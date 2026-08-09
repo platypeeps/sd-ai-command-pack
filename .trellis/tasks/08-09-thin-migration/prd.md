@@ -16,10 +16,12 @@ vendoring-gate retirement after the last conversion.
    the 2026-08-09 fleet sweep is a dated snapshot, not a migration
    authority.
 2. Conversion PR deletes: vendored payload (minus `repo-native` +
-   `consumer-config` slices, enumerated from the partition artifact —
-   the surface-partition JSON under fleet docs created by
-   `thin-surface-partition`; platforms flagged `provisional` there
-   are treated as repo-native, fail closed, until verified), all
+   `consumer-config` slices, enumerated from the partition artifact
+   `docs/fleet/surface-partition.json` — schema version 1, contract
+   documented in `.trellis/spec/backend/manifest-and-filesystem.md`,
+   "Surface Partition Artifact"; platforms whose `platforms.<id>`
+   entry carries `provisional: true` are treated as repo-native,
+   fail closed, until verified), all
    pack CI steps (syntax lints and the
    anomaly-metric-creator advisory `pr-body-scope.py` call — parent
    D2), and consumer-side sync automation

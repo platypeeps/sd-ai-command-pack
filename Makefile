@@ -17,9 +17,11 @@ hooks:
 generate:
 	@if [ -x "$(VENV_PYTHON)" ]; then \
 		"$(VENV_PYTHON)" .github/scripts/generate-command-surfaces.py; \
+		"$(VENV_PYTHON)" .github/scripts/partition-surfaces.py; \
 		"$(VENV_PYTHON)" scripts/sd-ai-command-pack-surface-check.py; \
 	else \
 		"$(PYTHON)" .github/scripts/generate-command-surfaces.py; \
+		"$(PYTHON)" .github/scripts/partition-surfaces.py; \
 		"$(PYTHON)" scripts/sd-ai-command-pack-surface-check.py; \
 	fi
 
@@ -52,8 +54,8 @@ test:
 # scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
 # out of the run so duplicate script names cannot collide.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \

@@ -745,6 +745,7 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13  # Intel Homebre
 python -m pip install -r requirements-dev.txt
 python -m ruff check install.py installer scripts templates/scripts tests \
   .github/scripts/check-command-surface-drift.py \
+  .github/scripts/partition-surfaces.py \
   .github/scripts/prepare-release.py
 if command -v node >/dev/null 2>&1; then
   node --check scripts/sd-ai-command-pack-review-preflight.mjs

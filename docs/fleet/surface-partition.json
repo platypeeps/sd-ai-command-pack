@@ -1,0 +1,4742 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "0.64.32",
+  "platforms": {
+    "antigravity": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "claude": {
+      "scope": "machine",
+      "provisional": false
+    },
+    "codebuddy": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "codex": {
+      "scope": "machine",
+      "provisional": true
+    },
+    "cursor": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "devin": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "droid": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "gemini": {
+      "scope": "machine",
+      "provisional": true
+    },
+    "github": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "kilo": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "kiro": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "opencode": {
+      "scope": "machine",
+      "provisional": true
+    },
+    "pi": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "qoder": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "reasonix": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "shared": {
+      "scope": "machine",
+      "provisional": true
+    },
+    "trae": {
+      "scope": "repo-native",
+      "provisional": false
+    },
+    "zcode": {
+      "scope": "repo-native",
+      "provisional": false
+    }
+  },
+  "counts": {
+    "machine-claude": 83,
+    "machine-other": 94,
+    "repo-native": 593,
+    "consumer-config": 6
+  },
+  "files": [
+    {
+      "target": ".agent/skills/sd-audit-repo/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-check/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-continue/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-create-pr/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-finish-work/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-fix-ci/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-full-check/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/references/command-catalog.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/references/examples.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-help/references/structured-questions.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-housekeeping/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-retro/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-review-learnings/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-review-local/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-review-pr/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-review/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-ship/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-start/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-status/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-test-gaps/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-update-deps/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-update-spec/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-update-spec/references/architecture.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-update-spec/references/repository-map.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-work-backlog/SKILL.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-audit-repo.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-check.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-continue.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-create-pr.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-finish-work.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-fix-ci.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-full-check.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-help.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-housekeeping.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-retro.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-review-learnings.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-review-local.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-review-pr.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-review.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-ship.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-start.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-status.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-test-gaps.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-update-deps.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-update-spec.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agent/workflows/sd-work-backlog.md",
+      "platform": "antigravity",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/accessibility-i18n.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/architecture.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/bloat.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/consumer-impact.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/correctness.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/dependencies.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/design.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/documentation.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/improvements.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/observability.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/performance.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/release-hygiene.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/security.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/testing.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-audit-repo/charters/tooling.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-check/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-continue/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-create-pr/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-finish-work/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-fix-ci/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-full-check/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/references/command-catalog.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/references/examples.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-help/references/structured-questions.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-housekeeping/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-retro/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-review-learnings/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-review-local/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-review-pr/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-review/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-ship/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-start/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-status/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-test-gaps/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-update-deps/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-update-spec/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-update-spec/references/architecture.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-update-spec/references/repository-map.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-work-backlog/SKILL.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/audit-repo.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/check.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/continue.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/create-pr.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/finish-work.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/fix-ci.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/full-check.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/help.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/housekeeping.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/retro.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/review-learnings.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/review-local.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/review-pr.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/review.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/ship.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/start.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/status.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/test-gaps.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/update-deps.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/update-spec.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/commands/sd/work-backlog.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/rules/sd-planning-adversarial-review.md",
+      "platform": "claude",
+      "category": "consumer-config",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/sd-ai-command-pack/planning-adversarial-review.md",
+      "platform": "claude",
+      "category": "consumer-config",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-audit-repo/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-check/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-continue/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-create-pr/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-finish-work/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-fix-ci/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-full-check/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/references/command-catalog.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/references/examples.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-help/references/structured-questions.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-housekeeping/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-retro/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-review-learnings/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-review-local/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-review-pr/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-review/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-ship/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-start/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-status/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-test-gaps/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-update-deps/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-update-spec/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-update-spec/references/architecture.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-update-spec/references/repository-map.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-work-backlog/SKILL.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".claude/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "claude",
+      "category": "machine-claude",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/audit-repo.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/check.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/continue.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/create-pr.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/finish-work.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/fix-ci.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/full-check.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/help.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/housekeeping.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/retro.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/review-learnings.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/review-local.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/review-pr.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/review.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/ship.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/start.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/status.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/test-gaps.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/update-deps.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/update-spec.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/commands/sd/work-backlog.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-audit-repo/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-check/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-continue/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-create-pr/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-finish-work/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-fix-ci/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-full-check/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/references/command-catalog.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/references/examples.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-help/references/structured-questions.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-housekeeping/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-retro/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-review-learnings/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-review-local/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-review-pr/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-review/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-ship/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-start/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-status/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-test-gaps/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-update-deps/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-update-spec/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-update-spec/references/architecture.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-update-spec/references/repository-map.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-work-backlog/SKILL.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".codebuddy/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "codebuddy",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-audit-repo.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-check.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-continue.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-create-pr.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-finish-work.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-fix-ci.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-full-check.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-help.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-housekeeping.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-retro.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-review-learnings.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-review-local.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-review-pr.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-review.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-ship.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-start.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-status.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-test-gaps.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-update-deps.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-update-spec.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".cursor/commands/sd-work-backlog.md",
+      "platform": "cursor",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-audit-repo/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-check/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-continue/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-create-pr/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-finish-work/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-fix-ci/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-full-check/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/references/command-catalog.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/references/examples.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-help/references/structured-questions.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-housekeeping/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-retro/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-review-learnings/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-review-local/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-review-pr/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-review/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-ship/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-start/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-status/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-test-gaps/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-update-deps/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-update-spec/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-update-spec/references/architecture.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-update-spec/references/repository-map.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-work-backlog/SKILL.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-audit-repo.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-check.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-continue.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-create-pr.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-finish-work.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-fix-ci.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-full-check.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-help.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-housekeeping.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-retro.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-review-learnings.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-review-local.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-review-pr.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-review.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-ship.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-start.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-status.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-test-gaps.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-update-deps.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-update-spec.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".devin/workflows/sd-work-backlog.md",
+      "platform": "devin",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/audit-repo.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/check.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/continue.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/create-pr.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/finish-work.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/fix-ci.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/full-check.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/help.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/housekeeping.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/retro.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/review-learnings.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/review-local.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/review-pr.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/review.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/ship.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/start.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/status.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/test-gaps.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/update-deps.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/update-spec.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/commands/sd/work-backlog.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-audit-repo/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-check/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-continue/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-create-pr/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-finish-work/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-fix-ci/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-full-check/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/references/command-catalog.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/references/examples.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-help/references/structured-questions.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-housekeeping/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-retro/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-review-learnings/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-review-local/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-review-pr/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-review/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-ship/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-start/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-status/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-test-gaps/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-update-deps/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-update-spec/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-update-spec/references/architecture.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-update-spec/references/repository-map.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-work-backlog/SKILL.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".factory/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "droid",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/audit-repo.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/check.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/continue.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/create-pr.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/finish-work.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/fix-ci.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/full-check.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/help.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/housekeeping.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/retro.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/review-learnings.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/review-local.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/review-pr.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/review.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/ship.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/start.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/status.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/test-gaps.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/update-deps.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/update-spec.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gemini/commands/sd/work-backlog.toml",
+      "platform": "gemini",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/PULL_REQUEST_TEMPLATE.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/copilot-instructions.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-audit-repo.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-check.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-continue.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-create-pr.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-finish-work.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-fix-ci.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-full-check.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-help.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-housekeeping.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-retro.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-review-learnings.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-review-local.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-review-pr.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-review.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-ship.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-start.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-status.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-test-gaps.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-update-deps.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-update-spec.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".github/prompts/sd-work-backlog.prompt.md",
+      "platform": "github",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gito/config.toml",
+      "platform": "shared",
+      "category": "consumer-config",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".gito/sd-ai-command-pack.env",
+      "platform": "shared",
+      "category": "consumer-config",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-audit-repo/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-check/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-continue/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-create-pr/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-finish-work/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-fix-ci/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-full-check/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/references/command-catalog.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/references/examples.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-help/references/structured-questions.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-housekeeping/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-retro/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-review-learnings/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-review-local/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-review-pr/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-review/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-ship/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-start/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-status/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-test-gaps/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-update-deps/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-update-spec/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-update-spec/references/architecture.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-update-spec/references/repository-map.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-work-backlog/SKILL.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-audit-repo.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-check.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-continue.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-create-pr.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-finish-work.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-fix-ci.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-full-check.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-help.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-housekeeping.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-retro.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-review-learnings.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-review-local.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-review-pr.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-review.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-ship.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-start.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-status.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-test-gaps.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-update-deps.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-update-spec.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kilocode/workflows/sd-work-backlog.md",
+      "platform": "kilo",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-audit-repo/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-check/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-continue/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-create-pr/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-finish-work/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-fix-ci/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-full-check/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/references/command-catalog.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/references/examples.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-help/references/structured-questions.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-housekeeping/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-retro/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-review-learnings/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-review-local/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-review-pr/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-review/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-ship/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-start/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-status/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-test-gaps/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-update-deps/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-update-spec/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-update-spec/references/architecture.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-update-spec/references/repository-map.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-work-backlog/SKILL.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".kiro/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "kiro",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-audit-repo.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-check.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-continue.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-create-pr.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-finish-work.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-fix-ci.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-full-check.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-help.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-housekeeping.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-retro.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-review-learnings.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-review-local.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-review-pr.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-review.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-ship.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-start.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-status.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-test-gaps.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-update-deps.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-update-spec.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".opencode/commands/sd-work-backlog.md",
+      "platform": "opencode",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-audit-repo.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-check.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-continue.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-create-pr.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-finish-work.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-fix-ci.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-full-check.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-help.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-housekeeping.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-retro.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-review-learnings.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-review-local.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-review-pr.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-review.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-ship.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-start.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-status.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-test-gaps.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-update-deps.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-update-spec.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/prompts/sd-work-backlog.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-audit-repo/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-check/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-continue/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-create-pr/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-finish-work/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-fix-ci/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-full-check/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/references/command-catalog.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/references/examples.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-help/references/structured-questions.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-housekeeping/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-retro/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-review-learnings/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-review-local/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-review-pr/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-review/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-ship/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-start/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-status/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-test-gaps/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-update-deps/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-update-spec/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-update-spec/references/architecture.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-update-spec/references/repository-map.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-work-backlog/SKILL.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".pi/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "pi",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".prism/rules.json",
+      "platform": "shared",
+      "category": "consumer-config",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".prism/rules.schema.json",
+      "platform": "shared",
+      "category": "consumer-config",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-audit-repo.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-check.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-continue.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-create-pr.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-finish-work.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-fix-ci.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-full-check.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-help.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-housekeeping.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-retro.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-review-learnings.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-review-local.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-review-pr.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-review.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-ship.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-start.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-status.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-test-gaps.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-update-deps.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-update-spec.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/commands/sd-work-backlog.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-audit-repo/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-check/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-continue/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-create-pr/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-finish-work/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-fix-ci/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-full-check/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/references/command-catalog.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/references/examples.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-help/references/structured-questions.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-housekeeping/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-retro/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-review-learnings/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-review-local/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-review-pr/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-review/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-ship/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-start/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-status/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-test-gaps/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-update-deps/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-update-spec/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-update-spec/references/architecture.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-update-spec/references/repository-map.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-work-backlog/SKILL.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".qoder/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "qoder",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-audit-repo/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-check/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-continue/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-create-pr/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-finish-work/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-fix-ci/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-full-check/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/references/command-catalog.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/references/examples.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-help/references/structured-questions.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-housekeeping/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-retro/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-review-learnings/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-review-local/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-review-pr/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-review/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-ship/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-start/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-status/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-test-gaps/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-update-deps/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-update-spec/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-update-spec/references/architecture.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-update-spec/references/repository-map.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-work-backlog/SKILL.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".reasonix/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "reasonix",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-audit-repo.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-check.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-continue.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-create-pr.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-finish-work.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-fix-ci.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-full-check.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-help.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-housekeeping.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-retro.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-review-learnings.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-review-local.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-review-pr.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-review.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-ship.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-start.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-status.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-test-gaps.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-update-deps.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-update-spec.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/commands/sd-work-backlog.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-audit-repo/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-check/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-continue/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-create-pr/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-finish-work/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-fix-ci/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-full-check/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/references/command-catalog.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/references/completion-lifecycle.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/references/environment-blocked-recovery.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/references/examples.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/references/recovery-artifacts.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-help/references/structured-questions.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-housekeeping/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-retro/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-review-learnings/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-review-local/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-review-pr/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-review/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-ship/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-ship/references/watch-coordinator.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-start/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-status/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-test-gaps/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-update-deps/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-update-spec/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-update-spec/references/architecture.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-update-spec/references/obsidian-kb.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-update-spec/references/repository-map.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-work-backlog/SKILL.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-work-backlog/references/autonomous-loop.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-work-backlog/references/ledger-recovery.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-work-backlog/references/ownership-recovery.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-work-backlog/references/run-recovery.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".trae/skills/sd-work-backlog/references/terminal-reconciliation.md",
+      "platform": "trae",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/audit-repo.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/check.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/continue.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/create-pr.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/finish-work.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/fix-ci.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/full-check.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/help.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/housekeeping.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/retro.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/review-learnings.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/review-local.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/review-pr.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/review.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/ship.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/start.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/status.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/test-gaps.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/update-deps.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/update-spec.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".zcode/commands/sd/work-backlog.md",
+      "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": "docs/SD_AI_COMMAND_PACK.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-audit-inventory.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-audit-route.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-check.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-full-check.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-housekeeping-result.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-housekeeping.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-install-audit.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-pr-body-scope.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-pr-eligibility.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-record-session.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-recovery-artifacts.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-full-check.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-learnings.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-local.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-local.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-preflight.mjs",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-scope.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-shell-lib.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-status.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-surface-check.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-toolchain.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-update-spec-kb.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-work-loop.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd_ai_command_pack_fleet_lib.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd_ai_command_pack_lib.py",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    }
+  ]
+}

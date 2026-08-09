@@ -74,6 +74,61 @@ and no rendered twins, and the manifest is byte-identical. The first named
 agents belong to `07-25-worker-agents`, which consumes this kind, field, and
 naming rule.
 
+## Surface Partition Artifact
+
+`.github/scripts/partition-surfaces.py` assigns every `manifest.json` row
+exactly one deployment category and writes the committed artifact
+`docs/fleet/surface-partition.json` (schema version 1). It runs from
+`make generate` after command-surface generation, because it reads the manifest
+that generator rewrites. `--check` regenerates in memory and byte-compares
+against the committed artifact; `tests/test_partition_surfaces.py` runs that
+check against the live tree, so drift fails the normal test lane rather than a
+separate CI job.
+
+The four categories are `machine-claude` (installed once per machine via the
+Claude Code plugin), `machine-other` (installed once per machine for non-Claude
+surfaces), `repo-native` (stays vendored per consumer repository), and
+`consumer-config` (small per-repo configuration a consumer keeps wherever the
+payload lives). `pack-only` is not a category: repository files outside the
+manifest are never shipped, so they need no inventory.
+
+Classification is computed by rule and never hand-maintained as a path list.
+Target-path overrides (`TARGET_OVERRIDES`) win first, then the per-platform
+disposition table (`PLATFORM_DISPOSITIONS`, one `machine` or `repo-native`
+entry per `PLATFORM_REGISTRY` key, checked in both directions at runtime).
+Because platform disposition alone would be a catch-all that can never fail,
+three independent conditions keep the gate reachable, each with its own
+diagnostic: a row whose platform is not a registry key, a row whose `kind` is
+outside `KNOWN_KINDS`, and an override pattern matching zero rows.
+
+`KNOWN_KINDS` is deliberately independent of `KNOWN_MANIFEST_KINDS`: the
+installer set is what install accepts, the partition set is what has been given
+a deployment category. `agent` is registered for install and ships zero rows,
+so the first agent row fails the partition gate until it is classified. That is
+the intended behavior, not a defect — it is one line to resolve.
+
+Two schema flags carry contracts for downstream consumers (the plugin build,
+the machine installer payload, and migration tooling):
+
+- `platforms.<id>.provisional: true` means the machine disposition is not
+  verified yet. Consumers **fail closed**: treat the platform as not
+  installable machine-scope — effectively repo-native — until verification
+  flips the flag. `claude` is non-provisional because the plugin mechanism is
+  itself the verification.
+- `files[].sharedRuntime: true` means non-Claude surfaces invoke the file at
+  runtime even though its primary category is `machine-claude`. The machine
+  installer consumes the `machine-other` slice **plus** every `sharedRuntime`
+  row; primary categories stay mutually exclusive.
+
+`counts` and `manifestVersion` exist to make the diff reviewable; downstream
+tooling reads `files` and `platforms`.
+
+Reference files:
+
+- `.github/scripts/partition-surfaces.py`
+- `docs/fleet/surface-partition.json`
+- `tests/test_partition_surfaces.py`
+
 ## Release Payload Gate
 
 Any pull request that changes shipped payload must carry the release ledger
