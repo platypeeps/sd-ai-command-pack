@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.64.33 - 2026-08-09
+
+- The Claude-side pack surface now also ships as a Claude Code plugin.
+  `.github/scripts/generate-plugin.py` builds the committed `plugins/sd/`
+  tree from the `machine-claude` slice of `docs/fleet/surface-partition.json`
+  joined to `manifest.json`: skills, the flattened `/sd:*` command surface
+  (plugin name `sd` preserves the invocation), and the shared pack scripts as
+  `bin/` executables. A repo-root `.claude-plugin/marketplace.json` catalogs
+  it, `plugin.json` `version` is stamped from `manifest.json`, and the
+  generator fails closed on a missing source row, unreadable source, unmapped
+  kind, rewrite residue, empty version, or an unresolvable command reference.
+  `.claude/rules/**` stays consumer configuration and is not in the plugin.
+- Pack scripts now resolve sibling helpers from their own file location
+  instead of a repository-root `scripts/` literal, so the payload works
+  unchanged in a vendored install, the plugin cache, or a machine install. Fat
+  installs are behavior-compatible — in a vendored layout the script directory
+  *is* `scripts/` — with one deliberate hardening: the current working
+  directory is no longer consulted, so a consumer file cannot shadow a pack
+  helper. `sd-ai-command-pack-toolchain.sh run` / `run-python` accept the same
+  bare and `scripts/`-prefixed pack-script arguments as before.
+- Release gating now treats `plugins/**`, `.claude-plugin/marketplace.json`,
+  and `.github/scripts/generate-plugin.py` as shipped payload in both
+  classifiers (`prepare-release.py` and the `run_pack_source_drift_gates`
+  release version gate), so plugin changes require a manifest version bump and
+  a matching changelog heading. `make release-prep` regenerates the partition
+  artifact and the plugin, then fails closed when the plugin and pack versions
+  disagree. CI validates the built plugin with a pinned
+  `claude plugin validate plugins/sd --strict`.
+- The installed guide gains a "Claude Code plugin and private marketplace"
+  section covering marketplace add/install, private-repository access via
+  `gh auth setup-git`, `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1` for
+  background auto-update failures, and CI cache pre-seeding through
+  `CLAUDE_CODE_PLUGIN_CACHE_DIR`.
+
 ## 0.64.32 - 2026-08-09
 
 - `sd-status` now inventories the repository's Git worktrees. The
