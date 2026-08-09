@@ -245,8 +245,10 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 2, result.stdout)
+        # Layout-neutral usage: the helper names itself, not a repository-root
+        # path, so the same text is correct vendored and plugin-shipped.
         self.assertIn(
-            "node scripts/sd-ai-command-pack-review-preflight.mjs\n",
+            "  sd-ai-command-pack-review-preflight.mjs\n",
             result.stdout,
         )
         self.assertIn("[--repo <repo-root>]", result.stdout)

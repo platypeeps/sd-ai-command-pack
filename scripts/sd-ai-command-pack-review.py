@@ -30,8 +30,11 @@ SCHEMA_VERSION = 1
 CONFIG_PATH = Path(".sd-ai-command-pack/review.json")
 DEFAULT_DESCRIPTOR_PATH = Path("config/routed-review-setup-v1.json")
 RECEIPT_MARKER = "<!-- sd-github-review-receipt:v1 -->\n"
-CHECK_SCRIPT = Path("scripts/sd-ai-command-pack-check.py")
-LOCAL_SCRIPT = Path("scripts/sd-ai-command-pack-review-local.py")
+# Stage helpers are siblings of this file, never repository-root paths, so the
+# controller runs the same way from a vendored scripts/ directory, a plugin
+# bin/, or a machine-wide install.
+CHECK_SCRIPT = Path(__file__).resolve().with_name("sd-ai-command-pack-check.py")
+LOCAL_SCRIPT = Path(__file__).resolve().with_name("sd-ai-command-pack-review-local.py")
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_DESCRIPTOR_BYTES = 64 * 1024
 MAX_STATE_BYTES = 2 * 1024 * 1024
@@ -688,9 +691,9 @@ def _advance(path: Path, state: dict[str, Any], phase: str, **updates: object) -
 
 
 def _run_check(repo: Path) -> dict[str, Any]:
-    script = repo / CHECK_SCRIPT
+    script = CHECK_SCRIPT
     if not script.is_file() or script.is_symlink():
-        raise ReviewError(f"missing regular sd-check helper: {CHECK_SCRIPT}")
+        raise ReviewError(f"missing regular sd-check helper: {CHECK_SCRIPT.name}")
     _, report = _json_process(
         [sys.executable, str(script), "--repo", str(repo), "--json"],
         repo=repo,
@@ -712,9 +715,9 @@ def _run_local(
     args: argparse.Namespace,
     local_policy: str,
 ) -> dict[str, Any]:
-    script = repo / LOCAL_SCRIPT
+    script = LOCAL_SCRIPT
     if not script.is_file() or script.is_symlink():
-        raise ReviewError(f"missing regular local review helper: {LOCAL_SCRIPT}")
+        raise ReviewError(f"missing regular local review helper: {LOCAL_SCRIPT.name}")
     # The local stage owns its artifact root: an in-repo, git-ignored
     # directory (default .build/sd-review). The coordinator's private root
     # must stay outside the repository, so it is never forwarded here.

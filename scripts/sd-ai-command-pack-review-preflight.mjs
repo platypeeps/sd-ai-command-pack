@@ -6,7 +6,11 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TextDecoder } from 'node:util';
 
-const defaultRootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// Pack helpers are resolved next to this file so the preflight works from a
+// vendored scripts/ directory, a plugin bin/, or a machine-wide install; only
+// repository content is resolved against rootDir.
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const defaultRootDir = resolve(scriptDir, '..');
 let rootDir = defaultRootDir;
 let config = defaultConfig();
 let failures = [];
@@ -537,9 +541,9 @@ function isMainModule() {
 function bookkeepingUsage() {
   return [
     'usage:',
-    '  node scripts/sd-ai-command-pack-review-preflight.mjs',
-    '  node scripts/sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--repo <repo-root>] [--json]',
-    '  node scripts/sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--repo <repo-root>] [--json]',
+    '  sd-ai-command-pack-review-preflight.mjs',
+    '  sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--repo <repo-root>] [--json]',
+    '  sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--repo <repo-root>] [--json]',
   ].join('\n');
 }
 
@@ -2827,7 +2831,7 @@ function stableJson(value) {
 export function unsupportedNodeVersionMessage(version) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version || '');
   if (!match) {
-    return `scripts/sd-ai-command-pack-review-preflight.mjs requires Node >= ${MIN_NODE_VERSION.label}; could not parse ${version || 'unknown version'}.`;
+    return `sd-ai-command-pack-review-preflight.mjs requires Node >= ${MIN_NODE_VERSION.label}; could not parse ${version || 'unknown version'}.`;
   }
 
   const major = Number(match[1]);
@@ -2836,7 +2840,7 @@ export function unsupportedNodeVersionMessage(version) {
     return '';
   }
 
-  return `scripts/sd-ai-command-pack-review-preflight.mjs requires Node >= ${MIN_NODE_VERSION.label}; current ${version}.`;
+  return `sd-ai-command-pack-review-preflight.mjs requires Node >= ${MIN_NODE_VERSION.label}; current ${version}.`;
 }
 
 function runCheck(label, check) {
@@ -4294,7 +4298,7 @@ function checkScopeAdvisory() {
   if (ambient && /^(0|false|FALSE|no|NO|skip|none|off|OFF|disabled|DISABLED)$/.test(ambient)) {
     return;
   }
-  const script = resolve(rootDir, 'scripts', 'sd-ai-command-pack-review-scope.sh');
+  const script = resolve(scriptDir, 'sd-ai-command-pack-review-scope.sh');
   if (!existsSync(script)) {
     return;
   }

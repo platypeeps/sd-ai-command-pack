@@ -3,7 +3,7 @@
   "name": "thin-plugin-packaging",
   "title": "Claude Code plugin packaging + private marketplace",
   "description": "Generated plugin dir from partition output; marketplace.json; version stamped from manifest.json version in release-prep; own-location helper resolution redesign + bin/ entry points; claude plugin validate --strict + grep gate; .claude/rules stays consumer-config",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

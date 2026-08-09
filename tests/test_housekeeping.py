@@ -590,9 +590,12 @@ class HousekeepingTests(InstallTestCase):
             self.assertEqual(failure.returncode, 0, failure.stdout)
             self.assertIn("rc=1", failure.stdout)
             self.assertIn("Obsidian KB refresh failed", failure.stdout)
+            # Layout-neutral remediation: the toolchain resolves a bare pack
+            # helper name against its own directory, so the instruction works
+            # from a vendored scripts/ directory and from a plugin bin/ alike.
             self.assertIn(
-                "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- "
-                "scripts/sd-ai-command-pack-update-spec-kb.py",
+                "sd-ai-command-pack-toolchain.sh run-python -- "
+                "sd-ai-command-pack-update-spec-kb.py",
                 failure.stdout,
             )
 

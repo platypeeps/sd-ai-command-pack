@@ -30,6 +30,36 @@ if ! SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" 2>/dev/null && pwd -P)"; then
   fail "cannot resolve toolchain directory" 5
 fi
 
+# Pack helpers are resolved against the toolchain's own directory so the payload
+# works in any layout: a vendored scripts/ directory, a plugin bin/, or a
+# machine-wide install. Own location wins outright and the working directory is
+# never probed, so a repository cannot shadow a pack helper with a same-named
+# file of its own. In a vendored install SCRIPT_DIR is the repository's scripts/
+# directory, so a bare helper name and the same name under a scripts/ prefix
+# both resolve to the file the caller already meant.
+RESOLVED_PACK_SCRIPT=""
+
+resolve_pack_script_operand() {
+  local operand="$1"
+  local name
+
+  RESOLVED_PACK_SCRIPT="$operand"
+  case "$operand" in
+    scripts/*) name="${operand#scripts/}" ;;
+    */*) return 0 ;;
+    *) name="$operand" ;;
+  esac
+  case "$name" in
+    */*) return 0 ;;
+    sd-ai-command-pack-*|sd_ai_command_pack_*) ;;
+    *) return 0 ;;
+  esac
+
+  [ -f "$SCRIPT_DIR/$name" ] || \
+    fail "pack helper is missing next to the toolchain: $SCRIPT_DIR/$name (requested as $operand); reinstall the command pack" 127
+  RESOLVED_PACK_SCRIPT="$SCRIPT_DIR/$name"
+}
+
 repo_root() {
   if [ -n "${SD_AI_COMMAND_PACK_REPO_ROOT:-}" ]; then
     printf '%s\n' "$SD_AI_COMMAND_PACK_REPO_ROOT"
@@ -469,15 +499,20 @@ case "$COMMAND" in
     [ "$1" = "--" ] || usage
     shift
     [ "$#" -gt 0 ] || usage
+    resolve_pack_script_operand "$1"
+    RUN_COMMAND="$RESOLVED_PACK_SCRIPT"
+    shift
     select_python
     verify_python
     configure_cache_environment
-    exec "$@"
+    exec "$RUN_COMMAND" "$@"
     ;;
   run-python)
     parse_python_options "$@"
     [ "$RUN_PYTHON_SEPARATOR" -eq 1 ] || usage
     [ "${#RUN_PYTHON_ARGS[@]}" -gt 0 ] || usage
+    resolve_pack_script_operand "${RUN_PYTHON_ARGS[0]}"
+    RUN_PYTHON_ARGS[0]="$RESOLVED_PACK_SCRIPT"
     select_python
     verify_python
     configure_cache_environment
