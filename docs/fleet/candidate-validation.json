@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-08T11:26:48Z",
-  "packVersion": "0.64.28",
-  "payloadDigest": "sha256:74e08652c7d670f2f0ef5468494ab51fa6220fec5a33f64947309e1f9f4569c7",
+  "validatedAt": "2026-08-09T00:26:07Z",
+  "packVersion": "0.64.29",
+  "payloadDigest": "sha256:f2deac56386d019941d9bc030142043a45685b83827b449fdbcf165fe4f0ac0a",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "470d991212882d7872db9f40fadc8c8361a91a22",
+      "baseCommit": "e2872da97a23c923e3b4f53b3b01675c94b6353b",
       "status": "passed",
       "prepares": [
         [

@@ -306,6 +306,65 @@ class StatusTests(InstallTestCase):
             before_refs,
         )
 
+    def test_active_task_resolves_from_current_json_payload(self) -> None:
+        # Trellis >=0.6.14: `task.py current --json` emits a JSON document
+        # and the collector reads current_task.dir from it.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "import json\n"
+            "import sys\n"
+            "if '--json' in sys.argv:\n"
+            "    print(json.dumps({\n"
+            "        'current_task': {'dir': '.trellis/tasks/status-fixture'},\n"
+            "        'source': 'file',\n"
+            "        'stale': False,\n"
+            "    }))\n"
+            "else:\n"
+            "    print('.trellis/tasks/status-fixture')\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+
+    def test_active_task_parses_prose_when_json_flag_is_ignored(self) -> None:
+        # A Trellis variant that ignores unknown flags prints the bare task
+        # path with exit 0; the collector must interpret that prose output.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "print('.trellis/tasks/status-fixture')\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+
+    def test_active_task_falls_back_when_current_rejects_json_flag(self) -> None:
+        # Trellis <=0.6.7: `task.py current --json` fails with an argparse
+        # error; the collector re-runs bare `current` and parses the path.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "import sys\n"
+            "if '--json' in sys.argv:\n"
+            "    print('task.py: error: unrecognized arguments: --json',\n"
+            "          file=sys.stderr)\n"
+            "    sys.exit(2)\n"
+            "print('.trellis/tasks/status-fixture')\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+
     def test_local_human_output_always_lists_selectable_sections(self) -> None:
         root = self.make_status_repo()
 

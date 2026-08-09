@@ -203,7 +203,12 @@ def existing_session_journals(journals: list[Path], title: str) -> list[Path]:
 
 
 def replace_section(block: str, heading: str, lines: list[str]) -> str | None:
-    """Replace the body under `heading` in the session block; None if absent."""
+    """Replace the body under `heading` in the session block; None if absent.
+
+    Trellis <=0.6.7 always scaffolds every section heading; >=0.6.14 omits a
+    section entirely when it has no content, so absence is an expected layout
+    difference handled by ``replace_or_insert_section``, not an error here.
+    """
     head = f"{heading}\n"
     start = block.find(head)
     if start == -1:
@@ -213,6 +218,28 @@ def replace_section(block: str, heading: str, lines: list[str]) -> str | None:
     if end == -1:
         end = len(block)
     return block[:body_at] + "\n" + "\n".join(lines) + "\n" + block[end:]
+
+
+def replace_or_insert_section(
+    block: str, heading: str, lines: list[str], before: str | None = None
+) -> str:
+    """Replace the section body, or insert the whole section when absent.
+
+    When inserting, place the section immediately before the `before`
+    heading if that heading exists (to preserve the canonical Trellis
+    section order); otherwise append at the end of the block.
+    """
+    patched = replace_section(block, heading, lines)
+    if patched is not None:
+        return patched
+    section = f"\n\n{heading}\n\n" + "\n".join(lines)
+    if before is not None:
+        anchor = block.find(f"{before}\n")
+        if anchor != -1:
+            insert_at = block.rfind("\n\n", 0, anchor)
+            if insert_at != -1:
+                return block[:insert_at] + section + block[insert_at:]
+    return block.rstrip("\n") + section + "\n"
 
 
 def patch_last_session(
@@ -257,16 +284,24 @@ def patch_last_session(
 
         block = row_re.sub(_row_replacement, block, count=1)
 
-    patched = replace_section(block, "### Testing", tests)
-    if patched is None:
-        return f"missing Testing section in the new entry in {journal}"
-    block = patched
+    # Trellis >=0.6.14 omits sections that were scaffolded empty by <=0.6.7,
+    # so insert the section when the heading is absent instead of failing.
+    # Canonical order (both versions): Testing before Status, Next Steps
+    # after Status — anchor the Testing insert accordingly.
+    block = replace_or_insert_section(
+        block, "### Testing", tests, before="### Status"
+    )
 
     if next_steps:
-        patched = replace_section(block, "### Next Steps", next_steps)
-        if patched is None:
-            return f"missing Next Steps section in the new entry in {journal}"
-        block = patched
+        block = replace_or_insert_section(block, "### Next Steps", next_steps)
+    elif "### Next Steps\n" not in block:
+        # Preserve the documented default: Trellis <=0.6.7 scaffolded this
+        # section with its own placeholder (left untouched above), but
+        # >=0.6.14 omits it entirely, so recreate the 0.6.7 default text to
+        # keep journal entries version-consistent.
+        block = replace_or_insert_section(
+            block, "### Next Steps", ["- None - task complete"]
+        )
 
     remaining = [p for p in PLACEHOLDERS if p in block]
     if remaining:

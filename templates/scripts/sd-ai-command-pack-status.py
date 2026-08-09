@@ -505,8 +505,33 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
     active: dict[str, Any] | None = None
     task_script = repo / ".trellis/scripts/task.py"
     if task_script.is_file():
-        result = run_command([sys.executable, str(task_script), "current"], cwd=repo)
-        active_path_text = result.stdout.strip() if result.returncode == 0 else ""
+        # Trellis >=0.6.14 offers machine-readable `current --json`; older
+        # vendored copies reject the flag with a nonzero argparse exit, so
+        # fall back to the bare-path prose output they print instead.
+        active_path_text = ""
+        result = run_command(
+            [sys.executable, str(task_script), "current", "--json"], cwd=repo
+        )
+        if result.returncode == 0:
+            try:
+                payload = json.loads(result.stdout)
+            except (json.JSONDecodeError, ValueError):
+                payload = None
+            if isinstance(payload, dict):
+                current_task = payload.get("current_task")
+                if isinstance(current_task, dict):
+                    active_path_text = str(current_task.get("dir") or "").strip()
+            else:
+                # A variant that ignores unknown flags prints the bare path
+                # with exit 0; keep interpreting that prose output.
+                active_path_text = result.stdout.strip()
+        else:
+            result = run_command(
+                [sys.executable, str(task_script), "current"], cwd=repo
+            )
+            active_path_text = (
+                result.stdout.strip() if result.returncode == 0 else ""
+            )
         if active_path_text:
             candidate_path = Path(active_path_text)
             if not candidate_path.is_absolute():

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.64.29 - 2026-08-08
+
+- Upgrade the vendored Trellis surface from 0.6.7 to 0.6.14 via the official
+  `trellis update` mechanism. `.trellis/scripts` is byte-identical to the
+  0.6.14 release templates; `task.py create` on a feature branch now seeds
+  `base_branch` from the repository default instead of the checked-out branch.
+- Adopt `task.py current --json` in the status collector
+  (`sd-ai-command-pack-status.py`), with a prose-path fallback for consumer
+  repositories still on Trellis <=0.6.7 that reject the flag.
+- Teach the record-session wrapper (`sd-ai-command-pack-record-session.py`)
+  to insert the Testing / Next Steps journal sections when absent: Trellis
+  >=0.6.14 omits sections scaffolded empty by <=0.6.7.
+
 ## 0.64.28 - 2026-08-08
 
 - Let `stop` retire a paused work-loop run. `pause` releases the ownership lock
