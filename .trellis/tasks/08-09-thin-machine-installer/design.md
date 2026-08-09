@@ -158,7 +158,8 @@ Engine behavior (`machinescope.py`):
   (a later `remove` would delete it). Before its first write the
   engine atomically writes `machine-install.intent.json`
   (`schemaVersion`, `payloadDigest`, planned target paths) beside the
-  receipt in the state root, and deletes it after the receipt commits.
+  receipt in the state root's `machine/` subdirectory, and deletes it
+  after the receipt commits.
   On rerun, a receipt-absent existing path that matches the new
   payload classifies `owned-current` ONLY when a valid intent journal
   with the same `payloadDigest` lists that path — proof a prior
@@ -170,7 +171,9 @@ Engine behavior (`machinescope.py`):
   `XDG_STATE_HOME`, Windows local-app-data, `~/.local/state/
   sd-ai-command-pack`), non-symlink directory, mode `0700` — the same
   contract the work-loop helper implements; the module reuses that
-  resolution helper rather than re-implementing it. File:
+  resolution helper rather than re-implementing it. This surface owns
+  the `machine/` subdirectory of that root, the way every other private
+  state surface owns its own. File:
   `machine-receipt.json`, schema v1: `schemaVersion`, `packVersion`,
   `payloadDigest`, `installedAt`, `files[{family, path, digest,
   executable, backup?}]`, `sourceRoot`. `backup` (present only for
@@ -188,10 +191,15 @@ Engine behavior (`machinescope.py`):
   the family roots.
 - **Row removal.** Paths in the old receipt absent from the new
   payload are deleted only when byte+mode-identical to their receipt
-  entry; otherwise left in place with a diagnostic.
+  entry; otherwise left in place with a diagnostic. A removed row that
+  carries a verifiable `backup` restores its displaced original instead
+  of deleting, because the new receipt is about to forget the backup
+  and `remove` would then have nothing left to restore from.
 - **`remove` subcommand** (rollback commitment): deletes receipt-owned,
-  unmodified files and prunes empty family directories; drifted files
-  refuse without `--force`. For entries carrying a `backup` record it
+  unmodified files and prunes empty family directories (up to each
+  family root, never `~/.agents` itself); drifted files refuse without
+  `--force`, and a path whose parent became a symlink after install is
+  never deleted through, with or without `--force`. For entries carrying a `backup` record it
   RESTORES the backed-up original in place (backup digest verified
   first; mismatch refuses without `--force`) and deletes the `.bak`.
   It restores nothing the receipt did not record a backup for — the
