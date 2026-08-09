@@ -1880,6 +1880,13 @@ Executed and finished 08-07-ci-preflight-full-mode-gap. Planning ran the full ad
 | `1c1aa3b7` | chore(task): record fix-PR run evidence for event-head validation |
 | `9252d01d` | Merge pull request #386 from platypeeps/codex/ci-preflight-full-mode-gap |
 
+### Testing
+
+- Local replays (research/local-replays.md): 4 replays, exits 1/0/1/1 as named, incl. fail-closed base guard and zero-line c8 guard negative probe
+- make test green after rewriting 3 contract tests to the new step layout; .venv YAML validation of tests.yml
+- CI observations: fix PR run 31291158452 (full, coverage 40.36%), sync run 31291818458 (bookkeeping), main push 31291862939 (push base = event.before), demo runs 31291939696 / 31292345434 / 31292345966 / 31292347063 / 31292003371 — all modes/bases/FAIL lines read from the Actions API
+- Local family probes for checks 1/3/7/8/9 with exact FAIL lines; tree restored clean after each
+
 ### Status
 
 [OK] **Completed**
