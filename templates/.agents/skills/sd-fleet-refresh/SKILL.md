@@ -1,6 +1,7 @@
 ---
 name: sd-fleet-refresh
 description: Use when a pack release must roll across the consumer fleet through the deterministic campaign controller, source preflight, bounded waves, and serialized housekeeping merges. Campaign invocation is explicit approval for controller-issued in-scope consumer commits, PR-branch pushes, configured GitHub review requests or re-requests, and eligible managed consumer PR merges without another prompt.
+model: sonnet
 ---
 
 # SD Fleet Refresh

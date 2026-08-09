@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.64.34 - 2026-08-09
+
+- Skill frontmatter now pins a cost-appropriate Claude model tier where the
+  workload is mechanical: `model: haiku` on the read-only reporting skills
+  (`sd-status`, `sd-help`) and `model: sonnet` on the procedural flow skills
+  (`sd-check`, `sd-start`, `sd-continue`, `sd-create-pr`, `sd-finish-work`,
+  `sd-housekeeping`, `sd-update-deps`, `sd-fleet-refresh`, `sd-retro`,
+  `sd-review-learnings`). Judgment-heavy skills (reviews, audits, CI fixes,
+  `sd-ship`, `sd-work-backlog`, `sd-update-spec`, `sd-test-gaps`,
+  `sd-full-check`) keep no `model:` field and inherit the session model, both
+  to preserve verdict quality and to avoid prompt-cache invalidation on long
+  orchestration turns. Non-Claude platforms ignore the extra frontmatter key.
+
 ## 0.64.33 - 2026-08-09
 
 - The Claude-side pack surface now also ships as a Claude Code plugin.
