@@ -3109,6 +3109,39 @@ function checkChangedTrellisTaskTopologySemantics() {
     }
   }
 
+  let inspectedRootBases = 0;
+  const rootDefaultBranch = changedTaskFiles.size > 0 ? trellisRootDefaultBranchName() : '';
+  if (rootDefaultBranch) {
+    for (const file of [...changedTaskFiles].sort()) {
+      const loaded = loadTrellisTaskMetadataFile(file, { deletedIsMissing: true });
+      if (loaded.status !== 'loaded') {
+        // The structural metadata check owns deleted move sources and unsafe or
+        // unreadable changed task records.
+        continue;
+      }
+
+      let record;
+      try {
+        record = JSON.parse(loaded.text);
+      } catch {
+        continue;
+      }
+      if (
+        !isPlainObject(record) ||
+        (record.parent !== null && record.parent !== undefined) ||
+        typeof record.base_branch !== 'string' ||
+        record.base_branch.trim().length === 0
+      ) {
+        continue;
+      }
+
+      inspectedRootBases += 1;
+      for (const issue of validateTrellisRootTaskBaseBranch(record, rootDefaultBranch)) {
+        fail(`${file} field ${issue}.`);
+      }
+    }
+  }
+
   let inspectedParentPrds = 0;
   for (const taskDir of [...changedTaskDirectories].sort()) {
     const taskFile = `${taskDir}/task.json`;
@@ -3188,12 +3221,13 @@ function checkChangedTrellisTaskTopologySemantics() {
   if (failures.length !== failureStart) {
     return;
   }
-  if (inspectedPlanningBases === 0 && inspectedParentPrds === 0) {
+  if (inspectedPlanningBases === 0 && inspectedRootBases === 0 && inspectedParentPrds === 0) {
     pass('no changed Trellis task topology requires semantic validation.');
     return;
   }
   pass(
-    `checked ${inspectedPlanningBases} deferred planning child base(s) and ` +
+    `checked ${inspectedPlanningBases} deferred planning child base(s), ` +
+      `${inspectedRootBases} root task base branch(es), and ` +
       `${inspectedParentPrds} active parent PRD child map(s) for topology semantics.`,
   );
 }
@@ -3244,6 +3278,32 @@ export function validateTrellisPlanningBaseInheritance(record, parentRecord) {
   return [
     `base_branch ${JSON.stringify(record.base_branch.trim())} must equal parent base_branch or active branch (` +
       `${uniqueAllowedTargets.map((target) => JSON.stringify(target)).join(', ')})`,
+  ];
+}
+
+export function validateTrellisRootTaskBaseBranch(record, defaultBranchName) {
+  if (
+    !isPlainObject(record) ||
+    (record.parent !== null && record.parent !== undefined) ||
+    typeof record.base_branch !== 'string' ||
+    record.base_branch.trim().length === 0 ||
+    typeof defaultBranchName !== 'string' ||
+    defaultBranchName.trim().length === 0
+  ) {
+    return [];
+  }
+  const exemption = isPlainObject(record.meta) ? record.meta.base_branch_exemption : undefined;
+  if (typeof exemption === 'string' && exemption.trim().length > 0) {
+    return [];
+  }
+  const target = record.base_branch.trim();
+  if (target === defaultBranchName.trim()) {
+    return [];
+  }
+  return [
+    `root task base_branch ${JSON.stringify(target)} must equal the repository default branch ` +
+      `${JSON.stringify(defaultBranchName.trim())} or carry a meta.base_branch_exemption reason ` +
+      '(python3 ./.trellis/scripts/task.py set-meta <task-dir> base_branch_exemption "<reason>")',
   ];
 }
 
@@ -4619,6 +4679,23 @@ function configuredReviewBaseRef(name) {
     return ref;
   }
   warn(`${name}=${ref} does not resolve to a commit; falling back to discovered default branch.`);
+  return '';
+}
+
+function trellisRootDefaultBranchName() {
+  // The repository default branch for the root-task base_branch rule. This is
+  // deliberately NOT defaultReviewBaseRef(): that resolver answers "what do I
+  // diff against" and may legitimately return a stacked-PR feature base (env
+  // override), the current branch's upstream, or an arbitrary sorted remote
+  // ref — none of which is a statement about the repository default.
+  const configured = (process.env.SD_AI_COMMAND_PACK_DEFAULT_BRANCH || '').trim();
+  if (configured) {
+    return configured;
+  }
+  const originHead = gitStdout(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  if (gitRefExists(originHead)) {
+    return originHead.replace(/^[^/]+\//, '');
+  }
   return '';
 }
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.64.30 - 2026-08-08
+
+- Add a review-preflight rule for root-task `base_branch`: a changed active
+  task record with no parent must target the repository default branch or
+  carry a recorded `meta.base_branch_exemption` reason. The default branch
+  resolves from the new `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` variable (CI
+  exports it from the event payload, since a pinned-SHA checkout never
+  establishes `origin/HEAD`), then from the `origin/HEAD` symbolic ref, and
+  the rule skips itself when neither source resolves. Twice a root task
+  recorded the feature branch it was authored on as its PR target, passed
+  the deterministic gate, and was caught only by a paid review round.
+- Correct the four active root-task records still naming dead feature
+  branches as `base_branch`; all now target `main`. These are data fixes
+  independent of the rule and are not meant to be reverted with it.
+- Pin the description-emptiness predicate divergence between the JavaScript
+  gate (`String.trim()`: strips U+FEFF, keeps U+0085) and Python create side
+  (`str.strip()`: the exact opposite) in tests, and require `--description`
+  in the pack-owned documented `task.py create` example. The create-time
+  refusal itself is parked on the Trellis fork
+  (`08-08-create-empty-metadata-rejection`) via the upstream handoff
+  register.
+
 ## 0.64.29 - 2026-08-08
 
 - Upgrade the vendored Trellis surface from 0.6.7 to 0.6.14 via the official

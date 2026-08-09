@@ -26,3 +26,11 @@ hardening (description refusal and any seed policy beyond the upstream
 default-branch resolution), not the seed defect itself — that is fixed by
 the upgrade. Re-verify on any consumer repo only after it takes its own
 Trellis upgrade.
+
+## Fleet-consumer verification: parked (2026-08-08)
+
+Consumers still run pre-0.6.8 vendored Trellis until their own upgrade, so
+the seed fix cannot be observed there yet. Verification is parked per this
+task's PRD "Adversarial review dispositions": trigger is each consumer's
+Trellis upgrade to >=0.6.8 through the fleet refresh flow; re-run this
+probe's create-on-feature-branch check there at that time.

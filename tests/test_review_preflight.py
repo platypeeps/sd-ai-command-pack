@@ -116,6 +116,7 @@ import {
   validateTrellisBookkeepingMetadata,
   validateTrellisTaskMetadata,
   validateTrellisPlanningBaseInheritance,
+  validateTrellisRootTaskBaseBranch,
   validateTrellisJournalSessions,
 } from './scripts/sd-ai-command-pack-review-preflight.mjs';
 
@@ -475,6 +476,76 @@ assert.deepEqual(validateTrellisPlanningBaseInheritance({
   branch: null,
   base_branch: 'main',
 }), []);
+// Root-task base_branch rule. The first case replays the PR #342 record that
+// passed the deterministic gate and was caught by a paid review round.
+assert.deepEqual(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: 'chore/task-preflight-bare-filename-references',
+}, 'main'), [
+  'root task base_branch "chore/task-preflight-bare-filename-references" must equal '
+    + 'the repository default branch "main" or carry a meta.base_branch_exemption reason '
+    + '(python3 ./.trellis/scripts/task.py set-meta <task-dir> base_branch_exemption "<reason>")',
+]);
+assert.deepEqual(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: 'main',
+}, 'main'), []);
+// set-base-branch persists its argument raw, so padded whitespace is normal
+// user residue: trim tolerance is deliberate.
+assert.deepEqual(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: ' main ',
+}, 'main'), []);
+// An absent parent field is a root too: the structural validator permits
+// undefined parent, so a literal-null check would let this record slip.
+assert.equal(validateTrellisRootTaskBaseBranch({
+  base_branch: 'codex/feature',
+}, 'main').length, 1);
+// Child records are the planning-inheritance rule's population, not this one's.
+assert.deepEqual(validateTrellisRootTaskBaseBranch({
+  parent: '07-17-parent',
+  base_branch: 'codex/feature',
+}, 'main'), []);
+// A recorded exemption must be a string with non-empty trim; set-meta stores
+// raw values, so whitespace-only or non-string values do not exempt.
+assert.deepEqual(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: 'integration/rollout',
+  meta: { base_branch_exemption: 'long-lived integration branch' },
+}, 'main'), []);
+assert.equal(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: 'integration/rollout',
+  meta: { base_branch_exemption: '   ' },
+}, 'main').length, 1);
+assert.equal(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: 'integration/rollout',
+  meta: { base_branch_exemption: true },
+}, 'main').length, 1);
+// An unresolvable default skips the rule rather than failing it.
+assert.deepEqual(validateTrellisRootTaskBaseBranch({
+  parent: null,
+  base_branch: 'codex/feature',
+}, ''), []);
+// Description emptiness predicate pins for the divergent characters: JS
+// trim() strips U+FEFF (so the gate refuses a BOM-only description) but
+// keeps U+0085 (so the gate accepts a NEL-only one). Python str.strip() does
+// the exact opposite; the paired Python assertions live in
+// test_description_predicate_divergence_matrix. An upstream create-side fix
+// must flip these into an equality check (see the task's PRD dispositions).
+assert.equal(
+  validateTrellisBookkeepingMetadata({
+    description: '\\uFEFF',
+  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  true,
+);
+assert.equal(
+  validateTrellisBookkeepingMetadata({
+    description: '\\u0085',
+  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  false,
+);
 assert.deepEqual(findMissingTrellisChildReferences(
   'Dependencies: [`07-17-child-extra`](./extra/prd.md) and `07-17-linked`.',
   ['07-17-child', '07-17-linked'],
@@ -1861,9 +1932,135 @@ assert.deepEqual(
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "checked 2 deferred planning child base(s) and 1 active parent PRD child map(s)",
+            "checked 2 deferred planning child base(s), 0 root task base branch(es), "
+            "and 1 active parent PRD child map(s)",
             result.stdout,
         )
+
+    def write_root_task_fixture(
+        self, root: Path, name: str, base_branch: str
+    ) -> None:
+        task_dir = root / ".trellis/tasks" / name
+        task_dir.mkdir(parents=True)
+        (task_dir / "task.json").write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    name.removeprefix("07-22-"), base_branch=base_branch
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (task_dir / "prd.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    def test_review_preflight_rejects_root_task_feature_base_branch(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+        # Bind resolver, diff population, and loop together: a self-remote
+        # with origin/HEAD established is the local-checkout shape the
+        # dedicated resolver discovers.
+        default_branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+        self.run_git(root, "remote", "add", "origin", str(root))
+        self.run_git(root, "fetch", "origin")
+        self.run_git(
+            root,
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            f"refs/remotes/origin/{default_branch}",
+        )
+
+        # Replays the PR #342 record shape: a root task recording the feature
+        # branch it was authored on as its PR target.
+        self.write_root_task_fixture(
+            root, "07-22-rooted", "chore/task-preflight-bare-filename-references"
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            '07-22-rooted/task.json field root task base_branch '
+            '"chore/task-preflight-bare-filename-references" must equal the '
+            f'repository default branch "{default_branch}" or carry a '
+            "meta.base_branch_exemption reason",
+            result.stdout,
+        )
+
+    def test_review_preflight_root_base_branch_env_default(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        self.write_root_task_fixture(root, "07-22-rooted", "codex/feature")
+
+        # The CI shape: no origin/HEAD (pinned-SHA checkout), default branch
+        # stated explicitly through the environment.
+        env = dict(os.environ)
+        env["SD_AI_COMMAND_PACK_DEFAULT_BRANCH"] = "main"
+        result = self.run_review_preflight(node, root, env=env)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            '07-22-rooted/task.json field root task base_branch '
+            '"codex/feature" must equal the repository default branch "main"',
+            result.stdout,
+        )
+
+    def test_review_preflight_skips_root_base_branch_without_default(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        # No remote, no env: unverifiable is not failable for root tasks.
+        self.write_root_task_fixture(root, "07-22-rooted", "codex/feature")
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("root task base_branch", result.stdout)
+
+    def test_description_predicate_divergence_matrix(self) -> None:
+        # Python half of the emptiness-predicate pin; the JS half lives in
+        # test_review_preflight_exports_reusable_helpers. Python str.strip()
+        # keeps U+FEFF (create side accepts a BOM-only description) and strips
+        # U+0085 (create side sees a NEL-only one as empty) — the exact
+        # opposite of JS String.trim() on both characters. If either runtime
+        # changes, this pin and its JS twin disagree and the divergence
+        # becomes visible instead of silent.
+        self.assertNotEqual("\ufeff".strip(), "")
+        self.assertEqual("\x85".strip(), "")
 
     def test_review_preflight_rejects_changed_parent_prd_child_drift(
         self,
@@ -1970,7 +2167,8 @@ assert.deepEqual(
         restored = self.run_review_preflight(node, root)
         self.assertEqual(restored.returncode, 0, restored.stdout)
         self.assertIn(
-            "checked 0 deferred planning child base(s) and 1 active parent PRD child map(s)",
+            "checked 0 deferred planning child base(s), 0 root task base branch(es), "
+            "and 1 active parent PRD child map(s)",
             restored.stdout,
         )
 
@@ -3128,7 +3326,7 @@ assert.deepEqual(
         )
 
     def run_review_preflight(
-        self, node: str, root: Path
+        self, node: str, root: Path, env: dict[str, str] | None = None
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
@@ -3137,6 +3335,7 @@ assert.deepEqual(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+            env=env,
         )
 
     def test_review_preflight_script_detects_trellis_journal_drift(self) -> None:

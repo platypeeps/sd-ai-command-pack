@@ -8,7 +8,15 @@ deterministic gate instead of reaching a paid review round.
 
 ## Problem
 
-`.trellis/scripts/common/task_store.py:296`:
+> Historical evidence note (2026-08-08): the `task_store.py` line numbers and
+> quoted code in this section were captured against vendored Trellis 0.6.7.
+> The 0.6.14 upgrade (08-08-trellis-upgrade) changed that file: default-branch
+> resolution now begins at `task_store.py:325`, the record assignment is at
+> `:377`, and the empty-description warning is at `:352`. The seeding defect
+> described below is FIXED upstream in 0.6.14 (see the Rescope section); the
+> quotes stand as the historical motivation.
+
+`.trellis/scripts/common/task_store.py:296` (0.6.7):
 
 ```python
 # Record current branch as base_branch (PR target)
@@ -231,3 +239,43 @@ RETAINS its deterministic-gate requirement — reject wrong root-task
 that the seeded value is correct on this repo and fleet consumers, plus
 tracking the upstream empty-description fix filed in the Trellis fork (see
 the Absorbed section above).
+
+## Adversarial review dispositions (2026-08-08)
+
+Planning adversarial review (host + Codex lanes) resolved the carried
+acceptance criteria against the post-0.6.14 reality. These dispositions are
+authoritative over the earlier "Carried acceptance criteria" wording:
+
+- PARKED — create-time refusal (`create` with no/blank `--description` or a
+  blank title exits nonzero and leaves no directory): vendored-upstream
+  behavior; 0.6.14 still only warns (`task_store.py:352`) after
+  `ensure_tasks_dir` (`:265`), and the vendored surface must stay
+  byte-identical to the release. Trigger: Trellis fork task
+  `08-08-create-empty-metadata-rejection` delivers the fix and a later
+  vendored upgrade lands it here, at which point pack-side verification of
+  the refusal is owed. Owner: upstream handoff register.
+- CONVERTED — the predicate-equality test ("fails if creation and the gate
+  classify any differently"): impossible to hold green while the create
+  side lives upstream, because the predicates measurably diverge TODAY
+  (probed 2026-08-08: JS `trim()` strips U+FEFF but not U+0085; Python
+  `strip()` strips U+0085 but not U+FEFF). This task pins that divergence
+  matrix explicitly in tests; the equality assertion is owed at upstream
+  uptake, alongside the parked refusal above.
+- SATISFIED BY ASSERTION — backfill: the 2026-08-08 survey found 0 active
+  records with empty/whitespace descriptions; the criterion is verified,
+  not worked.
+- SCOPED — the docs audit ("no documented in-repository invocation omits
+  the description") runs repo-wide, but hits on Trellis-managed or
+  vendored surfaces (`.trellis/workflow.md`, `.trellis/scripts/**` usage
+  text, Trellis-installed skills) are recorded in the upstream handoff
+  register instead of edited: those files' content is owned upstream and
+  local edits break the managed-file/byte-identity contract. Pack-owned
+  surfaces are fixed directly.
+- PARKED — fleet-consumer seed verification from the Rescope: consumers
+  still run pre-0.6.8 Trellis until their own upgrade; the seed fix cannot
+  be observed there yet. Trigger: each consumer's Trellis upgrade to
+  >=0.6.8 (fleet refresh flow). This repo's verification is complete
+  (research/2026-08-08-trellis-0-6-14-seed-probe.md).
+- The gate rule at `review-preflight.mjs:3348` remains unrelaxed, and the
+  R4 survey population was re-run fresh during planning: 4 offending root
+  records (down from 6; consolidation removed two).

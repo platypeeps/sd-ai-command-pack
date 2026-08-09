@@ -33,6 +33,22 @@ Each entry must resolve to exactly one of: a filed task in the Trellis fork
 9. 07-09-upstream-platform-state — post-upgrade uptake evaluation (same).
 10. 07-09-upstream-trellis-api-cleanup — post-upgrade uptake evaluation
     (same).
+11. Create-time empty-metadata refusal — Trellis fork task
+    `08-08-create-empty-metadata-rejection` (~/repos/ai/Trellis): `task.py
+    create` must refuse a missing/blank description and blank title before
+    creating directories. Parked from
+    08-06-task-create-base-branch-seed (see its PRD "Adversarial review
+    dispositions"); at uptake, the pack's description predicate-divergence
+    pin flips to an equality assertion.
+12. `task.py create` documented examples omit `--description` on
+    Trellis-managed surfaces (added 2026-08-08 by
+    08-06-task-create-base-branch-seed's docs audit; these files are owned
+    upstream and must not be edited locally): `.trellis/workflow.md:46,317`,
+    `.trellis/scripts/task.py` usage text (`:7`, `:381-384`, `:410-412`),
+    and the four platform copies of `trellis-brainstorm/SKILL.md:37` plus
+    `trellis-meta/references/local-architecture/task-system.md:62,109`.
+    Upstream should carry `--description` in every runnable example once
+    entry 11 makes it required.
 
 ## Acceptance criteria
 

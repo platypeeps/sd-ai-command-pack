@@ -67,6 +67,48 @@ the first draft's mechanism doesn't work") — it is easy to reach for the
 existing pattern by analogy and miss that its safety depends on a property
 the new case doesn't have.
 
+## Contract: root-task base_branch rule and its default-branch resolver
+
+Added 2026-08-08 (task 08-06-task-create-base-branch-seed, v0.64.30).
+
+`validateTrellisRootTaskBaseBranch(record, defaultBranchName)` — exported,
+pure. Population: changed active task records (the same delta-scoped
+`changedTaskFiles` walk as the other task-metadata rules — at-rest records
+are never inspected) whose `parent` is null OR absent (the structural
+validator permits an undefined `parent`, so a literal-null check would leak
+roots) and whose `base_branch` has a non-empty trim. Passes when
+`base_branch.trim()` equals the default branch name, or when
+`meta.base_branch_exemption` is a string with non-empty trim (written via
+`task.py set-meta <dir> base_branch_exemption "<reason>"`; whitespace-only
+and non-string values do not exempt). Trim tolerance on `base_branch` is
+deliberate: `set-base-branch` persists its argument raw.
+
+Default-branch resolution (`trellisRootDefaultBranchName()`):
+
+1. `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` env, trimmed non-empty — a statement
+   of the default branch NAME, not a diff base. Do NOT feed the rule from
+   `defaultReviewBaseRef()` or the `..._BASE_REF` variables: those answer
+   "what do I diff against" and may legitimately be a stacked-PR feature
+   base, the current branch's upstream, an alphabetically-first remote ref,
+   or (in CI) an exact SHA.
+2. `origin/HEAD` symbolic ref, `origin/` stripped.
+3. Neither → the rule SKIPS for the run (unverifiable is not failable;
+   remoteless local checkouts are supported).
+
+The CI bookkeeping step exports `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` from
+`github.event.repository.default_branch` because the pinned-SHA checkout
+never establishes `origin/HEAD`. CI coverage remains bounded by the known
+full-mode preflight gap (task `08-07-ci-preflight-full-mode-gap`); the
+primary enforcement point is the local pre-publication gate in
+`sd-create-pr`.
+
+The emptiness predicate divergence pinned alongside this rule: JS
+`String.trim()` strips U+FEFF and keeps U+0085; Python `str.strip()` does
+the opposite. Tests in `tests/test_review_preflight.py` pin both halves; if
+either runtime changes, the pins disagree visibly. An upstream create-time
+refusal (Trellis fork task `08-08-create-empty-metadata-rejection`) is
+expected to flip these pins into an equality assertion at uptake.
+
 ## Related
 
 - [Code Reuse Thinking Guide](../guides/code-reuse-thinking-guide.md) — this
