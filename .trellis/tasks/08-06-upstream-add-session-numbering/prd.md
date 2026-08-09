@@ -136,8 +136,8 @@ gate before a review round is paid for, and because it works even against an
 unfixed upstream script.
 
 This split — upstream defect, pack-local detection — is the same one
-`.trellis/tasks/08-06-task-create-base-branch-seed` names as its first design
-decision. The two tasks should resolve it the same way.
+`.trellis/tasks/archive/2026-08/08-06-task-create-base-branch-seed` (completed
+2026-08-08, PR #385) named as its first design decision. The two tasks should resolve it the same way.
 
 ## Requirements
 
@@ -215,8 +215,9 @@ decision. The two tasks should resolve it the same way.
 - Source: shipping PRs #321, #343, #344, and #345 on 2026-08-06. D1 was hit three
   times, D2 and D3 once each — both on session 311, both caught by `final-bundle`
   rather than by the script.
-- Related: `.trellis/tasks/08-06-task-create-base-branch-seed` shares the
-  upstream-defect / pack-local-detection split and should be designed with it.
+- Related: `.trellis/tasks/archive/2026-08/08-06-task-create-base-branch-seed`
+  (completed 2026-08-08, PR #385) shared the upstream-defect /
+  pack-local-detection split; follow its resolved design.
 - Complex enough to need `design.md` and `implement.md` before `task.py start`:
   the numbering scheme is a real choice with a compatibility cost against every
   existing journal, and R1 pulls against N1.
