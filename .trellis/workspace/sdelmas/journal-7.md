@@ -1760,3 +1760,52 @@ Recovered a stranded PRD rewrite from a scratchpad worktree and landed it as PR 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 347: Upgrade vendored Trellis 0.6.7 to 0.6.14
+
+**Date**: 2026-08-08
+**Task**: Upgrade vendored Trellis 0.6.7 to 0.6.14
+**Branch**: `main`
+
+### Summary
+
+Executed 08-08-trellis-upgrade end to end: official trellis update after a two-part safety gate, task.py current --json adoption in the status collector, pack 0.64.29, three-round adversarial planning review, two Copilot review rounds converged, PR #384 merged as 1eaf25ae.
+
+### Main Changes
+
+- Vendored Trellis surface 0.6.7 -> 0.6.14 via trellis update --force; .trellis/scripts byte-identical to release templates
+- Status collector adopts task.py current --json with prose fallbacks; record-session wrapper inserts omitted journal sections in canonical order
+- Downstream evidence packets recorded for 08-06-task-create-base-branch-seed and 08-08-upstream-handoff-register; vendored-trellis-compatibility spec added
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c5714bba8b30e73c4a752de2b5f4c191f5042f1f` | Merge pull request #381 from platypeeps/chore/preflight-incremental-base-gap-2 |
+| `3338e181640f1e42d51542706fca5cf932952874` | chore: consolidate Trellis backlog 79 -> 56 tasks |
+| `a1c2bc7e8164e014d7147fbde4872238e09ee0ad` | Merge pull request #382 from platypeeps/chore/backlog-consolidation |
+| `746bccfa9cbf944f0455cbf8950c290f07d0da95` | chore: archive backlog-consolidation and adopt relocated track-* stubs |
+| `77f11353de0559ed38e1c7e7b3acca908e718c53` | Merge pull request #383 from platypeeps/chore/consolidation-wrapup |
+| `d10d4e957828a63c2e49206e626f21e2b00ce178` | chore: upgrade vendored Trellis surface 0.6.7 -> 0.6.14 via trellis update |
+| `3328a1ec8d68760c82c026de6a62c7c7c6bdf390` | feat: adopt task.py current --json in the status collector |
+| `97f99e8f66381056def13592b5b7045307104df8` | docs(task): record trellis-upgrade planning and downstream evidence |
+| `887e159f40028f496192f7b8e21129ac9e792c9f` | docs(spec): add vendored Trellis compatibility contract |
+| `334e63b355f60bb3038f1bf980beb2ff61079c72` | fix: address Copilot review on PR #384 |
+| `5659ac8364a546b49463567b34231bc4f2add76a` | fix: anchor inserted Testing section before Status for canonical order |
+| `1eaf25aef13c28c1fe211dbf7a7a2763397d9e36` | Merge pull request #384 from platypeeps/chore/trellis-upgrade-0-6-14 |
+
+### Testing
+
+- [OK] make release-prep green (test + lint + audit + full-check)
+- [OK] PR #384 CI fully green; Copilot converged with no new comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Archive 08-08-trellis-upgrade
+- Fleet consumers upgrade Trellis independently via their own trellis update
