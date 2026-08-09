@@ -1121,6 +1121,7 @@ class ReviewControllerTests(InstallTestCase):
         receipt: dict[str, object] | None = None,
         observation: dict[str, object] | None = None,
         check_status: str = "passed",
+        local_receipt_extra: dict[str, object] | None = None,
     ):
         pr = self.pr(controller, root) if scope == "pr" else None
         args = controller.parse_args(
@@ -1148,6 +1149,8 @@ class ReviewControllerTests(InstallTestCase):
         )
         if local_diagnostic is not None:
             local["diagnostic"] = local_diagnostic
+        if local_receipt_extra is not None:
+            local["receipt"].update(local_receipt_extra)
         patches = [
             mock.patch.object(
                 controller,
@@ -1352,6 +1355,263 @@ class ReviewControllerTests(InstallTestCase):
         )
         self.assertEqual((code, report["status"]), (1, "blocked"))
         dispatch.assert_not_called()
+
+    def test_local_disposition_rerun_reaches_the_stage_and_records_rebuttals(
+        self,
+    ) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        def review_args(*dispositions: str):
+            return controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "branch",
+                    "--remote",
+                    "none",
+                    "--artifact-root",
+                    str(artifacts),
+                    "--json",
+                    *[
+                        item
+                        for value in dispositions
+                        for item in ("--local-disposition", value)
+                    ],
+                ]
+            )
+
+        captured: list[list[str]] = []
+
+        def json_process(command, **_kwargs):
+            captured.append(command)
+            if Path(command[1]).name.endswith("check.py"):
+                return 0, {"schemaVersion": 1, "status": "passed"}
+            # The stage revalidates its stored receipt and applies rebuttals
+            # without re-running a provider, so the outcome stays "findings".
+            rebutted = "id-1=rebutted" in command
+            return 0, {
+                "schemaVersion": 1,
+                "outcome": "findings",
+                "status": "findings",
+                "receipt": {
+                    "schemaVersion": 1,
+                    "receiptId": "local-receipt",
+                    "target": {"head": head, "contentDigest": "1" * 64},
+                    "plan": {
+                        "configurationDigest": "2" * 64,
+                        "policyId": "first-substantive-head",
+                    },
+                    "outcome": "findings",
+                    "attempts": [
+                        {
+                            "provider": {
+                                "id": "prism",
+                                "costTier": "low",
+                                "qualityTier": "standard",
+                            },
+                            "durationMs": 12,
+                        }
+                    ],
+                    "findings": [
+                        {
+                            "id": "id-1",
+                            "disposition": "rebutted" if rebutted else "outstanding",
+                        }
+                    ],
+                    "disposition": {
+                        "outstanding": 0 if rebutted else 1,
+                        "localDispositions": {"id-1": "rebutted"} if rebutted else {},
+                    },
+                },
+            }
+
+        with mock.patch.object(
+            controller,
+            "_json_process",
+            side_effect=json_process,
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            first_code, first_report = controller.run(review_args())
+            second_code, second_report = controller.run(review_args("id-1=rebutted"))
+        self.assertEqual((first_code, first_report["status"]), (1, "findings"))
+        self.assertEqual((second_code, second_report["status"]), (0, "ready"))
+        stage_commands = [
+            command
+            for command in captured
+            if Path(command[1]).name.endswith("review-local.py")
+        ]
+        self.assertEqual(len(stage_commands), 2)
+        self.assertNotIn("--local-disposition", stage_commands[0])
+        self.assertIn("--local-disposition", stage_commands[1])
+        self.assertIn("id-1=rebutted", stage_commands[1])
+        state_files = list(artifacts.glob("review-*.json"))
+        self.assertEqual(len(state_files), 1)
+        state = json.loads(state_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(state["phase"], "ready")
+        self.assertEqual(
+            state["local"]["receipt"]["disposition"],
+            {"outstanding": 0, "localDispositions": {"id-1": "rebutted"}},
+        )
+
+    def test_local_disposition_rerun_keeps_an_advanced_phase(self) -> None:
+        # Refreshing a cached local report must not rewind the phase: the
+        # remote channel reads it to choose between reconciliation, dispatch,
+        # and receipt polling. A rewind would strand a dispatch that already
+        # needs reconciliation in the receipt-polling path instead.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        pr = self.pr(controller, root)
+
+        def review_args(*dispositions: str):
+            return controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "pr",
+                    "--pr-number",
+                    "42",
+                    "--artifact-root",
+                    str(artifacts),
+                    "--json",
+                    *[
+                        item
+                        for value in dispositions
+                        for item in ("--local-disposition", value)
+                    ],
+                ]
+            )
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(controller, pr),
+        ), mock.patch.object(
+            controller, "_pr_evidence", return_value=pr
+        ), mock.patch.object(
+            controller, "_capability", return_value=self.capability()
+        ), mock.patch.object(
+            controller, "_query_receipt", return_value=None
+        ), mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ), mock.patch.object(
+            controller,
+            "_dispatch",
+            side_effect=controller.CommandError("workflow dispatch failed"),
+        ):
+            first_code, first_report = controller.run(review_args())
+            second_code, second_report = controller.run(review_args("id-1=rebutted"))
+        self.assertEqual((first_code, first_report["status"]), (3, "indeterminate"))
+        self.assertEqual((second_code, second_report["status"]), (3, "indeterminate"))
+        self.assertEqual(
+            second_report["limitations"], ["remote-dispatch-reconciliation-required"]
+        )
+        state_files = list(artifacts.glob("review-*.json"))
+        self.assertEqual(len(state_files), 1)
+        state = json.loads(state_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(state["phase"], "reconciliation-required")
+
+    def test_fully_rebutted_local_stage_routes_like_a_clean_one(self) -> None:
+        controller = self.load_controller()
+        absent = {"state": "absent", "reason": "setup-descriptor-absent"}
+        (clean_code, clean_report), clean_dispatch = self.run_with_mocks(
+            controller,
+            self.make_repo(),
+            scope="pr",
+            capability=absent,
+        )
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            self.make_repo(),
+            scope="pr",
+            local_status="findings",
+            capability=absent,
+            local_receipt_extra={
+                "findings": [{"id": "id-1", "disposition": "rebutted"}],
+                "disposition": {
+                    "outstanding": 0,
+                    "localDispositions": {"id-1": "rebutted"},
+                },
+            },
+        )
+        self.assertEqual((clean_code, clean_report["status"]), (0, "ready"))
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        self.assertEqual(report["phase"], clean_report["phase"])
+        self.assertEqual(report["limitations"], clean_report["limitations"])
+        self.assertTrue(report["exactHeadReady"])
+        # Provider evidence stays exactly as the stage recorded it; only the
+        # caller-owned disposition count moved the gate.
+        self.assertEqual(report["local"]["receipt"]["outcome"], "findings")
+        clean_dispatch.assert_not_called()
+        dispatch.assert_not_called()
+
+    def test_outstanding_local_findings_still_block_remote_routing(self) -> None:
+        controller = self.load_controller()
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            self.make_repo(),
+            scope="pr",
+            local_status="findings",
+            local_receipt_extra={
+                "findings": [
+                    {"id": "id-1", "disposition": "outstanding"},
+                    {"id": "id-2", "disposition": "rebutted"},
+                ],
+                "disposition": {
+                    "outstanding": 1,
+                    "localDispositions": {"id-2": "rebutted"},
+                },
+            },
+        )
+        self.assertEqual((code, report["status"]), (1, "findings"))
+        dispatch.assert_not_called()
+
+    def test_findings_outcome_listing_no_findings_still_blocks(self) -> None:
+        # The local stage blocks a provider that claims findings but lists none
+        # (nothing is inspectable or rebuttable), so a zero outstanding count on
+        # an empty findings list must not open the router either.
+        controller = self.load_controller()
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            self.make_repo(),
+            scope="pr",
+            local_status="findings",
+            local_receipt_extra={
+                "findings": [],
+                "disposition": {"outstanding": 0, "localDispositions": {}},
+            },
+        )
+        self.assertEqual((code, report["status"]), (1, "findings"))
+        dispatch.assert_not_called()
+
+    def test_unreadable_local_disposition_block_fails_closed(self) -> None:
+        controller = self.load_controller()
+        for extra in (
+            None,
+            {"disposition": ["not-a-mapping"]},
+            {"disposition": {}},
+            {"disposition": {"outstanding": "0"}},
+            {"disposition": {"outstanding": True}},
+            {"disposition": {"outstanding": -1}},
+        ):
+            with self.subTest(disposition=extra):
+                (code, report), dispatch = self.run_with_mocks(
+                    controller,
+                    self.make_repo(),
+                    scope="pr",
+                    local_status="findings",
+                    local_receipt_extra=extra,
+                )
+                self.assertEqual((code, report["status"]), (1, "findings"))
+                dispatch.assert_not_called()
 
     def test_run_remote_none_and_observation_terminals(self) -> None:
         controller = self.load_controller()

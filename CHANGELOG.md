@@ -20,6 +20,14 @@
   directory is no longer consulted, so a consumer file cannot shadow a pack
   helper. `sd-ai-command-pack-toolchain.sh run` / `run-python` accept the same
   bare and `scripts/`-prefixed pack-script arguments as before.
+- `sd-review` now completes the documented local-rebuttal flow. Rerunning the
+  same attempt with `--local-disposition` reaches the local stage even when the
+  attempt already cached a report, so the rebuttals are applied to the stored
+  receipt and persisted, and a local stage whose findings are all dispositioned
+  (`disposition.outstanding == 0`) routes exactly as a clean one does instead of
+  blocking forever on the immutable `findings` outcome. Findings left
+  outstanding still block, and a receipt that is unreadable — or that reports
+  findings while listing none for anyone to inspect — fails closed.
 - Release gating now treats `plugins/**`, `.claude-plugin/marketplace.json`,
   and `.github/scripts/generate-plugin.py` as shipped payload in both
   classifiers (`prepare-release.py` and the `run_pack_source_drift_gates`
