@@ -1853,3 +1853,37 @@ Executed 08-06-task-create-base-branch-seed end-to-end: three-round host+Codex a
 ### Next Steps
 
 - None - task complete
+
+## Session 349: CI event-head validation: both gaps closed, demonstrated, task finished
+
+**Date**: 2026-08-09
+**Task**: CI never fully validates a pull request's Trellis content (08-07-ci-preflight-full-mode-gap)
+**Branch**: `main`
+
+### Summary
+
+Executed and finished 08-07-ci-preflight-full-mode-gap. Planning ran the full adversarial contract (3 Codex rounds; fail-open base fallback, fix-PR-as-specimen, unproven zero-line guard, and evidence-less family matrix all remediated before approval). The fix (PR #386, merged 9252d01d): ci-scope gained an unconditional `Validate event head` step that fails closed when `EVENT_BASE_SHA` (`pull_request.base.sha || event.before`) does not resolve (push additionally requires ancestry), then runs the c8-wrapped preflight against that base in every mode; the bookkeeping step shrank to its final-bundle half; install unconditional; coverage report gated on the new step's `coverage_expected` output with the zero-line hard gate retained; aggregate untouched (`CI Result` propagation shown for both modes). Post-merge, five throwaway draft PRs (#387-391, closed unmerged, branches deleted) plus the fix PR and a real main push produced observational evidence for all 15 PRD acceptance criteria: opened/full defect fails (Demo A, the PR #358 replay shape), bookkeeping defect fails with expensive lanes still skipped (B), the valid-push-1/invalidating-push-2 parent-child construction fails in both lanes with classifier BEFORE_SHA shown distinct from validation base in one run (C/D), and a no-Trellis-path head stays green (E). All 12 preflight check families carry evidence (CI demo, stated local probe with exact FAIL line, or unreachability reason) in research/diff-scope-enumeration.md; research/ac-map.md maps every AC. Spec updated in the merged PR (bookkeeping-validator.md).
+
+### Main Changes
+
+- tests.yml: unconditional fail-closed event-head validation step; bookkeeping step reduced to final-bundle; coverage report re-gated (merged in PR #386)
+- Three contract tests rewritten to the new step layout, incl. drift guard that the bookkeeping step never regrows a bare preflight invocation
+- research/: evidence-fix-pr.md, evidence-demos.md, local-replays.md, diff-scope-enumeration.md (evidence column complete), ac-map.md
+- Filed 08-08-shell-coverage-kcov-flake (P2): Shell coverage kcov lane flaked twice tonight on test_completion_successor_finds_recent_anchor_in_long_history; reruns pass
+- Noted, no task filed: pre-existing red main run 31289548780 was completion-window contamination (reference-fix commit rode in the 2ea88133..3c247269 bundle window under the old workflow); one-off, main green since
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `41a6c06d` | fix(ci): validate every event head against the pull request's base |
+| `1c1aa3b7` | chore(task): record fix-PR run evidence for event-head validation |
+| `9252d01d` | Merge pull request #386 from platypeeps/codex/ci-preflight-full-mode-gap |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
