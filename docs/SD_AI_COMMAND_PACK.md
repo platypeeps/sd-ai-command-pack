@@ -2242,6 +2242,56 @@ bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```
 
+## Claude Code plugin and private marketplace
+
+The Claude-side surface of the pack — every `sd-*` skill, the `/sd:*` command
+surface, and the shared pack toolchain as `bin/` executables — also ships as a
+Claude Code plugin generated from the same templates. The plugin is installed
+once per machine instead of vendored per repository; the `.claude/rules/`
+files stay repository configuration and are not part of it.
+
+Add the marketplace once, then install the plugin:
+
+```bash
+claude plugin marketplace add platypeeps/sd-ai-command-pack
+claude plugin install sd@sd-ai-command-pack
+```
+
+The same commands work as `/plugin marketplace add ...` and
+`/plugin install ...` inside a Claude Code session.
+
+The plugin `version` is stamped from `manifest.json`, so an installed plugin
+names the exact pack release it came from:
+
+```bash
+claude plugin list --json
+```
+
+### Private-repository access
+
+`platypeeps/sd-ai-command-pack` is private, so plugin installs and updates use
+your normal Git credentials. Configure them once:
+
+```bash
+gh auth setup-git
+```
+
+SSH remotes with a loaded `ssh-agent` key work equally well. Background
+plugin auto-update runs its `git pull` without Git credential helpers, so a
+private marketplace can fail to refresh in the background and, by default, the
+marketplace entry is dropped. Keep it across such a failure:
+
+```bash
+export CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1
+```
+
+In CI, export a token and run `gh auth setup-git` before installing, or
+pre-seed a warm plugin cache and point the CLI at it:
+
+```bash
+export CLAUDE_CODE_PLUGIN_CACHE_DIR="$RUNNER_TEMP/claude-plugins"
+```
+
 ## Troubleshooting
 
 - Missing an `sd-*` command: reinstall the pack and include the platform

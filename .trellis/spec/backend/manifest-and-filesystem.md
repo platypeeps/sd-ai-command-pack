@@ -129,11 +129,94 @@ Reference files:
 - `docs/fleet/surface-partition.json`
 - `tests/test_partition_surfaces.py`
 
+## Plugin Generation
+
+`.github/scripts/generate-plugin.py` builds the committed Claude Code plugin at
+`plugins/sd/` from the `machine-claude` slice of the partition artifact joined
+to `manifest.json` by `target`. It runs from `make generate` after
+`partition-surfaces.py` (it consumes that artifact) and from the
+`prepare-release.py` chain in the same order. The plugin tree is never
+hand-edited: `--check` regenerates into a temp directory and byte-compares the
+committed tree including extraneous files, and `tests/test_generate_plugin.py`
+runs that check against the live tree, so drift fails the normal test lane.
+
+Slice targets map to plugin destinations by manifest `kind`: `skill` rows to
+`skills/<name>/...`, `command` rows to a flattened `commands/<short>.md` (the
+plugin is named `sd`, so `/sd:<short>` is preserved), and `scripts/` rows to
+`bin/`. Rows carrying `sharedRuntime: true` are shared with the machine
+installer, not exclusive to the plugin; the generator must keep shipping them.
+`.claude/rules/**` is `consumer-config` and never enters the plugin.
+
+Six conditions fail the build closed rather than shipping a broken plugin: a
+slice row with no manifest source row; an unreadable template source; a slice
+row whose kind has no plugin destination; rewrite residue; an empty pack
+version; and a dependency-closure gap. The residue gate has two scopes —
+generated Markdown may keep no repository-root script path at all (any
+`sd-ai-command-pack-` or `sd_ai_command_pack_` name prefixed with the
+`scripts/` directory), while `bin/` contents may keep
+only the consumer-layout *data* globs listed in the per-file allowlist with a
+written justification (`install-audit` and `pr-body-scope` region globs
+describing vendored installs). Closure means every bare pack-command reference
+in rewritten Markdown resolves to a file present in `bin/`, except entries in
+the justified in-generator allowlist.
+
+Two further contract points exist because `claude plugin validate --strict`
+rejects the alternative:
+
+- `plugin.json` carries an `author` object alongside `name`, `version`, and
+  `description`. `version` is stamped from `manifest.json["version"]`, and
+  `prepare-release.py` fails closed when the two disagree.
+- Every generated `commands/<short>.md` gets a frontmatter `description`
+  injected from the authored neutral command source
+  `.github/command-sources/sd-<short>.md`. A missing source file, missing
+  frontmatter, or missing/blank `description` is a hard generator error, not a
+  default; command adapters themselves stay generated from those same sources.
+
+Plugin paths are shipped payload for release gating: `plugins/**`,
+`.claude-plugin/marketplace.json`, and `.github/scripts/generate-plugin.py`
+are classified by both payload classifiers (see Release Payload Gate below), so
+changing them requires a manifest version bump and a matching changelog
+heading. The fleet candidate digest is deliberately not extended — it binds
+vendored-payload identity, which the plugin is not part of.
+
+Reference files:
+
+- `.github/scripts/generate-plugin.py`
+- `.claude-plugin/marketplace.json`
+- `plugins/sd/.claude-plugin/plugin.json`
+- `tests/test_generate_plugin.py`
+
+### Script Sibling Resolution
+
+Shipped pack scripts resolve sibling pack scripts from their own file
+location, never from repo-root `scripts/` literals: `SCRIPT_DIR` (from
+`BASH_SOURCE`) in shell, `Path(__file__).resolve().parent` in Python, and
+`import.meta.url` in Node. The toolchain's `run`/`run-python` handlers
+route pack-named operands (basename matching `sd-ai-command-pack-*` or
+`sd_ai_command_pack_*`, bare or `scripts/`-prefixed) through
+`resolve_pack_script_operand`, which probes `SCRIPT_DIR` only — no CWD
+probe, so a same-named file in the working directory can never shadow the
+installed script — and fails with exit 127 naming the missing resolved
+path. Non-pack operands pass through unchanged. This keeps one script set
+valid in both layouts: fat installs (`SCRIPT_DIR` equals the consumer's
+`scripts/`) and the plugin's `bin/` (resolved via PATH).
+
+`tests/test_script_sibling_resolution.py` enforces the boundary: no
+shipped script may build a sibling path from a repo-root `scripts/`
+literal outside its per-file justified `ALLOWED_LITERALS` allowlist
+(semantic data only — layout globs, changed-path classifiers, doctor
+repository probes, static-analysis annotations — never invocation). The
+generator's `BIN_LITERAL_ALLOWLIST` must stay set-for-set identical to
+that allowlist; `tests/test_generate_plugin.py` pins the parity and fails
+on stale entries in either direction.
+
 ## Release Payload Gate
 
 Any pull request that changes shipped payload must carry the release ledger
-with it. Shipped payload means `templates/**`, `docs/SD_AI_COMMAND_PACK.md`, or
-`manifest.json`. The local full-check and the CI `Release payload gate` both
+with it. Shipped payload means `templates/**`, `plugins/**`,
+`docs/SD_AI_COMMAND_PACK.md`, `manifest.json`,
+`.claude-plugin/marketplace.json`, or `.github/scripts/generate-plugin.py`.
+The local full-check and the CI `Release payload gate` both
 run the same pack-source drift gate against the PR base:
 
 - payload changes require a `manifest.json` version bump;
@@ -158,8 +241,10 @@ run the same pack-source drift gate against the PR base:
      performs preparation; the Make target invokes `$(MAKE) check` only after
      it exits successfully.
 3. **Contracts**:
-   - Run command-surface generation, forced self-install, spec-KB refresh, and
-     shipped-surface inspection in that order.
+   - Run command-surface generation, surface partitioning, plugin generation,
+     the plugin/pack version consistency check, forced self-install, spec-KB
+     refresh, and shipped-surface inspection in that order. The chain invokes
+     each generator directly; it never shells out to `make generate`.
    - Consume schema-version-1 shipped-surface JSON with exact scalar and
      container types, complete findings, a consistent status/exit pair, and a
      string-array `changedPaths` field.

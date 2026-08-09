@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-09T12:03:05Z",
-  "packVersion": "0.64.32",
-  "payloadDigest": "sha256:9994a22805293e0669809627cf788b8ed5cf1944610494091c8ed3d6a826264c",
+  "validatedAt": "2026-08-09T19:29:30Z",
+  "packVersion": "0.64.33",
+  "payloadDigest": "sha256:45aed51fe58f4c2bbd4f8b6fddd51b64bd4ed98a22c75d106a9ac2e8b2a76fff",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "8dde8fe75ff45cc3a308855253d87a56b56556dc",
+      "baseCommit": "b25d732d967295d1c0c912abc505dc9a2342f415",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "e2872da97a23c923e3b4f53b3b01675c94b6353b",
+      "baseCommit": "bfa7347a32dcff6385bca2fa6620830af169b60f",
       "status": "passed",
       "prepares": [
         [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "9b816afc91298484091949a5093e15f3e7f1ee1b",
+      "baseCommit": "209c2fd759d451991814629cea6821733822074c",
       "status": "passed",
       "prepares": [
         [

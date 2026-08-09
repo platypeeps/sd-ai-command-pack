@@ -59,6 +59,17 @@ class ReleasePrepTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory(prefix="release-prep-")
         self.addCleanup(self.tempdir.cleanup)
         self.root = Path(self.tempdir.name)
+        self.write_plugin_versions("1.0.0", "1.0.0")
+
+    def write_plugin_versions(self, pack: str, plugin: str) -> None:
+        (self.root / "manifest.json").write_text(
+            json.dumps({"version": pack}), encoding="utf-8"
+        )
+        plugin_manifest = self.root / release_prep.PLUGIN_MANIFEST
+        plugin_manifest.parent.mkdir(parents=True, exist_ok=True)
+        plugin_manifest.write_text(
+            json.dumps({"name": "sd", "version": plugin}), encoding="utf-8"
+        )
 
     def command_responses(self, reports: list[dict[str, object]]):
         remaining = iter(reports)
@@ -89,6 +100,8 @@ class ReleasePrepTests(unittest.TestCase):
             commands,
             [
                 ["/venv/python", ".github/scripts/generate-command-surfaces.py"],
+                ["/venv/python", ".github/scripts/partition-surfaces.py"],
+                ["/venv/python", ".github/scripts/generate-plugin.py"],
                 ["/venv/python", "install.py", ".", "--force"],
                 ["/venv/python", "scripts/sd-ai-command-pack-update-spec-kb.py"],
                 ["/venv/python", release_prep.SURFACE_CHECK, "--json"],
@@ -109,6 +122,8 @@ class ReleasePrepTests(unittest.TestCase):
             commands,
             [
                 ["/venv/python", ".github/scripts/generate-command-surfaces.py"],
+                ["/venv/python", ".github/scripts/partition-surfaces.py"],
+                ["/venv/python", ".github/scripts/generate-plugin.py"],
                 ["/venv/python", "install.py", ".", "--force"],
                 ["/venv/python", "scripts/sd-ai-command-pack-update-spec-kb.py"],
                 ["/venv/python", release_prep.SURFACE_CHECK, "--json"],
@@ -204,6 +219,68 @@ class ReleasePrepTests(unittest.TestCase):
 
         commands = [list(call.args[0]) for call in runner.call_args_list]
         self.assertNotIn(["/venv/python", release_prep.CANDIDATE_CHECK], commands)
+
+    def test_plugin_version_mismatch_stops_before_self_sync(self) -> None:
+        self.write_plugin_versions("1.1.0", "1.0.0")
+        with mock.patch.object(
+            release_prep.subprocess,
+            "run",
+            side_effect=self.command_responses([surface_report()]),
+        ) as runner:
+            with self.assertRaisesRegex(
+                release_prep.ReleasePrepError, "does not match manifest.json version"
+            ):
+                release_prep.prepare_release(self.root, "/venv/python")
+
+        commands = [list(call.args[0]) for call in runner.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                ["/venv/python", ".github/scripts/generate-command-surfaces.py"],
+                ["/venv/python", ".github/scripts/partition-surfaces.py"],
+                ["/venv/python", ".github/scripts/generate-plugin.py"],
+            ],
+        )
+
+    def test_missing_plugin_manifest_is_controlled(self) -> None:
+        (self.root / release_prep.PLUGIN_MANIFEST).unlink()
+        with mock.patch.object(
+            release_prep.subprocess,
+            "run",
+            side_effect=self.command_responses([surface_report()]),
+        ):
+            with self.assertRaisesRegex(
+                release_prep.ReleasePrepError, "cannot read plugin manifest"
+            ):
+                release_prep.prepare_release(self.root, "/venv/python")
+
+    def test_plugin_surfaces_count_as_shipped_payload(self) -> None:
+        for path in (
+            "plugins/sd/skills/sd-help/SKILL.md",
+            "plugins/sd/bin/sd-ai-command-pack-review.py",
+            ".claude-plugin/marketplace.json",
+            ".github/scripts/generate-plugin.py",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(release_prep._is_payload_path(path))
+        for path in (".github/workflows/tests.yml", "tests/test_generate_plugin.py"):
+            with self.subTest(path=path):
+                self.assertFalse(release_prep._is_payload_path(path))
+
+    def test_plugin_payload_change_requires_version_bump(self) -> None:
+        self.write_release_files("1.0.0", "## 1.0.0 - 2026-08-09\n")
+        report = surface_report(
+            stale=True,
+            changed_paths=["plugins/sd/.claude-plugin/plugin.json"],
+            base_ref="origin/main",
+        )
+        with mock.patch.object(
+            release_prep, "_git_text", return_value=json.dumps({"version": "1.0.0"})
+        ):
+            with self.assertRaisesRegex(
+                release_prep.ReleasePrepError, "without a manifest version bump"
+            ):
+                release_prep._validate_release_prerequisites(self.root, report)
 
     def write_release_files(self, version: str, heading: str) -> None:
         (self.root / "manifest.json").write_text(

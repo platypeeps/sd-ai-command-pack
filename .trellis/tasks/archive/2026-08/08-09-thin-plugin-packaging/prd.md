@@ -31,7 +31,9 @@ release-prep integration stamping `plugin.json` `version` from
    plugin-shipped skills invoke entry points as `bin/` bare commands
    or `${CLAUDE_PLUGIN_ROOT}` paths. Fat installs keep working.
 3. CI gates: `claude plugin validate --strict` passes; grep gate
-   proves zero consumer-repo-root script references in plugin output.
+   proves zero consumer-repo-root script references in plugin output
+   (scoped per the acceptance criterion below: strict for Markdown,
+   justified semantic-data allowlist for `bin/`).
 4. `.claude/rules` content is NOT in the plugin (consumer-config per
    parent design).
 5. Marketplace docs cover private-repo auth (`gh auth setup-git`) and
@@ -46,10 +48,14 @@ release-prep integration stamping `plugin.json` `version` from
 
 ## Acceptance criteria
 
-- [ ] `claude --plugin-dir <built-plugin>` session exposes the pack
+- [x] `claude --plugin-dir <built-plugin>` session exposes the pack
       skills/agents/bin commands in a repo with no vendored payload.
-- [ ] `claude plugin validate <dir> --strict` exits 0 in CI.
-- [ ] Release-prep bumps `plugin.json` version in lockstep with
+- [x] `claude plugin validate <dir> --strict` exits 0 in CI.
+- [x] Release-prep bumps `plugin.json` version in lockstep with
       `manifest.json["version"]`.
-- [ ] Grep gate: zero `scripts/sd-ai-command-pack-*` repo-root
-      references in plugin output.
+- [x] Grep gate: zero `scripts/sd-ai-command-pack-*` repo-root
+      references in plugin Markdown output (skills/commands), and
+      zero functional repo-root sibling construction in `bin/`;
+      consumer-layout *data* globs in audit/scope tooling
+      (`install-audit`, `pr-body-scope`) are exempt via an explicit
+      per-file justified allowlist enforced by the generator.

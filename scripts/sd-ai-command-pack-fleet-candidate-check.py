@@ -184,7 +184,8 @@ def validate_consumer(
         "git",
         "clone",
         "--quiet",
-        "--no-tags",
+        # Tags stay in: consumer gates may verify release-tag pin freshness
+        # (sd-github-review validate:metadata) and fail in a tag-less clone.
         "--single-branch",
         "--",
         origin_url,

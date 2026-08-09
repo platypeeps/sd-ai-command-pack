@@ -19,13 +19,17 @@ MAX_INPUT_BYTES = 2 * 1024 * 1024
 SURFACE_TIMEOUT_SECONDS = 180
 COMMAND_TIMEOUT_SECONDS = 300
 GIT_TIMEOUT_SECONDS = 60
+PLUGIN_MANIFEST = "plugins/sd/.claude-plugin/plugin.json"
 PAYLOAD_SINGLETONS = frozenset(
     {
         "manifest.json",
         "docs/SD_AI_COMMAND_PACK.md",
         "templates/docs/SD_AI_COMMAND_PACK.md",
+        ".claude-plugin/marketplace.json",
+        ".github/scripts/generate-plugin.py",
     }
 )
+PAYLOAD_PREFIXES = ("templates/", "plugins/")
 
 
 class ReleasePrepError(RuntimeError):
@@ -215,7 +219,26 @@ def _manifest_version(manifest: Mapping[str, object], *, label: str) -> str:
 
 
 def _is_payload_path(path: str) -> bool:
-    return path in PAYLOAD_SINGLETONS or path.startswith("templates/")
+    return path in PAYLOAD_SINGLETONS or path.startswith(PAYLOAD_PREFIXES)
+
+
+def _validate_plugin_version(root: Path) -> None:
+    manifest = _json_object(
+        _regular_bytes(root / "manifest.json", label="current manifest"),
+        label="current manifest",
+    )
+    plugin = _json_object(
+        _regular_bytes(root / PLUGIN_MANIFEST, label="plugin manifest"),
+        label="plugin manifest",
+    )
+    pack_version = _manifest_version(manifest, label="current manifest")
+    plugin_version = _manifest_version(plugin, label="plugin manifest")
+    if pack_version != plugin_version:
+        raise ReleasePrepError(
+            f"{PLUGIN_MANIFEST} version {plugin_version!r} does not match "
+            f"manifest.json version {pack_version!r}"
+        )
+    print(f"release prep: plugin version matches the pack release: {pack_version}")
 
 
 def _validate_release_prerequisites(
@@ -287,6 +310,17 @@ def prepare_release(root: Path = ROOT, python: str = sys.executable) -> None:
         [python, ".github/scripts/generate-command-surfaces.py"],
         label="generate command surfaces",
     )
+    _run_visible(
+        root,
+        [python, ".github/scripts/partition-surfaces.py"],
+        label="generate surface partition",
+    )
+    _run_visible(
+        root,
+        [python, ".github/scripts/generate-plugin.py"],
+        label="generate Claude Code plugin",
+    )
+    _validate_plugin_version(root)
     _run_visible(
         root,
         [python, "install.py", ".", "--force"],

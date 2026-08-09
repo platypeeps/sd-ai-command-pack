@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sd-ai-command-pack",
+  "description": "Software Delivery command pack for Claude Code: the /sd command surface, its skills, and the shared pack toolchain.",
+  "owner": {
+    "name": "platypeeps",
+    "url": "https://github.com/platypeeps"
+  },
+  "plugins": [
+    {
+      "name": "sd",
+      "description": "Software Delivery command pack: the /sd command surface, its skills, and the shared pack toolchain as executables.",
+      "source": "./plugins/sd",
+      "category": "workflow"
+    }
+  ]
+}

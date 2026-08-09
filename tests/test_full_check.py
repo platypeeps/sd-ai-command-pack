@@ -353,10 +353,13 @@ class FullCheckTests(InstallTestCase):
         self.assertIn('REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"', script)
         self.assertIn('! cd -- "$REPO_ROOT"', script)
         self.assertIn("run_sd_ai_command_pack_scope_check()", script)
-        self.assertIn("scripts/sd-ai-command-pack-review-scope.sh", script)
+        # Pack helpers resolve next to this script, never from a repository-root
+        # scripts/ literal, so the same file works vendored and plugin-shipped.
+        self.assertIn('local script="$SCRIPT_DIR/$name"', script)
+        self.assertIn('local name="sd-ai-command-pack-review-scope.sh"', script)
         self.assertIn("run_sd_ai_command_pack_scope_check", script)
         self.assertIn("run_sd_ai_command_pack_pr_body_scope_check()", script)
-        self.assertIn("scripts/sd-ai-command-pack-pr-body-scope.py", script)
+        self.assertIn('local name="sd-ai-command-pack-pr-body-scope.py"', script)
         self.assertIn("SD_AI_COMMAND_PACK_PR_BODY_SCOPE_CHECK", script)
         self.assertIn("run_sd_ai_command_pack_pr_body_scope_check", script)
         self.assertIn("run_ci_classification_report()", script)
@@ -366,7 +369,11 @@ class FullCheckTests(InstallTestCase):
         self.assertIn("CI change classification: current diff", script)
         self.assertIn("sd-ai-command-pack-ci-paths", script)
         self.assertIn("run_review_preflight()", script)
-        self.assertIn("scripts/sd-ai-command-pack-review-preflight.mjs", script)
+        self.assertIn('local name="sd-ai-command-pack-review-preflight.mjs"', script)
+        self.assertIn(
+            'REVIEW_PREFLIGHT_SCRIPT:-$SCRIPT_DIR/$name}"',
+            script,
+        )
         self.assertIn("scripts/check-review-preflight.mjs", script)
         self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT", script)
         self.assertIn(
@@ -1129,8 +1136,13 @@ class FullCheckTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 127, result.stdout)
         self.assertIn(
-            "Review preflight is required but no command is configured and neither "
-            "scripts/sd-ai-command-pack-review-preflight.mjs nor "
+            "Review preflight is required but no command is configured and neither ",
+            result.stdout,
+        )
+        # The pack helper is named by its resolved sibling path; the legacy
+        # repo-owned preflight stays repository-relative.
+        self.assertIn(
+            "sd-ai-command-pack-review-preflight.mjs nor "
             "scripts/check-review-preflight.mjs exists",
             result.stdout,
         )
@@ -1272,8 +1284,10 @@ class FullCheckTests(InstallTestCase):
         )
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("Generated Obsidian KB is stale or blocked", result.stdout)
-        self.assertIn(
-            "python3 scripts/sd-ai-command-pack-update-spec-kb.py", result.stdout
+        # The helper is resolved next to the pack script, so the remediation
+        # line carries its resolved path rather than a repository-root literal.
+        self.assertRegex(
+            result.stdout, r"python3 \S*sd-ai-command-pack-update-spec-kb\.py"
         )
         self.assertNotIn("Obsidian KB refresh", result.stdout)
         self.assertEqual(copied_readme.read_bytes(), copied_before_required)
@@ -1491,8 +1505,10 @@ class FullCheckTests(InstallTestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("synthetic refresh failure", result.stdout)
         self.assertIn("Automatic Obsidian KB refresh failed", result.stdout)
-        self.assertIn(
-            "python3 scripts/sd-ai-command-pack-update-spec-kb.py", result.stdout
+        # The helper is resolved next to the pack script, so the remediation
+        # line carries its resolved path rather than a repository-root literal.
+        self.assertRegex(
+            result.stdout, r"python3 \S*sd-ai-command-pack-update-spec-kb\.py"
         )
 
     def test_full_check_kb_auto_repair_requires_passing_recheck(self) -> None:
