@@ -720,11 +720,14 @@ payload_singletons = {
     "manifest.json",
     "docs/SD_AI_COMMAND_PACK.md",
     "templates/docs/SD_AI_COMMAND_PACK.md",
+    ".claude-plugin/marketplace.json",
+    ".github/scripts/generate-plugin.py",
 }
+payload_prefixes = ("templates/", "plugins/")
 payload_changed = sorted(
     path
     for path in changed_paths
-    if path.startswith("templates/") or path in payload_singletons
+    if path.startswith(payload_prefixes) or path in payload_singletons
 )
 current_version = str(manifest.get("version", "")).strip()
 base_version = None

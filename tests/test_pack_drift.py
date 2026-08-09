@@ -505,6 +505,28 @@ class PackDriftTests(InstallTestCase):
             result.stdout,
         )
 
+    def test_pack_source_drift_gate_rejects_plugin_payload_without_version_bump(
+        self,
+    ) -> None:
+        root = self.make_pack_source_fixture()
+        plugin_paths = (
+            "plugins/sd/.claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
+            ".github/scripts/generate-plugin.py",
+        )
+        for relative in plugin_paths:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# release gate fixture\n", encoding="utf-8")
+        self.run_git(root, "add", *plugin_paths)
+
+        result = self.run_pack_source_drift_gates(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("release version drift", result.stdout)
+        for relative in plugin_paths:
+            self.assertIn(relative, result.stdout)
+
     def test_shipped_script_coverage_gate_lists_every_python_helper(self) -> None:
         gate = install.ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         gate_text = gate.read_text(encoding="utf-8")
