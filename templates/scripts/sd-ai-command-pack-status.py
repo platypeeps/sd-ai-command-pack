@@ -258,6 +258,142 @@ def parse_porcelain_v2(output: str) -> dict[str, Any]:
     }
 
 
+def parse_worktree_porcelain(text: str) -> list[dict[str, Any]]:
+    """Parse `git worktree list --porcelain -z` output into raw rows.
+
+    Values are returned unmodified: paths may exceed display bounds and
+    contain newlines. Display bounding happens only when the outgoing
+    JSON row is composed, because filesystem probes need the raw path.
+    """
+    rows: list[dict[str, Any]] = []
+    entry: dict[str, Any] | None = None
+    for record in text.split("\0"):
+        if not record:
+            if entry is not None:
+                rows.append(entry)
+                entry = None
+            continue
+        if record.startswith("worktree "):
+            if entry is not None:
+                rows.append(entry)
+            entry = {
+                "path": record.removeprefix("worktree "),
+                "branch": None,
+                "detached": False,
+                "head": None,
+                "bare": False,
+                "locked": False,
+                "prunable": False,
+                "reason": None,
+            }
+            continue
+        if entry is None:
+            continue
+        if record.startswith("HEAD "):
+            entry["head"] = record.removeprefix("HEAD ")
+        elif record.startswith("branch "):
+            entry["branch"] = record.removeprefix("branch ").removeprefix(
+                "refs/heads/"
+            )
+        elif record == "detached":
+            entry["detached"] = True
+        elif record == "bare":
+            entry["bare"] = True
+        elif record == "locked":
+            entry["locked"] = True
+        elif record.startswith("locked "):
+            entry["locked"] = True
+            entry["reason"] = record.removeprefix("locked ")
+        elif record == "prunable":
+            entry["prunable"] = True
+        elif record.startswith("prunable "):
+            entry["prunable"] = True
+            entry["reason"] = record.removeprefix("prunable ")
+    if entry is not None:
+        rows.append(entry)
+    return rows
+
+
+def collect_worktrees(repo: Path) -> dict[str, Any]:
+    listing = git_output(repo, "worktree", "list", "--porcelain", "-z")
+    if listing is None:
+        return {"status": "unavailable"}
+    parsed = parse_worktree_porcelain(listing)
+    reporting_raw = git_output(
+        repo, "rev-parse", "--path-format=absolute", "--show-toplevel"
+    )
+    reporting: Path | None = None
+    if reporting_raw:
+        try:
+            reporting = Path(reporting_raw).resolve()
+        except OSError:
+            reporting = None
+    common_raw = git_output(
+        repo, "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    common: Path | None = None
+    if common_raw:
+        try:
+            common = Path(common_raw).resolve()
+        except OSError:
+            common = None
+    rows: list[dict[str, Any]] = []
+    current_marked = False
+    for entry in parsed:
+        raw_path = entry["path"]
+        current = False
+        if not current_marked:
+            try:
+                current = (
+                    reporting is not None
+                    and Path(raw_path).resolve() == reporting
+                )
+            except OSError:
+                current = reporting_raw is not None and raw_path == reporting_raw
+            current_marked = current
+        clean: bool | None = None
+        if not entry["bare"] and not entry["prunable"]:
+            probe_root = Path(raw_path)
+            try:
+                probe_ok = probe_root.is_dir()
+            except OSError:
+                probe_ok = False
+            if probe_ok and common is not None:
+                probe_common = git_output(
+                    probe_root,
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-common-dir",
+                )
+                identity = False
+                if probe_common:
+                    try:
+                        identity = Path(probe_common).resolve() == common
+                    except OSError:
+                        identity = False
+                if identity:
+                    porcelain = git_output(
+                        probe_root, "--no-optional-locks", "status", "--porcelain"
+                    )
+                    if porcelain is not None:
+                        clean = porcelain == ""
+        rows.append(
+            {
+                "path": safe_text(raw_path, limit=300),
+                "branch": safe_text(entry["branch"]) if entry["branch"] else None,
+                "detached": entry["detached"],
+                "head": safe_text(entry["head"][:12]) if entry["head"] else None,
+                "bare": entry["bare"],
+                "locked": entry["locked"],
+                "prunable": entry["prunable"],
+                "reason": safe_text(entry["reason"]) if entry["reason"] else None,
+                "clean": clean,
+                "current": current,
+            }
+        )
+    return {"status": "ok", "rows": rows}
+
+
 def default_branch(repo: Path, remote: str, supplied: str | None) -> str | None:
     if supplied:
         return supplied
@@ -340,6 +476,18 @@ def collect_git(
         if remote_branches
         else []
     )
+    worktrees = collect_worktrees(repo)
+    state["worktrees"] = worktrees
+    if worktrees["status"] == "ok":
+        state["branchesHeldElsewhere"] = sorted(
+            {
+                row["branch"]
+                for row in worktrees["rows"]
+                if row["branch"] and not row["current"]
+            }
+        )
+    else:
+        state["branchesHeldElsewhere"] = None
     stash_list = git_output(repo, "stash", "list", "--format=%gd")
     if stash_list is None:
         state["stashCount"] = None
@@ -2203,7 +2351,12 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
         print(f"- default comparison: {default} differs from {git.get('remote')}/{default}")
     local_branches = git.get("localBranches") or []
     remote_branches = git.get("remoteBranches") or []
-    print(f"- local branches ({len(local_branches)}): {', '.join(local_branches) or 'none'}")
+    held_elsewhere = set(git.get("branchesHeldElsewhere") or [])
+    branch_labels = [
+        f"{name} [worktree]" if name in held_elsewhere else name
+        for name in local_branches
+    ]
+    print(f"- local branches ({len(local_branches)}): {', '.join(branch_labels) or 'none'}")
     print(f"- remote branches ({len(remote_branches)}): {', '.join(remote_branches[:10]) or 'none'}")
     stash_count = git.get("stashCount")
     print(f"- git stashes: {stash_count if isinstance(stash_count, int) else 'unavailable'}")
@@ -2222,6 +2375,42 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
                 print(f"- remote source branch {label}: {remote_ref}")
             else:
                 print(f"- remote source branch absent: {remote_ref}")
+
+    print("\n==> Worktrees")
+    worktrees = git.get("worktrees")
+    if not isinstance(worktrees, dict) or worktrees.get("status") != "ok":
+        print("- worktrees: unavailable")
+    else:
+        worktree_rows = worktrees.get("rows") or []
+        if len(worktree_rows) <= 1:
+            print("- linked worktrees: none")
+        else:
+            worktree_limit = HUMAN_ITEM_LIMIT * 2
+            for row in worktree_rows[:worktree_limit]:
+                if row.get("branch"):
+                    checkout = f"branch {row['branch']}"
+                elif row.get("detached"):
+                    checkout = f"detached at {row.get('head') or 'unknown'}"
+                elif row.get("bare"):
+                    checkout = "bare"
+                else:
+                    checkout = "no branch"
+                if row.get("prunable"):
+                    state_label = "prunable"
+                elif row.get("clean") is True:
+                    state_label = "clean"
+                elif row.get("clean") is False:
+                    state_label = "dirty"
+                else:
+                    state_label = "unknown"
+                if row.get("locked"):
+                    state_label += ", locked"
+                if row.get("reason"):
+                    state_label += f" ({row['reason']})"
+                suffix = " (reporting)" if row.get("current") else ""
+                print(f"- {row.get('path')}: {checkout}, {state_label}{suffix}")
+            if len(worktree_rows) > worktree_limit:
+                print(f"- ; +{len(worktree_rows) - worktree_limit} more")
 
     versions = report["versions"]
     print("\n==> Delivery")

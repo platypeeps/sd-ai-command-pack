@@ -16,7 +16,7 @@ $
 ```
 
 Zero matches in the whole collector. The only path that touches worktrees at
-all is `collect_recovery` (`scripts/sd-ai-command-pack-status.py:1328`), which
+all is `collect_recovery` (`scripts/sd-ai-command-pack-status.py:1353`), which
 delegates to the recovery-artifacts helper's read-only classifier. That helper
 deliberately ignores worktrees it does not own
 (`scripts/sd-ai-command-pack-recovery-artifacts.py:818-865`):
@@ -107,8 +107,12 @@ Three concrete failures follow from the blind spot:
 - With N linked worktrees present, the report lists N rows plus the reporting
   checkout, and `git worktree list --porcelain` agrees row for row.
 - A branch checked out in another worktree is marked as such in the
-  local-branch listing, and the marked set exactly equals the set Git would
-  refuse to check out.
+  local-branch listing, and — under git's normal exclusive-checkout
+  invariant (no `worktree add -f` forced duplicates) — the marked set
+  exactly equals the set `git checkout` would refuse from the reporting
+  worktree. A forced duplicate of the reporting branch is still marked
+  (it is genuinely held elsewhere) even though checking it out here
+  would no-op succeed.
 - A repository with no linked worktrees reports the empty state explicitly
   rather than omitting the section.
 - Running status leaves `git worktree list --porcelain` byte-identical before

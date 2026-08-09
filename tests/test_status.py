@@ -1631,6 +1631,262 @@ class StatusTests(InstallTestCase):
         self.assertEqual(recovery["actionable"], [])
         self.assertIn("no tracked recovery artifacts", human.stdout)
 
+    def worktree_index_bytes(self, worktree: Path) -> bytes:
+        git_dir = Path(self.git_output(worktree, "rev-parse", "--absolute-git-dir"))
+        index = git_dir / "index"
+        return index.read_bytes() if index.exists() else b""
+
+    def test_worktree_inventory_rows_match_porcelain(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "worktree", "add", "-b", "wt-branch", str(root.parent / "wt-a"))
+        self.run_git(root, "worktree", "add", "--detach", str(root.parent / "wt-b"))
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        rows = json.loads(result.stdout)["git"]["worktrees"]["rows"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(sum(1 for row in rows if row["current"]), 1)
+        expected: list[dict[str, object]] = []
+        for line in self.git_output(root, "worktree", "list", "--porcelain").splitlines():
+            if line.startswith("worktree "):
+                expected.append(
+                    {"path": line.removeprefix("worktree "), "branch": None, "detached": False}
+                )
+            elif line.startswith("branch "):
+                expected[-1]["branch"] = line.removeprefix("branch ").removeprefix(
+                    "refs/heads/"
+                )
+            elif line == "detached":
+                expected[-1]["detached"] = True
+        self.assertEqual(
+            [(row["path"], row["branch"], row["detached"]) for row in rows],
+            [(row["path"], row["branch"], row["detached"]) for row in expected],
+        )
+
+    def test_held_branch_marking_matches_checkout_refusals(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "free-branch")
+        self.run_git(root, "worktree", "add", "-b", "held-branch", str(root.parent / "wt-held"))
+
+        machine = self.run_status(root, "--json")
+        human = self.run_status(root)
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        report = json.loads(machine.stdout)
+
+        no_hooks = root.parent / "no-hooks"
+        no_hooks.mkdir(exist_ok=True)
+        initial_branch = self.git_output(root, "rev-parse", "--abbrev-ref", "HEAD")
+        refused: set[str] = set()
+        try:
+            for name in report["git"]["localBranches"]:
+                attempt = subprocess.run(
+                    ["git", "-c", f"core.hooksPath={no_hooks}", "checkout", name],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if attempt.returncode != 0 and "already used by worktree" in attempt.stderr:
+                    refused.add(name)
+        finally:
+            subprocess.run(
+                ["git", "-c", f"core.hooksPath={no_hooks}", "checkout", initial_branch],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(set(report["git"]["branchesHeldElsewhere"]), refused)
+        self.assertIn("held-branch [worktree]", human.stdout)
+        self.assertNotIn("free-branch [worktree]", human.stdout)
+        self.assertNotIn("main [worktree]", human.stdout)
+
+    def test_worktree_empty_state_is_explicit(self) -> None:
+        root = self.make_status_repo()
+
+        machine = self.run_status(root, "--json")
+        human = self.run_status(root)
+
+        report = json.loads(machine.stdout)
+        self.assertEqual(len(report["git"]["worktrees"]["rows"]), 1)
+        self.assertEqual(report["git"]["branchesHeldElsewhere"], [])
+        self.assertIn("- linked worktrees: none", human.stdout)
+
+    def test_worktree_inventory_is_read_only(self) -> None:
+        root = self.make_status_repo()
+        state_root = root.parent / "worktree-recovery-state"
+        self.seed_needs_review_stash(root, state_root)
+        worktree = root.parent / "wt-ro"
+        self.run_git(root, "worktree", "add", "-b", "ro-branch", str(worktree))
+        env = {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)}
+
+        before_listing = self.git_output(root, "worktree", "list", "--porcelain")
+        before_receipts = self.recovery_state_snapshot(state_root)
+        before_index = self.worktree_index_bytes(worktree)
+        self.assertNotEqual(before_receipts, {})
+
+        machine = self.run_status(root, "--json", extra_env=env)
+        human = self.run_status(root, extra_env=env)
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        self.assertEqual(human.returncode, 0, human.stdout)
+
+        self.assertEqual(
+            self.git_output(root, "worktree", "list", "--porcelain"), before_listing
+        )
+        self.assertEqual(self.recovery_state_snapshot(state_root), before_receipts)
+        self.assertEqual(self.worktree_index_bytes(worktree), before_index)
+
+    def test_worktree_inventory_leaves_recovery_classification_unchanged(self) -> None:
+        root = self.make_status_repo()
+        state_root = root.parent / "empty-worktree-recovery"
+        state_root.mkdir()
+        env = {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_root)}
+
+        before = self.run_status(root, "--json", extra_env=env)
+        recovery_before = json.loads(before.stdout)["recoveryArtifacts"]
+
+        self.run_git(root, "worktree", "add", "-b", "foreign-branch", str(root.parent / "wt-foreign"))
+        after = self.run_status(root, "--json", extra_env=env)
+        recovery_after = json.loads(after.stdout)["recoveryArtifacts"]
+
+        self.assertEqual(recovery_after, recovery_before)
+        self.assertEqual(recovery_after["total"], 0)
+
+    def test_prunable_worktree_is_reported_and_not_pruned(self) -> None:
+        root = self.make_status_repo()
+        gone = root.parent / "wt-gone"
+        self.run_git(root, "worktree", "add", "-b", "gone-branch", str(gone))
+        shutil.rmtree(gone)
+
+        result = self.run_status(root, "--json")
+
+        rows = json.loads(result.stdout)["git"]["worktrees"]["rows"]
+        gone_rows = [row for row in rows if row["branch"] == "gone-branch"]
+        self.assertEqual(len(gone_rows), 1)
+        self.assertTrue(gone_rows[0]["prunable"])
+        self.assertIsNone(gone_rows[0]["clean"])
+        self.assertIn(
+            "refs/heads/gone-branch",
+            self.git_output(root, "worktree", "list", "--porcelain"),
+        )
+
+    def test_dirty_linked_worktree_reports_clean_false(self) -> None:
+        root = self.make_status_repo()
+        worktree = root.parent / "wt-dirty"
+        self.run_git(root, "worktree", "add", "-b", "dirty-branch", str(worktree))
+        (worktree / "scratch.txt").write_text("dirty\n", encoding="utf-8")
+
+        result = self.run_status(root, "--json")
+
+        rows = json.loads(result.stdout)["git"]["worktrees"]["rows"]
+        by_branch = {row["branch"]: row for row in rows}
+        self.assertIs(by_branch["dirty-branch"]["clean"], False)
+        self.assertIs(by_branch["main"]["clean"], True)
+
+    def test_unavailable_worktree_inventory_is_explicit(self) -> None:
+        root = self.make_status_repo()
+        real_git = shutil.which("git")
+        assert real_git is not None
+        stub_bin = root.parent / "stub-bin"
+        stub_bin.mkdir()
+        stub = stub_bin / "git"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "worktree" ]; then exit 1; fi\n'
+            f'exec "{real_git}" "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        env = {"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
+
+        machine = self.run_status(root, "--json", extra_env=env)
+        human = self.run_status(root, extra_env=env)
+
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        report = json.loads(machine.stdout)
+        self.assertEqual(report["git"]["worktrees"], {"status": "unavailable"})
+        self.assertIsNone(report["git"]["branchesHeldElsewhere"])
+        self.assertIn("- worktrees: unavailable", human.stdout)
+
+    def test_worktree_porcelain_parser_keeps_raw_adversarial_values(self) -> None:
+        status = self.load_status_module()
+        newline_path = "/tmp/evil\nname"
+        long_path = "/tmp/" + "a" * 400
+        blob = (
+            f"worktree {newline_path}\0HEAD {'1' * 40}\0branch refs/heads/tricky\0\0"
+            f"worktree {long_path}\0HEAD {'2' * 40}\0detached\0\0"
+            f"worktree /tmp/locked\0HEAD {'3' * 40}\0locked gone away\0"
+            "futureattr value\0\0"
+        )
+
+        rows = status.parse_worktree_porcelain(blob)
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["path"], newline_path)
+        self.assertEqual(rows[0]["branch"], "tricky")
+        self.assertEqual(rows[1]["path"], long_path)
+        self.assertTrue(rows[1]["detached"])
+        self.assertTrue(rows[2]["locked"])
+        self.assertEqual(rows[2]["reason"], "gone away")
+
+    def test_long_path_worktree_is_probed_and_display_bounded(self) -> None:
+        root = self.make_status_repo()
+        deep = root.parent
+        while len(str(deep)) < 320:
+            deep = deep / ("x" * 40)
+        deep.parent.mkdir(parents=True, exist_ok=True)
+        self.run_git(root, "worktree", "add", "-b", "long-branch", str(deep))
+
+        result = self.run_status(root, "--json")
+
+        rows = json.loads(result.stdout)["git"]["worktrees"]["rows"]
+        by_branch = {row["branch"]: row for row in rows}
+        long_row = by_branch["long-branch"]
+        self.assertIs(long_row["clean"], True)
+        self.assertLessEqual(len(long_row["path"]), 300)
+
+    def test_status_from_linked_worktree_marks_linked_row_current(self) -> None:
+        root = self.make_status_repo()
+        worktree = root.parent / "wt-linked"
+        self.run_git(root, "worktree", "add", "-b", "linked-branch", str(worktree))
+
+        result = self.run_status(worktree, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        rows = report["git"]["worktrees"]["rows"]
+        porcelain_paths = [
+            line.removeprefix("worktree ")
+            for line in self.git_output(
+                worktree, "worktree", "list", "--porcelain"
+            ).splitlines()
+            if line.startswith("worktree ")
+        ]
+        self.assertEqual([row["path"] for row in rows], porcelain_paths)
+        current = [row for row in rows if row["current"]]
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0]["branch"], "linked-branch")
+        self.assertFalse(rows[0]["current"])
+        self.assertIn("main", report["git"]["branchesHeldElsewhere"])
+
+    def test_stale_worktree_path_reused_by_stranger_is_not_probed(self) -> None:
+        root = self.make_status_repo()
+        reused = root.parent / "wt-reused"
+        self.run_git(root, "worktree", "add", "-b", "reused-branch", str(reused))
+        shutil.rmtree(reused)
+        reused.mkdir()
+        self.run_git(reused, "init")
+        (reused / "stranger.txt").write_text("dirty stranger\n", encoding="utf-8")
+
+        result = self.run_status(root, "--json")
+
+        rows = json.loads(result.stdout)["git"]["worktrees"]["rows"]
+        reused_rows = [row for row in rows if row["branch"] == "reused-branch"]
+        self.assertEqual(len(reused_rows), 1)
+        self.assertIsNone(reused_rows[0]["clean"])
+
     def test_local_status_counts_stashes_without_marking_attention(self) -> None:
         root = self.make_status_repo()
         for index in range(2):

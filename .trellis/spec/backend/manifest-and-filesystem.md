@@ -1609,9 +1609,15 @@ Ordinary installs and all status modes must not mutate user-global state.
 The collector is read-only: it may inspect Git, optional GitHub metadata,
 Trellis task JSON, and local version receipts, but must never fetch, pull,
 switch, stage, commit, push, merge, delete branches, or modify task state.
-Ref-derived remote facts are labelled `cached` unless the trusted housekeeping
-caller supplies the internal refreshed-ref attestation. Human output stays
-bounded; `--json` exposes schema version 1 for complete structured detail.
+It inventories the repository's Git worktrees from `git worktree list
+--porcelain -z` (additive `git.worktrees` and `git.branchesHeldElsewhere`
+keys plus a human `==> Worktrees` section); per-worktree cleanliness probes
+run `git --no-optional-locks status --porcelain` only after a common-dir
+identity check, and an unavailable inventory is reported explicitly, never
+as an empty healthy result. Ref-derived remote facts are labelled `cached`
+unless the trusted housekeeping caller supplies the internal refreshed-ref
+attestation. Human output stays bounded; `--json` exposes schema version 2
+for complete structured detail (additive keys do not bump the version).
 Ordinary dirty, stale, missing, behind, or diverged observations are advisory
 and do not change a successful report's exit status. Invalid repositories or
 fleet configuration fail, and internal `--expect-clean` fails when cleanup
