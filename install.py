@@ -15,6 +15,8 @@ from installer import (
     fileops,
     inspection,
     localonly,
+    machinescope,
+    machinestage,
     manifest,
     removal,
 )
@@ -209,6 +211,8 @@ __all__ = [
     "load_manifest",
     "local_only_exclude_block",
     "localonly",
+    "machinescope",
+    "machinestage",
     "main",
     "manifest",
     "manifest_cli_identity",
@@ -239,6 +243,7 @@ __all__ = [
     "require_trellis_repo",
     "retire_stale_targets",
     "run_diff_check",
+    "run_machine_install",
     "selected_files",
     "validate_source_only_command_names",
     "shutil",
@@ -294,7 +299,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "target",
         nargs="?",
-        default=".",
+        default=None,
         help="Target Trellis repository root. Defaults to the current directory.",
     )
     inspection_group = parser.add_mutually_exclusive_group()
@@ -343,6 +348,34 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Install all adapters even if platform directories or active Trellis "
             "markers are not present."
+        ),
+    )
+    parser.add_argument(
+        "--machine",
+        action="store_true",
+        help=(
+            "Install the machine-scope surfaces for non-Claude platforms into "
+            "the current user's home directory instead of into a repository. "
+            "The payload is staged from this checkout; no repository target, "
+            "platform selection, or Trellis install is involved."
+        ),
+    )
+    parser.add_argument(
+        "--home",
+        type=Path,
+        default=None,
+        help=(
+            "With --machine, the destination home directory. Defaults to the "
+            "current user's; a scratch prefix keeps a trial install contained."
+        ),
+    )
+    parser.add_argument(
+        "--state-home",
+        type=Path,
+        default=None,
+        help=(
+            "With --machine, the private state root holding the machine "
+            "receipt and the intent journal."
         ),
     )
     parser.add_argument(
@@ -415,8 +448,34 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     inspecting = args.status or args.check
     if args.audit and not inspecting:
         parser.error("--audit requires --status or --check")
-    if args.json and not inspecting:
-        parser.error("--json requires --status or --check")
+    if args.json and not inspecting and not args.machine:
+        parser.error("--json requires --status, --check, or --machine")
+    if not args.machine and (args.home is not None or args.state_home is not None):
+        parser.error("--home and --state-home require --machine")
+    if args.machine:
+        # Machine scope writes user-level surfaces from this checkout's own
+        # payload: it has no repository target, so every option that selects,
+        # inspects, or edits one is a sign the caller meant something else.
+        incompatible = [
+            option
+            for option, enabled in (
+                ("a repository target", args.target is not None),
+                ("--platform", bool(args.platform)),
+                ("--all", args.all),
+                ("--status", args.status),
+                ("--check", args.check),
+                ("--audit", args.audit),
+                ("--remove", args.remove),
+                ("--backup", args.backup),
+                ("--local-only", args.local_only),
+                ("--skip-trellis-init", args.skip_trellis_init),
+                ("--skip-diff-check", args.skip_diff_check),
+                ("--configure-fleet", args.configure_fleet),
+            )
+            if enabled
+        ]
+        if incompatible:
+            parser.error(f"--machine cannot be combined with {', '.join(incompatible)}")
     if inspecting:
         incompatible = [
             option
@@ -697,14 +756,47 @@ def _run_inspection(
     return inspection.report_exit_code(report, check=args.check)
 
 
+def run_machine_install(args: argparse.Namespace) -> int:
+    """Stage this checkout's machine payload and hand it to the engine.
+
+    The engine owns the plan, the conflict refusals, the receipt, and the exit
+    codes; staging only decides what the payload contains. Both halves are the
+    same code the plugin ships, so a developer installing from a checkout and a
+    machine installing from the plugin converge on the same tree.
+    """
+
+    engine_argv = ["install"]
+    if args.force:
+        engine_argv.append("--force")
+    if args.dry_run:
+        engine_argv.append("--dry-run")
+    if args.json:
+        engine_argv.append("--json")
+    if args.home is not None:
+        engine_argv.extend(["--home", str(args.home)])
+    if args.state_home is not None:
+        engine_argv.extend(["--state-home", str(args.state_home)])
+    try:
+        with machinestage.staged_payload(ROOT) as payload_root:
+            return machinescope.main([*engine_argv, "--payload", str(payload_root)])
+    except (
+        machinestage.MachineStageError,
+        machinestage.ReferenceRewriteError,
+    ) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if args.machine:
+        return run_machine_install(args)
     if args.backup and not args.force and not args.remove:
         raise SystemExit("error: --backup requires --force unless --remove is set")
     if args.skip_trellis_init and not args.local_only:
         raise SystemExit("error: --skip-trellis-init requires --local-only")
 
-    target = Path(args.target).resolve()
+    target = Path(args.target or ".").resolve()
     manifest_data, files = load_manifest()
 
     validate_manifest(files)

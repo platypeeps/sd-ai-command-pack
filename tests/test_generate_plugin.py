@@ -25,6 +25,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from installer import references
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:  # pragma: no cover - import shim
@@ -633,7 +635,7 @@ class CommittedPluginTreeTests(PluginFixtureCase):
             found = sorted(
                 {
                     match.rstrip(".")
-                    for match in self.generator.RESIDUE_RE.findall(
+                    for match in references.RESIDUE_RE.findall(
                         path.read_text(encoding="utf-8")
                     )
                 }
@@ -663,7 +665,7 @@ class AllowlistHygieneTests(PluginFixtureCase):
             self.assertTrue(path.is_file(), f"allowlisted script is missing: {name}")
             found = {
                 match.rstrip(".")
-                for match in self.generator.RESIDUE_RE.findall(
+                for match in references.RESIDUE_RE.findall(
                     path.read_text(encoding="utf-8")
                 )
             }

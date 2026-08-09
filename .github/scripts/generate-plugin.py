@@ -31,10 +31,14 @@ Markdown bodies are rewritten on the way in (the authored templates are
 untouched): a `scripts/`-prefixed pack script reference becomes the bare
 command name, which resolves through `bin/` on the Bash tool PATH. `node
 <name>.mjs` loses its runner prefix, because `node` does not PATH-search a
-script operand while `bash` does. Plugin command copies also gain the YAML
-frontmatter description authored in `.github/command-sources/<name>.md`; the
-Claude adapter drops it because Claude reads the skill, but a plugin command
-without a description fails `claude plugin validate --strict`.
+script operand while `bash` does. The rewrite rules and both gates live in
+`installer/references.py`, shared with the machine payload build, which
+relocates the same references to `~/.agents/bin` instead — one judgement about
+what is and is not a reference, applied to both payloads. Plugin command copies
+also gain the YAML frontmatter description authored in
+`.github/command-sources/<name>.md`; the Claude adapter drops it because Claude
+reads the skill, but a plugin command without a description fails `claude
+plugin validate --strict`.
 
 Six conditions fail the build closed:
 
@@ -65,7 +69,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -74,6 +77,10 @@ from pathlib import Path
 from typing import Sequence
 
 PACK_ROOT = Path(__file__).resolve().parents[2]
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+from installer import references  # noqa: E402
 
 MANIFEST_PATH = "manifest.json"
 PARTITION_PATH = "docs/fleet/surface-partition.json"
@@ -106,146 +113,10 @@ DATA_MODE = 0o644
 # Library modules are imported by their siblings, never invoked as commands.
 LIBRARY_PREFIX = "sd_ai_command_pack_"
 
-_PACK_SCRIPT_NAME = (
-    r"(?:sd-ai-command-pack-[A-Za-z0-9_-]+\.(?:py|sh|mjs)"
-    r"|sd_ai_command_pack_[A-Za-z0-9_]+\.py)"
-)
-# `scripts/<pack script>` in an authored body -> the bare command name.
-INVOCATION_RE = re.compile(rf"scripts/({_PACK_SCRIPT_NAME})")
-# `node <name>.mjs` -> `<name>.mjs`: bash PATH-searches a slash-free operand,
-# node does not, and every bin/ entry carries a shebang plus an executable bit.
-NODE_PREFIX_RE = re.compile(r"\bnode (sd-ai-command-pack-[A-Za-z0-9_-]+\.mjs)")
-# Anything still naming a repository-root pack path after the rewrite.
-RESIDUE_RE = re.compile(r"scripts/sd[-_]ai[-_]command[-_]pack[A-Za-z0-9_.*-]*")
-BARE_COMMAND_RE = re.compile(_PACK_SCRIPT_NAME)
-
-# bin/ file name -> (justification, literals that may appear in it).
-#
-# Every literal is semantic data about some *other* filesystem: a consumer
-# repository being audited, a changed-path set being classified, the pack
-# source repository's own tree, or a comment consumed by a linter. None of them
-# resolves a helper the script then runs — functional sibling resolution is
-# forbidden outright by tests/test_script_sibling_resolution.py, whose
-# justifications these mirror.
-BIN_LITERAL_ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
-    "sd-ai-command-pack-check.py": (
-        "repo-scoped payload discovery: sd-check reports whether the repository "
-        "under --repo carries the vendored helpers, so the paths describe that "
-        "repository's layout, not this script's siblings",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-install-audit.py",
-                "scripts/sd-ai-command-pack-pr-body-scope.py",
-                "scripts/sd-ai-command-pack-review-preflight.mjs",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-                "scripts/sd-ai-command-pack-update-spec-kb.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-full-check.sh": (
-        "pack-source-only release gate: the fleet candidate checker has no "
-        "manifest row and only ever runs inside the pack source repository, "
-        "whose own tree is the correct anchor",
-        frozenset({"scripts/sd-ai-command-pack-fleet-candidate-check.py"}),
-    ),
-    "sd-ai-command-pack-housekeeping.sh": (
-        "shellcheck source= directive: a static-analysis annotation, not a "
-        "runtime path (the runtime load uses $SCRIPT_DIR)",
-        frozenset({"scripts/sd-ai-command-pack-shell-lib.sh"}),
-    ),
-    "sd-ai-command-pack-install-audit.py": (
-        "consumer-layout data: the audit describes where a vendored install "
-        "puts payload files in the repository it inspects",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-",
-                "scripts/sd-ai-command-pack-*",
-                "scripts/sd-ai-command-pack-fleet-candidate-check.py",
-                "scripts/sd-ai-command-pack-fleet-controller.py",
-                "scripts/sd-ai-command-pack-fleet-finding-classify.py",
-                "scripts/sd-ai-command-pack-fleet-preflight.py",
-                "scripts/sd-ai-command-pack-fleet-publish.py",
-                "scripts/sd-ai-command-pack-fleet-review-classify.py",
-                "scripts/sd-ai-command-pack-fleet-timing.py",
-                "scripts/sd-ai-command-pack-fleet-wave-plan.py",
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-housekeeping.sh",
-                "scripts/sd_ai_command_pack_fleet_lib.py",
-                "scripts/sd_ai_command_pack_lib.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-pr-body-scope.py": (
-        "consumer-layout data: region globs classify changed paths in the "
-        "repository whose PR body is being scoped",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-*.mjs",
-                "scripts/sd-ai-command-pack-*.py",
-                "scripts/sd-ai-command-pack-*.sh",
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-housekeeping.sh",
-                "scripts/sd-ai-command-pack-install-audit.py",
-                "scripts/sd-ai-command-pack-pr-body-scope.py",
-                "scripts/sd-ai-command-pack-review-learnings.py",
-                "scripts/sd-ai-command-pack-review-local.sh",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-                "scripts/sd-ai-command-pack-shell-lib.sh",
-                "scripts/sd_ai_command_pack_*.py",
-                "scripts/sd_ai_command_pack_lib.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-review-learnings.py": (
-        "changed-path classification: payload prefixes used to recognize pack "
-        "files in a diff",
-        frozenset({"scripts/sd-ai-command-pack-", "scripts/sd_ai_command_pack_"}),
-    ),
-    "sd-ai-command-pack-review-preflight.mjs": (
-        "changed-path classification: copiedTemplateKind recognizes vendored "
-        "payload paths in a diff",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-surface-check.py": (
-        "pack-source-only validator: every path names the pack source "
-        "repository's own tree, which is always a full checkout",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-fleet-candidate-check.py",
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-surface-check.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-toolchain.sh": (
-        "repository-state report: doctor tells the operator whether the "
-        "repository it inspects carries a vendored full-check",
-        frozenset({"scripts/sd-ai-command-pack-full-check.sh"}),
-    ),
-    "sd-ai-command-pack-update-spec-kb.py": (
-        "generated-file provenance: the banner written into generated KB files "
-        "names the generator by its canonical repository path",
-        frozenset({"scripts/sd-ai-command-pack-update-spec-kb.py"}),
-    ),
-}
-
-# (plugin-relative Markdown path, bare command) -> justification for a
-# reference the plugin cannot satisfy from bin/.
-CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {
-    (
-        "skills/sd-review-pr/SKILL.md",
-        "sd-ai-command-pack-fleet-review-classify.py",
-    ): (
-        "fleet-operator path: the fleet scripts have no manifest rows, so this "
-        "reference is already absent from vendored consumer installs today; a "
-        "follow-up task fixes the skill text and retires this entry"
-    ),
-}
+# Re-exported so a test can patch the allowlist this build applies; the shared
+# gates read whichever object is passed in.
+BIN_LITERAL_ALLOWLIST = references.BIN_LITERAL_ALLOWLIST
+CLOSURE_ALLOWLIST = references.PLUGIN_CLOSURE_ALLOWLIST
 
 
 class PluginError(Exception):
@@ -368,8 +239,7 @@ def command_description(root: Path, short: str) -> str:
 def rewrite_markdown(text: str) -> str:
     """Repository-root pack invocations become bare `bin/` commands."""
 
-    rewritten = INVOCATION_RE.sub(r"\1", text)
-    return NODE_PREFIX_RE.sub(r"\1", rewritten)
+    return references.rewrite_text(text, profile=references.PLUGIN_PROFILE)
 
 
 def build_files(root: Path) -> dict[str, PluginFile]:
@@ -408,8 +278,12 @@ def build_files(root: Path) -> dict[str, PluginFile]:
     files[PLUGIN_MANIFEST_PATH] = PluginFile(
         content=render_plugin_manifest(version), executable=False
     )
-    check_residue(files)
-    check_closure(files)
+    try:
+        check_residue(files)
+        check_closure(files)
+    except references.ReferenceRewriteError as exc:
+        # The shared gates report in their own error model; this build has one.
+        raise PluginError(str(exc)) from exc
     return dict(sorted(files.items()))
 
 
@@ -428,56 +302,37 @@ def check_residue(files: dict[str, PluginFile]) -> None:
 
     for path, entry in sorted(files.items()):
         if path.startswith("bin/"):
-            name = path[len("bin/") :]
-            justification, allowed = BIN_LITERAL_ALLOWLIST.get(name, ("", frozenset()))
-            text = entry.content.decode("utf-8", errors="replace")
-            found = {match.rstrip(".") for match in RESIDUE_RE.findall(text)}
-            unexpected = sorted(found - allowed)
-            if unexpected:
-                raise PluginError(
-                    f"repository-root pack paths in bin/{name}: "
-                    + ", ".join(unexpected)
-                    + "; convert functional sibling resolution to own-location "
-                    "resolution, or add the literal to BIN_LITERAL_ALLOWLIST "
-                    "with a written justification if it is layout data"
-                )
-            if allowed and not justification:
-                raise PluginError(
-                    f"BIN_LITERAL_ALLOWLIST entry for {name} has no justification"
-                )
+            references.check_executable_residue(
+                path,
+                entry.content.decode("utf-8", errors="replace"),
+                allowlist=BIN_LITERAL_ALLOWLIST,
+                name=path[len("bin/") :],
+            )
             continue
         if not path.endswith(".md"):
             continue
-        text = entry.content.decode("utf-8")
-        residue = sorted({match.rstrip(".") for match in RESIDUE_RE.findall(text)})
-        if residue:
-            raise PluginError(
-                f"rewrite residue in {path}: "
-                + ", ".join(residue)
-                + "; the plugin ships no repository-root scripts/ directory, so "
-                "extend the rewrite rules in .github/scripts/generate-plugin.py"
-            )
+        references.check_text_residue(
+            path,
+            entry.content.decode("utf-8"),
+            profile=references.PLUGIN_PROFILE,
+        )
 
 
 def check_closure(files: dict[str, PluginFile]) -> None:
     """Every pack command named in Markdown must ship in bin/."""
 
-    shipped = {path[len("bin/") :] for path in files if path.startswith("bin/")}
+    shipped = frozenset(path[len("bin/") :] for path in files if path.startswith("bin/"))
     for path, entry in sorted(files.items()):
         if not path.endswith(".md"):
             continue
-        text = entry.content.decode("utf-8")
-        for command in sorted(set(BARE_COMMAND_RE.findall(text))):
-            if command in shipped:
-                continue
-            justification = CLOSURE_ALLOWLIST.get((path, command))
-            if not justification:
-                raise PluginError(
-                    f"{path} references {command}, which the plugin does not "
-                    "ship in bin/; add the script to the manifest, or record "
-                    "the reference in CLOSURE_ALLOWLIST with a written "
-                    "justification"
-                )
+        references.check_closure(
+            path,
+            entry.content.decode("utf-8"),
+            profile=references.PLUGIN_PROFILE,
+            shipped_commands=shipped,
+            shipped_docs=frozenset(),
+            allowlist=CLOSURE_ALLOWLIST,
+        )
 
 
 def materialize(files: dict[str, PluginFile], destination: Path) -> None:

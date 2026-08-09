@@ -1404,6 +1404,56 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(list(argv))
 
 
+# Every variable that can move a root out of the home the caller named:
+# `XDG_CONFIG_HOME` places OpenCode's commands, and the rest are the rungs of
+# the shared state ladder that place the receipt and the intent journal. Named
+# here rather than imported from the shared library, which loads by path at
+# call time and must not be pulled in just to spell a variable name.
+_HOME_SCOPED_ENV: tuple[str, ...] = (
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
+    "SD_AI_COMMAND_PACK_STATE_HOME",
+    "LOCALAPPDATA",
+)
+
+
+def _within(root: Path, value: str) -> bool:
+    try:
+        return Path(value).expanduser().resolve(strict=False).is_relative_to(root)
+    except (OSError, RuntimeError, ValueError):  # pragma: no cover - resolve is lenient
+        return False
+
+
+def cli_environ(home: Path | None, environ: Mapping[str, str] | None = None) -> Mapping[str, str]:
+    """The environment the CLI resolves destination and state roots from.
+
+    `--home` means "treat this directory as the home directory", which is what
+    a scratch-prefix install rests on. An ambient root override describes the
+    *real* home, so honoring it would put OpenCode's commands or the receipt
+    outside the prefix the caller named -- silently, because every other root
+    is home-relative and would land inside it, and a receipt written beside a
+    different home claims paths that install never wrote there. An override
+    that already sits inside the given home is honored: it is describing that
+    home. `--state-home` is unaffected; an explicit flag outranks the ladder.
+    """
+
+    resolved = os.environ if environ is None else environ
+    if home is None:
+        return resolved
+    root = home.expanduser().resolve(strict=False)
+    dropped = [
+        name
+        for name in _HOME_SCOPED_ENV
+        if resolved.get(name, "").strip() and not _within(root, resolved[name].strip())
+    ]
+    if not dropped:
+        return resolved
+    scoped = dict(resolved)
+    for name in dropped:
+        scoped.pop(name)
+    return scoped
+
+
 def _resolve_payload_argument(value: Path | None) -> Path:
     if value is not None:
         return value
@@ -1494,11 +1544,13 @@ def _print_removal(outcome: RemovalOutcome, *, as_json: bool) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    environ = cli_environ(args.home)
     try:
         if args.command == "install":
             outcome = install(
                 _resolve_payload_argument(args.payload),
                 home=args.home,
+                environ=environ,
                 state_home=args.state_home,
                 force=args.force,
                 dry_run=args.dry_run,
@@ -1507,6 +1559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "remove":
             removal = remove(
                 home=args.home,
+                environ=environ,
                 state_home=args.state_home,
                 force=args.force,
                 dry_run=args.dry_run,
@@ -1516,6 +1569,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = status(
                 payload_root=args.payload,
                 home=args.home,
+                environ=environ,
                 state_home=args.state_home,
             )
             if args.json:
@@ -1562,6 +1616,7 @@ __all__ = [
     "RemovalOutcome",
     "apply_plan",
     "build_plan",
+    "cli_environ",
     "default_payload_root",
     "install",
     "intent_content",
