@@ -330,6 +330,21 @@ class StatusTests(InstallTestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
 
+    def test_active_task_parses_prose_when_json_flag_is_ignored(self) -> None:
+        # A Trellis variant that ignores unknown flags prints the bare task
+        # path with exit 0; the collector must interpret that prose output.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "print('.trellis/tasks/status-fixture')\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+
     def test_active_task_falls_back_when_current_rejects_json_flag(self) -> None:
         # Trellis <=0.6.7: `task.py current --json` fails with an argparse
         # error; the collector re-runs bare `current` and parses the path.

@@ -278,6 +278,14 @@ def patch_last_session(
 
     if next_steps:
         block = replace_or_insert_section(block, "### Next Steps", next_steps)
+    elif "### Next Steps\n" not in block:
+        # Preserve the documented default: Trellis <=0.6.7 scaffolded this
+        # section with its own placeholder (left untouched above), but
+        # >=0.6.14 omits it entirely, so recreate the 0.6.7 default text to
+        # keep journal entries version-consistent.
+        block = replace_or_insert_section(
+            block, "### Next Steps", ["- None - task complete"]
+        )
 
     remaining = [p for p in PLACEHOLDERS if p in block]
     if remaining:
