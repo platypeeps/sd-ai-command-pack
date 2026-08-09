@@ -1,0 +1,1 @@
+Throwaway marker for task 08-07-ci-preflight-full-mode-gap Demo E: a full-mode head touching no .trellis path and no documentation file. Never merged.
