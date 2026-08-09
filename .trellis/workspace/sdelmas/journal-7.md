@@ -1809,3 +1809,47 @@ Executed 08-08-trellis-upgrade end to end: official trellis update after a two-p
 
 - Archive 08-08-trellis-upgrade
 - Fleet consumers upgrade Trellis independently via their own trellis update
+
+
+## Session 348: Root-task base_branch gate: rule, remediation, PR #385 merged
+
+**Date**: 2026-08-08
+**Task**: Root-task base_branch gate: rule, remediation, PR #385 merged
+**Branch**: `main`
+
+### Summary
+
+Executed 08-06-task-create-base-branch-seed end-to-end: three-round host+Codex adversarial planning review (17-concern ledger; final CI-coverage concern parked on 08-07-ci-preflight-full-mode-gap with user approval), then the pack-local deterministic gate. validateTrellisRootTaskBaseBranch (exported, pure) requires changed root-task records to target the repository default branch or carry meta.base_branch_exemption; dedicated resolver reads SD_AI_COMMAND_PACK_DEFAULT_BRANCH (new env, CI exports it from the event payload) then origin/HEAD, else skips. Evidence chain: sweep of all 55 active records found exactly the 4 surveyed offenders; live negative demo produced exactly 1 gate failure; post-remediation run 0 failures. All 4 records corrected to main. Description remainder: JS/Python emptiness predicate divergence (U+FEFF/U+0085) pinned in tests both sides, pack-owned create example gained --description, Trellis-managed examples and the parked create-time refusal recorded as upstream handoff register entries 11-12. Copilot reviewed 27/27 files with zero comments; CI 9 checks green; merged as 2ea88133.
+
+### Main Changes
+
+- New preflight rule validateTrellisRootTaskBaseBranch + trellisRootDefaultBranchName resolver, delta-scoped loop with own counter (scripts + templates mirror, byte-identical)
+- tests.yml bookkeeping step exports SD_AI_COMMAND_PACK_DEFAULT_BRANCH from the event payload
+- Corrected 4 root-task base_branch records to main (data fixes, separate commit)
+- Predicate divergence pins, docs audit (controller-recovery.md gains --description), upstream handoff register entries 11-12, gate contract spec in bookkeeping-validator.md
+- manifest 0.64.30, changelog, fleet candidate ledger regenerated
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a39027ab` | feat: gate root-task base_branch against the repository default branch |
+| `bde5e1ee` | chore: correct four root-task base_branch records to main |
+| `fde2dc99` | chore(task): base-branch-seed planning artifacts, register entries, and gate spec |
+| `2ea88133` | Merge pull request #385 from platypeeps/chore/root-task-base-branch-gate |
+
+### Testing
+
+- [OK] make test green (test_review_preflight 71 tests incl. 3 new full-script fixtures)
+- [OK] make release-prep green (full check)
+- [OK] Evidence chain: sweep 4/55, demo 1 failure, post-remediation 0 failures
+- [OK] Copilot 27/27 files no comments; CI 9/9 completed green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

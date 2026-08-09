@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-7.md`
-- **Total Sessions**: 347
+- **Total Sessions**: 348
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1801 | Active |
+| `journal-7.md` | ~1844 | Active |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +35,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 348 | 2026-08-08 | Root-task base_branch gate: rule, remediation, PR #385 merged | `a39027ab`, `bde5e1ee`, `fde2dc99`, `2ea88133` | `main` |
 | 347 | 2026-08-08 | Upgrade vendored Trellis 0.6.7 to 0.6.14 | `c5714bba8b30e73c4a752de2b5f4c191f5042f1f`, `3338e181640f1e42d51542706fca5cf932952874`, `a1c2bc7e8164e014d7147fbde4872238e09ee0ad`, `746bccfa9cbf944f0455cbf8950c290f07d0da95`, `77f11353de0559ed38e1c7e7b3acca908e718c53`, `d10d4e957828a63c2e49206e626f21e2b00ce178`, `3328a1ec8d68760c82c026de6a62c7c7c6bdf390`, `97f99e8f66381056def13592b5b7045307104df8`, `887e159f40028f496192f7b8e21129ac9e792c9f`, `334e63b355f60bb3038f1bf980beb2ff61079c72`, `5659ac8364a546b49463567b34231bc4f2add76a`, `1eaf25aef13c28c1fe211dbf7a7a2763397d9e36` | `main` |
 | 346 | 2026-08-08 | Recover the incremental-base gap into 08-07-ci-preflight-full-mode-gap | `0ad13504` | `chore/preflight-incremental-base-gap-2` |
 | 345 | 2026-08-08 | File six defects surfaced by the 14-PR merge batch | `f3ea4dd6`, `398ae8f0`, `16cbc0a5` | `chore/file-manifest-existence-and-shell-coverage-lane` |
