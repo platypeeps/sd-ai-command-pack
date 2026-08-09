@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.64.32 - 2026-08-09
+
+- `sd-status` now inventories the repository's Git worktrees. The
+  collector enumerates `git worktree list --porcelain -z` (NUL-delimited,
+  newline-safe for externally controlled paths) into an additive
+  `git.worktrees` JSON block — per-row path, branch or detached HEAD,
+  bare/locked/prunable flags, cleanliness, and a `current` marker for the
+  reporting checkout — plus a `git.branchesHeldElsewhere` list of local
+  branches checked out in another worktree. Human output gains a
+  `==> Worktrees` section (explicit `linked worktrees: none` /
+  `worktrees: unavailable` states) and marks held branches with
+  ` [worktree]` in the local-branches line. Cleanliness probes run
+  `git --no-optional-locks status` only after verifying the probed path
+  still belongs to this repository (common-dir identity check), so a
+  stale path reused by an unrelated repository reports `clean: null`
+  instead of the stranger's state. Read-only throughout; the
+  recovery-artifact classifier and its receipt-based ownership semantics
+  are unchanged, and `--json` stays schema version 2 (additive keys).
+
 ## 0.64.31 - 2026-08-08
 
 - Enrich every git-caused `*_unavailable` finding in the bookkeeping
