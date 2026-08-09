@@ -107,18 +107,47 @@ a deployment category. `agent` is registered for install and ships zero rows,
 so the first agent row fails the partition gate until it is classified. That is
 the intended behavior, not a defect — it is one line to resolve.
 
-Two schema flags carry contracts for downstream consumers (the plugin build,
+Three schema flags carry contracts for downstream consumers (the plugin build,
 the machine installer payload, and migration tooling):
 
 - `platforms.<id>.provisional: true` means the machine disposition is not
   verified yet. Consumers **fail closed**: treat the platform as not
   installable machine-scope — effectively repo-native — until verification
   flips the flag. `claude` is non-provisional because the plugin mechanism is
-  itself the verification.
+  itself the verification. Every other machine platform became
+  non-provisional through an **executed** user-scope probe against the
+  installed CLI (scratch `HOME` and `XDG_CONFIG_HOME`, empty working
+  directory, negative control), never through documentation alone.
 - `files[].sharedRuntime: true` means non-Claude surfaces invoke the file at
   runtime even though its primary category is `machine-claude`. The machine
   installer consumes the `machine-other` slice **plus** every `sharedRuntime`
   row; primary categories stay mutually exclusive.
+- `platforms.<id>.retainVendoredFor: [<platform-id>...]` (optional, additive
+  in schema version 1) names the platforms that still read this platform's
+  rows **repo-locally**, even though the platform itself installs
+  machine-scope. Migration tooling must keep those rows vendored in any
+  consumer that serves a listed platform. `shared` carries
+  `["codex", "pi"]`: OpenCode autoloads `~/.agents/skills`, but Codex
+  resolves `.agents` against the project root (its user root is
+  `$CODEX_HOME/skills`, a target family the pack does not ship) and Pi reads
+  the same layer repo-locally.
+
+The detection rule for `retainVendoredFor` is executable, not a judgement
+call: a consumer **still serves** a listed platform iff its
+`docs/fleet/consumers.json` `platforms` array intersects the list. The fleet
+registry is the single authority — no heuristic sniffing of consumer
+repositories decides retention. Because no consumer declares `codex` or `pi`
+today, current conversions delete the `shared` vendored rows; a consumer that
+starts serving either platform changes its registry row first, and that edit
+is what turns retention on. Conversion-time resweeps additionally grep the
+consumer for codex/pi usage markers and block conversion when usage exists
+without a matching registry declaration, so undeclared usage cannot be
+silently deleted.
+
+The field is optional and absent everywhere else, so consumers reading only
+`scope` and `provisional` keep working unchanged. The generator fails closed
+on a retention list that names an unknown platform, sits on a `repo-native`
+platform (where it would be meaningless), is empty, or repeats an entry.
 
 `counts` and `manifestVersion` exist to make the diff reviewable; downstream
 tooling reads `files` and `platforms`.

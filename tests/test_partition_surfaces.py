@@ -120,12 +120,71 @@ class PartitionSurfacesTests(InstallTestCase):
             committed["platforms"]["claude"],
             {"scope": "machine", "provisional": False},
         )
-        for platform in ("shared", "gemini", "opencode", "codex"):
+        # Verified by executed user-scope probes against the installed CLIs.
+        for platform in ("gemini", "opencode"):
             with self.subTest(platform=platform):
                 self.assertEqual(
                     committed["platforms"][platform],
-                    {"scope": "machine", "provisional": True},
+                    {"scope": "machine", "provisional": False},
                 )
+        # Codex resolves `.agents` against the project root and never reads
+        # `~/.agents/skills`, so it is re-dispositioned rather than force-fit.
+        self.assertEqual(
+            committed["platforms"]["codex"],
+            {"scope": "repo-native", "provisional": False},
+        )
+        self.assertEqual(
+            committed["platforms"]["shared"],
+            {
+                "scope": "machine",
+                "provisional": False,
+                "retainVendoredFor": ["codex", "pi"],
+            },
+        )
+
+    def test_retain_vendored_for_is_absent_on_every_other_platform(self) -> None:
+        committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
+
+        carriers = {
+            platform
+            for platform, entry in committed["platforms"].items()
+            if "retainVendoredFor" in entry
+        }
+
+        # Additive optional field: consumers reading only scope/provisional
+        # keep working, so it may appear nowhere else without review.
+        self.assertEqual(carriers, {"shared"})
+
+    def test_retained_platforms_are_repo_native_and_registered(self) -> None:
+        committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
+
+        for platform in committed["platforms"]["shared"]["retainVendoredFor"]:
+            with self.subTest(platform=platform):
+                # A retained platform must actually be the repo-local reader
+                # the carve-out exists for.
+                self.assertIn(platform, registry.PLATFORM_REGISTRY)
+                self.assertEqual(
+                    committed["platforms"][platform]["scope"], "repo-native"
+                )
+
+    def test_no_consumer_currently_serves_a_retained_platform(self) -> None:
+        # The executable detection rule migration tooling applies: a consumer
+        # keeps the vendored rows iff its registry `platforms` array
+        # intersects `retainVendoredFor`. Pinning it here means a consumer
+        # that starts declaring codex or pi surfaces as a deliberate change.
+        committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
+        fleet = json.loads(
+            (PACK_ROOT / "docs/fleet/consumers.json").read_text(encoding="utf-8")
+        )
+        retained = set(committed["platforms"]["shared"]["retainVendoredFor"])
+
+        serving = {
+            consumer["name"]
+            for consumer in fleet["consumers"]
+            if retained & set(consumer.get("platforms", []))
+        }
+
+        self.assertEqual(serving, set())
 
     def test_committed_consumer_config_and_shared_runtime_slices(self) -> None:
         committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
@@ -356,6 +415,79 @@ class PartitionSurfacesTests(InstallTestCase):
                 self.partition.PartitionError, "unknown scope disposition 'plugin'"
             ):
                 self.partition.build_partition(root)
+
+    def test_retention_for_unknown_platform_fails(self) -> None:
+        root = self.build_root([])
+        retentions = {"shared": ("codex", "nonesuch")}
+
+        with mock.patch.object(
+            self.partition, "PLATFORM_RETAIN_VENDORED_FOR", retentions
+        ):
+            with self.assertRaisesRegex(
+                self.partition.PartitionError,
+                "retains rows for unknown platform.*nonesuch",
+            ):
+                self.partition.build_partition(root)
+
+    def test_retention_on_an_unregistered_carrier_fails(self) -> None:
+        root = self.build_root([])
+        retentions = {"nonesuch": ("codex",)}
+
+        with mock.patch.object(
+            self.partition, "PLATFORM_RETAIN_VENDORED_FOR", retentions
+        ):
+            with self.assertRaisesRegex(
+                self.partition.PartitionError,
+                "retainVendoredFor names platform 'nonesuch'",
+            ):
+                self.partition.build_partition(root)
+
+    def test_retention_on_a_repo_native_carrier_fails(self) -> None:
+        root = self.build_root([])
+        retentions = {"github": ("codex",)}
+
+        with mock.patch.object(
+            self.partition, "PLATFORM_RETAIN_VENDORED_FOR", retentions
+        ):
+            with self.assertRaisesRegex(
+                self.partition.PartitionError,
+                "already stay.*vendored",
+            ):
+                self.partition.build_partition(root)
+
+    def test_empty_or_duplicated_retention_list_fails(self) -> None:
+        root = self.build_root([])
+
+        with mock.patch.object(
+            self.partition, "PLATFORM_RETAIN_VENDORED_FOR", {"shared": ()}
+        ):
+            with self.assertRaisesRegex(
+                self.partition.PartitionError, "empty retainVendoredFor list"
+            ):
+                self.partition.build_partition(root)
+
+        with mock.patch.object(
+            self.partition,
+            "PLATFORM_RETAIN_VENDORED_FOR",
+            {"shared": ("codex", "codex")},
+        ):
+            with self.assertRaisesRegex(
+                self.partition.PartitionError, "repeats a platform"
+            ):
+                self.partition.build_partition(root)
+
+    def test_retention_field_round_trips_and_stays_sorted(self) -> None:
+        root = self.build_root([])
+
+        with mock.patch.object(
+            self.partition, "PLATFORM_RETAIN_VENDORED_FOR", {"shared": ("pi", "codex")}
+        ):
+            partition = self.partition.build_partition(root)
+
+        self.assertEqual(
+            partition["platforms"]["shared"]["retainVendoredFor"], ["codex", "pi"]
+        )
+        self.assertNotIn("retainVendoredFor", partition["platforms"]["claude"])
 
     def test_stale_target_override_fails(self) -> None:
         root = self.build_root([])

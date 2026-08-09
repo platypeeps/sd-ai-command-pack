@@ -15,8 +15,8 @@
       "provisional": false
     },
     "codex": {
-      "scope": "machine",
-      "provisional": true
+      "scope": "repo-native",
+      "provisional": false
     },
     "cursor": {
       "scope": "repo-native",
@@ -32,7 +32,7 @@
     },
     "gemini": {
       "scope": "machine",
-      "provisional": true
+      "provisional": false
     },
     "github": {
       "scope": "repo-native",
@@ -48,7 +48,7 @@
     },
     "opencode": {
       "scope": "machine",
-      "provisional": true
+      "provisional": false
     },
     "pi": {
       "scope": "repo-native",
@@ -64,7 +64,11 @@
     },
     "shared": {
       "scope": "machine",
-      "provisional": true
+      "provisional": false,
+      "retainVendoredFor": [
+        "codex",
+        "pi"
+      ]
     },
     "trae": {
       "scope": "repo-native",
