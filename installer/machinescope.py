@@ -1176,7 +1176,6 @@ def remove(
 
     removed: list[Path] = []
     restored: list[Path] = []
-    skipped: list[tuple[Path, str]] = list(problems)
     for removal in planned:
         root = roots[removal.entry.family]
         deletable = removal.removable or (
@@ -1198,11 +1197,15 @@ def remove(
     if not dry_run:
         _unlink_if_present(state_dir / RECEIPT_FILE)
         _unlink_if_present(state_dir / INTENT_FILE)
+    # --force turns some of the refusals above into deletions; a path it did
+    # delete is reported as removed and nothing else, or the same run would
+    # claim to have both removed and skipped it.
+    deleted = set(removed)
     return RemovalOutcome(
         had_receipt=True,
         removed=tuple(removed),
         restored=tuple(restored),
-        skipped=tuple(skipped),
+        skipped=tuple((path, detail) for path, detail in problems if path not in deleted),
         dry_run=dry_run,
     )
 
@@ -1421,6 +1424,14 @@ def _print_install(outcome: InstallOutcome, *, as_json: bool) -> None:
     removals = [removal for removal in plan.removals if removal.removable]
     dropped = [removal for removal in removals if not removal.restores_backup]
     restored = [removal for removal in removals if removal.restores_backup]
+    # A row that left the payload but no longer matches its receipt entry stays
+    # on disk, and the new receipt is about to forget it, so this line is the
+    # only notice the operator ever gets that the file is now theirs to manage.
+    kept = [
+        removal
+        for removal in plan.removals
+        if not removal.removable and removal.detail != "already gone"
+    ]
     if as_json:
         report = {
             "schemaVersion": STATUS_SCHEMA_VERSION,
@@ -1432,6 +1443,10 @@ def _print_install(outcome: InstallOutcome, *, as_json: bool) -> None:
             "counts": dict(sorted(counts.items())),
             "removed": [str(removal.destination) for removal in dropped],
             "restored": [str(removal.destination) for removal in restored],
+            "kept": [
+                {"path": str(removal.destination), "detail": removal.detail}
+                for removal in kept
+            ],
             "notes": list(plan.notes),
             "advisories": list(outcome.advisories),
         }
@@ -1448,6 +1463,8 @@ def _print_install(outcome: InstallOutcome, *, as_json: bool) -> None:
     for removal in restored:
         verb = "would restore" if outcome.dry_run else "restored"
         print(f"{verb} {removal.destination} from its recorded backup")
+    for removal in kept:
+        print(f"kept {removal.destination}: {removal.detail}; no longer tracked")
     if not outcome.dry_run:
         print(f"receipt: pack {plan.payload.pack_version} payload {plan.payload.digest}")
 

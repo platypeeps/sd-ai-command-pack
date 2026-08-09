@@ -744,10 +744,14 @@ class RemoveTests(MachineInstallerTestCase):
         modified = self.installed(".agents/skills/sd-check/SKILL.md")
         modified.write_text("hand edited\n", encoding="utf-8")
 
-        self.remove(force=True)
+        outcome = self.remove(force=True)
 
         self.assertFalse(modified.exists())
         self.assertFalse(self.receipt_file.exists())
+        # A path force deleted it is reported once, as removed; calling it
+        # skipped as well would describe two different outcomes for one file.
+        self.assertIn(modified, outcome.removed)
+        self.assertNotIn(modified, [path for path, _ in outcome.skipped])
 
     def test_remove_dry_run_changes_nothing(self) -> None:
         self.install()
@@ -1779,6 +1783,47 @@ class CommandOutputTests(MachineInstallerTestCase):
 
         report = json.loads(output)
         self.assertEqual(report["restored"], [str(collision)])
+        self.assertEqual(report["removed"], [])
+
+    def drop_a_locally_modified_row(self) -> Path:
+        """Install, hand-edit a file, then drop its row from the payload.
+
+        The engine leaves such a file alone, and the receipt it is about to
+        write no longer mentions it, so the run has to say so.
+        """
+
+        self.run_cli("install", "--payload", str(self.payload_root))
+        modified = self.installed(".gemini/commands/sd/help.toml")
+        modified.write_text("hand edited\n", encoding="utf-8")
+        return modified
+
+    def test_install_reports_a_dropped_row_it_could_not_remove(self) -> None:
+        modified = self.drop_a_locally_modified_row()
+        trimmed = self.write_payload(
+            name="payload-v2",
+            rows=tuple(row for row in PAYLOAD_ROWS if not row[0].startswith(".gemini/")),
+        )
+
+        code, output = self.run_cli("install", "--payload", str(trimmed))
+
+        self.assertEqual(code, EXIT_OK)
+        self.assertIn(f"kept {modified}: modified since install", output)
+        self.assertEqual(modified.read_text(encoding="utf-8"), "hand edited\n")
+
+    def test_install_json_lists_what_it_kept(self) -> None:
+        modified = self.drop_a_locally_modified_row()
+        trimmed = self.write_payload(
+            name="payload-v2",
+            rows=tuple(row for row in PAYLOAD_ROWS if not row[0].startswith(".gemini/")),
+        )
+
+        _, output = self.run_cli("install", "--payload", str(trimmed), "--json")
+
+        report = json.loads(output)
+        self.assertEqual(
+            report["kept"],
+            [{"path": str(modified), "detail": "modified since install"}],
+        )
         self.assertEqual(report["removed"], [])
 
     def test_install_uses_the_bundled_payload_when_none_is_given(self) -> None:
