@@ -251,3 +251,72 @@ Policy conflict resolved at consolidation: the source's cached-pass-reuse AC
 ("a passing check on an unchanged head is still reused") is superseded by this
 task's recompute contract — recompute wins, correctness over reuse. Do not
 resurrect the reuse AC.
+
+## Second consumer, and a cost this PRD does not yet name (2026-08-09)
+
+`platypeeps/sd-github-review` hit this independently, five times, while still on
+`0.64.3`. It is a second consumer held at that version, distinct from the
+`se-ai-command-pack` fork described above; it carries no local fork, because its
+own `pack.install-audit` blocks one — `LOCAL_ALLOWED_PACK_FILES` covers only
+`.sd-ai-command-pack/*.json`, so the reference fix has no sanctioned home there.
+That closes off the workaround the other consumer used, which is why the defect
+is being pushed back here rather than patched locally again.
+
+### The replay consumes the round budget, so it manufactures an operator gate
+
+This is the part the PRD's "permanent block, not a delay" section understates.
+The `remoteIntegration` roundLimit refusal fires in `run` **before** the state
+file is loaded, so a spent attempt is spent whether or not it ever reached the
+cache. Attempts that exist only to prove the replay still count.
+
+Observed on that consumer's PR #71 at head `d9e31e9`, subject
+`pack.review-scope`:
+
+| Attempt | Result |
+| --- | --- |
+| 3 | `failed`, `durationMs: 733` |
+| 4 | `failed`, `durationMs: 733` |
+| 5 | `failed`, `durationMs: 733` |
+| 6 | `status: invalid`, `phase: setup` — "attempt exceeds remoteIntegration roundLimit; record the structured review.round-extension decision before continuing" |
+| 3 (fresh `--attempt-id`) | `ready`, `durationMs: 858` |
+
+Byte-identical `durationMs` across 3/4/5 is the replay evidence; the differing
+`858` on the escape run is the live re-execution. Attempts 4 and 5 ran no
+provider and revealed nothing.
+
+So the failure mode compounds: a stale cache that merely delayed a run now
+exhausts the round budget and demands a human `review.round-extension` decision
+for a check that was already remediated. Any acceptance criterion for this task
+should assert that escaping a replay costs no numbered attempt — recomputing at
+the **same** attempt number must reach the live result.
+
+### The remediated subject can live entirely outside the working tree
+
+The PRD's `pack.review-scope` analysis is confirmed and should be strengthened:
+the remediated artifact was the GitHub pull-request body, regenerated with this
+pack's own `sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body` and
+applied via `gh pr edit --body-file`. No tracked file changed, so the head stayed
+`d9e31e9` — the subject is further outside the content digest than a gitignored
+path, because it does not live in the working tree at all.
+
+Four earlier recurrences on that consumer (PRs #41, #68, #70, and one between)
+were `knowledge.obsidian-kb` against an **external symlink**. Per `7865666c`
+those would now downgrade to `skipped` rather than block, which is consistent
+with this PRD's read; they are recorded as replay evidence, not as blocking
+cases.
+
+### A rejected alternative, from a consumer that tried it
+
+That consumer designed and validated the smaller change — reuse a cached check
+only when it is a well-formed report whose `status` is `passed`, and hold a
+failing report in memory rather than on disk — with a hermetic five-scenario
+self-test. It works, and mutation testing showed the pass-only predicate is the
+load-bearing half while the non-persistence guard is only state hygiene.
+
+It is recorded here as a **rejected** alternative, not a proposal: it preserves
+cached-pass reuse, which this PRD's consolidation explicitly supersedes ("Do not
+resurrect the reuse AC"), and it therefore leaves the stale-**pass** direction
+unfixed. The recompute contract remains the requirement. The consumer's finding
+is still useful as design input: whichever remedy ships, the failing report must
+stay in the emitted result, because the coordinator's `check` diagnostics are how
+all five recurrences were identified in the first place.
