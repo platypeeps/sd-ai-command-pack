@@ -15,13 +15,7 @@
 
 ### Summary
 
-Shipped 08-07-status-worktree-invisibility (PR #393, v0.64.32): read-only worktree inventory with held-branch marking
-
-### Main Changes
-
-### Summary
-
-Planned, implemented, and finished 08-07-status-worktree-invisibility (PR #393, merged 59912b94, v0.64.32). sd-status previously had zero worktree awareness: a local branch checked out in a linked worktree looked identical to a free one, and leaked worktrees never surfaced. The collector now enumerates `git worktree list --porcelain -z` (NUL-delimited; worktree paths are externally controlled and may contain newlines) through a pure raw-value parser (parse_worktree_porcelain) into an additive git.worktrees JSON block plus a derived git.branchesHeldElsewhere set, with a `==> Worktrees` human section (porcelain row order, `(reporting)` marker, explicit none/unavailable states) and a ` [worktree]` suffix on held branches. Cleanliness probes run `git --no-optional-locks status --porcelain` only after a git-common-dir identity check, so a stale path reused by an unrelated repository reports clean: null, never the stranger's state, and no probe writes a foreign index. Schema stays version 2 (additive-key precedent 7ba4d0c9). Planning went through the full adversarial contract: 3 host findings plus two Codex rounds (8 concerns round 1, 5 round 2 - `-z` parsing, no-optional-locks, refusal-set circularity/forced-duplicate scoping, current-row detection from linked worktrees, stale-path identity, receipt-modification coverage, fail-before vs regression-invariant classification), all remediated before task.py start. Copilot round 1 raised one valid finding (a worktree HEAD symref'd outside refs/heads/ would leak a non-branch ref into branchesHeldElsewhere) - fixed by intersecting with localBranches plus a symref regression test; round 2 clean. Backend spec's stale "schema version 1" claim corrected to 2.
+Planned, implemented, and finished 08-07-status-worktree-invisibility (PR #393, merged 59912b94, v0.64.32; feature commit ad6b1279 carried the collector, tests, and task artifacts and is cited in prose because the journal-recovery window only accepts non-task-path commits). sd-status previously had zero worktree awareness: a local branch checked out in a linked worktree looked identical to a free one, and leaked worktrees never surfaced. The collector now enumerates `git worktree list --porcelain -z` (NUL-delimited; worktree paths are externally controlled and may contain newlines) through a pure raw-value parser (parse_worktree_porcelain) into an additive git.worktrees JSON block plus a derived git.branchesHeldElsewhere set, with a `==> Worktrees` human section (porcelain row order, `(reporting)` marker, explicit none/unavailable states) and a ` [worktree]` suffix on held branches. Cleanliness probes run `git --no-optional-locks status --porcelain` only after a git-common-dir identity check, so a stale path reused by an unrelated repository reports clean: null, never the stranger's state, and no probe writes a foreign index. Schema stays version 2 (additive-key precedent 7ba4d0c9). Planning went through the full adversarial contract: 3 host findings plus two Codex rounds (8 concerns round 1, 5 round 2 - `-z` parsing, no-optional-locks, refusal-set circularity/forced-duplicate scoping, current-row detection from linked worktrees, stale-path identity, receipt-modification coverage, fail-before vs regression-invariant classification), all remediated before task.py start. Copilot round 1 raised one valid finding (a worktree HEAD symref'd outside refs/heads/ would leak a non-branch ref into branchesHeldElsewhere) - fixed by intersecting with localBranches plus a symref regression test; round 2 clean. Backend spec's stale "schema version 1" claim corrected to 2.
 
 ### Main Changes
 
@@ -35,10 +29,8 @@ Planned, implemented, and finished 08-07-status-worktree-invisibility (PR #393, 
 
 | Hash | Message |
 |------|---------|
-| `ad6b1279` | feat(status): inventory Git worktrees and mark branches held elsewhere |
 | `398c8cb5` | chore(release): prepare 0.64.32 |
 | `611308bd` | fix(status): scope branchesHeldElsewhere to local branch names |
-| `59912b94` | Merge pull request #393 |
 
 ### Testing
 
@@ -54,17 +46,3 @@ Planned, implemented, and finished 08-07-status-worktree-invisibility (PR #393, 
 ### Next Steps
 
 - Return to 08-07-status-housekeeping-anomaly-disagreement (T-1): its worktree-held axis is now real; first correct its PRD's stale claim that this dependency was already "(merged)" before this task existed
-
-
-### Git Commits
-
-| Hash | Message |
-|------|---------|
-| `ad6b1279` | (see git log) |
-| `398c8cb5` | (see git log) |
-| `611308bd` | (see git log) |
-| `59912b94` | (see git log) |
-
-### Status
-
-[OK] **Completed**

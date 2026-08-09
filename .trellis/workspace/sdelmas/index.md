@@ -36,7 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 351 | 2026-08-09 | sd-status worktree inventory shipped: held branches and leaked worktrees visible | `ad6b1279`, `398c8cb5`, `611308bd`, `59912b94` | `main` |
+| 351 | 2026-08-09 | sd-status worktree inventory shipped: held branches and leaked worktrees visible | `398c8cb5`, `611308bd` | `main` |
 | 350 | 2026-08-09 | kcov-lane flake made diagnosable: git failures named in validator receipts | `326db2b1`, `3d130dd9`, `fcf422ed`, `1c914e1d` | `main` |
 | 349 | 2026-08-09 | CI event-head validation: both gaps closed, demonstrated, task finished | `41a6c06d`, `1c1aa3b7`, `9252d01d` | `main` |
 | 348 | 2026-08-08 | Root-task base_branch gate: rule, remediation, PR #385 merged | `a39027ab`, `bde5e1ee`, `fde2dc99`, `2ea88133` | `main` |
