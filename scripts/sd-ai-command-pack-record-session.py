@@ -220,12 +220,26 @@ def replace_section(block: str, heading: str, lines: list[str]) -> str | None:
     return block[:body_at] + "\n" + "\n".join(lines) + "\n" + block[end:]
 
 
-def replace_or_insert_section(block: str, heading: str, lines: list[str]) -> str:
-    """Replace the section body, or append the whole section when absent."""
+def replace_or_insert_section(
+    block: str, heading: str, lines: list[str], before: str | None = None
+) -> str:
+    """Replace the section body, or insert the whole section when absent.
+
+    When inserting, place the section immediately before the `before`
+    heading if that heading exists (to preserve the canonical Trellis
+    section order); otherwise append at the end of the block.
+    """
     patched = replace_section(block, heading, lines)
     if patched is not None:
         return patched
-    return block.rstrip("\n") + f"\n\n{heading}\n\n" + "\n".join(lines) + "\n"
+    section = f"\n\n{heading}\n\n" + "\n".join(lines)
+    if before is not None:
+        anchor = block.find(f"{before}\n")
+        if anchor != -1:
+            insert_at = block.rfind("\n\n", 0, anchor)
+            if insert_at != -1:
+                return block[:insert_at] + section + block[insert_at:]
+    return block.rstrip("\n") + section + "\n"
 
 
 def patch_last_session(
@@ -272,9 +286,11 @@ def patch_last_session(
 
     # Trellis >=0.6.14 omits sections that were scaffolded empty by <=0.6.7,
     # so insert the section when the heading is absent instead of failing.
-    # Testing is patched before Next Steps so an insertion of both keeps the
-    # upstream section order (Testing above Next Steps).
-    block = replace_or_insert_section(block, "### Testing", tests)
+    # Canonical order (both versions): Testing before Status, Next Steps
+    # after Status — anchor the Testing insert accordingly.
+    block = replace_or_insert_section(
+        block, "### Testing", tests, before="### Status"
+    )
 
     if next_steps:
         block = replace_or_insert_section(block, "### Next Steps", next_steps)
