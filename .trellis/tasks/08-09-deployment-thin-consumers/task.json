@@ -3,7 +3,7 @@
   "name": "deployment-thin-consumers",
   "title": "Reshape pack deployment: thin consumers, centrally resolved surfaces",
   "description": "Parent: move from vendored per-consumer installs (776-file payload, 8 consumers, sync PR per release) to thin consumers - version pin + repo config only, no pack code in consumer CI, agent surfaces resolved once per machine (Claude Code plugin + machine installer), fleet status as pin inventory",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
