@@ -23,7 +23,8 @@ like.
 
 Not supported / notable limits:
 
-- `CLAUDE.md` at plugin root is **not** loaded as context. Instructions
+- A CLAUDE markdown instructions file at the plugin root is **not**
+  loaded as context. Instructions
   must ship as skills. Pack `.claude/rules/*.md` content has no direct
   plugin equivalent; a skill or hook-injected context replaces it.
 - Plugin agents may not set `hooks`, `mcpServers`, or `permissionMode`
@@ -91,20 +92,28 @@ Update signal resolution order: `plugin.json` `version` → marketplace
 entry `version` → source commit SHA → archive sha256 → `unknown`.
 
 - **Explicit version** (`plugin.json` version, semver): users update
-  only when the field bumps. Pack already stamps `VERSION` per release —
-  release-prep can stamp `plugin.json` too, making plugin updates track
-  pack releases exactly.
+  only when the field bumps. The pack's release authority is
+  `manifest.json` `version` (read by prepare-release) — release-prep
+  can stamp `plugin.json` from it, making plugin updates track pack
+  releases exactly.
 - One installed version per machine per scope (cache keyed by version).
   There is **no per-project version selection** of a shared plugin —
   which matches requirement 2 (one update action propagates machine-
-  wide) but means the consumer-repo "pin" governs only CI-fetched
-  pieces, not agent surfaces. Fleet skew across machines remains
+  wide). The consumer-repo "pin" is therefore an expectation record
+  for fleet reporting, not a control over what executes (final
+  semantics in the parent PRD; no CI-fetched pieces exist per the
+  consumer-CI research). Fleet skew across machines remains
   possible and must be surfaced by `sd-status` (compare plugin
   installed version vs latest release).
 - `claude plugin update <name>` / auto-update apply bumps;
   `claude plugin details <name>` shows component inventory + token
   cost; `claude plugin list --json` gives machine-readable installed
-  state (version, marketplace, enabled) — good `sd-status` input.
+  state — good `sd-status` input. Verified live (2026-08-09, local
+  CLI): each entry carries `id`, `version`, `scope`, `enabled`,
+  `installPath` (absolute cache path), `installedAt`, `lastUpdated`.
+  `installPath` is not in the published docs, so consumers of it
+  should keep a fallback that derives the root from the cache layout
+  (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`).
 
 ## Dev loop + validation
 

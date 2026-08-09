@@ -1,8 +1,9 @@
 # Research: what consumer CI actually does with the vendored pack
 
 Date: 2026-08-09. Sources: local checkouts of two of the eight fleet
-consumers (`rwbp-coordinator`, `rwbp-website`), both with
-`.github/workflows/ci.yml` referencing the pack.
+consumers (`rwbp-coordinator`, `rwbp-website`), both with a CI
+workflow (their own ci.yml under the GitHub workflows directory)
+referencing the pack.
 
 ## Finding: consumer CI syntax-checks the payload; it executes nothing
 
@@ -71,12 +72,20 @@ automation itself, which the thin model deletes rather than migrates.
 
 The consumer bootstrap requirement collapses from "a mechanism every
 consumer needs" to "one script, one consumer": `pr-body-scope.py` in
-`anomaly-metric-creator`. Design options, smallest first: (a) vendor
-just that one script there as repo-owned config, (b) pinned-fetch of
-that single file with digest check, (c) move PR-body scope validation
-out of consumer CI entirely. Every other consumer's footprint under
-the thin model is the version pin plus repo config; their CI pack
-steps (lint of vendored code) are deleted with the payload.
+`anomaly-metric-creator` — and closer inspection (2026-08-09) shows
+even that execution is a no-op. The script only enforces when a PR
+body is supplied via `--body-file` or the
+`SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` /
+`SD_AI_COMMAND_PACK_SCOPE_PR_BODY` env vars; the `ci.yml:293` call
+passes none of them, so it prints detected categories and exits 0
+unconditionally. It has never blocked a PR there.
+
+Decision (user, 2026-08-09): drop the step during migration rather
+than preserve it. The "consumer CI executes pack code" category is
+therefore empty fleet-wide: no pinned-fetch bootstrap mechanism is
+needed at all. Every consumer's footprint under the thin model is the
+version pin plus repo config; all consumer CI pack steps (lint of
+vendored code plus this advisory call) are deleted with the payload.
 
 ## Residual verification (cheap, before migration child ships)
 
