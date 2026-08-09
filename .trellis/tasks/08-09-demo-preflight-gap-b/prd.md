@@ -5,3 +5,7 @@ Throwaway demonstration record for task
 reference below resolves.
 
 Context lives in [the workflow](.github/workflows/tests.yml).
+
+## Push 2 addition
+
+The defect: [design detail](docs/demo-preflight-gap-b-does-not-exist.md).
