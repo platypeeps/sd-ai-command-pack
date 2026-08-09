@@ -95,12 +95,17 @@ Default-branch resolution (`trellisRootDefaultBranchName()`):
 3. Neither → the rule SKIPS for the run (unverifiable is not failable;
    remoteless local checkouts are supported).
 
-The CI bookkeeping step exports `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` from
+The CI `Validate event head` step exports
+`SD_AI_COMMAND_PACK_DEFAULT_BRANCH` from
 `github.event.repository.default_branch` because the pinned-SHA checkout
-never establishes `origin/HEAD`. CI coverage remains bounded by the known
-full-mode preflight gap (task `08-07-ci-preflight-full-mode-gap`); the
-primary enforcement point is the local pre-publication gate in
-`sd-create-pr`.
+never establishes `origin/HEAD` (the bookkeeping final-bundle step exports
+it too, same rationale). The event-head step runs the preflight on every
+head in every mode, against the pull request's own base on `pull_request`
+events and `github.event.before` on `push` events, with a fail-closed
+guard on an unverifiable base — closing the former full-mode preflight
+gap (task `08-07-ci-preflight-full-mode-gap`). The local pre-publication
+gate in `sd-create-pr` remains the first enforcement point; CI is now the
+backstop in both modes.
 
 The emptiness predicate divergence pinned alongside this rule: JS
 `String.trim()` strips U+FEFF and keeps U+0085; Python `str.strip()` does
