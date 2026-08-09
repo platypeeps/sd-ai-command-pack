@@ -46,3 +46,28 @@ Planned, implemented, and finished 08-07-status-worktree-invisibility (PR #393, 
 ### Next Steps
 
 - Return to 08-07-status-housekeeping-anomaly-disagreement (T-1): its worktree-held axis is now real; first correct its PRD's stale claim that this dependency was already "(merged)" before this task existed
+
+
+## Session 352: Ship thin-surface-partition child: four-category partition artifact
+
+**Date**: 2026-08-09
+**Task**: Ship thin-surface-partition child: four-category partition artifact
+**Branch**: `main`
+
+### Summary
+
+Converged thin-surface-partition planning through round-3 adversarial review, implemented partition-surfaces.py with fail-closed classification of all 776 manifest rows into four categories (593/94/83/6), committed docs/fleet/surface-partition.json with drift gate and 26 tests, merged as PR #395. Also pinned trellis-implement agent to Opus with CI guard test (PR #394).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a37c7085` | (see git log) |
+| `0fc5a4a1` | (see git log) |
+| `545322d0` | (see git log) |
+| `c2f9cf69` | (see git log) |
+| `cef5903f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
