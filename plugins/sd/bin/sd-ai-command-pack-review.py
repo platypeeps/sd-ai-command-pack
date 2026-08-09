@@ -765,6 +765,37 @@ def _run_local(
     return report
 
 
+def _local_outstanding(local: Mapping[str, Any]) -> int | None:
+    """Count the local receipt findings the caller has left outstanding.
+
+    Provider evidence is immutable, so a receipt whose findings are all
+    rebutted keeps ``outcome == "findings"``; the caller-owned disposition
+    block is the only place a rebuttal lands. An unreadable receipt returns
+    ``None`` so callers gate as if findings were still outstanding.
+    """
+
+    receipt = local.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return None
+    findings = receipt.get("findings")
+    # A stage that reports findings while listing none has produced evidence
+    # nobody can inspect or rebut. Its own remote gate blocks that shape, so a
+    # zero count over an empty list must not open routing here either.
+    if not isinstance(findings, list) or not findings:
+        return None
+    disposition = receipt.get("disposition")
+    if not isinstance(disposition, Mapping):
+        return None
+    outstanding = disposition.get("outstanding")
+    if (
+        not isinstance(outstanding, int)
+        or isinstance(outstanding, bool)
+        or outstanding < 0
+    ):
+        return None
+    return outstanding
+
+
 def _capability(
     repo: Path,
     *,
@@ -1839,7 +1870,11 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             limitations=("deterministic-check-not-passed",),
         )
 
-    if state.get("local") is None:
+    # A rerun that supplies dispositions must reach the local stage even when a
+    # report is already cached: the stage revalidates its durable receipt,
+    # applies the rebuttals and persists them without re-running any provider.
+    if state.get("local") is None or args.local_disposition:
+        refreshed = state.get("local") is not None
         local = _run_local(
             repo,
             scope=scope,
@@ -1849,7 +1884,14 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             args=args,
             local_policy=local_policy,
         )
-        _advance(state_path, state, "local", local=local)
+        # Refreshing a cached report must not rewind the phase: the remote
+        # channel reads it for dispatch idempotency and reconciliation.
+        _advance(
+            state_path,
+            state,
+            str(state.get("phase", "resolve")) if refreshed else "local",
+            local=local,
+        )
     local = state["local"]
     if not isinstance(local, dict):
         raise ReviewError("local review state is invalid")
@@ -1857,11 +1899,17 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     # ``status`` alias for the dual-emit window (A-077).
     local_status = local.get("outcome", local.get("status"))
     if local_status == "findings":
-        return 1, _report(
-            state=state,
-            status="findings",
-            diagnostic="local review findings require disposition before remote routing",
-        )
+        if _local_outstanding(local) != 0:
+            return 1, _report(
+                state=state,
+                status="findings",
+                diagnostic="local review findings require disposition before remote routing",
+            )
+        # Every provider finding carries a caller disposition. The receipt keeps
+        # its ``findings`` outcome because provider evidence is never rewritten,
+        # so routing reads the disposition count and the stage continues exactly
+        # as a clean one does.
+        local_status = "clean"
     if local_status == "blocked":
         local_diagnostic = local.get("diagnostic")
         if not isinstance(local_diagnostic, str) or not local_diagnostic.strip():
