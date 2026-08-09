@@ -8,15 +8,17 @@ installer").
 
 `install.py --machine` writing user-level surface equivalents for
 the `machine-other` partition slice plus rows flagged
-`sharedRuntime: true` in the partition artifact (the
-surface-partition JSON under fleet docs, created by
-`thin-surface-partition` — schema in that child's design) — shared
-scripts that non-Claude surfaces invoke at runtime; the rest of the
-`machine-claude` slice belongs exclusively to the plugin
-(`thin-plugin-packaging`). Platforms with `provisional: true` are
-not installable until this child's verification flips them
-(fail-closed schema semantics). Plus `sd-pack-update` (shipped in
-plugin `bin/`) as the single machine update action.
+`sharedRuntime: true` in the partition artifact
+`docs/fleet/surface-partition.json` (schema version 1; contract
+documented in `.trellis/spec/backend/manifest-and-filesystem.md`,
+"Surface Partition Artifact") — shared scripts that non-Claude
+surfaces invoke at runtime; the rest of the `machine-claude` slice
+belongs exclusively to the plugin (`thin-plugin-packaging`).
+Platforms whose `platforms.<id>` entry carries `provisional: true`
+are not installable machine-scope until this child's verification
+flips the flag; consumers of the artifact fail closed and treat them
+as repo-native until then. Plus `sd-pack-update` (shipped in plugin
+`bin/`) as the single machine update action.
 
 ## Requirements
 
