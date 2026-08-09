@@ -186,6 +186,30 @@ Reference files:
 - `plugins/sd/.claude-plugin/plugin.json`
 - `tests/test_generate_plugin.py`
 
+### Script Sibling Resolution
+
+Shipped pack scripts resolve sibling pack scripts from their own file
+location, never from repo-root `scripts/` literals: `SCRIPT_DIR` (from
+`BASH_SOURCE`) in shell, `Path(__file__).resolve().parent` in Python, and
+`import.meta.url` in Node. The toolchain's `run`/`run-python` handlers
+route pack-named operands (basename matching `sd-ai-command-pack-*` or
+`sd_ai_command_pack_*`, bare or `scripts/`-prefixed) through
+`resolve_pack_script_operand`, which probes `SCRIPT_DIR` only — no CWD
+probe, so a same-named file in the working directory can never shadow the
+installed script — and fails with exit 127 naming the missing resolved
+path. Non-pack operands pass through unchanged. This keeps one script set
+valid in both layouts: fat installs (`SCRIPT_DIR` equals the consumer's
+`scripts/`) and the plugin's `bin/` (resolved via PATH).
+
+`tests/test_script_sibling_resolution.py` enforces the boundary: no
+shipped script may build a sibling path from a repo-root `scripts/`
+literal outside its per-file justified `ALLOWED_LITERALS` allowlist
+(semantic data only — layout globs, changed-path classifiers, doctor
+repository probes, static-analysis annotations — never invocation). The
+generator's `BIN_LITERAL_ALLOWLIST` must stay set-for-set identical to
+that allowlist; `tests/test_generate_plugin.py` pins the parity and fails
+on stale entries in either direction.
+
 ## Release Payload Gate
 
 Any pull request that changes shipped payload must carry the release ledger
