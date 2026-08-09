@@ -650,44 +650,98 @@ class BookkeepingWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("needs", jobs["main-push-scope"])
         self.assertNotIn("paths-ignore", self.workflow["on"]["push"])
 
+    def test_event_head_validation_runs_in_every_mode(self) -> None:
+        # The content gate is unconditional: no `if` key means no mode gate,
+        # so full-mode heads (every PR's opened head) are validated too.
+        event_head = self.scope_step("validate-event-head")
+        self.assertNotIn("if", event_head)
+        self.assertIn("git diff --check", event_head["run"])
+        self.assertIn(
+            'SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF="$EVENT_BASE_SHA"',
+            event_head["run"],
+        )
+        self.assertIn("sd-ai-command-pack-review-preflight.mjs", event_head["run"])
+        # The base is the PR's own base on pull_request events (merge-base
+        # diff via the preflight's three-dot construction), the pushed
+        # range's `before` on push events.
+        self.assertEqual(
+            event_head["env"]["EVENT_BASE_SHA"],
+            "${{ github.event.pull_request.base.sha || github.event.before }}",
+        )
+        # Fail-closed base guard: an unverifiable base or a non-ancestor
+        # push base must fail the step, never fall back to another window.
+        self.assertIn('git rev-parse --verify --quiet "${EVENT_BASE_SHA}^{commit}"', event_head["run"])
+        self.assertIn('git merge-base --is-ancestor "$EVENT_BASE_SHA" "$AFTER_SHA"', event_head["run"])
+        self.assertIn("failing closed", event_head["run"].lower())
+        self.assertNotIn("BEFORE_SHA", event_head.get("env", {}))
+
     def test_bookkeeping_lane_reuses_canonical_validators(self) -> None:
         validation = self.scope_step("bookkeeping-validation")
-        self.assertIn("git diff --check", validation["run"])
-        self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF", validation["run"])
-        self.assertIn("sd-ai-command-pack-review-preflight.mjs", validation["run"])
+        self.assertEqual(
+            validation["if"], "steps.classify.outputs.mode == 'bookkeeping'"
+        )
         self.assertIn("final-bundle --mode", validation["run"])
         self.assertIn('reasonCodes == [($mode + "_bundle_valid")]', validation["run"])
+        # The event-head content gate moved out of this step: the bare
+        # preflight invocation and the whitespace check must not reappear
+        # here, or the invocation would exist in two drifting copies.
+        self.assertNotIn("git diff --check", validation["run"])
+        self.assertNotIn(
+            "SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF", validation["run"]
+        )
 
-    def test_bookkeeping_lane_measures_review_preflight_coverage(self) -> None:
+    def test_review_preflight_coverage_measured_in_every_mode(self) -> None:
+        # Coverage plumbing follows the invocation: install and report are
+        # unconditional (modulo coverage_expected) now that the event-head
+        # validation instruments the preflight on every run.
         install = self.scope_step("install-review-preflight-coverage-tooling")
-        self.assertEqual(install["if"], "steps.classify.outputs.mode == 'bookkeeping'")
+        self.assertNotIn("if", install)
         self.assertIn("npm ci", install["run"])
+
+        event_head = self.scope_step("validate-event-head")
+        self.assertIn("--clean=false", event_head["run"])
+        self.assertIn("c8_run=(npm exec --no -- c8", event_head["run"])
+        self.assertEqual(
+            event_head["run"].count('"${c8_run[@]}"'),
+            1,
+            "the event-head preflight invocation must reuse the shared c8_run wrapper",
+        )
+        # coverage_expected must be emitted before the instrumented
+        # invocation so the reporter only fires when instrumentation was
+        # actually attempted.
+        emit_index = event_head["run"].index("coverage_expected=true")
+        invoke_index = event_head["run"].index('"${c8_run[@]}"')
+        self.assertLess(emit_index, invoke_index)
 
         validation = self.scope_step("bookkeeping-validation")
         self.assertIn("--clean=false", validation["run"])
         self.assertIn("c8_run=(npm exec --no -- c8", validation["run"])
         self.assertEqual(
             validation["run"].count('"${c8_run[@]}"'),
-            2,
-            "both review-preflight.mjs invocations must reuse the shared c8_run wrapper",
+            1,
+            "the final-bundle invocation must reuse the shared c8_run wrapper",
         )
 
         report = self.scope_step("report-review-preflight-coverage")
         self.assertEqual(
-            report["if"], "steps.classify.outputs.mode == 'bookkeeping' && !cancelled()"
+            report["if"],
+            "steps.validate-event-head.outputs.coverage_expected == 'true' && !cancelled()",
         )
         self.assertIn(
             "jq -e '.total.lines.total > 0 and .total.lines.covered > 0'", report["run"]
         )
 
+        event_head_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', event_head["run"])
         validation_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', validation["run"])
         report_temp_dir = re.search(r'c8_temp_dir="([^"]+)"', report["run"])
+        self.assertIsNotNone(event_head_temp_dir)
         self.assertIsNotNone(validation_temp_dir)
         self.assertIsNotNone(report_temp_dir)
+        self.assertEqual(event_head_temp_dir.group(1), report_temp_dir.group(1))
         self.assertEqual(
             validation_temp_dir.group(1),
             report_temp_dir.group(1),
-            "validation and report steps must accumulate coverage in the same --temp-directory",
+            "all instrumented steps must accumulate coverage in the same --temp-directory",
         )
 
     def test_report_review_preflight_coverage_gate_fails_closed_on_zero_lines(self) -> None:

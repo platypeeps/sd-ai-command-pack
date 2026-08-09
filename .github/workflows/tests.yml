@@ -219,21 +219,35 @@ jobs:
           python3 "$classifier_file" "${classifier_args[@]}" >"$result_file"
           publish_result
 
-      # c8 coverage-measures the review-preflight.mjs invocations below; only
-      # the bookkeeping path runs them, so installation is gated the same way
-      # instead of paying npm cost on every "full" mode run.
+      # c8 coverage-measures the review-preflight.mjs invocations below.
+      # The event-head validation runs on every head regardless of mode,
+      # so the tooling installs unconditionally (lockfile-pinned npm ci).
       - name: Install review preflight coverage tooling
         id: install-review-preflight-coverage-tooling
-        if: steps.classify.outputs.mode == 'bookkeeping'
         run: npm ci
 
-      - name: Validate bookkeeping head
-        id: bookkeeping-validation
-        if: steps.classify.outputs.mode == 'bookkeeping'
+      # Validate the event head's content in EVERY mode. Mode decides which
+      # expensive jobs run; it does not decide whether content is validated.
+      # Base semantics, per event:
+      # - pull_request: the PR's own base (github.event.pull_request.base.sha).
+      #   The preflight turns the base into a three-dot `diff <base>...HEAD`,
+      #   so this yields the merge-base diff — the pull request's diff,
+      #   covering every push on the PR, not just the newest one.
+      # - push: github.event.before — the pushed range (stated, not inherited).
+      # - No fallback base: an unverifiable base FAILS this step. Substituting
+      #   the head itself would validate an empty diff (fail-open), and an
+      #   unset base would hand resolution to a discovery chain whose last
+      #   resort is an arbitrary sorted remote ref.
+      # A head touching none of the validated paths passes: the diff-scoped
+      # checks report "no changed ... require" pass lines on an empty set,
+      # and the repo-wide checks (package.json, documentation references,
+      # completed-task location) run against the checkout as always.
+      - name: Validate event head
+        id: validate-event-head
         env:
           AFTER_SHA: ${{ steps.classify.outputs.after_sha }}
-          BEFORE_SHA: ${{ steps.classify.outputs.before_sha }}
-          VALIDATION_MODE: ${{ steps.classify.outputs.validation_mode }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
           # The pinned-SHA checkout never establishes origin/HEAD, so the
           # root-task base_branch rule cannot discover the default branch;
           # state it explicitly from the event payload.
@@ -241,21 +255,59 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check "$BEFORE_SHA" "$AFTER_SHA" -- .trellis/tasks .trellis/workspace
+          if ! git rev-parse --verify --quiet "${EVENT_BASE_SHA}^{commit}" >/dev/null; then
+            printf 'error: event base %s does not resolve to a commit; failing closed rather than validating an empty or arbitrary diff window.\n' \
+              "${EVENT_BASE_SHA:-<empty>}" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "push" ] && ! git merge-base --is-ancestor "$EVENT_BASE_SHA" "$AFTER_SHA"; then
+            printf 'error: push base %s is not an ancestor of %s (force push?); the pushed-range claim would be false. Failing closed.\n' \
+              "$EVENT_BASE_SHA" "$AFTER_SHA" >&2
+            exit 1
+          fi
 
-          # Coverage-instrument every review-preflight.mjs invocation below
-          # into one shared V8 raw-coverage directory: --clean=false keeps
-          # each run's data instead of the next invocation wiping the
-          # previous one. "npm exec --no" refuses to fall back to an
-          # unpinned registry fetch if the lockfile-pinned local install is
-          # missing, failing loudly instead. The "Report review preflight
-          # coverage" step below combines and publishes the merged number.
+          git diff --check "$EVENT_BASE_SHA...$AFTER_SHA" -- .trellis/tasks .trellis/workspace
+
+          # Coverage-instrument every review-preflight.mjs invocation into
+          # one shared V8 raw-coverage directory: --clean=false keeps each
+          # run's data instead of the next invocation wiping the previous
+          # one. "npm exec --no" refuses to fall back to an unpinned
+          # registry fetch if the lockfile-pinned local install is missing,
+          # failing loudly instead. The "Report review preflight coverage"
+          # step below combines and publishes the merged number; its gate
+          # reads coverage_expected, emitted here immediately before the
+          # first instrumented invocation, so the zero-line guard fires
+          # only on runs where instrumentation was actually attempted.
           c8_temp_dir="$RUNNER_TEMP/c8-review-preflight"
           mkdir -p "$c8_temp_dir"
           c8_run=(npm exec --no -- c8 --clean=false --reporter=none --temp-directory="$c8_temp_dir" --include="scripts/sd-ai-command-pack-review-preflight.mjs")
+          printf 'coverage_expected=true\n' >>"$GITHUB_OUTPUT"
 
-          SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF="$BEFORE_SHA" \
+          SD_AI_COMMAND_PACK_REVIEW_PREFLIGHT_BASE_REF="$EVENT_BASE_SHA" \
             "${c8_run[@]}" node scripts/sd-ai-command-pack-review-preflight.mjs
+
+      # The final-bundle validation stays bookkeeping-only: it certifies the
+      # finalization delta between consecutive trusted heads, which is an
+      # incremental question — the PR base would be the wrong window here.
+      - name: Validate bookkeeping head
+        id: bookkeeping-validation
+        if: steps.classify.outputs.mode == 'bookkeeping'
+        env:
+          AFTER_SHA: ${{ steps.classify.outputs.after_sha }}
+          BEFORE_SHA: ${{ steps.classify.outputs.before_sha }}
+          VALIDATION_MODE: ${{ steps.classify.outputs.validation_mode }}
+          # Same rationale as the event-head step: the pinned-SHA checkout
+          # has no origin/HEAD for default-branch discovery.
+          SD_AI_COMMAND_PACK_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Shell variables do not cross steps: re-declare the c8 plumbing
+          # byte-identical to the event-head step's so both steps' raw
+          # coverage lands in the same shared directory.
+          c8_temp_dir="$RUNNER_TEMP/c8-review-preflight"
+          mkdir -p "$c8_temp_dir"
+          c8_run=(npm exec --no -- c8 --clean=false --reporter=none --temp-directory="$c8_temp_dir" --include="scripts/sd-ai-command-pack-review-preflight.mjs")
 
           case "$VALIDATION_MODE" in
             none)
@@ -281,9 +333,15 @@ jobs:
               ;;
           esac
 
+      # Runs in BOTH modes: the event-head validation always instruments
+      # the preflight, so the zero-line guard below now protects every run.
+      # coverage_expected keeps this reporter from firing on runs that
+      # failed before instrumentation was attempted (checkout, npm ci, the
+      # base guard), where a zero-line report would misdiagnose the real
+      # failure as broken coverage plumbing.
       - name: Report review preflight JavaScript coverage
         id: report-review-preflight-coverage
-        if: steps.classify.outputs.mode == 'bookkeeping' && !cancelled()
+        if: steps.validate-event-head.outputs.coverage_expected == 'true' && !cancelled()
         shell: bash
         run: |
           set -euo pipefail
@@ -331,6 +389,7 @@ jobs:
           REASON: ${{ steps.classify.outputs.reason }}
           VALIDATION_MODE: ${{ steps.classify.outputs.validation_mode }}
           VALIDATION_OUTCOME: ${{ steps.bookkeeping-validation.outcome }}
+          EVENT_HEAD_OUTCOME: ${{ steps.validate-event-head.outcome }}
         shell: bash
         run: |
           {
@@ -339,6 +398,7 @@ jobs:
             printf '%s\n' "- Reason: ${REASON:-unavailable}"
             printf '%s\n' "- Heads: ${BEFORE_SHA:-unavailable} -> ${AFTER_SHA:-unavailable}"
             printf '%s\n' "- Prior evidence: ${EVIDENCE_SCOPE:-none}; run ${EVIDENCE_RUN_ID:-none}; check ${EVIDENCE_CHECK_RUN_ID:-none}"
+            printf '%s\n' "- Event-head validation: ${EVENT_HEAD_OUTCOME:-not-run}"
             printf '%s\n' "- Bookkeeping validation: ${VALIDATION_MODE:-none} (${VALIDATION_OUTCOME:-not-run})"
             if [ "${MODE:-}" = "bookkeeping" ] && [ "${VALIDATION_OUTCOME:-}" = "success" ]; then
               printf '%s\n' "- Expensive jobs avoided: unittest matrix, lint, security, release payload"
