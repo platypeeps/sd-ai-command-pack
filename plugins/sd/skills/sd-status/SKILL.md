@@ -1,6 +1,7 @@
 ---
 name: sd-status
 description: Use when the user wants a read-only repository status report or a rollout-priority summary for the configured fleet from any installed checkout.
+model: haiku
 ---
 
 # SD Status

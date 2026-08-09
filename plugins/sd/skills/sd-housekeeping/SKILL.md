@@ -1,6 +1,7 @@
 ---
 name: sd-housekeeping
 description: Use at the end of a development stream to run finish-work before merging a ready PR, clean up after merge, prune stale refs, and report the expected clean repo state plus anomalies. Invocation is explicit approval for its in-scope task, archive, and journal commits and PR-branch push without another prompt.
+model: sonnet
 ---
 
 # SD Housekeeping

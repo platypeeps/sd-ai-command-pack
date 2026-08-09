@@ -1877,7 +1877,15 @@ class GeneratedParityTests(InstallTestCase):
         )
 
     def test_shared_skill_frontmatter_is_strict_yaml(self) -> None:
-        allowed_keys = {"name", "description", "license", "allowed-tools", "metadata"}
+        allowed_keys = {
+            "name",
+            "description",
+            "license",
+            "allowed-tools",
+            "metadata",
+            "model",
+        }
+        allowed_models = {"haiku", "sonnet", "opus", "inherit"}
         skill_paths = sorted(
             (install.ROOT / "templates/.agents/skills").glob("*/SKILL.md")
         )
@@ -1900,6 +1908,12 @@ class GeneratedParityTests(InstallTestCase):
                     set(),
                     f"{skill_path}: unexpected frontmatter keys: {sorted(unexpected_keys)}",
                 )
+                if "model" in frontmatter:
+                    self.assertIn(
+                        frontmatter["model"],
+                        allowed_models,
+                        f"{skill_path}: model must be one of {sorted(allowed_models)}",
+                    )
 
     def test_flat_markdown_entries_are_completion_visible(self) -> None:
         _, files = install.load_manifest()
