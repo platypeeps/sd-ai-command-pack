@@ -1162,6 +1162,7 @@ class BookkeepingValidatorTests(InstallTestCase):
             "#!/bin/sh\n"
             'if [ "$1" = "log" ] && [ "$2" = "-1" ] '
             '&& [ "$3" = "--format=%s" ]; then\n'
+            '  echo "fatal: injected subject failure" >&2\n'
             "  exit 73\n"
             "fi\n"
             f"exec {json.dumps(real_git)} \"$@\"\n",
@@ -1187,6 +1188,15 @@ class BookkeepingValidatorTests(InstallTestCase):
             payload["reasonCodes"], ["completion_successor_history_unavailable"]
         )
         self.assertEqual(payload["status"], "indeterminate")
+        subject_findings = [
+            finding
+            for finding in payload["findings"]
+            if "subject for successor commit" in finding["message"]
+        ]
+        self.assertEqual(len(subject_findings), 1, payload["findings"])
+        self.assertIn("exited 73", subject_findings[0]["message"])
+        self.assertIn("fatal: injected subject failure", subject_findings[0]["message"])
+        self.assert_failure_receipt_shape(payload)
 
     def test_completion_successor_reports_unavailable_successor_diff(self) -> None:
         root, _, bookkeeping_head = self.make_post_archive_successor_repo()
@@ -1228,6 +1238,274 @@ class BookkeepingValidatorTests(InstallTestCase):
             payload["reasonCodes"], ["completion_successor_history_unavailable"]
         )
         self.assertEqual(payload["status"], "indeterminate")
+
+    RECEIPT_KEYS = {
+        "schemaVersion",
+        "kind",
+        "status",
+        "command",
+        "mode",
+        "reasonCodes",
+        "evidence",
+        "findings",
+        "advisories",
+    }
+
+    def assert_failure_receipt_shape(self, payload: dict) -> None:
+        # The git-failure enrichment must never change the receipt contract:
+        # same schema version, same top-level keys, and only known
+        # dispositions -- detail lands inside existing message strings.
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(set(payload), self.RECEIPT_KEYS)
+        for finding in payload["findings"]:
+            self.assertIn(
+                finding["disposition"], {"invalid", "indeterminate"}, finding
+            )
+
+    def write_git_stub(self, root: Path, name: str, body: str) -> Path:
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        stub_bin = root / name
+        stub_bin.mkdir()
+        git_stub = stub_bin / "git"
+        git_stub.write_text(
+            "#!/bin/sh\n" + body + f"exec {json.dumps(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_stub.chmod(0o755)
+        return stub_bin
+
+    def stub_path_env(self, stub_bin: Path) -> dict[str, str]:
+        return {"PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
+
+    def test_completion_recovery_names_git_failure_for_archive_delta(self) -> None:
+        # Fingerprint 1 of the kcov-lane flake: the candidate ARCHIVE delta
+        # diff fails mid-scan and the old finding said only "could not
+        # inspect". The stub fails exactly the anchor window's
+        # baseOid..archiveOid pair: the direct final-bundle diff uses
+        # identical oids and the scan's journal-delta diff (archiveOid..
+        # bookkeepingHeadOid) runs first, so any broader stub would fire at
+        # the wrong site.
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        (root / "review-fix.txt").write_text("reviewed\n", encoding="utf-8")
+        self.run_git(root, "add", "review-fix.txt")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+        archive_commit = self.git_output(root, "rev-parse", f"{bookkeeping_head}^")
+        work_commit = self.git_output(root, "rev-parse", f"{bookkeeping_head}~2")
+        stub_bin = self.write_git_stub(
+            root,
+            ".test-archive-delta-bin",
+            f"if [ \"$1\" = diff ] && [ \"$5\" = {work_commit} ] "
+            f"&& [ \"$6\" = {archive_commit} ]; then\n"
+            '  echo "fatal: injected diff failure" >&2\n'
+            "  exit 128\n"
+            "fi\n",
+        )
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            extra_env=self.stub_path_env(stub_bin),
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["reasonCodes"], ["completion_successor_history_unavailable"]
+        )
+        self.assertEqual(payload["status"], "indeterminate")
+        [finding] = payload["findings"]
+        self.assertIn("candidate archive delta", finding["message"])
+        self.assertIn("exited 128", finding["message"])
+        self.assertIn("fatal: injected diff failure", finding["message"])
+        self.assert_failure_receipt_shape(payload)
+
+    def test_final_bundle_names_git_failure_for_direct_diff(self) -> None:
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        base = self.git_output(root, "rev-parse", f"{bookkeeping_head}^")
+        stub_bin = self.write_git_stub(
+            root,
+            ".test-direct-diff-bin",
+            'if [ "$1" = diff ] && [ "$2" = --raw ]; then\n'
+            '  echo "fatal: injected direct diff failure" >&2\n'
+            "  exit 128\n"
+            "fi\n",
+        )
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            base,
+            "--head",
+            bookkeeping_head,
+            extra_env=self.stub_path_env(stub_bin),
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["bundle_diff_unavailable"])
+        [finding] = payload["findings"]
+        self.assertIn("finalization delta", finding["message"])
+        self.assertIn("exited 128", finding["message"])
+        self.assertIn("fatal: injected direct diff failure", finding["message"])
+        self.assert_failure_receipt_shape(payload)
+
+    def test_git_failure_stderr_is_bounded_in_findings(self) -> None:
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        base = self.git_output(root, "rev-parse", f"{bookkeeping_head}^")
+        long_line = "A" * 300
+        stub_bin = self.write_git_stub(
+            root,
+            ".test-bounded-bin",
+            'if [ "$1" = diff ] && [ "$2" = --raw ]; then\n'
+            f'  echo "{long_line}" >&2\n'
+            '  echo "second stderr line" >&2\n'
+            "  exit 128\n"
+            "fi\n",
+        )
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            base,
+            "--head",
+            bookkeeping_head,
+            extra_env=self.stub_path_env(stub_bin),
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        [finding] = payload["findings"]
+        self.assertIn("A" * 200 + "...", finding["message"])
+        self.assertNotIn("A" * 201, finding["message"])
+        self.assertNotIn("second stderr line", finding["message"])
+        self.assert_failure_receipt_shape(payload)
+
+    def test_git_failure_detail_is_not_stale_across_invocations(self) -> None:
+        # Two runBookkeepingValidator calls in ONE process: the first fails
+        # its diff with a known stderr (positive control: pre-change code
+        # embedded no stderr anywhere, so this half fails against the old
+        # script), the second returns status-0 MALFORMED diff output. The
+        # malformed null must not inherit the first call's failure detail.
+        root, _, bookkeeping_head = self.make_post_archive_successor_repo()
+        base = self.git_output(root, "rev-parse", f"{bookkeeping_head}^")
+        marker = root / ".stale-slot-marker"
+        stub_bin = self.write_git_stub(
+            root,
+            ".test-stale-slot-bin",
+            'if [ "$1" = diff ] && [ "$2" = --raw ]; then\n'
+            f"  if [ -f {json.dumps(str(marker))} ]; then\n"
+            "    printf 'not-a-raw-record'\n"
+            "    exit 0\n"
+            "  fi\n"
+            '  echo "fatal: injected stale stderr" >&2\n'
+            "  exit 128\n"
+            "fi\n",
+        )
+        runner = root / "stale-slot-runner.mjs"
+        runner.write_text(
+            "import { runBookkeepingValidator } from"
+            " './scripts/sd-ai-command-pack-review-preflight.mjs';\n"
+            "import { writeFileSync } from 'node:fs';\n"
+            "const [base, head, marker] = process.argv.slice(2);\n"
+            "const first = runBookkeepingValidator("
+            "{ command: 'final-bundle', mode: 'completion', base, head });\n"
+            "writeFileSync(marker, 'switch\\n');\n"
+            "const second = runBookkeepingValidator("
+            "{ command: 'final-bundle', mode: 'completion', base, head });\n"
+            "console.log(JSON.stringify({ first, second }));\n",
+            encoding="utf-8",
+        )
+
+        env = dict(os.environ)
+        env.update(self.stub_path_env(stub_bin))
+        completed = subprocess.run(
+            [self.node, str(runner), base, bookkeeping_head, str(marker)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout)
+        payload = json.loads(completed.stdout)
+        first_messages = [f["message"] for f in payload["first"]["findings"]]
+        self.assertTrue(
+            any("fatal: injected stale stderr" in message for message in first_messages),
+            first_messages,
+        )
+        self.assertIn("bundle_diff_malformed", payload["second"]["reasonCodes"])
+        for finding in payload["second"]["findings"]:
+            self.assertNotIn("fatal: injected stale stderr", finding["message"])
+
+    def test_completion_successor_names_git_failure_for_range(self) -> None:
+        root, _, _ = self.make_post_archive_successor_repo()
+        (root / "review-fix.txt").write_text("reviewed\n", encoding="utf-8")
+        self.run_git(root, "add", "review-fix.txt")
+        self.run_git(root, "commit", "-m", "fix review finding")
+        head = self.git_output(root, "rev-parse", "HEAD")
+        stub_bin = self.write_git_stub(
+            root,
+            ".test-range-bin",
+            'if [ "$1" = rev-list ] && [ "$2" = --first-parent ] '
+            '&& [ "$3" = --reverse ]; then\n'
+            '  echo "fatal: injected rev-list failure" >&2\n'
+            "  exit 73\n"
+            "fi\n",
+        )
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            extra_env=self.stub_path_env(stub_bin),
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["reasonCodes"], ["completion_successor_history_unavailable"]
+        )
+        range_findings = [
+            finding
+            for finding in payload["findings"]
+            if "completion-successor commit range" in finding["message"]
+        ]
+        self.assertEqual(len(range_findings), 1, payload["findings"])
+        self.assertIn("exited 73", range_findings[0]["message"])
+        self.assertIn("fatal: injected rev-list failure", range_findings[0]["message"])
+        self.assert_failure_receipt_shape(payload)
+
+    def test_run_git_failure_includes_repo_state_context(self) -> None:
+        root = self.make_validator_repo()
+        (root / ".git/HEAD").write_text("garbage\n", encoding="utf-8")
+
+        with self.assertRaises(AssertionError) as caught:
+            self.run_git(root, "commit", "--allow-empty", "-m", "context probe")
+
+        message = str(caught.exception)
+        self.assertIn("git repo-state context", message)
+        self.assertIn("HEAD bytes", message)
+        self.assertIn("garbage", message)
 
     def test_completion_successor_rejects_invalid_nearest_anchor(self) -> None:
         root, _, _ = self.make_post_archive_successor_repo(corrupt_archive=True)
