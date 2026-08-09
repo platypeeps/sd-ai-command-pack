@@ -3,7 +3,7 @@
   "name": "thin-surface-partition",
   "title": "Surface partition: manifest + platform-registry classifier with exhaustiveness gate",
   "description": "Classify all 776 manifest files into four categories (machine-claude / machine-other / repo-native / consumer-config; pack-only is the non-manifest complement) via manifest.json + installer/registry.py; per-platform scope disposition; fail-closed on unknown platform, unknown kind, stale override, or undispositioned platform",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
