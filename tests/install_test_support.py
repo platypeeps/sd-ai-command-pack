@@ -284,16 +284,12 @@ class InstallTestCase(unittest.TestCase):
                     )
                     packed = common_dir / "packed-refs"
                     if packed.is_file():
-                        entry = next(
-                            (
-                                line
-                                for line in packed.read_text(
-                                    encoding="utf-8", errors="replace"
-                                ).splitlines()
-                                if line.endswith(f" {ref_name}")
-                            ),
-                            None,
-                        )
+                        entry = None
+                        with packed.open(encoding="utf-8", errors="replace") as handle:
+                            for packed_line in handle:
+                                if packed_line.rstrip("\n").endswith(f" {ref_name}"):
+                                    entry = packed_line.rstrip("\n")
+                                    break
                         lines.append(
                             f"packed-refs entry for {ref_name}: "
                             f"{entry if entry is not None else 'ABSENT'}"
@@ -302,10 +298,24 @@ class InstallTestCase(unittest.TestCase):
                         lines.append("packed-refs: absent")
             else:
                 lines.append("HEAD: MISSING")
-            locks = sorted(
-                str(path.relative_to(common_dir))
-                for path in common_dir.rglob("*.lock")
-            )[:10]
+            # Bounded lock scan: only the directories where git takes ref /
+            # index / packfile locks, not the whole .git tree (objects/**
+            # can be arbitrarily large).
+            lock_paths: list[str] = []
+            for lock_dir, recursive in (
+                (common_dir, False),
+                (common_dir / "refs", True),
+                (common_dir / "logs", True),
+                (common_dir / "objects" / "pack", False),
+            ):
+                if not lock_dir.is_dir():
+                    continue
+                pattern = "**/*.lock" if recursive else "*.lock"
+                lock_paths.extend(
+                    str(path.relative_to(common_dir))
+                    for path in lock_dir.glob(pattern)
+                )
+            locks = sorted(lock_paths)[:10]
             lines.append(f"lock files: {locks if locks else 'none'}")
         except OSError as error:
             lines.append(f"context capture failed: {error}")
