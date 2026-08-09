@@ -31,6 +31,7 @@ per machine
 per consumer repo (thin)
 ├── .claude/settings.json      extraKnownMarketplaces + enabledPlugins
 ├── pack pin + provenance receipt (one small file)
+├── repo-native platform slice (e.g. GitHub surfaces, 23 files)
 └── genuinely repo-scoped config only (e.g. .prism rules)
 ```
 
@@ -85,11 +86,12 @@ per consumer repo (thin)
 
 - `install.py` gains a machine-scope mode (working name
   `install.py --machine`) that writes the user-level surface
-  equivalents for the `machine-other` partition slice only — the
-  non-Claude platforms dispositioned `machine` (verified per
-  platform; fleet-relevant candidates: Gemini, OpenCode,
-  Codex/`.agents`). The `machine-claude` slice belongs exclusively to
-  the plugin. Idempotent,
+  equivalents for the `machine-other` partition slice plus rows the
+  partition flags `sharedRuntime: true` (shared helper scripts that
+  non-Claude surfaces invoke at runtime) — the non-Claude platforms
+  dispositioned `machine` (verified per platform; fleet-relevant
+  candidates: Gemini, OpenCode, Codex/`.agents`). The rest of the
+  `machine-claude` slice belongs exclusively to the plugin. Idempotent,
   versioned by a receipt file in the target (records pack version +
   payload digest, mirroring the existing provenance receipt shape).
   Ownership contract: the installer touches only receipt-owned paths
@@ -125,11 +127,13 @@ per consumer repo (thin)
 ### Surface partition (requirement 1)
 
 - Partition is computed from `manifest.json` by rule, not by list:
-  every payload path classifies as `machine-claude` (→ plugin),
-  `machine-other` (→ machine installer), `repo-native` (inherently
-  repository-scoped platform surfaces that stay vendored, shrunk),
-  `consumer-config` (repo-scoped configuration, stays), or
-  `pack-only` (never leaves this repo).
+  every payload path classifies into exactly one of four categories —
+  `machine-claude` (→ plugin), `machine-other` (→ machine
+  installer), `repo-native` (inherently repository-scoped platform
+  surfaces that stay vendored, shrunk), or `consumer-config`
+  (repo-scoped configuration, stays). `pack-only` is the
+  definitional complement: repo files outside the manifest never
+  ship and need no inventory.
 - **Platform scope disposition is registry-driven.** Every manifest
   row carries a `platform`; the authoritative platform set is
   `PLATFORM_REGISTRY` in `installer/registry.py`, enumerated at

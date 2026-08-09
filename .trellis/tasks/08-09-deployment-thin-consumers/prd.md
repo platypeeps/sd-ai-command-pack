@@ -42,12 +42,15 @@ fleet status becomes pin inventory instead of tree diffing.
 ## Requirements
 
 1. **Surface partition is explicit and complete.** Every one of the
-   776 payload files is classified as machine-scoped Claude (plugin),
-   machine-scoped other (machine installer), repo-native (platform
-   surfaces only readable from the repository, e.g. GitHub
-   instructions — stay vendored, shrunk), consumer config (repo-scoped
-   config, rules, the pin/provenance receipt), or pack-repo-only
-   (fleet registry, release machinery). The classification is
+   776 payload files is classified into exactly one of FOUR
+   categories: machine-scoped Claude (plugin), machine-scoped other
+   (machine installer), repo-native (platform surfaces only readable
+   from the repository, e.g. GitHub instructions — stay vendored,
+   shrunk), or consumer config (repo-scoped config and rules; the
+   pin/provenance receipt is an install-time artifact outside the
+   manifest). Pack-repo-only files (fleet registry, release
+   machinery) are the definitional complement — not in the manifest,
+   never shipped, no inventory needed. The classification is
    enumerable from the manifest and the platform registry, not a
    hand-maintained list, and every platform carries an explicit
    machine-vs-repo-native scope disposition.

@@ -16,7 +16,10 @@ release-prep integration stamping `plugin.json` `version` from
 ## Requirements
 
 1. Plugin dir is build-generated from templates via the partition
-   output, never hand-edited; mirror-style CI gate keeps it fresh.
+   artifact (`machine-claude` slice of the surface-partition JSON
+   under fleet docs; path and schema per the `thin-surface-partition`
+   child's design), never hand-edited; mirror-style CI gate keeps it
+   fresh.
 2. Helper-script resolution redesign: pack scripts resolve sibling
    helpers relative to their own file location (layout-independent);
    plugin-shipped skills invoke entry points as `bin/` bare commands

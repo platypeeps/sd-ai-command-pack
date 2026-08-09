@@ -7,11 +7,16 @@ installer").
 ## Deliverable
 
 `install.py --machine` writing user-level surface equivalents for
-the `machine-other` partition slice only — non-Claude platforms
-dispositioned `machine`; the `machine-claude` slice belongs
-exclusively to the plugin (`thin-plugin-packaging`) — plus
-`sd-pack-update` (shipped in plugin `bin/`) as the single machine
-update action.
+the `machine-other` partition slice plus rows flagged
+`sharedRuntime: true` in the partition artifact (the
+surface-partition JSON under fleet docs, created by
+`thin-surface-partition` — schema in that child's design) — shared
+scripts that non-Claude surfaces invoke at runtime; the rest of the
+`machine-claude` slice belongs exclusively to the plugin
+(`thin-plugin-packaging`). Platforms with `provisional: true` are
+not installable until this child's verification flips them
+(fail-closed schema semantics). Plus `sd-pack-update` (shipped in
+plugin `bin/`) as the single machine update action.
 
 ## Requirements
 

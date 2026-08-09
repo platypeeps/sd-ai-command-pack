@@ -16,7 +16,11 @@ vendoring-gate retirement after the last conversion.
    the 2026-08-09 fleet sweep is a dated snapshot, not a migration
    authority.
 2. Conversion PR deletes: vendored payload (minus `repo-native` +
-   `consumer-config` slices), all pack CI steps (syntax lints and the
+   `consumer-config` slices, enumerated from the partition artifact —
+   the surface-partition JSON under fleet docs created by
+   `thin-surface-partition`; platforms flagged `provisional` there
+   are treated as repo-native, fail closed, until verified), all
+   pack CI steps (syntax lints and the
    anomaly-metric-creator advisory `pr-body-scope.py` call — parent
    D2), and consumer-side sync automation
    (`sd-ai-command-pack-sync.yml` in anomaly-metric-creator, which
