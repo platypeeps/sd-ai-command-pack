@@ -1894,3 +1894,46 @@ Executed and finished 08-07-ci-preflight-full-mode-gap. Planning ran the full ad
 ### Next Steps
 
 - None - task complete
+
+
+## Session 350: kcov-lane flake made diagnosable: git failures named in validator receipts
+
+**Date**: 2026-08-09
+**Task**: kcov-lane flake made diagnosable: git failures named in validator receipts
+**Branch**: `main`
+
+### Summary
+
+Executed and finished 08-08-shell-coverage-kcov-flake (PR #392, merged 1c914e1d). The recurring Shell coverage kcov-lane flake of test_completion_successor_finds_recent_anchor_in_long_history (two 2026-08-09 attempt-1 occurrences, both fingerprints undiagnosable from existing output) got diagnostics-only enrichment: a lastBookkeepingGitFailure module slot names the failed git command, exit status, and bounded stderr (first line, 200 chars) in all six silent-probe unavailable findings; seven direct-status sites append the same detail inline; run_git/git_output fixture wrappers append a bounded repo-state block (HEAD bytes, loose/packed ref state, lock scan limited to .git root, refs, logs, objects/pack) for the fixture-side could-not-parse-HEAD fingerprint. No retries, no schema/semantic change: reason codes, statuses, dispositions, and receipt keys all unchanged (byte-identical receipts old-vs-new on four windows including a status-valid fixture path). Characterization: 25 local iterations (10 serial, 15 under 16-core load) did not reproduce; mitigation is diagnose-and-wait. Release payload gate required the 0.64.31 bump (manifests, changelog, regenerated command catalog, refreshed candidate ledger). Copilot round 1 raised two valid findings (unbounded .git lock rglob; whole-file packed-refs read), both fixed; round 2 clean. Implementation re-hit the spec-documented TDZ gotcha (slot declared below the CLI dispatch; node --check green, every real run threw ReferenceError) - spec extended to cover let slots.
+
+### Main Changes
+
+- scripts/sd-ai-command-pack-review-preflight.mjs + templates twin: lastBookkeepingGitFailure slot, boundedGitFailureStderr/gitFailureSuffix/describeGitFailure helpers, 6 slot-reader + 7 direct-status enriched sites; slot cleared at bookkeepingChangedEntries entry and reset per run
+- tests/install_test_support.py: _git_failure_context repo-state capture in run_git/git_output assertion wrappers only (worktree gitdir/commondir aware; bounded lock scan per Copilot review)
+- tests/test_bookkeeping_validator.py: six new tests + subject-probe upgrade (pair-selective archive-delta stub, direct-diff, stderr bounding, stale-slot with positive control, range-site, fixture-context via assertRaises); assert_failure_receipt_shape pins schema on failure paths
+- Release: 0.64.31 manifests + changelog, regenerated command-catalog surfaces, fleet candidate ledger refreshed twice (payload digest changes)
+- Spec: bookkeeping-validator.md gained the git-failure diagnostics contract section; TDZ gotcha extended to let slots; tooling index row updated
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `326db2b1` | (see git log) |
+| `3d130dd9` | (see git log) |
+| `fcf422ed` | (see git log) |
+| `1c914e1d` | (see git log) |
+
+### Testing
+
+- [OK] Step-5 named check: all 6 validator tests fail against git show HEAD: pre-change script and the fixture-context test fails against pre-change test support; all 7 pass against new code
+- [OK] make test green locally after candidate-ledger refresh; first run failed on provenance.candidate-stale, second on release version drift - both are the expected shipped-payload gates, satisfied by ledger refresh + 0.64.31 bump
+- [OK] Receipt-schema sanity: old vs new receipts byte-identical on four windows (invalid planning x2, invalid completion, valid fixture completion with completion_bundle_valid)
+- [OK] PR #392 CI fully green including the kcov Shell coverage lane on attempt 1 (one green sample, not proof the flake is gone - enrichment pays off at the next occurrence)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Diagnose-and-wait: next kcov-lane occurrence now carries the failed git command, status, stderr, and repo-state context; re-open investigation with that evidence
