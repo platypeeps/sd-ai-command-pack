@@ -1909,6 +1909,11 @@ class GeneratedParityTests(InstallTestCase):
                     f"{skill_path}: unexpected frontmatter keys: {sorted(unexpected_keys)}",
                 )
                 if "model" in frontmatter:
+                    self.assertIsInstance(
+                        frontmatter["model"],
+                        str,
+                        f"{skill_path}: model must be a string",
+                    )
                     self.assertIn(
                         frontmatter["model"],
                         allowed_models,
