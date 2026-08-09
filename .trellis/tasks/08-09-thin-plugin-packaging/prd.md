@@ -48,12 +48,12 @@ release-prep integration stamping `plugin.json` `version` from
 
 ## Acceptance criteria
 
-- [ ] `claude --plugin-dir <built-plugin>` session exposes the pack
+- [x] `claude --plugin-dir <built-plugin>` session exposes the pack
       skills/agents/bin commands in a repo with no vendored payload.
-- [ ] `claude plugin validate <dir> --strict` exits 0 in CI.
-- [ ] Release-prep bumps `plugin.json` version in lockstep with
+- [x] `claude plugin validate <dir> --strict` exits 0 in CI.
+- [x] Release-prep bumps `plugin.json` version in lockstep with
       `manifest.json["version"]`.
-- [ ] Grep gate: zero `scripts/sd-ai-command-pack-*` repo-root
+- [x] Grep gate: zero `scripts/sd-ai-command-pack-*` repo-root
       references in plugin Markdown output (skills/commands), and
       zero functional repo-root sibling construction in `bin/`;
       consumer-layout *data* globs in audit/scope tooling
