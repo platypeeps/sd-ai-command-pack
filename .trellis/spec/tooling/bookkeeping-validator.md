@@ -32,6 +32,13 @@ Verify by actually running the code path (a targeted test, not just
 - Good: adding it to the existing top-of-file constants block, then
   confirming with a real test run (not just `node --check`) that it resolves.
 
+Re-confirmed 2026-08-09 (task `08-08-shell-coverage-kcov-flake`): the same
+TDZ applies to module-level `let` slots, not just `const`. A
+`let lastBookkeepingGitFailure = null;` placed near its readers (after the
+dispatch block) threw the identical `ReferenceError` on every CLI run while
+`node --check` stayed green; the fix was moving the slot (and the constants
+it feeds) above `if (isMainModule())`.
+
 ## Design principle: a "historical proof" via a live-reading function is only sound for immutable content
 
 Adopted 2026-08-01. The completion-mode auto-recovery mechanisms
@@ -113,6 +120,62 @@ the opposite. Tests in `tests/test_review_preflight.py` pin both halves; if
 either runtime changes, the pins disagree visibly. An upstream create-time
 refusal (Trellis fork task `08-08-create-empty-metadata-rejection`) is
 expected to flip these pins into an equality assertion at uptake.
+
+## Contract: git-failure diagnostics enrichment (`lastBookkeepingGitFailure`)
+
+Adopted 2026-08-09 (task `08-08-shell-coverage-kcov-flake`, the kcov-lane
+flake). Every git-caused `*_unavailable` finding must name the failed git
+command, its exit status, and bounded stderr — a bare "Git could not
+inspect" receipt is undiagnosable when the failure only reproduces on a CI
+runner.
+
+### Signatures
+
+- `let lastBookkeepingGitFailure: {commandArgs, status, stderr} | null` —
+  module slot, declared in the top-of-file block (see TDZ gotcha above).
+- `boundedGitFailureStderr(stderr) -> string` — first stderr line, capped
+  at `GIT_FAILURE_STDERR_LIMIT` (200) chars with `...`, or
+  `'no stderr output'`.
+- `gitFailureSuffix(commandArgs, status, stderr) -> string` — appended to
+  direct-status failure sites: `` ` (git <args> exited <status>: <stderr>)` ``.
+- `describeGitFailure(prefix) -> string` — for slot-readers: returns
+  `prefix` unchanged when the slot is null, else prefix + suffix.
+
+### Slot lifecycle (stale-safety, non-negotiable)
+
+- Cleared at `bookkeepingChangedEntries` **entry**: a status-0
+  malformed-output null return must not inherit an older invocation's
+  failure text.
+- Reset in `runBookkeepingValidator`'s module-state block: two validator
+  runs in one process must not leak failure detail across receipts.
+- Set only on nonzero `git diff --raw` status, immediately before the
+  `bundle_diff_unavailable` finding.
+
+### Contract invariants
+
+- Receipt schema unchanged: same 9 keys (`schemaVersion` 1), same reason
+  codes, same dispositions. Enrichment is append-only text inside existing
+  `findings[].message` strings.
+- No retries, no semantic change: a git failure still yields the same
+  reason code and `indeterminate`/`invalid` status it did before.
+- Site taxonomy: slot-readers (silent-probe `bookkeepingChangedEntries`
+  callers) use `describeGitFailure`; direct-status sites (`rev-list`,
+  subject probe, whitespace, parents probe) use `gitFailureSuffix`; the
+  real-`add` diff callers are covered by the enriched
+  `bundle_diff_unavailable` itself.
+
+### Tests (assertion points)
+
+`tests/test_bookkeeping_validator.py`: PATH-prefix git stubs inject
+failures per-site (pair-selective on oids to hit the archive-delta site,
+not the journal-delta site that diffs first); assertions cover message
+content ("exited N" + injected stderr), stderr bounding (200-char cap,
+first line only), stale-slot regression across two in-process runs (with
+a positive control on the first receipt), and failure-receipt shape
+(`assert_failure_receipt_shape`). Fixture-side: `run_git`/`git_output`
+failures append a repo-state context block (HEAD bytes, loose/packed ref
+state, lock files) — capture lives in the assertion wrappers only, never
+`_run_git_process`, whose direct callers expect nonzero exits.
 
 ## Related
 

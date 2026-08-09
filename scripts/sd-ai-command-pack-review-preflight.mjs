@@ -454,6 +454,38 @@ function printReviewPreflightResult(result) {
   console.log(`\nReview preflight: ${result.failures.length} failure(s), ${result.warnings.length} warning(s).`);
 }
 
+// Most recent git failure observed by bookkeepingChangedEntries, so the
+// *_unavailable finding composers -- including the silent-probe callers
+// that pass a discarding add callback -- can name the actual git error
+// instead of a bare "could not inspect". Cleared at every
+// bookkeepingChangedEntries entry: a status-0 malformed-output null must
+// not inherit an older invocation's failure. Also reset per validator run
+// in runBookkeepingValidator, alongside the other module state. Declared
+// before the CLI dispatch below: module evaluation reaches that dispatch
+// (and therefore runBookkeepingValidator's module-state reset) before any
+// later top-level statement runs.
+let lastBookkeepingGitFailure = null;
+
+const GIT_FAILURE_STDERR_LIMIT = 200;
+
+function boundedGitFailureStderr(stderr) {
+  const line = String(stderr || '').trim().split('\n', 1)[0].trim();
+  if (!line) return 'no stderr output';
+  return line.length > GIT_FAILURE_STDERR_LIMIT
+    ? `${line.slice(0, GIT_FAILURE_STDERR_LIMIT)}...`
+    : line;
+}
+
+function gitFailureSuffix(commandArgs, status, stderr) {
+  return ` (git ${commandArgs.join(' ')} exited ${status}: ${boundedGitFailureStderr(stderr)})`;
+}
+
+function describeGitFailure(prefix) {
+  if (!lastBookkeepingGitFailure) return prefix;
+  const failure = lastBookkeepingGitFailure;
+  return `${prefix}${gitFailureSuffix(failure.commandArgs, failure.status, failure.stderr)}`;
+}
+
 if (isMainModule()) {
   const unsupportedNode = unsupportedNodeVersionMessage(process.version);
   if (unsupportedNode) {
@@ -580,6 +612,7 @@ export function runBookkeepingValidator(options = {}) {
   rootDir = resolve(options.rootDir || defaultRootDir);
   config = defaultConfig();
   readTextCache.clear();
+  lastBookkeepingGitFailure = null;
   const findings = [];
   const advisories = [];
   let advisoriesDropped = 0;
@@ -1211,17 +1244,18 @@ function attemptArchiveAnchorRecovery(headOid) {
     if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
     findings.push({ reasonCode, path, message, disposition });
   };
-  const history = runGit([
+  const historyArgs = [
     'rev-list',
     '--first-parent',
     `--max-count=${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS + 1}`,
     headOid,
-  ]);
+  ];
+  const history = runGit(historyArgs);
   if (history.status !== 0) {
     add(
       'completion_successor_history_unavailable',
       '',
-      'Git could not enumerate bounded first-parent history for completion recovery',
+      `Git could not enumerate bounded first-parent history for completion recovery${gitFailureSuffix(historyArgs, history.status, history.stderr)}`,
       'indeterminate',
     );
     return { status: 'indeterminate', shapedTailCount: 0, findings, evidence: {} };
@@ -1240,7 +1274,7 @@ function attemptArchiveAnchorRecovery(headOid) {
       add(
         'completion_successor_history_unavailable',
         '',
-        'Git could not inspect a candidate journal delta during completion recovery',
+        describeGitFailure('Git could not inspect a candidate journal delta during completion recovery'),
         'indeterminate',
       );
       return { status: 'indeterminate', shapedTailCount, findings, evidence: {} };
@@ -1250,7 +1284,7 @@ function attemptArchiveAnchorRecovery(headOid) {
       add(
         'completion_successor_history_unavailable',
         '',
-        'Git could not inspect a candidate archive delta during completion recovery',
+        describeGitFailure('Git could not inspect a candidate archive delta during completion recovery'),
         'indeterminate',
       );
       return { status: 'indeterminate', shapedTailCount, findings, evidence: {} };
@@ -1405,12 +1439,13 @@ function discoverActiveTrellisTaskDirectory() {
 // task whose whole lifecycle fits in the search window, which is the
 // ordinary case for a young task, not an edge case.
 function findActiveTaskHistoricalBase(taskDir, headOid) {
-  const history = runGit([
+  const historyArgs = [
     'rev-list',
     '--first-parent',
     `--max-count=${MAX_BOOKKEEPING_ANCHOR_SEARCH_COMMITS + 1}`,
     headOid,
-  ]);
+  ];
+  const history = runGit(historyArgs);
   if (history.status !== 0) {
     return {
       status: 'indeterminate',
@@ -1418,7 +1453,7 @@ function findActiveTaskHistoricalBase(taskDir, headOid) {
         {
           reasonCode: 'completion_successor_history_unavailable',
           path: '',
-          message: 'Git could not enumerate bounded first-parent history for active-task completion recovery',
+          message: `Git could not enumerate bounded first-parent history for active-task completion recovery${gitFailureSuffix(historyArgs, history.status, history.stderr)}`,
           disposition: 'indeterminate',
         },
       ],
@@ -1437,7 +1472,7 @@ function findActiveTaskHistoricalBase(taskDir, headOid) {
           {
             reasonCode: 'completion_successor_history_unavailable',
             path: '',
-            message: 'Git could not inspect a candidate task-directory delta during active-task completion recovery',
+            message: describeGitFailure('Git could not inspect a candidate task-directory delta during active-task completion recovery'),
             disposition: 'indeterminate',
           },
         ],
@@ -1505,12 +1540,13 @@ function evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid) {
     if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
     findings.push({ reasonCode, path, message, disposition });
   };
-  const range = runGit(['rev-list', '--first-parent', '--reverse', `${historicalBase}..${headOid}`]);
+  const rangeArgs = ['rev-list', '--first-parent', '--reverse', `${historicalBase}..${headOid}`];
+  const range = runGit(rangeArgs);
   if (range.status !== 0) {
     add(
       'completion_successor_history_unavailable',
       '',
-      'Git could not inspect the active-task completion-successor commit range',
+      `Git could not inspect the active-task completion-successor commit range${gitFailureSuffix(rangeArgs, range.status, range.stderr)}`,
       'indeterminate',
     );
     return { status: 'indeterminate', findings };
@@ -1545,7 +1581,7 @@ function evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid) {
       add(
         'completion_successor_history_unavailable',
         '',
-        `Git could not inspect the per-commit delta for active-task completion successor commit ${oid.slice(0, 12)}`,
+        describeGitFailure(`Git could not inspect the per-commit delta for active-task completion successor commit ${oid.slice(0, 12)}`),
         'indeterminate',
       );
       return { status: 'indeterminate', findings };
@@ -1579,7 +1615,7 @@ function evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid) {
     add(
       'completion_successor_history_unavailable',
       '',
-      'Git could not inspect changed paths in the active-task completion-successor range',
+      describeGitFailure('Git could not inspect changed paths in the active-task completion-successor range'),
       'indeterminate',
     );
     return { status: 'indeterminate', findings };
@@ -1838,12 +1874,13 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
     if (findings.length >= MAX_BOOKKEEPING_FINDINGS) return;
     findings.push({ reasonCode, path, message, disposition });
   };
-  const range = runGit(['rev-list', '--first-parent', '--reverse', `${anchorOid}..${headOid}`]);
+  const rangeArgs = ['rev-list', '--first-parent', '--reverse', `${anchorOid}..${headOid}`];
+  const range = runGit(rangeArgs);
   if (range.status !== 0) {
     add(
       'completion_successor_history_unavailable',
       '',
-      'Git could not inspect the completion-successor commit range',
+      `Git could not inspect the completion-successor commit range${gitFailureSuffix(rangeArgs, range.status, range.stderr)}`,
       'indeterminate',
     );
     return { status: 'indeterminate', evidence: {}, findings };
@@ -1871,12 +1908,13 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
       );
       continue;
     }
-    const subjectResult = runGit(['log', '-1', '--format=%s', oid]);
+    const subjectArgs = ['log', '-1', '--format=%s', oid];
+    const subjectResult = runGit(subjectArgs);
     if (subjectResult.status !== 0) {
       add(
         'completion_successor_history_unavailable',
         '',
-        `Git could not inspect the subject for successor commit ${oid.slice(0, 12)}`,
+        `Git could not inspect the subject for successor commit ${oid.slice(0, 12)}${gitFailureSuffix(subjectArgs, subjectResult.status, subjectResult.stderr)}`,
         'indeterminate',
       );
       return { status: 'indeterminate', evidence: {}, findings };
@@ -1893,7 +1931,7 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
     add(
       'completion_successor_history_unavailable',
       '',
-      'Git could not inspect changed paths in the completion-successor range',
+      describeGitFailure('Git could not inspect changed paths in the completion-successor range'),
       'indeterminate',
     );
     return { status: 'indeterminate', evidence: {}, findings };
@@ -1950,9 +1988,12 @@ function resolveBookkeepingCommit(ref, label, add) {
 }
 
 function bookkeepingChangedEntries(baseOid, headOid, add) {
-  const result = runGit(['diff', '--raw', '-z', '--find-renames', baseOid, headOid, '--']);
+  lastBookkeepingGitFailure = null;
+  const diffArgs = ['diff', '--raw', '-z', '--find-renames', baseOid, headOid, '--'];
+  const result = runGit(diffArgs);
   if (result.status !== 0) {
-    add('bundle_diff_unavailable', '', 'Git could not enumerate the finalization delta', 'indeterminate');
+    lastBookkeepingGitFailure = { commandArgs: diffArgs, status: result.status, stderr: result.stderr };
+    add('bundle_diff_unavailable', '', describeGitFailure('Git could not enumerate the finalization delta'), 'indeterminate');
     return null;
   }
   const tokens = result.stdout.split('\0');
@@ -1991,11 +2032,12 @@ function bookkeepingChangedEntries(baseOid, headOid, add) {
 }
 
 function validateBookkeepingDiffWhitespace(baseOid, headOid, add) {
-  const result = runGit(['diff', '--check', baseOid, headOid, '--', '.trellis/tasks', '.trellis/workspace']);
+  const checkArgs = ['diff', '--check', baseOid, headOid, '--', '.trellis/tasks', '.trellis/workspace'];
+  const result = runGit(checkArgs);
   if (result.status === 0) return;
   const detail = (result.stdout || result.stderr).trim();
   if (!detail) {
-    add('bundle_whitespace_unavailable', '', 'Git whitespace validation could not complete', 'indeterminate');
+    add('bundle_whitespace_unavailable', '', `Git whitespace validation could not complete${gitFailureSuffix(checkArgs, result.status, result.stderr)}`, 'indeterminate');
     return;
   }
   for (const line of detail.split(/\r?\n/).slice(0, MAX_BOOKKEEPING_FINDINGS)) {
@@ -2556,12 +2598,13 @@ function validateJournalOnlyPlanningRecovery(entries, journalSummary, evidence, 
       continue;
     }
 
-    const parentResult = runGit(['rev-list', '--parents', '-n', '1', commit.oid]);
+    const parentArgs = ['rev-list', '--parents', '-n', '1', commit.oid];
+    const parentResult = runGit(parentArgs);
     if (parentResult.status !== 0) {
       add(
         'planning_recovery_commit_unavailable',
         session.file,
-        `Git could not inspect parents for commit ${commit.hash}`,
+        `Git could not inspect parents for commit ${commit.hash}${gitFailureSuffix(parentArgs, parentResult.status, parentResult.stderr)}`,
         'indeterminate',
       );
       continue;

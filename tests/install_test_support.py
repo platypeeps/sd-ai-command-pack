@@ -239,13 +239,95 @@ class InstallTestCase(unittest.TestCase):
             check=False,
         )
 
+    def _git_failure_context(self, root: Path) -> str:
+        # Bounded repo-state capture for UNEXPECTED git failures only (the
+        # kcov-lane flake's second fingerprint died on `fatal: could not
+        # parse HEAD` with nothing to distinguish a torn HEAD read from a
+        # missing ref or lock contention). Runs solely on the failing
+        # assertion path; passing runs never call this. Direct
+        # _run_git_process callers that expect nonzero exits are untouched.
+        lines = ["--- git repo-state context ---"]
+        try:
+            git_path = root / ".git"
+            git_dir = git_path
+            if git_path.is_file():
+                pointer = git_path.read_bytes()[:200]
+                lines.append(f".git is a worktree pointer file: {pointer!r}")
+                pointer_text = pointer.decode("utf-8", errors="replace").strip()
+                if pointer_text.startswith("gitdir:"):
+                    target = Path(pointer_text[len("gitdir:") :].strip())
+                    git_dir = target if target.is_absolute() else root / target
+            common_dir = git_dir
+            common_file = git_dir / "commondir"
+            if common_file.is_file():
+                common_text = common_file.read_text(
+                    encoding="utf-8", errors="replace"
+                ).strip()
+                common_target = Path(common_text)
+                common_dir = (
+                    common_target
+                    if common_target.is_absolute()
+                    else git_dir / common_target
+                )
+                lines.append(f"commondir: {common_text}")
+            head_path = git_dir / "HEAD"
+            if head_path.is_file():
+                head_bytes = head_path.read_bytes()[:200]
+                lines.append(f"HEAD bytes: {head_bytes!r}")
+                head_text = head_bytes.decode("utf-8", errors="replace").strip()
+                if head_text.startswith("ref:"):
+                    ref_name = head_text[len("ref:") :].strip()
+                    loose = common_dir / ref_name
+                    lines.append(
+                        f"loose ref {ref_name}: "
+                        f"{'exists' if loose.is_file() else 'MISSING'}"
+                    )
+                    packed = common_dir / "packed-refs"
+                    if packed.is_file():
+                        entry = next(
+                            (
+                                line
+                                for line in packed.read_text(
+                                    encoding="utf-8", errors="replace"
+                                ).splitlines()
+                                if line.endswith(f" {ref_name}")
+                            ),
+                            None,
+                        )
+                        lines.append(
+                            f"packed-refs entry for {ref_name}: "
+                            f"{entry if entry is not None else 'ABSENT'}"
+                        )
+                    else:
+                        lines.append("packed-refs: absent")
+            else:
+                lines.append("HEAD: MISSING")
+            locks = sorted(
+                str(path.relative_to(common_dir))
+                for path in common_dir.rglob("*.lock")
+            )[:10]
+            lines.append(f"lock files: {locks if locks else 'none'}")
+        except OSError as error:
+            lines.append(f"context capture failed: {error}")
+        return "\n".join(lines)
+
+    def _assert_git_success(
+        self, root: Path, args: tuple[str, ...], result: subprocess.CompletedProcess[str]
+    ) -> None:
+        if result.returncode == 0:
+            return
+        self.fail(
+            f"git {' '.join(args)} exited {result.returncode}: {result.stdout}\n"
+            f"{self._git_failure_context(root)}"
+        )
+
     def run_git(self, root: Path, *args: str) -> None:
         result = self._run_git_process(root, *args)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self._assert_git_success(root, args, result)
 
     def git_output(self, root: Path, *args: str) -> str:
         result = self._run_git_process(root, *args)
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self._assert_git_success(root, args, result)
         return result.stdout.strip()
 
     def load_module_from_path(self, module_path: Path, module_name: str):
