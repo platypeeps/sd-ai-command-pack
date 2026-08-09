@@ -1,2 +1,5 @@
+{"file": ".trellis/tasks/08-09-thin-machine-installer/research/platform-verification.md", "reason": "Executed-binary platform verdicts (gemini/opencode/codex) grounding every partition disposition and probe design"}
+{"file": ".trellis/tasks/08-09-thin-machine-installer/research/adversarial-review-ledger.md", "reason": "Resolved review concerns C-1..C-19; implementation must not reintroduce a dispositioned defect (intent journal, per-surface probes, backup receipts, doc rewrite)"}
 {"file": ".trellis/tasks/08-09-deployment-thin-consumers/research/consumer-ci-usage.md", "reason": "Fleet CI evidence bounding this child's consumer-facing scope (no pack code executes in consumer CI)"}
 {"file": ".trellis/tasks/08-09-deployment-thin-consumers/research/claude-code-plugin-capabilities.md", "reason": "Claude Code plugin/marketplace capability constraints this child must respect"}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Tooling spec layer pre-development checklist for generator/installer/test changes"}

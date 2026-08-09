@@ -3,7 +3,7 @@
   "name": "thin-machine-installer",
   "title": "Machine-scope installer for non-Claude surfaces + unified update action",
   "description": "install.py --machine for platforms dispositioned machine (verify per platform); receipt with version+digest; ownership contract; plugin-bundled installer package; sd-pack-update runs plugin update then machine install, idempotent, partial failure = visible skew",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
