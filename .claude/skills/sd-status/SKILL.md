@@ -57,6 +57,10 @@ reinterpret them as shell text.
    report fresher.
 4. For local mode, report repository identity, branch and working-tree counts,
    Git stash count, cached upstream divergence, default/local/remote branches,
+   the Git worktree inventory (every worktree with its path, checked-out
+   branch or detached HEAD, cleanliness, and the reporting row marked; local
+   branches held in another worktree carry a ` [worktree]` marking, and an
+   unavailable inventory is reported explicitly),
    installed pack and Trellis versions, relevant PR, open PRs/issues, current
    and queued Trellis work, completed tasks stranded outside the Trellis
    archive, the user-local autonomous work-loop state, pack recovery-artifact
