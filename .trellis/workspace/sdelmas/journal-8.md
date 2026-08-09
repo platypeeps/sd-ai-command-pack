@@ -71,3 +71,50 @@ Converged thin-surface-partition planning through round-3 adversarial review, im
 ### Status
 
 [OK] **Completed**
+
+
+## Session 353: Thin plugin packaging: Claude Code plugin, marketplace, review-coordinator rebuttal fix
+
+**Date**: 2026-08-09
+**Task**: Thin plugin packaging: Claude Code plugin, marketplace, review-coordinator rebuttal fix
+**Branch**: `feat/thin-plugin-packaging`
+
+### Summary
+
+Shipped the Claude Code plugin generator, plugins/sd tree, marketplace catalog, release-chain wiring, and CI strict validation for task 08-09-thin-plugin-packaging on PR #400. Fixed two pre-existing review-coordinator defects blocking the local rebuttal flow (cached-state rerun swallow; outcome-only findings gate) and validated the fix live by converging the PR review with same-attempt rebuttals. Verified AC1 via headless --plugin-dir smoke in a payload-free repo.
+
+### Main Changes
+
+- Plugin generator .github/scripts/generate-plugin.py with six fail-closed conditions and justified bin literal allowlist
+- Generated plugins/sd tree (84 files) plus .claude-plugin/marketplace.json catalog
+- Release chain: plugin generation in make generate/release-prep, payload classifier extensions, CI pinned claude plugin validate --strict
+- Review coordinator: apply --local-disposition on rerun of cached attempt; gate on receipt disposition outstanding with fail-closed empty-findings guard; phase-rewind guard
+- Spec: Script Sibling Resolution contract subsection in manifest-and-filesystem.md
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `10b9013c` | feat(scripts): own-location sibling resolution for pack scripts |
+| `0d971228` | feat(plugin): Claude Code plugin generator, marketplace catalog, generated tree |
+| `303f49e3` | feat(plugin): wire generator into make generate, lint lanes; add test suite |
+| `994af6cf` | feat(release): plugin generation in release chain, payload gates, CI validate, docs |
+| `5bea9185` | docs(spec): capture script sibling-resolution contract |
+| `7beccf32` | fix(review): apply local-disposition reruns and gate on outstanding findings |
+
+### Testing
+
+- [OK] make test: 1721 tests across 62 modules, 0 failures
+- [OK] tests.test_review_controller: 34 tests OK incl 6 rebuttal-flow tests
+- [OK] claude plugin validate plugins/sd --strict exit 0; generate-plugin.py --check clean
+- [OK] AC1 smoke: claude --plugin-dir plugins/sd in empty repo exposes 21 sd: commands/skills
+- [OK] sd-review PR 400 converged ready at head 7beccf32 via same-attempt rebuttals
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
