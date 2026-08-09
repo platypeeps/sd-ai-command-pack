@@ -1703,6 +1703,24 @@ class StatusTests(InstallTestCase):
         self.assertNotIn("free-branch [worktree]", human.stdout)
         self.assertNotIn("main [worktree]", human.stdout)
 
+    def test_non_branch_worktree_ref_stays_out_of_held_set(self) -> None:
+        root = self.make_status_repo()
+        worktree = root.parent / "wt-oddref"
+        self.run_git(root, "worktree", "add", "-b", "odd-branch", str(worktree))
+        oid = self.git_output(root, "rev-parse", "HEAD")
+        self.run_git(worktree, "update-ref", "refs/odd/pin", oid)
+        self.run_git(worktree, "symbolic-ref", "HEAD", "refs/odd/pin")
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        held = report["git"]["branchesHeldElsewhere"]
+        self.assertEqual(held, [])
+        self.assertTrue(
+            set(held).issubset(set(report["git"]["localBranches"]))
+        )
+
     def test_worktree_empty_state_is_explicit(self) -> None:
         root = self.make_status_repo()
 

@@ -479,11 +479,16 @@ def collect_git(
     worktrees = collect_worktrees(repo)
     state["worktrees"] = worktrees
     if worktrees["status"] == "ok":
+        # A worktree HEAD may symref to a non-branch ref; the held set is
+        # scoped to local branches so it stays a subset of localBranches.
+        local_branch_names = set(state["localBranches"])
         state["branchesHeldElsewhere"] = sorted(
             {
                 row["branch"]
                 for row in worktrees["rows"]
-                if row["branch"] and not row["current"]
+                if row["branch"]
+                and not row["current"]
+                and row["branch"] in local_branch_names
             }
         )
     else:
