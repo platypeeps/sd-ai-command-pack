@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.64.31 - 2026-08-08
+
+- Enrich every git-caused `*_unavailable` finding in the bookkeeping
+  review preflight with the failed git command, its exit status, and
+  bounded stderr (first line, 200 chars). A module slot captures the most
+  recent `bookkeepingChangedEntries` diff failure for the silent-probe
+  history recoveries; direct-status sites (rev-list histories, the
+  successor subject probe, whitespace validation, the planning-recovery
+  parents probe) append the same detail inline. Diagnostics only: reason
+  codes, receipt schema, statuses, and dispositions are unchanged. This
+  targets the kcov-lane flake of
+  `test_completion_successor_finds_recent_anchor_in_long_history`, whose
+  receipts discarded the underlying git error.
+- Test fixtures: unexpected git failures in the `run_git`/`git_output`
+  assertion wrappers now append a bounded repo-state context block (HEAD
+  bytes, loose/packed ref state, lock files) so the fixture-side
+  `fatal: could not parse HEAD` fingerprint carries discriminating
+  evidence at its next occurrence.
+
 ## 0.64.30 - 2026-08-08
 
 - Add a review-preflight rule for root-task `base_branch`: a changed active
