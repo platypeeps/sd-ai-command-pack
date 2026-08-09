@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-7.md`
-- **Total Sessions**: 350
+- **Active File**: `journal-8.md`
+- **Total Sessions**: 351
 - **Last Active**: 2026-08-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-7.md` | ~1939 | Active |
+| `journal-8.md` | ~70 | Active |
+| `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
 | `journal-4.md` | ~1967 | Archived |
@@ -35,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 351 | 2026-08-09 | sd-status worktree inventory shipped: held branches and leaked worktrees visible | `ad6b1279`, `398c8cb5`, `611308bd`, `59912b94` | `main` |
 | 350 | 2026-08-09 | kcov-lane flake made diagnosable: git failures named in validator receipts | `326db2b1`, `3d130dd9`, `fcf422ed`, `1c914e1d` | `main` |
 | 349 | 2026-08-09 | CI event-head validation: both gaps closed, demonstrated, task finished | `41a6c06d`, `1c1aa3b7`, `9252d01d` | `main` |
 | 348 | 2026-08-08 | Root-task base_branch gate: rule, remediation, PR #385 merged | `a39027ab`, `bde5e1ee`, `fde2dc99`, `2ea88133` | `main` |
