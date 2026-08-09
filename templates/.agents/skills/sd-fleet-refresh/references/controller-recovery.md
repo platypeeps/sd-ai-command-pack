@@ -127,7 +127,8 @@ campaign target release, or replays the prior merge action.
 
 Execute the newly issued publication action append-only. Preserve the failed
 finish-work journal commit. Create one substantive planning task with
-`task.py create --no-start`, leave its lifecycle at `planning` with no branch,
+`task.py create --no-start --description "<why this corrective task exists>"`,
+leave its lifecycle at `planning` with no branch,
 and commit only those task artifacts after the journal. Rerun the original
 `final-bundle --mode planning` command with the failed receipt's exact base and
 the new full head. Require `planning_bundle_valid`, retain that receipt, then

@@ -1718,6 +1718,15 @@ of bypassing the cache contract.
   tree with the merge base of this ref and `HEAD`, so upstream-only changes do
   not inflate the advisory. If no merge base exists, the preflight warns and
   conservatively falls back to the configured or discovered base ref.
+- `SD_AI_COMMAND_PACK_DEFAULT_BRANCH`: explicit repository default-branch NAME
+  (for example `main`) for the review preflight's root-task `base_branch`
+  rule. This is a statement of the default branch, not a diff base: the
+  branch-diff base-ref variables above are deliberately ignored by this rule
+  because their values (a stacked-PR base, in CI an exact SHA) have different
+  semantics. When unset, the rule discovers the default from the
+  `origin/HEAD` symbolic ref and skips itself when neither source resolves.
+  CI exports it from the event payload because a pinned-SHA checkout never
+  establishes `origin/HEAD`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=0`: skip
   repo-local review preflight.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT=required`: fail if no configured
