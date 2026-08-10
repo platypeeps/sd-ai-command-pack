@@ -58,7 +58,7 @@ if [ -n "$first" ] && [ "${first#-}" = "$first" ] && [ -f "$first" ]; then
   # No chmod: kcov parses the script through its shebang and does NOT need the
   # exec bit (probe case E measured a 0644 script fine). Granting +x here would
   # mutate the mode of the tracked shipped script, dirtying the working tree —
-  # which review-local.sh and the surface-closure check both observe and fail on.
+  # which the surface-closure check observes and fails on.
   exec kcov \
     --include-pattern="$include_pattern" \
     --bash-dont-parse-binary-dir \

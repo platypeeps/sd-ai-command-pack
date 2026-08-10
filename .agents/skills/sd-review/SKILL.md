@@ -12,8 +12,8 @@ idempotency, durable receipts, GitHub observation, and typed results. Do not
 reimplement those mechanisms in prose.
 
 This successor is self-contained. Never call, alias, or fall back to
-`sd-review-local`, `sd-review-pr`, a direct Copilot request, or a backend command
-found in configuration or a receipt.
+`sd-review-pr`, a direct Copilot request, or a backend command found in
+configuration or a receipt.
 
 ## Standing GitHub authority
 

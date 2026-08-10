@@ -1,5 +1,15 @@
 # sd-review-pr SKILL: reference fleet classifier, retire generator closure-allowlist entry
 
+> **Subsumed (2026-08-10, from `07-24-remove-retired-review-surfaces`).**
+> This task's entire subject is the `sd-review-pr` skill, which
+> `08-09-retire-review-pr-surface` deletes. Deleting the skill removes the only
+> caller of `fleet-review-classify.py` outside the `machine-claude` slice, so
+> the generator's single dependency-closure allowlist entry goes away with it —
+> there is nothing left to re-reference. Close this task when 08-09 lands, and
+> verify there that `.github/scripts/generate-plugin.py` carries zero
+> closure-allowlist entries rather than a re-pointed one.
+
+
 ## Goal
 
 Remove the plugin generator's single dependency-closure allowlist entry

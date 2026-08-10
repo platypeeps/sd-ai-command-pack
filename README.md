@@ -265,15 +265,6 @@ unpublished for recovery. The ordinary no-argument review preflight uses the
 same descriptive task metadata rules during local pre-publication and
 `sd-check`.
 
-### sd-full-check
-
-Runs the deterministic local verification gate before PR readiness. Prism can
-run automatically when available; Gito is opt-in through
-`SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1` because it may need network access,
-local caches, and LLM credentials.
-This independent legacy surface remains during the clean-interface migration;
-new deterministic callers use `sd-check` and do not invoke or alias it.
-
 ### sd-review
 
 Runs one exact-scope review lifecycle for local changes, the current branch,
@@ -297,8 +288,8 @@ invalid, incompatible, unavailable, failed, or ambiguous states fail closed;
 there is no direct Copilot or custom reviewer fallback.
 
 `sd-review` is additive in this release while callers migrate. The legacy
-`sd-review-pr` and `sd-review-local` surfaces remain independent and are not
-called or aliased by the successor.
+`sd-review-pr` surface remains independent and is not called or aliased by the
+successor.
 
 ### sd-review-pr
 
@@ -316,22 +307,6 @@ The command-owned deterministic gate runs
 `scripts/sd-ai-command-pack-check.py --json` through the installed toolchain.
 It consumes `.sd-ai-command-pack/check.json` when present and never discovers
 `package.json` scripts or falls back to the legacy full-check selector.
-
-### sd-review-local
-
-Runs configured local review providers against local changes, or against the
-current branch when no local changes exist, then enters a user-selected fix
-loop. With the `all` argument it reviews the full checked-out repository (the
-former `sd-review-local-all` command, folded in as of 0.13.0); exclusion and
-retry behavior lives in the installed guide's
-[Local Review](docs/SD_AI_COMMAND_PACK.md#local-review) section.
-On Claude Code, normal current-diff review also runs the native `codex review`
-CLI concurrently with the selected runner stack when the CLI is available and
-supports the matching target. This does not require the OpenAI Codex Claude
-plugin. If the `codex` executable is absent or incompatible, the optional lane
-is reported as skipped and the selected runner stack continues normally; `all`
-mode remains runner-only because native Codex review has no full-codebase
-target.
 
 ### Planning artifact adversarial review
 
@@ -499,15 +474,7 @@ schema-version-1 result; human output remains the default for direct shell use.
 | `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG` | Slug source used to derive `codex/<slug>` when `SD_AI_COMMAND_PACK_CREATE_PR_BRANCH` is unset. | unset |
 | `SD_AI_COMMAND_PACK_CREATE_PR_COMMIT_MESSAGE` | Commit message used by `sd-create-pr` when it creates a commit and the user did not provide a message. | `chore: prepare pull request` |
 | `SD_AI_COMMAND_PACK_CREATE_PR_DRAFT` | Create the PR as draft when set to `1`, unless the user explicitly asks for ready. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS` | Local review tool set for `sd-review-local` (any scope); unset uses the runner default. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` | Custom command for a named local review provider. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND` | Full-codebase custom command for a named provider; unset falls back to the non-`ALL` command. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND` | Example Semgrep custom-provider command for `sd-review-local`; follows the generic `<TOOL>` command naming pattern. | unset |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` | Max Gito attempts for HTTP 429 provider rate limits. | `2` |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` | Initial Gito retry delay. | `30` |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` | Maximum Gito retry delay after backoff. | `120` |
 | `MAX_CONCURRENT_TASKS` | Gito LLM concurrency cap. Loaded from `.gito/sd-ai-command-pack.env` by pack runners when unset. | `4` |
-| `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK` | Enables Prism full-codebase batch/path fallback after empty chunk responses. | `1` |
 | `SD_AI_COMMAND_PACK_SCOPE_PR_BODY` | General PR body override for review-scope and fallback PR-body scope checks. | unset |
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` | PR body override consumed specifically by `sd-ai-command-pack-pr-body-scope.py`; unset falls back to `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`. | unset |
 | `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR` | PR author login (or `--actor`) for `sd-ai-command-pack-pr-body-scope.py`; a `[bot]`-suffixed login (e.g. `dependabot[bot]`) is exempt from strict validation so automated PRs are not blocked. | unset |
@@ -611,7 +578,6 @@ bash -n scripts/sd-ai-command-pack-full-check.sh
 bash -n scripts/sd-ai-command-pack-review-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-toolchain.sh
-bash -n scripts/sd-ai-command-pack-review-local.sh
 bash -n scripts/sd-ai-command-pack-review-scope.sh
 python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```

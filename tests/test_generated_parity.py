@@ -253,13 +253,11 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
-                ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 ".agents/skills/sd-continue/SKILL.md",
                 ".agents/skills/sd-start/SKILL.md",
                 ".agents/skills/sd-finish-work/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
-                ".agents/skills/sd-review-local/SKILL.md",
                 ".agents/skills/sd-update-spec/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-shell-lib.sh",
@@ -270,7 +268,6 @@ class GeneratedParityTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
-                "scripts/sd-ai-command-pack-review-local.sh",
                 "scripts/sd-ai-command-pack-review-learnings.py",
                 "scripts/sd-ai-command-pack-install-audit.py",
                 "scripts/sd-ai-command-pack-pr-body-scope.py",
@@ -305,9 +302,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/test-gaps.toml",
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
-                ".gemini/commands/sd/review-local.toml",
                 ".gemini/commands/sd/review-learnings.toml",
-                ".gemini/commands/sd/full-check.toml",
                 ".gemini/commands/sd/housekeeping.toml",
                 ".gemini/commands/sd/update-spec.toml",
                 ".github/prompts/sd-continue.prompt.md",
@@ -322,9 +317,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-test-gaps.prompt.md",
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
-                ".github/prompts/sd-review-local.prompt.md",
                 ".github/prompts/sd-review-learnings.prompt.md",
-                ".github/prompts/sd-full-check.prompt.md",
                 ".github/prompts/sd-housekeeping.prompt.md",
                 ".github/prompts/sd-update-spec.prompt.md",
             ],
@@ -349,9 +342,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-test-gaps.md",
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
-                ".cursor/commands/sd-review-local.md",
                 ".cursor/commands/sd-review-learnings.md",
-                ".cursor/commands/sd-full-check.md",
                 ".cursor/commands/sd-housekeeping.md",
                 ".cursor/commands/sd-update-spec.md",
             ],
@@ -372,9 +363,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/test-gaps.md",
                 ".claude/commands/sd/retro.md",
                 ".claude/commands/sd/review-pr.md",
-                ".claude/commands/sd/review-local.md",
                 ".claude/commands/sd/review-learnings.md",
-                ".claude/commands/sd/full-check.md",
                 ".claude/commands/sd/housekeeping.md",
                 ".claude/commands/sd/update-spec.md",
                 ".opencode/commands/sd-continue.md",
@@ -390,9 +379,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-test-gaps.md",
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
-                ".opencode/commands/sd-review-local.md",
                 ".opencode/commands/sd-review-learnings.md",
-                ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
                 ".opencode/commands/sd-update-spec.md",
             ],
@@ -476,9 +463,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
-                ".agents/skills/sd-review-local/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
-                ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-toolchain.sh",
@@ -488,7 +473,6 @@ class GeneratedParityTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
-                "scripts/sd-ai-command-pack-review-local.sh",
                 "scripts/sd-ai-command-pack-review-learnings.py",
                 "scripts/sd-ai-command-pack-pr-body-scope.py",
                 "scripts/sd-ai-command-pack-update-spec-kb.py",
@@ -515,9 +499,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".claude/commands/sd/test-gaps.md",
                 ".claude/commands/sd/retro.md",
                 ".claude/commands/sd/review-pr.md",
-                ".claude/commands/sd/review-local.md",
                 ".claude/commands/sd/review-learnings.md",
-                ".claude/commands/sd/full-check.md",
                 ".claude/commands/sd/housekeeping.md",
                 ".claude/commands/sd/update-spec.md",
                 ".cursor/commands/sd-continue.md",
@@ -532,9 +514,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".cursor/commands/sd-test-gaps.md",
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
-                ".cursor/commands/sd-review-local.md",
                 ".cursor/commands/sd-review-learnings.md",
-                ".cursor/commands/sd-full-check.md",
                 ".cursor/commands/sd-housekeeping.md",
                 ".cursor/commands/sd-update-spec.md",
                 ".gemini/commands/sd/continue.toml",
@@ -549,9 +529,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".gemini/commands/sd/test-gaps.toml",
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review-pr.toml",
-                ".gemini/commands/sd/review-local.toml",
                 ".gemini/commands/sd/review-learnings.toml",
-                ".gemini/commands/sd/full-check.toml",
                 ".gemini/commands/sd/housekeeping.toml",
                 ".gemini/commands/sd/update-spec.toml",
                 ".github/prompts/sd-continue.prompt.md",
@@ -566,9 +544,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".github/prompts/sd-test-gaps.prompt.md",
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
-                ".github/prompts/sd-review-local.prompt.md",
                 ".github/prompts/sd-review-learnings.prompt.md",
-                ".github/prompts/sd-full-check.prompt.md",
                 ".github/prompts/sd-housekeeping.prompt.md",
                 ".github/prompts/sd-update-spec.prompt.md",
             ],
@@ -593,9 +569,7 @@ class GeneratedParityTests(InstallTestCase):
                 ".opencode/commands/sd-test-gaps.md",
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
-                ".opencode/commands/sd-review-local.md",
                 ".opencode/commands/sd-review-learnings.md",
-                ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
                 ".opencode/commands/sd-update-spec.md",
             ],
@@ -619,11 +593,8 @@ class GeneratedParityTests(InstallTestCase):
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
-                ".agents/skills/sd-review-local/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
-                ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
-                "scripts/sd-ai-command-pack-review-local.sh",
                 "scripts/sd-ai-command-pack-review-learnings.py",
                 "scripts/sd_ai_command_pack_lib.py",
                 "scripts/sd-ai-command-pack-audit-route.py",
@@ -785,20 +756,6 @@ class GeneratedParityTests(InstallTestCase):
             ),
             (
                 [
-                    root / ".claude/commands/sd/review-local.md",
-                    root / ".cursor/commands/sd-review-local.md",
-                    root / ".gemini/commands/sd/review-local.toml",
-                    root / ".github/prompts/sd-review-local.prompt.md",
-                    root / ".opencode/commands/sd-review-local.md",
-                ],
-                [
-                    "Resolve the `sd-review-local` skill by name",
-                    "scripts/sd-ai-command-pack-review-local.sh",
-                ],
-                [],
-            ),
-            (
-                [
                     root / ".claude/commands/sd/ship.md",
                     root / ".cursor/commands/sd-ship.md",
                     root / ".gemini/commands/sd/ship.toml",
@@ -823,20 +780,6 @@ class GeneratedParityTests(InstallTestCase):
                 [
                     "Resolve the `sd-review-learnings` skill by name",
                     "scripts/sd-ai-command-pack-review-learnings.py",
-                ],
-                [],
-            ),
-            (
-                [
-                    root / ".claude/commands/sd/full-check.md",
-                    root / ".cursor/commands/sd-full-check.md",
-                    root / ".gemini/commands/sd/full-check.toml",
-                    root / ".github/prompts/sd-full-check.prompt.md",
-                    root / ".opencode/commands/sd-full-check.md",
-                ],
-                [
-                    "Resolve the `sd-full-check` skill by name",
-                    "source of truth for the exact checks",
                 ],
                 [],
             ),
@@ -1370,9 +1313,6 @@ class GeneratedParityTests(InstallTestCase):
             "ClientError: 429",
             "installs should commit this file",
             "clone-local exclude list instead",
-            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
-            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
-            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS",
             "shared environment builder",
             "SD_AI_COMMAND_PACK_CACHE_ROOT",
@@ -1703,18 +1643,12 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("one task per iteration", content)
                 self.assertIn("sd-ship", content)
                 self.assertIn("nested housekeeping report", content)
-            elif "full-check" in file.target.name:
-                self.assertIn("Resolve the `sd-full-check` skill by name", content)
-                self.assertIn("source of truth for the exact checks", content)
             elif "check" in file.target.name:
                 self.assertIn("Resolve the `sd-check` skill by name", content)
                 self.assertIn("read-only", content)
             elif "ship" in file.target.name:
                 self.assertIn("Resolve the `sd-ship` skill by name", content)
                 self.assertIn("only merge authority", content)
-            elif "review-local" in file.target.name:
-                self.assertIn("Resolve the `sd-review-local` skill by name", content)
-                self.assertIn("scripts/sd-ai-command-pack-review-local.sh", content)
             elif "housekeeping" in file.target.name:
                 self.assertIn(
                     "Resolve the `sd-housekeeping` skill by name",
@@ -1737,7 +1671,7 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("read-only", content)
             elif "Resolve the `sd-review` skill by name" in content:
                 self.assertIn("scripts/sd-ai-command-pack-review.py", content)
-                self.assertIn("never fall back to `sd-review-local`", content)
+                self.assertIn("never fall back to `sd-review-pr`", content)
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)
 
@@ -1777,19 +1711,6 @@ class GeneratedParityTests(InstallTestCase):
                         apply_platform_body_deviations(platform, command, body)
                     )
                     self.assertEqual(adapter_body, neutral_body)
-
-    def test_claude_body_insertion_parity_requires_exactly_one_copy(self) -> None:
-        command = "review-local"
-        _, platform_text = CLAUDE_COMMAND_BODY_INSERTIONS[command]
-        insertion = f"{platform_text}\n\n"
-
-        for body in ("", insertion * 2):
-            with self.subTest(copy_count=body.count(insertion)):
-                with self.assertRaisesRegex(
-                    AssertionError,
-                    "Claude body insertion must appear exactly once",
-                ):
-                    apply_platform_body_deviations("claude", command, body)
 
     def test_review_pr_remote_round_limit_defaults_to_five(self) -> None:
         _, files = install.load_manifest()
@@ -1940,10 +1861,8 @@ class GeneratedParityTests(InstallTestCase):
             "test-gaps",
             "retro",
             "review-pr",
-            "review-local",
             "review-learnings",
             "check",
-            "full-check",
             "housekeeping",
             "update-spec",
         ]
@@ -1981,11 +1900,9 @@ class GeneratedParityTests(InstallTestCase):
             "retro": "Capture a structured retrospective for a debugging stream or incident, record it in the journal, and propose consent-gated prevention tasks.",
             "review": "Run one exact-scope local and routed-remote Software Delivery review lifecycle.",
             "review-pr": "Run the Software Delivery (SD) pull-request review loop.",
-            "review-local": "Run the Software Delivery (SD) local review loop.",
             "ship": "Take the current branch from committed work to a merged pull request by sequencing the standard SD create-pr, routed review, lifecycle, internal check watch, and housekeeping stages.",
             "review-learnings": "Detect or update repository review learnings.",
             "check": "Run deterministic read-only Software Delivery checks and report a typed result.",
-            "full-check": "Run the Software Delivery (SD) full-check gate for deterministic checks, local review, and readiness reporting.",
             "housekeeping": "Run Software Delivery (SD) end-of-stream housekeeping for a completed work stream.",
             "update-spec": "Run the Software Delivery (SD) update-spec workflow for repository knowledge artifacts.",
         }
@@ -2067,7 +1984,6 @@ class GeneratedParityTests(InstallTestCase):
             "scripts/sd-ai-command-pack-housekeeping.sh",
             "scripts/sd-ai-command-pack-review-scope.sh",
             "scripts/sd-ai-command-pack-review-preflight.mjs",
-            "scripts/sd-ai-command-pack-review-local.sh",
             "scripts/sd-ai-command-pack-review-learnings.py",
             "scripts/sd-ai-command-pack-install-audit.py",
             "scripts/sd-ai-command-pack-pr-body-scope.py",

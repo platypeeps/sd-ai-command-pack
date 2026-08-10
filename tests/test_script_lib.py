@@ -328,7 +328,6 @@ class ScriptLibTests(InstallTestCase):
 
         for name in (
             "sd-ai-command-pack-full-check.sh",
-            "sd-ai-command-pack-review-local.sh",
             "sd-ai-command-pack-review-scope.sh",
             "sd-ai-command-pack-housekeeping.sh",
         ):

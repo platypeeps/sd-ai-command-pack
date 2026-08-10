@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.65.0 - 2026-08-09
+
+- Skills that positioned themselves against `sd-full-check` and
+  `sd-review-local` — `sd-fix-ci`, `sd-test-gaps`, `sd-audit-repo`, `sd-check`,
+  and `sd-review` — now name `sd-check` and `sd-review` instead. `sd-fix-ci`
+  routed every local gate run through `sd-full-check`, so this is a behavior
+  change, not only wording.
+- The retired `sd-full-check` and `sd-review-local` command surfaces are
+  removed. Both were transitional after 0.62.0 and are fully covered by
+  `sd-check` (deterministic gate) and `sd-review` (routed review lifecycle).
+  Every generated adapter, skill, prompt, and manifest row for them is gone,
+  along with `scripts/sd-ai-command-pack-review-local.sh` and the 23
+  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_*` environment keys — including the four
+  deprecated `SD_AI_COMMAND_PACK_FULL_CHECK_*` fallbacks that read them. A
+  refresh retires the installed copies from prior releases; a locally modified
+  copy is preserved and reported rather than deleted. `sd-review-pr` is
+  untouched by this release. `scripts/sd-ai-command-pack-full-check.sh`
+  survives as the pack-source gate that `make full-check` and CI still run;
+  only the command surface named `sd-full-check` is retired.
+
 ## 0.64.35 - 2026-08-09
 
 - The non-Claude surfaces now install once per machine instead of once per

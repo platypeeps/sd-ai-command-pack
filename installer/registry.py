@@ -634,15 +634,6 @@ INTERACTION_DECISIONS: tuple[InteractionDecision, ...] = (
         noninteractive="report-only",
     ),
     InteractionDecision(
-        "review-local.findings",
-        "finding-task-batch",
-        "Review fixes",
-        "Which verified local-review findings should I fix now?",
-        option_source="independent verified local-review findings",
-        multi_select=True,
-        noninteractive="report-only",
-    ),
-    InteractionDecision(
         "review.higher-risk-fixes",
         "higher-risk-mutation",
         "Risky fixes",
@@ -940,16 +931,6 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         ),
     ),
     CommandInfo(
-        "sd-review-local",
-        "review-local",
-        "verification-improvement",
-        mutates_local=True,
-        interaction_decisions=(
-            "review-local.findings",
-            "review.scope-expansion",
-        ),
-    ),
-    CommandInfo(
         "sd-review-learnings",
         "review-learnings",
         "verification-improvement",
@@ -957,9 +938,6 @@ COMMAND_REGISTRY: tuple[CommandInfo, ...] = (
         interaction_decisions=("review-learnings.external-target",),
     ),
     CommandInfo("sd-check", "check", "verification-improvement"),
-    CommandInfo(
-        "sd-full-check", "full-check", "verification-improvement", mutates_local=True
-    ),
     CommandInfo(
         "sd-housekeeping",
         "housekeeping",
@@ -1380,32 +1358,66 @@ RETIRED_COMMAND_SURFACES: tuple[RetiredCommandSurface, ...] = (
         removed_version="0.57.0",
         owner_task="07-24-simplify-review-shipping-composition",
     ),
-    # Schedule-only rows: the three transitional review surfaces still ship
-    # until the announced removal release. identifiers stay empty and
-    # source_paths_must_be_absent stays False until the owner task deletes
-    # the files and flips the rows to enforcing.
+    # removed_version stays 0.62.0, the release these surfaces were announced
+    # for, even though the deletion shipped later: the removal register records
+    # the schedule consumers were given, and CHANGELOG.md records the slip.
     RetiredCommandSurface(
         id="full-check-command",
-        identifiers=(),
+        identifiers=("sd-full-check",),
         installed_targets=command_installed_targets("sd-full-check", "full-check"),
         removed_version="0.62.0",
         owner_task="07-24-remove-retired-review-surfaces",
-        source_paths_must_be_absent=False,
     ),
     RetiredCommandSurface(
         id="review-local-command",
-        identifiers=(),
-        installed_targets=command_installed_targets("sd-review-local", "review-local"),
+        identifiers=("sd-review-local",),
+        installed_targets=(
+            *command_installed_targets("sd-review-local", "review-local"),
+            # command_installed_targets returns command paths only, so the
+            # script the surface shipped must be listed by hand or consumer
+            # copies stay undeletable. Consumer-install path only, never the
+            # templates/ source.
+            "scripts/sd-ai-command-pack-review-local.sh",
+        ),
         removed_version="0.62.0",
         owner_task="07-24-remove-retired-review-surfaces",
-        source_paths_must_be_absent=False,
+        # identifiers alone do not lint environment names; the drift lint reads
+        # (*identifiers, *configuration_keys).
+        configuration_keys=(
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_CUSTOM_COMMAND",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND",
+            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS",
+        ),
     ),
+    # Schedule-only row: sd-review-pr still ships until its owner task deletes
+    # it. identifiers stay empty and source_paths_must_be_absent stays False
+    # until that task flips the row to enforcing.
     RetiredCommandSurface(
         id="review-pr-command",
         identifiers=(),
         installed_targets=command_installed_targets("sd-review-pr", "review-pr"),
         removed_version="0.62.0",
-        owner_task="07-24-remove-retired-review-surfaces",
+        owner_task="08-09-retire-review-pr-surface",
         source_paths_must_be_absent=False,
     ),
 )
@@ -1434,8 +1446,6 @@ def retired_surface_removed_version(surface_id: str) -> str:
 # removal version always comes from the referenced retirement row so the
 # schedule has exactly one source of truth.
 SUPERSEDED_COMMANDS: dict[str, tuple[str, str]] = {
-    "sd-full-check": ("sd-check", "full-check-command"),
-    "sd-review-local": ("sd-review", "review-local-command"),
     "sd-review-pr": ("sd-review", "review-pr-command"),
 }
 
@@ -1462,11 +1472,6 @@ def validate_superseded_commands(
 COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
     CommandSurfaceAllowance(
         identifier="sd-review-local-all",
-        path_pattern="README.md",
-        reason="bounded migration note for the 0.13.0 command fold",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-review-local-all",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
     ),
@@ -1474,11 +1479,6 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         identifier="sd-review-local-all",
         path_pattern="CHANGELOG.md",
         reason="bounded historical release record",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-review-local-all",
-        path_pattern="tests/test_install_core.py",
-        reason="migration behavior regression fixture",
     ),
     CommandSurfaceAllowance(
         identifier="sd-review-local-all",
@@ -1546,6 +1546,301 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
     ),
     CommandSurfaceAllowance(
         identifier="sd-watch-pr",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern="CHANGELOG.md",
+        reason="bounded historical release record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern=".trellis/audit/ledger.md",
+        reason="bounded historical audit record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern="tests/test_retired_targets.py",
+        reason="retired-target cleanup regression fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern=".trellis/audit/report-2026-07-19.md",
+        reason="bounded historical audit record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern=".trellis/audit/report-2026-07-28.md",
+        reason="bounded historical audit record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-full-check",
+        path_pattern="docs/review-learnings.md",
+        reason="bounded historical review-learning record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local",
+        path_pattern="CHANGELOG.md",
+        reason="bounded historical release record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local",
+        path_pattern=".trellis/audit/ledger.md",
+        reason="bounded historical audit record",
+    ),
+    CommandSurfaceAllowance(
+        identifier="sd-review-local",
+        path_pattern="tests/test_retired_targets.py",
+        reason="retired-target cleanup regression fixture",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_CUSTOM_COMMAND",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_CUSTOM_COMMAND",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND",
+        path_pattern="plugins/sd/installer/registry.py",
+        reason="generated plugin copy of the canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS",
+        path_pattern="installer/registry.py",
+        reason="canonical retired-surface declaration",
+    ),
+    CommandSurfaceAllowance(
+        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS",
         path_pattern="plugins/sd/installer/registry.py",
         reason="generated plugin copy of the canonical retired-surface declaration",
     ),

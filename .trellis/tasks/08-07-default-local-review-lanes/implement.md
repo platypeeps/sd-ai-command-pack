@@ -1,5 +1,17 @@
 # Implement — default to local subscription review lanes
 
+> **Correction (2026-08-10, from `07-24-remove-retired-review-surfaces`).**
+> The seven-site checklist below and the runner it enumerates target
+> `sd-ai-command-pack-review-local.sh`, which no longer exists: the
+> `sd-review-local` command surface and its shell runner were deleted in pack
+> 0.65.0. Re-target this plan at the surviving stage before implementing —
+> `templates/scripts/sd-ai-command-pack-review-local.py` (the tool list and
+> per-tool dispatch it owns at `:251` and `:266`) and
+> `templates/scripts/sd-ai-command-pack-review.py:220` — and re-derive the line
+> anchors, which no longer apply. The task's goal is unaffected; only its edit
+> sites moved.
+
+
 Branch: `task/08-07-default-local-review-lanes`
 Worktree: session scratchpad `pack-wt`, isolated from the checkout another
 session is using on `task/08-07-review-check-stale-cache`.

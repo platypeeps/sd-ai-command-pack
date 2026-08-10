@@ -85,9 +85,8 @@ exec "$real_bash" "$@"        # option forms (-c/-n): no coverage, real bash
 
 > **Warning: never `chmod` the target.** kcov reads a `0644` script through its
 > shebang; it does not need the exec bit. Granting `+x` mutates the mode of the
-> tracked shipped script, dirtying the working tree — which `review-local.sh`
-> (sees itself in the local-changes filter) and the surface-closure check both
-> observe and fail on.
+> tracked shipped script, dirtying the working tree — which the
+> surface-closure check observes and fails on.
 
 > **Warning: `--include-pattern` is a plain substring, not a regex or path
 > prefix.** Use the basename marker `sd-ai-command-pack-`. A `$PWD/scripts/...`

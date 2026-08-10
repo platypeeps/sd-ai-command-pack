@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-10T02:08:41Z",
-  "packVersion": "0.64.35",
-  "payloadDigest": "sha256:7aa604afcec045d64286b8f76bb24e4dd1ec670a3c73f68b2a0b77060dccbd8f",
+  "validatedAt": "2026-08-10T10:08:46Z",
+  "packVersion": "0.65.0",
+  "payloadDigest": "sha256:1d09f640149e8b307986546f152fd232695e22817b90bec65adc68d7afe23231",
   "fleetManifestDigest": "sha256:e32b7b80ebdd66d067fdf4dd95c8ccc049553191d85b6cb7ed44a49960f13a23",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "9bb5f74083422d609660899ee1f2f2fa4cbaf8b6",
+      "baseCommit": "c40268ce22df685a94dbcd2300a8f2825744ec6d",
       "status": "passed",
       "prepares": [
         [
@@ -26,7 +26,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "538d89b20019dcc9ec3b529fe118ea5c780d8894",
+      "baseCommit": "b770d1743429f899445e8bc13530245959041004",
       "status": "passed",
       "prepares": [
         [
@@ -64,7 +64,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "65f834b642cd6d16e276138fcbf2ed517c68911c",
+      "baseCommit": "81f06977bdaf2b7e8ae18a28cb0a74170926aa65",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "2344437a628823d05bc3e251296d80c505150f0b",
+      "baseCommit": "dcc2d58b43ff4a949216fdd4da4998a145d75788",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -121,7 +121,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "53c1cf5111bd9cfef10d6ba9e94bf9e612b9f400",
+      "baseCommit": "8a5493b4002f1988f18c35952f6e9f28b8b6972f",
       "status": "passed",
       "prepares": [
         [
@@ -149,7 +149,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "209c2fd759d451991814629cea6821733822074c",
+      "baseCommit": "b85ac149134bdbec3794af04d8a38eea84066031",
       "status": "passed",
       "prepares": [
         [

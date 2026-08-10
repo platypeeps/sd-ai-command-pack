@@ -1,5 +1,14 @@
 # Default to local subscription review lanes before remote paid review
 
+> **Correction (2026-08-10, from `07-24-remove-retired-review-surfaces`).**
+> AC8 below invokes `templates/scripts/...review-local.sh`, which pack 0.65.0
+> deleted along with the `sd-review-local` surface. Restate that criterion
+> against the surviving local-review stage
+> (`templates/scripts/sd-ai-command-pack-review-local.py`) and the `sd-review`
+> coordinator before this task starts. The criterion's intent — a stub `codex`
+> on `PATH` is invoked rather than reported as unconfigured — still holds.
+
+
 ## Goal
 
 Make a zero-marginal-cost local review lane a first-class configured provider
@@ -234,8 +243,9 @@ every consumer without Codex. Preventing that is a requirement, not a nicety.
   promises "Prism/Gito defaults", and the top `CHANGELOG.md` heading matches.
 - [ ] AC11. `make check` passes: `make test`, `make lint`, `make audit`,
   `make full-check` all green with zero failures. `tests/test_review_stage.py`
-  and `tests/test_review_controller.py` are included, not only
-  `tests/test_review_local.py`.
+  and `tests/test_review_controller.py` are included. (The former
+  `test_review_local.py` was deleted with the `sd-review-local` surface by
+  `07-24-remove-retired-review-surfaces`.)
 - [ ] AC12. `make sync` and `make surface-check` report no drift between
   `templates/` and the installed root copies.
 
@@ -359,7 +369,8 @@ pass against a lane that was never wired up.
 That task established consent-not-capability gating for the two shipped Codex
 lanes (planning adversarial review at
 `.claude/sd-ai-command-pack/planning-adversarial-review.md:41-44`; local
-review at `.agents/skills/sd-review-local/SKILL.md:166`). Both currently
+review at line 166 of the since-deleted `sd-review-local` skill, removed by
+`07-24-remove-retired-review-surfaces`). Both then
 launch on a successful capability probe alone — "can this run?" answering
 "should this run?" — sending planning artifacts or diffs to a third party
 because a CLI happens to be installed. This task, which owns the local-review

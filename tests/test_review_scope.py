@@ -651,11 +651,9 @@ class ReviewScopeTests(InstallTestCase):
                 if file.kind in guidance_kinds
             }
         )
-        full_check_skill = (
-            install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
-        )
+        check_skill = install.ROOT / "templates/.agents/skills/sd-check/SKILL.md"
 
-        self.assertIn(full_check_skill, guidance_sources)
+        self.assertIn(check_skill, guidance_sources)
         self.assertGreater(len(guidance_sources), 1)
         for source in guidance_sources:
             with self.subTest(source=source):
@@ -1711,8 +1709,6 @@ class ReviewScopeTests(InstallTestCase):
         self.assertIn("typed deterministic `sd-check` gate", readme)
         self.assertIn("never discovers", readme)
         self.assertIn("re-requests review after each pushed fix", readme)
-        self.assertIn("sd-review-local", readme)
-        self.assertIn("With the `all` argument", readme)
         self.assertIn(
             "[docs/SD_AI_COMMAND_PACK.md](docs/SD_AI_COMMAND_PACK.md#commands)",
             readme,
@@ -1724,8 +1720,6 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("SD_AI_COMMAND_PACK_REVIEW_PR_REMOTE_REVIEWER", doc)
             self.assertIn("review-fix commit made", doc)
             self.assertIn("never invokes full-check, Prism, or Gito", doc)
-            self.assertIn("sd-review-local", doc)
-            self.assertIn("`all`", doc)
 
 
 if __name__ == "__main__":

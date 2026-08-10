@@ -1,0 +1,34 @@
+candidate validation failed for 1 consumer(s); ledger was not updated
+sd-ai-command-pack candidate: 0.65.0
+failed  P40 platypeeps/rwbp-website (8.4s)
+  candidate check 1 failed with exit 1: node scripts/sd-ai-command-pack-review-preflight.mjs
+PASS package.json keeps dependency overrides in one source of truth per package.
+PASS working tree diff + untracked files changes copied Trellis/SD command-pack surfaces with repo-owned integration context: docs/SD_AI_COMMAND_PACK.md, docs/repomix-map.md.
+PASS checked 457 documentation/prompt/spec file(s) for personal absolute paths.
+PASS no changed Trellis task metadata records require integrity checks.
+PASS no changed Trellis task topology requires semantic validation.
+PASS checked 42 active-root Trellis task record(s); none is completed outside archive.
+PASS no changed Trellis task context manifests require validation.
+PASS checked 79 completed Trellis journal session(s) for placeholders and validation consistency, 79 journal/index commit list(s), and 79 baseline session(s) for historical edits.
+PASS no changed code paths require a first-review boundary-risk sweep.
+PASS f9102493d23bc79d87223f567bb26e4775753339 to working tree changes 94 file(s), at or below GitHub Copilot's 300-file review limit.
+PASS f9102493d23bc79d87223f567bb26e4775753339 to working tree changes 7008 line(s), below the Copilot review-size warning threshold.
+PASS f9102493d23bc79d87223f567bb26e4775753339 to working tree changes 0 authored source line(s), below the focused-review warning threshold.
+PASS f9102493d23bc79d87223f567bb26e4775753339 to working tree changes at most one Trellis task directory.
+WARN This branch changes tooling/generated files; the PR body must include a recognized tooling/generated scope section (for example 'Tooling/generated scope:'). Add it before opening the PR.
+FAIL .trellis/spec/web/testing/local-and-ci-gates.md:87 references missing path scripts/sd-ai-command-pack-review-local.sh.
+FAIL .trellis/spec/workspace/documentation/framework-adapters.md:68 references missing path .gemini/commands/sd/review-local.toml.
+FAIL .trellis/spec/workspace/documentation/framework-adapters.md:71 references missing path .github/prompts/sd-review-local.prompt.md.
+FAIL .trellis/spec/workspace/documentation/framework-adapters.md:76 references missing path .opencode/commands/sd-review-local.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:38 references missing path scripts/sd-ai-command-pack-review-local.sh.
+FAIL docs/DEVELOPMENT_CYCLE.md:100 references missing path .agents/skills/sd-full-check/SKILL.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:103 references missing path .agents/skills/sd-review-local/SKILL.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:108 references missing path .github/prompts/sd-full-check.prompt.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:109 references missing path .github/prompts/sd-review-local.prompt.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:110 references missing path .gemini/commands/sd/full-check.toml.
+FAIL docs/DEVELOPMENT_CYCLE.md:111 references missing path .gemini/commands/sd/review-local.toml.
+FAIL docs/DEVELOPMENT_CYCLE.md:112 references missing path .opencode/commands/sd-full-check.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:113 references missing path .opencode/commands/sd-review-local.md.
+FAIL docs/DEVELOPMENT_CYCLE.md:146 references missing path scripts/sd-ai-command-pack-review-local.sh.
+FAIL docs/ci.md:54 references missing path scripts/sd-ai-command-pack-review-local.sh.
+Review preflight: 15 failure(s), 1 warning(s).

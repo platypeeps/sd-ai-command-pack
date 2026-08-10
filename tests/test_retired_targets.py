@@ -25,6 +25,12 @@ STALE_WORK_DESIGNS_SKILL = ".agents/skills/sd-work-designs/SKILL.md"
 STALE_WORK_DESIGNS_CONTENT = "# sd-work-designs\n\nUse the former design selector.\n"
 STALE_WATCH_PR_SKILL = ".agents/skills/sd-watch-pr/SKILL.md"
 STALE_WATCH_PR_CONTENT = "# sd-watch-pr\n\nRun the former PR watch loop.\n"
+STALE_FULL_CHECK_SKILL = ".agents/skills/sd-full-check/SKILL.md"
+STALE_FULL_CHECK_CONTENT = "# sd-full-check\n\nRun the former local gate.\n"
+STALE_REVIEW_LOCAL_SKILL = ".agents/skills/sd-review-local/SKILL.md"
+STALE_REVIEW_LOCAL_CONTENT = "# sd-review-local\n\nRun the former provider loop.\n"
+STALE_REVIEW_LOCAL_SCRIPT = "scripts/sd-ai-command-pack-review-local.sh"
+STALE_REVIEW_LOCAL_SCRIPT_CONTENT = "#!/usr/bin/env bash\n# former local review runner\n"
 
 
 class RetiredTargetsTests(InstallTestCase):
@@ -79,7 +85,9 @@ class RetiredTargetsTests(InstallTestCase):
         self.assertEqual(len(install.SOURCE_ONLY_COMMAND_TARGETS), 26)
         self.assertEqual(len(install.RETIRED_WORK_DESIGNS_TARGETS), 26)
         self.assertEqual(len(install.RETIRED_WATCH_PR_TARGETS), 26)
-        self.assertEqual(len(install.RETIRED_TARGETS), 104)
+        self.assertEqual(len(install.RETIRED_FULL_CHECK_TARGETS), 26)
+        self.assertEqual(len(install.RETIRED_REVIEW_LOCAL_TARGETS), 27)
+        self.assertEqual(len(install.RETIRED_TARGETS), 157)
         self.assertEqual(
             len(set(install.RETIRED_TARGETS)),
             len(install.RETIRED_TARGETS),
@@ -96,6 +104,18 @@ class RetiredTargetsTests(InstallTestCase):
         for target in install.RETIRED_WATCH_PR_TARGETS:
             with self.subTest(target=target):
                 self.assertIn("watch-pr", target)
+        for target in install.RETIRED_FULL_CHECK_TARGETS:
+            with self.subTest(target=target):
+                self.assertIn("full-check", target)
+        for target in install.RETIRED_REVIEW_LOCAL_TARGETS:
+            with self.subTest(target=target):
+                self.assertIn("review-local", target)
+        # The review-local retirement is the only one that also reclaims a
+        # shipped script, so the family is command targets plus that one path.
+        self.assertIn(
+            "scripts/sd-ai-command-pack-review-local.sh",
+            install.RETIRED_REVIEW_LOCAL_TARGETS,
+        )
         # A retired path must never come back as a live manifest target.
         manifest_targets = {file.target.as_posix() for file in self._manifest_files}
         self.assertEqual(
@@ -135,7 +155,7 @@ class RetiredTargetsTests(InstallTestCase):
         self.assertIn(f"{'retired':17} {STALE_SKILL}", result.stdout)
         self.assertFalse(stale.exists())
         self.assertFalse(stale.parent.exists())
-        self.assertTrue((root / ".agents/skills/sd-review-local/SKILL.md").is_file())
+        self.assertTrue((root / ".agents/skills/sd-review/SKILL.md").is_file())
         receipt = (root / install.INSTALLED_TARGETS_FILE).read_text(encoding="utf-8")
         provenance = (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
         self.assertNotIn("review-local-all", receipt)
@@ -174,6 +194,60 @@ class RetiredTargetsTests(InstallTestCase):
         self.assertIn(f"{'retired':17} {STALE_WATCH_PR_SKILL}", result.stdout)
         self.assertFalse(stale.exists())
         self.assertTrue((root / ".agents/skills/sd-ship/SKILL.md").is_file())
+
+    def test_refresh_deletes_vouched_full_check_target(self) -> None:
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        stale = self.seed_stale_target(
+            root,
+            STALE_FULL_CHECK_SKILL,
+            content=STALE_FULL_CHECK_CONTENT,
+        )
+
+        result = self.run_install_inproc(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"{'retired':17} {STALE_FULL_CHECK_SKILL}", result.stdout)
+        self.assertFalse(stale.exists())
+        self.assertTrue((root / ".agents/skills/sd-check/SKILL.md").is_file())
+
+    def test_refresh_deletes_vouched_review_local_target(self) -> None:
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        stale = self.seed_stale_target(
+            root,
+            STALE_REVIEW_LOCAL_SKILL,
+            content=STALE_REVIEW_LOCAL_CONTENT,
+        )
+
+        result = self.run_install_inproc(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"{'retired':17} {STALE_REVIEW_LOCAL_SKILL}", result.stdout)
+        self.assertFalse(stale.exists())
+        self.assertTrue((root / ".agents/skills/sd-review/SKILL.md").is_file())
+
+    def test_refresh_deletes_vouched_retired_script(self) -> None:
+        """The only retired family that reclaims a shipped `scripts/` path."""
+
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        stale = self.seed_stale_target(
+            root,
+            STALE_REVIEW_LOCAL_SCRIPT,
+            content=STALE_REVIEW_LOCAL_SCRIPT_CONTENT,
+        )
+
+        result = self.run_install_inproc(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"{'retired':17} {STALE_REVIEW_LOCAL_SCRIPT}", result.stdout)
+        self.assertFalse(stale.exists())
+        # The shared script directory survives: other runners still live there.
+        self.assertTrue((root / "scripts/sd-ai-command-pack-review.py").is_file())
 
     def test_refresh_preserves_drifted_stale_target_without_force(self) -> None:
         root = self.make_repo()

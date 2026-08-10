@@ -22,7 +22,8 @@
     "07-24-implement-read-only-sd-check",
     "07-24-implement-unified-routed-sd-review",
     "07-24-simplify-review-shipping-composition",
-    "07-24-remove-retired-review-surfaces"
+    "07-24-remove-retired-review-surfaces",
+    "08-09-retire-review-pr-surface"
   ],
   "parent": null,
   "relatedFiles": [],

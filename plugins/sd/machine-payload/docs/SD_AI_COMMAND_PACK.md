@@ -54,7 +54,6 @@ Quick links:
   local-provider, routed-review, finding-disposition, and exact-head lifecycle.
 - `.agents/skills/sd-review-pr/SKILL.md`: deterministic local gate plus remote
   PR review workflow.
-- `.agents/skills/sd-review-local/SKILL.md`: local review provider fix loop.
 - `.agents/skills/sd-review-learnings/SKILL.md`: review feedback learning
   capture workflow.
 - `.agents/skills/sd-audit-repo/SKILL.md`: formal multi-dimension repository
@@ -73,7 +72,6 @@ Quick links:
   lifecycle step, watch-pr, and housekeeping.
 - `.agents/skills/sd-check/SKILL.md`: typed deterministic read-only verification
   workflow.
-- `.agents/skills/sd-full-check/SKILL.md`: full local verification workflow.
 - `.agents/skills/sd-housekeeping/SKILL.md`: post-merge cleanup workflow.
 - `.agents/skills/sd-update-spec/SKILL.md`: Trellis update-spec workflow plus
   pack-managed repository knowledge refresh.
@@ -126,13 +124,6 @@ Quick links:
 - `~/.agents/bin/sd-ai-command-pack-review-preflight.mjs`: generic dependency-free
   review preflight for copied/generated disclosure, documentation path hygiene,
   Trellis journal consistency, npm override drift, and large diff warnings.
-- `~/.agents/bin/sd-ai-command-pack-review-local.sh`: local Prism/Gito and configured
-  review-tool runner for the review-local loop, including its `all`
-  full-codebase mode. Distinct from the similarly named
-  `~/.agents/bin/sd-ai-command-pack-review-local.py`, the internal local review
-  stage that `~/.agents/bin/sd-ai-command-pack-review.py` invokes; the two share a
-  base name but do not call each other, and the `.py` is an internal pipeline
-  stage rather than an operator entry point.
 - `~/.agents/bin/sd-ai-command-pack-review-learnings.py`: local review feedback
   pattern scanner and managed learning-block updater. It preserves current,
   non-outdated unresolved comments as individual actionable rows, clusters
@@ -186,7 +177,7 @@ and then performs the architecture-overview check.
 Codex exposes the pack entry points as skills named `sd-help`, `sd-status`,
 `sd-start`, `sd-continue`,
 `sd-finish-work`, `sd-create-pr`, `sd-work-backlog`,
-`sd-check`, `sd-full-check`, `sd-housekeeping`, `sd-review`, `sd-review-pr`, `sd-review-local`,
+`sd-check`, `sd-housekeeping`, `sd-review`, `sd-review-pr`,
 `sd-review-learnings`, `sd-audit-repo`, `sd-ship`,
 `sd-fix-ci`, `sd-update-deps`,
 `sd-test-gaps`, `sd-retro`, and `sd-update-spec`; type
@@ -483,10 +474,8 @@ Qoder commands, Trae commands, Pi prompts, workflow adapters, and Codex skills:
 /sd-create-pr
 /sd-work-backlog
 /sd-check
-/sd-full-check
 /sd-housekeeping
 /sd-review-pr
-/sd-review-local
 /sd-ship
 /sd-review-learnings
 /sd-audit-repo
@@ -564,8 +553,6 @@ Use the script directly from any shell:
 bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
   ~/.agents/bin/sd-ai-command-pack-check.py --json
 bash ~/.agents/bin/sd-ai-command-pack-full-check.sh
-bash ~/.agents/bin/sd-ai-command-pack-review-local.sh
-bash ~/.agents/bin/sd-ai-command-pack-review-local.sh --full-codebase
 bash ~/.agents/bin/sd-ai-command-pack-housekeeping.sh --json # typed cleanup result
 bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- ~/.agents/bin/sd-ai-command-pack-status.py
 bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- ~/.agents/bin/sd-ai-command-pack-status.py fleet --json
@@ -699,9 +686,8 @@ explicit `SOURCE_ONLY_SKILL_REFERENCES` declaration); the validator never runs
 those preparation actions itself. The local pre-publication gate and CI use
 the same helper rather than reconstructing the policy from separate globs.
 
-The independent `sd-full-check` surface remains available only during the
-clean-interface migration. New deterministic callers do not invoke or alias it.
-Its script runs `git diff --check`, `git diff --cached --check`,
+`~/.agents/bin/sd-ai-command-pack-full-check.sh` is a pack-source release gate with
+no command surface of its own: `make check` and CI run it directly. It runs `git diff --check`, `git diff --cached --check`,
 review preflight through `~/.agents/bin/sd-ai-command-pack-review-preflight.mjs`, any
 configured `SD_AI_COMMAND_PACK_FULL_CHECK_REVIEW_PREFLIGHT_COMMAND`, and the
 legacy repo-local `scripts/check-review-preflight.mjs` when present. It then
@@ -853,36 +839,6 @@ Generated GitHub paths and path-like comment snippets inside the complete
 validator masks only that block while preserving line numbers. Human-authored
 content around the block and incomplete marker pairs remain checked normally.
 
-The review-local script is intentionally tool-stack aware. In this pack version
-its runner-owned default toolset is Prism and Gito. Its default scope is
-local-files-first: it reviews
-unstaged, staged, and untracked local files when present; if there are no local
-changed files, it reviews the current branch diff from the configured base. Pass
-tool names as arguments, set
-`SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`, or configure a third-party tool with
-`SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`. The review-local command uses
-that script output to ask which findings to fix, applies only selected fixes,
-and repeats the same tool stack until the user selects no more items.
-
-When `sd-review-local` runs through its Claude Code adapter, normal
-current-diff review also adds the native Codex CLI as a concurrent peer lane.
-Dirty working trees use `codex review --uncommitted`; clean-tree branch review
-uses `codex review --base <resolved-ref>` with the same base selected by the
-shared skill. The adapter checks for the `codex` executable before probing the
-CLI and required flag, then collects both the Codex and runner results even
-when one fails and verifies/deduplicates their findings before asking what to
-fix. A missing executable, failed help probe, or incompatible Codex CLI skips
-that optional lane visibly while the selected runner stack continues normally;
-a runner-only result may still be clean. A Codex review that starts and then
-fails makes the combined review incomplete, not clean.
-
-This Claude lane calls the supported `codex review` CLI directly. It does not
-require, inspect, install, or patch the OpenAI Codex Claude plugin; that plugin
-may be installed or uninstalled independently. The Codex CLI itself must remain
-installed and authenticated. Native Codex review has no repository-wide target,
-so `sd-review-local all` runs only the configured full-codebase runner providers
-and reports the Codex scope limitation rather than mixing scopes.
-
 ### Unified routed review
 
 `sd-review` invokes `~/.agents/bin/sd-ai-command-pack-review.py` through the shared
@@ -927,14 +883,11 @@ When integration is optional and the descriptor is absent, only a clean local
 receipt may complete, with `router-not-configured` and
 `zero-remote-confidence` limitations. Explicit or required routing, invalid or
 incompatible setup, provider failure, malformed receipts, stale heads, and
-ambiguous dispatch fail closed. The successor never calls `sd-review-local`,
-`sd-review-pr`, or GitHub's reviewer API directly.
+ambiguous dispatch fail closed. The successor never calls `sd-review-pr` or
+GitHub's reviewer API directly.
 
-Use `bash ~/.agents/bin/sd-ai-command-pack-review-local.sh --full-codebase` or the
-review-local command with the `all` argument when you want a full
-checked-out repository review.
-The older `--all` flag remains a supported scope alias.
-In that mode, Prism runs `prism review codebase`; Gito normally runs
+Run `sd-review scope=codebase` when you want a full checked-out repository
+review. In that mode, Prism runs `prism review codebase`; Gito normally runs
 `gito review --all --path <absolute-repo-root>` and writes to
 `.build/review/gito-all` by default with an include filter built from existing
 tracked files, so branch-diff deletions are not reviewed as deleted diff paths.
@@ -977,15 +930,8 @@ a private per-user/per-repository namespace outside the repository while
 leaving GitHub configuration and authentication paths unchanged. When Gito
 reports provider rate limiting through an explicit
 HTTP 429 status such as `ClientError: 429` or a 429 slow-down response, the
-runner retries with bounded exponential backoff. Tune attempts and delays with
-`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`,
-`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`, and
-`SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`. If Prism
-full-codebase review returns an empty chunk response, the runner retries in
-tracked-file batches and splits a failed batch into individual paths when
-needed. Configure third-party full-codebase scans with
-`SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`; if that is not set, the
-runner falls back to `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`.
+full-check runner retries with bounded exponential backoff; tune attempts and
+delays with the Gito retry keys below.
 
 The PR-body scope preflight is generic and config-driven. By default it checks
 pack/Trellis generated and bookkeeping files, housekeeping automation files,
@@ -1333,8 +1279,8 @@ keeps `fixed` entries as history, marks a reappearing fixed finding
 The audit never creates Trellis tasks on its own: untracked P0–P2 findings
 become prd-ready task proposals that wait for explicit user consent.
 
-`sd-audit-repo` complements `sd-review-local` (provider loop),
-`sd-review` (routed review), and `sd-full-check` (gate); it is the periodic
+`sd-audit-repo` complements `sd-review` (routed review) and `sd-check`
+(gate); it is the periodic
 formal audit, not a per-change review loop.
 
 The `sd-fix-ci` command triages a red CI run back toward green. It targets
@@ -1796,19 +1742,13 @@ of bypassing the cache contract.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`: output folder for Gito reports. Defaults
   to `.build/review/gito`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS`: max Gito attempts when the
-  provider reports HTTP 429 or slow-down rate limiting. Defaults to the
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS` value, then `2`.
+  provider reports HTTP 429 or slow-down rate limiting. Defaults to `2`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
-  delay for rate limits. Defaults to the
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS` value, then `30`.
+  delay for rate limits. Defaults to `30`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
-  retry delay after exponential backoff. Defaults to the
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS` value, then
-  `120`.
+  retry delay after exponential backoff. Defaults to `120`.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS`: maximum runtime for one
-  full-check Gito attempt. Defaults to
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`, then `600`; set `0`
-  to disable the timeout.
+  full-check Gito attempt. Defaults to `600`; set `0` to disable the timeout.
 
 ### Planning Artifact Review
 
@@ -1840,77 +1780,6 @@ of bypassing the cache contract.
   optional lane is desired. The OpenAI Codex Claude plugin is not required.
 - Claude Code `all` mode skips the Codex peer lane visibly because native Codex
   review has no full-codebase target.
-
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`: local review tool list for
-  `sd-review-local`. Defaults to `prism gito`; accepts spaces or commas.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE=all`: run the local review runner
-  against the full checked-out repository. Defaults to current-diff scope. The
-  `sd-review-local` command in `all` mode passes this by invoking the
-  runner with
-  `--full-codebase`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF`: base ref for the current-diff
-  local review scope. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`,
-  then the discovered branch-diff sequence above.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE=0`: disable Prism in the local
-  review runner. By default, if Prism is selected as an active local review
-  tool, it must run successfully.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK=0`: disable the
-  tracked-file batch fallback used when Prism full-codebase review reports an
-  empty chunk response.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE`: tracked file
-  batch size for that fallback before adaptive splitting. Defaults to `25`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES`:
-  maximum failed single-path requests during full-codebase fallback before the
-  runner stops issuing more Prism requests. Defaults to `3`; set `0` to allow
-  all fallback paths.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS`: maximum runtime for
-  one Prism command. Defaults to `300`; set `0` to disable the timeout.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON`: severity that fails the
-  local Prism review. Defaults to
-  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_FAIL_ON`, then `high`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS`: cap on reported local
-  Prism findings. Defaults to
-  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_MAX_FINDINGS`, then unset (no cap).
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES`: explicit Prism rules file for
-  the local review runner. Defaults to
-  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_RULES`, then `.prism/rules.json` when
-  present.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE`: comma-separated extra Prism
-  `--exclude` globs for the local review runner. Defaults to
-  `SD_AI_COMMAND_PACK_FULL_CHECK_PRISM_EXCLUDE`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE=0`: disable Gito in the local
-  review runner. By default, if Gito is selected as an active local review tool,
-  it must run successfully.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS`: max Gito attempts when
-  the provider reports HTTP 429 or slow-down rate limiting. Defaults to `2`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS`: initial Gito retry
-  delay for rate limits. Defaults to `30`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS`: maximum Gito
-  retry delay after exponential backoff. Defaults to `120`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`: maximum runtime for
-  one Gito attempt. Defaults to `600`; set `0` to disable the timeout.
-- `MAX_CONCURRENT_TASKS`: Gito LLM concurrency cap. The pack runners load the
-  installed `.gito/sd-ai-command-pack.env` default of `4` when this variable is
-  unset.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND`: command for a repo-specific
-  or third-party local review tool, run with `bash -c`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND`: full-codebase command
-  for a repo-specific or third-party local review tool. Takes precedence over
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_<TOOL>_COMMAND` when scope is `all`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND`: example Semgrep custom
-  provider command for `sd-review-local`; follows the generic `<TOOL>` command
-  naming pattern.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF`: base ref for review-local Gito
-  review. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_BASE_REF`, then
-  `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
-  sequence above.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR`: output folder for review-local
-  Gito reports. Defaults to `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`, then
-  `.build/review/gito`.
-- `SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR`: output folder for
-  full-codebase (`all` mode) Gito reports. Defaults to
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR`, then
-  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_OUT_DIR`, then `.build/review/gito-all`.
 
 ### Scope And PR Body Checks
 
@@ -2243,7 +2112,6 @@ bash -n ~/.agents/bin/sd-ai-command-pack-full-check.sh
 bash -n ~/.agents/bin/sd-ai-command-pack-review-full-check.sh
 bash -n ~/.agents/bin/sd-ai-command-pack-shell-lib.sh
 bash -n ~/.agents/bin/sd-ai-command-pack-toolchain.sh
-bash -n ~/.agents/bin/sd-ai-command-pack-review-local.sh
 bash -n ~/.agents/bin/sd-ai-command-pack-review-scope.sh
 python3 ~/.agents/bin/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```
@@ -2378,7 +2246,7 @@ the installed plugin version, so an update that only half completed shows as
   `GH_CONFIG_DIR`; cache routing intentionally preserves existing GitHub auth.
 - Root-level `code-review-report.*` files appear after manual Gito runs: the
   managed gitignore block ignores them, but prefer running through
-  `sd-review-local` (any scope) or
+  `sd-review` (any scope) or
   `SD_AI_COMMAND_PACK_FULL_CHECK_GITO=1 bash
   ~/.agents/bin/sd-ai-command-pack-full-check.sh` so reports go under the
   pack-managed `.build/review/gito` and `.build/review/gito-all` directories.

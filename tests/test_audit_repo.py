@@ -105,9 +105,9 @@ class AuditRepoTests(InstallTestCase):
             "explicit user consent",
             "Findings without `file:line` evidence are downgraded or dropped",
             # Positioning.
-            "`sd-review-local` (provider loop)",
+            "`sd-review` (review loop)",
             "`sd-review-pr` (PR loop)",
-            "`sd-full-check` (gate)",
+            "`sd-check` (gate)",
         ]:
             self.assertIn(text, skill)
 

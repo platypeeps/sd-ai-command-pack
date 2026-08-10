@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "0.64.35",
+  "manifestVersion": "0.65.0",
   "platforms": {
     "antigravity": {
       "scope": "repo-native",
@@ -80,9 +80,9 @@
     }
   },
   "counts": {
-    "machine-claude": 84,
-    "machine-other": 94,
-    "repo-native": 593,
+    "machine-claude": 79,
+    "machine-other": 88,
+    "repo-native": 551,
     "consumer-config": 6
   },
   "files": [
@@ -118,12 +118,6 @@
     },
     {
       "target": ".agent/skills/sd-fix-ci/SKILL.md",
-      "platform": "antigravity",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".agent/skills/sd-full-check/SKILL.md",
       "platform": "antigravity",
       "category": "repo-native",
       "sharedRuntime": false
@@ -184,12 +178,6 @@
     },
     {
       "target": ".agent/skills/sd-review-learnings/SKILL.md",
-      "platform": "antigravity",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".agent/skills/sd-review-local/SKILL.md",
       "platform": "antigravity",
       "category": "repo-native",
       "sharedRuntime": false
@@ -339,12 +327,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".agent/workflows/sd-full-check.md",
-      "platform": "antigravity",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".agent/workflows/sd-help.md",
       "platform": "antigravity",
       "category": "repo-native",
@@ -364,12 +346,6 @@
     },
     {
       "target": ".agent/workflows/sd-review-learnings.md",
-      "platform": "antigravity",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".agent/workflows/sd-review-local.md",
       "platform": "antigravity",
       "category": "repo-native",
       "sharedRuntime": false
@@ -555,12 +531,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".agents/skills/sd-full-check/SKILL.md",
-      "platform": "shared",
-      "category": "machine-other",
-      "sharedRuntime": false
-    },
-    {
       "target": ".agents/skills/sd-help/SKILL.md",
       "platform": "shared",
       "category": "machine-other",
@@ -616,12 +586,6 @@
     },
     {
       "target": ".agents/skills/sd-review-learnings/SKILL.md",
-      "platform": "shared",
-      "category": "machine-other",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".agents/skills/sd-review-local/SKILL.md",
       "platform": "shared",
       "category": "machine-other",
       "sharedRuntime": false
@@ -771,12 +735,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".claude/commands/sd/full-check.md",
-      "platform": "claude",
-      "category": "machine-claude",
-      "sharedRuntime": false
-    },
-    {
       "target": ".claude/commands/sd/help.md",
       "platform": "claude",
       "category": "machine-claude",
@@ -796,12 +754,6 @@
     },
     {
       "target": ".claude/commands/sd/review-learnings.md",
-      "platform": "claude",
-      "category": "machine-claude",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".claude/commands/sd/review-local.md",
       "platform": "claude",
       "category": "machine-claude",
       "sharedRuntime": false
@@ -909,12 +861,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".claude/skills/sd-full-check/SKILL.md",
-      "platform": "claude",
-      "category": "machine-claude",
-      "sharedRuntime": false
-    },
-    {
       "target": ".claude/skills/sd-help/SKILL.md",
       "platform": "claude",
       "category": "machine-claude",
@@ -970,12 +916,6 @@
     },
     {
       "target": ".claude/skills/sd-review-learnings/SKILL.md",
-      "platform": "claude",
-      "category": "machine-claude",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".claude/skills/sd-review-local/SKILL.md",
       "platform": "claude",
       "category": "machine-claude",
       "sharedRuntime": false
@@ -1125,12 +1065,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".codebuddy/commands/sd/full-check.md",
-      "platform": "codebuddy",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".codebuddy/commands/sd/help.md",
       "platform": "codebuddy",
       "category": "repo-native",
@@ -1150,12 +1084,6 @@
     },
     {
       "target": ".codebuddy/commands/sd/review-learnings.md",
-      "platform": "codebuddy",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".codebuddy/commands/sd/review-local.md",
       "platform": "codebuddy",
       "category": "repo-native",
       "sharedRuntime": false
@@ -1251,12 +1179,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".codebuddy/skills/sd-full-check/SKILL.md",
-      "platform": "codebuddy",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".codebuddy/skills/sd-help/SKILL.md",
       "platform": "codebuddy",
       "category": "repo-native",
@@ -1312,12 +1234,6 @@
     },
     {
       "target": ".codebuddy/skills/sd-review-learnings/SKILL.md",
-      "platform": "codebuddy",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".codebuddy/skills/sd-review-local/SKILL.md",
       "platform": "codebuddy",
       "category": "repo-native",
       "sharedRuntime": false
@@ -1467,12 +1383,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".cursor/commands/sd-full-check.md",
-      "platform": "cursor",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".cursor/commands/sd-help.md",
       "platform": "cursor",
       "category": "repo-native",
@@ -1492,12 +1402,6 @@
     },
     {
       "target": ".cursor/commands/sd-review-learnings.md",
-      "platform": "cursor",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".cursor/commands/sd-review-local.md",
       "platform": "cursor",
       "category": "repo-native",
       "sharedRuntime": false
@@ -1593,12 +1497,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".devin/skills/sd-full-check/SKILL.md",
-      "platform": "devin",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".devin/skills/sd-help/SKILL.md",
       "platform": "devin",
       "category": "repo-native",
@@ -1654,12 +1552,6 @@
     },
     {
       "target": ".devin/skills/sd-review-learnings/SKILL.md",
-      "platform": "devin",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".devin/skills/sd-review-local/SKILL.md",
       "platform": "devin",
       "category": "repo-native",
       "sharedRuntime": false
@@ -1809,12 +1701,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".devin/workflows/sd-full-check.md",
-      "platform": "devin",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".devin/workflows/sd-help.md",
       "platform": "devin",
       "category": "repo-native",
@@ -1834,12 +1720,6 @@
     },
     {
       "target": ".devin/workflows/sd-review-learnings.md",
-      "platform": "devin",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".devin/workflows/sd-review-local.md",
       "platform": "devin",
       "category": "repo-native",
       "sharedRuntime": false
@@ -1935,12 +1815,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".factory/commands/sd/full-check.md",
-      "platform": "droid",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".factory/commands/sd/help.md",
       "platform": "droid",
       "category": "repo-native",
@@ -1960,12 +1834,6 @@
     },
     {
       "target": ".factory/commands/sd/review-learnings.md",
-      "platform": "droid",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".factory/commands/sd/review-local.md",
       "platform": "droid",
       "category": "repo-native",
       "sharedRuntime": false
@@ -2061,12 +1929,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".factory/skills/sd-full-check/SKILL.md",
-      "platform": "droid",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".factory/skills/sd-help/SKILL.md",
       "platform": "droid",
       "category": "repo-native",
@@ -2122,12 +1984,6 @@
     },
     {
       "target": ".factory/skills/sd-review-learnings/SKILL.md",
-      "platform": "droid",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".factory/skills/sd-review-local/SKILL.md",
       "platform": "droid",
       "category": "repo-native",
       "sharedRuntime": false
@@ -2277,12 +2133,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".gemini/commands/sd/full-check.toml",
-      "platform": "gemini",
-      "category": "machine-other",
-      "sharedRuntime": false
-    },
-    {
       "target": ".gemini/commands/sd/help.toml",
       "platform": "gemini",
       "category": "machine-other",
@@ -2302,12 +2152,6 @@
     },
     {
       "target": ".gemini/commands/sd/review-learnings.toml",
-      "platform": "gemini",
-      "category": "machine-other",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".gemini/commands/sd/review-local.toml",
       "platform": "gemini",
       "category": "machine-other",
       "sharedRuntime": false
@@ -2415,12 +2259,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".github/prompts/sd-full-check.prompt.md",
-      "platform": "github",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".github/prompts/sd-help.prompt.md",
       "platform": "github",
       "category": "repo-native",
@@ -2440,12 +2278,6 @@
     },
     {
       "target": ".github/prompts/sd-review-learnings.prompt.md",
-      "platform": "github",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".github/prompts/sd-review-local.prompt.md",
       "platform": "github",
       "category": "repo-native",
       "sharedRuntime": false
@@ -2553,12 +2385,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".kilocode/skills/sd-full-check/SKILL.md",
-      "platform": "kilo",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".kilocode/skills/sd-help/SKILL.md",
       "platform": "kilo",
       "category": "repo-native",
@@ -2614,12 +2440,6 @@
     },
     {
       "target": ".kilocode/skills/sd-review-learnings/SKILL.md",
-      "platform": "kilo",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".kilocode/skills/sd-review-local/SKILL.md",
       "platform": "kilo",
       "category": "repo-native",
       "sharedRuntime": false
@@ -2769,12 +2589,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".kilocode/workflows/sd-full-check.md",
-      "platform": "kilo",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".kilocode/workflows/sd-help.md",
       "platform": "kilo",
       "category": "repo-native",
@@ -2794,12 +2608,6 @@
     },
     {
       "target": ".kilocode/workflows/sd-review-learnings.md",
-      "platform": "kilo",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".kilocode/workflows/sd-review-local.md",
       "platform": "kilo",
       "category": "repo-native",
       "sharedRuntime": false
@@ -2895,12 +2703,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".kiro/skills/sd-full-check/SKILL.md",
-      "platform": "kiro",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".kiro/skills/sd-help/SKILL.md",
       "platform": "kiro",
       "category": "repo-native",
@@ -2956,12 +2758,6 @@
     },
     {
       "target": ".kiro/skills/sd-review-learnings/SKILL.md",
-      "platform": "kiro",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".kiro/skills/sd-review-local/SKILL.md",
       "platform": "kiro",
       "category": "repo-native",
       "sharedRuntime": false
@@ -3111,12 +2907,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".opencode/commands/sd-full-check.md",
-      "platform": "opencode",
-      "category": "machine-other",
-      "sharedRuntime": false
-    },
-    {
       "target": ".opencode/commands/sd-help.md",
       "platform": "opencode",
       "category": "machine-other",
@@ -3136,12 +2926,6 @@
     },
     {
       "target": ".opencode/commands/sd-review-learnings.md",
-      "platform": "opencode",
-      "category": "machine-other",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".opencode/commands/sd-review-local.md",
       "platform": "opencode",
       "category": "machine-other",
       "sharedRuntime": false
@@ -3237,12 +3021,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".pi/prompts/sd-full-check.md",
-      "platform": "pi",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".pi/prompts/sd-help.md",
       "platform": "pi",
       "category": "repo-native",
@@ -3262,12 +3040,6 @@
     },
     {
       "target": ".pi/prompts/sd-review-learnings.md",
-      "platform": "pi",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".pi/prompts/sd-review-local.md",
       "platform": "pi",
       "category": "repo-native",
       "sharedRuntime": false
@@ -3363,12 +3135,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".pi/skills/sd-full-check/SKILL.md",
-      "platform": "pi",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".pi/skills/sd-help/SKILL.md",
       "platform": "pi",
       "category": "repo-native",
@@ -3424,12 +3190,6 @@
     },
     {
       "target": ".pi/skills/sd-review-learnings/SKILL.md",
-      "platform": "pi",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".pi/skills/sd-review-local/SKILL.md",
       "platform": "pi",
       "category": "repo-native",
       "sharedRuntime": false
@@ -3591,12 +3351,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".qoder/commands/sd-full-check.md",
-      "platform": "qoder",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".qoder/commands/sd-help.md",
       "platform": "qoder",
       "category": "repo-native",
@@ -3616,12 +3370,6 @@
     },
     {
       "target": ".qoder/commands/sd-review-learnings.md",
-      "platform": "qoder",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".qoder/commands/sd-review-local.md",
       "platform": "qoder",
       "category": "repo-native",
       "sharedRuntime": false
@@ -3717,12 +3465,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".qoder/skills/sd-full-check/SKILL.md",
-      "platform": "qoder",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".qoder/skills/sd-help/SKILL.md",
       "platform": "qoder",
       "category": "repo-native",
@@ -3778,12 +3520,6 @@
     },
     {
       "target": ".qoder/skills/sd-review-learnings/SKILL.md",
-      "platform": "qoder",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".qoder/skills/sd-review-local/SKILL.md",
       "platform": "qoder",
       "category": "repo-native",
       "sharedRuntime": false
@@ -3933,12 +3669,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".reasonix/skills/sd-full-check/SKILL.md",
-      "platform": "reasonix",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".reasonix/skills/sd-help/SKILL.md",
       "platform": "reasonix",
       "category": "repo-native",
@@ -3994,12 +3724,6 @@
     },
     {
       "target": ".reasonix/skills/sd-review-learnings/SKILL.md",
-      "platform": "reasonix",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".reasonix/skills/sd-review-local/SKILL.md",
       "platform": "reasonix",
       "category": "repo-native",
       "sharedRuntime": false
@@ -4149,12 +3873,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".trae/commands/sd-full-check.md",
-      "platform": "trae",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".trae/commands/sd-help.md",
       "platform": "trae",
       "category": "repo-native",
@@ -4174,12 +3892,6 @@
     },
     {
       "target": ".trae/commands/sd-review-learnings.md",
-      "platform": "trae",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".trae/commands/sd-review-local.md",
       "platform": "trae",
       "category": "repo-native",
       "sharedRuntime": false
@@ -4275,12 +3987,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".trae/skills/sd-full-check/SKILL.md",
-      "platform": "trae",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".trae/skills/sd-help/SKILL.md",
       "platform": "trae",
       "category": "repo-native",
@@ -4336,12 +4042,6 @@
     },
     {
       "target": ".trae/skills/sd-review-learnings/SKILL.md",
-      "platform": "trae",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".trae/skills/sd-review-local/SKILL.md",
       "platform": "trae",
       "category": "repo-native",
       "sharedRuntime": false
@@ -4491,12 +4191,6 @@
       "sharedRuntime": false
     },
     {
-      "target": ".zcode/commands/sd/full-check.md",
-      "platform": "zcode",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
       "target": ".zcode/commands/sd/help.md",
       "platform": "zcode",
       "category": "repo-native",
@@ -4516,12 +4210,6 @@
     },
     {
       "target": ".zcode/commands/sd/review-learnings.md",
-      "platform": "zcode",
-      "category": "repo-native",
-      "sharedRuntime": false
-    },
-    {
-      "target": ".zcode/commands/sd/review-local.md",
       "platform": "zcode",
       "category": "repo-native",
       "sharedRuntime": false
@@ -4672,12 +4360,6 @@
     },
     {
       "target": "scripts/sd-ai-command-pack-review-local.py",
-      "platform": "shared",
-      "category": "machine-claude",
-      "sharedRuntime": true
-    },
-    {
-      "target": "scripts/sd-ai-command-pack-review-local.sh",
       "platform": "shared",
       "category": "machine-claude",
       "sharedRuntime": true

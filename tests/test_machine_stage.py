@@ -488,14 +488,22 @@ class PackCheckoutStagingTests(unittest.TestCase):
 
         self.assertEqual(offenders, {})
 
-    def test_the_relocated_manual_reference_reaches_the_skill_that_names_it(
-        self,
-    ) -> None:
-        body = self.staged[".agents/skills/sd-full-check/SKILL.md"].content.decode(
-            "utf-8"
+    def test_the_manual_reference_relocates_to_the_machine_docs_root(self) -> None:
+        """No staged file names the manual today, but the rewrite still binds.
+
+        Losing the rule silently would ship a repository-root path that never
+        exists on a machine-scope install, so assert it directly rather than
+        through whichever surface happens to cite the manual this release.
+        """
+
+        rewritten = references.rewrite_text(
+            "See `docs/SD_AI_COMMAND_PACK.md` for the contract.\n",
+            profile=references.MACHINE_PROFILE,
+            key=".agents/skills/sd-check/SKILL.md",
         )
 
-        self.assertIn("`~/.agents/docs/SD_AI_COMMAND_PACK.md`", body)
+        self.assertIn(f"`{references.AGENTS_DOC_REFERENCE}`", rewritten)
+        self.assertNotIn("`docs/SD_AI_COMMAND_PACK.md`", rewritten)
 
     def test_the_source_only_fleet_references_keep_their_repository_path(self) -> None:
         """Rewriting them would assert a machine location that never exists."""
