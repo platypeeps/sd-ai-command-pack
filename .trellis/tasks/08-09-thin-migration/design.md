@@ -112,8 +112,8 @@ The resweep greps the consumer for:
      Informational, listed so the conversion PR can be read against it.
    - *packDefects* — a surviving file whose content is still the pack's
      own cites a removed path. **Blocking, and ours to fix**: measured
-     14 hits in 7 files for the five consumers that have not edited their
-     PR template, 12 in 6 for the three that have — four pack-shipped
+     16 hits in 7 files for the five consumers that have not edited their
+     PR template, 14 in 6 for the three that have — four pack-shipped
      prompts telling an agent to run removed scripts, the pack's managed
      block in `.github/copilot-instructions.md`,
      `.github/PULL_REQUEST_TEMPLATE.md`, and the `obsidian-kb` block that

@@ -18,8 +18,8 @@ installed. See the Evidence section.
 
 ## Evidence
 
-Measured 2026-08-10 across all 8 registered consumers: **14 hits in 7
-files** for the five that have not edited their PR template, **12 in 6**
+Measured 2026-08-10 across all 8 registered consumers: **16 hits in 7
+files** for the five that have not edited their PR template, **14 in 6**
 for `mezmo_benchmark`, `sd-github-review`, and `anomaly-metric-creator`,
 which have — there the template is consumer-owned and its two stale
 citations are `blockers` in that consumer's own cleanup, not pack
@@ -37,15 +37,24 @@ fleet-blocker-scan.py --out /tmp/scan.json
 | `.github/prompts/sd-review-learnings.prompt.md` | 44, 46 | `scripts/sd-ai-command-pack-review-learnings.py` |
 | `.github/prompts/sd-review.prompt.md` | 43 | `scripts/sd-ai-command-pack-review.py`, `scripts/sd-ai-command-pack-toolchain.sh` |
 | `.github/prompts/sd-status.prompt.md` | 43 | `scripts/sd-ai-command-pack-toolchain.sh` |
-| `.github/copilot-instructions.md` | 5 hits, consumer-dependent lines | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-install-audit.py` |
+| `.github/copilot-instructions.md` | 7 hits, consumer-dependent lines | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-install-audit.py`, and the globs `.agents/skills/sd-*/SKILL.md` and `**/skills/sd-*/**` |
 | `.github/PULL_REQUEST_TEMPLATE.md` | 7, 14 (template) | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-full-check.sh` |
 | `.gitignore`, `obsidian-kb` block | 1 hit, consumer-dependent line | `scripts/sd-ai-command-pack-update-spec-kb.py` |
 
 The four prompts are whole-file pack targets, so their line numbers are
 stable fleet-wide. The Copilot hits are not: the block sits below whatever
-preamble the consumer wrote, so the same five citations land at 27/51/54/
-106/108 in `rwbp-coordinator` and 47/71/74/126/128 in `mezmo_benchmark`.
-The resweep reports the lines; this table does not fix them.
+preamble the consumer wrote, so the same seven citations land at
+26/27/36/51/54/106/108 in `rwbp-coordinator` and 46/47/56/71/74/126/128 in
+`mezmo_benchmark`. The resweep reports the lines; this table does not fix
+them.
+
+Two of those seven are **globs**, not paths, and were found only in round
+nine: the block's own text names `.agents/skills/sd-*/SKILL.md` as an
+entry point and `**/skills/sd-*/**` as a pack-owned tree. A thin
+conversion removes that whole population, so both citations name nothing
+afterwards. They matter for the repoint because a glob cannot be fixed by
+pointing it at a different directory that also does not exist: the block
+has to say where skills live in a thin checkout, or detect the mode.
 
 `.github/prompts/sd-help.prompt.md` is deliberately **not** listed, and an
 earlier revision of this PRD listed it in error. It tells the agent to
@@ -54,19 +63,44 @@ relative to a resolved skill, not to a location in the repository. Nothing
 static can tie it to a removed path without guessing, and the guess that
 put it here also produced a false blocker in `se-ai-command-pack`.
 
-Every listed file is a `repo-native` partition row (`platform: github`)
-that the conversion **keeps** — verified against
+The first six are `repo-native` partition rows (`platform: github`) that
+the conversion **keeps** — verified against
 `docs/fleet/surface-partition.json`, not assumed. `repo-native` is exactly
 why they survive and therefore exactly why their stale citations matter.
 
-The `.gitignore` entry is the subtlest of the seven and was missed for
-three rounds. The file is in `block_strip`: conversion removes the
-`trellis-gitignore` marker pair and leaves the rest of the file. But a
-consumer's `.gitignore` also carries an `obsidian-kb` block, written by
-the KB refresh, whose header comment names the very script conversion
-deletes. A rule keyed on "is this file block-stripped?" calls that hit
-`scheduled` and loses it; the span the conversion actually removes is what
-decides, not the file.
+`.gitignore` is the exception and has **no partition row at all**; it
+survives because it is a `block_strip` target, not because a partition
+slice keeps it. An earlier revision of this PRD said all seven were
+partition rows, which is false and mattered: the two survive by different
+mechanisms, and only one of them is refreshed by an install.
+
+That is also why the `.gitignore` entry is the subtlest of the seven and
+was missed for three rounds. Conversion removes the `trellis-gitignore`
+marker pair and leaves the rest of the file. But a consumer's `.gitignore`
+also carries an `obsidian-kb` block, written by the KB refresh, whose
+header comment names the very script conversion deletes. A rule keyed on
+"is this file block-stripped?" calls that hit `scheduled` and loses it;
+the span the conversion actually removes is what decides, not the file.
+
+**The `obsidian-kb` block does not reach zero by shipping and refreshing.**
+Its text is emitted when
+`scripts/sd-ai-command-pack-update-spec-kb.py` *executes*; a pack refresh
+installs the corrected script but never rewrites a block the script wrote
+on some earlier run. So the seven surfaces clear by three different
+routes, not two:
+
+- four prompts and the Copilot managed block — rewritten by a refresh;
+- `.gitignore`'s `obsidian-kb` block — cleared only when the consumer runs
+  the KB refresh after taking the new pack version. That run is an
+  explicit step in each conversion PR for children 3–5, not a consequence
+  of refreshing;
+- `.github/PULL_REQUEST_TEMPLATE.md` — never rewritten at all, for the
+  force-preserved reason below.
+
+Without the explicit KB-refresh step, the block stays a `packDefect` and
+`--thin` keeps refusing, with the pack side of the fix already shipped and
+apparently complete. That is precisely the failure mode this task exists
+to prevent.
 
 Three different ownership proofs are involved, which is why this set was
 undercounted twice:
@@ -76,7 +110,7 @@ undercounted twice:
 - `.github/copilot-instructions.md` is a **managed-block** target, so
   provenance never records a whole-file digest for it and only the content
   between the pack's `SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START`/`:END`
-  markers is ours. All five of its hits are inside that block. The repoint
+  markers is ours. All seven of its hits are inside that block. The repoint
   must stay inside the markers; editing outside them would rewrite
   consumer content.
 - `.github/PULL_REQUEST_TEMPLATE.md` is **force-preserved**
@@ -137,12 +171,18 @@ through `make sync` and `make generate`.
    records, in the conversion PR checklist for children 3–5, that **all
    eight** consumers repoint their own template as part of converting.
 3. The resweep reports zero `packDefects` for every registered consumer
-   after the change ships and consumers refresh. That is the acceptance
-   signal, not a reading of the diff. The PR template reaches zero by a
-   different route than the other five surfaces: those are rewritten by
-   the refresh, while the template is force-preserved and instead becomes
-   consumer-owned once the shipped bytes change, moving to `blockers`.
-   Both routes must be verified against a measurement, not asserted.
+   after the change ships, consumers refresh, **and** each consumer runs
+   the KB refresh. That is the acceptance signal, not a reading of the
+   diff. The seven surfaces reach zero by three routes: five are rewritten
+   by the refresh; the `obsidian-kb` block is rewritten only when
+   `sd-ai-command-pack-update-spec-kb.py` runs; and the force-preserved PR
+   template is never rewritten and instead becomes consumer-owned once the
+   shipped bytes change, moving to `blockers`. All three must be verified
+   against a measurement, not asserted.
+3b. The conversion PR checklist for children 3–5 carries the KB-refresh
+   step explicitly, next to the template-repoint step. Both are consumer
+   actions the pack cannot perform, and both are invisible in a pack diff
+   that otherwise looks complete.
 4. The change carries a `manifest.json` version bump and a CHANGELOG
    entry — it is a shipped-payload change, and the release gate fails
    otherwise.
@@ -167,8 +207,13 @@ through `make sync` and `make generate`.
       outage for another.
 - [ ] `fleet-blocker-scan.py` (or the shipped resweep, once it exists)
       reports `packDefects: 0` for a consumer refreshed to the new pack
-      version — the five refreshed surfaces are rewritten, and the PR
-      template leaves the bucket by becoming consumer-owned.
+      version **and** re-run through the KB refresh — five surfaces
+      rewritten by the refresh, the `obsidian-kb` block rewritten by the
+      KB script, and the PR template leaving the bucket by becoming
+      consumer-owned.
+- [ ] A consumer refreshed but **not** KB-refreshed still reports the
+      `obsidian-kb` hit as a `packDefect`. This is the negative case that
+      proves the extra step is load-bearing rather than ceremonial.
 - [ ] A **fresh** install into an empty target writes the corrected PR
       template. This is the only path on which the template fix reaches a
       repository, so it is the only path that proves the fix shipped.

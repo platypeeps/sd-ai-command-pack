@@ -68,7 +68,7 @@ for the gate between them):
    prompts telling agents to run removed scripts, the managed block in
    `.github/copilot-instructions.md`, the force-preserved
    `.github/PULL_REQUEST_TEMPLATE.md`, and the surviving `obsidian-kb`
-   block in `.gitignore`: 14 hits in 7 files, or 12 in 6 for the three
+   block in `.gitignore`: 16 hits in 7 files, or 14 in 6 for the three
    consumers that have taken the PR template over and own its stale
    citations themselves. The resweep reports these as `packDefects`,
    which blocks `--thin`, so this child gates children 3–5 on the **pack**
@@ -83,7 +83,7 @@ because they change repositories outside this one. That work is also
 **larger than "run the converter"**: measured 2026-08-10, every one of
 the 8 registered consumers has consumer-authored callers, in command
 position, of paths the conversion removes (14 hits in 10 files at the low
-end, 191 in 21 at the high end), so each consumer needs its execution
+end, 205 in 21 at the high end), so each consumer needs its execution
 surface repointed before it can convert. Evidence and per-consumer figures:
 `08-10-thin-conversion-tooling/research/fleet-blocker-scan.json`.
 

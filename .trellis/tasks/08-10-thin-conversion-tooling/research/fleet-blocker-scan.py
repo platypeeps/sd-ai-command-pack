@@ -179,7 +179,10 @@ COMMAND_CONTEXT = re.compile(
       | \brun:\s | ^\s*run\s*[:=] | \bcommand\s*[:=] | \bentrypoint\s*[:=]
         # Command substitution, but not arithmetic expansion: "$((delay * 2))"
         # quoted inside a review-feedback ledger is not an invocation.
-      | \$\(\s*[\w./-]+\s
+        # R9-C5: a command may take no argument -- "$(pwd)/scripts/x.sh" is an
+        # invocation, and round 8's trailing \s excluded every such form while
+        # its ledger claimed only arithmetic had been excluded.
+      | \$\(\s*[\w./-]+\s*[\s)]
         # Checklist item a human works through, but only when the line also
         # names something runnable. Every Trellis PRD states its acceptance
         # criteria as checklist items, so an unqualified checklist rule blocks
@@ -420,41 +423,65 @@ def is_executable_surface(repo: Path, relative: str) -> bool:
     return not full.is_symlink() and full.is_file() and os.access(full, os.X_OK)
 
 
-def reference_forms(removed: frozenset[str]) -> frozenset[str]:
-    """Every string worth searching for when looking for a removed path.
+# R9-2: there is deliberately no discovery prefilter here any more.
+#
+# Rounds 1-8 ran a `needle_pattern` regex over each file and each line before
+# handing the line to `cites_removed_path`, on the theory that discovery could
+# be cheap and broad while matching stayed strict. It was neither: the needle
+# set was full removed paths, their >=2-segment suffixes, and only those
+# basenames carrying the pack name, while the matcher independently accepts
+# a glob whose whole population is removed and a bare unambiguous basename
+# (rule 5, added in round 8). The two sets were never reconciled, so the
+# matcher's last two rules were mostly unreachable.
+#
+# Measured against the committed round-8 scan: 512 lines across all 8
+# consumers satisfy `cites_removed_path` and were skipped by the prefilter
+# before it ever ran -- including `.github/copilot-instructions.md` citing
+# `.agents/skills/sd-*/SKILL.md`, which is inside the pack's own managed block.
+# A prefilter that hides pack defects is not an optimisation.
+#
+# Any substring gate has this failure mode, because a glob token shares no
+# literal substring with the paths it selects. So the matcher now sees every
+# line, and `cites_removed_path` is the only thing that decides.
 
-    Discovery only. Matching is decided by ``cites_removed_path``, which is
-    stricter: a form here merely makes a line a candidate.
 
-    Full paths, their >=2-segment suffixes (so a reference written relative to
-    another directory still matches), and distinctive basenames -- only those
-    carrying the pack name. A bare basename is deliberately excluded: the
-    removal set contains `SKILL.md`, `config.toml`, and `ci.yml`, and admitting
-    those matched 67 lines across the fleet that name nothing removed, 12 of
-    them in the two blocking buckets. Precision matters more here than reach,
-    because a false blocker refuses a conversion that should proceed.
+def resolve_link(repo: Path, relative: str, limit: int = 16) -> str | None:
+    """Repository-relative path a tracked symlink ultimately names.
+
+    ``None`` when it cannot be resolved -- unreadable, a cycle, or a target
+    outside the repository -- which the caller treats as blocking rather than
+    skipping.
+
+    R9-C4. The earlier version compared ``os.readlink()`` output against a
+    relative removal set, so ``link -> /repo/scripts/removed.sh`` matched
+    nothing, and a link pointing at another link that ends on a removed path
+    was invisible. Both are still empty across the fleet; the code now keeps
+    the fail-closed promise it was making.
     """
-    forms: set[str] = set()
-    for entry in removed:
-        forms.add(entry)
-        parts = entry.split("/")
-        for index in range(1, len(parts) - 1):
-            forms.add("/".join(parts[index:]))
-        if "sd-ai-command-pack" in parts[-1]:
-            forms.add(parts[-1])
-    return frozenset(forms)
-
-
-def needle_pattern(removed: frozenset[str]) -> re.Pattern[str]:
-    """Regex over every reference form, plus the pack name.
-
-    The pack name is in the discovery set but not in the matching set: it is
-    what makes a glob citation like scripts/sd-ai-command-pack-*.sh
-    discoverable, while the match itself is still decided against removed paths.
-    """
-    needles = set(reference_forms(removed)) | {"sd-ai-command-pack"}
-    ordered = sorted(needles, key=len, reverse=True)
-    return re.compile("|".join(re.escape(needle) for needle in ordered))
+    current = relative
+    for _ in range(limit):
+        full = repo / current
+        if not full.is_symlink():
+            return current
+        try:
+            link = os.readlink(full)
+        except OSError:
+            return None
+        if os.path.isabs(link):
+            resolved = os.path.normpath(link)
+            try:
+                current = str(Path(resolved).relative_to(repo))
+            except ValueError:
+                # Outside the repository: nothing the conversion removes.
+                return None
+        else:
+            parent = str(Path(current).parent)
+            current = os.path.normpath(
+                link if parent == "." else f"{parent}/{link}"
+            )
+        if current.startswith(".."):
+            return None
+    return None
 
 
 def unambiguous_basenames(
@@ -469,6 +496,20 @@ def unambiguous_basenames(
     os.path.join("scripts", "x.sh"), a Windows separator, a name passed as an
     argument. A basename owned by exactly one removed path and by nothing that
     survives carries no ambiguity to lose.
+
+    R9-3: and the name must carry the pack name. "Owned by exactly one removed
+    path and by no survivor" is not the same as "can only mean that path": the
+    survivor test only sees files this repository tracks, and a bare name in
+    prose often means something the repository does not contain at all.
+    Measured: se-ai-command-pack's se-author SKILL.md says "`review.md`:
+    findings, decisions, approved edits", naming a workspace artifact the skill
+    writes at runtime, and it matched the removed `.claude/commands/sd/review.md`
+    -- the same shape as the round-6 `references/examples.md` false blocker, one
+    level further in. `security.md` and `update-spec.md` collide the same way.
+    A distinctive name -- `sd_ai_command_pack_lib.py` -- carries its own proof;
+    `review.md` carries none. This keeps every recovery the rule was added for
+    (the 36 `REPO_ROOT / "scripts" / "<pack file>"` citations) and drops the
+    coincidences, at the cost of leaving a distinctively-named-only lower bound.
     """
     counts: dict[str, int] = {}
     for entry in removed:
@@ -476,7 +517,11 @@ def unambiguous_basenames(
         counts[name] = counts.get(name, 0) + 1
     surviving = {entry.rsplit("/", 1)[-1] for entry in survivors}
     return frozenset(
-        name for name, count in counts.items() if count == 1 and name not in surviving
+        name
+        for name, count in counts.items()
+        if count == 1
+        and name not in surviving
+        and ("sd-ai-command-pack" in name or "sd_ai_command_pack" in name)
     )
 
 
@@ -535,6 +580,16 @@ def cites_removed_path(
     # "./scripts/x.sh" keeps its leading "./".
     token = token.strip("'\"`,;:()[]{}<>").rstrip(".")
     if not token:
+        return False
+    # R9-1: TOKEN cannot contain ":", so a URL tokenizes to its authority plus
+    # path -- "https://example.com/docs/SD_AI_COMMAND_PACK.md" becomes
+    # "//example.com/docs/SD_AI_COMMAND_PACK.md", whose tail matches a removed
+    # path. A URL names a resource on a host, not a file the conversion
+    # deletes. No repository-relative path begins with "//", so the residue is
+    # unambiguous. Measured zero occurrences in the blockers and packDefects
+    # buckets of all 8 consumers at the time of the fix: this closes the class
+    # before it has an instance rather than after.
+    if token.startswith("//"):
         return False
     if "*" in token or "?" in token:
         if not any(fnmatch.fnmatch(entry, token) for entry in removed):
@@ -670,7 +725,6 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
     managed = frozenset(receipt.entries)
     recorded = provenance_digests(repo)
     shipped = shipped_template_digests()
-    needles = needle_pattern(removed)
 
     buckets: dict[str, list[dict]] = {
         "blockers": [],
@@ -709,48 +763,62 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             # *is* the reference. No consumer has a tracked symlink today, so
             # this classifies an empty class -- which is the point, since
             # "measured zero" and "never looked" are different claims.
-            try:
-                link = os.readlink(full)
-            except OSError:
-                continue
-            parent = str(Path(relative).parent)
-            resolved = os.path.normpath(
-                link if parent == "." or link.startswith("/") else f"{parent}/{link}"
-            )
-            if resolved in removed or link in removed:
+            # R9-C4: resolve the link the way the filesystem does, not the way
+            # the string reads. Three forms were missed: an absolute target
+            # inside the repository (compared as-is against a relative removal
+            # set, so it matched nothing), a chain of links ending at a removed
+            # path, and an unreadable link, which simply `continue`d. All three
+            # are still empty across the fleet -- no consumer has a tracked
+            # symlink -- but "fails closed" was a claim the code did not keep.
+            target = resolve_link(repo, relative)
+            if target is None:
                 buckets["blockers"].append(
                     {
                         "file": relative,
                         "line": None,
-                        "detail": f"symlink to removed path: {link}",
+                        "detail": "unresolvable symlink",
+                    }
+                )
+            elif target in removed:
+                buckets["blockers"].append(
+                    {
+                        "file": relative,
+                        "line": None,
+                        "detail": f"symlink to removed path: {target}",
                     }
                 )
             continue
         try:
             body = full.read_text(encoding="utf-8", errors="strict")
-        except (OSError, UnicodeError):
-            # Binary or unreadable. Unreadable *pack* content is unverifiable
-            # and therefore blocking; unreadable consumer content cannot cite
-            # anything a static reader can see, and is reported as such.
+        except UnicodeError:
+            # Binary. Unreadable *pack* content is unverifiable and therefore
+            # blocking; a binary consumer asset cannot carry a citation a
+            # static reader could see, and is recorded rather than skipped.
             if relative in managed:
                 buckets["packDefects"].append(
                     {"file": relative, "line": None, "detail": "unreadable pack target"}
                 )
-            elif full.is_file():
-                # Present and not UTF-8: a binary asset, which cannot carry a
-                # citation a static reader could see. Recorded, not silent.
-                binary.append(relative)
             else:
-                # Tracked and absent. A sparse checkout or a skip-worktree entry
-                # looks identical to a complete tree in `git ls-files -s`, so
-                # this is the difference between "measured zero" and "did not
-                # look", and it invalidates the scan rather than reducing it.
+                binary.append(relative)
+            continue
+        except OSError:
+            # R9-C2: an OSError is not a binary file. Round 8's handler shared
+            # one branch with UnicodeError, so a present-but-unreadable file --
+            # a permission-denied UTF-8 file full of blockers -- was counted as
+            # a binary asset and cleared. Present-and-unreadable is the same
+            # epistemic state as absent: bytes this scan did not read. Both go
+            # to `missingTrackedFiles`, which forces the verdict `blocked`. A
+            # sparse checkout or a skip-worktree entry looks identical to a
+            # complete tree in `git ls-files -s`, so this is the difference
+            # between "measured zero" and "did not look".
+            if relative in managed:
+                buckets["packDefects"].append(
+                    {"file": relative, "line": None, "detail": "unreadable pack target"}
+                )
+            else:
                 missing.append(relative)
             continue
         lines = body.splitlines()
-        if not needles.search(body):
-            continue
-
         all_spans = block_spans(lines)
         malformed_markers = all_spans is None
         spans = stripped_spans(relative, lines, all_spans) if relative in stripped else []
@@ -774,8 +842,6 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         commanded = command_lines(lines)
 
         for number, line in enumerate(lines, start=1):
-            if not needles.search(line):
-                continue
             if not any(
                 cites_removed_path(
                     token, removed, repo, relative, survivors, unambiguous
@@ -807,11 +873,20 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 buckets["advisories"].append(entry)
 
     index = git(repo, "ls-files", "-s")
+    # R9-C3. `git status` hides a file marked `assume-unchanged` or
+    # `skip-worktree`, so its bytes can change while `head`, `indexDigest`,
+    # `worktreeDigest`, `worktreeClean`, `executableBitsDigest`, and
+    # `missingTrackedFiles` all stay identical -- and the scanner still reads
+    # the new bytes and can classify them differently. `git ls-files -v`
+    # prefixes each path with its flag letter, so hashing that output binds the
+    # flag state itself. No consumer sets either flag today.
+    index_flags = git(repo, "ls-files", "-v")
     return {
         "consumer": name,
         "repo": str(repo),
         "head": git(repo, "rev-parse", "HEAD").strip(),
         "indexDigest": digest_of(index),
+        "indexFlagsDigest": digest_of(index_flags),
         "worktreeDigest": worktree_digest(repo),
         "worktreeClean": not git(repo, "status", "--porcelain").strip(),
         "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),
@@ -857,6 +932,14 @@ def main() -> int:
         "packWorktreeDigest": worktree_digest(ROOT),
         "packWorktreeClean": not git(ROOT, "status", "--porcelain").strip(),
         "scannerDigest": file_digest(Path(__file__)),
+        # R9: the counterexample list is executable and lives beside this
+        # scanner. Binding its bytes here is what makes "all counterexamples
+        # pass" checkable against a specific result rather than a memory of
+        # one -- a result produced by this scanner and validated by that
+        # harness, both identified.
+        "counterexamplesDigest": file_digest(
+            Path(__file__).with_name("classifier-counterexamples.py")
+        ),
         "consumers": results,
     }
     if args.out:

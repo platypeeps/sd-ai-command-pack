@@ -40,10 +40,20 @@ would be a hand-edited deletion of 166 files with no reversal path.
    procedure and the measurement behind it.
 
    The citation check matches a removed path exactly, as a tail of the
-   cited token, resolved relative to the citing file, or by glob — and
-   nothing looser. Bare-basename matching was tried and removed: the
-   removal set contains names like `SKILL.md` and `config.toml`, so it
-   manufactured blockers out of surviving sibling files. The check is a
+   cited token, resolved relative to the citing file, by glob whose
+   **whole** matched population is removed, or by a bare basename that is
+   both unique to the removal set and distinctively the pack's — and
+   nothing looser. Those five, and this passage is authoritative where any
+   other wording disagrees.
+
+   Unrestricted bare-basename matching was tried and removed: the removal
+   set contains names like `SKILL.md` and `config.toml`, so it manufactured
+   blockers out of surviving sibling files. The narrow form that replaced
+   it is not that rule returning — it demands uniqueness against the whole
+   tracked tree *and* a pack-distinctive name, because uniqueness alone
+   still matched prose naming a file the repository does not contain
+   (`review.md`). Its purpose is the citation that never spells a path:
+   `REPO_ROOT / "scripts" / "sd_ai_command_pack_lib.py"`. The check is a
    **lower bound** by construction: a path composed at runtime from
    variables is invisible to any static reader. Reversibility via
    `--revert-thin`, not resweep exhaustiveness, is what makes conversion

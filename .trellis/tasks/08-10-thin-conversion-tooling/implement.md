@@ -169,8 +169,16 @@ or `--check` reports a phantom change. The first fixture attempt passed
 `templates/scripts/` counterpart and no `manifest.json` row, like every
 other `fleet-*` script. Imports step 1's builder for the removal set and
 applies `design.md`'s four-bucket rule — `scheduled`, `packDefects`,
-`blockers`, `advisories` — each step failing closed. Records `head`,
-`indexDigest`, `worktreeClean`, and `classifierDigest`.
+`blockers`, `advisories` — each step failing closed. Records the full
+binding set from `design.md`'s verdict schema: `head`, `indexDigest`,
+`indexFlagsDigest`, `worktreeDigest`, `worktreeClean`,
+`receiptOccupancyDigest`, `executableBitsDigest`, `binaryTrackedFiles`,
+`missingTrackedFiles`, and `classifierDigest`. The short list this step
+used to name — `head`, `indexDigest`, `worktreeClean`,
+`classifierDigest` — would have shipped a verdict *less* reproducible
+than the research measurement it derives from: every field added after
+that list was added because something changed a classification while the
+short list stayed identical.
 
 `classifier_digest` in `installer/conversion.py` gains
 `scripts/sd-ai-command-pack-thin-resweep.py` in the same commit. The
@@ -207,11 +215,11 @@ Checks:
   blocks on pack-managed files as such cannot clear any consumer.
 - A fixture whose kept pack-managed file cites a **removed** path →
   `blocked`, that hit in `packDefects`, not `scheduled`. Measured:
-  **14 hits in 7 files** for the five consumers that have not edited
-  their PR template, **12 in 6** for the three that have — four surviving
+  **16 hits in 7 files** for the five consumers that have not edited
+  their PR template, **14 in 6** for the three that have — four surviving
   pack prompts (`sd-housekeeping` 37/38, `sd-review-learnings` 44/46,
   `sd-review` 43, `sd-status` 43), the pack's managed block in
-  `.github/copilot-instructions.md` (5 hits, at consumer-dependent line
+  `.github/copilot-instructions.md` (7 hits, at consumer-dependent line
   numbers), `.github/PULL_REQUEST_TEMPLATE.md` 7 and 14, and the
   surviving `obsidian-kb` block in `.gitignore`. Calling any of
   that `scheduled` would ship known breakage against a release obligation
@@ -221,7 +229,7 @@ Checks:
   **outside** the block → judged as consumer-authored. Provenance never
   vouches managed-block targets (`installer/provenance.py:114`), so
   digest comparison cannot reach this case at all — measured: it is how
-  `.github/copilot-instructions.md`'s 5 hits were missed entirely by the
+  `.github/copilot-instructions.md`'s 7 hits were missed entirely by the
   digest-only rule.
 - A receipt entry that is a **symlink**, and one whose bytes are
   **unreadable** → `packDefects` with a stated reason, not silently
@@ -286,11 +294,11 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 19/5, `hoa-manager` 32/9, `mezmo_benchmark` 39/24,
-`rwbp-coordinator` 40/7, `loadsmith` 53/5, `rwbp-website` 59/7,
-`anomaly-metric-creator` 191/21 — CI workflows, `package.json` scripts,
+`se-ai-command-pack` 21/7, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
+`rwbp-coordinator` 48/7, `loadsmith` 53/5, `rwbp-website` 65/8,
+`anomaly-metric-creator` 205/21 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
-PR-template checklists. Plus 14 pack defects in 7 files (12 in 6 where
+PR-template checklists. Plus 16 pack defects in 7 files (14 in 6 where
 the consumer has taken over its PR template).
 
 Step 3 is therefore expected to return `blocked` for every real consumer
@@ -861,3 +869,70 @@ Fixture criteria this round adds:
 12 in 6 where the consumer owns its PR template. No consumer is `clear`.
 
 All 21 accumulated counterexamples pass together.
+
+### Round 9
+
+Ten concerns: three from the host lane and seven from Codex, with **no
+overlap at all** — the first round where the two lanes found disjoint
+sets. The host lane's three are one defect wearing three faces: the
+boundary between **discovery** (which lines get looked at) and
+**matching** (which lines count). Every previous round had improved one
+or the other and never checked that they still agreed. Codex reviewed
+`87ec77cd` and went after the *claims* instead — every place a ledger
+said "fails closed" or "is bound" and the code or the schema did not
+keep the promise. Five of its seven are empty classes today; that is the
+point, since each was already being asserted as covered.
+
+| ID | Lane | Concern | Fix |
+|---|---|---|---|
+| R9-1 | host | **A URL tail-matched as a repository citation.** `TOKEN` cannot contain `:`, so `https://example.com/docs/SD_AI_COMMAND_PACK.md` tokenizes to `//example.com/docs/SD_AI_COMMAND_PACK.md`, whose path tail is a removed file | A token beginning `//` is a URL authority, not a path; no repository-relative path can start that way. Measured **zero** occurrences in the blocking buckets of all 8 consumers when the fix landed — this closes the class before it has an instance, and the ledger says so rather than implying a defect was found |
+| R9-2 | host | **The discovery prefilter hid what the matcher would have caught.** `needle_pattern` searched for full removed paths, their ≥2-segment suffixes, and only pack-named basenames. Matching meanwhile accepts a glob whose whole population is removed (R7-4) and a bare distinctive basename (R8-5) — neither of which shares a literal substring with anything in the needle set. **512 lines across the 8 consumers satisfied `cites_removed_path` and were dropped before it ran.** Two per consumer were inside `.github/copilot-instructions.md`, the pack's own managed block, which ships `.agents/skills/sd-*/SKILL.md` and `**/skills/sd-*/**` | The prefilter is gone, not widened: any substring gate has this failure mode, because a glob shares no substring with what it selects. The matcher now sees every line of every tracked file. Cost: 11 seconds fleet-wide. `packDefects` rose from 14/7 to 16/7 uniformly across all 8 consumers, and the Copilot block is a **7-hit** surface, not 5 |
+| R9-3 | host | **The unambiguous-basename rule was still a guess.** "Owned by one removed path and no survivor" is not "can only mean that path": the survivor test only sees tracked files, and prose often names something the repository does not contain. Exposed the moment R9-2 let those lines through — `se-ai-command-pack/templates/skills/se-author/SKILL.md` says "`review.md`: findings, decisions, approved edits", a workspace artifact the skill writes at runtime, and it matched the removed `.claude/commands/sd/review.md`. Same shape as the round-6 `references/examples.md` false blocker, one level in. `security.md` and `update-spec.md` collide identically | The basename must also carry the pack name. `sd_ai_command_pack_lib.py` carries its own proof; `review.md` carries none. All 36 recoveries R8-5 was added for survive; the scan is now an explicitly distinctively-named-only lower bound on that rule |
+
+| R9-C1 | Codex | **The shipped verdict schema was less bound than the research JSON.** `design.md`'s normative object listed `head`, `indexDigest`, `worktreeClean`, `classifierDigest` — and nothing else — while rounds 7 and 8 had added four more binding fields to the scanner precisely because each one could change a classification invisibly. The implementation checklist repeated the short list | The schema and the checklist now carry the full set, including `indexFlagsDigest` from R9-C3. The planned production artifact cannot be *less* reproducible than the research measurement it derives from |
+| R9-C2 | Codex | **`R8-3` still failed open on a present-but-unreadable file.** `OSError` and `UnicodeError` shared one handler; a `PermissionError` on a readable-as-text file counted it as a binary asset and cleared it. Round 8's ledger claimed unreadable files were reported | The two are separate handlers. Binary means "decoded as not-UTF-8"; an `OSError` means bytes this scan did not read, which is the same epistemic state as absent, so it joins `missingTrackedFiles` and forces `blocked` |
+| R9-C3 | Codex | **`assume-unchanged` and `skip-worktree` were unbound.** Either flag hides a file from `git status`, so its bytes can change while `head`, `indexDigest`, `worktreeDigest`, `worktreeClean`, `executableBitsDigest`, and `missingTrackedFiles` all stay identical — and the scanner reads the new bytes anyway | `indexFlagsDigest` over `git ls-files -v`, which prefixes each path with its flag letter. Empty across the fleet: no consumer sets either flag |
+| R9-C4 | Codex | **R8-6's symlink handling missed three forms.** An absolute target was compared as-is against a relative removal set; a link pointing at another link was never followed; an unreadable link `continue`d silently. "Fails closed" was a claim the code did not keep | `resolve_link()` follows chains with a depth limit, rebases absolute in-repo targets, and returns `None` — classified as a blocker — for unreadable, cyclic, or outside-the-repository links. Still zero tracked symlinks fleet-wide |
+| R9-C5 | Codex | **The R8-4 remediation was too narrow.** `\$\(\s*[\w./-]+\s` requires an argument, so `$(dirname x.sh)` matched but `$(pwd)` did not — and `tool="$(pwd)/scripts/removed.sh"` could stay advisory. R8's ledger claimed only arithmetic had been excluded | The trailing class accepts a closing paren. `$((delay * 2))` still fails at the first character, which is where arithmetic was always distinguishable |
+| R9-C6 | Codex | **Child 2b counted seven surfaces and cleared six.** It claimed all seven were `repo-native` partition rows — `.gitignore` has no partition row and survives as a `block_strip` target — and then accounted for "five rewritten surfaces plus the template". The `obsidian-kb` block is rewritten only when `sd-ai-command-pack-update-spec-kb.py` *runs*; a pack refresh installs the corrected script and leaves the old block in place | Three routes to zero, not two, with the KB refresh named as an explicit consumer step in the children 3–5 checklist and a negative acceptance criterion — refreshed-but-not-KB-refreshed must still report the `packDefect`. Without it the pack side looks complete and `--thin` keeps refusing |
+| R9-C7 | Codex | **Two normative passages stated different citation rules.** `prd.md` said matching is exact, tail, relative, or glob "and nothing looser", with bare-basename matching "tried and removed"; the scanner and `design.md` elsewhere implement the narrow unambiguous-basename rule. An implementer could conform to either and produce different verdicts | One authoritative list of five forms in `prd.md`, with `design.md` pointing at it. The narrow rule is stated as what it is — uniqueness against the tracked tree **and** a pack-distinctive name — rather than as the removed rule returning |
+
+The counterexample list is no longer prose. `research/classifier-counterexamples.py`
+executes it: 15 fleet assertions naming a real consumer, file, line, and
+expected bucket, plus 20 predicate-level assertions, each tagged with the
+round that found it. "All counterexamples still pass" was re-established
+by hand every round until now, which meant it could not survive a context
+break and could not be checked by anyone else.
+
+```text
+35 passed, 0 failed, 0 skipped (15 fleet + 20 unit)
+```
+
+Fixture criteria this round adds:
+
+- A URL whose path ends in a removed file → no hit; the same path written
+  bare on the same line → a hit.
+- A file citing a removed population **only** by glob, with the pack name
+  absent from the line → a hit. This is the case the prefilter dropped.
+- A managed-block file whose in-block content cites a removed population
+  by glob → `packDefects`, not `advisories`.
+- A bare basename that is unique to the removal set but carries no
+  pack-distinctive marker → **no** hit, even though it is unambiguous
+  against the tracked tree.
+- A tracked file that is present and unreadable → `missingTrackedFiles`
+  and verdict `blocked`, not counted as a binary asset.
+- A symlink whose target is absolute and inside the repository, and one
+  whose target is another symlink → both resolve to the removed path; one
+  pointing outside the repository, and a cycle → `blocked`.
+- `$(pwd)/scripts/<removed>.sh` → command context; `$((delay * 2))` still
+  not.
+- A consumer refreshed to the fixed pack but **not** KB-refreshed → the
+  `obsidian-kb` hit is still a `packDefect`.
+
+**Seventh measurement.** Blockers: `sd-github-review` 14 hits in 10 files,
+`se-ai-command-pack` 21/7, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
+`rwbp-coordinator` 48/7, `loadsmith` 53/5, `rwbp-website` 65/8,
+`anomaly-metric-creator` 205/21. `packDefects` **16 hits in 7 files**, or
+14 in 6 where the consumer owns its PR template. No consumer is `clear`.
+Every count rose or held; none fell, which is what a hidden-lines defect
+predicts and a mis-tightened rule would not.

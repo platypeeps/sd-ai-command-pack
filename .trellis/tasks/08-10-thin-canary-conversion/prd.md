@@ -44,7 +44,7 @@ revert-and-restore proof.
    three generated bookkeeping files are **kept and rewritten**, and
    `.gitignore` **survives** with one exact marker block removed. Saying
    "plus the four special cases" described 183 deletions and overstated
-   destructive scope by four files. It also deletes It keeps the `repo-native` +
+   destructive scope by four files. It **keeps** the `repo-native` and
    `consumer-config` slices. The counts are recomputed per consumer, not
    assumed from this line.
 4. The revert proof executes `install.py TARGET --revert-thin` on one

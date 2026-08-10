@@ -281,7 +281,13 @@ Emits a schema-versioned verdict object:
   "repo": "<absolute path>",
   "head": "<40-char SHA>",
   "indexDigest": "sha256:<hash of `git ls-files -s` output>",
+  "indexFlagsDigest": "sha256:<hash of `git ls-files -v` output>",
+  "worktreeDigest": "sha256:<hash over dirty paths and their contents>",
   "worktreeClean": true,
+  "receiptOccupancyDigest": "sha256:<hash over what each receipt target is on disk>",
+  "executableBitsDigest": "sha256:<hash over the exec bit of every tracked file>",
+  "binaryTrackedFiles": 0,
+  "missingTrackedFiles": [],
   "classifierDigest": "sha256:<hash over the pack-side inputs below>",
   "verdict": "clear" | "blocked",
   "blockers": [{"kind": "...", "file": "...", "line": 12, "detail": "..."}],
@@ -293,6 +299,19 @@ Emits a schema-versioned verdict object:
   // handle null rather than assume every blocker cites a line
 }
 ```
+
+Every digest field above is load-bearing, and the list is the one the
+research scanner arrived at after two rounds of finding inputs that
+changed a classification while every recorded field stayed identical: a
+gitignored receipt target appearing (`receiptOccupancyDigest`), `chmod +x`
+on a tracked Markdown file under `core.fileMode=false`
+(`executableBitsDigest`), a sparse or unreadable checkout
+(`missingTrackedFiles`, which forces `blocked`), and an `assume-unchanged`
+or `skip-worktree` entry whose bytes change invisibly to `git status`
+(`indexFlagsDigest`). An earlier revision of this schema listed only
+`head`, `indexDigest`, `worktreeClean`, and `classifierDigest`, which
+would have shipped a verdict *less* reproducible than the research
+measurement it is derived from.
 
 `blockers` and `packDefects` both stop conversion — the verdict is
 `clear` only when both are empty. They are separate arrays because they
@@ -330,12 +349,13 @@ more blocking, not less.
    does not. A hit **inside** the block the conversion strips is
    `scheduled`; a hit outside it is judged by the steps below. Deciding
    that needs the block's line span, which the strip already computes, so
-   the resweep reads the span rather than re-deriving it. No consumer
-   exercises this today — no `block_strip` target cites a removed path in
-   any of the 8 — so it is correctness for the case that has not happened
-   yet. The research scanner implements it anyway
-   (`fleet-blocker-scan.py:440`), which is why the case can be asserted to
-   be empty rather than assumed to be.
+   the resweep reads the span rather than re-deriving it. Every one of the
+   8 consumers exercises this: `.gitignore` is a `block_strip` target, and
+   its surviving `obsidian-kb` block names the removed KB script — a hit
+   *outside* the stripped span, in a file that survives, which is why it
+   is a `packDefect` and not `scheduled`. An earlier revision of this
+   paragraph called the case hypothetical; it was hypothetical only while
+   the span was computed per file instead of per block.
 
 2. **Otherwise the file survives. Is it still byte-for-byte the pack's?**
    — present in the pre-conversion installed-targets receipt *and* its
@@ -379,8 +399,8 @@ more blocking, not less.
    `packDefects` entry, and it **blocks**. The earlier draft called this
    `scheduled` on the reasoning that a later release would fix it; that
    recorded an obligation no artifact tracks and shipped known breakage
-   in the meantime. Measured: **14 hits in 7 files** for the five
-   consumers that have not edited their PR template, **12 in 6** for the
+   in the meantime. Measured: **16 hits in 7 files** for the five
+   consumers that have not edited their PR template, **14 in 6** for the
    three that have (`mezmo_benchmark`, `sd-github-review`,
    `anomaly-metric-creator`) — there the template is the consumer's, and
    its stale citations are blockers instead:
@@ -500,15 +520,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 19 in 5,
-`hoa-manager` 32 in 9, `mezmo_benchmark` 39 in 24,
-`rwbp-coordinator` 40 in 7, `loadsmith` 53 in 5, `rwbp-website` 59 in 7,
-`anomaly-metric-creator` 191 in 21. Plus the pack defects above. They are
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 21 in 7,
+`hoa-manager` 34 in 9, `mezmo_benchmark` 44 in 24,
+`rwbp-coordinator` 48 in 7, `loadsmith` 53 in 5, `rwbp-website` 65 in 8,
+`anomaly-metric-creator` 205 in 21. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the sixth measurement, and the five before them were each
+**These are the seventh measurement, and the six before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 
@@ -524,8 +544,12 @@ a rule that reasoning found sufficient, and measurement did not.
   which let a surviving sibling collide with a removed path of the same
   name — `se-ai-command-pack/templates/skills/se-help/SKILL.md:51` cites
   its own `references/examples.md` and was recorded as a blocker.
-  Matching is now exact, tail-of-path, or resolved relative to the citing
-  file, and nothing else.
+  Matching is exact, tail-of-path, resolved relative to the citing file,
+  glob-with-whole-population-removed, or a basename that is both unique to
+  the removal set and pack-distinctive — the five forms `prd.md` states
+  normatively, and nothing else. An earlier revision of this bullet ended
+  at "relative to the citing file", which contradicted the rule the
+  scanner implements; the two are one list now.
 - *Enumerating execution surfaces did not converge.* Three consecutive
   rounds each found a file type the previous enumeration missed: nested
   `scripts/` directories, agent prompt files, root `CLAUDE.md`, PR
@@ -533,6 +557,19 @@ a rule that reasoning found sufficient, and measurement did not.
   a path appearing in command position blocks regardless of the file it
   sits in — because the space of ways a command is written is far smaller
   and far more stable than the space of files that might run one.
+- *Discovery and matching were never reconciled.* Even after discovery was
+  rebuilt around the removal set, it stayed a substring prefilter: full
+  removed paths, their multi-segment suffixes, and only those basenames
+  carrying the pack name. Matching meanwhile grew two rules that share no
+  literal substring with anything — a glob whose whole population is
+  removed, and a bare distinctive basename — so those rules were largely
+  unreachable. 512 lines across the eight consumers satisfied the matcher
+  and were discarded before it ran, two of them per consumer inside the
+  pack's **own** managed block in `.github/copilot-instructions.md`, which
+  cites `.agents/skills/sd-*/SKILL.md` and `**/skills/sd-*/**`. Any
+  substring gate has this failure mode. There is no prefilter now: the
+  matcher sees every line of every tracked file, which costs 11 seconds
+  fleet-wide.
 
 The lesson is specific and is why step 3 keeps the scanner as a committed,
 re-runnable artifact rather than a number in prose: when prose and

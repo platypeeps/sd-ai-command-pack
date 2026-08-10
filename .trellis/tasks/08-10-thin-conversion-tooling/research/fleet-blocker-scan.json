@@ -1,17 +1,19 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "1c85b02cb8a4483e80c6ac77a71438e9a4e5f4ba",
-  "packWorktreeDigest": "sha256:de37fc0d38bf0c41a122d5c5f43fd0a5f12127f0f68998cbd64d5aa8e0063ea4",
+  "packHead": "87ec77cd535b6d8649c5065bd923a03be8fe8781",
+  "packWorktreeDigest": "sha256:aabc94e5a1b8f9a5fb2d7a069a1a30dc1950165f84b298a8250b410f37633224",
   "packWorktreeClean": false,
-  "scannerDigest": "sha256:7494cc80acf0c261832537738802d08c99854057b50166b78224f1448c87ada7",
+  "scannerDigest": "sha256:4b6f8d237e8ffd7779fd7c8dc907c7a81a75938440cbd6440c91f89fb8ec1083",
+  "counterexamplesDigest": "sha256:88e46ac5c24c39eb9a7ef91cb021db58bc7d416045ba89acb2ca2e0d037dc1c5",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
       "head": "5c17320caeb2d68314b87c3c0af3392c52e3920e",
       "indexDigest": "sha256:fe20b450ac3ebbb74f78633aa4c247f665060b0471d8534723a12f9a5d60f7bc",
-      "worktreeDigest": "sha256:112600f9bbe2a2bc32276b6948bb3b537843987619ecee84f2d983f905a90059",
+      "indexFlagsDigest": "sha256:0a8bb278834491eda6036c4b9c16e3f3c766f1ac07d972f5cd634d060c4367ed",
+      "worktreeDigest": "sha256:0ff42d5dbddd59486355ec395f770670831b87edbab804e20c8e6a4ce67a025a",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:f5607bd2f12123ebe43ad4cd3a9816eaef33c24285536a33fd991a0e04128cd3",
       "executableBitsDigest": "sha256:e8d4772484dc71e0fc5b11ce0bdc50250ac666aad17428ae88693153a7fcefe2",
@@ -21,10 +23,10 @@
       "removedTargets": 179,
       "trackedFiles": 1400,
       "counts": {
-        "blockers": 40,
-        "packDefects": 14,
+        "blockers": 48,
+        "packDefects": 16,
         "scheduled": 182,
-        "advisories": 111
+        "advisories": 115
       },
       "blockerFiles": [
         ".github/workflows/ci.yml",
@@ -73,13 +75,18 @@
         },
         {
           "file": "package.json",
-          "line": 55,
+          "line": 56,
           "detail": "\"review:local\": \"SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1 bash scripts/sd-ai-command-pack-full-check.sh\","
         },
         {
           "file": "scripts/check-full.test.mjs",
           "line": 118,
           "detail": "assert.deepEqual(args, ['scripts/sd-ai-command-pack-full-check.sh']);"
+        },
+        {
+          "file": "scripts/check-review-churn.mjs",
+          "line": 205,
+          "detail": "'**/skills/sd-*/**',"
         },
         {
           "file": "scripts/check-review-churn.mjs",
@@ -103,8 +110,28 @@
         },
         {
           "file": "scripts/check-review-churn.mjs",
+          "line": 345,
+          "detail": "expectIncludes('scripts/classify-ci-changes.sh', '.agents/skills/sd-*/*', 'CI classifier to keep copied SD agent skill payloads in the lightweight lane');"
+        },
+        {
+          "file": "scripts/check-review-churn.mjs",
           "line": 348,
           "detail": "expectIncludes('scripts/classify-ci-changes.sh', 'scripts/sd-ai-command-pack-*', 'CI classifier to keep copied SD command-pack scripts in the lightweight lane')"
+        },
+        {
+          "file": "scripts/check-review-churn.mjs",
+          "line": 356,
+          "detail": "expectIncludes('scripts/classify-ci-changes.sh', '.claude/commands/sd/*.md', 'CI classifier to keep SD command adapters in the lightweight lane');"
+        },
+        {
+          "file": "scripts/check-review-churn.mjs",
+          "line": 358,
+          "detail": "expectIncludes('scripts/classify-ci-changes.sh', '.gemini/commands/sd/*.toml', 'CI classifier to keep Gemini SD command adapters in the lightweight lane');"
+        },
+        {
+          "file": "scripts/check-review-churn.mjs",
+          "line": 359,
+          "detail": "expectIncludes('scripts/classify-ci-changes.sh', '.opencode/commands/sd-*.md', 'CI classifier to keep OpenCode SD command adapters in the lightweight lane');"
         },
         {
           "file": "scripts/check-review-churn.mjs",
@@ -238,6 +265,21 @@
         },
         {
           "file": "scripts/classify-ci-changes.sh",
+          "line": 117,
+          "detail": ".agents/skills/trellis-*/*|.agents/skills/sd-*/*)"
+        },
+        {
+          "file": "scripts/classify-ci-changes.sh",
+          "line": 141,
+          "detail": ".claude/commands/sd/*.md)"
+        },
+        {
+          "file": "scripts/classify-ci-changes.sh",
+          "line": 144,
+          "detail": ".cursor/commands/sd-*.md|.gemini/commands/sd/*.toml|.opencode/commands/sd-*.md)"
+        },
+        {
+          "file": "scripts/classify-ci-changes.sh",
           "line": 153,
           "detail": ".sd-ai-command-pack/*|scripts/sd-ai-command-pack-*)"
         },
@@ -260,8 +302,18 @@
         },
         {
           "file": ".github/copilot-instructions.md",
+          "line": 26,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 27,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 36,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -1409,6 +1461,11 @@
           "detail": "- [OK] sd-ai-command-pack-review-full-check.sh: 88 script tests, 490 app unit tests, production build, and 56 Playwright tests"
         },
         {
+          "file": ".trellis/workspace/sdelmas/journal-2.md",
+          "line": 1314,
+          "detail": "Managed fleet refresh 0.55.2 to 0.64.0; installer-managed output plus .claude/skills/sd-* fanout, repomix map, dedicated task. install-audit + check:full green;"
+        },
+        {
           "file": "docs/DEVELOPMENT_CYCLE.md",
           "line": 5,
           "detail": "live in `package.json`, `scripts/sd-ai-command-pack-full-check.sh`, and"
@@ -1487,6 +1544,21 @@
           "file": "docs/REVIEW_PATTERNS.md",
           "line": 111,
           "detail": "Evidence: `docs/SD_AI_COMMAND_PACK.md`,"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1734,
+          "detail": "SD_AI_COMMAND_PACK.md"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1780,
+          "detail": "sd_ai_command_pack_fleet_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1781,
+          "detail": "sd_ai_command_pack_lib.py"
         },
         {
           "file": "docs/repomix-map.md",
@@ -1615,6 +1687,7 @@
       "repo": "/Users/sven/repos/platypeeps/loadsmith",
       "head": "b770d1743429f899445e8bc13530245959041004",
       "indexDigest": "sha256:11417ddf076b72e3962d0df0c478e927144a52455feda41cbb615621d1e86826",
+      "indexFlagsDigest": "sha256:24266d8c25caed66146818591f8be58c8f2fe1809b125c5402960ee0cb9686bb",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:9e43f8265eaff89914818c24604b53ab43fb8d5ce0e4bae56e3e6302dca39221",
@@ -1626,9 +1699,9 @@
       "trackedFiles": 1399,
       "counts": {
         "blockers": 53,
-        "packDefects": 14,
+        "packDefects": 16,
         "scheduled": 182,
-        "advisories": 159
+        "advisories": 163
       },
       "blockerFiles": [
         ".github/workflows/ci.yml",
@@ -1927,8 +2000,18 @@
         },
         {
           "file": ".github/copilot-instructions.md",
+          "line": 17,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 18,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 27,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -3132,6 +3215,16 @@
         },
         {
           "file": ".trellis/workspace/sdelmas/journal-2.md",
+          "line": 1684,
+          "detail": "Managed fleet refresh 0.55.2 to 0.64.0; installer output + .claude/skills/sd-* fanout, repomix map, dedicated task. Audit + full-gate readiness green; PR #175."
+        },
+        {
+          "file": ".trellis/workspace/sdelmas/journal-2.md",
+          "line": 1689,
+          "detail": "- Added the `.claude/skills/sd-*` fanout surface and refreshed the generated repomix map."
+        },
+        {
+          "file": ".trellis/workspace/sdelmas/journal-2.md",
           "line": 1857,
           "detail": "- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs: 0 failure(s), 1 warning(s)"
         },
@@ -3149,6 +3242,11 @@
           "file": "README.md",
           "line": 139,
           "detail": "The installed SD command set is documented in `docs/SD_AI_COMMAND_PACK.md`, including `sd-review` and its `scope=`/`local=`/`remote=` controls, and `sd-review-l"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 49,
+          "detail": "SD_AI_COMMAND_PACK.md"
         },
         {
           "file": "docs/repomix-map.md",
@@ -3209,6 +3307,11 @@
           "file": "docs/repomix-map.md",
           "line": 878,
           "detail": "- `.agents/skills/sd-work-backlog/references/autonomous-loop.md`: shared"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 880,
+          "detail": "- `.agents/skills/sd-work-backlog/references/*-recovery.md`: conditionally"
         },
         {
           "file": "docs/repomix-map.md",
@@ -3522,6 +3625,7 @@
       "repo": "/Users/sven/repos/platypeeps/hoa-manager",
       "head": "a487b283363012ea316f9c88e7b2deb641e02356",
       "indexDigest": "sha256:75c382c401976a78f5b035a3847c23983cc82ad7a84b8120120f1fd4e28eced0",
+      "indexFlagsDigest": "sha256:031da61bf3e6242d52522221904f4a2077c069af371b430ef763c4d3cd9d3ee5",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:bfd28edb38add0e33434e40559100fc42a2f3aa11cabc65051ebc465efb8c01f",
@@ -3532,10 +3636,10 @@
       "removedTargets": 179,
       "trackedFiles": 1628,
       "counts": {
-        "blockers": 32,
-        "packDefects": 14,
+        "blockers": 34,
+        "packDefects": 16,
         "scheduled": 182,
-        "advisories": 121
+        "advisories": 127
       },
       "blockerFiles": [
         ".github/workflows/ci.yml",
@@ -3641,6 +3745,16 @@
         },
         {
           "file": "scripts/check-review-preflight.mjs",
+          "line": 58,
+          "detail": "'.claude/commands/sd/**',"
+        },
+        {
+          "file": "scripts/check-review-preflight.mjs",
+          "line": 59,
+          "detail": "'.gemini/commands/sd/**',"
+        },
+        {
+          "file": "scripts/check-review-preflight.mjs",
           "line": 70,
           "detail": "// Mirrors the pack's own matcher at scripts/sd-ai-command-pack-review-scope.sh:170,"
         },
@@ -3733,8 +3847,18 @@
         },
         {
           "file": ".github/copilot-instructions.md",
+          "line": 44,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 45,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 54,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -4527,6 +4651,11 @@
       ],
       "advisories": [
         {
+          "file": ".gitignore",
+          "line": 41,
+          "detail": "# Python (bytecode cache from scripts/*.py)"
+        },
+        {
           "file": ".trellis/spec/web/testing/verification-commands.md",
           "line": 378,
           "detail": "These delegate to `scripts/sd-ai-command-pack-review-local.sh`. The default"
@@ -4922,6 +5051,11 @@
           "detail": "| [docs/SD_AI_COMMAND_PACK.md](./docs/SD_AI_COMMAND_PACK.md) | Installed SD command-pack usage, commands, config, and troubleshooting. |"
         },
         {
+          "file": "docs/ARCHITECTURE.md",
+          "line": 10,
+          "detail": "The key insight from analyzing the two reference repos (`<reference-root>/rwbp/{rwbp-coordinator,rwbp-website}`) is that **almost every ask already has a preced"
+        },
+        {
           "file": "docs/DEVELOPMENT_CYCLE.md",
           "line": 72,
           "detail": "[`docs/SD_AI_COMMAND_PACK.md`](./SD_AI_COMMAND_PACK.md)."
@@ -4942,6 +5076,11 @@
           "detail": "`scripts/sd-ai-command-pack-full-check.sh`. The pack full-check script runs:"
         },
         {
+          "file": "docs/REFERENCE_STACK.md",
+          "line": 214,
+          "detail": "The later architecture ([ARCHITECTURE.md](./ARCHITECTURE.md)) is mostly *generalize-and-port*, not *invent*. The precedents in these two repos to build each pri"
+        },
+        {
           "file": "docs/REVIEW_PATTERNS.md",
           "line": 93,
           "detail": "- **The scope marker is a line, not a phrase \u2014 but its colon is optional (corrected).** Any of the three phrases works, with or without a trailing colon, and wi"
@@ -4960,6 +5099,21 @@
           "file": "docs/REVIEW_PATTERNS.md",
           "line": 127,
           "detail": "`check:full` delegates to `scripts/sd-ai-command-pack-full-check.sh`; the slash command is"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1128,
+          "detail": "SD_AI_COMMAND_PACK.md"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1148,
+          "detail": "sd_ai_command_pack_fleet_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1149,
+          "detail": "sd_ai_command_pack_lib.py"
         },
         {
           "file": "docs/repomix-map.md",
@@ -5138,6 +5292,7 @@
       "repo": "/Users/sven/repos/rwbp/rwbp-website",
       "head": "74c038bd038f3cd8a5804fe4e3c3a89a69b91381",
       "indexDigest": "sha256:879561d81217eaf4712ff7ea8141012571a1b7a9fbc752a0d45bdca45ee5250f",
+      "indexFlagsDigest": "sha256:73741914fa25c8d8e72ced1a2e3e412bc68e1a1e2e661a13f0c11acec8ff617d",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:def2fe6f7df8916494c63c827979490bf16bf2b51ba7a9d413f0344f8e002419",
@@ -5148,10 +5303,10 @@
       "removedTargets": 179,
       "trackedFiles": 1562,
       "counts": {
-        "blockers": 59,
-        "packDefects": 14,
+        "blockers": 65,
+        "packDefects": 16,
         "scheduled": 182,
-        "advisories": 99
+        "advisories": 105
       },
       "blockerFiles": [
         ".github/instructions/rwbp.instructions.md",
@@ -5159,6 +5314,7 @@
         ".trellis/spec/web/testing/local-and-ci-gates.md",
         ".trellis/spec/workspace/operations/release-gates.md",
         "package.json",
+        "scripts/classify_ci_changes.sh",
         "scripts/review-guard.mjs",
         "tests/review-guard.test.mjs"
       ],
@@ -5173,6 +5329,21 @@
       ],
       "verdict": "blocked",
       "blockers": [
+        {
+          "file": ".github/instructions/rwbp.instructions.md",
+          "line": 80,
+          "detail": "- `.agents/skills/sd-*/**`"
+        },
+        {
+          "file": ".github/instructions/rwbp.instructions.md",
+          "line": 81,
+          "detail": "- `.github/prompts/sd-*.prompt.md`, `.gemini/commands/sd/**`, and"
+        },
+        {
+          "file": ".github/instructions/rwbp.instructions.md",
+          "line": 82,
+          "detail": "`.opencode/commands/sd-*.md`"
+        },
         {
           "file": ".github/instructions/rwbp.instructions.md",
           "line": 85,
@@ -5257,6 +5428,16 @@
           "file": "package.json",
           "line": 72,
           "detail": "\"lint\": \"node --check scripts/source-check.mjs && node --check scripts/setup-local-env.mjs && node --check scripts/dev-start.mjs && node --check scripts/dev-sto"
+        },
+        {
+          "file": "scripts/classify_ci_changes.sh",
+          "line": 80,
+          "detail": ".gemini/commands/sd/*.toml|.gemini/commands/trellis/*.toml)"
+        },
+        {
+          "file": "scripts/classify_ci_changes.sh",
+          "line": 83,
+          "detail": ".opencode/commands/sd-*.md|.opencode/commands/trellis/*.md)"
         },
         {
           "file": "scripts/review-guard.mjs",
@@ -5374,6 +5555,11 @@
           "detail": "const file = 'scripts/sd-ai-command-pack-full-check.sh';"
         },
         {
+          "file": "scripts/review-guard.mjs",
+          "line": 1827,
+          "detail": "// .claude/skills/sd-*/SKILL.md) are picked up without editing this list. The"
+        },
+        {
           "file": "tests/review-guard.test.mjs",
           "line": 30,
           "detail": "import { runReviewPreflight as runSharedReviewPreflight } from '../scripts/sd-ai-command-pack-review-preflight.mjs';"
@@ -5482,8 +5668,18 @@
         },
         {
           "file": ".github/copilot-instructions.md",
+          "line": 7,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 8,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 17,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -6312,6 +6508,11 @@
         },
         {
           "file": ".trellis/spec/workspace/documentation/framework-adapters.md",
+          "line": 54,
+          "detail": "`.opencode/commands/sd-*`; shared behavior stays in `.agents/skills/` and"
+        },
+        {
+          "file": ".trellis/spec/workspace/documentation/framework-adapters.md",
           "line": 66,
           "detail": "- `.gemini/commands/sd/continue.toml`"
         },
@@ -6522,6 +6723,11 @@
         },
         {
           "file": "docs/DEVELOPMENT_CYCLE.md",
+          "line": 95,
+          "detail": "ignored, but the shared `.claude/commands/sd/*.md` command adapters are tracked"
+        },
+        {
+          "file": "docs/DEVELOPMENT_CYCLE.md",
           "line": 99,
           "detail": "- `.agents/skills/sd-review-pr/SKILL.md`"
         },
@@ -6597,6 +6803,11 @@
         },
         {
           "file": "docs/REVIEW_PATTERNS.md",
+          "line": 40,
+          "detail": "`.opencode/commands/sd-*.md` as thin adapters that point back to shared"
+        },
+        {
+          "file": "docs/REVIEW_PATTERNS.md",
           "line": 45,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`; that guide is copied from"
         },
@@ -6649,6 +6860,21 @@
           "file": "docs/ci.md",
           "line": 225,
           "detail": "- `scripts/sd-ai-command-pack-full-check.sh`"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1894,
+          "detail": "SD_AI_COMMAND_PACK.md"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1926,
+          "detail": "sd_ai_command_pack_fleet_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1927,
+          "detail": "sd_ai_command_pack_lib.py"
         },
         {
           "file": "docs/repomix-map.md",
@@ -6777,6 +7003,7 @@
       "repo": "/Users/sven/repos/mezmo/mezmo_benchmark",
       "head": "aa8b6a451f0de8216eb87e524f03bbe70f085f3c",
       "indexDigest": "sha256:7b6ec67476400715b271824266fa14876ae8fa48532fa3a6b98f2018e7ca36cb",
+      "indexFlagsDigest": "sha256:cb5d7db9b6e9cc6fb5ed797542fa581067812925911edfe17302d3ff052ef97d",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:d9d117d57b8685fee05a4121d67bdc42c08a906d39193a76cf797c93d2a4bd87",
@@ -6787,10 +7014,10 @@
       "removedTargets": 179,
       "trackedFiles": 1854,
       "counts": {
-        "blockers": 39,
-        "packDefects": 12,
+        "blockers": 44,
+        "packDefects": 14,
         "scheduled": 182,
-        "advisories": 92
+        "advisories": 97
       },
       "blockerFiles": [
         ".github/copilot-instructions.md",
@@ -6919,6 +7146,11 @@
           "detail": "\"scripts/sd-ai-command-pack-*.py\","
         },
         {
+          "file": "pyproject.toml",
+          "line": 132,
+          "detail": "\"scripts/sd_ai_command_pack*.py\","
+        },
+        {
           "file": "scripts/check-defect-patterns.py",
           "line": 233,
           "detail": "if name.startswith(\"sd-ai-command-pack-\") or name == \"sd_ai_command_pack_lib.py\":"
@@ -6932,6 +7164,11 @@
           "file": "scripts/check-review-cycle-patterns.py",
           "line": 45,
           "detail": "\"sd-ai-command-pack-review-learnings.py\""
+        },
+        {
+          "file": "scripts/check-review-cycle-patterns.py",
+          "line": 56,
+          "detail": "\"**/skills/sd-*/**\","
         },
         {
           "file": "scripts/check-review-cycle-patterns.py",
@@ -6964,14 +7201,29 @@
           "detail": "REPO_ROOT / \"scripts\" / \"sd-ai-command-pack-review-learnings.py\""
         },
         {
+          "file": "tests/preflight/conftest.py",
+          "line": 31,
+          "detail": "SD_PACK_LIB_SCRIPT = REPO_ROOT / \"scripts\" / \"sd_ai_command_pack_lib.py\""
+        },
+        {
           "file": "tests/preflight/test_check_review_cycle_patterns.py",
           "line": 122,
           "detail": "path = \"scripts/sd-ai-command-pack-full-check.sh\""
         },
         {
+          "file": "tests/preflight/test_check_review_cycle_patterns.py",
+          "line": 403,
+          "detail": "assert \"**/skills/sd-*/**\" in findings[0].detail"
+        },
+        {
           "file": "tests/test_ci_workflow.py",
           "line": 165,
           "detail": "\"scripts/sd-ai-command-pack-*.py\","
+        },
+        {
+          "file": "tests/test_ci_workflow.py",
+          "line": 166,
+          "detail": "\"scripts/sd_ai_command_pack*.py\","
         },
         {
           "file": "tests/test_docs_drift.py",
@@ -7027,8 +7279,18 @@
       "packDefects": [
         {
           "file": ".github/copilot-instructions.md",
+          "line": 46,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 47,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 56,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -7991,6 +8253,16 @@
           "detail": "bash scripts/sd-ai-command-pack-full-check.sh                 # local review loop"
         },
         {
+          "file": ".trellis/tasks/archive/2026-07/07-18-speed-test-io-hotspots/design.md",
+          "line": 63,
+          "detail": "| chmod on `sd_ai_command_pack_lib.py` | no | no | **yes** |"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-07/07-18-speed-test-io-hotspots/implement.md",
+          "line": 74,
+          "detail": "today, has no chmod on `sd_ai_command_pack_lib.py`, and \u2014 critically \u2014"
+        },
+        {
           "file": ".trellis/tasks/archive/2026-07/07-20-structured-logging-core/implement.md",
           "line": 26,
           "detail": "bash scripts/sd-ai-command-pack-full-check.sh"
@@ -8162,6 +8434,21 @@
         },
         {
           "file": "docs/repomix-map.md",
+          "line": 1200,
+          "detail": "SD_AI_COMMAND_PACK.md"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1318,
+          "detail": "sd_ai_command_pack_fleet_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1319,
+          "detail": "sd_ai_command_pack_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
           "line": 1320,
           "detail": "sd-ai-command-pack-audit-inventory.py"
         },
@@ -8285,26 +8572,29 @@
     {
       "consumer": "se-ai-command-pack",
       "repo": "/Users/sven/repos/platypeeps/se-ai-command-pack",
-      "head": "ac1f2f57bf96c1c6df05a1362a74b1a00291c19a",
-      "indexDigest": "sha256:16e62679abb7e8f5922e759b023ceefc7463a29bd3902ee6322af33dabfba5c5",
-      "worktreeDigest": "sha256:a87ec784f6b862062dc6fda9e0483cc00d3a7199d3acaee478dac404ba1a5085",
-      "worktreeClean": false,
+      "head": "e8dd4e3b10226caa21f52d4a5dfc589b24ed4dc9",
+      "indexDigest": "sha256:1f968a4165fd699f8c446d86e809402705671825349b4c3bcd64268af7e7c838",
+      "indexFlagsDigest": "sha256:956571772c8feb18c4dba331bc324aa21e9c40518111aaa7cc072daeef02e39e",
+      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:5f07fda12898725c43dcc85efe9f587abedfe6aa586b69e369b715f352a64eb0",
-      "executableBitsDigest": "sha256:13ae63b088524a9ac18f1093dfdd70a431dc9a54f5bda780d42f7c4b5dfa34c7",
+      "executableBitsDigest": "sha256:b37418dd18043832bb1d79306c3a057fc2c7f1e72ffcb1a80b718bb3aa43d7f3",
       "binaryTrackedFiles": 0,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
-      "trackedFiles": 1407,
+      "trackedFiles": 1410,
       "counts": {
-        "blockers": 19,
-        "packDefects": 14,
+        "blockers": 21,
+        "packDefects": 16,
         "scheduled": 182,
-        "advisories": 770
+        "advisories": 810
       },
       "blockerFiles": [
+        ".github/scripts/generate-skill-surfaces.py",
         ".github/workflows/tests.yml",
         ".trellis/spec/backend/quality-guidelines.md",
+        "Makefile",
         "package.json",
         "tests/test_project_check.py",
         "tests/test_repomix.py"
@@ -8320,6 +8610,11 @@
       ],
       "verdict": "blocked",
       "blockers": [
+        {
+          "file": ".github/scripts/generate-skill-surfaces.py",
+          "line": 378,
+          "detail": "\"references/*.md, and scripts/*.py are shipped in this pack \""
+        },
         {
           "file": ".github/workflows/tests.yml",
           "line": 133,
@@ -8376,6 +8671,11 @@
           "detail": "\"check:full\": \"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
         },
         {
+          "file": "Makefile",
+          "line": 61,
+          "detail": "for f in scripts/*.sh .github/scripts/update-repomix; do bash -n \"$$f\" || exit 1; done"
+        },
+        {
           "file": "package.json",
           "line": 5,
           "detail": "\"check:full\": \"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
@@ -8429,8 +8729,18 @@
         },
         {
           "file": ".github/copilot-instructions.md",
+          "line": 19,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 20,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 29,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -9223,6 +9533,16 @@
       ],
       "advisories": [
         {
+          "file": ".gitignore",
+          "line": 44,
+          "detail": ".claude/commands/*"
+        },
+        {
+          "file": ".gitignore",
+          "line": 51,
+          "detail": ".claude/skills/*"
+        },
+        {
           "file": ".prism/rules.json",
           "line": 43,
           "detail": "\"text\": \"Do not report the lone generated `_example` row in a planning task's implement.jsonl or check.jsonl as leftover placeholder content. `task.py create` w"
@@ -9339,6 +9659,11 @@
         },
         {
           "file": ".trellis/audit/report-2026-07-25.md",
+          "line": 17,
+          "detail": "- .gitignore:92 \u2014 SD-pack managed block re-includes `.claude/commands/sd/*.md` (lines 93\u201395), defeated by line 27."
+        },
+        {
+          "file": ".trellis/audit/report-2026-07-25.md",
           "line": 19,
           "detail": "- scripts/sd-ai-command-pack-install-audit.py:489 \u2014 pack's own audit flags this receipts-vs-worktree mismatch on a fresh clone."
         },
@@ -9451,6 +9776,11 @@
           "file": ".trellis/audit/report-2026-07-25.md",
           "line": 263,
           "detail": "- .agents/skills/sd-update-deps/SKILL.md:14 \u2014 workflow triages bot PRs only, but no .github/dependabot.yml or renovate config exists."
+        },
+        {
+          "file": ".trellis/spec/backend/directory-structure.md",
+          "line": 56,
+          "detail": "`references/*.md` and `scripts/*.py` are shipped; nested resource trees and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
@@ -9589,6 +9919,16 @@
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
+          "line": 1158,
+          "detail": "shapes are `references/*.md` and `scripts/*.py`; nested directories and other"
+        },
+        {
+          "file": ".trellis/spec/backend/quality-guidelines.md",
+          "line": 1177,
+          "detail": "| Flat `references/*.md` or `scripts/*.py` file | Validate and fan out to every declared platform. |"
+        },
+        {
+          "file": ".trellis/spec/backend/quality-guidelines.md",
           "line": 2069,
           "detail": "Both `scripts/sd-ai-command-pack-status.py` and"
         },
@@ -9601,6 +9941,11 @@
           "file": ".trellis/spec/backend/quality-guidelines.md",
           "line": 2084,
           "detail": "(`sd-ai-command-pack-status.py` at 2631 lines) and were re-located by symbol"
+        },
+        {
+          "file": ".trellis/spec/backend/quality-guidelines.md",
+          "line": 2130,
+          "detail": "(`sd_ai_command_pack_fleet_lib.py`, `:119-131`): `$XDG_CONFIG_HOME`"
         },
         {
           "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
@@ -9663,6 +10008,11 @@
           "detail": "`.agents/skills/sd-retro/SKILL.md` specialization boundary."
         },
         {
+          "file": ".trellis/tasks/archive/2026-07/07-17-se-skill-roadmap/final-integration-review.md",
+          "line": 71,
+          "detail": "`references/*.md` or `scripts/*.py` shapes, and one canonical source feeds all"
+        },
+        {
           "file": ".trellis/tasks/archive/2026-07/07-20-configure-project-check/prd.md",
           "line": 20,
           "detail": "`scripts/sd-ai-command-pack-full-check.sh`."
@@ -9688,6 +10038,16 @@
           "detail": "- [ ] `bash scripts/sd-ai-command-pack-toolchain.sh doctor` reports"
         },
         {
+          "file": ".trellis/tasks/archive/2026-07/07-21-skill-package-reviewer/prd.md",
+          "line": 21,
+          "detail": "this repository owns `templates/skills/se-*`, while `.agents/skills/sd-*` is"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-07/07-21-skill-package-reviewer/prd.md",
+          "line": 79,
+          "detail": "directories. Treat `.agents/skills/**`, `.claude/skills/**`,"
+        },
+        {
           "file": ".trellis/tasks/archive/2026-07/07-22-se-ask-me-current-context-drafts/implement.md",
           "line": 33,
           "detail": "- `bash scripts/sd-ai-command-pack-review-full-check.sh`;"
@@ -9709,8 +10069,33 @@
         },
         {
           "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
+          "line": 6,
+          "detail": "the tracked `.gemini/commands/sd/*` twins.** Local-only third-party skills under"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
+          "line": 15,
+          "detail": "carry because line 27 ignores them. The parity partner `.gemini/commands/sd/*`"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
           "line": 19,
           "detail": "`scripts/sd-ai-command-pack-install-audit.py` (audit_expected_targets, ~:474-511)"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
+          "line": 55,
+          "detail": ".claude/commands/*"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
+          "line": 62,
+          "detail": ".claude/skills/*"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
+          "line": 70,
+          "detail": "- **Tracked (new):** `.claude/commands/sd/**`, `.claude/skills/sd-*/**`,"
         },
         {
           "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/design.md",
@@ -9741,6 +10126,16 @@
           "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/implement.md",
           "line": 56,
           "detail": "- `python3 scripts/sd-ai-command-pack-install-audit.py` \u2014 AC2 gate."
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/prd.md",
+          "line": 10,
+          "detail": "21 tracked `.gemini/commands/sd/*` twins. Local-only third-party skills under"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/prd.md",
+          "line": 31,
+          "detail": "(parity with the 21 tracked `.gemini/commands/sd/*` twins)."
         },
         {
           "file": ".trellis/tasks/archive/2026-08/07-25-audit-claude-gitignore-owner/prd.md",
@@ -9804,6 +10199,16 @@
         },
         {
           "file": ".trellis/tasks/archive/2026-08/07-25-audit-repo-tooling-ownership/prd.md",
+          "line": 193,
+          "detail": "- [x] Makefile references repo-own scripts at their documented home. \u2014 `Makefile:35` now calls `.github/scripts/update-repomix`; every `.github/scripts` call si"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-repo-tooling-ownership/prd.md",
+          "line": 275,
+          "detail": "`.opencode/commands/sd-*.md` as `sd/**` and missed that `.gitignore` is an"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-repo-tooling-ownership/prd.md",
           "line": 336,
           "detail": "the pre-move `update_repomix` path \u2014 `scripts/sd-ai-command-pack-review-scope.sh:146`"
         },
@@ -9848,6 +10253,21 @@
           "detail": "- Evidence: docs/repomix-map.md:1; .trellis/spec/backend/quality-guidelines.md:1130; scripts/sd-ai-command-pack-install-audit.py:246; tests/test_repomix.py:89-9"
         },
         {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-skill-review-internals/implement.md",
+          "line": 26,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest discover -s tests -p test_skill_review.py 2>&1 | tail -3"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-skill-review-internals/implement.md",
+          "line": 86,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest discover -s tests -p test_skill_review.py 2>&1 | tail -3"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-skill-review-internals/implement.md",
+          "line": 130,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -m unittest discover -s tests -p test_frontmatter_conformance.py 2>&1 | tail -3"
+        },
+        {
           "file": ".trellis/tasks/archive/2026-08/07-25-dispatch-pilot/implement.md",
           "line": 8,
           "detail": "protocol` (`.claude/skills/sd-audit-repo/SKILL.md:156-172`) and"
@@ -9856,6 +10276,16 @@
           "file": ".trellis/tasks/archive/2026-08/07-25-dispatch-pilot/implement.md",
           "line": 62,
           "detail": "- Review preflight: `node scripts/sd-ai-command-pack-review-preflight.mjs`"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-worker-agents/research/agent-artifact-format.md",
+          "line": 73,
+          "detail": "| Resource dirs | `references/*.md`, `scripts/*.py` allowed (`:130-133`, checked `:290-321`) | agents are flat single `*.md` files only (`validate_agents`, `:70"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-28-brand-voice-validator-skill/design.md",
+          "line": 173,
+          "detail": "- only `SKILL.md`, `references/*.md`, `scripts/*.py`; no nested directories, no"
         },
         {
           "file": ".trellis/tasks/archive/2026-08/07-28-enhance-skills-workflow/implement.md",
@@ -9878,9 +10308,29 @@
           "detail": "scripts/sd-ai-command-pack-update-spec-kb.py"
         },
         {
+          "file": ".trellis/tasks/archive/2026-08/08-03-propose-skills-from-session/design.md",
+          "line": 23,
+          "detail": "irreducibly model judgement. A `scripts/*.py` could only manipulate text it cannot"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-03-propose-skills-from-session/prd.md",
+          "line": 44,
+          "detail": "- Only `SKILL.md`, `references/*.md`, `scripts/*.py` may exist in the skill dir."
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-03-propose-skills-from-session/prd.md",
+          "line": 69,
+          "detail": "`scripts/*.py` helper is allowed but not required.)"
+        },
+        {
           "file": ".trellis/tasks/archive/2026-08/08-04-audit-review-nested-check-falseblock/design.md",
           "line": 5,
           "detail": "`scripts/sd-ai-command-pack-review.py` memoizes the **entire typed sd-check"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-04-audit-review-nested-check-falseblock/design.md",
+          "line": 43,
+          "detail": "Refuted alternatives: `build_tool_environment` (sd_ai_command_pack_lib.py:239-293)"
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-04-audit-review-nested-check-falseblock/implement.md",
@@ -12204,6 +12654,11 @@
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-06-sd-review-local-rebuttal-gap/research/refresh-diff-review.md",
+          "line": 589,
+          "detail": "| `sd_ai_command_pack_lib.py` | +539 | **Behavioral (shared)** \u2014 `declare_verdict_domain`/`VERDICT_CORE`/`DEPRECATED_PAYLOAD_KEYS` (0.64.17), `run_git_minimal`/"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-06-sd-review-local-rebuttal-gap/research/refresh-diff-review.md",
           "line": 590,
           "detail": "| `sd-ai-command-pack-pr-body-scope.py` | +84 | Performance \u2014 `ScopeRule` literal/glob partition + cached hash; output byte-identical (0.64.18) |"
         },
@@ -12629,8 +13084,18 @@
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-07-status-collector-pack-drift/prd.md",
+          "line": 31,
+          "detail": "> - `sd_ai_command_pack_fleet_lib.py` is **byte-for-byte identical** between the"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-07-status-collector-pack-drift/prd.md",
           "line": 53,
           "detail": "`collect_versions` (`scripts/sd-ai-command-pack-status.py:382-415`) decides pack"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-07-status-collector-pack-drift/prd.md",
+          "line": 161,
+          "detail": "`sd_ai_command_pack_fleet_lib.py` resolves a target version three ways, each"
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-07-status-collector-pack-drift/prd.md",
@@ -12694,8 +13159,18 @@
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/design.md",
+          "line": 119,
+          "detail": "or `bash -n` on the seven `scripts/*.sh` files (4,620 lines total). They are"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/design.md",
           "line": 120,
           "detail": "vendored, but `sd-ai-command-pack-full-check.sh`, `-housekeeping.sh`, and"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/design.md",
+          "line": 126,
+          "detail": "- New Makefile target `shell-syntax`: `bash -n` over `scripts/*.sh`,"
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/design.md",
@@ -12729,8 +13204,23 @@
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/implement.md",
+          "line": 49,
+          "detail": "`for f in scripts/*.sh; do bash -n \"$f\" || exit 1; done`."
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/implement.md",
           "line": 65,
           "detail": "mandatory (`ENTRY_KEYS` membership `sd-ai-command-pack-check.py:65-66`,"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/implement.md",
+          "line": 74,
+          "detail": "2. `make shell-syntax` \u2014 passes. Then copy one `scripts/*.sh` to a scratch"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/prd.md",
+          "line": 30,
+          "detail": "`scripts/*.sh` files. They are vendored, but they execute inside this"
         },
         {
           "file": ".trellis/tasks/archive/2026-08/08-08-ci-gate-fail-softs/prd.md",
@@ -13054,6 +13544,11 @@
         },
         {
           "file": "CONTRIBUTING.md",
+          "line": 32,
+          "detail": "| `.claude/commands/sd/**`, `.gemini/commands/sd/**`, `.opencode/commands/sd-*.md` | SD pack | same |"
+        },
+        {
+          "file": "CONTRIBUTING.md",
           "line": 33,
           "detail": "| `.claude/skills/sd-*/**`, `.agents/skills/sd-*/**`, `.claude/rules/sd-*`, `.claude/sd-ai-command-pack/**` | SD pack | same |"
         },
@@ -13061,6 +13556,21 @@
           "file": "CONTRIBUTING.md",
           "line": 34,
           "detail": "| `.github/PULL_REQUEST_TEMPLATE.md`, `docs/SD_AI_COMMAND_PACK.md`, `.gito/sd-ai-command-pack.env`, `.prism/rules.schema.json` | SD pack | same |"
+        },
+        {
+          "file": "CONTRIBUTING.md",
+          "line": 198,
+          "detail": "tracked `.gemini/commands/sd/*` twins. Everything else under `.claude/` (local"
+        },
+        {
+          "file": "docs/SE_AI_COMMAND_PACK.md",
+          "line": 12,
+          "detail": "| `templates/skills/<name>/` | Canonical skill definitions (`SKILL.md` + optional flat `references/*.md` and `scripts/*.py`). The only place skills are edited. "
+        },
+        {
+          "file": "docs/SE_AI_COMMAND_PACK.md",
+          "line": 985,
+          "detail": "2. Optional flat `references/*.md` and standard-library `scripts/*.py`;"
         },
         {
           "file": "repomix.config.json",
@@ -13079,6 +13589,7 @@
       "repo": "/Users/sven/repos/platypeeps/sd-github-review",
       "head": "8a5493b4002f1988f18c35952f6e9f28b8b6972f",
       "indexDigest": "sha256:be03736cdd85bab6d5455828089050fc3ac9f5c9fb155a41bc068834822f5dcd",
+      "indexFlagsDigest": "sha256:f6408da435adfa47ca49788713e59131177c743e84b8fa452ff76d901e0bc37e",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:a7e3f41c7fa4e146f0a3c811743ed376d6b20a503376e026cfa2359a42396729",
@@ -13090,7 +13601,7 @@
       "trackedFiles": 1182,
       "counts": {
         "blockers": 14,
-        "packDefects": 12,
+        "packDefects": 14,
         "scheduled": 182,
         "advisories": 76
       },
@@ -13190,8 +13701,18 @@
       "packDefects": [
         {
           "file": ".github/copilot-instructions.md",
+          "line": 19,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 20,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 29,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -14370,6 +14891,7 @@
       "repo": "/Users/sven/repos/platypeeps/anomaly-metric-creator",
       "head": "82ad2f5ea881d79ba35873268671a0330607ac92",
       "indexDigest": "sha256:396c8e2be7955db03dd5df79ddc1104558342cd6a015b9a1518519a349ae2fd3",
+      "indexFlagsDigest": "sha256:56d415644624d9f44c53de2c55ada36e0e914d6a2e78dd8c27648002f1116d9d",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:0b68729aab21d49cbd879f1b9831d815f42278347407c0040473e67992a5f8c0",
@@ -14380,10 +14902,10 @@
       "removedTargets": 179,
       "trackedFiles": 1348,
       "counts": {
-        "blockers": 191,
-        "packDefects": 12,
+        "blockers": 205,
+        "packDefects": 14,
         "scheduled": 182,
-        "advisories": 150
+        "advisories": 154
       },
       "blockerFiles": [
         ".github/PULL_REQUEST_TEMPLATE.md",
@@ -14457,6 +14979,16 @@
           "file": ".github/instructions/anomaly-metric-creator.instructions.md",
           "line": 70,
           "detail": "`scripts/sd-ai-command-pack-pr-body-scope.py`,"
+        },
+        {
+          "file": ".github/instructions/anomaly-metric-creator.instructions.md",
+          "line": 91,
+          "detail": "`.agents/skills/sd-*/**`, `.github/prompts/sd-*.prompt.md`,"
+        },
+        {
+          "file": ".github/instructions/anomaly-metric-creator.instructions.md",
+          "line": 92,
+          "detail": "`.gemini/commands/sd/**`, `.opencode/commands/sd-*.md`,"
         },
         {
           "file": ".github/instructions/anomaly-metric-creator.instructions.md",
@@ -14925,6 +15457,21 @@
         },
         {
           "file": "tests/test_copilot_instruction_contract.py",
+          "line": 116,
+          "detail": "SD copies: `.agents/skills/sd-*/**`,"
+        },
+        {
+          "file": "tests/test_copilot_instruction_contract.py",
+          "line": 117,
+          "detail": "`.github/prompts/sd-*.prompt.md`, `.gemini/commands/sd/**`,"
+        },
+        {
+          "file": "tests/test_copilot_instruction_contract.py",
+          "line": 118,
+          "detail": "`.opencode/commands/sd-*.md`,"
+        },
+        {
+          "file": "tests/test_copilot_instruction_contract.py",
           "line": 120,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-review-scope.sh`,"
         },
@@ -15044,6 +15591,11 @@
           "detail": "AUTHORITY = REPO_ROOT / \"scripts\" / \"sd-ai-command-pack-pr-body-scope.py\""
         },
         {
+          "file": "tests/test_scope_heading_mirrors_lint.py",
+          "line": 21,
+          "detail": "AUTHORITY_LIB = REPO_ROOT / \"scripts\" / \"sd_ai_command_pack_lib.py\""
+        },
+        {
           "file": "tests/test_sd_ai_command_pack_full_check_script.py",
           "line": 1,
           "detail": "\"\"\"Focused tests for ``scripts/sd-ai-command-pack-full-check.sh`` review-tooling behavior.\"\"\""
@@ -15065,6 +15617,11 @@
         },
         {
           "file": "tests/test_sd_ai_command_pack_full_check_script.py",
+          "line": 16,
+          "detail": "PYTHON_LIB = REPO_ROOT / \"scripts\" / \"sd_ai_command_pack_lib.py\""
+        },
+        {
+          "file": "tests/test_sd_ai_command_pack_full_check_script.py",
           "line": 46,
           "detail": "shutil.copy2(SCRIPT, repo / \"scripts\" / \"sd-ai-command-pack-full-check.sh\")"
         },
@@ -15077,6 +15634,11 @@
           "file": "tests/test_sd_ai_command_pack_full_check_script.py",
           "line": 48,
           "detail": "shutil.copy2(TOOLCHAIN, repo / \"scripts\" / \"sd-ai-command-pack-toolchain.sh\")"
+        },
+        {
+          "file": "tests/test_sd_ai_command_pack_full_check_script.py",
+          "line": 49,
+          "detail": "shutil.copy2(PYTHON_LIB, repo / \"scripts\" / \"sd_ai_command_pack_lib.py\")"
         },
         {
           "file": "tests/test_sd_ai_command_pack_full_check_script.py",
@@ -15255,6 +15817,36 @@
         },
         {
           "file": "tools/check_copilot_instruction_contract.py",
+          "line": 172,
+          "detail": "\".agents/skills/sd-*/**\","
+        },
+        {
+          "file": "tools/check_copilot_instruction_contract.py",
+          "line": 173,
+          "detail": "\".agents/skills/sd-*/**\","
+        },
+        {
+          "file": "tools/check_copilot_instruction_contract.py",
+          "line": 184,
+          "detail": "\".gemini/commands/sd/**\","
+        },
+        {
+          "file": "tools/check_copilot_instruction_contract.py",
+          "line": 185,
+          "detail": "\".gemini/commands/sd/**\","
+        },
+        {
+          "file": "tools/check_copilot_instruction_contract.py",
+          "line": 190,
+          "detail": "\".opencode/commands/sd-*.md\","
+        },
+        {
+          "file": "tools/check_copilot_instruction_contract.py",
+          "line": 191,
+          "detail": "\".opencode/commands/sd-*.md\","
+        },
+        {
+          "file": "tools/check_copilot_instruction_contract.py",
           "line": 201,
           "detail": "\"docs/SD_AI_COMMAND_PACK.md\","
         },
@@ -15377,8 +15969,18 @@
       "packDefects": [
         {
           "file": ".github/copilot-instructions.md",
+          "line": 37,
+          "detail": "entry points: `.trellis/workflow.md`, `.agents/skills/sd-*/SKILL.md`, and"
+        },
+        {
+          "file": ".github/copilot-instructions.md",
           "line": 38,
           "detail": "`docs/SD_AI_COMMAND_PACK.md`."
+        },
+        {
+          "file": ".github/copilot-instructions.md",
+          "line": 47,
+          "detail": "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,"
         },
         {
           "file": ".github/copilot-instructions.md",
@@ -16737,6 +17339,21 @@
         },
         {
           "file": "docs/repomix-map.md",
+          "line": 1433,
+          "detail": "SD_AI_COMMAND_PACK.md"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1439,
+          "detail": "sd_ai_command_pack_fleet_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
+          "line": 1440,
+          "detail": "sd_ai_command_pack_lib.py"
+        },
+        {
+          "file": "docs/repomix-map.md",
           "line": 1441,
           "detail": "sd-ai-command-pack-audit-inventory.py"
         },
@@ -16904,6 +17521,11 @@
           "file": "docs/review-learnings.md",
           "line": 31,
           "detail": "- **current** PR #226 `scripts/sd-ai-command-pack-review-local.sh`: `join_by_comma` is invoked with an unquoted array expansion. If any reviewed path/pattern co"
+        },
+        {
+          "file": "docs/review-learnings.md",
+          "line": 59,
+          "detail": "- Representative signatures: `` `_load_source_module()` collapses several path-policy failures (including platforms without... `` (x1); `` `PACK_FILE_PATTERNS` "
         },
         {
           "file": "docs/review-learnings.md",
