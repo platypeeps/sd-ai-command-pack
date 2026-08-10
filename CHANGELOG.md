@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.66.1 - 2026-08-10
+
+- `install.py --status` / `--check` now understand a thin install. When the
+  provenance receipt pins `mode: "thin"`, the inspection compares the checkout
+  against the residual payload a conversion leaves behind instead of the full
+  source payload, so a converted consumer reports `state: current` rather than
+  `refresh-required` forever. The pack's `.gitignore` block is not reinstalled
+  on that path, and the receipt's pinned `platforms` are reported as the
+  installed platforms — a thin receipt no longer lists the machine-provided
+  surfaces, so inferring platforms from it would shrink the set and make every
+  fleet reader reject the consumer against the registry. A fat install takes
+  the unchanged path: `mode: "thin"` is the only discriminator, and provenance
+  written without a pin is byte-identical to before.
+- `sd-ai-command-pack-install-audit.py` skips only its manifest-derived
+  expected-target completeness check for a thin install, whose payload was
+  deliberately reduced. Every receipt-to-disk check still applies: the receipt
+  remains the allowlist, and every listed target must still be present.
+  Verifying the receipt itself against the expected residual belongs to
+  `install.py --check` run from a source checkout, which is where the surface
+  partition lives.
+
 ## 0.66.0 - 2026-08-10
 
 - Fleet registry schema 5: each `docs/fleet/consumers.json` consumer may now

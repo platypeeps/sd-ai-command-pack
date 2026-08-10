@@ -52,7 +52,7 @@ happens to each. Four existing readers settle it — and the first draft
 
 | File | Fate |
 |---|---|
-| `.sd-ai-command-pack/provenance.json` | **kept, rewritten**: residual `files` map, `version`, `pack`, plus `mode: "thin"` and `settingsAdditions` |
+| `.sd-ai-command-pack/provenance.json` | **kept, rewritten**: residual `files` map, `version`, `pack`, plus the thin pin — `mode: "thin"`, `platforms`, `consumer`, `settingsAdditions`, `forced` |
 | `.sd-ai-command-pack/installed-targets.txt` | **kept, rewritten** to the derived residual set |
 | `.sd-ai-command-pack/manifest.json` | **kept, rewritten** to describe the residual payload |
 
@@ -76,6 +76,19 @@ All three survive because all three are required:
   requires every listed target to be *present* (`:616-626`), reporting
   everything else as `unlisted-pack-like` (`:640`). A missing receipt
   makes both checks fail at once.
+- The audit's expected-target completeness check is manifest-derived
+  (`expected_targets_from_manifest`), so it demands every surface the
+  pack ships for the consumer's platforms and fails a thin consumer on
+  all ~167 deleted files. It ships to consumers while the partition does
+  not, so it cannot recompute the residual: when provenance pins
+  `mode: "thin"` it skips *only* that check and keeps every
+  receipt-to-disk check. Verifying the receipt itself against the
+  expected residual stays with the source-checkout `install.py --check`.
+- The pin carries `platforms` because a thin receipt no longer proves
+  which platforms the consumer selected — `_manifest_platforms`
+  intersects the manifest against the receipt, which for a converted
+  consumer collapses to its repo-native platforms and makes every fleet
+  reader reject the mismatch against the registry.
 - `read_consumer_pin` needs only a non-empty `version`
   (`scripts/sd-ai-command-pack-status.py:2911`), which is exactly why
   it cannot be the only interface consulted: `sd-status` would report a

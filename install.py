@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from installer import (
+    conversion,
     fileops,
     inspection,
     localonly,
@@ -80,6 +81,7 @@ from installer.provenance import (
     preserved_receipt_targets,
     read_existing_installed_targets,
     read_existing_provenance_files,
+    read_existing_provenance_pin,
 )
 from installer.registry import (
     _LOCAL_GITIGNORE_GROUP_ORDER,
@@ -197,6 +199,7 @@ __all__ = [
     "atomic_write_bytes",
     "display_path",
     "configure_fleet_profile",
+    "conversion",
     "ensure_local_only_exclude",
     "ensure_trellis_for_local_only",
     "fileops",
@@ -232,6 +235,7 @@ __all__ = [
     "preserved_receipt_targets",
     "read_existing_installed_targets",
     "read_existing_provenance_files",
+    "read_existing_provenance_pin",
     "read_text_if_exists",
     "read_text_strict",
     "reject_tracked_local_only_paths",
@@ -516,10 +520,15 @@ def _install_payload(
     dry_run: bool,
     backup: bool,
     planned_results: dict[Path, InstallResult] | None = None,
+    install_gitignore: bool = True,
 ) -> tuple[list[InstallResult], list[Path]]:
     results: list[InstallResult] = []
     generated_targets: list[Path] = []
-    if not local_only:
+    # A thin checkout stripped the pack's .gitignore block on purpose: the
+    # entries it carries ignore machine surfaces that no longer live in the
+    # repository. Reinstalling it would make every thin inspection report a
+    # pending change and would relist .gitignore as an installed target.
+    if not local_only and install_gitignore:
         results.append(install_trellis_gitignore(target, dry_run=dry_run))
         generated_targets.append(TRELLIS_GITIGNORE_TARGET)
 
@@ -570,6 +579,7 @@ def _install_receipt_files(
     results: list[InstallResult],
     generated_targets: list[Path],
     dry_run: bool,
+    pin: dict | None = None,
 ) -> list[tuple[Path, str]]:
     """Write the pack-manifest, provenance, and installed-targets receipts.
 
@@ -604,6 +614,7 @@ def _install_receipt_files(
             receipt_targets=receipt_target_set,
             never_vouched=never_vouched_targets(files),
             dry_run=dry_run,
+            pin=pin,
         )
     )
     results.append(
@@ -675,6 +686,31 @@ def _print_install_summary(
         )
 
 
+SURFACE_PARTITION_FILE = Path("docs/fleet/surface-partition.json")
+
+
+def _residual_files_for_thin(
+    files: list[PackFile],
+    target: Path,
+) -> tuple[list[PackFile], bool]:
+    """Narrow the payload to the residual slice when this checkout is thin.
+
+    Returns ``(files, False)`` for every fat checkout, which is every existing
+    consumer: the sole discriminator is ``mode: "thin"`` in the provenance
+    receipt. An unreadable partition also falls back to the full payload --
+    that over-reports a refresh rather than under-reporting one, and the
+    resweep is where a missing partition is a hard error.
+    """
+    receipt = conversion.read_thin_receipt(target)
+    if receipt is None or not receipt.is_thin:
+        return files, False
+    try:
+        partition = conversion.load_partition(ROOT / SURFACE_PARTITION_FILE)
+    except (OSError, ValueError, KeyError, TypeError):
+        return files, False
+    return conversion.residual_source_files(files, target, partition, receipt), True
+
+
 def _run_inspection(
     args: argparse.Namespace,
     target: Path,
@@ -703,7 +739,13 @@ def _run_inspection(
     retired_results: list[RemoveResult] = []
     if receipts.present and not receipts.errors:
         try:
-            selected, skipped = selected_files(files, target, None, False)
+            # A thin consumer is missing its machine surfaces on purpose.
+            # Comparing it against the full payload would report
+            # refresh-required forever, and fleet-review-classify requires
+            # `current`. mode: "thin" in the provenance receipt is the only
+            # discriminator; a fat consumer takes the unchanged path below.
+            inspected_files, is_thin = _residual_files_for_thin(files, target)
+            selected, skipped = selected_files(inspected_files, target, None, False)
             results, generated_targets = _install_payload(
                 selected,
                 target,
@@ -711,6 +753,7 @@ def _run_inspection(
                 force=False,
                 dry_run=True,
                 backup=False,
+                install_gitignore=not is_thin,
             )
             retired_results = retire_stale_targets(
                 target,
@@ -727,6 +770,7 @@ def _run_inspection(
                 results=results,
                 generated_targets=generated_targets,
                 dry_run=True,
+                pin=read_existing_provenance_pin(target),
             )
         except SystemExit as error:
             receipts = inspection.ReceiptState(

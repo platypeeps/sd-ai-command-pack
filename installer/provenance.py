@@ -32,6 +32,13 @@ from installer.registry import (
 
 GIT_TIMEOUT_SECONDS = 60
 
+# The thin pin: keys a fat-to-thin conversion adds to provenance so later
+# readers can tell a deliberately-reduced payload from a damaged one. They
+# live between "version" and "files" in the emitted JSON, and the ordering is
+# load-bearing -- the inspection dry-run regenerates this file and compares it
+# byte-for-byte, so writer and regenerator must agree on key order.
+PIN_KEYS = ("mode", "platforms", "consumer", "settingsAdditions", "forced")
+
 
 def installed_targets_set(
     selected: list[PackFile],
@@ -78,6 +85,25 @@ def read_existing_provenance_files(target: Path) -> dict[str, str]:
     }
 
 
+def read_existing_provenance_pin(target: Path) -> dict:
+    """Return the thin-pin keys a prior conversion wrote, or an empty mapping.
+
+    A fat install deliberately does not call this: reinstalling the full
+    payload makes the checkout fat again, so carrying `mode: "thin"` forward
+    would leave a converted-looking receipt over an unconverted tree.
+    """
+    provenance = target_destination(target, PROVENANCE_FILE)
+    if provenance.is_symlink() or not provenance.is_file():
+        return {}
+    try:
+        payload = json.loads(provenance.read_text(encoding="utf-8", errors="strict"))
+    except (OSError, UnicodeError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: payload[key] for key in PIN_KEYS if key in payload}
+
+
 def read_existing_provenance_files_for_remove(target: Path) -> dict[str, str]:
     try:
         return read_existing_provenance_files(target)
@@ -114,6 +140,7 @@ def provenance_content(
     existing_files: dict[str, str],
     receipt_targets: set[str],
     never_vouched: set[str],
+    pin: dict | None = None,
 ) -> str:
     # Entries survive for targets still recorded in the receipt so a
     # filtered or partially-skipped run does not shrink coverage; this
@@ -153,8 +180,13 @@ def provenance_content(
     payload = {
         "pack": manifest["name"],
         "version": manifest["version"],
-        "files": dict(sorted(files.items())),
     }
+    # Absent pin keys emit nothing, so a fat install's provenance is
+    # byte-identical to what it was before the pin existed.
+    for key in PIN_KEYS:
+        if pin and key in pin:
+            payload[key] = pin[key]
+    payload["files"] = dict(sorted(files.items()))
     return json.dumps(payload, indent=2) + "\n"
 
 
@@ -192,6 +224,7 @@ def install_provenance_file(
     receipt_targets: set[str],
     never_vouched: set[str],
     dry_run: bool,
+    pin: dict | None = None,
 ) -> InstallResult:
     file = generated_pack_file("generated-provenance", PROVENANCE_FILE)
     content = provenance_content(
@@ -200,6 +233,7 @@ def install_provenance_file(
         existing_files=read_existing_provenance_files(target),
         receipt_targets=receipt_targets,
         never_vouched=never_vouched,
+        pin=pin,
     )
     return _install_generated_text_file(file, target, content, dry_run=dry_run)
 

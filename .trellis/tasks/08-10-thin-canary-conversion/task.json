@@ -2,7 +2,7 @@
   "id": "thin-canary-conversion",
   "name": "thin-canary-conversion",
   "title": "Convert the canary cohort to thin mode and prove revert",
-  "description": "",
+  "description": "Convert the canary consumer cohort to thin mode with the conversion tooling, prove --revert-thin restores the fat payload byte for byte, and record the per-consumer verdicts.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

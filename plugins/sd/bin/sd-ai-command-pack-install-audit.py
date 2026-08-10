@@ -437,6 +437,30 @@ def expected_targets_from_manifest(
     return expected, selected_platforms, []
 
 
+def installed_mode(root: Path) -> str | None:
+    """Read the install mode pinned in provenance, if any.
+
+    A thin install carries ``mode: "thin"``. Everything else -- absent,
+    unreadable, or an unrecognized value -- is reported as None so the caller
+    keeps the ordinary fat contract rather than relaxing a check on a guess.
+    """
+    provenance_path = root / PROVENANCE_FILE
+    try:
+        if provenance_path.is_symlink() or not provenance_path.is_file():
+            return None
+        payload = json.loads(
+            provenance_path.read_text(encoding="utf-8", errors="strict")
+        )
+    except (OSError, UnicodeError, ValueError):
+        # An unreadable provenance is audit_provenance's failure to report
+        # precisely; reading the mode must never be what raises.
+        return None
+    if not isinstance(payload, dict):
+        return None
+    mode = payload.get("mode")
+    return mode if isinstance(mode, str) else None
+
+
 def audit_expected_targets(
     root: Path,
     targets: set[str],
@@ -980,7 +1004,21 @@ def main() -> int:
     expected_count: int | None = None
     expected_platforms: set[str] = set()
     expected_warnings: list[str] = []
-    if targets and not manifest_failures:
+    thin_install = installed_mode(root) == "thin"
+    if thin_install:
+        # The manifest-derived completeness check asks "does this checkout hold
+        # everything the pack ships for these platforms?" -- the wrong question
+        # for a payload that was deliberately reduced. The receipt stays the
+        # allowlist, every listed target is still required to be present, and
+        # the source checkout's `install.py --check` is what verifies the
+        # receipt itself against the expected residual.
+        expected_warnings = [
+            "installed payload is pinned thin; skipping the manifest-derived "
+            "expected-target completeness check. Receipt-to-disk checks still "
+            "apply; run install.py --check from an sd-ai-command-pack source "
+            "checkout to verify the receipt against the expected residual"
+        ]
+    elif targets and not manifest_failures:
         (
             expected_failures,
             expected_warnings,

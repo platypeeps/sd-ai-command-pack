@@ -2,7 +2,7 @@
   "id": "thin-final-conversion-gate-retirement",
   "name": "thin-final-conversion-gate-retirement",
   "title": "Convert anomaly-metric-creator and retire the vendoring gates",
-  "description": "",
+  "description": "Convert the last vendored consumer, anomaly-metric-creator, then retire the vendoring-era gates and fixtures that no longer describe any live consumer.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

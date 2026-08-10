@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "validatedAt": "2026-08-10T13:13:00Z",
-  "packVersion": "0.66.0",
-  "payloadDigest": "sha256:a715615012cc27da9dec11a684e70938cc5cd299b0d162bd7bd4c921c9e4660c",
+  "validatedAt": "2026-08-10T17:55:01Z",
+  "packVersion": "0.66.1",
+  "payloadDigest": "sha256:fe4afb1520e1e1677ba88d58075d289a1e7d2b1eda0c3c2d348a9022adffd85d",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "c40268ce22df685a94dbcd2300a8f2825744ec6d",
+      "baseCommit": "2b4704a5bc2951275a922e08cac3366300ef8ca3",
       "status": "passed",
       "prepares": [
         [
@@ -107,7 +107,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "6b00c1bc2ba1781758c91d703b3cc7ce37b321ff",
+      "baseCommit": "31696d6dd14c8f83c736f7c50e9dd3e2d392ffdd",
       "status": "passed",
       "prepares": [],
       "checks": [

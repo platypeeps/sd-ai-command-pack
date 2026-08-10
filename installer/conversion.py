@@ -287,6 +287,88 @@ def expected_residual_targets(
     return frozenset(expected | set(present_managed_blocks) | set(BOOKKEEPING_TARGETS))
 
 
+def residual_source_files(
+    files: list,
+    target: Path,
+    partition: Partition,
+    receipt: "ThinReceipt",
+) -> list:
+    """Narrow the source payload to the slice a thin consumer should hold.
+
+    ``install.py --check`` decides its state by dry-running an install of the
+    full payload and counting would-be changes. A thin consumer is missing its
+    machine surfaces by design, so against the full payload it reports
+    refresh-required forever -- and fleet-review-classify requires `current`.
+    Narrowing the payload first makes the same comparison ask the right
+    question: does the residual slice match the source's residual slice?
+    """
+    expected = expected_residual_targets(
+        frozenset(file.target.as_posix() for file in files),
+        partition,
+        receipt.platforms,
+        present_managed_blocks=frozenset(
+            managed
+            for managed in MANAGED_BLOCK_REMOVAL_TARGETS
+            if target_destination(target, Path(managed)).exists()
+        ),
+    )
+    return [file for file in files if file.target.as_posix() in expected]
+
+
+THIN_MODE = "thin"
+
+
+@dataclass(frozen=True)
+class ThinReceipt:
+    """The thin pin, read back from the provenance receipt.
+
+    ``mode`` is the single discriminator every thin-aware reader keys on. A
+    conversion that deleted the payload but left the receipt alone would
+    otherwise report a healthy pin at the old version, so a half-converted
+    repository could masquerade as a converted one.
+    """
+
+    mode: str
+    version: str | None
+    platforms: frozenset[str]
+    consumer: str | None
+    settings_additions: dict
+    forced: tuple[str, ...]
+
+    @property
+    def is_thin(self) -> bool:
+        return self.mode == THIN_MODE
+
+
+def read_thin_receipt(target: Path) -> ThinReceipt | None:
+    """Return the thin pin, or None when this consumer is not thin.
+
+    Any unreadable or non-thin provenance yields None so the caller keeps the
+    unchanged fat path; a malformed receipt is the inspection layer's problem
+    to report, not this reader's to guess at.
+    """
+    provenance = target_destination(target, PROVENANCE_FILE)
+    try:
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("mode") != THIN_MODE:
+        return None
+    version = payload.get("version")
+    consumer = payload.get("consumer")
+    platforms = payload.get("platforms")
+    additions = payload.get("settingsAdditions")
+    forced = payload.get("forced")
+    return ThinReceipt(
+        mode=THIN_MODE,
+        version=version if isinstance(version, str) and version.strip() else None,
+        platforms=frozenset(platforms) if isinstance(platforms, list) else frozenset(),
+        consumer=consumer if isinstance(consumer, str) and consumer.strip() else None,
+        settings_additions=additions if isinstance(additions, dict) else {},
+        forced=tuple(forced) if isinstance(forced, list) else (),
+    )
+
+
 def classifier_digest(root: Path, consumer_entry: dict) -> str:
     """Hash everything that determines what a conversion does.
 
@@ -313,3 +395,29 @@ def classifier_digest(root: Path, consumer_entry: dict) -> str:
         json.dumps(consumer_entry, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
     return f"sha256:{digest.hexdigest()}"
+
+
+__all__ = [
+    "BOOKKEEPING_TARGETS",
+    "BlockedEntry",
+    "ConversionPlan",
+    "KEEP_CATEGORIES",
+    "MACHINE_CATEGORIES",
+    "Partition",
+    "PartitionRow",
+    "RECEIPT_MISSING",
+    "RECEIPT_PRESENT",
+    "RECEIPT_UNREADABLE",
+    "ReceiptLoad",
+    "THIN_MODE",
+    "ThinReceipt",
+    "build_conversion_plan",
+    "classifier_digest",
+    "classify_target",
+    "expected_residual_targets",
+    "load_partition",
+    "occupied_receipt_targets",
+    "read_installed_targets_receipt",
+    "read_thin_receipt",
+    "residual_source_files",
+]

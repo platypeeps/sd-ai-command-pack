@@ -2,7 +2,7 @@
   "id": "thin-candidate-loop-rescope",
   "name": "thin-candidate-loop-rescope",
   "title": "Rescope the release-prep candidate loop to the thin shape",
-  "description": "",
+  "description": "Rescope the release-prep candidate validation loop to the thin shape so it validates a machine-provided payload instead of re-installing the full vendored surface into every candidate.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

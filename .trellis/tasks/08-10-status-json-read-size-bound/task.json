@@ -2,7 +2,7 @@
   "id": "status-json-read-size-bound",
   "name": "status-json-read-size-bound",
   "title": "Bound the size of JSON files status reads from consumer checkouts",
-  "description": "",
+  "description": "Bound the size of JSON files the status collector reads from consumer checkouts so an oversized or hostile receipt cannot exhaust memory in a read-only report.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

@@ -112,6 +112,57 @@ Checks:
   a `present` pin — so the pin alone is not a health signal, which is
   why the acceptance criteria assert `mode` and the residual together.
 
+#### What step 2 actually cost — measured, not planned
+
+Narrowing the payload was one line. Three further readers turned out to
+ask the same wrong question, each found by running the converted fixture
+rather than by reading:
+
+1. **The pack's `.gitignore` block is reinstalled unconditionally.**
+   `_install_payload` calls `install_trellis_gitignore` outside the
+   selected-files loop (`install.py:526-528`), so a thin consumer whose
+   block was stripped reports a pending change forever and relists
+   `.gitignore` as an installed target. Fixed with an explicit
+   `install_gitignore` parameter, false only on the thin path.
+2. **Installed platforms are inferred from the receipt.**
+   `_manifest_platforms` intersects the manifest against the receipt, so
+   a thin consumer reports only its repo-native platforms — measured as
+   `claude, github` where the registry declares
+   `claude, gemini, github, opencode`. `validate_inspection` rejects
+   that mismatch before it ever looks at `state`. The provenance pin now
+   carries `platforms` and `inspect_receipts` prefers it.
+3. **The shipped structural audit fails a thin consumer outright.**
+   `--check` runs it (`audit_requested = args.audit or args.check`) and
+   a failed audit makes the report `state: invalid`, not
+   `refresh-required`. Its expected set is manifest-derived
+   (`expected_targets_from_manifest`) — the wrong question for a
+   deliberately reduced payload. Because the audit ships to consumers and
+   the partition does not, it cannot recompute the residual: it now skips
+   only the manifest-derived completeness check when provenance pins
+   `mode: "thin"`, keeping every receipt-to-disk check. The division is
+   deliberate — the shipped audit proves receipt ↔ disk, the source-side
+   `--check` proves receipt ↔ expected residual.
+
+Two corrections to the checks above, from measurement:
+
+- The half-converted fixture reports **`invalid`**, not
+  `refresh-required`: the receipt still lists the deleted targets, so
+  `inspect_receipts` emits `installed target is missing or invalid` per
+  file and the report never reaches a change count. That is strictly
+  louder than the planned expectation; the test asserts `invalid`.
+- `fleet-review-classify` was verified at its gate
+  (`run_install_inspection` + `validate_inspection` against the
+  converted fixture), not end to end — the full classifier additionally
+  requires a registry entry, a base commit, and a remote, none of which
+  a temporary fixture has. `validate_inspection` returning cleanly is
+  the whole of what step 2 can break.
+
+Carried into step 6: the conversion must write its receipts from
+*exactly* the inputs the inspection recomputes — the same narrowed
+`selected`, the same `_install_payload` dry-run results, the same pin —
+or `--check` reports a phantom change. The first fixture attempt passed
+`results=[]` and produced a spurious `installed-targets.txt` update.
+
 ### 3. Resweep script + verdict schema
 
 `scripts/sd-ai-command-pack-thin-resweep.py` — `scripts/` only, no

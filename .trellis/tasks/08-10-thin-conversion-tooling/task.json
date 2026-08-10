@@ -2,7 +2,7 @@
   "id": "thin-conversion-tooling",
   "name": "thin-conversion-tooling",
   "title": "Thin conversion tooling: resweep verdict, --thin, --revert-thin",
-  "description": "",
+  "description": "Build the fat-to-thin conversion tooling: the shared plan builder, thin-aware install.py --status/--check, the source-checkout resweep verdict, and the --thin / --revert-thin conversions.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

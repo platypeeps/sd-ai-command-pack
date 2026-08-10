@@ -2,7 +2,7 @@
   "id": "thin-post-canary-conversion",
   "name": "thin-post-canary-conversion",
   "title": "Convert the post-canary cohort to thin mode",
-  "description": "",
+  "description": "Convert the remaining post-canary consumer cohort to thin mode once the canary cohort has held, reusing the recorded conversion verdicts.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
