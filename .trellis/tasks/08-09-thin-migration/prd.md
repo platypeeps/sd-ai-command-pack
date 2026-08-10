@@ -63,13 +63,14 @@ for the gate between them):
 1. `08-10-thin-conversion-tooling` — pack-internal
 2. `08-10-thin-candidate-loop-rescope` — pack-internal
 2b. `08-10-thin-prompt-surface-repoint` — pack-internal, added
-   2026-08-10 after child 1's step-3 measurement. Six pack-shipped
+   2026-08-10 after child 1's step-3 measurement. Seven pack-shipped
    surfaces survive conversion and still cite paths it removes — four
    prompts telling agents to run removed scripts, the managed block in
-   `.github/copilot-instructions.md`, and the force-preserved
-   `.github/PULL_REQUEST_TEMPLATE.md`: 12 hits in 6 files, or 11 in 5 for
-   the three consumers that have taken the PR template over and own its
-   stale command themselves. The resweep reports these as `packDefects`,
+   `.github/copilot-instructions.md`, the force-preserved
+   `.github/PULL_REQUEST_TEMPLATE.md`, and the surviving `obsidian-kb`
+   block in `.gitignore`: 14 hits in 7 files, or 12 in 6 for the three
+   consumers that have taken the PR template over and own its stale
+   citations themselves. The resweep reports these as `packDefects`,
    which blocks `--thin`, so this child gates children 3–5 on the **pack**
    side and must land before any real conversion.
 3. `08-10-thin-canary-conversion` — mutates consumer repositories
@@ -82,7 +83,7 @@ because they change repositories outside this one. That work is also
 **larger than "run the converter"**: measured 2026-08-10, every one of
 the 8 registered consumers has consumer-authored callers, in command
 position, of paths the conversion removes (14 hits in 10 files at the low
-end, 168 in 20 at the high end), so each consumer needs its execution
+end, 191 in 21 at the high end), so each consumer needs its execution
 surface repointed before it can convert. Evidence and per-consumer figures:
 `08-10-thin-conversion-tooling/research/fleet-blocker-scan.json`.
 

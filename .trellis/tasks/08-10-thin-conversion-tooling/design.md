@@ -379,11 +379,11 @@ more blocking, not less.
    `packDefects` entry, and it **blocks**. The earlier draft called this
    `scheduled` on the reasoning that a later release would fix it; that
    recorded an obligation no artifact tracks and shipped known breakage
-   in the meantime. Measured: **12 hits in 6 files** for the five
-   consumers that have not edited their PR template, **11 in 5** for the
+   in the meantime. Measured: **14 hits in 7 files** for the five
+   consumers that have not edited their PR template, **12 in 6** for the
    three that have (`mezmo_benchmark`, `sd-github-review`,
    `anomaly-metric-creator`) — there the template is the consumer's, and
-   its stale command is a blocker instead:
+   its stale citations are blockers instead:
 
    - `.github/copilot-instructions.md`, five hits — inside the pack's own
      managed block, citing `docs/SD_AI_COMMAND_PACK.md` and
@@ -397,8 +397,14 @@ more blocking, not less.
      `sd-review-learnings` 44/46, `sd-review` 43, `sd-status` 43 — each
      telling an agent to run something conversion removes. These are
      whole-file pack targets, so their line numbers are stable fleet-wide.
-   - `.github/PULL_REQUEST_TEMPLATE.md` 14 — a checklist item telling a
+   - `.github/PULL_REQUEST_TEMPLATE.md` 7 and 14 — a scope instruction
+     citing removed operator documentation, and a checklist item telling a
      human to run the removed full-check script.
+   - `.gitignore`, one hit inside the surviving `obsidian-kb` block: the
+     block's generated-by header names the removed KB refresh script. The
+     file is in `block_strip`, so a rule keyed on the *file* calls this
+     `scheduled` and loses it; only the span the conversion actually
+     removes — `trellis-gitignore` — is scheduled.
 
    `sd-help.prompt.md` is deliberately **not** here, and for a rule
    reason rather than a judgement call: it says to read
@@ -494,15 +500,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 18 in 5,
-`mezmo_benchmark` 29 in 19, `hoa-manager` 31 in 9,
-`rwbp-coordinator` 40 in 7, `loadsmith` 53 in 5, `rwbp-website` 58 in 7,
-`anomaly-metric-creator` 168 in 20. Plus the pack defects above. They are
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 19 in 5,
+`hoa-manager` 32 in 9, `mezmo_benchmark` 39 in 24,
+`rwbp-coordinator` 40 in 7, `loadsmith` 53 in 5, `rwbp-website` 59 in 7,
+`anomaly-metric-creator` 191 in 21. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the fifth measurement, and the four before them were each
+**These are the sixth measurement, and the five before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 

@@ -2,10 +2,13 @@
 
 ## Goal
 
-Six pack-shipped files survive a thin conversion and still cite paths the
-conversion removes — four prompts that instruct an agent to run removed
-scripts, the managed block inside `.github/copilot-instructions.md`, and
-the force-preserved `.github/PULL_REQUEST_TEMPLATE.md`. Until they are
+Seven pack-shipped surfaces survive a thin conversion and still cite
+paths the conversion removes — four prompts that instruct an agent to run
+removed scripts, the managed block inside
+`.github/copilot-instructions.md`, the force-preserved
+`.github/PULL_REQUEST_TEMPLATE.md`, and the `obsidian-kb` block in
+`.gitignore`, which survives while the `trellis-gitignore` block beside it
+is stripped. Until they are
 repointed, every consumer's resweep returns `packDefects` and no
 conversion can proceed. This task fixes the pack side so children 3–5 of
 the thin migration can run at all — with one exception it states
@@ -15,11 +18,12 @@ installed. See the Evidence section.
 
 ## Evidence
 
-Measured 2026-08-10 across all 8 registered consumers: **12 hits in 6
-files** for the five that have not edited their PR template, **11 in 5**
+Measured 2026-08-10 across all 8 registered consumers: **14 hits in 7
+files** for the five that have not edited their PR template, **12 in 6**
 for `mezmo_benchmark`, `sd-github-review`, and `anomaly-metric-creator`,
-which have — there the template is consumer-owned and its stale command
-is a `blocker` in that consumer's own cleanup, not a pack defect.
+which have — there the template is consumer-owned and its two stale
+citations are `blockers` in that consumer's own cleanup, not pack
+defects.
 Reproduce with the scanner committed under the sibling task:
 
 ```bash
@@ -34,7 +38,8 @@ fleet-blocker-scan.py --out /tmp/scan.json
 | `.github/prompts/sd-review.prompt.md` | 43 | `scripts/sd-ai-command-pack-review.py`, `scripts/sd-ai-command-pack-toolchain.sh` |
 | `.github/prompts/sd-status.prompt.md` | 43 | `scripts/sd-ai-command-pack-toolchain.sh` |
 | `.github/copilot-instructions.md` | 5 hits, consumer-dependent lines | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-install-audit.py` |
-| `.github/PULL_REQUEST_TEMPLATE.md` | 14 (template) | `scripts/sd-ai-command-pack-full-check.sh` |
+| `.github/PULL_REQUEST_TEMPLATE.md` | 7, 14 (template) | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-full-check.sh` |
+| `.gitignore`, `obsidian-kb` block | 1 hit, consumer-dependent line | `scripts/sd-ai-command-pack-update-spec-kb.py` |
 
 The four prompts are whole-file pack targets, so their line numbers are
 stable fleet-wide. The Copilot hits are not: the block sits below whatever
@@ -53,6 +58,15 @@ Every listed file is a `repo-native` partition row (`platform: github`)
 that the conversion **keeps** — verified against
 `docs/fleet/surface-partition.json`, not assumed. `repo-native` is exactly
 why they survive and therefore exactly why their stale citations matter.
+
+The `.gitignore` entry is the subtlest of the seven and was missed for
+three rounds. The file is in `block_strip`: conversion removes the
+`trellis-gitignore` marker pair and leaves the rest of the file. But a
+consumer's `.gitignore` also carries an `obsidian-kb` block, written by
+the KB refresh, whose header comment names the very script conversion
+deletes. A rule keyed on "is this file block-stripped?" calls that hit
+`scheduled` and loses it; the span the conversion actually removes is what
+decides, not the file.
 
 Three different ownership proofs are involved, which is why this set was
 undercounted twice:
@@ -96,15 +110,17 @@ user-tunable. It is not in this task's scope and would need its own
 task and its own review.
 
 `templates/.github/prompts/**`,
-`templates/.github/copilot-instructions.sd-ai-command-pack.md`, and
-`templates/.github/PULL_REQUEST_TEMPLATE.md` are the canonical sources;
+`templates/.github/copilot-instructions.sd-ai-command-pack.md`,
+`templates/.github/PULL_REQUEST_TEMPLATE.md`, and the `obsidian-kb` block
+text emitted by `templates/scripts/sd-ai-command-pack-update-spec-kb.py`
+are the canonical sources;
 `scripts/`, `plugins/sd/bin/`, and `plugins/sd/machine-payload/scripts/`
 are byte-verified mirrors, so the edit goes to the template and then
 through `make sync` and `make generate`.
 
 ## Requirements
 
-1. Each of the six surfaces resolves its cited path through a location that
+1. Each of the seven surfaces resolves its cited path through a location that
    exists in **both** a fat and a thin checkout, or it detects the mode
    and branches explicitly. A prompt that silently assumes one layout
    fails on the other, and the failure surfaces as an agent following an
@@ -143,10 +159,10 @@ through `make sync` and `make generate`.
 
 ## Acceptance criteria
 
-- [ ] All six surfaces resolve their cited paths in a thin checkout,
+- [ ] All seven surfaces resolve their cited paths in a thin checkout,
       proven against the converted fixture from
       `08-10-thin-conversion-tooling`, not by inspection.
-- [ ] All six still resolve in a fat checkout — the fat path is the one
+- [ ] All seven still resolve in a fat checkout — the fat path is the one
       every consumer is on today, and breaking it to fix thin trades one
       outage for another.
 - [ ] `fleet-blocker-scan.py` (or the shipped resweep, once it exists)

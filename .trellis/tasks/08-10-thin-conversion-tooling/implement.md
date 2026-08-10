@@ -207,12 +207,13 @@ Checks:
   blocks on pack-managed files as such cannot clear any consumer.
 - A fixture whose kept pack-managed file cites a **removed** path →
   `blocked`, that hit in `packDefects`, not `scheduled`. Measured:
-  **12 hits in 6 files** for the five consumers that have not edited
-  their PR template, **11 in 5** for the three that have — four surviving
+  **14 hits in 7 files** for the five consumers that have not edited
+  their PR template, **12 in 6** for the three that have — four surviving
   pack prompts (`sd-housekeeping` 37/38, `sd-review-learnings` 44/46,
   `sd-review` 43, `sd-status` 43), the pack's managed block in
   `.github/copilot-instructions.md` (5 hits, at consumer-dependent line
-  numbers), and `.github/PULL_REQUEST_TEMPLATE.md:14`. Calling any of
+  numbers), `.github/PULL_REQUEST_TEMPLATE.md` 7 and 14, and the
+  surviving `obsidian-kb` block in `.gitignore`. Calling any of
   that `scheduled` would ship known breakage against a release obligation
   no artifact tracks.
 - A fixture managed-block target whose **in-block** content cites a
@@ -285,18 +286,19 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 18/5, `mezmo_benchmark` 29/19, `hoa-manager` 31/9,
-`rwbp-coordinator` 40/7, `loadsmith` 53/5, `rwbp-website` 58/7,
-`anomaly-metric-creator` 168/20 — CI workflows, `package.json` scripts,
+`se-ai-command-pack` 19/5, `hoa-manager` 32/9, `mezmo_benchmark` 39/24,
+`rwbp-coordinator` 40/7, `loadsmith` 53/5, `rwbp-website` 59/7,
+`anomaly-metric-creator` 191/21 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
-PR-template checklists. Plus 12 pack defects in 6 files (11 in 5 where
+PR-template checklists. Plus 14 pack defects in 7 files (12 in 6 where
 the consumer has taken over its PR template).
 
 Step 3 is therefore expected to return `blocked` for every real consumer
 on its first run, and that is the correct answer, not a bug in the rule.
-Two remediations follow: the pack must repoint its own six surviving
-surfaces — four prompts, the Copilot managed block, and the PR template —
-off the deleted `scripts/` paths, and each consumer must repoint its
+Two remediations follow: the pack must repoint its own seven surviving
+surfaces — four prompts, the Copilot managed block, the PR template, and
+the `obsidian-kb` block in `.gitignore` — off the deleted `scripts/`
+paths, and each consumer must repoint its
 execution surface. The first is pack work that gates all conversions; the
 second belongs to children 3–5 and materially enlarges them.
 - Codex/pi markers, each asserted separately rather than as one case:
@@ -809,6 +811,53 @@ Fixture criteria this round adds:
 `packDefects` unchanged at 12 hits in 6 files, or 11 in 5 where the
 consumer owns its PR template. No consumer is `clear`.
 
-All 17 counterexamples accumulated across rounds 4–7 pass simultaneously,
-which is the first time the fixture list has been closed rather than
-extended by the next round's review.
+All 17 counterexamples accumulated across rounds 4–7 pass simultaneously.
+That was the first time the fixture list closed rather than being extended
+mid-round — but round 8 extended it again, so "closed" meant "closed
+against the counterexamples known then", which is the only sense any
+version of that sentence has ever had.
+
+### Round 8
+
+Four blocking concerns, one blocking contradiction, three smaller ones.
+Codex found all of the blocking set; the host lane found two more while
+probing the round-7 rules. Convergence did **not** hold: round 7's
+agreement was about the defects already visible, not evidence that the
+rule had stopped having new ones.
+
+| ID | Lane | Concern | Fix |
+|---|---|---|---|
+| R8-1 | Codex | **Sentence-final punctuation lost the citation entirely.** The token pattern keeps `.` so extensions survive, but the cleanup strip did not remove a trailing period — so `scripts/sd-ai-command-pack-update-spec-kb.py.` matched nothing. Every one of the 8 consumers carries that exact line in `.gitignore`, and it appeared in **no bucket at all** | Trailing punctuation is stripped after the token is cut. Leading `./` is preserved, so `./scripts/x.sh` still resolves |
+| R8-2 | Codex | **`block_strip` ownership was keyed by file, not by the block actually removed.** Conversion strips one exact marker pair per file (`installer/removal.py:337`); the scanner treated *every* pack block in a listed file as stripped. Each consumer's `.gitignore` carries two — `trellis-gitignore`, which goes, and `obsidian-kb`, which stays and whose generated-by header names the removed KB script | The stripped span is resolved from the same marker constants removal uses, so the two cannot drift. The surviving block's citation is now a `packDefect`. **This is a seventh surviving pack surface**, and child 2b's scope grew accordingly |
+| R8-3 | Codex | **Two classification inputs were unbound.** `is_executable_surface()` reads the filesystem exec bit, which no digest recorded — with `core.fileMode=false`, `chmod +x` on a tracked Markdown file moves it onto the execution surface while `head`, `indexDigest`, `worktreeDigest`, `worktreeClean`, and `receiptOccupancyDigest` all stay identical. Separately, an unreadable tracked file was silently skipped despite the comment claiming it was reported | `executableBitsDigest` over every tracked file. Unreadable files are split: `binaryTrackedFiles` counts present-but-not-UTF-8 assets, `missingTrackedFiles` lists tracked-and-absent paths, and a non-empty `missingTrackedFiles` makes the verdict `blocked` — a sparse checkout is a tree the scan did not read, not a tree it cleared |
+| R8-4 | Codex | **Command-shaped prose in a review ledger blocked.** `anomaly-metric-creator/docs/review-learnings.md` quotes reviewers verbatim, so it contains both `python3 scripts/….py` and `$((delay * 2))`; the second matched an unconditional `$(` alternative that was never about arithmetic | Command substitution must contain a command, not arithmetic. And `docs/review-learnings.md` — the pack's own generated ledger, path taken from `registry.py:1589` rather than guessed — joins `.trellis/audit/` as a record of the past |
+| R8-5 | host | **Bare basenames were unmatchable after round 6.** Round 5 matched any basename and produced false blockers; round 6 removed basename matching outright and lost every citation that never spells a path. Real, in three consumers: `REPO_ROOT / "scripts" / "sd-ai-command-pack-full-check.sh"` | A basename owned by exactly **one** removed path and by **no** surviving file carries no ambiguity to lose. 36 real citations recovered across `mezmo_benchmark`, `se-ai-command-pack`, and `anomaly-metric-creator`; the `se-help` false positive stays gone, because `examples.md` names a survivor |
+| R8-6 | host | **Symlinks to removed paths were skipped.** Only a symlinked *receipt* target was reported; a consumer symlink pointing at a removed path was silently dropped, and following a symlink is the most direct execution there is | Classified. No consumer has a tracked symlink today — which is the point: "measured zero" and "never looked" are different claims |
+| R8-7 | Codex | **The canary PRD overstated destructive scope.** It described "166 machine files plus 13 retired files plus the four special cases" — 183 deletions — while every JSON row records 179 removed targets. The four special cases are not deletions: three bookkeeping files are kept and rewritten, and `.gitignore` survives with one block removed | Corrected, with the reason stated. This wording governs destructive work in someone else's repository |
+| R8-8 | Codex | Two false statements in the scanner's own comments (`make -C build` claimed to match when it does not; "five consumer trees are dirty" when six are), and the parent design's opening claim that "nothing blocks the first conversion" contradicting its own child-2b prerequisite | All three corrected |
+
+Fixture criteria this round adds:
+
+- A removed path followed by a sentence period → a hit. This one is worth
+  a fixture precisely because it failed *silently*: not misclassified,
+  absent.
+- A file in `block_strip` carrying two differently-labelled pack blocks →
+  only the span the conversion removes is `scheduled`; a citation in the
+  surviving block is a `packDefect`.
+- A tracked Markdown file made executable → `executableBitsDigest`
+  changes. `indexDigest` under `core.fileMode=false` does not.
+- A tracked path absent from the worktree → verdict `blocked`, listed in
+  `missingTrackedFiles`.
+- `$((x * 2))` quoted in prose → not command context; `$(dirname x.sh)` →
+  command context.
+- A bare basename unique to the removal set → a hit; a basename shared
+  with any surviving file → not.
+- A tracked symlink whose target is removed → `blocked`.
+
+**Sixth measurement.** Blockers: `sd-github-review` 14 hits in 10 files,
+`se-ai-command-pack` 19/5, `hoa-manager` 32/9, `mezmo_benchmark` 39/24,
+`rwbp-coordinator` 40/7, `loadsmith` 53/5, `rwbp-website` 59/7,
+`anomaly-metric-creator` 191/21. `packDefects` **14 hits in 7 files**, or
+12 in 6 where the consumer owns its PR template. No consumer is `clear`.
+
+All 21 accumulated counterexamples pass together.

@@ -47,10 +47,33 @@ from installer import conversion  # noqa: E402
 from installer.manifest import load_manifest  # noqa: E402
 from installer.provenance import PROVENANCE_FILE  # noqa: E402
 from installer.registry import (  # noqa: E402
+    COPILOT_GUIDANCE_START,
+    COPILOT_INSTRUCTIONS_TARGET,
     FORCE_PRESERVED_TARGETS,
     INSTALLED_TARGETS_FILE,
     PACK_MANIFEST_FILE,
+    TRELLIS_GITIGNORE_START,
+    TRELLIS_GITIGNORE_TARGET,
 )
+
+# R8-2. `plan.block_strip` names *files*; the conversion removes one exact
+# marker pair per file (installer/removal.py:337). Treating every pack-labelled
+# block in a listed file as stripped is wrong for a file that carries more than
+# one -- measured: every consumer's `.gitignore` has both `trellis-gitignore`
+# and `obsidian-kb`, and only the first is removed. The mapping is derived from
+# the same constants removal uses, so the two cannot drift apart.
+STRIPPED_BLOCK_LABEL = {
+    TRELLIS_GITIGNORE_TARGET.as_posix(): TRELLIS_GITIGNORE_START,
+    COPILOT_INSTRUCTIONS_TARGET.as_posix(): COPILOT_GUIDANCE_START,
+}
+
+# R8-4. `docs/review-learnings.md` is the pack's own generated ledger of past
+# review comments (templates/scripts/sd-ai-command-pack-review-learnings.py:42,
+# registry.py:1589). It quotes reviewers verbatim, so it contains
+# command-shaped prose -- "the runnable command is `python3 scripts/....py`" --
+# that is a record of something said, never an instruction. Same category as
+# .trellis/audit/, derived from the pack constant rather than guessed.
+HISTORICAL_NAMES = frozenset({"docs/review-learnings.md"})
 
 # H-4, round 7. The three generated bookkeeping files describe the install
 # itself: `manifest.json` alone names every shipped target, so a conversion
@@ -141,8 +164,10 @@ EXECUTABLE_NAME_SUFFIXES = (".prompt.md", ".instructions.md")
 # rwbp-website/.gitignore:165, the comment "Python bytecode from scripts/*.py",
 # was recorded as a blocker. The interpreter must be case-sensitive and must be
 # followed by something that looks like a path, which is what an invocation
-# actually is. "make sure" and "the node is" stop matching; "make -C build" and
-# "python3 scripts/x.py" still do.
+# actually is. "make sure" and "the node is" stop matching; "python3 scripts/x.py"
+# and "make -f scripts/x.mk" still do. A flagged invocation whose argument is not
+# path-shaped ("make -C build") does not match, and does not need to: it names no
+# path this scan is looking for.
 RUNNER = (
     r"(?:(?:ba|z|d)?sh|python3?|node|npx?|pnpm|yarn|deno|ruby|perl|exec|source"
     r"|make|uvx|uv\s+run|go\s+run)"
@@ -152,7 +177,9 @@ COMMAND_CONTEXT = re.compile(
     rf"""(
         (?-i:\b{RUNNER}\s+(?:-{{1,2}}[\w-]+\s+)*[-\w.$~"'`/]*[./][-\w.$~"'`/]*)
       | \brun:\s | ^\s*run\s*[:=] | \bcommand\s*[:=] | \bentrypoint\s*[:=]
-      | \$\(
+        # Command substitution, but not arithmetic expansion: "$((delay * 2))"
+        # quoted inside a review-feedback ledger is not an invocation.
+      | \$\(\s*[\w./-]+\s
         # Checklist item a human works through, but only when the line also
         # names something runnable. Every Trellis PRD states its acceptance
         # criteria as checklist items, so an unqualified checklist rule blocks
@@ -313,13 +340,36 @@ def receipt_occupancy_digest(repo: Path, entries) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
+def executable_bits_digest(repo: Path, tracked: list[str]) -> str:
+    """Digest over the filesystem executable bit of every tracked file.
+
+    R8-3: `is_executable_surface()` consults `os.access(X_OK)`, which is
+    filesystem state. `indexDigest` records Git's mode, and with
+    `core.fileMode=false` the two can disagree -- chmod +x on a tracked Markdown
+    file moves it onto the execution surface while `head`, `indexDigest`,
+    `worktreeDigest`, `worktreeClean`, and `receiptOccupancyDigest` all stay
+    identical. A classification input that nothing records is a verdict that can
+    go stale in silence.
+    """
+    digest = hashlib.sha256()
+    for relative in tracked:
+        full = repo / relative
+        try:
+            bit = b"1" if os.access(full, os.X_OK) and full.is_file() else b"0"
+        except OSError:
+            bit = b"?"
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0" + bit + b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
 def worktree_digest(repo: Path) -> str:
     """Digest over the dirty *contents*, not over `git status` output.
 
     Hashing the porcelain status hashes the set of dirty paths; two different
     edits to the same file produce the same value, so a dirty tree stayed
-    unidentifiable exactly where identification mattered. Five consumer trees
-    are dirty, so this is the common case here, not the corner.
+    unidentifiable exactly where identification mattered. Six of the eight
+    consumer trees are dirty, so this is the common case here, not the corner.
 
     ``-uall`` matters as much as the content hashing: the default collapses an
     untracked directory to a single ``dir/`` record, so every file inside it
@@ -407,12 +457,36 @@ def needle_pattern(removed: frozenset[str]) -> re.Pattern[str]:
     return re.compile("|".join(re.escape(needle) for needle in ordered))
 
 
+def unambiguous_basenames(
+    removed: frozenset[str], survivors: frozenset[str]
+) -> frozenset[str]:
+    """Basenames that can only mean one removed path.
+
+    Round 5 matched any bare basename against the removal set and produced real
+    false blockers, because the removal set contains names like SKILL.md and
+    config.toml that surviving files also carry. Round 6 removed basename
+    matching entirely, which lost the citations that never spell a path --
+    os.path.join("scripts", "x.sh"), a Windows separator, a name passed as an
+    argument. A basename owned by exactly one removed path and by nothing that
+    survives carries no ambiguity to lose.
+    """
+    counts: dict[str, int] = {}
+    for entry in removed:
+        name = entry.rsplit("/", 1)[-1]
+        counts[name] = counts.get(name, 0) + 1
+    surviving = {entry.rsplit("/", 1)[-1] for entry in survivors}
+    return frozenset(
+        name for name, count in counts.items() if count == 1 and name not in surviving
+    )
+
+
 def cites_removed_path(
     token: str,
     removed: frozenset[str],
     repo: Path,
     relative_to: str,
     survivors: frozenset[str],
+    unambiguous: frozenset[str],
 ) -> bool:
     """Does this token name something the conversion removes?
 
@@ -432,6 +506,14 @@ def cites_removed_path(
     removed files *and* surviving ones, so the script keeps working and needs no
     repoint. A glob is only broken when nothing it selects survives.
 
+    5. it is a bare basename that belongs to exactly one removed path and to
+       no surviving file. This is the narrow, checked form of the matching that
+       round 5 removed wholesale. It recovers the citations a static reader
+       cannot resolve otherwise -- a Windows-separator path, an
+       os.path.join("scripts", "x.sh") -- without the ambiguity that made the
+       wholesale version wrong: a name shared with anything that survives, or
+       with a second removed path, is not evidence about either.
+
     What is deliberately absent is bare-suffix guessing: associating a short
     relative reference with any removed path that happens to end the same way.
     That produced real false blockers -- se-ai-command-pack's se-help SKILL.md
@@ -445,7 +527,13 @@ def cites_removed_path(
     elsewhere remains invisible. --revert-thin, not this check, is what makes
     the conversion safe.
     """
-    token = token.strip("'\"`,;:()[]{}<>")
+    # R8-1: a removed path at the end of a sentence keeps its period, and the
+    # token pattern deliberately includes "." so extensions survive. Measured in
+    # all 8 consumers: `.gitignore` carries "# Generated by
+    # scripts/sd-ai-command-pack-update-spec-kb.py. DO NOT EDIT MANUALLY." and
+    # the citation landed in no bucket at all. Stripping is trailing-only so
+    # "./scripts/x.sh" keeps its leading "./".
+    token = token.strip("'\"`,;:()[]{}<>").rstrip(".")
     if not token:
         return False
     if "*" in token or "?" in token:
@@ -459,7 +547,9 @@ def cites_removed_path(
         return True
     parent = str(Path(relative_to).parent)
     resolved = os.path.normpath(token if parent == "." else f"{parent}/{token}")
-    return resolved in removed
+    if resolved in removed:
+        return True
+    return "/" not in token and token in unambiguous
 
 
 def block_spans(lines: list[str]) -> list[tuple[int, int]] | None:
@@ -498,6 +588,24 @@ def block_spans(lines: list[str]) -> list[tuple[int, int]] | None:
     if start is not None:
         return None
     return spans
+
+
+def stripped_spans(
+    relative: str,
+    lines: list[str],
+    all_spans: list[tuple[int, int]] | None,
+) -> list[tuple[int, int]]:
+    """Only the span the conversion actually removes, not every pack block.
+
+    A file can carry several pack blocks with different labels; the conversion
+    removes exactly one marker pair per file. A hit inside a block that survives
+    is not `scheduled` -- it is pack content citing a removed path, which is a
+    pack defect.
+    """
+    marker = STRIPPED_BLOCK_LABEL.get(relative)
+    if marker is None or not all_spans:
+        return []
+    return [span for span in all_spans if marker in lines[span[0] - 1]]
 
 
 def shipped_template_digests() -> dict[str, str]:
@@ -576,6 +684,9 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         if entry and not entry.startswith(SKIP_DIRS)
     ]
     survivors = frozenset(tracked) - removed
+    binary: list[str] = []
+    missing: list[str] = []
+    unambiguous = unambiguous_basenames(removed, survivors)
     for relative in tracked:
         if relative in removed:
             buckets["scheduled"].append({"file": relative, "line": None})
@@ -593,6 +704,27 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 buckets["packDefects"].append(
                     {"file": relative, "line": None, "detail": "symlinked pack target"}
                 )
+                continue
+            # A symlink is a citation in its most executable form: following it
+            # *is* the reference. No consumer has a tracked symlink today, so
+            # this classifies an empty class -- which is the point, since
+            # "measured zero" and "never looked" are different claims.
+            try:
+                link = os.readlink(full)
+            except OSError:
+                continue
+            parent = str(Path(relative).parent)
+            resolved = os.path.normpath(
+                link if parent == "." or link.startswith("/") else f"{parent}/{link}"
+            )
+            if resolved in removed or link in removed:
+                buckets["blockers"].append(
+                    {
+                        "file": relative,
+                        "line": None,
+                        "detail": f"symlink to removed path: {link}",
+                    }
+                )
             continue
         try:
             body = full.read_text(encoding="utf-8", errors="strict")
@@ -604,6 +736,16 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 buckets["packDefects"].append(
                     {"file": relative, "line": None, "detail": "unreadable pack target"}
                 )
+            elif full.is_file():
+                # Present and not UTF-8: a binary asset, which cannot carry a
+                # citation a static reader could see. Recorded, not silent.
+                binary.append(relative)
+            else:
+                # Tracked and absent. A sparse checkout or a skip-worktree entry
+                # looks identical to a complete tree in `git ls-files -s`, so
+                # this is the difference between "measured zero" and "did not
+                # look", and it invalidates the scan rather than reducing it.
+                missing.append(relative)
             continue
         lines = body.splitlines()
         if not needles.search(body):
@@ -611,7 +753,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
 
         all_spans = block_spans(lines)
         malformed_markers = all_spans is None
-        spans = (all_spans or []) if relative in stripped else []
+        spans = stripped_spans(relative, lines, all_spans) if relative in stripped else []
         vouched = recorded.get(relative)
         actual = file_digest(full)
         pack_owned = relative in managed and vouched is not None and vouched == actual
@@ -626,14 +768,18 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             )
         unvouchable = relative in managed and vouched is None
         executable = is_executable_surface(repo, relative)
-        historical = relative.startswith(HISTORICAL_PREFIXES)
+        historical = (
+            relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES
+        )
         commanded = command_lines(lines)
 
         for number, line in enumerate(lines, start=1):
             if not needles.search(line):
                 continue
             if not any(
-                cites_removed_path(token, removed, repo, relative, survivors)
+                cites_removed_path(
+                    token, removed, repo, relative, survivors, unambiguous
+                )
                 for token in TOKEN.findall(line)
             ):
                 continue
@@ -669,6 +815,9 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "worktreeDigest": worktree_digest(repo),
         "worktreeClean": not git(repo, "status", "--porcelain").strip(),
         "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),
+        "executableBitsDigest": executable_bits_digest(repo, tracked),
+        "binaryTrackedFiles": len(binary),
+        "missingTrackedFiles": sorted(missing),
         "receiptEntries": len(receipt.entries),
         "removedTargets": len(removed),
         "trackedFiles": len(tracked),
@@ -676,8 +825,11 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "blockerFiles": sorted({entry["file"] for entry in buckets["blockers"]}),
         "packDefectFiles": sorted({entry["file"] for entry in buckets["packDefects"]}),
         "verdict": (
+            # A tracked file the scan could not read is not a file it cleared.
+            # An incomplete tree fails closed, like every other input the rule
+            # cannot resolve.
             "clear"
-            if not buckets["blockers"] and not buckets["packDefects"]
+            if not buckets["blockers"] and not buckets["packDefects"] and not missing
             else "blocked"
         ),
         **buckets,

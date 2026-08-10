@@ -11,7 +11,7 @@ is per cohort; authorizing this cohort does not authorize post-canary.
 Also requires children 1, 2, and 2b shipped. Child 2b is not optional
 sequencing: until the pack's own surviving surfaces stop citing removed
 paths, every consumer's resweep returns `packDefects` and `--thin`
-refuses. Measured 2026-08-10: 12 such hits in 6 files in all three canary
+refuses. Measured 2026-08-10: 14 such hits in 7 files in all three canary
 consumers, which still carry the pack's own PR template.
 
 ## Deliverable
@@ -38,9 +38,13 @@ revert-and-restore proof.
    that override, invoked deliberately — not assumed.
 3. Each conversion deletes the set enumerated **from that consumer's
    own installed-targets receipt** and classified through the partition
-   (parent contract C-B) — measured today at 166 machine files plus 13
-   retired files plus the four special cases, per consumer — and deletes
-   that consumer's pack CI steps. It keeps the `repo-native` +
+   (parent contract C-B) — measured today at **179 removed targets per
+   consumer**, being 166 machine files plus 13 retired files. The four
+   special cases are not part of that number and must not be added to it:
+   three generated bookkeeping files are **kept and rewritten**, and
+   `.gitignore` **survives** with one exact marker block removed. Saying
+   "plus the four special cases" described 183 deletions and overstated
+   destructive scope by four files. It also deletes It keeps the `repo-native` +
    `consumer-config` slices. The counts are recomputed per consumer, not
    assumed from this line.
 4. The revert proof executes `install.py TARGET --revert-thin` on one

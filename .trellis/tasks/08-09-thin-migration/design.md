@@ -4,7 +4,9 @@ Refines the parent `08-09-deployment-thin-consumers` design section
 "Migration" (requirements 3, 5, 6). Prerequisites are shipped:
 `thin-surface-partition`, `thin-plugin-packaging`,
 `thin-machine-installer`, and `thin-fleet-status-pins` are all archived
-`completed`, so nothing blocks the first conversion.
+`completed`. Those four no longer block anything; children 1, 2, and 2b
+of *this* task do, and child 2b is a hard prerequisite for the first
+conversion (see "Child map"). Nothing external remains.
 
 This task is a **parent of ordered children**. It owns the migration
 contracts and the cross-child acceptance criteria below; each child owns
@@ -110,11 +112,13 @@ The resweep greps the consumer for:
      Informational, listed so the conversion PR can be read against it.
    - *packDefects* — a surviving file whose content is still the pack's
      own cites a removed path. **Blocking, and ours to fix**: measured
-     12 hits in 6 files for the five consumers that have not edited their
-     PR template, 11 in 5 for the three that have — four pack-shipped
+     14 hits in 7 files for the five consumers that have not edited their
+     PR template, 12 in 6 for the three that have — four pack-shipped
      prompts telling an agent to run removed scripts, the pack's managed
-     block in `.github/copilot-instructions.md`, and
-     `.github/PULL_REQUEST_TEMPLATE.md`. Ownership is proven three ways,
+     block in `.github/copilot-instructions.md`,
+     `.github/PULL_REQUEST_TEMPLATE.md`, and the `obsidian-kb` block that
+     survives in `.gitignore` while the `trellis-gitignore` block beside
+     it is stripped. Ownership is proven three ways,
      because one is not enough: a receipt entry whose sha256 matches
      provenance; for managed-block targets, which provenance deliberately
      never vouches, content between the pack's block markers; and for
@@ -424,7 +428,7 @@ or the fleet manifest changed, and on `make check` otherwise.
 |---|-------|-------|-----------|
 | 1 | `thin-conversion-tooling` | resweep verdict + `--thin` + `--revert-thin` + settings/pin writers | pack-internal |
 | 2 | `thin-candidate-loop-rescope` | C-F | pack-internal |
-| 2b | `thin-prompt-surface-repoint` | the six pack-shipped surfaces that survive conversion and still cite removed paths | pack-internal |
+| 2b | `thin-prompt-surface-repoint` | the seven pack-shipped surfaces that survive conversion and still cite removed paths | pack-internal |
 | 3 | `thin-canary-conversion` | rwbp-coordinator, loadsmith, hoa-manager + the executed revert proof | **converts real consumer repos** |
 | 4 | `thin-post-canary-conversion` | rwbp-website, mezmo_benchmark, se-ai-command-pack, sd-github-review | **converts real consumer repos** |
 | 5 | `thin-final-conversion-gate-retirement` | anomaly-metric-creator (incl. `sd-ai-command-pack-sync.yml` + the advisory `pr-body-scope.py` CI step), then C-E | **converts a real consumer repo** |
