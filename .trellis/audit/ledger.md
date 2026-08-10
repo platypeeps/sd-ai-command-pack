@@ -814,7 +814,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   regressions in those lanes are invisible to the owners.
 - fix: Delete the never-instantiated legacy fallbacks and fold the optional lanes into one
   explicitly optional section.
-- notes: untracked as of 2026-08-09. 07-24-remove-retired-review-surfaces was narrowed to the `sd-full-check` and `sd-review-local` command surfaces and no longer touches `scripts/sd-ai-command-pack-full-check.sh`, which survives 0.65.0 as the pack-source gate `make full-check` and CI still run. The unreachable-lane cleanup needs its own owner.
+- notes: owner filed 2026-08-10: `08-09-retire-review-pr-surface`, which deletes `scripts/sd-ai-command-pack-full-check.sh` and recomposes `make check` around `sd-check`. 07-24-remove-retired-review-surfaces was narrowed to the `sd-full-check` and `sd-review-local` command surfaces and left the script in place, so 0.65.0 does not change this finding. If 08-09 keeps any lane of the script alive, that lane inherits this cleanup.
 
 ## A-044 — Pack-repo fleet-refresh command adapters are frozen, so the only surface that can run fleet-refresh lacks the checkout-trust gate
 - status: open
@@ -1853,7 +1853,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   degrades and then hard-fails at exec.
 - fix: Cap or skip the fallback filter and let `--vs` bound the scope; collapse the pipeline
   and delete the identity function.
-- notes: untracked as of 2026-08-09. Resolution-by-deletion no longer applies: 0.65.0 removes the `sd-full-check` command surface but keeps `scripts/sd-ai-command-pack-full-check.sh` as the pack-source gate, so the joined `--filter` argv is still live and needs its own owner.
+- notes: owner filed 2026-08-10: `08-09-retire-review-pr-surface`, which deletes `scripts/sd-ai-command-pack-full-check.sh`. 0.65.0 removed the `sd-full-check` command surface but kept the script as the pack-source gate, so the joined `--filter` argv is still live until 08-09 lands. If that task keeps the gito lane in any form, the argv cap moves with it.
 
 ## A-103 — review-local digests changed files with unbounded whole-file reads though a streaming hasher already exists
 - status: open

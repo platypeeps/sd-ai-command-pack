@@ -1,5 +1,14 @@
 # Default to local subscription review lanes before remote paid review
 
+> **Correction (2026-08-10, from `07-24-remove-retired-review-surfaces`).**
+> AC8 below invokes `templates/scripts/...review-local.sh`, which pack 0.65.0
+> deleted along with the `sd-review-local` surface. Restate that criterion
+> against the surviving local-review stage
+> (`templates/scripts/sd-ai-command-pack-review-local.py`) and the `sd-review`
+> coordinator before this task starts. The criterion's intent — a stub `codex`
+> on `PATH` is invoked rather than reported as unconfigured — still holds.
+
+
 ## Goal
 
 Make a zero-marginal-cost local review lane a first-class configured provider
