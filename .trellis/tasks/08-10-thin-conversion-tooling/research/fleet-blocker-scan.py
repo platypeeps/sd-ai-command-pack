@@ -732,9 +732,25 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "scheduled": [],
         "advisories": [],
     }
+    # H10-1: tracked files *and* untracked, non-ignored ones. The conversion
+    # runs against a working tree, not against the index, and an untracked
+    # script that invokes a removed path breaks exactly as hard as a committed
+    # one. Enumerating only `git ls-files` left that class unread while
+    # `worktreeClean` -- which the verdict does not require -- was the only
+    # signal it existed. Measured: 8 untracked files across the fleet, all in
+    # `rwbp-coordinator`, none citing a removed path. Ignored files stay out:
+    # they are bound by `receiptOccupancyDigest` for the targets that matter
+    # and are not part of a conversion PR.
     tracked = [
         entry
         for entry in git(repo, "ls-files", "-z").split("\0")
+        if entry and not entry.startswith(SKIP_DIRS)
+    ]
+    tracked += [
+        entry
+        for entry in git(
+            repo, "ls-files", "-z", "--others", "--exclude-standard"
+        ).split("\0")
         if entry and not entry.startswith(SKIP_DIRS)
     ]
     survivors = frozenset(tracked) - removed
@@ -903,6 +919,14 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             # A tracked file the scan could not read is not a file it cleared.
             # An incomplete tree fails closed, like every other input the rule
             # cannot resolve.
+            #
+            # This deliberately does *not* require `worktreeClean`, and the
+            # shipped resweep does (prd.md:62). Six of the eight consumers are
+            # dirty right now; gating on cleanliness would report `blocked`
+            # everywhere for a reason unrelated to conversion and destroy the
+            # measurement. The research scanner records cleanliness and the
+            # worktree digest so a rerun is comparable; refusing to convert a
+            # dirty tree is the production tool's job, not this one's.
             "clear"
             if not buckets["blockers"] and not buckets["packDefects"] and not missing
             else "blocked"

@@ -520,7 +520,7 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 21 in 7,
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 22 in 8,
 `hoa-manager` 34 in 9, `mezmo_benchmark` 44 in 24,
 `rwbp-coordinator` 48 in 7, `loadsmith` 53 in 5, `rwbp-website` 65 in 8,
 `anomaly-metric-creator` 205 in 21. Plus the pack defects above. They are

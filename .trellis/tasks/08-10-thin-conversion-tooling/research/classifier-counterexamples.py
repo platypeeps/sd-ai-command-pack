@@ -149,6 +149,17 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
         "scheduled",
     ),
     (
+        "mezmo_benchmark",
+        ".trellis/tasks/archive/2026-07/07-02-audit-adapter-retry-backoff/implement.md",
+        81,
+        "advisories",
+        "R7-2/H10-5",
+        "an archived task plan carries `bash scripts/<removed>.sh` in plain "
+        "command position: advisory only because the archive prefix is "
+        "historical. Mutation-testing found no fixture exercised that rule -- "
+        "the review-learnings case stopped depending on it once R8-4 landed",
+    ),
+    (
         "anomaly-metric-creator",
         "docs/review-learnings.md",
         22,
@@ -174,6 +185,26 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
         "R9-3",
         "'`review.md`: findings, decisions' names a runtime workspace artifact; "
         "the unambiguous-basename rule matched .claude/commands/sd/review.md",
+    ),
+    (
+        "rwbp-coordinator",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        7,
+        "packDefects",
+        "V-2/H10-6",
+        "force-preserved, so provenance never vouches it; ownership is decided "
+        "by comparing the consumer's bytes against the pack's shipped "
+        "template. Mutation-testing found no fixture exercised that proof",
+    ),
+    (
+        "sd-github-review",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        15,
+        "blockers",
+        "V-2/H10-6",
+        "the same file edited by the consumer: bytes differ from the shipped "
+        "template, so it is consumer-owned and its stale command is theirs to "
+        "fix. The two rows together are what make the proof falsifiable",
     ),
     (
         "rwbp-coordinator",
@@ -246,7 +277,12 @@ def unit_cases(module) -> list[tuple[str, str, bool, bool]]:
             ".claude/commands/sd/review.md",
         }
     )
-    survivors = frozenset({"README.md", "docs/review.md", "scripts/local.sh"})
+    # H10-2: `docs/review.md` used to be here, which made the R9-3 case
+    # tautological -- a surviving `review.md` excluded the basename from
+    # `unambiguous` regardless of the pack-name rule, so reverting R9-3 left
+    # this harness green. The survivor set must not contain the basename the
+    # case is about.
+    survivors = frozenset({"README.md", "docs/notes.md", "scripts/local.sh"})
     unambiguous = module.unambiguous_basenames(removed, survivors)
     repo = Path("/nonexistent")
 
@@ -306,6 +342,24 @@ def unit_cases(module) -> list[tuple[str, str, bool, bool]]:
             "H-3",
             "a real interpreter invocation still matches",
             commanded("python3 scripts/sd-ai-command-pack-full-check.sh"),
+            True,
+        ),
+        (
+            "H-3/H10-4",
+            "a capitalised runner word in prose is not an invocation",
+            # The round-7 line this rule was written for -- "# Python bytecode
+            # from scripts/*.py" -- stopped matching for a second reason (its
+            # argument is not path-shaped), so it no longer exercises the
+            # case-sensitivity itself. Mutation-testing caught that: reverting
+            # `(?-i:` left the whole harness green. This line has a path-shaped
+            # argument and fails only on case.
+            commanded("Make ./scripts/sd-ai-command-pack-full-check.sh executable"),
+            False,
+        ),
+        (
+            "H-3/H10-4",
+            "the same runner lowercase, with a path, is an invocation",
+            commanded("make -f scripts/sd-ai-command-pack-full-check.sh all"),
             True,
         ),
         (
@@ -397,6 +451,21 @@ def main() -> int:
             failures.append(f"unit  {round_id}: {description} -> {actual!r}")
 
     scan = json.loads(args.scan.read_text(encoding="utf-8"))
+    # H10-3: a fleet assertion reads a stored result, so on its own it proves
+    # nothing about the scanner that is on disk right now. Mutation-testing
+    # this harness showed exactly that: reverting the R9-3 rule left all 15
+    # fleet cases green, because they were re-checking a JSON produced before
+    # the mutation. Requiring the recorded `scannerDigest` to match the
+    # scanner's current bytes is what makes "35 passed" a statement about this
+    # scanner rather than about some scanner.
+    current = module.file_digest(SCANNER)
+    if scan.get("scannerDigest") != current:
+        print(
+            f"FAIL scan {args.scan} was produced by a different scanner "
+            f"({scan.get('scannerDigest')} != {current}); re-run "
+            "fleet-blocker-scan.py before asserting fleet cases"
+        )
+        return 1
     rows = {row["consumer"]: row for row in scan["consumers"]}
     buckets = ("blockers", "packDefects", "scheduled", "advisories")
 

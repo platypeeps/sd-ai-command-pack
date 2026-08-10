@@ -294,7 +294,7 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 21/7, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
+`se-ai-command-pack` 22/8, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
 `rwbp-coordinator` 48/7, `loadsmith` 53/5, `rwbp-website` 65/8,
 `anomaly-metric-creator` 205/21 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
@@ -936,3 +936,51 @@ Fixture criteria this round adds:
 14 in 6 where the consumer owns its PR template. No consumer is `clear`.
 Every count rose or held; none fell, which is what a hidden-lines defect
 predicts and a mis-tightened rule would not.
+
+### Round 10 (host lane; Codex lane pending)
+
+Round 9's deliverable was an executable counterexample list. Round 10's
+host lane began by asking the obvious question about it — *does it fail
+when the scanner is wrong?* — and answered it by mutation: revert one
+rule, re-run the scan, re-run the harness, see whether anything goes red.
+Nine rules were mutated. **Four survived**, meaning four of the scanner's
+rules had no fixture that actually depended on them.
+
+| ID | Concern | Fix |
+|---|---|---|
+| H10-1 | **Untracked, non-ignored files were never classified.** The scan enumerated `git ls-files`; a conversion runs against a working tree. An untracked script invoking a removed path breaks exactly as hard as a committed one, and the only signal it existed was `worktreeClean` — which the verdict does not require. Measured: 8 untracked files fleet-wide, all in `rwbp-coordinator`, none citing a removed path | `--others --exclude-standard` joins the enumeration. Ignored files stay out: the receipt targets among them are bound by `receiptOccupancyDigest`, and they are not part of a conversion PR. The research scanner's deliberate divergence from the shipped rule — it does **not** gate `clear` on a clean tree, because six of eight consumers are dirty and gating would report `blocked` everywhere for an unrelated reason — is now stated at the verdict rather than left as a silent difference |
+| H10-2 | **A fixture was tautological.** The R9-3 case asserted that the bare basename `review.md` does not match — while the fixture's own survivor set contained `docs/review.md`, which excluded that basename from `unambiguous` no matter what the pack-name rule did. Reverting R9-3 left the harness green | The survivor set no longer contains the basename the case is about. Reverting R9-3 now fails both the unit case and the `se-author` fleet case |
+| H10-3 | **Fleet assertions could not detect a scanner regression at all.** They read a stored JSON, so they re-checked a result produced *before* whatever change is being tested. "Run after any scanner change" was the docstring's claim; nothing enforced the pairing | The harness compares the scan's recorded `scannerDigest` against the scanner's current bytes and refuses to assert fleet cases on a mismatch. "40 passed" is now a statement about this scanner rather than about some scanner |
+| H10-4 | **Case-sensitivity was unexercised.** The `(?-i:` guard exists because "Python bytecode from scripts/*.py" once blocked — but that line stopped matching for an unrelated second reason (its argument is not path-shaped), so no fixture depended on the guard. Reverting it left everything green | A fixture that fails only on case: `Make ./scripts/<removed>.sh executable` must not be command context, `make -f scripts/<removed>.sh all` must be |
+| H10-5 | **Historical scoping was unexercised.** Same shape: the `docs/review-learnings.md` fixture stopped depending on it once R8-4 made arithmetic non-matching | An archived task plan carrying `bash scripts/<removed>.sh` in plain command position — advisory *only* because the archive prefix is historical |
+| H10-6 | **The force-preserved ownership proof was unexercised.** No fixture named `.github/PULL_REQUEST_TEMPLATE.md`, so disabling the shipped-bytes comparison changed nothing the harness could see | Two rows that are only correct together: `rwbp-coordinator`'s copy is `packDefects` (byte-identical to the shipped template), `sd-github-review`'s is `blockers` (edited, therefore consumer-owned). Weakening the digest proof to bare membership now fails the second |
+
+Mutation results after the fixes — nine rules reverted one at a time,
+each with a full re-scan:
+
+```text
+R9-1 URL guard                     caught
+R9-3 pack-distinctive basename     caught (both levels)
+R8-1 trailing-period strip         caught (both levels)
+R8-2 per-block strip ownership     caught
+R7-4 glob whole-population         caught
+R8-4 arithmetic vs substitution    caught
+R7-3 interpreter case-sensitivity  caught (after H10-4)
+historical scoping                 caught (after H10-5)
+ownership proofs (two forms)       caught (after H10-6)
+no-op control                      no failures
+```
+
+The list grew by three fleet rows and two unit rows, none of them from a
+new defect in the scanner — all five exist because a rule was correct and
+unprotected:
+
+```text
+40 passed, 0 failed, 0 skipped (18 fleet + 22 unit)
+```
+
+**Eighth measurement.** Two figures moved and neither is a rule change:
+`se-ai-command-pack` is 22 blockers in 8 files rather than 21 in 7,
+because that consumer's tree changed under the scan — which is what the
+recorded head and digests are for. Every other row is identical to the
+seventh. The untracked-file scope added zero hits.

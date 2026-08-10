@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "87ec77cd535b6d8649c5065bd923a03be8fe8781",
-  "packWorktreeDigest": "sha256:aabc94e5a1b8f9a5fb2d7a069a1a30dc1950165f84b298a8250b410f37633224",
+  "packHead": "dbed118eb784d055da8e89c49084733952c59845",
+  "packWorktreeDigest": "sha256:bfb7ee9c0ea5a08034851628b7e7ea3a3487bc981c7dc497599139469c808a06",
   "packWorktreeClean": false,
-  "scannerDigest": "sha256:4b6f8d237e8ffd7779fd7c8dc907c7a81a75938440cbd6440c91f89fb8ec1083",
-  "counterexamplesDigest": "sha256:88e46ac5c24c39eb9a7ef91cb021db58bc7d416045ba89acb2ca2e0d037dc1c5",
+  "scannerDigest": "sha256:7994a3a98373557f2692f47d775f0b8a03ea1a083f5af1caec8c120268fea986",
+  "counterexamplesDigest": "sha256:1ef7c718b4694705dd33e78a631d7312b8d5cd7ff13145a630245aab5ebe9028",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
@@ -13,15 +13,15 @@
       "head": "5c17320caeb2d68314b87c3c0af3392c52e3920e",
       "indexDigest": "sha256:fe20b450ac3ebbb74f78633aa4c247f665060b0471d8534723a12f9a5d60f7bc",
       "indexFlagsDigest": "sha256:0a8bb278834491eda6036c4b9c16e3f3c766f1ac07d972f5cd634d060c4367ed",
-      "worktreeDigest": "sha256:0ff42d5dbddd59486355ec395f770670831b87edbab804e20c8e6a4ce67a025a",
+      "worktreeDigest": "sha256:9727b2a45a6855aca4aaea1fce6c52b4b6c3637a8fa90731920f424afed54a19",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:f5607bd2f12123ebe43ad4cd3a9816eaef33c24285536a33fd991a0e04128cd3",
-      "executableBitsDigest": "sha256:e8d4772484dc71e0fc5b11ce0bdc50250ac666aad17428ae88693153a7fcefe2",
+      "executableBitsDigest": "sha256:8278416ac8bc2a0134f4a41394719fb5ff88e02aadbf334e5e0aadb6e0670994",
       "binaryTrackedFiles": 16,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
-      "trackedFiles": 1400,
+      "trackedFiles": 1406,
       "counts": {
         "blockers": 48,
         "packDefects": 16,
@@ -8572,8 +8572,8 @@
     {
       "consumer": "se-ai-command-pack",
       "repo": "/Users/sven/repos/platypeeps/se-ai-command-pack",
-      "head": "e8dd4e3b10226caa21f52d4a5dfc589b24ed4dc9",
-      "indexDigest": "sha256:1f968a4165fd699f8c446d86e809402705671825349b4c3bcd64268af7e7c838",
+      "head": "6fe98db56656a05320d2c0293fb73c54a41856f2",
+      "indexDigest": "sha256:2832c1dbde9b05b7b1489e842c2c5022ba3de70d151cce54184c7d8f0fb181bc",
       "indexFlagsDigest": "sha256:956571772c8feb18c4dba331bc324aa21e9c40518111aaa7cc072daeef02e39e",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
@@ -8585,15 +8585,16 @@
       "removedTargets": 179,
       "trackedFiles": 1410,
       "counts": {
-        "blockers": 21,
+        "blockers": 22,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 810
+        "advisories": 812
       },
       "blockerFiles": [
         ".github/scripts/generate-skill-surfaces.py",
         ".github/workflows/tests.yml",
         ".trellis/spec/backend/quality-guidelines.md",
+        ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
         "Makefile",
         "package.json",
         "tests/test_project_check.py",
@@ -8669,6 +8670,11 @@
           "file": ".trellis/spec/backend/quality-guidelines.md",
           "line": 2475,
           "detail": "\"check:full\": \"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
+        },
+        {
+          "file": ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
+          "line": 55,
+          "detail": "(`bash scripts/sd-ai-command-pack-review-scope.sh`, exit 0) and a direct"
         },
         {
           "file": "Makefile",
@@ -9969,12 +9975,17 @@
         },
         {
           "file": ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
-          "line": 77,
+          "line": 111,
+          "detail": "of one gate execution. `scripts/sd-ai-command-pack-review.py` is vendored too,"
+        },
+        {
+          "file": ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
+          "line": 115,
           "detail": "`scripts/sd-ai-command-pack-review-scope.sh` and"
         },
         {
           "file": ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
-          "line": 78,
+          "line": 116,
           "detail": "`scripts/sd-ai-command-pack-pr-body-scope.py` are vendored (Registry B,"
         },
         {
@@ -13536,6 +13547,11 @@
           "file": ".trellis/workspace/sdelmas/journal-4.md",
           "line": 754,
           "detail": "- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs -> 0 failures, 0 warnings"
+        },
+        {
+          "file": ".trellis/workspace/sdelmas/journal-4.md",
+          "line": 926,
+          "detail": "- [OK] bash scripts/sd-ai-command-pack-review-scope.sh: exit 0 after the body edit"
         },
         {
           "file": "CONTRIBUTING.md",
