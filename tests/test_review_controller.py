@@ -1456,6 +1456,200 @@ class ReviewControllerTests(InstallTestCase):
             {"outstanding": 0, "localDispositions": {"id-1": "rebutted"}},
         )
 
+    def branch_review_args(self, controller, root: Path, artifacts: Path, *extra: str):
+        """A repeatable `scope=branch` invocation against one attempt.
+
+        The attempt key is a function of the repository, scope, base, head,
+        worktree bytes and controls, so repeated calls against an unchanged
+        checkout resolve to the same private state file. That is what makes the
+        caching tests below observe a resume rather than a fresh attempt.
+        """
+
+        return controller.parse_args(
+            [
+                "--repo",
+                str(root),
+                "--scope",
+                "branch",
+                "--remote",
+                "none",
+                "--artifact-root",
+                str(artifacts),
+                "--json",
+                *extra,
+            ]
+        )
+
+    def test_failed_check_is_recomputed_on_the_next_invocation(self) -> None:
+        # A registered check may read an input the attempt key does not cover:
+        # `pack.review-scope` reads the pull-request body. Caching its failure
+        # pinned the attempt to that verdict, so the operator's own remediation
+        # — editing the body — could not clear it.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            side_effect=[
+                {"schemaVersion": 1, "status": "failed"},
+                {"schemaVersion": 1, "status": "passed"},
+            ],
+        ) as run_check, mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(
+                controller,
+                {"head": self.git_output(root, "rev-parse", "HEAD")},
+            ),
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            first = controller.run(self.branch_review_args(controller, root, artifacts))
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (1, "blocked"))
+        self.assertEqual(first[1]["limitations"], ["deterministic-check-not-passed"])
+        self.assertEqual((second[0], second[1]["status"]), (0, "ready"))
+        self.assertEqual(run_check.call_count, 2)
+        state_files = list(artifacts.glob("review-*.json"))
+        self.assertEqual(len(state_files), 1)
+        state = json.loads(state_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(state["check"], {"schemaVersion": 1, "status": "passed"})
+
+    def test_unchanged_passing_stages_still_replay_from_the_cache(self) -> None:
+        # The idempotency guarantee the recompute must not cost: a plain
+        # re-invocation after an interruption resumes past completed work.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ) as run_check, mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(
+                controller,
+                {"head": self.git_output(root, "rev-parse", "HEAD")},
+            ),
+        ) as run_local, mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ):
+            first = controller.run(self.branch_review_args(controller, root, artifacts))
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (0, "ready"))
+        self.assertEqual((second[0], second[1]["status"]), (0, "ready"))
+        self.assertEqual(run_check.call_count, 1)
+        self.assertEqual(run_local.call_count, 1)
+
+    def test_rejected_disposition_neither_replays_nor_evicts_the_report(self) -> None:
+        # An `invalid` local report rejects the caller's `--local-disposition`
+        # argv, which the attempt key does not cover. Caching it replayed the
+        # rejection on the next invocation even with no dispositions at all.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+        clean = self.local_report(controller, {"head": head})
+        rejected = self.local_report(controller, {"head": head}, status="invalid")
+        rejected["diagnostic"] = "local disposition ids match no finding at this head"
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            side_effect=[clean, rejected],
+        ) as run_local, mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ):
+            first = controller.run(self.branch_review_args(controller, root, artifacts))
+            second = controller.run(
+                self.branch_review_args(
+                    controller, root, artifacts, "--local-disposition", "id-1=rebutted"
+                )
+            )
+            third = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (0, "ready"))
+        self.assertEqual((second[0], second[1]["status"]), (2, "invalid"))
+        self.assertEqual(second[1]["limitations"], ["local-invalid"])
+        # The third invocation supplies no dispositions, so it must read the
+        # stored clean report rather than re-run the stage or replay the
+        # rejection: the durable report the first invocation stored survived.
+        self.assertEqual((third[0], third[1]["status"]), (0, "ready"))
+        self.assertEqual(run_local.call_count, 2)
+        state_files = list(artifacts.glob("review-*.json"))
+        self.assertEqual(len(state_files), 1)
+        state = json.loads(state_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(state["local"], clean)
+
+    def test_local_provider_failure_is_recomputed_on_the_next_invocation(self) -> None:
+        # Provider reachability is environmental, not a function of the attempt
+        # key, so an `unavailable` report is a verdict the next invocation is
+        # entitled to recompute rather than completed work to resume from.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            side_effect=[
+                self.local_report(controller, {"head": head}, status="unavailable"),
+                self.local_report(controller, {"head": head}),
+            ],
+        ) as run_local, mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ):
+            first = controller.run(self.branch_review_args(controller, root, artifacts))
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (3, "failed"))
+        self.assertEqual(first[1]["limitations"], ["local-unavailable"])
+        self.assertEqual((second[0], second[1]["status"]), (0, "ready"))
+        self.assertEqual(run_local.call_count, 2)
+
+    def test_policy_blocked_local_report_stays_cached(self) -> None:
+        # The complement of the three tests above, and the reason the
+        # non-resumable set is enumerated rather than "anything that is not
+        # clean": local policy is decided by the configuration digest, which the
+        # attempt key does cover, so replaying a `blocked` report is correct.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+        blocked = self.local_report(controller, {"head": head}, status="blocked")
+        blocked["diagnostic"] = "an approved review.round-extension decision is required"
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=blocked,
+        ) as run_local, mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ):
+            first = controller.run(self.branch_review_args(controller, root, artifacts))
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (1, "blocked"))
+        self.assertEqual((second[0], second[1]["status"]), (1, "blocked"))
+        self.assertEqual(run_local.call_count, 1)
+
     def test_local_disposition_rerun_keeps_an_advanced_phase(self) -> None:
         # Refreshing a cached local report must not rewind the phase: the
         # remote channel reads it to choose between reconciliation, dispatch,

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.66.1 - 2026-08-10
+
+- The review coordinator no longer caches a terminal-failure verdict in its
+  per-attempt resume state. Resume caching is keyed by the attempt identity —
+  repository, scope, base, head, worktree bytes, pull-request number and the
+  typed controls — which does not cover every input a stage reads, so a stored
+  failure survived the operator remedying the input it turned on. A
+  deterministic-check failure (`pack.review-scope` reads the pull-request body),
+  a rejected `--local-disposition` set, and a local provider
+  `unavailable`/`failed`/`cancelled` report are now reported without being
+  written, and the next invocation of the same attempt recomputes that stage.
+  Previously each pinned the attempt to the stale verdict with no escape short
+  of a fresh `--attempt-id`, which discards the attempt's local and remote
+  review evidence too.
+- A `blocked` local report stays cached, and a passing check and clean report
+  still replay: local policy is decided by the configuration digest, which the
+  attempt identity does cover, and the interrupted-resume guarantee is
+  unchanged.
+
 ## 0.66.0 - 2026-08-10
 
 - Fleet registry schema 5: each `docs/fleet/consumers.json` consumer may now

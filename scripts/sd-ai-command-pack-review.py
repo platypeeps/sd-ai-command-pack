@@ -57,6 +57,15 @@ LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
 CAPABILITY_STATES = frozenset(
     {"ready", "absent", "invalid", "incompatible", "unavailable", "skipped"}
 )
+# Local outcomes the coordinator must never cache in its resume state. Each one
+# turns on an input the attempt key does not cover: ``invalid`` rejects the
+# caller's ``--local-disposition`` list, and the three provider outcomes turn on
+# whether a provider was reachable at all. ``blocked`` is absent on purpose —
+# local policy is decided by the configuration digest, which the key does cover,
+# so replaying it is correct.
+LOCAL_NON_RESUMABLE_OUTCOMES = frozenset(
+    {"invalid", "unavailable", "failed", "cancelled"}
+)
 RECEIPT_ROUTES = frozenset({"cheap", "deep", "copilot", "none"})
 RECEIPT_CHECK_NAME = "sd-github-review/receipt"
 FINDING_CHANNELS = frozenset(
@@ -690,6 +699,37 @@ def _advance(path: Path, state: dict[str, Any], phase: str, **updates: object) -
     _atomic_json(path, state)
 
 
+def _record_stage(
+    path: Path,
+    state: dict[str, Any],
+    phase: str,
+    *,
+    resumable: bool,
+    **updates: object,
+) -> None:
+    """Persist a stage result, or keep a non-resumable one in memory only.
+
+    Resume caching exists so an interrupted attempt picks up after the work it
+    already completed. It is keyed by `_state_identity`, which covers the
+    repository, scope, base, head, worktree bytes, pull-request number and the
+    typed controls — not every input a stage reads. A verdict that turns on an
+    input outside that key is not completed work: the next invocation is
+    entitled to recompute it, and persisting it instead pins the attempt to the
+    verdict with no supported way out short of a fresh `--attempt-id`, which
+    discards the local and remote evidence too.
+
+    A non-resumable result still lands in ``state`` because `_report` reads both
+    stage payloads straight out of it — the caller sees exactly what this run
+    computed. Only the write to the private state file is withheld, so any
+    result an earlier invocation did persist survives untouched on disk.
+    """
+
+    if resumable:
+        _advance(path, state, phase, **updates)
+        return
+    state.update(updates)
+
+
 def _run_check(repo: Path) -> dict[str, Any]:
     script = CHECK_SCRIPT
     if not script.is_file() or script.is_symlink():
@@ -763,6 +803,18 @@ def _run_local(
     if not _is_exact_integer(report.get("schemaVersion"), 1):
         raise ReviewError("local review returned an unsupported schema")
     return report
+
+
+def _local_outcome(local: object) -> object:
+    """Read the local stage's verdict from its report.
+
+    Prefer the canonical ``outcome`` key; fall back to the deprecated ``status``
+    alias for the dual-emit window (A-077).
+    """
+
+    if not isinstance(local, Mapping):
+        return None
+    return local.get("outcome", local.get("status"))
 
 
 def _local_outstanding(local: Mapping[str, Any]) -> int | None:
@@ -1860,7 +1912,17 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
 
     if state.get("check") is None:
         check = _run_check(repo)
-        _advance(state_path, state, "check", check=check)
+        # Only a pass is completed work. A registered check may read an input
+        # the attempt key does not cover — `pack.review-scope` reads the pull
+        # request body — so a persisted failure survives the operator editing
+        # that input, which is the correct remediation, and replays forever.
+        _record_stage(
+            state_path,
+            state,
+            "check",
+            resumable=isinstance(check, dict) and check.get("status") == "passed",
+            check=check,
+        )
     check = state["check"]
     if not isinstance(check, dict) or check.get("status") != "passed":
         return 1, _report(
@@ -1885,19 +1947,21 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             local_policy=local_policy,
         )
         # Refreshing a cached report must not rewind the phase: the remote
-        # channel reads it for dispatch idempotency and reconciliation.
-        _advance(
+        # channel reads it for dispatch idempotency and reconciliation. A
+        # non-resumable outcome is reported but not written, so a rejected
+        # disposition set neither replays on the next invocation nor overwrites
+        # the durable report an earlier one already stored.
+        _record_stage(
             state_path,
             state,
             str(state.get("phase", "resolve")) if refreshed else "local",
+            resumable=_local_outcome(local) not in LOCAL_NON_RESUMABLE_OUTCOMES,
             local=local,
         )
     local = state["local"]
     if not isinstance(local, dict):
         raise ReviewError("local review state is invalid")
-    # Prefer the canonical ``outcome`` verdict key; fall back to the deprecated
-    # ``status`` alias for the dual-emit window (A-077).
-    local_status = local.get("outcome", local.get("status"))
+    local_status = _local_outcome(local)
     if local_status == "findings":
         if _local_outstanding(local) != 0:
             return 1, _report(
