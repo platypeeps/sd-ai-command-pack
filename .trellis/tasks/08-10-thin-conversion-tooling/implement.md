@@ -284,9 +284,9 @@ Per-consumer `head`, `indexDigest`, and `worktreeDigest` plus full
 per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
-removed paths: `sd-github-review` 10 hits in 8 files,
-`se-ai-command-pack` 16/5, `mezmo_benchmark` 24/13, `hoa-manager` 32/9,
-`rwbp-coordinator` 40/7, `loadsmith` 48/4, `rwbp-website` 59/8,
+removed paths: `sd-github-review` 14 hits in 10 files,
+`se-ai-command-pack` 18/5, `mezmo_benchmark` 29/19, `hoa-manager` 31/9,
+`rwbp-coordinator` 40/7, `loadsmith` 53/5, `rwbp-website` 58/7,
 `anomaly-metric-creator` 168/20 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
 PR-template checklists. Plus 12 pack defects in 6 files (11 in 5 where
@@ -755,3 +755,60 @@ Additional fixture criteria this round adds, on top of those above:
   whose bare hex is identical → recognized as pack-owned. The
   fail-open direction is the one that matters: this bug reported zero
   pack defects, not spurious ones.
+
+### Round 7 — the first round where both lanes converged
+
+Host lane and Codex lane ran against the round-6 remediation. **Both
+independently found the same three defects** (live task artifacts wrongly
+scoped as historical, the interpreter regex matching the English word
+"Python", and generated bookkeeping drowning the advisory list), which is
+the first time in four rounds that the two lanes agreed on the defect set
+rather than each finding classes the other missed. Codex found six more
+the host lane had not; the host lane found two Codex did not. Every one is
+fixed and each has a counterexample in the fixture list.
+
+| ID | Lane | Concern | Fix |
+|---|---|---|---|
+| R7-1 | Codex | **Live agent guidance still advisory.** `anomaly-metric-creator/.trellis/spec/amc/backend/testing-quality.md:288` says "Use `scripts/sd-ai-command-pack-full-check.sh` as the local review gate" — an instruction that causes execution with no interpreter token anywhere on the line, so the "live spec stays live" scoping had nothing to act on | `COMMAND_CONTEXT` gained an imperative-plus-runnable-path alternative. The agent supplies the interpreter; the instruction is the command |
+| R7-2 | both | **Historical scoping too broad.** All of `.trellis/tasks/**` was treated as historical, so an *unarchived* task's `implement.md` — a plan someone is about to follow — was advisory. `mezmo_benchmark/.trellis/tasks/07-02-audit-s3-iam-runscope-kms/implement.md:83` is `status: planning` and says `bash scripts/sd-ai-command-pack-full-check.sh` | Narrowed to `.trellis/tasks/archive/`. Only an archived task is a record of what was already run |
+| R7-3 | both | **The interpreter regex matched English.** `\bpython3?\s` under `IGNORECASE` matched the word "Python": `rwbp-website/.gitignore:165`, the comment "Python bytecode from scripts/*.py", was a blocker | Interpreters are matched case-sensitively and must be followed by something path-shaped. "make sure" and "the node is" stop matching; `make -C build` and `python3 scripts/x.py` still do. Six prose lines left `blockers`, all verified as prose |
+| R7-4 | Codex | **Broad globs falsely blocked.** `hoa-manager/scripts/update_repomix:8` passes `INCLUDE_PATTERNS="...,docs/**,.trellis/spec/**,..."`. Those globs match removed files *and* surviving ones, so the script keeps working — but a glob matching *any* removed entry was a hit | A glob is a hit only when **nothing it selects survives**. A population that still exists needs no repoint |
+| R7-5 | Codex | **The PR-template remediation was unreachable.** Child 2b claimed that fixing the shipped template fixes the five byte-identical consumers. It cannot: `install_file()` returns `PRESERVED` for a force-preserved target whose bytes differ from the shipped ones, *even under `force=True`* (`installer/fileops.py:366`), so changing the template guarantees every existing copy is preserved forever | Planning fix, not a code fix. The pack edit is for fresh installs; all eight existing consumers repoint their own template in their conversion PR, where the classification already puts it once the shipped bytes change. Child 2b's PRD now says this and carries an acceptance criterion that the refresh reports `PRESERVED` |
+| R7-6 | Codex | **Duplicate complete marker pairs were accepted.** `block_spans()` took `START/END/START/END` as two valid spans while `installer/fileops.py:150` rejects any repeat of either marker | Duplicate detection now keys on the marker *label*, because one file legitimately carries several distinct blocks — `rwbp-website/.gitignore` has `trellis-gitignore` and `obsidian-kb`. A repeated label is malformed; two different labels are not |
+| R7-7 | Codex | **Gitignored files escaped every binding.** `occupied_receipt_targets()` tests filesystem existence, and `design.md:190` records that installed adapters can be gitignored — so an adapter could appear or disappear, changing the plan, while `head`, `indexDigest`, `worktreeDigest`, and `worktreeClean` all stayed identical | New `receiptOccupancyDigest` over every receipt target's on-disk state and bytes. Git's view is not the plan's view |
+| R7-8 | Codex | **`classifierDigest` omitted its newest inputs.** The force-preserved ownership proof reads `manifest.json` and the shipped template bytes through `installer/manifest.py`; none of the three were in the normative digest list, so a template change could flip a file between `packDefects` and `blockers` with the digest unchanged | All three added to `design.md`'s list |
+| R7-9 | Codex | **The parent's authoritative child map omitted 2b**, going straight from child 2 to child 3, while the parent PRD, parent implement plan, canary PRD, and 2b's own metadata all stated the dependency | Map row added, with the tool-enforced rationale next to it |
+| R7-10 | host | **Fenced blocks and shell continuations were invisible.** The fleet writes long invocations as `bash toolchain.sh run-python -- \` with the script path on the next line, and puts bare invocations inside ```bash fences. Both put the removed path on a line carrying no command token — `se-ai-command-pack/.trellis/spec/backend/quality-guidelines.md:552` and `loadsmith/docs/repomix-map.md:1388` | Fence and continuation state are tracked per file. Fences must carry an **explicit** runnable tag: a bare ` ``` ` only ever closes, because real files nest fences and parity tracking desynchronised and then labelled ordinary prose as command context |
+| R7-11 | host | **Every checklist item was command context.** Trellis PRDs state acceptance criteria as checklist items, so the rule that caught the PR template's "- [ ] Local gate: `bash …`" also caught "- [ ] A **real** pack refresh that modifies `docs/SD_AI_COMMAND_PACK.md` is …" | A checklist item qualifies only when the line also names a file with a runnable extension |
+| R7-12 | both | **Generated bookkeeping was 93% of every advisory list.** `manifest.json` alone names every shipped target, so removing 179 of them produced 1055 "citations" per consumer. The design already said generated bookkeeping is not a citation source; the scanner did not implement it | The three `.sd-ai-command-pack/` files are `scheduled` — the conversion does rewrite them. Advisory lists went from ~1139 to ~84 per consumer and became readable |
+
+Fixture criteria this round adds:
+
+- A live `.trellis/spec/**` line saying "Use `<removed>.sh` as the gate" →
+  `blocked`; the same path in a descriptive sentence → advisory.
+- A removed path on a **continuation line** whose command token is on the
+  previous line → `blocked`.
+- A removed path inside a ```` ```bash ```` fence → `blocked`; inside an
+  untagged fence in a file with nested fences → not a blocker, and no
+  prose outside any fence is marked.
+- A glob matching both removed and surviving files → **not** a hit; a
+  glob whose entire population is removed → a hit.
+- Two **distinct** managed blocks in one file → both parsed; the **same**
+  block label twice → malformed, `packDefects`.
+- A receipt target that exists on disk but is gitignored → changes
+  `receiptOccupancyDigest`. `head`, `indexDigest`, and `worktreeDigest`
+  cannot see it.
+- A refresh of an existing consumer whose `.github/PULL_REQUEST_TEMPLATE.md`
+  differs from the newly shipped template → `PRESERVED`, and the resweep
+  reports its stale line as a `blocker`, not a `packDefect`.
+
+**Fifth measurement** (all figures in the artifacts restated against it):
+`sd-github-review` 14 blockers in 10 files, `se-ai-command-pack` 18/5,
+`mezmo_benchmark` 29/19, `hoa-manager` 31/9, `rwbp-coordinator` 40/7,
+`loadsmith` 53/5, `rwbp-website` 58/7, `anomaly-metric-creator` 168/20.
+`packDefects` unchanged at 12 hits in 6 files, or 11 in 5 where the
+consumer owns its PR template. No consumer is `clear`.
+
+All 17 counterexamples accumulated across rounds 4–7 pass simultaneously,
+which is the first time the fixture list has been closed rather than
+extended by the next round's review.

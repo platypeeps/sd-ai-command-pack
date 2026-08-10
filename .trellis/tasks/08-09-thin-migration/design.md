@@ -424,11 +424,15 @@ or the fleet manifest changed, and on `make check` otherwise.
 |---|-------|-------|-----------|
 | 1 | `thin-conversion-tooling` | resweep verdict + `--thin` + `--revert-thin` + settings/pin writers | pack-internal |
 | 2 | `thin-candidate-loop-rescope` | C-F | pack-internal |
+| 2b | `thin-prompt-surface-repoint` | the six pack-shipped surfaces that survive conversion and still cite removed paths | pack-internal |
 | 3 | `thin-canary-conversion` | rwbp-coordinator, loadsmith, hoa-manager + the executed revert proof | **converts real consumer repos** |
 | 4 | `thin-post-canary-conversion` | rwbp-website, mezmo_benchmark, se-ai-command-pack, sd-github-review | **converts real consumer repos** |
 | 5 | `thin-final-conversion-gate-retirement` | anomaly-metric-creator (incl. `sd-ai-command-pack-sync.yml` + the advisory `pr-body-scope.py` CI step), then C-E | **converts a real consumer repo** |
 
-Children 1 and 2 are ordinary pack-repo work. Children 3–5 mutate
+Children 1, 2, and 2b are ordinary pack-repo work. Child 2b is a hard
+prerequisite for 3–5 and the tool enforces it: its surfaces are
+`packDefects`, a `packDefects` entry makes the verdict `blocked`, and
+`--thin` refuses without `clear`. Children 3–5 mutate
 repositories outside this one and are **gated on explicit user
 authorization per cohort**; the autonomous run-level authority does not
 extend to them. Each of 3–5 carries a `blockedOn` marker until that

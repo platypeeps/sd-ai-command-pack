@@ -494,15 +494,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 10 hits in 8 files, `se-ai-command-pack` 16 in 5,
-`mezmo_benchmark` 24 in 13, `hoa-manager` 32 in 9,
-`rwbp-coordinator` 40 in 7, `loadsmith` 48 in 4, `rwbp-website` 59 in 8,
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 18 in 5,
+`mezmo_benchmark` 29 in 19, `hoa-manager` 31 in 9,
+`rwbp-coordinator` 40 in 7, `loadsmith` 53 in 5, `rwbp-website` 58 in 7,
 `anomaly-metric-creator` 168 in 20. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the fourth measurement, and the three before them were each
+**These are the fifth measurement, and the four before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 
@@ -570,6 +570,15 @@ classification authority:
   single largest determinant of the plan, and omitting it would let an
   edit to the classification logic between resweep and conversion leave
   every other digest input unchanged while the delete set moved
+- `manifest.json` bytes, `installer/manifest.py` bytes, and the bytes of
+  every force-preserved template the manifest names. The force-preserved
+  ownership proof compares a consumer's file against the pack's own
+  shipped template, so all three are classification inputs: a changed
+  template flips `.github/PULL_REQUEST_TEMPLATE.md` between `packDefects`
+  and `blockers`, a changed manifest changes which template is compared,
+  and `installer/manifest.py` decides that mapping. Omitting them would
+  leave a `clear` verdict standing across exactly the release that
+  invalidates it
 - `scripts/sd-ai-command-pack-thin-resweep.py` bytes — the resweep
   itself. The builder decides what is removed, but the resweep decides
   what counts as a hit, what counts as the execution surface, and how a

@@ -81,7 +81,7 @@ Children 3–5 are blocked on explicit per-cohort user authorization,
 because they change repositories outside this one. That work is also
 **larger than "run the converter"**: measured 2026-08-10, every one of
 the 8 registered consumers has consumer-authored callers, in command
-position, of paths the conversion removes (10 hits in 8 files at the low
+position, of paths the conversion removes (14 hits in 10 files at the low
 end, 168 in 20 at the high end), so each consumer needs its execution
 surface repointed before it can convert. Evidence and per-consumer figures:
 `08-10-thin-conversion-tooling/research/fleet-blocker-scan.json`.

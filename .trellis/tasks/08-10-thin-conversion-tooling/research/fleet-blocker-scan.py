@@ -46,7 +46,25 @@ sys.path.insert(0, str(ROOT))
 from installer import conversion  # noqa: E402
 from installer.manifest import load_manifest  # noqa: E402
 from installer.provenance import PROVENANCE_FILE  # noqa: E402
-from installer.registry import FORCE_PRESERVED_TARGETS  # noqa: E402
+from installer.registry import (  # noqa: E402
+    FORCE_PRESERVED_TARGETS,
+    INSTALLED_TARGETS_FILE,
+    PACK_MANIFEST_FILE,
+)
+
+# H-4, round 7. The three generated bookkeeping files describe the install
+# itself: `manifest.json` alone names every shipped target, so a conversion
+# that removes 179 of them produces 1055 "citations" per consumer -- 93% of
+# every advisory list, all of it noise. The design already said generated
+# bookkeeping is not a source of citations; this implements that. They are
+# `scheduled` rather than skipped, because the conversion does rewrite them.
+GENERATED_BOOKKEEPING = frozenset(
+    {
+        INSTALLED_TARGETS_FILE.as_posix(),
+        PACK_MANIFEST_FILE.as_posix(),
+        PROVENANCE_FILE.as_posix(),
+    }
+)
 
 PARTITION = ROOT / "docs/fleet/surface-partition.json"
 REGISTRY = ROOT / "docs/fleet/consumers.json"
@@ -118,14 +136,36 @@ EXECUTABLE_NAME_SUFFIXES = (".prompt.md", ".instructions.md")
 # the space of files that might run one, so a citation appearing in command
 # position blocks regardless of what file it sits in. This only ever adds
 # blockers; it never moves one to advisory.
+# H-3, round 7. An interpreter word alone is not command position. `\bpython3?\s`
+# under IGNORECASE matches the English word "Python" -- measured:
+# rwbp-website/.gitignore:165, the comment "Python bytecode from scripts/*.py",
+# was recorded as a blocker. The interpreter must be case-sensitive and must be
+# followed by something that looks like a path, which is what an invocation
+# actually is. "make sure" and "the node is" stop matching; "make -C build" and
+# "python3 scripts/x.py" still do.
+RUNNER = (
+    r"(?:(?:ba|z|d)?sh|python3?|node|npx?|pnpm|yarn|deno|ruby|perl|exec|source"
+    r"|make|uvx|uv\s+run|go\s+run)"
+)
+
 COMMAND_CONTEXT = re.compile(
-    r"""(
-        \b(?:ba|z|d)?sh\s | \bpython3?\s | \bnode\s | \bexec\s | \bsource\s
-      | \bnpx?\s | \buv(?:x|\srun)\s | \bmake\s | \bgo\srun\s
+    rf"""(
+        (?-i:\b{RUNNER}\s+(?:-{{1,2}}[\w-]+\s+)*[-\w.$~"'`/]*[./][-\w.$~"'`/]*)
       | \brun:\s | ^\s*run\s*[:=] | \bcommand\s*[:=] | \bentrypoint\s*[:=]
-      | \$\( | ^\s*[-*]?\s*\[[ x]\]        # checklist item: a human runs it
+      | \$\(
+        # Checklist item a human works through, but only when the line also
+        # names something runnable. Every Trellis PRD states its acceptance
+        # criteria as checklist items, so an unqualified checklist rule blocks
+        # on prose like "a refresh that modifies `docs/SD_AI_COMMAND_PACK.md`".
+      | ^\s*[-*]?\s*\[[ x]\](?=.*\.(?:sh|bash|zsh|py|mjs|cjs|js|ts|rb|pl)\b)
       | \w+_(?:script|cmd|command|bin|path)\s*= # shell/py assignment of a runnable
-      | \brun\b.{0,24}\b(?:script|command)\b
+      | \brun\b.{{0,24}}\b(?:script|command)\b
+        # Imperative guidance naming a runnable file. Live agent guidance under
+        # .trellis/spec/** causes execution without ever writing an interpreter:
+        # "Use `scripts/sd-ai-command-pack-full-check.sh` as the local review
+        # gate" is an instruction, and the agent supplies the interpreter.
+      | \b(?:use|run|invoke|execute|call|launch)\b[^\n]{{0,48}}
+        \.(?:sh|bash|zsh|py|mjs|cjs|js|rb|pl)\b
     )""",
     re.VERBOSE | re.IGNORECASE,
 )
@@ -139,20 +179,87 @@ COMMAND_CONTEXT = re.compile(
 # guidance under .trellis/spec/** is deliberately NOT here: an agent reads a
 # spec and acts on it.
 HISTORICAL_PREFIXES = (
-    ".trellis/tasks/",
+    ".trellis/tasks/archive/",
     ".trellis/workspace/",
     ".trellis/audit/",
     ".trellis/journal/",
 )
 
+# H-2, round 7. Scoping out all of `.trellis/tasks/` was too broad: an
+# *unarchived* task's implement.md is a live instruction a developer or agent
+# is expected to follow, in exactly the sense that made the PR-template
+# checklist blocking. Only `archive/` is a record of what was already run.
+
+# Explicit tags only. A bare ``` can be either half of a pair, and real files
+# nest fences (a generated repository map quotes Markdown that itself contains
+# fences), so tracking parity across a whole file desynchronises and then labels
+# ordinary prose as command context. Treating an untagged fence as *always
+# closing* is the fail-safe direction: it can only lose a fence-derived blocker
+# that the line's own syntax or a continuation would usually catch anyway.
+RUNNABLE_FENCE_LANGS = frozenset(
+    {"bash", "sh", "shell", "console", "zsh", "shell-session", "make", "python"}
+)
+
+FENCE = re.compile(r"^\s*(?:```+|~~~+)\s*([\w-]*)")
+
+
+def command_lines(lines: list[str]) -> set[int]:
+    r"""Line numbers that are in command position for a reason the line itself
+    does not carry.
+
+    Two cases, both found in real consumers and both previously advisory:
+
+    - Inside a fenced block whose language is runnable. `docs/repomix-map.md`
+      and task `implement.md` files put bare invocations in ```bash fences; the
+      fence *is* the command context.
+    - A shell continuation. `bash toolchain.sh run-python -- \` followed by the
+      script path on the next line puts the removed path on a line with no
+      command token of its own, which is how the fleet writes nearly every
+      long invocation.
+    """
+    marked: set[int] = set()
+    fenced = False
+    runnable = False
+    continued = False
+    for number, line in enumerate(lines, start=1):
+        match = FENCE.match(line)
+        if match:
+            if fenced:
+                fenced = runnable = False
+            elif match.group(1).lower() in RUNNABLE_FENCE_LANGS:
+                fenced = runnable = True
+            continued = False
+            continue
+        if fenced and runnable:
+            marked.add(number)
+        elif continued:
+            marked.add(number)
+        stripped = line.rstrip()
+        continued = bool(stripped) and stripped.endswith("\\") and (
+            (fenced and runnable) or continued or bool(COMMAND_CONTEXT.search(line))
+        )
+    return marked
+
 # Managed-block delimiters. A citation inside a block the conversion strips is
 # scheduled; the same citation outside it is judged normally.
 BLOCK_START = re.compile(
-    r"(SD-AI-COMMAND-PACK:[A-Z-]+:START|# sd-ai-command-pack [a-z-]+ start)"
+    r"(?:SD-AI-COMMAND-PACK:([A-Z-]+):START|# sd-ai-command-pack ([a-z-]+) start)"
 )
 BLOCK_END = re.compile(
-    r"(SD-AI-COMMAND-PACK:[A-Z-]+:END|# sd-ai-command-pack [a-z-]+ end)"
+    r"(?:SD-AI-COMMAND-PACK:([A-Z-]+):END|# sd-ai-command-pack ([a-z-]+) end)"
 )
+
+
+def marker_label(match: re.Match[str]) -> str:
+    """Which block this marker belongs to.
+
+    One file legitimately carries several *distinct* pack blocks -- measured:
+    rwbp-website/.gitignore has `trellis-gitignore` and `obsidian-kb`. What the
+    installer rejects (installer/fileops.py:150) is a repeat of the *same*
+    marker, which it looks for by exact string. Duplicate detection must key on
+    the label, not on "a second block appeared".
+    """
+    return next(group for group in match.groups() if group is not None).lower()
 
 # Path-shaped tokens. The class keeps "*" and "?" so a glob citation survives
 # tokenization -- measured: loadsmith/.github/workflows/ci.yml:149 addresses the
@@ -176,6 +283,36 @@ def digest_of(text: str) -> str:
     return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
 
 
+def receipt_occupancy_digest(repo: Path, entries) -> str:
+    """Digest over what the *receipt's* targets actually are on disk.
+
+    `head`, `indexDigest`, and `worktreeDigest` all describe Git's view, and a
+    gitignored file is in none of them. The conversion plan does not share that
+    blind spot: `occupied_receipt_targets()` (installer/conversion.py:249) tests
+    filesystem existence, and design.md:190 records that installed adapters can
+    be gitignored. An adapter appearing or disappearing would otherwise change
+    the plan while every recorded binding stayed identical.
+    """
+    digest = hashlib.sha256()
+    for target in sorted(entries):
+        digest.update(target.encode("utf-8"))
+        full = repo / target
+        try:
+            if full.is_symlink():
+                digest.update(b"\0symlink:" + os.readlink(full).encode("utf-8"))
+            elif full.is_file():
+                digest.update(b"\0file:")
+                digest.update(hashlib.sha256(full.read_bytes()).digest())
+            elif full.is_dir():
+                digest.update(b"\0dir")
+            else:
+                digest.update(b"\0absent")
+        except OSError:
+            digest.update(b"\0unreadable")
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
 def worktree_digest(repo: Path) -> str:
     """Digest over the dirty *contents*, not over `git status` output.
 
@@ -183,15 +320,26 @@ def worktree_digest(repo: Path) -> str:
     edits to the same file produce the same value, so a dirty tree stayed
     unidentifiable exactly where identification mattered. Five consumer trees
     are dirty, so this is the common case here, not the corner.
+
+    ``-uall`` matters as much as the content hashing: the default collapses an
+    untracked directory to a single ``dir/`` record, so every file inside it
+    would be invisible to the digest. Rename records carry a second path field,
+    which is consumed rather than misread as the next record's status.
     """
     digest = hashlib.sha256()
-    for line in git(repo, "status", "--porcelain", "-z").split("\0"):
-        if not line:
-            continue
-        relative = line[3:] if len(line) > 3 else line
-        digest.update(line[:3].encode("utf-8"))
+    fields = iter(
+        field
+        for field in git(repo, "status", "--porcelain=v1", "-z", "-uall").split("\0")
+        if field
+    )
+    for record in fields:
+        status, relative = record[:2], record[3:] if len(record) > 3 else ""
+        digest.update(record[:3].encode("utf-8"))
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
+        if status[0] in "RC" or status[1] in "RC":
+            digest.update(next(fields, "").encode("utf-8"))
+            digest.update(b"\0")
         full = repo / relative
         try:
             if full.is_symlink():
@@ -264,6 +412,7 @@ def cites_removed_path(
     removed: frozenset[str],
     repo: Path,
     relative_to: str,
+    survivors: frozenset[str],
 ) -> bool:
     """Does this token name something the conversion removes?
 
@@ -276,7 +425,12 @@ def cites_removed_path(
        tokenizes to repo_root/scripts/... and matches nothing exactly;
     3. it resolves, relative to the citing file's own directory, to a removed
        path;
-    4. it is a glob that matches one.
+    4. it is a glob whose whole matched population is removed.
+
+    The qualifier on (4) is not a detail. hoa-manager's scripts/update_repomix
+    passes INCLUDE_PATTERNS="...,docs/**,.trellis/spec/**,..."; those globs match
+    removed files *and* surviving ones, so the script keeps working and needs no
+    repoint. A glob is only broken when nothing it selects survives.
 
     What is deliberately absent is bare-suffix guessing: associating a short
     relative reference with any removed path that happens to end the same way.
@@ -295,7 +449,9 @@ def cites_removed_path(
     if not token:
         return False
     if "*" in token or "?" in token:
-        return any(fnmatch.fnmatch(entry, token) for entry in removed)
+        if not any(fnmatch.fnmatch(entry, token) for entry in removed):
+            return False
+        return not any(fnmatch.fnmatch(entry, token) for entry in survivors)
     if token in removed:
         return True
     parts = token.split("/")
@@ -316,17 +472,29 @@ def block_spans(lines: list[str]) -> list[tuple[int, int]] | None:
     content as pack-owned, which is the opposite of failing closed.
     """
     spans: list[tuple[int, int]] = []
+    seen: set[str] = set()
+    open_label: str | None = None
     start: int | None = None
     for number, line in enumerate(lines, start=1):
-        if BLOCK_START.search(line):
-            if start is not None:
+        opening = BLOCK_START.search(line)
+        closing = None if opening else BLOCK_END.search(line)
+        if opening:
+            label = marker_label(opening)
+            # A repeat of the same label is a duplicate even when the first pair
+            # closed cleanly: installer/fileops.py:150 rejects any repeat of
+            # either marker, so accepting it would let the resweep vouch an
+            # ownership shape the conversion itself refuses to parse.
+            if start is not None or label in seen:
                 return None
+            seen.add(label)
+            open_label = label
             start = number
-        elif BLOCK_END.search(line):
-            if start is None:
+        elif closing:
+            if start is None or marker_label(closing) != open_label:
                 return None
             spans.append((start, number))
             start = None
+            open_label = None
     if start is not None:
         return None
     return spans
@@ -407,9 +575,15 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         for entry in git(repo, "ls-files", "-z").split("\0")
         if entry and not entry.startswith(SKIP_DIRS)
     ]
+    survivors = frozenset(tracked) - removed
     for relative in tracked:
         if relative in removed:
             buckets["scheduled"].append({"file": relative, "line": None})
+            continue
+        if relative in GENERATED_BOOKKEEPING:
+            buckets["scheduled"].append(
+                {"file": relative, "line": None, "detail": "generated bookkeeping"}
+            )
             continue
         full = repo / relative
         if full.is_symlink():
@@ -453,12 +627,13 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         unvouchable = relative in managed and vouched is None
         executable = is_executable_surface(repo, relative)
         historical = relative.startswith(HISTORICAL_PREFIXES)
+        commanded = command_lines(lines)
 
         for number, line in enumerate(lines, start=1):
             if not needles.search(line):
                 continue
             if not any(
-                cites_removed_path(token, removed, repo, relative)
+                cites_removed_path(token, removed, repo, relative, survivors)
                 for token in TOKEN.findall(line)
             ):
                 continue
@@ -477,7 +652,10 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 if malformed_markers and not in_pack_block:
                     entry = {**entry, "detail": f"[malformed markers] {entry['detail']}"}
                 buckets["packDefects"].append(entry)
-            elif executable or (not historical and COMMAND_CONTEXT.search(line)):
+            elif executable or (
+                not historical
+                and (COMMAND_CONTEXT.search(line) or number in commanded)
+            ):
                 buckets["blockers"].append(entry)
             else:
                 buckets["advisories"].append(entry)
@@ -490,6 +668,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "indexDigest": digest_of(index),
         "worktreeDigest": worktree_digest(repo),
         "worktreeClean": not git(repo, "status", "--porcelain").strip(),
+        "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),
         "receiptEntries": len(receipt.entries),
         "removedTargets": len(removed),
         "trackedFiles": len(tracked),
