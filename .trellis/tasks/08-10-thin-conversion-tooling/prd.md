@@ -30,8 +30,13 @@ would be a hand-edited deletion of 166 files with no reversal path.
    its opening lines, so a resweep that blocked on it could never return
    `clear` for any consumer that exists today. The resweep computes the
    removal set first and sorts every hit into four buckets, each failing
-   closed: *scheduled* (the hit lives in a file conversion removes —
-   informational), *packDefects* (a surviving file whose content is still
+   closed: *scheduled* (the hit lives in a file the conversion **rewrites
+   rather than leaves alone** — either one it removes, or one of the three
+   generated bookkeeping files it keeps and rewrites; both are
+   informational, because in neither case does a stale citation survive
+   the conversion. `manifest.json` alone names every shipped target, so
+   classifying it line-by-line produces 1055 "citations" per consumer,
+   93% of every advisory list, all of it noise), *packDefects* (a surviving file whose content is still
    the pack's own cites a removed path — blocking, and ours to fix),
    *blockers* (a consumer-authored file cites a removed path in command
    position — blocking, and the consumer's to fix), and *advisories*

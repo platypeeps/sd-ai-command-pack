@@ -43,7 +43,22 @@ revert-and-restore proof.
    progression only through successful canaries absent an explicit
    parked-canary override. Continuing past a blocked canary would need
    that override, invoked deliberately — not assumed.
-3. One consumer-authored blocker is already measured and belongs to this
+3. **Every canary declares `codex` or stops using it, before conversion.**
+   Measured 2026-08-10 and true of all three canaries: each has a
+   `.codex/` directory holding files that are not Trellis-local, and each
+   registry row declares only `claude`, `gemini`, `github`, `opencode`.
+   That is a blocker, not a warning, and the reason is not bookkeeping:
+   `retainVendoredFor` intersects the consumer's **declared** platforms
+   (parent `design.md:187`), so conversion deletes `.agents/**` out from
+   under a Codex user — and Codex cannot consume the machine-installed
+   plugin at all, so nothing replaces it. Per consumer, choose one and
+   record which: add `codex` to that consumer's `platforms` (turning
+   `retainVendoredFor` retention on, and making this the first real
+   exercise of a path the parent design calls untested), or remove the
+   Codex usage. `rwbp-coordinator`, `loadsmith`, and `hoa-manager` also
+   reference `$CODEX_HOME` in surviving files — a second, separate marker
+   that clears the same two ways.
+4. One consumer-authored blocker is already measured and belongs to this
    task rather than to child 2b: `rwbp-coordinator/.prism/rules.json:55`
    is a live Prism **required** rule naming three removed paths. Its text
    is not in the pack's `templates/.prism/rules.json`, so it is
@@ -54,7 +69,7 @@ revert-and-restore proof.
    `.prism/rules.json` is agent-executed, not inert data: round 10
    reclassified it from `advisories` to `blockers` for exactly that
    reason.
-4. Each conversion deletes the set enumerated **from that consumer's
+5. Each conversion deletes the set enumerated **from that consumer's
    own installed-targets receipt** and classified through the partition
    (parent contract C-B) — measured today at **179 removed targets per
    consumer**, being 166 machine files plus 13 retired files. The four
@@ -65,12 +80,12 @@ revert-and-restore proof.
    destructive scope by four files. It **keeps** the `repo-native` and
    `consumer-config` slices. The counts are recomputed per consumer, not
    assumed from this line.
-5. The revert proof executes `install.py TARGET --revert-thin` on one
+6. The revert proof executes `install.py TARGET --revert-thin` on one
    converted canary, confirms CI stays green in the reverted state,
    then re-converts. Reading the revert code is not the proof.
-6. `sd-status fleet` is the acceptance instrument, not a summary
+7. `sd-status fleet` is the acceptance instrument, not a summary
    written by hand.
-7. **Machine provisioning precedes conversion** (parent contract C-C2).
+8. **Machine provisioning precedes conversion** (parent contract C-C2).
    Conversion removes a repository's agent surfaces on the assumption
    the machine supplies them; for anyone without the plugin installed
    and the machine installer run, it is indistinguishable from
@@ -98,6 +113,12 @@ revert-and-restore proof.
       pre-conversion installed-targets receipt** — a comparison against
       the current partition alone would pass while orphan files from an
       older pin survive.
+- [ ] Each canary's undeclared-codex marker is cleared by a recorded
+      choice — `codex` added to its `platforms`, or the Codex usage
+      removed — and the resweep confirms it rather than a hand check. If
+      any canary declares `codex`, `retainVendoredFor` retention runs
+      against a real consumer for the first time, so its residual is
+      compared against that consumer's own receipt, not assumed.
 - [ ] `rwbp-coordinator/.prism/rules.json` names no removed path at the
       converted HEAD, verified by the resweep returning `clear` for that
       consumer rather than by reading the file — the rule text moved once

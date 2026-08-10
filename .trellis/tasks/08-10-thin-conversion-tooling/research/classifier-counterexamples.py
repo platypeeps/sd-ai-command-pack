@@ -210,6 +210,48 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
     ),
     (
         "loadsmith",
+        ".codex",
+        None,
+        "blockers",
+        "R12-C1",
+        "undeclared codex usage: the registry declares claude/gemini/github/"
+        "opencode, and `retainVendoredFor` intersects *declared* platforms, so "
+        "conversion deletes `.agents/**` out from under a Codex user who "
+        "cannot consume the machine plugin at all",
+    ),
+    (
+        "se-ai-command-pack",
+        ".codex",
+        None,
+        None,
+        "R12-C1",
+        "this consumer's `.codex/` holds nothing but Trellis-local paths, so "
+        "the directory marker must NOT fire. Blocking it would block every "
+        "Trellis repository for a reason the conversion does not cause",
+    ),
+    (
+        "se-ai-command-pack",
+        "$CODEX_HOME",
+        None,
+        "blockers",
+        "R12-C1",
+        "and the environment marker fires on the same consumer anyway. The "
+        "pair is what makes the three markers falsifiably separate: `prd.md:204` "
+        "requires three fixtures because one combined case would pass while two "
+        "markers were never implemented",
+    ),
+    (
+        "sd-github-review",
+        "$CODEX_HOME",
+        None,
+        None,
+        "R12-C1",
+        "the one consumer with neither marker: a Trellis-local `.codex/` and no "
+        "surviving $CODEX_HOME reference. Without this row, a marker rule that "
+        "fired on everything would look correct",
+    ),
+    (
+        "loadsmith",
         "docs/repomix-map.md",
         1388,
         "blockers",
@@ -336,6 +378,261 @@ def symlink_cases(module) -> list[tuple[str, str, object, object]]:
                 None,
             ),
         ]
+
+
+def _synthetic_consumer(raw: str, build) -> Path:
+    """A disposable consumer with a real receipt, so `scan()` can run on it.
+
+    R12-C2/C3/C4. Several rules the scanner claims fail closed -- an unreadable
+    unmanaged file, a symlinked receipt target, malformed markers, an empty
+    `.codex/`, a NUL-bearing executable -- describe filesystem states no fleet
+    consumer is in. Codex reverted three of them and the harness stayed at
+    63/0/0, because there was no way to *reach* them: every fixture was either a
+    pure predicate or a real consumer. A consumer the harness builds is the
+    missing third thing.
+    """
+    repo = Path(raw).resolve()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "harness@example.invalid"),
+        ("config", "user.name", "harness"),
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    (repo / ".sd-ai-command-pack").mkdir()
+    (repo / ".sd-ai-command-pack/installed-targets.txt").write_text(
+        "scripts/sd-ai-command-pack-full-check.sh\n"
+        ".github/copilot-instructions.md\n"
+        ".gitignore\n",
+        encoding="utf-8",
+    )
+    (repo / ".sd-ai-command-pack/provenance.json").write_text(
+        '{"pack": "sd-ai-command-pack", "version": "0.64.0", "files": {}}',
+        encoding="utf-8",
+    )
+    (repo / ".sd-ai-command-pack/manifest.json").write_text(
+        '{"version": "0.64.0"}', encoding="utf-8"
+    )
+    (repo / "scripts").mkdir()
+    (repo / "scripts/sd-ai-command-pack-full-check.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    (repo / ".gitignore").write_text("nothing\n", encoding="utf-8")
+    build(repo)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "synthetic"],
+        check=True,
+        capture_output=True,
+    )
+    return repo
+
+
+BINDINGS = (
+    "head",
+    "indexDigest",
+    "indexFlagsDigest",
+    "hiddenBytesDigest",
+    "worktreeDigest",
+    "worktreeClean",
+    "receiptOccupancyDigest",
+    "executableBitsDigest",
+    "symlinkTargetsDigest",
+    "binaryTrackedFiles",
+    "missingTrackedFiles",
+)
+
+
+def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
+    """Rules whose triggering state no real consumer is in."""
+    cases: list[tuple[str, str, object, object]] = []
+    platforms = frozenset({"claude", "github"})
+
+    def scan_with(build):
+        with tempfile.TemporaryDirectory() as raw:
+            repo = _synthetic_consumer(raw, build)
+            return module.scan("synthetic", repo, platforms)
+
+    def baseline(repo):
+        (repo / "run.sh").write_text(
+            "#!/bin/sh\nbash scripts/sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+    base = scan_with(baseline)
+    cases.append(
+        (
+            "R12-C2",
+            "the synthetic baseline blocks on its one real citation",
+            [(e["file"], e["line"]) for e in base["blockers"]],
+            [("run.sh", 2)],
+        )
+    )
+
+    # R12-C2: an empty directory. Every file-oriented binding is blind to it.
+    def with_codex(repo):
+        baseline(repo)
+
+    # Both scans run against the *same* checkout, inside its lifetime: the only
+    # difference is the declared platform set. A second `scan_with` would build
+    # a second repository and the comparison would be about two trees.
+    with tempfile.TemporaryDirectory() as raw:
+        repo = _synthetic_consumer(raw, with_codex)
+        clean = module.scan("synthetic", repo, platforms)
+        # Created *after* the commit, and left empty: git tracks no directory,
+        # so this is the change no file-oriented binding can see.
+        (repo / ".codex").mkdir()
+        codex = module.scan("synthetic", repo, platforms)
+        declared = module.scan("synthetic", repo, platforms | {"codex"})
+
+    def marker_fired(result):
+        return any(
+            "undeclared codex" in (entry.get("detail") or "")
+            for entry in result["blockers"]
+        )
+
+    cases += [
+        (
+            "R12-C1/R12-C2",
+            "an undeclared .codex/ blocks",
+            marker_fired(codex),
+            True,
+        ),
+        (
+            "R12-C2",
+            "and it moves platformMarkerDigest, which no other binding sees",
+            codex["platformMarkerDigest"] != clean["platformMarkerDigest"],
+            True,
+        ),
+        (
+            "R12-C2",
+            "while every other recorded binding stays byte-identical",
+            [key for key in BINDINGS if codex[key] != clean[key]],
+            [],
+        ),
+        (
+            "R12-C1",
+            "declaring the platform clears the marker on the same checkout",
+            marker_fired(declared),
+            False,
+        ),
+    ]
+
+    # R12-C4: a NUL byte does not mean "cannot execute".
+    def with_nul_script(repo):
+        baseline(repo)
+        (repo / "nul.sh").write_bytes(
+            b"#!/bin/sh\n# \x00 marker\nbash scripts/sd-ai-command-pack-full-check.sh\n"
+        )
+
+    nul = scan_with(with_nul_script)
+    cases.append(
+        (
+            "R12-C4",
+            "a NUL-bearing shell script is still classified, not skipped as an asset",
+            any(entry["file"] == "nul.sh" for entry in nul["blockers"]),
+            True,
+        )
+    )
+
+    # R12-C3: an unreadable unmanaged file is a tree the scan did not read.
+    def with_unreadable(repo):
+        baseline(repo)
+        secret = repo / "unreadable.sh"
+        secret.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    with tempfile.TemporaryDirectory() as raw:
+        repo = _synthetic_consumer(raw, with_unreadable)
+        (repo / "unreadable.sh").chmod(0o000)
+        readable_anyway = os.access(repo / "unreadable.sh", os.R_OK)
+        result = module.scan("synthetic", repo, platforms)
+        (repo / "unreadable.sh").chmod(0o644)
+    if not readable_anyway:
+        cases += [
+            (
+                "R8-3/R12-C3",
+                "an unreadable unmanaged file is missing, not binary",
+                result["missingTrackedFiles"],
+                ["unreadable.sh"],
+            ),
+            (
+                "R8-3/R12-C3",
+                "and a tree the scan could not read is blocked",
+                result["verdict"],
+                "blocked",
+            ),
+        ]
+
+    # R12-C3: a symlinked receipt target is unresolvable ownership.
+    def with_symlinked_target(repo):
+        baseline(repo)
+        (repo / "scripts/sd-ai-command-pack-full-check.sh").unlink()
+        (repo / "real-check.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        os.symlink(
+            "../real-check.sh", repo / "scripts/sd-ai-command-pack-full-check.sh"
+        )
+        (repo / ".github").mkdir()
+        os.symlink("../real-check.sh", repo / ".github/copilot-instructions.md")
+
+    symlinked = scan_with(with_symlinked_target)
+    cases.append(
+        (
+            "R12-C3",
+            "a symlinked receipt target is a pack defect, not a silent skip",
+            any(
+                entry["file"] == ".github/copilot-instructions.md"
+                for entry in symlinked["packDefects"]
+            ),
+            True,
+        )
+    )
+
+    # R12-C3: malformed markers are unresolvable ownership, so pack-owned.
+    def with_malformed_markers(repo):
+        baseline(repo)
+        (repo / ".github").mkdir()
+        (repo / ".github/copilot-instructions.md").write_text(
+            f"{module.COPILOT_GUIDANCE_START}\n"
+            "run scripts/sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+    malformed = scan_with(with_malformed_markers)
+    cases.append(
+        (
+            "U-3/R12-C3",
+            "an unterminated marker fails closed to a pack defect, not a blocker",
+            any(
+                entry["file"] == ".github/copilot-instructions.md"
+                for entry in malformed["packDefects"]
+            ),
+            True,
+        )
+    )
+
+    # R11-C4: .github is the host's shared directory, not one agent's.
+    def with_issue_template(repo):
+        baseline(repo)
+        (repo / ".github/ISSUE_TEMPLATE").mkdir(parents=True)
+        (repo / ".github/ISSUE_TEMPLATE/bug.md").write_text(
+            "Paste the output of scripts/sd-ai-command-pack-full-check.sh here\n",
+            encoding="utf-8",
+        )
+
+    issue = scan_with(with_issue_template)
+    cases.append(
+        (
+            "R11-C4/R12-C3",
+            "an issue template is not an execution surface, so it stays advisory",
+            [
+                bucket
+                for bucket in ("blockers", "packDefects", "advisories")
+                for entry in issue[bucket]
+                if entry["file"] == ".github/ISSUE_TEMPLATE/bug.md"
+            ],
+            ["advisories"],
+        )
+    )
+    return cases
 
 
 def enumeration_cases(module) -> list[tuple[str, str, object, object]]:
@@ -731,6 +1028,7 @@ def main() -> int:
         + symlink_cases(module)
         + bytes_cases(module)
         + enumeration_cases(module)
+        + synthetic_cases(module)
     ):
         if actual == expected:
             passed += 1
@@ -792,7 +1090,10 @@ def main() -> int:
         # naming nothing at all, for two rounds.
         repo = Path(row["repo"])
         full = repo / relative
-        if not full.exists():
+        # `$CODEX_HOME` is a synthetic key, not a path: the environment marker
+        # aggregates references across many files, and anchoring it to whichever
+        # one `git ls-files` sorted first would anchor it to nothing.
+        if not relative.startswith("$") and not full.exists():
             failures.append(
                 f"fleet {round_id}: {consumer}/{relative} does not exist; a "
                 "case that names no file asserts nothing"
@@ -844,7 +1145,7 @@ def main() -> int:
     print(
         f"{passed} passed, {len(failures)} failed, {len(skipped)} skipped "
         f"({len(FLEET_CASES)} fleet + "
-        f"{len(unit_cases(module)) + len(symlink_cases(module)) + len(bytes_cases(module)) + len(enumeration_cases(module))}"
+        f"{len(unit_cases(module)) + len(symlink_cases(module)) + len(bytes_cases(module)) + len(enumeration_cases(module)) + len(synthetic_cases(module))}"
         " unit)"
     )
     return 1 if failures or skipped else 0

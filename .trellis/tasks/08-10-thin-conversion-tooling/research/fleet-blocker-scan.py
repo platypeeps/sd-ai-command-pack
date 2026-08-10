@@ -494,6 +494,177 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
     return digest_of("\n".join(parts))
 
 
+# R12-C1, demonstrated against all eight consumers. `prd.md:19` and the parent
+# `design.md:150` both require this and neither the scanner nor any earlier round
+# implemented it: a codex or pi usage marker in a consumer whose registry
+# `platforms` omits that platform is a **blocker**. The reason is not
+# bookkeeping. `retainVendoredFor` intersects the consumer's *declared*
+# platforms (parent `design.md:187`), so an undeclared codex user has their
+# `.agents/**` deleted -- and `.agents/skills/` is how Codex reads a skill,
+# because Codex cannot consume the machine-installed plugin at all. Silently
+# deleting it is exactly the failure the gate exists to prevent.
+#
+# Trellis-local paths are excluded, from the pack's own constant rather than by
+# judgement: `PlatformInfo.trellis_local_only` is the pack stating which paths
+# under a platform directory are Trellis's and not its own. A `.codex/` holding
+# nothing but `trellis-*.toml` agents and hooks is a Trellis repository, not an
+# undeclared pack-codex consumer, and blocking it would block every Trellis repo
+# for a reason the conversion does not cause.
+MARKER_PLATFORMS = ("codex", "pi")
+CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
+
+
+def trellis_local_patterns(platform: str) -> tuple[str, ...]:
+    info = PLATFORM_REGISTRY.get(platform)
+    return tuple(getattr(info, "trellis_local_only", ()) or ())
+
+
+def is_trellis_local(platform: str, relative: str) -> bool:
+    for pattern in trellis_local_patterns(platform):
+        if pattern.endswith("/"):
+            if relative.startswith(pattern):
+                return True
+        elif fnmatch.fnmatch(relative, pattern):
+            return True
+    return False
+
+
+def platform_marker_hits(
+    repo: Path,
+    files: list[str],
+    declared: frozenset[str],
+    removed: frozenset[str],
+) -> list[dict]:
+    """Undeclared codex/pi usage, as blocker entries.
+
+    Three markers, because `prd.md:204` requires three fixtures and says why:
+    "One combined case would pass while two of the three markers were never
+    implemented." A directory, an environment reference, and a pi adapter file
+    are three different ways to be a codex or pi consumer.
+
+    Each marker aggregates to one entry per consumer rather than one per hit.
+    The finding is a fact about the consumer -- "this repository uses Codex and
+    the registry does not say so" -- and `mezmo_benchmark` alone names
+    `$CODEX_HOME` in 49 files. Forty-nine copies of one fact is noise that
+    hides the other blockers.
+    """
+    hits: list[dict] = []
+    for platform in MARKER_PLATFORMS:
+        if platform in declared:
+            continue
+        info = PLATFORM_REGISTRY.get(platform)
+        if info is None:
+            continue
+        # Probed from the filesystem, not from `git ls-files`. R12-C2: an empty
+        # or wholly untracked `.codex/` leaves every recorded binding -- `head`,
+        # both index digests, hidden bytes, worktree digest and cleanliness,
+        # receipt occupancy, executable bits, symlink targets, binary count,
+        # missing files -- byte-identical, because git does not track a
+        # directory. The occupancy is the input; no file is.
+        root = repo / info.directory
+        if not root.is_dir():
+            continue
+        prefix = f"{info.directory}/"
+        present = sorted(
+            str(path.relative_to(repo).as_posix())
+            for path in root.rglob("*")
+            if path.is_file()
+        )
+        owned = [
+            relative
+            for relative in present
+            if not is_trellis_local(platform, relative)
+        ]
+        if owned or not present:
+            hits.append(
+                {
+                    "file": info.directory,
+                    "line": None,
+                    "detail": (
+                        f"undeclared {platform} usage: {prefix} exists with "
+                        f"{len(owned)} non-Trellis-local file(s)"
+                        + (f", e.g. {owned[0]}" if owned else " and no files at all")
+                    ),
+                }
+            )
+        adapters = [
+            relative
+            for relative in files
+            if any(
+                fnmatch.fnmatch(relative, pattern)
+                for pattern in (getattr(info, "markers", ()) or ())
+            )
+        ]
+        if adapters:
+            hits.append(
+                {
+                    "file": adapters[0],
+                    "line": None,
+                    "detail": (
+                        f"undeclared {platform} adapter file: {len(adapters)} of "
+                        f"the registry's marker paths are present"
+                    ),
+                }
+            )
+    if "codex" not in declared:
+        referencing = []
+        for relative in files:
+            # Three exclusions, each already a rule elsewhere in this scanner
+            # rather than a judgement made here: Trellis-local paths are the
+            # pack's own statement that they are not its concern; a file the
+            # conversion removes cannot be evidence of *surviving* usage (that
+            # is what `scheduled` means); and a historical record of something
+            # said is not current usage (R8-4).
+            if is_trellis_local("codex", relative) or relative in removed:
+                continue
+            if relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES:
+                continue
+            try:
+                raw = (repo / relative).read_bytes()
+            except OSError:
+                continue
+            if is_binary(raw) and not is_executable_surface(repo, relative):
+                continue
+            if CODEX_HOME.search(raw.decode("utf-8", errors="replace")):
+                referencing.append(relative)
+        if referencing:
+            hits.append(
+                {
+                    # A stable synthetic key, not `referencing[0]`: the first
+                    # matching path is whatever `git ls-files` happened to sort
+                    # first, so anchoring a fixture to it anchors to nothing.
+                    "file": "$CODEX_HOME",
+                    "line": None,
+                    "detail": (
+                        f"undeclared codex usage: $CODEX_HOME referenced in "
+                        f"{len(referencing)} surviving file(s), e.g. "
+                        f"{referencing[0]}"
+                    ),
+                }
+            )
+    return hits
+
+
+def platform_marker_digest(hits: list[dict], repo: Path, declared: frozenset[str]) -> str:
+    """R12-C2: bind directory occupancy, which no file-oriented digest sees.
+
+    An empty `.codex/` directory added to a clean checkout leaves `head`, both
+    index digests, the hidden-bytes digest, the worktree digest and cleanliness,
+    receipt occupancy, executable bits, symlink targets, the binary count, and
+    the missing-file list all byte-identical -- while the verdict must change
+    from `clear` to `blocked`. The occupancy is the input; no file is.
+    """
+    parts = [f"declared:{','.join(sorted(declared))}"]
+    for platform in MARKER_PLATFORMS:
+        info = PLATFORM_REGISTRY.get(platform)
+        if info is None:
+            continue
+        present = (repo / info.directory).is_dir()
+        parts.append(f"{platform}:{info.directory}:{'present' if present else 'absent'}")
+    parts += [f"hit:{hit['file']}:{hit['detail']}" for hit in hits]
+    return digest_of("\n".join(parts))
+
+
 def enumerate_files(repo: Path) -> list[str]:
     """Every file the conversion would run against: tracked *and* untracked.
 
@@ -649,7 +820,7 @@ def cites_removed_path(
 ) -> bool:
     """Does this token name something the conversion removes?
 
-    Four ways, and deliberately not a fifth:
+    Five ways, and deliberately not a sixth (`prd.md:42` is authoritative):
 
     1. the token is a removed path;
     2. a tail of the token is, at a path boundary -- this is what handles a
@@ -917,7 +1088,16 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 missing.append(relative)
             continue
-        if is_binary(raw):
+        # R12-C4, constructed but executable: a NUL byte means "binary", and
+        # binary does not mean "cannot execute". Codex fed bash a NUL-bearing
+        # source stream and it ran, printing `NUL_SCRIPT_EXECUTED` -- so a
+        # shell script carrying one NUL plus an invocation of a removed path
+        # could clear. The NUL test decides whether the *bytes* look like an
+        # asset; it is not licence to skip a file the execution-surface rule
+        # says can run. A file that is both is decoded leniently and classified
+        # like any other: matching still requires a removed path, so a
+        # replacement character cannot manufacture a citation.
+        if is_binary(raw) and not is_executable_surface(repo, relative):
             if relative in managed:
                 buckets["packDefects"].append(
                     {"file": relative, "line": None, "detail": "unreadable pack target"}
@@ -980,6 +1160,9 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 buckets["advisories"].append(entry)
 
+    marker_hits = platform_marker_hits(repo, tracked, platforms, removed)
+    buckets["blockers"].extend(marker_hits)
+
     index = git(repo, "ls-files", "-s")
     # R9-C3 / R10-C3. `git status` hides a file marked `assume-unchanged` or
     # `skip-worktree`, so its bytes can change while `head`, `indexDigest`,
@@ -1006,6 +1189,9 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),
         "executableBitsDigest": executable_bits_digest(repo, tracked),
         "symlinkTargetsDigest": symlink_targets_digest(repo, tracked),
+        "platformMarkerDigest": platform_marker_digest(
+            marker_hits, repo, platforms
+        ),
         "binaryTrackedFiles": len(binary),
         "missingTrackedFiles": sorted(missing),
         "receiptEntries": len(receipt.entries),

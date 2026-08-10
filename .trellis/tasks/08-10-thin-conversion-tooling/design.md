@@ -510,10 +510,21 @@ more blocking, not less.
      `Taskfile.y*ml`, `.pre-commit-config.yaml`, `.gitlab-ci.yml`,
      `Dockerfile`;
    - it is under `.github/workflows/`, `.github/actions/`, `.circleci/`,
-     `.devcontainer/`, or an agent-executed surface — `.github/prompts/`,
-     `.github/instructions/`, `.claude/commands/`, `.claude/rules/`,
-     `.claude/skills/`, `.agents/`, `.gemini/commands/`,
-     `.opencode/command/`, `.codex/`, `.prism/`;
+     `.devcontainer/`, `.github/prompts/`, `.github/instructions/`,
+     `.prism/`, or **any platform directory the registry defines**. That
+     last clause is derived from `PLATFORM_REGISTRY`, not written down:
+     R11-C4 found the hand-written list had drifted to a singular
+     `.opencode/command/` that matched nothing (the registry says
+     `.opencode/commands/`, `installer/registry.py:309`) and had omitted
+     twelve platform directories outright — `.agent`, `.codebuddy`,
+     `.cursor`, `.devin`, `.factory`, `.kilocode`, `.kiro`, `.pi`,
+     `.qoder`, `.reasonix`, `.trae`, `.zcode`. An implementation that
+     re-types the list re-acquires the drift; one that enumerates the
+     registry covers a platform added later without anyone remembering
+     this paragraph. `.github` is excluded from that clause and keeps its
+     explicit sub-prefixes above: it is the host's shared directory rather
+     than one agent's, so `.github/ISSUE_TEMPLATE/` is not an execution
+     surface the way `.github/workflows/` is;
    - its basename is a root agent instruction file — `CLAUDE.md`,
      `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `copilot-instructions.md`,
      `.cursorrules`, `SKILL.md` — or ends in `.prompt.md` or
@@ -566,15 +577,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 29 in 10,
-`hoa-manager` 34 in 9, `mezmo_benchmark` 44 in 24,
-`rwbp-coordinator` 49 in 8, `loadsmith` 53 in 5, `rwbp-website` 65 in 8,
-`anomaly-metric-creator` 205 in 21. Plus the pack defects above. They are
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 30 in 11,
+`hoa-manager` 36 in 11, `mezmo_benchmark` 46 in 26,
+`rwbp-coordinator` 51 in 10, `loadsmith` 55 in 7, `rwbp-website` 67 in 10,
+`anomaly-metric-creator` 206 in 22. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the tenth measurement, and the nine before them were each
+**These are the eleventh measurement, and the ten before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 

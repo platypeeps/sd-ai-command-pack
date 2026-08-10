@@ -169,9 +169,15 @@ or `--check` reports a phantom change. The first fixture attempt passed
 `templates/scripts/` counterpart and no `manifest.json` row, like every
 other `fleet-*` script. Imports step 1's builder for the removal set and
 applies `design.md`'s four-bucket rule — `scheduled`, `packDefects`,
-`blockers`, `advisories` — each step failing closed. Records the full
+`blockers`, `advisories` — each step failing closed, **plus the
+undeclared-platform marker pass** (`prd.md:19`): a codex or pi directory,
+a surviving `$CODEX_HOME` reference, or a pi adapter file in a consumer
+whose registry `platforms` omits that platform is a blocker. The
+execution-surface prefixes are enumerated from `PLATFORM_REGISTRY` rather
+than re-typed from `design.md`'s prose. Records the full
 binding set from `design.md`'s verdict schema: `head`, `indexDigest`,
-`indexFlagsDigest`, `hiddenBytesDigest`, `worktreeDigest`, `worktreeClean`,
+`indexFlagsDigest`, `hiddenBytesDigest`, `symlinkTargetsDigest`,
+`platformMarkerDigest`, `worktreeDigest`, `worktreeClean`,
 `receiptOccupancyDigest`, `executableBitsDigest`, `binaryTrackedFiles`,
 `missingTrackedFiles`, and `classifierDigest`. The short list this step
 used to name — `head`, `indexDigest`, `worktreeClean`,
@@ -294,9 +300,9 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 29/10, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
-`rwbp-coordinator` 49/8, `loadsmith` 53/5, `rwbp-website` 65/8,
-`anomaly-metric-creator` 205/21 — CI workflows, `package.json` scripts,
+`se-ai-command-pack` 30/11, `hoa-manager` 36/11, `mezmo_benchmark` 46/26,
+`rwbp-coordinator` 51/10, `loadsmith` 55/7, `rwbp-website` 67/10,
+`anomaly-metric-creator` 206/22 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
 PR-template checklists. Plus 16 pack defects in 7 files (14 in 6 where
 the consumer has taken over its PR template).
@@ -1081,3 +1087,48 @@ stored row cannot survive. Every other row is identical to the ninth.
 `packDefects` unchanged. No consumer is `clear`. Harness 63 passed, 0
 failed, 0 skipped — 23 fleet and 40 unit, up from 50, and every addition
 exists because a mutation proved the old set could not tell.
+
+### Round 12 (Codex lane)
+
+Five blocking groups. The first is the largest single finding of the
+twelve rounds: a **requirement the PRD has stated since round 1 was never
+implemented**, and every published blocker count was understated because
+of it.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R12-C1 | Codex | **Demonstrated against all eight consumers: the undeclared-platform marker pass does not exist.** `prd.md:19` and parent `design.md:150` both require it — a codex or pi usage marker in a consumer whose registry `platforms` omits that platform is a **blocker** — and `scan()` had no such pass, only citation matching. Every consumer has a `.codex/` directory; no registry row declares `codex`. The reason this matters is not bookkeeping: `retainVendoredFor` intersects the consumer's *declared* platforms, so an undeclared Codex user has `.agents/**` deleted, and Codex cannot consume the machine-installed plugin at all | Three markers implemented, aggregated one entry each: a platform directory probed **from the filesystem** (so an empty or wholly untracked one counts), a surviving `$CODEX_HOME` reference, and a registry adapter-marker file. `PlatformInfo.trellis_local_only` excludes Trellis's own `.codex/` paths — the pack's own constant saying which paths are not its concern — so a Trellis repository is not blocked for a reason the conversion does not cause. Removed files and historical prefixes are excluded for the reasons those buckets already exist. **Seven of eight consumers gained a blocker**; `sd-github-review` is the one with a wholly Trellis-local `.codex/` and no surviving `$CODEX_HOME`, which is what makes the rule falsifiable rather than universal |
+| R12-C2 | Codex | **Demonstrated: a directory is invisible to every recorded binding.** An empty `.codex/` added to a clean checkout leaves `head`, both index digests, hidden bytes, worktree digest and cleanliness, receipt occupancy, executable bits, symlink targets, binary count, and the missing-file list byte-identical — while the verdict must change from `clear` to `blocked`. Git does not track a directory | `platformMarkerDigest` binds the occupancy. The fixture is exact: build a synthetic consumer, scan it, `mkdir .codex` **after** the commit, scan again, and assert that every one of the eleven other bindings is unchanged and this one moved |
+| R12-C3 | Codex | **Three claimed fail-closed rules were mutation-invisible, and the `.github` exclusion was only positively fixtured.** Reverting "unreadable unmanaged file → `missingTrackedFiles`", "symlinked receipt target → `packDefects`", and "malformed markers → pack-owned" each left 63/0/0. Including `.github/` wholesale moved two real advisories to blockers and also left 63/0/0 | These rules describe filesystem states no fleet consumer is in, so no real-consumer fixture could reach them and no pure predicate exposed them. The harness now **builds a consumer**: a temporary git repository with a real receipt, which `scan()` runs on end to end. Six synthetic fixtures cover the three rules, the `.github/ISSUE_TEMPLATE/` negative, the empty directory, and R12-C4. Verified by mutation: each revert now fails |
+| R12-C4 | Codex | **Constructed and executable: NUL means "binary", and binary does not mean "cannot execute".** Codex fed bash a NUL-bearing source stream and it ran. A shell script carrying one NUL plus an invocation of a removed path could therefore clear. The only fixture was a NUL-bearing PNG | The NUL test now decides only whether the *bytes* look like an asset; it is not licence to skip a file the execution-surface rule says can run. A file that is both is decoded leniently and classified like any other. Fixture: a synthetic `nul.sh` carrying a NUL and a removed-path invocation must block |
+| R12-C5 | Codex | **The production spec still described the pre-round-11 execution list.** The scanner derives prefixes from `PLATFORM_REGISTRY`; `design.md` still hand-listed directories, kept the singular `.opencode/command/` that matches nothing, and omitted the twelve round-11 additions. Step 3 says to apply the design's rule. The same checklist claimed the full binding set and omitted `symlinkTargetsDigest` | The design's clause is now "any platform directory the registry defines", with the drift it replaced named so a future editor does not re-type the list; `.github`'s exclusion and its explicit sub-prefixes are stated in the same place. Step 3 names `symlinkTargetsDigest` and `platformMarkerDigest`, and now also names the marker pass, which it had never mentioned |
+
+Both non-blocking items fixed: `scheduled` is now defined in the PRD as
+"a file the conversion rewrites rather than leaves alone" — which covers
+both the removed files and the three kept-and-rewritten bookkeeping ones,
+and explains the 182-vs-179 difference at the definition instead of
+leaving it to a later paragraph — and the matcher docstring says five
+ways, matching what it then lists.
+
+One environment note, recorded because it would otherwise look like a
+missing consumer: the review prompt named
+`/Users/sven/repos/platypeeps/mezmo_benchmark`, which does not exist. The
+registry's `pathHint` resolves to `/Users/sven/repos/mezmo/mezmo_benchmark`
+and that is the checkout both the scanner and the review used. The
+scanner has never read the path from prose.
+
+**Eleventh measurement.** Seven rows moved, all from R12-C1 and all
+verified by naming the marker that fired: `rwbp-coordinator` 51 blockers
+in 10 files, `loadsmith` 55 in 7, `hoa-manager` 36 in 11, `rwbp-website`
+67 in 10, `mezmo_benchmark` 46 in 26, `se-ai-command-pack` 30 in 11,
+`anomaly-metric-creator` 206 in 22. `sd-github-review` holds at 14 in 10.
+`packDefects` unchanged at 16 in 7, or 14 in 6 where the consumer owns its
+PR template. No consumer is `clear`. Harness 78 passed, 0 failed, 0
+skipped — 27 fleet and 51 unit.
+
+**Fleet consequence, recorded in child 3 rather than here.** Every canary
+must now either declare `codex` in its registry row or stop using Codex,
+before conversion. If any declares it, `retainVendoredFor` retention runs
+against a real consumer for the first time — the parent design calls that
+path untested — so its residual is compared against that consumer's own
+receipt rather than assumed.
