@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.66.0 - 2026-08-10
+
+- Fleet registry schema 5: each `docs/fleet/consumers.json` consumer may now
+  declare `mode` (`fat`, the default, or `thin`) and `pinPath` (default
+  `.sd-ai-command-pack/provenance.json`). Both are optional and both default,
+  so a schema-5 registry that names neither reports exactly as the schema-4
+  registry it replaces. Absolute, Windows-absolute, and `..`-bearing pin paths
+  are rejected at load time, and the reader additionally resolves and contains
+  the path so a symlink cannot leave the checkout.
+- `sd-status fleet` reports a thin consumer by its pin — `present` with a
+  version, `absent`, or `unreadable` — instead of by installed-tree drift,
+  which a thin consumer no longer has. Fat consumers keep the existing
+  installed-versus-target report unchanged.
+- `sd-status fleet` collects the machine-scope inventory once per run, not once
+  per consumer, and raises skew rows for pin versus machine install, machine
+  install versus target, and plugin versus machine receipt. Those rows appear
+  only when the registry contains at least one thin consumer.
+- Fleet follow-ups are now derived from the complete row set and skew rows are
+  ranked ahead of advisory rows, so a bounded human list can no longer drop a
+  skew row.
+
 ## 0.65.0 - 2026-08-09
 
 - Skills that positioned themselves against `sd-full-check` and

@@ -615,9 +615,19 @@ The optional positional `fleet` mode works from any installed checkout. It
 resolves the canonical fleet manifest from `--fleet-manifest`,
 `SD_AI_COMMAND_PACK_FLEET_MANIFEST`, the machine-local fleet profile, or the
 canonical source checkout, in that order. It preserves rollout priority,
-reports missing checkouts, compares installed versions to the source manifest
-version, and returns one bounded row per fleet member plus F-prefixed fleet
-follow-ups. Complete per-consumer follow-up and task records remain available
+reports missing checkouts, and returns one bounded row per fleet member plus
+F-prefixed fleet follow-ups. The schema-version-5 registry gives each consumer
+an optional `mode` (`fat`, the default, or `thin`) and an optional `pinPath`
+(default `.sd-ai-command-pack/provenance.json`, always relative and contained
+inside the checkout). A fat consumer's row compares its installed version to
+the source manifest version as before; a thin consumer's row reports its pin —
+`present` with a version, or `absent`/`unreadable` — because it vendors no
+tree. When any consumer is thin, the report adds the one machine-scope
+inventory collected per run and its skew rows: pin versus machine install,
+machine install versus target, and plugin versus machine receipt. An all-fat
+registry adds no machine rows. Skew rows are derived before the human list is
+truncated, so a bounded report never drops one. Complete per-consumer
+follow-up and task records remain available
 in nested JSON or through local status for that checkout. A dirty, stale, missing,
 behind, or diverged repository is advisory in ordinary status; the command
 remains read-only and exits zero after producing the report. Invalid

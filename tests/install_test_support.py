@@ -58,7 +58,7 @@ SECRET_MARKER_PATTERNS = (
 
 
 def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
-    """Build the smallest valid schema-4 fleet around test consumer rows."""
+    """Build the smallest valid schema-5 fleet around test consumer rows."""
     ordered = sorted(
         consumers,
         key=lambda consumer: (
@@ -67,7 +67,7 @@ def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
         ),
     )
     return {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "rolloutPolicy": {
             "defaultConcurrency": 1,
             "cohorts": [
