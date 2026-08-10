@@ -301,7 +301,8 @@ provider:
      -v codex` and `codex exec --help`. When both succeed, launch one
      review-only `codex exec` command". `.claude/rules/` makes that contract
      mandatory whenever a run materially updates a planning artifact.
-   - `.agents/skills/sd-review-local/SKILL.md:166` — the same shape with
+   - line 166 of the since-deleted `sd-review-local` skill (removed by
+     `07-24-remove-retired-review-surfaces`) — the same shape with
      `codex review --help`, described there as checking "the host capability
      before launching paid review work". Capability is the only condition
      checked; there is no consent condition.

@@ -167,7 +167,7 @@ matching `SUPERSEDED_COMMANDS` keys fails at **module import**
    (`check-command-surface-drift.py:485-489`) and the field defaults to empty
    (`installer/registry.py:1339`). Without it, a reintroduced
    `SD_AI_COMMAND_PACK_REVIEW_LOCAL_*` reader passes the lint silently and R5 is
-   unenforceable. The 24 concrete keys:
+   unenforceable. The 23 concrete keys:
 
    ```
    ..._REVIEW_LOCAL_ALL_CUSTOM_COMMAND        ..._REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE

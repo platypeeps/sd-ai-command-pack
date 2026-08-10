@@ -189,11 +189,13 @@ before its manifest entries were removed.
 
 ### The rest of the 52 files
 
-Deletions: the skill, the `.github/command-sources/` neutral body, and every
-generated adapter in both `templates/` and the installed roots
-(`.claude/commands/sd/watch-pr.md`, `.gemini/commands/sd/watch-pr.toml`,
-`.opencode/commands/sd-watch-pr.md`, `.github/prompts/sd-watch-pr.prompt.md`,
-`templates/.commands/sd-watch-pr.md`, …).
+Deletions (all already removed by that precedent task; named here without
+directory prefixes because the paths no longer exist): the skill, the
+`.github/command-sources/` neutral body, and every generated adapter in both
+`templates/` and the installed roots — `watch-pr.md` under `.claude/commands/sd/`,
+`watch-pr.toml` under `.gemini/commands/sd/`, `sd-watch-pr.md` under
+`.opencode/commands/`, `sd-watch-pr.prompt.md` under `.github/prompts/`,
+`sd-watch-pr.md` under `templates/.commands/`, and so on.
 
 Regenerated: `manifest.json` and `.sd-ai-command-pack/manifest.json` (−252
 lines each), the `sd-help` command catalog (one row removed in each of its

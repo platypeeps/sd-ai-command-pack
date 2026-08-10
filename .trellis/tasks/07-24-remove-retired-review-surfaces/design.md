@@ -148,7 +148,7 @@ Two further mechanics, both found in round 3:
   (`installer/registry.py:1339`). No existing row populates it. Without it, R5's
   commitment to lint environment names is unenforceable and a reintroduced
   `SD_AI_COMMAND_PACK_REVIEW_LOCAL_*` reader passes silently. The
-  `review-local-command` row must carry the 24 concrete keys. Verified safe: no
+  `review-local-command` row must carry the 23 concrete keys. Verified safe: no
   live `CommandInfo` declares any of them, so the `config_overlap` check
   (`:1626`) cannot fire, and no other retired row declares them, so the
   `repeated_keys` check (`:1633`) cannot either. The cost is real and intended —

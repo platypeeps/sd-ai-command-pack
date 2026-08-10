@@ -43,8 +43,8 @@ Identical shape for all three surviving surfaces. Substitute
 | `templates/.github/prompts/sd-<SURFACE>.prompt.md` | generated GitHub prompt |
 | `.github/command-sources/sd-<SURFACE>.md` | **authored neutral body** — the true source the generator reads (`.trellis/spec/frontend/directory-structure.md:56`) |
 
-(That is 6 rows; `templates/.commands/…` is generated *from*
-`.github/command-sources/…`.)
+(That is 6 rows; the per-surface file under `templates/.commands/` is generated
+*from* the matching authored body under `.github/command-sources/`.)
 
 **Installed-into-source-checkout mirrors (6)**
 
@@ -159,7 +159,8 @@ Each of the four `scripts/` entries has a byte-identical twin in
 - `scripts/sd-ai-command-pack-full-check.sh` — 32 occurrences, 24 distinct keys.
 - `scripts/sd-ai-command-pack-review-full-check.sh:71,74,79` — 3 occurrences
   (`..._PACKAGE_RUNNER`, `..._PRISM=0`, `..._GITO=0`).
-- `scripts/sd-ai-command-pack-review-local.sh:299,309,312,327,332,337,351,604,619`
+- `sd-ai-command-pack-review-local.sh` (then under `scripts/`, since deleted) at
+  `:299,309,312,327,332,337,351,604,619`
   — 9 occurrences, all as **fallback defaults** behind a `REVIEW_LOCAL_*` key
   (e.g. `:327` `"${..._REVIEW_LOCAL_PRISM_FAIL_ON:-${..._FULL_CHECK_PRISM_FAIL_ON:-high}}"`).
   These are the "dormant readers for migration convenience" R2 forbids; they
@@ -204,11 +205,11 @@ This is the load-bearing table.
 | Artifact | Depends on / depended on by | Classification | Evidence |
 |---|---|---|---|
 | `scripts/sd-ai-command-pack-review-local.py` | **The successor coordinator imports it.** `sd-ai-command-pack-review.py:37` `LOCAL_SCRIPT = Path(__file__).resolve().with_name("sd-ai-command-pack-review-local.py")`; used at `:718` and hard-fails at `:720` (`raise ReviewError(f"missing regular local review helper: {LOCAL_SCRIPT.name}")`) | **KEEP UNCHANGED.** Despite the `review-local` name it is the internal local-review *stage* of `sd-review`, documented as such at `docs/SD_AI_COMMAND_PACK.md:132-133`. Deleting it breaks `sd-review`. | `scripts/sd-ai-command-pack-review.py:37,718,720` |
-| `scripts/sd-ai-command-pack-review-local.sh` | separate 771-line legacy shell path; only the `sd-review-local` skill/commands call it | **DELETE** ×4 | callers are all skill text + docs + tests; no code caller |
+| `sd-ai-command-pack-review-local.sh` (then under `scripts/`, since deleted) | separate 771-line legacy shell path; only the `sd-review-local` skill/commands call it | **DELETE** ×4 | callers are all skill text + docs + tests; no code caller |
 | `scripts/sd-ai-command-pack-review-scope.sh` | reads `..._FULL_CHECK_BASE_REF` at `:60`; consumed by `sd-ai-command-pack-check.py`, `pr-body-scope.py`, `review-preflight.mjs` | **REFACTOR** — drop the FULL_CHECK fallback, keep the script | `scripts/sd-ai-command-pack-review-scope.sh:60` |
 | `scripts/sd-ai-command-pack-review-preflight.mjs` | reads `..._FULL_CHECK_BASE_REF` at `:4751`; invoked by `sd-ai-command-pack-check.py:988`, `sd-create-pr` SKILL `:213-218`, `sd-finish-work` SKILL `:85,:150`, `fleet-publish.py:324`, `pr-eligibility.py:352` | **REFACTOR** | `scripts/sd-ai-command-pack-review-preflight.mjs:4751` |
 | `scripts/sd-ai-command-pack-surface-check.py` | `:37` `FULL_CHECK = "templates/scripts/sd-ai-command-pack-full-check.sh"`; `:176` reads `..._FULL_CHECK_RELEASE_BASE_REF` | **REFACTOR** — this is `make surface-check`, a live gate that would break on a dangling path constant | `scripts/sd-ai-command-pack-surface-check.py:37,176` |
-| `scripts/sd-ai-command-pack-install-audit.py` | `:146`/`:194` map legacy `scripts/trellis-full-check.sh` → `scripts/sd-ai-command-pack-full-check.sh`; `:183`/`:216` list `review-local.sh`; `:200` maps `TRELLIS_FULL_CHECK` env prefix | **REFACTOR** — audit survives; these rows become dangling advice | `scripts/sd-ai-command-pack-install-audit.py:146,183,194,200,216,217` |
+| `scripts/sd-ai-command-pack-install-audit.py` | `:146`/`:194` map legacy `trellis-full-check.sh` (a pre-rename `scripts/` path that never existed in this repo) → `scripts/sd-ai-command-pack-full-check.sh`; `:183`/`:216` list `review-local.sh`; `:200` maps `TRELLIS_FULL_CHECK` env prefix | **REFACTOR** — audit survives; these rows become dangling advice | `scripts/sd-ai-command-pack-install-audit.py:146,183,194,200,216,217` |
 | `scripts/sd-ai-command-pack-pr-body-scope.py` | `:253`/`:305` `scripts/sd-ai-command-pack-full-check.sh` region globs; `:299` legacy `scripts/check-review-preflight.mjs`; `:301` `review-local.sh` | **REFACTOR** — classifier survives | `scripts/sd-ai-command-pack-pr-body-scope.py:253,299,301,305` |
 | `plugins/sd/bin/sd-ai-command-pack-toolchain.sh` | `:309` special-cases `sd-ai-command-pack-full-check.sh` (`suffix = "\|recursive"`); `:381`/`:414` probe for the script | **REFACTOR** — toolchain is the universal runner | `plugins/sd/bin/sd-ai-command-pack-toolchain.sh:309,381,414` (and its `scripts/` twin) |
 | **`installer/references.py`** (new, uncommitted) | `:111-116` `BIN_LITERAL_ALLOWLIST["sd-ai-command-pack-full-check.sh"]`; `:137` inside install-audit allowlist; `:152` and `:157` (`review-local.sh`) inside pr-body-scope allowlist; `:186` inside surface-check allowlist; `:194` inside toolchain allowlist; `:216` `PLUGIN_CLOSURE_ALLOWLIST[("skills/sd-review-pr/SKILL.md", fleet-review-classify)]`; `:222` `MACHINE_CLOSURE_ALLOWLIST[(".agents/skills/sd-review-pr/SKILL.md", …)]` | **REFACTOR** — the two closure-allowlist entries become dead keys the moment the `sd-review-pr` SKILL.md is deleted, and its own docstring at `:208-212` says "a follow-up task fixes the skill text and retires this entry". That follow-up is this task. | `installer/references.py:111,137,152,157,186,194,208-225` |
@@ -233,7 +234,7 @@ PRD R2's "package `check:full` hook" is satisfied by deleting the wrapper.
 | File | Lines |
 |---|---|
 | `tests/test_full_check.py` | 1621 |
-| `tests/test_review_local.py` | 1435 |
+| `test_review_local.py` (then under `tests/`, since deleted) | 1435 |
 | `tests/test_review_full_check.py` | 254 |
 
 **Modules with retired-surface assertions to prune** (20 total mention at
@@ -354,8 +355,8 @@ the classifier at `:175`.
 `sd-full-check`, `sd-review-local`, `sd-review-pr` skills, commands, prompts,
 command-sources, plugin and machine-payload copies (51 files);
 `full-check.sh`, `review-full-check.sh`, `review-local.sh` (12 files);
-`tests/test_full_check.py`, `tests/test_review_local.py`,
-`tests/test_review_full_check.py`; `Makefile` `full-check` target;
+`test_full_check.py`, `test_review_local.py`, `test_review_full_check.py`
+(all then under `tests/`, since deleted); `Makefile` `full-check` target;
 83 manifest rows.
 
 **REFACTOR — surviving code that names retired things:**

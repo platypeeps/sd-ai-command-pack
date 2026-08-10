@@ -124,9 +124,6 @@ Quick links:
 - `~/.agents/bin/sd-ai-command-pack-review-preflight.mjs`: generic dependency-free
   review preflight for copied/generated disclosure, documentation path hygiene,
   Trellis journal consistency, npm override drift, and large diff warnings.
-- `~/.agents/bin/sd-ai-command-pack-review-local.py`: the internal local review
-  stage that `~/.agents/bin/sd-ai-command-pack-review.py` invokes. It is a pipeline
-  stage, not an operator entry point; run local review through `sd-review`.
 - `~/.agents/bin/sd-ai-command-pack-review-learnings.py`: local review feedback
   pattern scanner and managed learning-block updater. It preserves current,
   non-outdated unresolved comments as individual actionable rows, clusters
