@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "2e384eebcb6d5ca952d7aab23df063f10e52671a",
-  "packWorktreeDigest": "sha256:88e69683215fd61f8ee644c8c3171f52c97e55906b439501c8d06af8b1ec8ad1",
+  "packHead": "69a34b1866775b6bc20ecbe19ee656062ee22036",
+  "packWorktreeDigest": "sha256:9ec02ace13f0f5ef460bc11fa48b3b118b5dba505acb0780a636e34fce8e2465",
   "packWorktreeClean": false,
-  "scannerDigest": "sha256:10f4792c4addabdd7f02eb84ab483bc5eb76c2bff62f36abe897d1c054ab2ab7",
-  "counterexamplesDigest": "sha256:75df1ef800b35b3732b4fd8e9fb3bd8777be167384f328b3e66a96a6dfefcaad",
+  "scannerDigest": "sha256:7b351bc8714e64a53469c325e7b354c7c2237d8f63a60c5b19f74463d5db8197",
+  "counterexamplesDigest": "sha256:dc611c330bb6342cedb8e03a643cd2dcfffa2061bc068c5b85a38275530ae173",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
@@ -8582,17 +8582,17 @@
       "indexDigest": "sha256:2832c1dbde9b05b7b1489e842c2c5022ba3de70d151cce54184c7d8f0fb181bc",
       "indexFlagsDigest": "sha256:956571772c8feb18c4dba331bc324aa21e9c40518111aaa7cc072daeef02e39e",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeClean": true,
+      "worktreeDigest": "sha256:b1a284e2648d771de511fa57045eb2d93c7d3edc95e49c1d6df04a23f3fe4fb3",
+      "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:5f07fda12898725c43dcc85efe9f587abedfe6aa586b69e369b715f352a64eb0",
-      "executableBitsDigest": "sha256:b37418dd18043832bb1d79306c3a057fc2c7f1e72ffcb1a80b718bb3aa43d7f3",
+      "executableBitsDigest": "sha256:45447d54176c1771614d6eda24566aea329e07fa62210cd148d07ccbc674c2a1",
       "binaryTrackedFiles": 0,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
-      "trackedFiles": 1410,
+      "trackedFiles": 1412,
       "counts": {
-        "blockers": 23,
+        "blockers": 29,
         "packDefects": 16,
         "scheduled": 182,
         "advisories": 811
@@ -8602,6 +8602,7 @@
         ".github/workflows/tests.yml",
         ".prism/rules.json",
         ".trellis/spec/backend/quality-guidelines.md",
+        ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
         ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
         "Makefile",
         "package.json",
@@ -8733,6 +8734,36 @@
           "file": "tests/test_repomix.py",
           "line": 67,
           "detail": "\"## File: scripts/sd-ai-command-pack-full-check.sh\","
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 17,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 29,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run -- \\"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 39,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 61,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 90,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 107,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         }
       ],
       "packDefects": [

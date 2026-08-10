@@ -1016,3 +1016,35 @@ removed paths) and `se-ai-command-pack` 23 in 9 (was 22/8 — its
 Every other row is identical to the eighth. `packDefects` unchanged at
 16 in 7, or 14 in 6 where the consumer owns its PR template. No consumer
 is `clear`. The harness is 40 passed, 0 failed, 0 skipped.
+
+### Round 11 (host lane)
+
+Round 10's method applied to round 10's own fixes: every rule that round
+added was reverted, the scan re-run, and the harness re-run. **Three of
+four survived** — the same shape round 10 found, one round later, which
+is the argument for keeping the sweep rather than declaring the harness
+done.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| H11-1 | host | **R10-C6's `.prism/` prefix had no fixture.** Reverting it left the whole harness green while `rwbp-coordinator/.prism/rules.json:55` silently fell back to `advisories` — the exact classification round 10 was opened to fix | Two fleet cases, `rwbp-coordinator/.prism/rules.json:55` and `se-ai-command-pack/.prism/rules.json:43`, both `blockers`. Two consumers rather than one, so the rule cannot be dismissed as a single consumer's drift. Reverting the prefix now fails 2 |
+| H11-2 | host | **R10-C5's binary rule was unreachable from the harness.** It was an inline `if b"\0" in raw` inside `scan()`, so a fixture could only reach it by standing up a synthetic consumer with a receipt and a partition. A rule the harness cannot call is a rule the harness cannot protect | Extracted as `is_binary(raw)`, called from the same place. Three unit cases: a NUL-bearing PNG header is binary; a Latin-1 shell comment above `bash scripts/sd-ai-command-pack-full-check.sh` is **not**; plain ASCII is not. Reverting to round 9's strict-UTF-8-means-binary now fails the middle one |
+| H11-3 | host | **R10-C4's symlink fix had fixtures for the shape that already worked.** The five existing cases were all symlinked *leaves*; the defect Codex constructed was an intermediate symlinked *directory*, and a broken chain returning its lexical target. Neither was covered | Two cases added: `through-directory -> alias/removed.sh` where `alias -> scripts` must resolve to `scripts/removed.sh`, and `broken-link` must be `None` rather than its nonexistent lexical target. Reverting to a lexical walk now fails 7 |
+| H11-4 | host | **R10-C3's `hiddenBytesDigest` had no fixture.** Reverting it to the flag-and-path-only form it replaced left the harness green | A temporary git repository: commit a file, set `skip-worktree`, rewrite its bytes to invoke a removed path. The fixture asserts all three halves — `git status --porcelain` is empty, `git ls-files -v` is byte-identical, and `hiddenBytesDigest` **moves**. The first two are what make the third mean something; without them the case would not show that the flag hides anything |
+| H11-5 | host | **The harness's own count line did not add up.** It printed `50 passed ... (20 fleet + 24 unit)`, because the unit total summed two of the three case groups. A summary line that is not derived from what ran is the same defect class as a fixture that asserts nothing — it just fails in the report instead of the check | The label now sums every group. Caught by reading the number, which is the only way this class is ever caught |
+
+Two claims the harness makes about itself were also verified rather than
+assumed, since round 10 found both of them false at the time: a fleet case
+naming a nonexistent file **fails** (probed with
+`.prism/does-not-exist.json` — `FAIL fleet PROBE: ... does not exist; a
+case that names no file asserts nothing`), and a consumer whose head has
+moved is **skipped**, with exit status 1 rather than 0 (probed by
+rewriting one consumer's recorded head — `SKIP fleet R10-C6:
+rwbp-coordinator is at 5044c11de3ab, the scan recorded 000000000000`, five
+cases skipped, `skip-exit=1`).
+
+Harness is now 50 passed, 0 failed, 0 skipped — 20 fleet and 30 unit. The
+control re-run with no mutation applied produces no failures, so the
+sweep's failures are attributable to the mutations and not to a dirty
+substrate. Measurement unchanged from the ninth: no rule changed, only its
+coverage.

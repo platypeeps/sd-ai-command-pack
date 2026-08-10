@@ -209,6 +209,26 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
     ),
     (
         "rwbp-coordinator",
+        ".prism/rules.json",
+        55,
+        "blockers",
+        "R10-C6",
+        "a live Prism *required* rule naming three removed paths. A .json "
+        "suffix reads as inert data while the contents are rules an agent "
+        "obeys; it sat in advisories for ten rounds",
+    ),
+    (
+        "se-ai-command-pack",
+        ".prism/rules.json",
+        43,
+        "blockers",
+        "R10-C6",
+        "the same surface in a second consumer, naming "
+        "scripts/sd-ai-command-pack-review-preflight.mjs. Two rows because one "
+        "consumer's drift could be dismissed as that consumer's alone",
+    ),
+    (
+        "rwbp-coordinator",
         ".github/copilot-instructions.md",
         26,
         "packDefects",
@@ -232,6 +252,14 @@ def symlink_cases(module) -> list[tuple[str, str, object, object]]:
         os.symlink("cycle-b", repo / "cycle-a")
         os.symlink("cycle-a", repo / "cycle-b")
         os.symlink("scripts/removed.sh", repo / "relative-link")
+        # R10-C4: the failing shape was never a symlinked *leaf*. `alias` is a
+        # symlinked directory, so `alias/full-check.sh` is a regular file and
+        # the old lexical walk returned it verbatim -- naming a path the
+        # removal set does not contain, and missing the removed one it
+        # ultimately reaches.
+        os.symlink("scripts", repo / "alias")
+        os.symlink("alias/removed.sh", repo / "through-directory")
+        os.symlink("scripts/never-existed.sh", repo / "broken-link")
         resolve = module.resolve_link
         return [
             (
@@ -264,7 +292,121 @@ def symlink_cases(module) -> list[tuple[str, str, object, object]]:
                 resolve(repo, "cycle-a"),
                 None,
             ),
+            (
+                "R10-C4",
+                "a link through a symlinked directory resolves to the real path",
+                resolve(repo, "through-directory"),
+                "scripts/removed.sh",
+            ),
+            (
+                "R10-C4",
+                "a broken chain is unresolvable, not its lexical target",
+                resolve(repo, "broken-link"),
+                None,
+            ),
         ]
+
+
+def bytes_cases(module) -> list[tuple[str, str, object, object]]:
+    """R10-C5 and R10-C3: rules about bytes the scanner might never read."""
+    cases: list[tuple[str, str, object, object]] = [
+        (
+            "R10-C5",
+            "a NUL-bearing asset is binary",
+            module.is_binary(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"),
+            True,
+        ),
+        (
+            "R10-C5",
+            "a shell script with a Latin-1 comment is not binary",
+            module.is_binary(
+                "# r\N{LATIN SMALL LETTER E WITH ACUTE}sum\n"
+                "bash scripts/sd-ai-command-pack-full-check.sh\n".encode("latin-1")
+            ),
+            False,
+        ),
+        (
+            "R10-C5",
+            "plain ASCII is not binary",
+            module.is_binary(b"bash scripts/sd-ai-command-pack-full-check.sh\n"),
+            False,
+        ),
+    ]
+
+    with tempfile.TemporaryDirectory() as raw:
+        repo = Path(raw).resolve()
+        for args in (
+            ("init", "-q"),
+            ("config", "user.email", "harness@example.invalid"),
+            ("config", "user.name", "harness"),
+        ):
+            subprocess.run(
+                ["git", "-C", str(repo), *args], check=True, capture_output=True
+            )
+        hidden = repo / "hidden.sh"
+        hidden.write_text("#!/bin/sh\necho before\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "hidden.sh"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-qm", "seed"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "update-index", "--skip-worktree", "hidden.sh"],
+            check=True,
+            capture_output=True,
+        )
+        flags = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-v"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        before = module.hidden_bytes_digest(repo, flags)
+        # The whole point of the flag: this rewrite is invisible to `git
+        # status`, `git ls-files -s`, and `git ls-files -v` alike.
+        hidden.write_text(
+            "#!/bin/sh\nbash scripts/sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+        after_flags = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-v"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        after = module.hidden_bytes_digest(repo, after_flags)
+        cases += [
+            (
+                "R10-C3",
+                "a skip-worktree rewrite is invisible to git status",
+                status.strip(),
+                "",
+            ),
+            (
+                "R10-C3",
+                "a skip-worktree rewrite is invisible to `git ls-files -v`",
+                after_flags,
+                flags,
+            ),
+            (
+                "R10-C3",
+                "a skip-worktree rewrite still moves hiddenBytesDigest",
+                before != after,
+                True,
+            ),
+        ]
+    return cases
 
 
 def unit_cases(module) -> list[tuple[str, str, bool, bool]]:
@@ -448,7 +590,7 @@ def main() -> int:
     passed = 0
 
     for round_id, description, actual, expected in (
-        unit_cases(module) + symlink_cases(module)
+        unit_cases(module) + symlink_cases(module) + bytes_cases(module)
     ):
         if actual == expected:
             passed += 1
@@ -540,7 +682,8 @@ def main() -> int:
     print(
         f"{passed} passed, {len(failures)} failed, {len(skipped)} skipped "
         f"({len(FLEET_CASES)} fleet + "
-        f"{len(unit_cases(module)) + len(symlink_cases(module))} unit)"
+        f"{len(unit_cases(module)) + len(symlink_cases(module)) + len(bytes_cases(module))}"
+        " unit)"
     )
     return 1 if failures or skipped else 0
 

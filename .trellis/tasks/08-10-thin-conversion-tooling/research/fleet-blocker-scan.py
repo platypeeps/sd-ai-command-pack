@@ -480,6 +480,26 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
     return digest_of("\n".join(parts))
 
 
+def is_binary(raw: bytes) -> bool:
+    """Whether these bytes are an asset that cannot carry a citation.
+
+    R10-C5: "did not decode as strict UTF-8" is not "cannot carry a citation".
+    A shell script with one Latin-1 comment and an invocation of a removed path
+    is still a shell script; round 9 sent it to `binaryTrackedFiles` and
+    cleared it. A NUL byte is the signal that actually distinguishes a binary
+    asset -- and it is what all 16 of `rwbp-coordinator`'s decode failures
+    have, being PNG and ICO files. Everything else is decoded leniently and
+    classified normally: a replacement character in a comment cannot
+    manufacture a citation, because matching still requires a removed path.
+
+    R11: this was an inline `if b"\\0" in raw` inside `scan()`, which meant no
+    fixture could reach it without standing up a whole synthetic consumer with
+    a receipt. A rule the harness cannot call is a rule the harness cannot
+    protect, so it is a function.
+    """
+    return b"\0" in raw
+
+
 def resolve_link(repo: Path, relative: str, limit: int = 16) -> str | None:
     """Repository-relative path a tracked symlink ultimately names.
 
@@ -852,16 +872,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 missing.append(relative)
             continue
-        # R10-C5: "did not decode as strict UTF-8" is not "cannot carry a
-        # citation". A shell script with one Latin-1 comment and an invocation
-        # of a removed path is still a shell script; round 9 sent it to
-        # `binaryTrackedFiles` and cleared it. A NUL byte is the signal that
-        # actually distinguishes a binary asset -- and it is what all 16 of
-        # `rwbp-coordinator`'s decode failures have, being PNG and ICO files.
-        # Everything else is decoded leniently and classified normally: a
-        # replacement character in a comment cannot manufacture a citation,
-        # because matching still requires a removed path.
-        if b"\0" in raw:
+        if is_binary(raw):
             if relative in managed:
                 buckets["packDefects"].append(
                     {"file": relative, "line": None, "detail": "unreadable pack target"}
