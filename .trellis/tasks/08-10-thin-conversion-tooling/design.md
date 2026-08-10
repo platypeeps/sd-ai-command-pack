@@ -559,8 +559,43 @@ more blocking, not less.
      `.githooks`, or `.husky` — at any depth, not only the first; or
    - the file carries the executable bit.
 
-   Prose (`.md`, `.rst`, `.txt`), `.trellis/` history, and data-only
-   config that nothing executes fall through to `advisories`.
+   **Command position includes a direct path.** A line that begins with
+   `./path` or `../path` — at the start of the line or after `;`, `&`,
+   `|`, `(`, `&&`, or `||` — is an invocation naming no runner word at
+   all. R14 piped exactly those bytes to bash and got them executed while
+   the scanner filed the line as advisory, which does not block. A `./x`
+   appearing mid-sentence in prose is not anchored and does not match.
+
+   **What a file's bytes looking binary does and does not decide.** A NUL
+   byte means the bytes read as an asset. It does not mean the file cannot
+   execute, and it does not mean the file is unreadable. The full
+   disposition, which R14 required be written down because three of its
+   eight findings lived in the gaps between these cells:
+
+   | Bytes | Path is an execution surface | Line is in command position | Disposition |
+   |---|---|---|---|
+   | text | yes | either | ownership rules, then `blockers` |
+   | text | no | yes | `blockers` |
+   | text | no | no | `advisories` |
+   | asset | yes | either | classified as text: a NUL-bearing `.sh` still runs |
+   | asset | no | yes | `blockers` — command position executes whatever the file is named |
+   | asset | no | no | `advisories`, tagged `[asset bytes]` |
+
+   Every matched citation lands in exactly one bucket; none is discarded.
+   `unreadable pack target` is reserved for a read that actually failed
+   (`OSError`) and for a receipt target that is a symlink. A managed file
+   that is readable and contains a NUL is an asset the pack ships, not a
+   defect — R14 blocked a conversion on a `.gitignore` carrying harmless
+   NUL bytes and no citation at all.
+
+   Prose (`.md`, `.rst`, `.txt`), Trellis history, and data-only config
+   that nothing executes fall through to `advisories`. "Trellis history"
+   is a named set, not all of `.trellis/`: `.trellis/tasks/archive/`,
+   `.trellis/workspace/`, `.trellis/audit/`, `.trellis/journal/`, and
+   `docs/review-learnings.md`. Live guidance under `.trellis/spec/` and an
+   *unarchived* task's `implement.md` are deliberately not in it — an
+   agent reads a spec and acts on it, which is why H-2 narrowed the
+   earlier, looser rule.
 
    Discovery itself must also start from the removal set rather than from
    the pack's name — see the measurement correction below. A file citing a
@@ -599,15 +634,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 15 hits in 11 files, `se-ai-command-pack` 25 in 11,
-`hoa-manager` 36 in 11, `mezmo_benchmark` 46 in 26,
-`rwbp-coordinator` 51 in 10, `loadsmith` 55 in 7, `rwbp-website` 67 in 10,
+`sd-github-review` 15 hits in 11 files, `se-ai-command-pack` 26 in 11,
+`hoa-manager` 39 in 14, `mezmo_benchmark` 47 in 27,
+`rwbp-coordinator` 52 in 11, `loadsmith` 56 in 8, `rwbp-website` 67 in 10,
 `anomaly-metric-creator` 206 in 22. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the twelfth measurement, and the eleven before them were each
+**These are the thirteenth measurement, and the twelve before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 

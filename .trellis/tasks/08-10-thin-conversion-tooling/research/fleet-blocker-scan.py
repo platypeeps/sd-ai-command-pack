@@ -200,6 +200,13 @@ RUNNER = (
 COMMAND_CONTEXT = re.compile(
     rf"""(
         (?-i:\b{RUNNER}\s+(?:-{{1,2}}[\w-]+\s+)*[-\w.$~"'`/]*[./][-\w.$~"'`/]*)
+        # R14-C4, executed: `./scripts/x.sh` is the canonical way to run a
+        # repository script and names no runner word at all. Codex piped
+        # exactly these bytes to bash and got `R14_EXECUTED`. The plain form
+        # was landing in `advisories`, which does not block. Anchored at the
+        # start of a line or after a shell separator, so a `./path` mentioned
+        # mid-sentence in prose is not an invocation.
+      | (?:^|[;&|(]|&&|\|\|)\s*\.{{1,2}}/[-\w.$~/]*
       | \brun:\s | ^\s*run\s*[:=] | \bcommand\s*[:=] | \bentrypoint\s*[:=]
         # Command substitution, but not arithmetic expansion: "$((delay * 2))"
         # quoted inside a review-feedback ledger is not an invocation.
@@ -526,8 +533,27 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
 # is the fact that matters, so the marker is what `prd.md:19` says it is:
 # unqualified. The resolution is not "do not block" but the canary's recorded
 # choice -- declare `codex`, or remove the usage.
+#
+# R14-C1 corrected it once more, in both directions, and this is where it
+# settles. An *empty* directory is not usage: Codex leaves one behind, the
+# conversion plan against a consumer with one is byte-identical, and blocking on
+# it asks for a declaration that changes nothing. So the directory marker
+# requires at least one file under it. And a directory is not *necessary*
+# either: a repository whose surviving guidance says `codex exec ...` is a Codex
+# consumer whether or not it keeps a `.codex/` directory, which the previous
+# rule missed entirely. That is a fourth marker, matched the same way
+# `$CODEX_HOME` is.
+#
+# What no repository scan can see: a consumer whose Codex use is entirely global
+# -- `~/.codex/`, a CLI flag, a CI environment variable. The scanner cannot
+# close that, and pretending otherwise would be the worst kind of fail-open. The
+# canary task carries it as an operator declaration instead (child 3,
+# requirement 3), which is the only place the fact exists.
 MARKER_PLATFORMS = ("codex", "pi")
 CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
+# The CLI, in command position. `\bcodex\s+exec\b` alone matches prose about
+# Codex; requiring the subcommand keeps it to an invocation.
+CODEX_CLI = re.compile(r"\bcodex\s+(?:exec|resume|apply|login)\b")
 
 
 def platform_marker_hits(
@@ -535,6 +561,7 @@ def platform_marker_hits(
     files: list[str],
     declared: frozenset[str],
     removed: frozenset[str],
+    managed: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Undeclared codex/pi usage, as blocker entries.
 
@@ -571,17 +598,17 @@ def platform_marker_hits(
             for path in root.rglob("*")
             if path.is_file()
         )
-        hits.append(
-            {
-                "file": info.directory,
-                "line": None,
-                "detail": (
-                    f"undeclared {platform} usage: {prefix} exists with "
-                    f"{len(present)} file(s)"
-                    + (f", e.g. {present[0]}" if present else " (empty)")
-                ),
-            }
-        )
+        if present:
+            hits.append(
+                {
+                    "file": info.directory,
+                    "line": None,
+                    "detail": (
+                        f"undeclared {platform} usage: {prefix} exists with "
+                        f"{len(present)} file(s), e.g. {present[0]}"
+                    ),
+                }
+            )
         adapters = [
             relative
             for relative in files
@@ -602,15 +629,21 @@ def platform_marker_hits(
                 }
             )
     if "codex" not in declared:
-        referencing = []
+        referencing: list[str] = []
+        invoking: list[str] = []
         for relative in files:
-            # Two exclusions, each already a rule elsewhere in this scanner
+            # Three exclusions, each already a rule elsewhere in this scanner
             # rather than a judgement made here: a file the conversion removes
             # cannot be evidence of *surviving* usage (that is what `scheduled`
             # means), and a historical record of something said is not current
-            # usage (R8-4). R13: the Trellis-local exclusion that used to sit
-            # here is gone for the reason recorded above the marker platforms.
-            if relative in removed:
+            # usage (R8-4). And R14: a file the *pack* installed is the pack's
+            # text, not the consumer's -- a fat install carries pack guidance
+            # that names `codex exec`, and reading that back as "this consumer
+            # uses Codex" would fire on every consumer that installed the pack,
+            # which is all of them. R13: the Trellis-local exclusion that used
+            # to sit here is gone for the reason recorded above the marker
+            # platforms.
+            if relative in removed or relative in managed:
                 continue
             if relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES:
                 continue
@@ -620,8 +653,22 @@ def platform_marker_hits(
                 continue
             if is_binary(raw) and not is_executable_surface(repo, relative):
                 continue
-            if CODEX_HOME.search(raw.decode("utf-8", errors="replace")):
+            body = raw.decode("utf-8", errors="replace")
+            if CODEX_HOME.search(body):
                 referencing.append(relative)
+            if CODEX_CLI.search(body):
+                invoking.append(relative)
+        if invoking:
+            hits.append(
+                {
+                    "file": "codex exec",
+                    "line": None,
+                    "detail": (
+                        f"undeclared codex usage: the codex CLI is invoked in "
+                        f"{len(invoking)} surviving file(s), e.g. {invoking[0]}"
+                    ),
+                }
+            )
         if referencing:
             hits.append(
                 {
@@ -712,11 +759,17 @@ def symlink_targets_digest(repo: Path, files: list[str]) -> str:
 
 
 def is_binary(raw: bytes) -> bool:
-    """Whether these bytes are an asset that cannot carry a citation.
+    """Whether these bytes look like an asset rather than text.
+
+    R14-C6: this used to say "cannot carry a citation", and R13 stopped that
+    being true -- an asset's bytes in command position still execute, and its
+    weaker citations are recorded as advisories. The predicate answers one
+    narrow question: do these bytes read as an asset. What follows from the
+    answer is decided at the call site.
 
     R10-C5: "did not decode as strict UTF-8" is not "cannot carry a citation".
     A shell script with one Latin-1 comment and an invocation of a removed path
-    is still a shell script; round 9 sent it to `binaryTrackedFiles` and
+    is still a shell script; round 9 sent it to `binaryFiles` and
     cleared it. A NUL byte is the signal that actually distinguishes a binary
     asset -- and it is what all 16 of `rwbp-coordinator`'s decode failures
     have, being PNG and ICO files. Everything else is decoded leniently and
@@ -1080,7 +1133,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             # a permission-denied UTF-8 file full of blockers -- was counted as
             # a binary asset and cleared. Present-and-unreadable is the same
             # epistemic state as absent: bytes this scan did not read. Both go
-            # to `missingTrackedFiles`, which forces the verdict `blocked`. A
+            # to `missingFiles`, which forces the verdict `blocked`. A
             # sparse checkout or a skip-worktree entry looks identical to a
             # complete tree in `git ls-files -s`, so this is the difference
             # between "measured zero" and "did not look".
@@ -1113,11 +1166,14 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         # so a replacement character cannot manufacture a citation.
         asset = is_binary(raw) and not is_executable_surface(repo, relative)
         if asset:
-            if relative in managed:
-                buckets["packDefects"].append(
-                    {"file": relative, "line": None, "detail": "unreadable pack target"}
-                )
-                continue
+            # R14-C5, demonstrated: this branch used to emit a whole-file
+            # `unreadable pack target` defect for any *managed* file containing
+            # a NUL, and a `.gitignore` carrying harmless NUL bytes and no
+            # citation at all blocked the conversion. The read succeeded --
+            # "contains NUL" and "could not be read" are different facts, and
+            # only the second is a defect. A managed asset is an asset: the pack
+            # ships binary files. `unreadable pack target` is now reserved for
+            # the `OSError` handler above and the symlink case before it.
             binary.append(relative)
         body = raw.decode("utf-8", errors="replace")
         lines = body.splitlines()
@@ -1125,7 +1181,14 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         malformed_markers = all_spans is None
         spans = stripped_spans(relative, lines, all_spans) if relative in stripped else []
         vouched = recorded.get(relative)
-        actual = file_digest(full)
+        # R14-C2, demonstrated with a split-read fixture and again with an ACL
+        # race: this used to be `file_digest(full)`, a *second* read of the same
+        # path. The classification then rested on bytes no binding recorded --
+        # Codex made the two reads disagree and moved a consumer from `blocked`
+        # to `clear` with `changedBindings: []`. Ownership is now decided from
+        # the same bytes `scannedBytesDigest` hashed, so a second-read
+        # disagreement cannot exist: there is no second read.
+        actual = f"sha256:{hashlib.sha256(raw).hexdigest()}"
         pack_owned = relative in managed and vouched is not None and vouched == actual
         # Provenance never vouches a managed-block, force-preserved, or generated
         # target, so a missing digest proves nothing about ownership. Managed
@@ -1153,10 +1216,19 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 continue
             entry = {"file": relative, "line": number, "detail": line.strip()[:160]}
             if asset:
-                # R13-C5. Command position only; every other form of citation in
-                # an asset's bytes is noise.
+                # R13-C5: command position in an asset's bytes still executes.
+                # R14-C6: and every other form is *recorded*, not discarded --
+                # the PRD says each hit lands in exactly one of four buckets,
+                # and silently dropping one made that false. Advisory is the
+                # honest bucket: a PNG whose bytes happen to spell a removed
+                # path is real information about the tree and no reason to
+                # refuse a conversion.
                 if COMMAND_CONTEXT.search(line) or number in commanded:
                     buckets["blockers"].append(entry)
+                else:
+                    buckets["advisories"].append(
+                        {**entry, "detail": f"[asset bytes] {entry['detail']}"}
+                    )
                 continue
             in_block = any(start <= number <= end for start, end in spans)
             in_pack_block = bool(all_spans) and any(
@@ -1180,14 +1252,14 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 buckets["advisories"].append(entry)
 
-    marker_hits = platform_marker_hits(repo, tracked, platforms, removed)
+    marker_hits = platform_marker_hits(repo, tracked, platforms, removed, managed)
     buckets["blockers"].extend(marker_hits)
 
     index = git(repo, "ls-files", "-s")
     # R9-C3 / R10-C3. `git status` hides a file marked `assume-unchanged` or
     # `skip-worktree`, so its bytes can change while `head`, `indexDigest`,
     # `worktreeDigest`, `worktreeClean`, `executableBitsDigest`, and
-    # `missingTrackedFiles` all stay identical -- and the scanner still reads
+    # `missingFiles` all stay identical -- and the scanner still reads
     # the new bytes and can classify them differently.
     #
     # Round 9 hashed `git ls-files -v` and called that binding. It is not: the

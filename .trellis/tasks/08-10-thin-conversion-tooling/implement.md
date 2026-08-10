@@ -300,8 +300,8 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 15 hits in 11 files,
-`se-ai-command-pack` 25/11, `hoa-manager` 36/11, `mezmo_benchmark` 46/26,
-`rwbp-coordinator` 51/10, `loadsmith` 55/7, `rwbp-website` 67/10,
+`se-ai-command-pack` 26/11, `hoa-manager` 39/14, `mezmo_benchmark` 47/27,
+`rwbp-coordinator` 52/11, `loadsmith` 56/8, `rwbp-website` 67/10,
 `anomaly-metric-creator` 206/22 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
 PR-template checklists. Plus 16 pack defects in 7 files (14 in 6 where
@@ -1172,3 +1172,45 @@ regenerated scan: directory marker off → 7 failed; pi adapter branch off
 → 1 failed; `scannedBytesDigest` pinned to a constant → 1 failed; assets
 skipped before command-position detection → 1 failed; control → 89
 passed, 0 failed.
+
+### Round 14 (Codex lane)
+
+Eight blocking groups. Six of the eight fault a round-13 fix, and one
+faults a round-13 fix that was itself a correction of a round-12 fix.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R14-C1 | Codex | **The unqualified marker rule is wrong in both directions, demonstrated.** Not sufficient: an empty `.codex/` blocks, while the conversion plan against a consumer holding one is byte-identical — 166 delete, 13 retire, 27 keep either way. Blocking there demands a declaration that changes nothing. Not necessary: on a temporary `sd-github-review` with `.codex/` deleted the marker set is empty, while its surviving guidance invokes `codex exec`. And nothing repository-visible exists at all for a consumer whose Codex use is global | Three changes. The directory marker requires at least one file under it. A fourth marker matches the `codex` CLI in surviving files, the same way `$CODEX_HOME` is matched. And both content markers now exclude **pack-managed** files: a fat install ships pack guidance naming `codex exec`, and reading that back as consumer usage would fire on every consumer that installed the pack. The global case is not closed by the scanner and is not pretended to be — it is an operator declaration in child 3, recorded beside the marker evidence, and an unanswered question is not a `clear` verdict |
+| R14-C2 | Codex | **`scannedBytesDigest` did not bind the bytes ownership was decided from.** `scan()` hashed the first `read_bytes()`, then `file_digest(full)` **re-read the same path** for the ownership comparison. Codex made the two reads disagree with a split-read fixture and moved a cited line from `packDefects` to `advisories`, verdict `blocked` to `clear`, `changedBindings: []` — then reproduced the fail-open form with an ACL race | There is no second read. Ownership is decided from the same bytes the digest hashed, so a second-read disagreement cannot exist. Fixture: poison `file_digest` for every path inside the consumer and require every bucket to be identical — it is still the pack's own templates' honest reader, which is a different tree |
+| R14-C3 | Codex | **The synthetic consumer still was not a `--thin` input.** It passed the structural audit added in round 13 and then failed `install.py --check`: `state=invalid`, `.trellis/config.yaml` missing; and after that file was added, `refresh-required` with `changeCount=84`. Six hand-written receipt entries and two manifest rows resemble no real install | The fixture is built by **running the installer**. `install.py <tmp> --platform claude --platform github` against a seeded git repository produces a 160-entry receipt, and three assertions hold the preconditions: audit exit 0 with no error lines, `--check` `state=current` with `changeCount=0`, and a conversion plan with nothing blocked. Everything the fixtures assert is now about a tree the production path accepts |
+| R14-C4 | Codex | **A direct-path command was not command position.** `./scripts/sd-ai-command-pack-full-check.sh` is the canonical way to run a repository script and names no runner word; Codex executed exactly those bytes. The plain form landed in `advisories`, which does not block, and the NUL-bearing form landed in no bucket at all | `COMMAND_CONTEXT` matches `./path` and `../path` anchored at the start of a line or after `;`, `&`, `|`, `(`, `&&`, `\|\|`, so a `./x` mid-sentence in prose stays prose. Both fixtures — plain and asset — assert a blocker. Writing it revealed a second bug worth recording: the first attempt put `{1,2}` inside an f-string, where it is a tuple expression, and the regex silently compiled to something that matched nothing |
+| R14-C5 | Codex | **A readable managed file containing NUL falsely blocked.** The asset branch emitted a whole-file `unreadable pack target` defect for any managed file with a NUL in it. A `.gitignore` carrying harmless NUL bytes and **no citation at all** produced `verdict=blocked`. The read succeeded — "contains NUL" and "could not be read" are different facts | `unreadable pack target` is reserved for the `OSError` handler and the symlinked-receipt-target case. A managed asset is an asset; the pack ships binary files |
+| R14-C6 | Codex | **Three remaining spec-to-scanner divergences, each changing `clear` versus `blocked`.** The design said a path in command position blocks while the scanner omitted direct paths; the PRD said every hit lands in exactly one of four buckets while a weak citation in an asset was silently discarded; and no authoritative rule permitted a readable managed NUL file to become a whole-file defect | The design carries the direct-path grammar and the full eight-cell disposition matrix over (bytes look binary) × (path is an execution surface) × (line is in command position), plus the rule that `unreadable pack target` means a read that failed. Weak asset citations are recorded as `advisories` tagged `[asset bytes]` rather than dropped, so the four-bucket claim is true again |
+| R14-C7 | Codex | **The canary's "declare codex" branch contradicts its own residual criterion.** `retainVendoredFor` is keyed on the *shared* platform's disposition, not on `.agents/**`. Measured identically against all three canaries: declaring Codex moves the plan from 166/13/27 to **91/13/102** — 75 further retained targets, being 49 `.agents/**`, 25 `scripts/**`, and `docs/SD_AI_COMMAND_PACK.md` — and the removal total becomes 104, not 179. The task simultaneously permits that branch and requires no residual beyond `repo-native` + `consumer-config` | The canary PRD states the derived retention set with its measured figures, and its acceptance criterion compares the executed tree against that consumer's own receipt **under its recorded platform choice** rather than against one fixed slice |
+| R14-C8 | Codex | **The canary named the wrong GitHub owner and had no executable command sequence.** `gh api repos/rwbp/rwbp-coordinator` returns 404; `platypeeps/rwbp-coordinator` returns 200, which is also what the registry and the checkout's `origin` say. Round 13 changed this line to `rwbp/` on the strength of the *local checkout path* `~/repos/rwbp/`, which is a different fact. The PRD also contained none of `--out`, `--resweep-verdict`, `--consumer`, or the resweep script's name, and its revert proof did not require a fresh resweep before re-conversion | Owner restored to `platypeeps`, with the path-versus-slug distinction written down so it is not "corrected" a third time. Requirement 1 carries the literal three-command sequence, the reason the verdict travels as a file, and the recovery for an abandoned attempt. The revert proof requires a fresh exact-head resweep against the reverted tree, because the revert changes the tree and the first verdict does not authorize the second conversion |
+
+All three non-blocking items fixed: the two renamed fields' remaining
+mentions were stale comments, `is_binary`'s docstring no longer claims an
+asset "cannot carry a citation" (R13 made that false), and the design's
+"`.trellis/` history" is now the named set the scanner implements —
+archive, workspace, audit, journal, plus `docs/review-learnings.md` —
+with live `.trellis/spec/` guidance explicitly outside it.
+
+**Thirteenth measurement.** `sd-github-review` 15 blockers in 11 files,
+`se-ai-command-pack` 26 in 11, `hoa-manager` 39 in 14, `mezmo_benchmark`
+47 in 27, `rwbp-coordinator` 52 in 11, `loadsmith` 56 in 8,
+`rwbp-website` 67 in 10, `anomaly-metric-creator` 206 in 22.
+`packDefects` unchanged at 16 in 7, or 14 in 6 where the consumer owns
+its PR template. No consumer is `clear`. Markers per consumer after
+R14-C1: three for `rwbp-coordinator`, `loadsmith`, and
+`mezmo_benchmark`; two for `hoa-manager`, `rwbp-website`, and
+`se-ai-command-pack`; one for `sd-github-review` and
+`anomaly-metric-creator`. Harness 100 passed, 0 failed, 0 skipped — 28
+fleet and 72 unit.
+
+Mutation sweep, each a true revert against a regenerated scan: direct
+path grammar removed → 2 failed; ownership re-read restored → 1 failed;
+empty directory blocking restored → 2 failed; codex CLI marker off → 1
+failed; pack-managed exclusion off → 4 failed; managed NUL as unreadable
+target restored → 1 failed; asset weak citations dropped → 1 failed;
+control → 100 passed, 0 failed.

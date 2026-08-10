@@ -28,7 +28,6 @@ Exit status is 0 only when every assertion passes and none was skipped.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -41,12 +40,6 @@ HERE = Path(__file__).resolve().parent
 SCANNER = HERE / "fleet-blocker-scan.py"
 REGISTRY = HERE.parents[3] / "docs/fleet/consumers.json"
 AUDIT = HERE.parents[3] / "scripts/sd-ai-command-pack-install-audit.py"
-SYNTHETIC_VERSION = "0.64.0"
-SYNTHETIC_BOOKKEEPING = (
-    ".sd-ai-command-pack/installed-targets.txt",
-    ".sd-ai-command-pack/manifest.json",
-    ".sd-ai-command-pack/provenance.json",
-)
 DEFAULT_SCAN = HERE / "fleet-blocker-scan.json"
 
 
@@ -406,24 +399,25 @@ def symlink_cases(module) -> list[tuple[str, str, object, object]]:
 
 
 def _synthetic_consumer(raw: str, build) -> Path:
-    """A disposable consumer with a real receipt, so `scan()` can run on it.
+    """A disposable consumer built by the real installer, so `scan()` can run
+    on a repository the production tooling would accept.
 
     R12-C2/C3/C4. Several rules the scanner claims fail closed -- an unreadable
-    unmanaged file, a symlinked receipt target, malformed markers, an empty
-    `.codex/`, a NUL-bearing executable -- describe filesystem states no fleet
-    consumer is in. Codex reverted three of them and the harness stayed at
-    63/0/0, because there was no way to *reach* them: every fixture was either a
-    pure predicate or a real consumer. A consumer the harness builds is the
-    missing third thing.
+    unmanaged file, a symlinked receipt target, malformed markers, a NUL-bearing
+    executable -- describe filesystem states no fleet consumer is in. Codex
+    reverted three of them and the harness stayed at 63/0/0, because there was
+    no way to *reach* them: every fixture was either a pure predicate or a real
+    consumer. A consumer the harness builds is the missing third thing.
 
-    R13-C4: the receipt is the one the production installer would have written,
-    not the smallest one `scan()` accepts. Round 12's fixture listed three
-    targets, omitted the three generated bookkeeping files, gave `manifest.json`
-    no `files` list and `provenance.json` an empty map -- so the production
-    structural audit rejected it with five errors. Assertions about `scan()` on
-    a repository `--thin` would refuse to touch prove less than they appear to,
-    so `audit_cases()` now runs that audit against this fixture and requires it
-    to pass.
+    R13-C4 hand-wrote the receipt and R14-C3 showed why that was still not a
+    consumer: the fixture passed the structural audit but `install.py --check`
+    called it `invalid` (no `.trellis/config.yaml`), then `refresh-required`
+    with `changeCount=84`, and its six hand-written receipt entries resembled no
+    real install. So the baseline is now produced by running the installer.
+    `audit_case()` asserts the three production preconditions -- audit exit 0,
+    `--check` state `current` with `changeCount` 0, and a conversion plan with
+    nothing blocked -- against that baseline, which is what makes every
+    assertion below evidence about a tree `--thin` would touch.
     """
     repo = Path(raw).resolve()
     for args in (
@@ -432,70 +426,32 @@ def _synthetic_consumer(raw: str, build) -> Path:
         ("config", "user.name", "harness"),
     ):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
-    (repo / ".sd-ai-command-pack").mkdir()
-    (repo / "scripts").mkdir()
-    (repo / ".github").mkdir()
-    (repo / "scripts/sd-ai-command-pack-full-check.sh").write_text(
-        "#!/bin/sh\n", encoding="utf-8"
+    (repo / "README.md").write_text("synthetic consumer\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True
     )
-    (repo / ".github/copilot-instructions.md").write_text(
-        "consumer guidance\n", encoding="utf-8"
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "seed"],
+        check=True,
+        capture_output=True,
     )
-    (repo / ".gitignore").write_text("nothing\n", encoding="utf-8")
-    payload = (
-        "scripts/sd-ai-command-pack-full-check.sh",
-        ".github/copilot-instructions.md",
-        ".gitignore",
-    )
-    (repo / ".sd-ai-command-pack/installed-targets.txt").write_text(
-        "".join(f"{target}\n" for target in sorted(payload + SYNTHETIC_BOOKKEEPING)),
-        encoding="utf-8",
-    )
-    (repo / ".sd-ai-command-pack/provenance.json").write_text(
-        json.dumps(
-            {
-                "pack": "sd-ai-command-pack",
-                "version": SYNTHETIC_VERSION,
-                # Production provenance does not vouch a managed-block or
-                # force-preserved target -- that is why the scanner has three
-                # separate ownership proofs -- so neither does this. Vouching
-                # `.github/copilot-instructions.md` here would have made the
-                # malformed-marker fixture assert the wrong rule.
-                "files": {
-                    target: "sha256:"
-                    + hashlib.sha256((repo / target).read_bytes()).hexdigest()
-                    for target in payload
-                    if target == "scripts/sd-ai-command-pack-full-check.sh"
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (repo / ".sd-ai-command-pack/manifest.json").write_text(
-        json.dumps(
-            {
-                "schemaVersion": 1,
-                "name": "sd-ai-command-pack",
-                "version": SYNTHETIC_VERSION,
-                "files": [
-                    {
-                        "platform": "shared",
-                        "kind": "script",
-                        "source": "templates/scripts/sd-ai-command-pack-full-check.sh",
-                        "target": "scripts/sd-ai-command-pack-full-check.sh",
-                        "install": "always",
-                    },
-                    {
-                        "platform": "github",
-                        "kind": "instructions",
-                        "source": "templates/.github/copilot-instructions.md",
-                        "target": ".github/copilot-instructions.md",
-                        "install": "always",
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
+    # Left untracked deliberately: `install.py` refuses `--local-only` for a
+    # tracked `.trellis/config.yaml`, and the tracked path wants a real
+    # `trellis init` this harness has no business running.
+    (repo / ".trellis").mkdir()
+    (repo / ".trellis/config.yaml").write_text("version: 1\n", encoding="utf-8")
+    subprocess.run(
+        [
+            sys.executable,
+            str(HERE.parents[3] / "install.py"),
+            str(repo),
+            "--platform",
+            "claude",
+            "--platform",
+            "github",
+        ],
+        check=True,
+        capture_output=True,
     )
     build(repo)
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
@@ -549,20 +505,27 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
         )
     )
 
-    # R12-C2: an empty directory. Every file-oriented binding is blind to it.
+    # R12-C2 asserted that an empty `.codex/` blocks, and R14-C1 demonstrated
+    # that it must not: Codex leaves the directory behind, and the conversion
+    # plan against a consumer holding one is byte-identical -- 166 delete, 13
+    # retire, 27 keep either way. Blocking there asks a consumer to declare a
+    # platform whose declaration would change nothing. What still blocks is a
+    # directory with something in it.
     def with_codex(repo):
         baseline(repo)
 
-    # Both scans run against the *same* checkout, inside its lifetime: the only
-    # difference is the declared platform set. A second `scan_with` would build
-    # a second repository and the comparison would be about two trees.
+    # Every scan below runs against the *same* checkout, inside its lifetime:
+    # the only differences are the directory's contents and the declared
+    # platform set. A second `_synthetic_consumer` would build a second
+    # repository and the comparison would be about two trees.
     with tempfile.TemporaryDirectory() as raw:
-        repo = _synthetic_consumer(raw, with_codex)
+        repo = _synthetic_consumer(repo_raw := raw, with_codex)
         clean = module.scan("synthetic", repo, platforms)
-        # Created *after* the commit, and left empty: git tracks no directory,
-        # so this is the change no file-oriented binding can see.
+        # Created *after* the commit, and left empty: git tracks no directory.
         (repo / ".codex").mkdir()
-        codex = module.scan("synthetic", repo, platforms)
+        empty = module.scan("synthetic", repo, platforms)
+        (repo / ".codex/config.toml").write_text("[project]\n", encoding="utf-8")
+        occupied = module.scan("synthetic", repo, platforms)
         declared = module.scan("synthetic", repo, platforms | {"codex"})
 
     def marker_fired(result):
@@ -573,22 +536,36 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
 
     cases += [
         (
-            "R12-C1/R12-C2",
-            "an undeclared .codex/ blocks",
-            marker_fired(codex),
+            "R14-C1",
+            "an empty .codex/ is not usage and does not block",
+            marker_fired(empty),
+            False,
+        ),
+        (
+            "R12-C1/R14-C1",
+            "a .codex/ with a file in it does",
+            marker_fired(occupied),
             True,
         ),
         (
-            "R12-C2",
-            "and it moves platformMarkerDigest, which no other binding sees",
-            codex["platformMarkerDigest"] != clean["platformMarkerDigest"],
-            True,
+            "R13-C1",
+            "including when that file is the one Trellis writes",
+            [
+                entry["detail"]
+                for entry in occupied["blockers"]
+                if entry["file"] == ".codex"
+            ],
+            ["undeclared codex usage: .codex/ exists with 1 file(s), "
+             "e.g. .codex/config.toml"],
         ),
         (
             "R12-C2",
-            "while every other recorded binding stays byte-identical",
-            [key for key in BINDINGS if codex[key] != clean[key]],
-            [],
+            "and platformMarkerDigest records the occupancy either way",
+            (
+                clean["platformMarkerDigest"] != empty["platformMarkerDigest"],
+                empty["platformMarkerDigest"] != occupied["platformMarkerDigest"],
+            ),
+            (True, True),
         ),
         (
             "R12-C1",
@@ -713,7 +690,9 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
         )
     )
 
-    # R13-C4: the fixture is only evidence if production would accept it.
+    # R13-C4/R14-C3: the fixture is only evidence if production accepts it.
+    # Three preconditions, because passing the structural audit alone did not
+    # stop `--check` from calling the previous fixture invalid.
     with tempfile.TemporaryDirectory() as raw:
         repo = _synthetic_consumer(raw, baseline)
         audit = subprocess.run(
@@ -721,7 +700,26 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
             capture_output=True,
             text=True,
         )
-    cases.append(
+        check = subprocess.run(
+            [
+                sys.executable,
+                str(HERE.parents[3] / "install.py"),
+                str(repo),
+                "--check",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        state = json.loads(check.stdout)
+        receipt = module.conversion.read_installed_targets_receipt(repo)
+        plan = module.conversion.build_conversion_plan(
+            receipt,
+            module.conversion.load_partition(module.PARTITION),
+            platforms,
+            occupied=module.conversion.occupied_receipt_targets(repo, receipt),
+        )
+    cases += [
         (
             "R13-C4",
             "the production structural audit accepts the synthetic consumer",
@@ -729,8 +727,20 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
                 line for line in audit.stdout.splitlines() if line.startswith("error")
             ]),
             (0, []),
-        )
-    )
+        ),
+        (
+            "R14-C3",
+            "and install.py --check calls it a current, complete fat install",
+            (state["state"], state["changeCount"]),
+            ("current", 0),
+        ),
+        (
+            "R14-C3",
+            "and the conversion plan against it is not blocked",
+            list(plan.blocked),
+            [],
+        ),
+    ]
 
     # R13-C1, demonstrated against a real consumer. Round 12 exempted paths on
     # `PlatformInfo.trellis_local_only`, and `.codex/config.toml` is on that
@@ -815,6 +825,153 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
         ),
     ]
 
+    # R14-C1: a directory is not necessary either. A repository whose surviving
+    # guidance invokes the Codex CLI is a Codex consumer with no `.codex/` at
+    # all -- the marker set had no way to see that.
+    def with_codex_cli(repo):
+        (repo / "CONTRIBUTING.md").write_text(
+            "Run `codex exec --sandbox read-only` before pushing.\n",
+            encoding="utf-8",
+        )
+
+    cli = scan_with(with_codex_cli)
+    cases += [
+        (
+            "R14-C1",
+            "invoking the codex CLI is undeclared usage without any .codex/",
+            [
+                entry["file"]
+                for entry in cli["blockers"]
+                if "codex CLI is invoked" in (entry.get("detail") or "")
+            ],
+            ["codex exec"],
+        ),
+        (
+            "R14-C1",
+            "but the pack's own installed files are the pack's text, not the "
+            "consumer's usage",
+            [
+                entry["file"]
+                for entry in base["blockers"]
+                if "codex CLI is invoked" in (entry.get("detail") or "")
+            ],
+            [],
+        ),
+    ]
+
+    # R14-C4, executed: `./scripts/x.sh` is a command that names no runner word.
+    def with_direct_path(repo):
+        (repo / "release.md").write_text(
+            "Before tagging:\n"
+            "./scripts/sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+        (repo / "direct.dat").write_bytes(
+            b"asset \x00 bytes\n./scripts/sd-ai-command-pack-full-check.sh\n"
+        )
+
+    direct = scan_with(with_direct_path)
+    cases += [
+        (
+            "R14-C4",
+            "a direct ./path invocation is command position",
+            [(e["file"], e["line"]) for e in direct["blockers"]
+             if e["file"] == "release.md"],
+            [("release.md", 2)],
+        ),
+        (
+            "R14-C4",
+            "and it is command position in an asset's bytes too",
+            [(e["file"], e["line"]) for e in direct["blockers"]
+             if e["file"] == "direct.dat"],
+            [("direct.dat", 2)],
+        ),
+    ]
+
+    # R14-C5: a managed file that contains a NUL is readable, and readable is
+    # not a defect. The previous rule emitted a whole-file pack defect with no
+    # citation at all and blocked the conversion on it.
+    def with_nul_managed(repo):
+        (repo / ".gitignore").write_bytes(b"harmless \x00 bytes\n")
+
+    nul_managed = scan_with(with_nul_managed)
+    cases += [
+        (
+            "R14-C5",
+            "a readable managed file containing NUL is not an unreadable target",
+            [e for e in nul_managed["packDefects"]
+             if e["file"] == ".gitignore" and e.get("line") is None],
+            [],
+        ),
+    ]
+
+    # R14-C6: a citation an asset carries in no command position is still a
+    # citation. Dropping it silently made the PRD's "every hit lands in exactly
+    # one of four buckets" false, and left the reader unable to tell an asset
+    # with no citations from an asset whose citations were discarded.
+    def with_weak_asset_citation(repo):
+        (repo / "index.dat").write_bytes(
+            b"asset \x00 bytes\nsee scripts/sd-ai-command-pack-full-check.sh\n"
+        )
+
+    weak = scan_with(with_weak_asset_citation)
+    cases += [
+        (
+            "R14-C6",
+            "a weak citation in an asset is recorded as advisory, not dropped",
+            [(e["file"], e["line"], e["detail"][:13]) for e in weak["advisories"]
+             if e["file"] == "index.dat"],
+            [("index.dat", 2, "[asset bytes]")],
+        ),
+        (
+            "R14-C6",
+            "and it is not a blocker: an asset's bytes are not an invocation",
+            [e for e in weak["blockers"] if e["file"] == "index.dat"],
+            [],
+        ),
+    ]
+
+    # R14-C2: ownership is decided from the bytes the scan read, so the second
+    # read that used to decide it is gone. Poisoning it must change nothing.
+    def with_edited_pack_file(repo):
+        (repo / "scripts/sd-ai-command-pack-full-check.sh").write_text(
+            "#!/bin/sh\nbash scripts/sd-ai-command-pack-housekeeping.sh\n",
+            encoding="utf-8",
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        repo = _synthetic_consumer(raw, with_edited_pack_file)
+        honest = module.scan("synthetic", repo, platforms)
+        original = module.file_digest
+        # Poisoned only for paths inside the consumer: `file_digest` also reads
+        # the *pack's* shipped templates, which is a different file in a
+        # different tree and a legitimate second read.
+        module.file_digest = lambda path: (
+            "sha256:poison" if str(path).startswith(str(repo)) else original(path)
+        )
+        try:
+            poisoned = module.scan("synthetic", repo, platforms)
+        finally:
+            module.file_digest = original
+
+    cases.append(
+        (
+            "R14-C2",
+            "no classification depends on a second read of a file",
+            [
+                (bucket, entry["file"], entry["line"])
+                for bucket in ("blockers", "packDefects", "advisories")
+                for entry in honest[bucket]
+            ]
+            == [
+                (bucket, entry["file"], entry["line"])
+                for bucket in ("blockers", "packDefects", "advisories")
+                for entry in poisoned[bucket]
+            ],
+            True,
+        )
+    )
+
     # R13-C3, constructed: a clean filter maps any worktree content to the
     # committed blob, so `git status` stays empty and `worktreeDigest` -- which
     # hashes only the paths git reports dirty -- sees nothing, while the scanner
@@ -863,9 +1020,14 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
         ),
         (
             "R13-C3",
-            "the hidden bytes still change the verdict",
-            (before["verdict"], after["verdict"]),
-            ("clear", "blocked"),
+            "the hidden bytes still produce a blocker that was not there before",
+            (
+                [(e["file"], e["line"]) for e in before["blockers"]
+                 if e["file"] == "notes.txt"],
+                [(e["file"], e["line"]) for e in after["blockers"]
+                 if e["file"] == "notes.txt"],
+            ),
+            ([], [("notes.txt", 1)]),
         ),
         (
             "R13-C3",

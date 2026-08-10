@@ -3,10 +3,13 @@
 Child 3 of `08-09-thin-migration`.
 
 **BLOCKED — requires explicit user authorization.** This task mutates
-repositories outside `sd-ai-command-pack`: `rwbp/rwbp-coordinator`,
-`platypeeps/loadsmith`, `platypeeps/hoa-manager`. The coordinator's owner
-is `rwbp`, not `platypeeps`: R13 found this file naming a repository that
-does not exist at the path it gives. The autonomous
+repositories outside `sd-ai-command-pack`: `platypeeps/rwbp-coordinator`,
+`platypeeps/loadsmith`, `platypeeps/hoa-manager`. The coordinator's GitHub
+owner is `platypeeps` (`docs/fleet/consumers.json:28`, and its `origin` is
+`git@github.com:platypeeps/rwbp-coordinator.git`); only its *local
+checkout path* is `~/repos/rwbp/`. R13 changed this line to `rwbp/` on the
+strength of that path and R14 demonstrated the repository does not exist
+under that owner — the path and the slug are different facts. The autonomous
 work-loop's run-level authority does not extend to them. Authorization
 is per cohort; authorizing this cohort does not authorize post-canary.
 
@@ -36,6 +39,32 @@ revert-and-restore proof.
    window between them — tree thin, registry row still `fat` — is the
    pin-vs-mode skew the parent design accepts and `sd-status fleet`
    reports.
+   The literal sequence, per consumer, with `<consumer>` its registry
+   name and `<path>` its checkout — R14 found this file describing the
+   steps without naming a single command, which is not an executable
+   plan:
+
+   ```bash
+   # 1. exact head, clean tree, verdict written to a file
+   git -C <path> status --porcelain          # must be empty
+   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+     scripts/sd-ai-command-pack-thin-resweep.py --repo <path> \
+     --consumer <consumer> --out /tmp/<consumer>-verdict.json --json
+   # 2. convert, both roots, gated on that exact verdict file
+   .venv/bin/python install.py <path> --thin \
+     --resweep-verdict /tmp/<consumer>-verdict.json
+   # 3. consumer PR from <path>, then the pack PR carrying the mode row
+   ```
+
+   The verdict is a file rather than a fresh in-process check because the
+   two must be the same measurement: `--thin` verifies the verdict's
+   recorded bindings still describe the tree in front of it and refuses
+   otherwise. If the consumer's HEAD or worktree moved between the two
+   commands, re-run step 1. An abandoned conversion leaves both roots
+   uncommitted: `git -C <path> checkout -- .` and
+   `git checkout -- docs/fleet/consumers.json` restore them, and the next
+   attempt starts again at step 1.
+
 2. A `blocked` verdict stops that consumer's conversion and is reported
    with its reasons. It is not worked around. **It stops the whole
    canary cohort**, matching the existing rollout contract: the wave
@@ -62,8 +91,31 @@ revert-and-restore proof.
    `retainVendoredFor` retention on, and making this the first real
    exercise of a path the parent design calls untested), or remove the
    Codex usage. `rwbp-coordinator`, `loadsmith`, and `hoa-manager` also
-   reference `$CODEX_HOME` in surviving files — a second, separate marker
-   that clears the same two ways.
+   reference `$CODEX_HOME` in surviving files, and the first two invoke the
+   `codex` CLI in their own surviving guidance — two further markers that
+   clear the same two ways.
+
+   **Declaring `codex` is not the cheap branch, and the residual figures
+   change if it is taken.** `retainVendoredFor` is keyed on the *shared*
+   platform's disposition, not on `.agents/**`, so declaring Codex retains
+   the whole shared machine slice. Measured against all three canaries,
+   identically: the plan moves from 166 delete / 13 retire / 27 keep to
+   **91 delete / 13 retire / 102 keep** — 75 additional retained targets,
+   being 49 `.agents/**` files, 25 `scripts/**`, and
+   `docs/SD_AI_COMMAND_PACK.md`. The removal total for that consumer is
+   then 104, not 179, and the "no vendored payload beyond `repo-native` +
+   `consumer-config`" criterion below does not describe it. Whichever
+   branch a consumer takes, its acceptance compares the executed tree
+   against **its own receipt under its recorded platform choice**, and the
+   choice is recorded in this file before the conversion runs.
+
+   **What no scan can see.** A consumer whose Codex use is entirely
+   global — `~/.codex/`, a CLI flag, a CI environment variable — leaves no
+   repository-visible marker. The resweep cannot close that and does not
+   claim to. Before converting each canary, ask whoever works in that
+   repository whether they run Codex against it, and record the answer
+   here alongside the marker evidence. An unanswered question is not a
+   `clear` verdict.
 4. One consumer-authored blocker is already measured and belongs to this
    task rather than to child 2b: `rwbp-coordinator/.prism/rules.json:55`
    is a live Prism **required** rule naming three removed paths. Its text
@@ -113,12 +165,15 @@ revert-and-restore proof.
 - [ ] Each canary's CI is green post-conversion with zero pack CI steps,
       verified by grepping that consumer's `.github/workflows/` at its
       post-merge HEAD.
-- [ ] No vendored payload remains in any canary beyond the
-      `repo-native` + `consumer-config` slices, verified per consumer by
-      comparing its post-conversion tree against **its own
-      pre-conversion installed-targets receipt** — a comparison against
-      the current partition alone would pass while orphan files from an
-      older pin survive.
+- [ ] No vendored payload remains in any canary beyond what that
+      consumer's **recorded platform choice** retains — the `repo-native` +
+      `consumer-config` slices, plus the whole shared machine slice for a
+      consumer that declared `codex` (75 further targets, measured) —
+      verified per consumer by comparing its post-conversion tree against
+      **its own pre-conversion installed-targets receipt** and the plan
+      derived under that choice. A comparison against the current
+      partition alone would pass while orphan files from an older pin
+      survive.
 - [ ] Each canary's undeclared-codex marker is cleared by a recorded
       choice — `codex` added to its `platforms`, or the Codex usage
       removed — and the resweep confirms it rather than a hand check. If
@@ -133,8 +188,10 @@ revert-and-restore proof.
       the first canary mutation, with the `sd-status` output recorded.
 - [ ] The revert proof was executed on a named canary at a named
       commit, CI stayed green, and the only residue was the
-      `enabledPlugins` disable marker. The consumer was re-converted
-      afterward.
+      `enabledPlugins` disable marker. Re-conversion ran a **fresh
+      exact-head resweep** against the reverted tree first: the revert
+      changes the tree, so the verdict that authorized the first
+      conversion does not authorize the second.
 - [ ] `make release-prep` passes on this repo after the registry flips
       — not `make check` alone. Each `mode` flip changes the
       fleet-manifest digest pinned into

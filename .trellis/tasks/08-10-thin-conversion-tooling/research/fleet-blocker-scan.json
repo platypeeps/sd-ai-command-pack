@@ -1,35 +1,35 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "48cbf56a47c00abf26169434a8c5a7f134cde9ec",
-  "packWorktreeDigest": "sha256:db8303e7745bdd5271ebe6bc8c2a41d1f805d04ce9a0f53ee39f07f1ea7751c8",
+  "packHead": "6c4a3911c0ea9cf99248b0d0ec44f31c0c375daa",
+  "packWorktreeDigest": "sha256:dae5750e973b70201bb55aac02f483fa4b2fbf32d5157324c48c2292feab4128",
   "packWorktreeClean": false,
   "packIndexFlagsDigest": "sha256:79a5a17998e4d0ac882946e401204089f700b56f893637d337705f44b20e068d",
   "packHiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "scannerDigest": "sha256:75e60e799ae290dc411377dedfb5375165e22ad20ce2ec6f8372ae8daf19fe03",
-  "counterexamplesDigest": "sha256:da9ae99075e322e6a8d759b5ba1d6b288947f10330f1f1888d08339d678cea99",
+  "scannerDigest": "sha256:694181d2941503f2371cadc46b8d1535316eeec50fb2002c10f9ce1b046347cb",
+  "counterexamplesDigest": "sha256:410606f66c18a20858ae01bac30151ddd6ed5483ec92c624c61f3db410007cd6",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
-      "head": "e89cb42736c61db6b4dd3b3fa955cfeeea79c441",
-      "indexDigest": "sha256:e999ee5fb0f88d6718fac28ad32e4c81e0bd9c4385230fd2149a1bf100fc3059",
+      "head": "270d5cbf77f3b648533ad672992cc3e38c080637",
+      "indexDigest": "sha256:3faec1c9cbe0241f142bf8097f0cd1b0191a279d0e6a76a6f03b6e4b9a2de856",
       "indexFlagsDigest": "sha256:c3f96221d742e796ec26834211ac350ad0b0035c8be69de8a0a43ede7904684c",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeClean": true,
+      "worktreeDigest": "sha256:ed7266d590458d5bd1bebb2394c74a585aa76496d4af9902b2b749c6292563db",
+      "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:a2c9d964bf92b78e5afcb3ef60a8f578d956e50c6ff4628f4018710afd7dc8eb",
-      "executableBitsDigest": "sha256:391aa86580348ce671c35c3f1decf2ab9549cb0ba85baa2c69d87eebe34e6240",
+      "executableBitsDigest": "sha256:cdb8a32c6b2cfed2f230f19710a9f4b6b335f39b0e499aeb13472687f6ff4bd2",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:ca7598eb683158181fcdd908bed6e336c52b6d1ad32d1a1ba35256afadeeb8bc",
-      "platformMarkerDigest": "sha256:d5a1bab33ddf769e875b1663c6702fc96362bc6040027a7048873ffa5425e962",
+      "scannedBytesDigest": "sha256:9df101f2699bb43d768d08b8e36b91457227f8a42ca9e0719a75184d63cfe997",
+      "platformMarkerDigest": "sha256:4af779985d902c2cb8c94252161b721513474370ad915b1df1358f2cff575b94",
       "binaryFiles": 10,
       "missingFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
-      "trackedFiles": 1409,
+      "trackedFiles": 1413,
       "counts": {
-        "blockers": 51,
+        "blockers": 52,
         "packDefects": 16,
         "scheduled": 182,
         "advisories": 114
@@ -40,6 +40,7 @@
         ".github/workflows/ci.yml",
         ".prism/rules.json",
         ".trellis/spec/web/operations/local-development.md",
+        "codex exec",
         "package.json",
         "scripts/check-full.test.mjs",
         "scripts/check-review-churn.mjs",
@@ -90,7 +91,7 @@
         {
           "file": "package.json",
           "line": 57,
-          "detail": "\"review:local\": \"SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1 bash scripts/sd-ai-command-pack-full-check.sh\","
+          "detail": "\"review:local\": \"npm run check:node-version && SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1 bash scripts/sd-ai-command-pack-full-check.sh\","
         },
         {
           "file": "scripts/check-full.test.mjs",
@@ -306,6 +307,11 @@
           "file": ".codex",
           "line": null,
           "detail": "undeclared codex usage: .codex/ exists with 30 file(s), e.g. .codex/agents/trellis-check.toml"
+        },
+        {
+          "file": "codex exec",
+          "line": null,
+          "detail": "undeclared codex usage: the codex CLI is invoked in 1 surviving file(s), e.g. docs/integrations.md"
         },
         {
           "file": "$CODEX_HOME",
@@ -1714,14 +1720,14 @@
       "executableBitsDigest": "sha256:239ce94c86823145a109709a74fc5ec4bbf0c0853fca02eb7c60b4e9e7eec631",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "scannedBytesDigest": "sha256:400c9a4c5a3c395006a6a016dbd0cbcf2257890c3f89e059d15f4e6646c61e1b",
-      "platformMarkerDigest": "sha256:b62b313e777810d152ded7456b04456a12f94cb5468e33296ef49e7d9c04e392",
+      "platformMarkerDigest": "sha256:81667275e87e2ee5bc89a11c1fbb2bb9d2761780040cb04c146038929310e1b4",
       "binaryFiles": 2,
       "missingFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
       "trackedFiles": 1399,
       "counts": {
-        "blockers": 55,
+        "blockers": 56,
         "packDefects": 16,
         "scheduled": 182,
         "advisories": 163
@@ -1731,6 +1737,7 @@
         ".codex",
         ".github/workflows/ci.yml",
         ".trellis/spec/guides/operations-and-release.md",
+        "codex exec",
         "docs/repomix-map.md",
         "scripts/check.sh",
         "scripts/check_review_readiness.sh"
@@ -2015,6 +2022,11 @@
           "file": ".codex",
           "line": null,
           "detail": "undeclared codex usage: .codex/ exists with 23 file(s), e.g. .codex/agents/trellis-check.toml"
+        },
+        {
+          "file": "codex exec",
+          "line": null,
+          "detail": "undeclared codex usage: the codex CLI is invoked in 1 surviving file(s), e.g. docs/repomix-map.md"
         },
         {
           "file": "$CODEX_HOME",
@@ -3675,10 +3687,10 @@
       "removedTargets": 179,
       "trackedFiles": 1628,
       "counts": {
-        "blockers": 36,
+        "blockers": 39,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 127
+        "advisories": 124
       },
       "blockerFiles": [
         "$CODEX_HOME",
@@ -3686,6 +3698,9 @@
         ".github/workflows/ci.yml",
         ".trellis/spec/web/testing/verification-commands.md",
         ".trellis/tasks/08-07-task-manifest-context-roots/prd.md",
+        "README.md",
+        "docs/DEVELOPMENT_CYCLE.md",
+        "docs/REFERENCE_STACK.md",
         "docs/REVIEW_PATTERNS.md",
         "package.json",
         "scripts/check-full-prelude.mjs",
@@ -3743,6 +3758,21 @@
           "file": ".trellis/tasks/08-07-task-manifest-context-roots/prd.md",
           "line": 73,
           "detail": "- [ ] AC-1: `node scripts/sd-ai-command-pack-review-preflight.mjs` reports zero"
+        },
+        {
+          "file": "README.md",
+          "line": 29,
+          "detail": "| [docs/SD_AI_COMMAND_PACK.md](./docs/SD_AI_COMMAND_PACK.md) | Installed SD command-pack usage, commands, config, and troubleshooting. |"
+        },
+        {
+          "file": "docs/DEVELOPMENT_CYCLE.md",
+          "line": 72,
+          "detail": "[`docs/SD_AI_COMMAND_PACK.md`](./SD_AI_COMMAND_PACK.md)."
+        },
+        {
+          "file": "docs/REFERENCE_STACK.md",
+          "line": 214,
+          "detail": "The later architecture ([ARCHITECTURE.md](./ARCHITECTURE.md)) is mostly *generalize-and-port*, not *invent*. The precedents in these two repos to build each pri"
         },
         {
           "file": "docs/REVIEW_PATTERNS.md",
@@ -5097,19 +5127,9 @@
           "detail": "- Line-anchored SCOPE_BODY_PATTERN with an optional colon, matching sd-ai-command-pack-review-scope.sh:170 and the docs/SD_AI_COMMAND_PACK.md:750 contract; expo"
         },
         {
-          "file": "README.md",
-          "line": 29,
-          "detail": "| [docs/SD_AI_COMMAND_PACK.md](./docs/SD_AI_COMMAND_PACK.md) | Installed SD command-pack usage, commands, config, and troubleshooting. |"
-        },
-        {
           "file": "docs/ARCHITECTURE.md",
           "line": 10,
           "detail": "The key insight from analyzing the two reference repos (`<reference-root>/rwbp/{rwbp-coordinator,rwbp-website}`) is that **almost every ask already has a preced"
-        },
-        {
-          "file": "docs/DEVELOPMENT_CYCLE.md",
-          "line": 72,
-          "detail": "[`docs/SD_AI_COMMAND_PACK.md`](./SD_AI_COMMAND_PACK.md)."
         },
         {
           "file": "docs/DEVELOPMENT_CYCLE.md",
@@ -5125,11 +5145,6 @@
           "file": "docs/DEVELOPMENT_CYCLE.md",
           "line": 101,
           "detail": "`scripts/sd-ai-command-pack-full-check.sh`. The pack full-check script runs:"
-        },
-        {
-          "file": "docs/REFERENCE_STACK.md",
-          "line": 214,
-          "detail": "The later architecture ([ARCHITECTURE.md](./ARCHITECTURE.md)) is mostly *generalize-and-port*, not *invent*. The precedents in these two repos to build each pri"
         },
         {
           "file": "docs/REVIEW_PATTERNS.md",
@@ -5341,8 +5356,8 @@
     {
       "consumer": "rwbp-website",
       "repo": "/Users/sven/repos/rwbp/rwbp-website",
-      "head": "64993fc9b10e5f8af045cf57d1bd7d4fabbb7983",
-      "indexDigest": "sha256:91df76e93e53703d1a709962eb6454c8ee8e1e65eca3a55e0735fe0c97aa1991",
+      "head": "4b4f3d46e70686ddba5c59ddab66bc83891652bd",
+      "indexDigest": "sha256:180fad7f6fc3ca302f98b8235f31361d35d73fcb4518ff1b445b94ad82176c37",
       "indexFlagsDigest": "sha256:40d932e3195dec054bc2b8323d1872b7f014955d48d617ef1f3830787bdb6dec",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -5350,7 +5365,7 @@
       "receiptOccupancyDigest": "sha256:def2fe6f7df8916494c63c827979490bf16bf2b51ba7a9d413f0344f8e002419",
       "executableBitsDigest": "sha256:e1ef3fa999c797022b9ceff88e47a589e7932787158a6f1e489812f7acfd1096",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:46c7ef392149b312e69bd68bc58ad31a79b1d7d4a6d76b4570ee6b0db4058beb",
+      "scannedBytesDigest": "sha256:5d130051689ab335b0bea0849a88b3d40f928e71bb914473b14251db8cc53eea",
       "platformMarkerDigest": "sha256:4716334c490d2e8fc890c25cb98428d7c5a1cc1d7bea0104e85b18fa9307247b",
       "binaryFiles": 19,
       "missingFiles": [],
@@ -5479,7 +5494,7 @@
         {
           "file": "package.json",
           "line": 55,
-          "detail": "\"review:local\": \"SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1 bash scripts/sd-ai-command-pack-full-check.sh\","
+          "detail": "\"review:local\": \"npm run check:node-version && SD_AI_COMMAND_PACK_FULL_CHECK_SKIP_PACKAGE_SCRIPTS=1 bash scripts/sd-ai-command-pack-full-check.sh\","
         },
         {
           "file": "package.json",
@@ -7078,14 +7093,14 @@
       "executableBitsDigest": "sha256:fd4f3299acd2ac3037961a2ad098873e21fcc77922758992cdb22edbb3b3671c",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "scannedBytesDigest": "sha256:c17c8e7a93060b2cbb7573d3b71267483817671c5b043803df9f73c670fcfe75",
-      "platformMarkerDigest": "sha256:0c86ea4c4611d8caf919f62f71aba7854aec5278086cef01bd64e1dfca43ace7",
+      "platformMarkerDigest": "sha256:95e6ae112720e611c5b8f479210ceb40f48dcdc089cd59d755938fdb1f1e30fe",
       "binaryFiles": 1,
       "missingFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
       "trackedFiles": 1854,
       "counts": {
-        "blockers": 46,
+        "blockers": 47,
         "packDefects": 14,
         "scheduled": 182,
         "advisories": 97
@@ -7104,6 +7119,7 @@
         ".trellis/tasks/08-06-review-stale-check-receipt/prd.md",
         "CLAUDE.md",
         "CONTRIBUTING.md",
+        "codex exec",
         "docs/pr-review-checklist.md",
         "pyproject.toml",
         "scripts/check-defect-patterns.py",
@@ -7352,6 +7368,11 @@
           "file": ".codex",
           "line": null,
           "detail": "undeclared codex usage: .codex/ exists with 31 file(s), e.g. .codex/agents/trellis-check.toml"
+        },
+        {
+          "file": "codex exec",
+          "line": null,
+          "detail": "undeclared codex usage: the codex CLI is invoked in 17 surviving file(s), e.g. CHANGELOG.md"
         },
         {
           "file": "$CODEX_HOME",
@@ -8655,16 +8676,16 @@
     {
       "consumer": "se-ai-command-pack",
       "repo": "/Users/sven/repos/platypeeps/se-ai-command-pack",
-      "head": "0cb5793950638917c69be5505ca03c6bc858bfe2",
-      "indexDigest": "sha256:1ff6f4fa9933988d1a73c19eb9de7b4416205222f706f514079b0b39118c965a",
+      "head": "e0a3afd67d3730bdc54a2c3dd04eb71d0589ab6e",
+      "indexDigest": "sha256:67655232985e2822e04d1a7b2d18ce518e83430e5be2ec705047a6b5c1b7c5dd",
       "indexFlagsDigest": "sha256:f42db2e98130749b4a2f44bfe758dd28479b8c34ab0d3bac177790f2965bb285",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeClean": true,
+      "worktreeDigest": "sha256:4133c2eee7954bfa6e0daa6a968bfe46ad937a2773738785a46c4dbe7a208d67",
+      "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:5f07fda12898725c43dcc85efe9f587abedfe6aa586b69e369b715f352a64eb0",
       "executableBitsDigest": "sha256:ac7e84837063f799fb5f5e2fec32eebccf18e601a89464aa294fece7e7f137c0",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:3f89683c7931fd02402b6895c0e5c190228ebad523398d4d8c4ee9a2a1dcf03a",
+      "scannedBytesDigest": "sha256:3156762f0e47e8ab98d892a5d3e740be80bc2093f478c1a3c4647c6aa6a17612",
       "platformMarkerDigest": "sha256:fe933800fde95b9c2aee02d593308a2b023befb2847df9b019bb09ead68abfe0",
       "binaryFiles": 0,
       "missingFiles": [],
@@ -8672,10 +8693,10 @@
       "removedTargets": 179,
       "trackedFiles": 1414,
       "counts": {
-        "blockers": 25,
+        "blockers": 26,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 817
+        "advisories": 823
       },
       "blockerFiles": [
         "$CODEX_HOME",
@@ -8718,52 +8739,57 @@
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 287,
+          "line": 268,
+          "detail": "bash scripts/sd-ai-command-pack-review-scope.sh   # exit 0 once the body is fixed"
+        },
+        {
+          "file": ".trellis/spec/backend/quality-guidelines.md",
+          "line": 309,
           "detail": "python3 scripts/sd-ai-command-pack-update-spec-kb.py --if-present"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 603,
+          "line": 625,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 604,
+          "line": 626,
           "detail": "scripts/sd-ai-command-pack-work-loop.py evidence --repo . \\"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 607,
+          "line": 629,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 608,
+          "line": 630,
           "detail": "scripts/sd-ai-command-pack-work-loop.py evidence --repo . \\"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2462,
+          "line": 2484,
           "detail": "\"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2463,
+          "line": 2485,
           "detail": "bash scripts/sd-ai-command-pack-review-full-check.sh"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2464,
+          "line": 2486,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh doctor"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2515,
+          "line": 2537,
           "detail": "\"check:full\": \"bash scripts/sd-ai-command-pack-review-full-check.sh\""
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2527,
+          "line": 2549,
           "detail": "\"check:full\": \"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
         },
         {
@@ -9895,168 +9921,198 @@
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 257,
+          "line": 279,
           "detail": "`--prepare-tooling-body` (`scripts/sd-ai-command-pack-pr-body-scope.py`) does"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 300,
+          "line": 322,
           "detail": "`scripts/sd-ai-command-pack-review-preflight.mjs` gates on"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 380,
+          "line": 402,
           "detail": "(`scripts/sd-ai-command-pack-review-local.py`, `execute`). From v0.66.1"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 409,
+          "line": 431,
           "detail": "- **Shell lane** (`scripts/sd-ai-command-pack-review-local.sh:327-346`)"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 417,
+          "line": 439,
           "detail": "`scripts/sd-ai-command-pack-review-local.py` (`_expand_argv`, `:1376`)"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 428,
+          "line": 450,
           "detail": "codes 0/1 (`scripts/sd-ai-command-pack-review-local.py:254-260`,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 457,
+          "line": 479,
           "detail": "- Files: `scripts/sd-ai-command-pack-review-local.py` and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 458,
+          "line": 480,
           "detail": "`scripts/sd-ai-command-pack-review-local.sh` (Registry B, `kind: script`,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 503,
+          "line": 525,
           "detail": "generic code (`scripts/sd-ai-command-pack-pr-eligibility.py:706-721`)."
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 564,
+          "line": 586,
           "detail": "(`scripts/sd-ai-command-pack-work-loop.py:2864`). A `stopped` run falls through"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 582,
+          "line": 604,
           "detail": "2. **File**: `scripts/sd-ai-command-pack-work-loop.py` (`install: \"always\"`),"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 583,
+          "line": 605,
           "detail": "with the documented call shape in `.agents/skills/sd-work-backlog/SKILL.md`"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 584,
+          "line": 606,
           "detail": "(`install: \"always\"`) and `.claude/skills/sd-work-backlog/SKILL.md`"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 635,
+          "line": 657,
           "detail": "(`.agents/skills/sd-ship/SKILL.md:179-186`), the fix commit put an authored"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 675,
+          "line": 697,
           "detail": "- Files: `.agents/skills/sd-ship/SKILL.md` and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 676,
+          "line": 698,
           "detail": "`.agents/skills/sd-finish-work/SKILL.md` (Registry B, `kind: skill`,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 677,
+          "line": 699,
           "detail": "`install: \"always\"`); `.claude/skills/sd-ship/SKILL.md` and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 678,
+          "line": 700,
           "detail": "`.claude/skills/sd-finish-work/SKILL.md` (Registry B, `kind: skill`,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 680,
+          "line": 702,
           "detail": "`scripts/sd-ai-command-pack-review-preflight.mjs` (Registry B,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 742,
+          "line": 764,
           "detail": "`scripts/sd-ai-command-pack-review-preflight.mjs:3331-3354`, wired at"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 769,
+          "line": 791,
           "detail": "(`scripts/sd-ai-command-pack-review-preflight.mjs`, Registry B,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 785,
+          "line": 807,
           "detail": "The sd-ai-command-pack payload (`scripts/sd-ai-command-pack-*`,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 786,
+          "line": 808,
           "detail": "`.claude/skills/sd-*`, `.agents/skills/sd-*`, `docs/SD_AI_COMMAND_PACK.md`,"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 819,
+          "line": 841,
           "detail": "> `bc01bc2` (`_resolve_check` in `scripts/sd-ai-command-pack-review.py`) and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 899,
+          "line": 921,
           "detail": "| `scripts/sd-ai-command-pack-review.py` | Registry B, `install: \"always\"` \u2014 vendored |"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 948,
+          "line": 970,
           "detail": "2. File: `scripts/sd-ai-command-pack-status.py`, manifest entry"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 1210,
+          "line": 1232,
           "detail": "shapes are `references/*.md` and `scripts/*.py`; nested directories and other"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 1229,
+          "line": 1251,
           "detail": "| Flat `references/*.md` or `scripts/*.py` file | Validate and fan out to every declared platform. |"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2121,
+          "line": 2143,
           "detail": "Both `scripts/sd-ai-command-pack-status.py` and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2122,
+          "line": 2144,
           "detail": "`scripts/sd_ai_command_pack_fleet_lib.py` are vendored with"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2136,
+          "line": 2158,
           "detail": "(`sd-ai-command-pack-status.py` at 2631 lines) and were re-located by symbol"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2182,
+          "line": 2204,
           "detail": "(`sd_ai_command_pack_fleet_lib.py`, `:119-131`): `$XDG_CONFIG_HOME`"
         },
         {
           "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 21,
-          "detail": "- Evidence: AGENTS.md:13; .agents/skills/sd-finish-work/SKILL.md:11; .gemini/commands/sd/finish-work.toml:1."
+          "line": 54,
+          "detail": "(`.agents/skills/sd-finish-work/SKILL.md:119-123`)."
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 55,
+          "detail": "3. **No exact-head final-bundle gate.** `.agents/skills/sd-finish-work/SKILL.md`"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 208,
+          "detail": "- The guard reads vendored `.agents/skills/sd-*/SKILL.md` content, so a pack"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 213,
+          "detail": "- `scripts/sd-ai-command-pack-install-audit.py:231` scans `AGENTS.md` for"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 218,
+          "detail": "- `docs/SD_AI_COMMAND_PACK.md:1046` gives `sd-update-spec` a documented-command"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 221,
+          "detail": "- `scripts/sd-ai-command-pack-update-spec-kb.py:1174` treats `AGENTS.md` as a"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 230,
+          "detail": "- Upstream note for the follow-up: `.agents/skills/sd-finish-work/SKILL.md:136`"
         },
         {
           "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/task.json",
