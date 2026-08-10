@@ -401,8 +401,13 @@ def _parse_consumer_mode(item: Mapping[str, Any], label: str) -> str:
 
 def _parse_consumer_pin_path(item: Mapping[str, Any], label: str) -> str:
     value = item.get("pinPath", DEFAULT_FLEET_PIN_PATH)
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value.strip() or "\0" in value:
         raise FleetConfigError(f"{label} pinPath must be a non-empty string")
+    # Strip before validating and return the stripped value, as
+    # ``_required_string`` does. Returning the raw string would let
+    # " .sd-ai-command-pack/provenance.json " pass validation and then read a
+    # filename that does not exist, reporting a healthy consumer as `absent`.
+    value = value.strip()
     candidate = PurePosixPath(value)
     if candidate.is_absolute() or ntpath.isabs(value) or ".." in candidate.parts:
         raise FleetConfigError(

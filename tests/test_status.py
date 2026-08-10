@@ -2540,6 +2540,7 @@ class StatusTests(InstallTestCase):
         status = self.load_status_module()
         fleet = self.load_fleet_lib()
         root = self.make_status_repo()
+        default = fleet.DEFAULT_FLEET_PIN_PATH
         cases = (
             ({"mode": "thick"}, "mode must be one of"),
             # Wrong types, not just wrong values: JSON can carry a number or a
@@ -2578,6 +2579,19 @@ class StatusTests(InstallTestCase):
         consumer = fleet.load_fleet_consumers(manifest)[0]
         self.assertEqual(consumer.mode, "fat")
         self.assertEqual(consumer.pin_path, fleet.DEFAULT_FLEET_PIN_PATH)
+
+        # Surrounding whitespace is stripped rather than carried into the read:
+        # an unstripped value passes validation and then names a file that does
+        # not exist, reporting a healthy consumer as `absent`.
+        padded = self.write_fleet_manifest(
+            root.parent / "fleet-padded.json",
+            [
+                self.fleet_consumer_entry(
+                    "alpha", root, priority=10, pinPath=f"  {default}\t"
+                )
+            ],
+        )
+        self.assertEqual(fleet.load_fleet_consumers(padded)[0].pin_path, default)
 
     def test_consumer_pin_reader_classifies_every_state(self) -> None:
         status = self.load_status_module()
