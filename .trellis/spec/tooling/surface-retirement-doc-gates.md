@@ -87,6 +87,21 @@ The gates are the tests; run both against the full tree, not the diff:
 Do not scope either to changed files. Both failures land in files the deletion
 did not touch, which is exactly what a diff-scoped check cannot see.
 
+**Deleting a test module needs a third check.** `tests/test_install.py` is a
+compatibility facade that imports every other test module; the sharded runner
+in `.github/scripts/run-tests.sh` skips it by name (its `load_tests` returns an
+empty suite, so `unittest tests.test_install` would exit 5). A dangling import
+there is therefore invisible to `make test` and only surfaces in the CI shell-
+coverage job, which uses plain discovery. After deleting any `tests/test_*.py`,
+run discovery the way CI does:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+```
+
+Assert exit 0 — a `ModuleNotFoundError` here is reported as one errored test,
+so the run count barely moves and the summary line is easy to misread.
+
 ### 7. Wrong vs Correct
 
 #### Wrong
