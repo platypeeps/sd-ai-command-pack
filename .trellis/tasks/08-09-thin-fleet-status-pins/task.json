@@ -3,7 +3,7 @@
   "name": "thin-fleet-status-pins",
   "title": "Fleet/status rework to pin + plugin inventory",
   "description": "consumers.json schema bump (mode fat|thin, pin source); sd-status machine inventory via claude plugin list --json + machine receipt; fleet mode reports pin vs machine vs latest; skew is follow-up row",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

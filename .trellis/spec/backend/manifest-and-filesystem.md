@@ -433,12 +433,60 @@ CLI can never masquerade as an up-to-date machine. The line is advisory and does
 not change the exit status; `invalid` is promoted into `anomalies` like the two
 ledgers above it, so `--expect-clean` gates on it.
 
+### `sd-status fleet` install modes, pins, and skew
+
+Fleet mode collects `collect_machine_scope` **once per run** against the pack
+root — never once per consumer; each consumer row keeps
+`include_machine_scope=False`, so no extra `claude plugin list --json`
+subprocess is spawned per member. The result is published under the same
+`machineScope` key local mode uses, and a call-count test, not convention,
+holds the once-per-run property.
+
+Each consumer row gains two additive fields. `installMode` is the registry's
+`mode` value; the row field is deliberately *not* spelled `mode`, because the
+fleet payload already carries a top-level `"mode": "fleet"` discriminator.
+`pin` is `null` for a fat consumer and `{state, version, source, detail}` for a
+thin one, where `state` is `present`, `absent`, or `unreadable` — never
+silently empty. `read_json_object` collapses a missing file, an I/O error, and
+invalid JSON into one `None`, and `collect_versions` additionally falls back to
+`.sd-ai-command-pack/manifest.json`, so the pin reader does its own read rather
+than reusing either. It resolves the path with `resolve(strict=True)` and
+`relative_to(<consumer root>)` before parsing, so a relative `pinPath` that
+leaves the checkout through a symlink is `unreadable` with a reason, never
+followed.
+
+Version judgement follows the mode split, in both the JSON rows and the human
+attention counter: a fat consumer keeps installed-versus-target tree drift, and
+a thin consumer is judged by pin versus machine install, because it vendors no
+tree to diff. Three further comparisons produce **fleet-level** rows — pin
+versus machine install, machine install versus target, and
+`machineScope.comparison` for plugin versus receipt — and *every* fleet-level
+row is gated on the registry containing at least one thin consumer. An all-fat
+registry therefore emits no machine rows at all, which is what makes a schema-5
+registry naming no `mode` report identically to the schema-4 registry it
+replaced. An unavailable machine inventory with thin consumers present reports
+`unavailable` plus a follow-up; it is never rendered as agreement.
+
+Follow-ups are derived from the **complete** row set and only the human
+`nextSteps` list is truncated to `HUMAN_ITEM_LIMIT`, with skew rows ranked ahead
+of advisory rows. Deriving `F-*` rows from the truncated list — the prior
+behavior — could silently drop a skew row once enough missing/dirty/divergent
+consumers existed.
+
+The status payload's own `SCHEMA_VERSION` stays **2**: this is a hard
+constraint, not a convenience.
+`scripts/sd-ai-command-pack-housekeeping-result.py:43,173` requires exactly 2
+by equality, so every fleet addition is an optional field or an extra row.
+Removing or retyping a field would require coordinating that consumer first.
+
 Reference files:
 
 - `installer/machinescope.py`
 - `installer/machinepayload.py`
 - `installer/machinestage.py`
 - `installer/references.py`
+- `templates/scripts/sd-ai-command-pack-status.py`
+- `templates/scripts/sd_ai_command_pack_fleet_lib.py`
 - `templates/scripts/sd-ai-command-pack-pack-update.sh`
 - `tests/test_machine_installer.py`, `tests/test_machine_stage.py`,
   `tests/test_references.py`, `tests/test_pack_update.py`
@@ -549,12 +597,21 @@ release verdict.
    - `create-release-tag.py --base REF --head REF` validates the ledger from the
      exact committed head tree before creating `v<manifest-version>`.
 3. **Contracts**:
-   - `docs/fleet/consumers.json` schema version 4 requires unique consumer
+   - `docs/fleet/consumers.json` schema version 5 requires unique consumer
    names that are safe non-path identifiers, GitHub slugs, rollout priorities,
    bounded positive timeouts,
      platform lists, explicit `candidatePrepare` argv arrays that may be empty,
      and `candidateChecks` as non-empty argv arrays.
-   - Schema version 4 also requires `rolloutPolicy`: a bounded default
+   - Schema version 5 adds two optional per-consumer fields. `mode` is
+     `fat` (default) or `thin`; any other value is a `FleetConfigError` naming
+     the consumer. `pinPath` (default `.sd-ai-command-pack/provenance.json`) is
+     a non-empty relative path inside the consumer checkout; POSIX-absolute,
+     Windows-absolute, and `..`-bearing values are rejected at parse time. Both
+     defaults reproduce schema-4 behavior exactly, so a schema-5 registry that
+     names neither field reports identically to the schema-4 registry it
+     replaces. Parsing still demands exact `schemaVersion` equality, so a
+     schema-4 file is rejected after the bump by design, as it was for 3 -> 4.
+   - Schema version 5 also requires `rolloutPolicy`: a bounded default
      concurrency, a first sequential `canary` cohort, and ordered cohorts that
      include every consumer exactly once in rollout-priority order.
    - `docs/fleet/candidate-validation.json` schema version 2 records
@@ -1707,7 +1764,7 @@ preserving the existing release, review, finding, CI, and housekeeping gates.
 
 ### 2. Signatures
 
-- Fleet manifest schema version 4 adds `rolloutPolicy.defaultConcurrency` and
+- Fleet manifest schema version 4 added `rolloutPolicy.defaultConcurrency` and
   ordered cohorts with `name`, `strategy`, optional `maxConcurrency`, and
   `consumers`.
 - `parse_fleet_rollout_policy(...) -> FleetRolloutPolicy` is the shared strict

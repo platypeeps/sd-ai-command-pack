@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "description": "Known sd-ai-command-pack consumer repositories for operator-triggered fleet refreshes.",
   "rolloutPolicy": {
     "defaultConcurrency": 2,

@@ -2439,6 +2439,430 @@ class StatusTests(InstallTestCase):
         self.assertEqual(by_name["omega"]["status"], "available")
         self.assertIsNotNone(by_name["omega"]["report"])
 
+    def fleet_consumer_entry(
+        self,
+        name: str,
+        path: Path,
+        *,
+        priority: int,
+        **extra: object,
+    ) -> dict[str, object]:
+        entry: dict[str, object] = {
+            "name": name,
+            "github": f"example/{name}",
+            "pathHint": str(path),
+            "platforms": ["claude"],
+            "rolloutPriority": priority,
+            "candidateTimeoutSeconds": 60,
+            "candidatePrepare": [],
+            "candidateChecks": [["bash", "check.sh"]],
+        }
+        entry.update(extra)
+        return entry
+
+    def write_fleet_manifest(self, path: Path, entries: list[dict[str, object]]) -> Path:
+        path.write_text(json.dumps(fleet_manifest(entries)) + "\n", encoding="utf-8")
+        return path
+
+    def machine_scope_fixture(
+        self,
+        *,
+        state: str = "installed",
+        pack_version: str | None = "9.9.9",
+        plugin_version: str = "9.9.9",
+        comparison: str = "current",
+    ) -> dict[str, object]:
+        return {
+            "schemaVersion": 1,
+            "state": state,
+            "packVersion": pack_version,
+            "receiptPath": "/scratch/machine-receipt.json",
+            "detail": None,
+            "pluginId": "sd@sd-ai-command-pack",
+            "pluginVersion": plugin_version,
+            "pluginDetail": None,
+            "comparison": comparison,
+        }
+
+    def collect_fleet_with_machine(self, status, manifest: Path, scope: object):
+        """Collect a fleet against a fixed machine inventory.
+
+        The machine probe is stubbed rather than staged on disk so each test
+        states the machine half it is asserting about, and so the once-per-run
+        property can be asserted by call count.
+        """
+        probe = mock.Mock(return_value=scope)
+        with mock.patch.object(status, "collect_machine_scope", probe):
+            report = status.collect_fleet(
+                PACK_ROOT,
+                fleet_path=manifest,
+                network=False,
+                refs_refreshed=False,
+            )
+        return report, probe
+
+    def test_local_machine_scope_regression_reports_both_halves(self) -> None:
+        # PRD requirement 1: local mode reports the plugin and receipt versions,
+        # and labels an absent source `unavailable` rather than empty-healthy.
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        home, state_home = self.machine_scratch()
+        self.write_machine_receipt(state_home, pack_version="9.9.9")
+        with self.stub_claude(
+            status, [{"id": status.MACHINE_PLUGIN_ID, "version": "9.9.9"}]
+        ):
+            installed = self.machine_section(status, root, home, state_home)
+        self.assertEqual(installed["packVersion"], "9.9.9")
+        self.assertEqual(installed["pluginVersion"], "9.9.9")
+        self.assertEqual(installed["comparison"], "current")
+
+        home, state_home = self.machine_scratch()
+        with mock.patch.object(status.shutil, "which", return_value=None):
+            absent = self.machine_section(status, root, home, state_home)
+        self.assertEqual(absent["pluginVersion"], "unavailable")
+        self.assertTrue(absent["pluginDetail"])
+        self.assertIsNone(absent["packVersion"])
+        # An unreadable half must never present as agreement.
+        self.assertEqual(absent["comparison"], "unknown")
+
+    def test_status_pin_path_default_matches_the_fleet_library(self) -> None:
+        # The status fallback exists only for a FleetConsumer that predates
+        # schema 5; a drift between the two constants would silently read a
+        # different file than the registry documents.
+        status = self.load_status_module()
+        fleet = self.load_fleet_lib()
+        self.assertEqual(
+            status.DEFAULT_CONSUMER_PIN_PATH, fleet.DEFAULT_FLEET_PIN_PATH
+        )
+
+    def test_fleet_registry_rejects_bad_mode_and_escaping_pin_path(self) -> None:
+        status = self.load_status_module()
+        fleet = self.load_fleet_lib()
+        root = self.make_status_repo()
+        cases = (
+            ({"mode": "thick"}, "mode must be one of"),
+            # Wrong types, not just wrong values: JSON can carry a number or a
+            # bool where the registry documents a string.
+            ({"mode": 5}, "mode must be one of"),
+            ({"mode": True}, "mode must be one of"),
+            ({"pinPath": 5}, "pinPath must be a non-empty string"),
+            ({"pinPath": ["a"]}, "pinPath must be a non-empty string"),
+            ({"pinPath": "/etc/passwd"}, "pinPath must be a relative path"),
+            ({"pinPath": "../escape.json"}, "pinPath must be a relative path"),
+            ({"pinPath": "C:\\escape.json"}, "pinPath must be a relative path"),
+            ({"pinPath": "   "}, "pinPath must be a non-empty string"),
+        )
+        for index, (override, expected) in enumerate(cases):
+            with self.subTest(override=override):
+                manifest = self.write_fleet_manifest(
+                    root.parent / f"fleet-bad-{index}.json",
+                    [
+                        self.fleet_consumer_entry(
+                            "alpha", root, priority=10, **override
+                        )
+                    ],
+                )
+                with self.assertRaisesRegex(fleet.FleetConfigError, expected) as caught:
+                    fleet.load_fleet_consumers(manifest)
+                self.assertIn("alpha", str(caught.exception))
+                # The same failure reaches status as a usable configuration error.
+                with self.assertRaisesRegex(ValueError, expected):
+                    status.load_fleet(PACK_ROOT, manifest)
+
+        # Both fields are optional: omitting them reproduces schema-4 behaviour.
+        manifest = self.write_fleet_manifest(
+            root.parent / "fleet-default.json",
+            [self.fleet_consumer_entry("alpha", root, priority=10)],
+        )
+        consumer = fleet.load_fleet_consumers(manifest)[0]
+        self.assertEqual(consumer.mode, "fat")
+        self.assertEqual(consumer.pin_path, fleet.DEFAULT_FLEET_PIN_PATH)
+
+    def test_consumer_pin_reader_classifies_every_state(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        default = status.DEFAULT_CONSUMER_PIN_PATH
+
+        present = status.read_consumer_pin(root, default)
+        self.assertEqual(present["state"], "present")
+        self.assertEqual(present["version"], PACK_VERSION)
+        self.assertEqual(present["source"], default)
+
+        absent = status.read_consumer_pin(root, "nowhere/pin.json")
+        self.assertEqual(absent["state"], "absent")
+        self.assertIsNone(absent["version"])
+        self.assertIn("does not exist", absent["detail"])
+
+        broken = root / "broken-pin.json"
+        broken.write_text("{not json\n", encoding="utf-8")
+        result = status.read_consumer_pin(root, "broken-pin.json")
+        self.assertEqual(result["state"], "unreadable")
+        self.assertIsNone(result["version"])
+
+        versionless = root / "versionless-pin.json"
+        versionless.write_text(json.dumps({"pack": "sd"}) + "\n", encoding="utf-8")
+        result = status.read_consumer_pin(root, "versionless-pin.json")
+        self.assertEqual(result["state"], "unreadable")
+        self.assertIn("no version string", result["detail"])
+
+        # Load-time validation cannot see this: the registry path is relative
+        # and contains no "..", but the symlink leaves the checkout.
+        outside = root.parent / "outside-pin.json"
+        outside.write_text(json.dumps({"version": "6.6.6"}) + "\n", encoding="utf-8")
+        (root / "escaping-pin.json").symlink_to(outside)
+        result = status.read_consumer_pin(root, "escaping-pin.json")
+        self.assertEqual(result["state"], "unreadable")
+        self.assertIsNone(result["version"])
+
+    def test_fleet_all_fat_registry_ignores_machine_state(self) -> None:
+        # AC3 and the fleet-level gate together: with no thin consumer the
+        # machine inventory cannot change a single row, so a schema-5 registry
+        # naming no mode reports exactly as the schema-4 registry it replaces.
+        status = self.load_status_module()
+        current = self.make_status_repo(pack_version=PACK_VERSION)
+        stale = self.make_status_repo(pack_version="0.18.0")
+        manifest = self.write_fleet_manifest(
+            current.parent / "fleet.json",
+            [
+                self.fleet_consumer_entry("current", current, priority=10),
+                self.fleet_consumer_entry("stale", stale, priority=20),
+            ],
+        )
+
+        healthy, _ = self.collect_fleet_with_machine(
+            status, manifest, self.machine_scope_fixture()
+        )
+        broken, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                state="none",
+                pack_version=None,
+                plugin_version="unavailable",
+                comparison="unknown",
+            ),
+        )
+
+        def comparable(report):
+            rows = [
+                {key: value for key, value in row.items() if key not in {"pin", "installMode"}}
+                for row in report["repositories"]
+            ]
+            return rows, report["nextSteps"], report["followUps"]
+
+        self.assertEqual(comparable(healthy), comparable(broken))
+        for row in healthy["repositories"]:
+            self.assertEqual(row["installMode"], "fat")
+            self.assertIsNone(row["pin"])
+        # The inventory itself is still published; only the rows are gated.
+        self.assertIsInstance(healthy["machineScope"], dict)
+        self.assertTrue(
+            any("Refresh stale SD pack installations" in step for step in healthy["nextSteps"])
+        )
+        for step in healthy["nextSteps"]:
+            self.assertNotIn("machine SD install", step)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.render_fleet(healthy)
+        rendered = output.getvalue()
+        self.assertNotIn("Machine scope:", rendered)
+        self.assertIn("stale: clean; main; cached:synchronized; pack 0.18.0", rendered)
+
+    def test_fleet_thin_consumer_reports_pin_and_skew(self) -> None:
+        status = self.load_status_module()
+        fat = self.make_status_repo(pack_version="0.18.0")
+        thin = self.make_status_repo(pack_version="0.30.0")
+        manifest = self.write_fleet_manifest(
+            fat.parent / "fleet.json",
+            [
+                self.fleet_consumer_entry("fatty", fat, priority=10),
+                self.fleet_consumer_entry("thinny", thin, priority=20, mode="thin"),
+            ],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(pack_version="0.31.0", plugin_version="0.31.0"),
+        )
+
+        rows = {row["name"]: row for row in report["repositories"]}
+        self.assertEqual(rows["fatty"]["installMode"], "fat")
+        self.assertIsNone(rows["fatty"]["pin"])
+        self.assertEqual(rows["thinny"]["installMode"], "thin")
+        self.assertEqual(rows["thinny"]["pin"]["state"], "present")
+        self.assertEqual(rows["thinny"]["pin"]["version"], "0.30.0")
+
+        steps = report["nextSteps"]
+        # The thin consumer's pin lags the machine install, and the machine
+        # install lags the target: two distinct skew rows, neither a tree diff.
+        self.assertTrue(any("thinny" in step and "0.31.0" in step for step in steps))
+        self.assertTrue(any("Update the machine SD install (0.31.0)" in step for step in steps))
+        stale_rows = [step for step in steps if "Refresh stale SD pack installations" in step]
+        self.assertEqual(len(stale_rows), 1)
+        self.assertIn("fatty", stale_rows[0])
+        self.assertNotIn("thinny", stale_rows[0])
+        self.assertTrue(
+            any("thinny" in item["summary"] for item in report["followUps"])
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.render_fleet(report)
+        rendered = output.getvalue()
+        self.assertIn("Machine scope: installed 0.31.0", rendered)
+        self.assertIn("thinny: clean; main; cached:synchronized; pin 0.30.0", rendered)
+        self.assertIn("fatty: clean; main; cached:synchronized; pack 0.18.0", rendered)
+        # Both consumers need attention, by two different measures.
+        self.assertIn("2 need attention", rendered)
+
+    def test_fleet_thin_pin_states_and_unavailable_machine(self) -> None:
+        status = self.load_status_module()
+        thin = self.make_status_repo(pack_version=PACK_VERSION)
+        (thin / ".sd-ai-command-pack/provenance.json").unlink()
+        manifest = self.write_fleet_manifest(
+            thin.parent / "fleet.json",
+            [self.fleet_consumer_entry("thinny", thin, priority=10, mode="thin")],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                state="none",
+                pack_version=None,
+                plugin_version="unavailable",
+                comparison="unknown",
+            ),
+        )
+
+        row = report["repositories"][0]
+        self.assertEqual(row["pin"]["state"], "absent")
+        steps = report["nextSteps"]
+        self.assertTrue(any("Repair missing or unreadable thin consumer pins" in s for s in steps))
+        # An unavailable machine inventory is reported as unavailable, never as
+        # agreement with whatever the consumer pinned.
+        self.assertTrue(any("inventory is unavailable" in step for step in steps))
+        self.assertTrue(any("Install or repair the machine SD install" in s for s in steps))
+        summaries = [item["summary"] for item in report["followUps"]]
+        self.assertTrue(any("inventory is unavailable" in summary for summary in summaries))
+
+    def test_fleet_reports_plugin_versus_receipt_divergence(self) -> None:
+        status = self.load_status_module()
+        thin = self.make_status_repo(pack_version=PACK_VERSION)
+        manifest = self.write_fleet_manifest(
+            thin.parent / "fleet.json",
+            [self.fleet_consumer_entry("thinny", thin, priority=10, mode="thin")],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                pack_version=PACK_VERSION,
+                plugin_version="0.1.0",
+                comparison="skew",
+            ),
+        )
+
+        steps = report["nextSteps"]
+        divergence = [step for step in steps if step.startswith("Reconcile the SD plugin")]
+        self.assertEqual(len(divergence), 1)
+        self.assertIn("0.1.0", divergence[0])
+        self.assertIn(PACK_VERSION, divergence[0])
+        # The pin agrees with the machine receipt, so this row is the plugin's
+        # own divergence and not a restatement of pin skew.
+        self.assertFalse(any("Reconcile thin consumer pins" in step for step in steps))
+
+    def test_fleet_skew_rows_survive_human_truncation(self) -> None:
+        status = self.load_status_module()
+        skewed = self.make_status_repo(pack_version="0.1.0")
+        broken = self.make_status_repo(pack_version=PACK_VERSION)
+        (broken / ".sd-ai-command-pack/provenance.json").unlink()
+        dirty = self.make_status_repo(pack_version=PACK_VERSION)
+        (dirty / "README.md").write_text("uncommitted\n", encoding="utf-8")
+        stale = self.make_status_repo(pack_version="0.18.0")
+        manifest = self.write_fleet_manifest(
+            skewed.parent / "fleet.json",
+            [
+                self.fleet_consumer_entry("skewed", skewed, priority=10, mode="thin"),
+                self.fleet_consumer_entry("broken", broken, priority=20, mode="thin"),
+                self.fleet_consumer_entry("dirty", dirty, priority=30),
+                self.fleet_consumer_entry("stale", stale, priority=40),
+                self.fleet_consumer_entry(
+                    "gone", skewed.parent / "gone", priority=50
+                ),
+            ],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                pack_version="0.2.0", plugin_version="0.3.0", comparison="skew"
+            ),
+        )
+
+        # Four skew rows and three advisory rows: more than the human list can
+        # hold, which is exactly the case that used to lose a skew row.
+        self.assertEqual(len(report["nextSteps"]), status.HUMAN_ITEM_LIMIT)
+        self.assertEqual(len(report["followUps"]), 7)
+        skew_prefixes = (
+            "Repair missing or unreadable thin consumer pins",
+            "Reconcile thin consumer pins",
+            "Update the machine SD install",
+            "Reconcile the SD plugin",
+        )
+        for prefix in skew_prefixes:
+            with self.subTest(row=prefix):
+                # Every skew row survives truncation in the human list...
+                self.assertTrue(
+                    any(step.startswith(prefix) for step in report["nextSteps"])
+                )
+        # ...because the four of them are ranked ahead of every advisory row.
+        self.assertTrue(
+            all(
+                step.startswith(skew_prefixes)
+                for step in report["nextSteps"][: len(skew_prefixes)]
+            ),
+            report["nextSteps"],
+        )
+        # Follow-ups still carry the advisory rows truncation dropped.
+        summaries = [item["summary"] for item in report["followUps"]]
+        for advisory in (
+            "Resolve uncommitted fleet work",
+            "Refresh stale SD pack installations",
+        ):
+            with self.subTest(row=advisory):
+                self.assertTrue(any(s.startswith(advisory) for s in summaries))
+                self.assertFalse(
+                    any(step.startswith(advisory) for step in report["nextSteps"])
+                )
+
+    def test_fleet_collects_machine_scope_once_per_run(self) -> None:
+        status = self.load_status_module()
+        repos = [self.make_status_repo(pack_version=PACK_VERSION) for _ in range(3)]
+        manifest = self.write_fleet_manifest(
+            repos[0].parent / "fleet.json",
+            [
+                self.fleet_consumer_entry(f"member{index}", repo, priority=10 + index)
+                for index, repo in enumerate(repos)
+            ],
+        )
+
+        report, probe = self.collect_fleet_with_machine(
+            status, manifest, self.machine_scope_fixture()
+        )
+
+        # One machine probe for the whole run, not one per consumer: each
+        # consumer row keeps include_machine_scope=False.
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(len(report["repositories"]), 3)
+        for row in report["repositories"]:
+            self.assertIsNone(row["report"]["machineScope"])
+
     def test_machine_scope_api_loads_the_engine_beside_the_script(self) -> None:
         status = self.load_status_module()
         # The installed arrangement: scripts/ beside installer/. The canonical

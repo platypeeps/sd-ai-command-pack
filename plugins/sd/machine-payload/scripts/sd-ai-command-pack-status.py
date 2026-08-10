@@ -107,6 +107,16 @@ REVIEW_TOTAL_COUNT_QUERY = (
 FLEET_READY_STEP = (
     "Fleet checkouts are locally ready; no immediate fleet action is required."
 )
+# Skew rows describe an installation that no longer matches what it pins, so
+# they must reach the operator even when the advisory rows outnumber
+# HUMAN_ITEM_LIMIT. fleet_next_steps sorts by this rank before truncating and
+# derives followUps from the untruncated set.
+FLEET_STEP_RANK_SKEW = 0
+FLEET_STEP_RANK_ADVISORY = 1
+# Mirrors DEFAULT_FLEET_PIN_PATH in sd_ai_command_pack_fleet_lib. Used only as a
+# defensive fallback for a FleetConsumer that predates schema 5; a test asserts
+# the two constants stay equal.
+DEFAULT_CONSUMER_PIN_PATH = ".sd-ai-command-pack/provenance.json"
 
 
 @dataclass(frozen=True)
@@ -2860,42 +2870,196 @@ def load_fleet(
     return consumers, resolution
 
 
-def fleet_next_steps(reports: Sequence[Mapping[str, Any]], target: str) -> list[str]:
+def read_consumer_pin(root: Path, pin_path: str) -> dict[str, Any]:
+    """Classify a thin consumer's pin as present, absent, or unreadable.
+
+    ``read_json_object`` collapses a missing file, an I/O error, and invalid
+    JSON into one ``None``, and ``collect_versions`` additionally falls back to
+    the installed manifest, so neither can express this three-way state. Load
+    time already rejects absolute and ``..``-bearing pin paths, but a purely
+    relative path can still leave the checkout through a symlink, so the read
+    repeats the containment pattern used by ``filesystem_payload_digest``:
+    ``resolve(strict=True)`` then ``relative_to`` the consumer root. An escape
+    is reported, never followed.
+    """
+
+    source = safe_text(pin_path, limit=300)
+
+    def result(
+        state: str,
+        *,
+        version: str | None = None,
+        detail: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "state": state,
+            "version": version,
+            "source": source,
+            "detail": safe_text(detail, limit=200) if detail else None,
+        }
+
+    try:
+        resolved = (root / pin_path).resolve(strict=True)
+        resolved.relative_to(root.resolve())
+    except FileNotFoundError:
+        return result("absent", detail="pin file does not exist")
+    except (OSError, RuntimeError, ValueError) as error:
+        return result(
+            "unreadable",
+            detail=f"pin path is not readable inside the checkout: {error}",
+        )
+    payload = read_json_object(resolved)
+    if payload is None:
+        return result("unreadable", detail="pin file is not a readable JSON object")
+    version = payload.get("version")
+    if not isinstance(version, str) or not version.strip():
+        return result("unreadable", detail="pin file carries no version string")
+    return result("present", version=safe_text(version, limit=80))
+
+
+def machine_install_version(machine_scope: Mapping[str, Any] | None) -> str | None:
+    """The machine install's pack version, or ``None`` when unavailable."""
+    if not isinstance(machine_scope, Mapping):
+        return None
+    if machine_scope.get("state") != "installed":
+        return None
+    version = machine_scope.get("packVersion")
+    return version if isinstance(version, str) and version else None
+
+
+def fleet_step_records(
+    reports: Sequence[Mapping[str, Any]],
+    target: str,
+    *,
+    machine_scope: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Every fleet step, untruncated, ranked so skew outranks advisory rows.
+
+    Fleet-level machine rows are gated on the registry containing at least one
+    thin consumer: nothing consumes the machine install while every consumer is
+    fat, so an all-fat fleet reports exactly as it did before schema 5.
+    """
     missing = [item["name"] for item in reports if item.get("status") == "missing"]
+    available = [item for item in reports if item.get("status") == "available"]
+    thin = [item for item in available if item.get("installMode") == "thin"]
+    fat = [item for item in available if item.get("installMode") != "thin"]
     dirty = [
         item["name"]
-        for item in reports
-        if item.get("status") == "available"
-        and item["report"]["git"]["workingTree"]["state"] == "dirty"
+        for item in available
+        if item["report"]["git"]["workingTree"]["state"] == "dirty"
     ]
     stale = [
         item["name"]
-        for item in reports
-        if item.get("status") == "available"
-        and item["report"]["versions"]["sdAiCommandPack"] != target
+        for item in fat
+        if item["report"]["versions"]["sdAiCommandPack"] != target
     ]
     divergent = [
         item["name"]
-        for item in reports
-        if item.get("status") == "available"
-        and item["report"]["git"]["syncState"] in {"behind", "diverged"}
+        for item in available
+        if item["report"]["git"]["syncState"] in {"behind", "diverged"}
     ]
-    steps: list[str] = []
+    has_thin = any(item.get("installMode") == "thin" for item in reports)
+    machine_version = machine_install_version(machine_scope)
+
+    records: list[dict[str, Any]] = []
+
+    def add(summary: str, rank: int) -> None:
+        records.append({"summary": summary, "rank": rank})
+
+    broken_pins = [
+        item["name"]
+        for item in thin
+        if (item.get("pin") or {}).get("state") != "present"
+    ]
+    if broken_pins:
+        add(
+            "Repair missing or unreadable thin consumer pins: "
+            + ", ".join(broken_pins)
+            + ".",
+            FLEET_STEP_RANK_SKEW,
+        )
+    if machine_version is None:
+        if thin:
+            add(
+                "Machine SD install inventory is unavailable; thin consumer pins "
+                "cannot be compared.",
+                FLEET_STEP_RANK_SKEW,
+            )
+    else:
+        skewed_pins = [
+            item["name"]
+            for item in thin
+            if (item.get("pin") or {}).get("state") == "present"
+            and (item.get("pin") or {}).get("version") != machine_version
+        ]
+        if skewed_pins:
+            add(
+                f"Reconcile thin consumer pins against the machine install "
+                f"({machine_version}): " + ", ".join(skewed_pins) + ".",
+                FLEET_STEP_RANK_SKEW,
+            )
+    if has_thin:
+        if machine_version is None:
+            add(
+                "Install or repair the machine SD install; thin consumers depend "
+                "on it.",
+                FLEET_STEP_RANK_SKEW,
+            )
+        elif machine_version != target:
+            add(
+                f"Update the machine SD install ({machine_version}) to the target "
+                f"pack version ({target}).",
+                FLEET_STEP_RANK_SKEW,
+            )
+        if isinstance(machine_scope, Mapping) and machine_scope.get("comparison") == "skew":
+            add(
+                "Reconcile the SD plugin "
+                f"({machine_scope.get('pluginVersion') or 'unavailable'}) and the "
+                f"machine receipt ({machine_scope.get('packVersion') or 'unavailable'}).",
+                FLEET_STEP_RANK_SKEW,
+            )
+
     if missing:
-        steps.append("Restore or correct missing fleet checkouts: " + ", ".join(missing) + ".")
+        add(
+            "Restore or correct missing fleet checkouts: " + ", ".join(missing) + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
     if dirty:
-        steps.append("Resolve uncommitted fleet work before rollout: " + ", ".join(dirty) + ".")
+        add(
+            "Resolve uncommitted fleet work before rollout: " + ", ".join(dirty) + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
     if divergent:
-        steps.append("Reconcile behind or diverged fleet checkouts: " + ", ".join(divergent) + ".")
+        add(
+            "Reconcile behind or diverged fleet checkouts: " + ", ".join(divergent) + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
     if stale:
-        steps.append("Refresh stale SD pack installations: " + ", ".join(stale) + ".")
-    if not steps:
-        steps.append(FLEET_READY_STEP)
-    return steps[:HUMAN_ITEM_LIMIT]
+        add(
+            "Refresh stale SD pack installations: " + ", ".join(stale) + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
+    if not records:
+        add(FLEET_READY_STEP, FLEET_STEP_RANK_ADVISORY)
+    records.sort(key=lambda record: record["rank"])
+    return records
 
 
-def fleet_follow_ups(steps: Sequence[str]) -> list[dict[str, Any]]:
-    actionable = [step for step in steps if step != FLEET_READY_STEP]
+def fleet_next_steps(records: Sequence[Mapping[str, Any]]) -> list[str]:
+    return [str(record["summary"]) for record in records][:HUMAN_ITEM_LIMIT]
+
+
+def fleet_follow_ups(records: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Derive ``F-*`` rows from the complete record set.
+
+    Deriving them from the truncated human list would let a skew row vanish
+    once enough advisory rows exist, which PRD requirement 3 forbids.
+    """
+    actionable = [
+        str(record["summary"])
+        for record in records
+        if record["summary"] != FLEET_READY_STEP
+    ]
     return select_items(
         [
             {"kind": "action", "summary": step, "source": "fleet"}
@@ -2929,6 +3093,8 @@ def collect_fleet(
             consumer.name.casefold(),
             Path(consumer.path_hint).expanduser(),
         )
+        install_mode = getattr(consumer, "mode", "fat")
+        pin_path = getattr(consumer, "pin_path", DEFAULT_CONSUMER_PIN_PATH)
         if not path.is_dir():
             return {
                 "name": consumer.name,
@@ -2936,6 +3102,8 @@ def collect_fleet(
                 "priority": consumer.rollout_priority,
                 "path": str(path),
                 "status": "missing",
+                "installMode": install_mode,
+                "pin": None,
                 "report": None,
             }
         try:
@@ -2967,6 +3135,12 @@ def collect_fleet(
             "priority": consumer.rollout_priority,
             "path": str(path),
             "status": "available" if report else "unavailable",
+            "installMode": install_mode,
+            "pin": (
+                read_consumer_pin(path, pin_path)
+                if report and install_mode == "thin"
+                else None
+            ),
             "report": report,
         }
 
@@ -2984,11 +3158,21 @@ def collect_fleet(
             reports = list(executor.map(collect_consumer, consumers))
     else:
         reports = []
-    steps = fleet_next_steps(reports, target)
+    # One machine probe per fleet run, never one per consumer: each consumer
+    # row keeps include_machine_scope=False, so no extra `claude plugin list`
+    # subprocess is spawned per member.
+    machine_scope = collect_machine_scope(
+        pack_root,
+        home=home,
+        environ=environ,
+    )
+    records = fleet_step_records(reports, target, machine_scope=machine_scope)
+    steps = fleet_next_steps(records)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "mode": "fleet",
         "targetPackVersion": target,
+        "machineScope": machine_scope,
         "refsFreshness": "refreshed" if refs_refreshed else "cached",
         "configuration": {
             "source": resolution.source,
@@ -2998,7 +3182,7 @@ def collect_fleet(
             ),
         },
         "repositories": reports,
-        "followUps": fleet_follow_ups(steps),
+        "followUps": fleet_follow_ups(records),
         "nextSteps": steps,
     }
 
@@ -3008,16 +3192,27 @@ def render_fleet(report: Mapping[str, Any]) -> None:
     available = sum(item.get("status") == "available" for item in repositories)
     missing = sum(item.get("status") == "missing" for item in repositories)
     unavailable = len(repositories) - available - missing
+    machine_version = machine_install_version(report.get("machineScope"))
     attention = 0
     for item in repositories:
         local = item.get("report")
         if not isinstance(local, dict):
             attention += 1
-        elif (
+            continue
+        if (
             local["git"]["workingTree"]["state"] != "clean"
             or local["git"]["syncState"] in {"behind", "diverged"}
-            or local["versions"]["sdAiCommandPack"] != report["targetPackVersion"]
         ):
+            attention += 1
+            continue
+        # Version attention follows the mode split, so the human counter and the
+        # JSON skew rows cannot disagree: a thin consumer has no meaningful
+        # installed tree to compare against the target.
+        if item.get("installMode") == "thin":
+            pin = item.get("pin") or {}
+            if pin.get("state") != "present" or pin.get("version") != machine_version:
+                attention += 1
+        elif local["versions"]["sdAiCommandPack"] != report["targetPackVersion"]:
             attention += 1
     print(
         f"SD fleet status: {len(repositories)} repositories, "
@@ -3027,6 +3222,8 @@ def render_fleet(report: Mapping[str, Any]) -> None:
     print(f"Target pack: {report['targetPackVersion']}")
     configuration = report.get("configuration", {})
     print(f"Fleet config: {configuration.get('source', 'unknown')}")
+    if any(item.get("installMode") == "thin" for item in repositories):
+        print(f"Machine scope: {format_machine_scope(report.get('machineScope'))}")
     print(f"Ref freshness: {report['refsFreshness']}")
     print("\n==> Fleet")
     for item in repositories:
@@ -3046,11 +3243,21 @@ def render_fleet(report: Mapping[str, Any]) -> None:
             if github.get("openPrsStatus") == "available"
             else "unavailable"
         )
+        if item.get("installMode") == "thin":
+            pin = item.get("pin") or {}
+            pin_state = pin.get("state") or "unreadable"
+            pack_label = (
+                f"pin {pin.get('version')}"
+                if pin_state == "present"
+                else f"pin {pin_state}"
+            )
+        else:
+            pack_label = f"pack {versions.get('sdAiCommandPack') or 'none'}"
         print(
             f"- {prefix}: {git['workingTree']['state']}; "
             f"{git.get('branch') or 'detached'}; "
             f"{report['refsFreshness']}:{git['syncState']}; "
-            f"pack {versions.get('sdAiCommandPack') or 'none'}; "
+            f"{pack_label}; "
             f"stashes {stash_label}; "
             f"PRs {pr_count}; "
             f"tasks {len(trellis.get('inProgress', []))}/{len(trellis.get('planned', []))}"

@@ -446,8 +446,8 @@ class FleetCandidateTests(InstallTestCase):
         malformed_consumer = fleet_manifest([valid])
         malformed_consumer["consumers"] = ["bad"]
         invalid_manifests = [
-            ({}, "schemaVersion must be 4"),
-            ({"schemaVersion": 3, "consumers": []}, "schemaVersion must be 4"),
+            ({}, "schemaVersion must be 5"),
+            ({"schemaVersion": 4, "consumers": []}, "schemaVersion must be 5"),
             (malformed_consumer, "consumers[0] must be an object"),
             (fleet_manifest([{**valid, "name": ""}]), "has invalid name"),
             (fleet_manifest([{**valid, "name": ".."}]), "name must be a non-path"),

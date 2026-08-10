@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ntpath
 import os
 import re
 import stat
@@ -14,8 +15,16 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-FLEET_SCHEMA_VERSION = 4
+FLEET_SCHEMA_VERSION = 5
 FLEET_PROFILE_SCHEMA_VERSION = 1
+# Schema 5 adds the per-consumer install mode. ``fat`` keeps the vendored
+# payload and its installed-vs-target drift report; ``thin`` resolves agent
+# surfaces from the machine install and is reported by pin instead. Both
+# fields default, so a schema-5 registry that names neither behaves exactly
+# like the schema-4 registry it replaces.
+FLEET_CONSUMER_MODES = ("fat", "thin")
+DEFAULT_FLEET_CONSUMER_MODE = "fat"
+DEFAULT_FLEET_PIN_PATH = ".sd-ai-command-pack/provenance.json"
 CANDIDATE_LEDGER_SCHEMA_VERSION = 2
 MAX_CANDIDATE_TIMEOUT_SECONDS = 3600
 MAX_FLEET_CONCURRENCY = 4
@@ -41,6 +50,10 @@ class FleetConsumer:
     candidate_timeout_seconds: int
     candidate_prepare: tuple[tuple[str, ...], ...]
     candidate_checks: tuple[tuple[str, ...], ...]
+    # Declared last with defaults so existing positional constructors keep
+    # working; schema 5 makes both optional in the registry as well.
+    mode: str = DEFAULT_FLEET_CONSUMER_MODE
+    pin_path: str = DEFAULT_FLEET_PIN_PATH
 
 
 @dataclass(frozen=True)
@@ -377,6 +390,28 @@ def _parse_platforms(item: Mapping[str, Any], label: str) -> tuple[str, ...]:
     return tuple(sorted(parsed))
 
 
+def _parse_consumer_mode(item: Mapping[str, Any], label: str) -> str:
+    mode = item.get("mode", DEFAULT_FLEET_CONSUMER_MODE)
+    if mode not in FLEET_CONSUMER_MODES:
+        raise FleetConfigError(
+            f"{label} mode must be one of {', '.join(FLEET_CONSUMER_MODES)}"
+        )
+    return mode
+
+
+def _parse_consumer_pin_path(item: Mapping[str, Any], label: str) -> str:
+    value = item.get("pinPath", DEFAULT_FLEET_PIN_PATH)
+    if not isinstance(value, str) or not value.strip():
+        raise FleetConfigError(f"{label} pinPath must be a non-empty string")
+    candidate = PurePosixPath(value)
+    if candidate.is_absolute() or ntpath.isabs(value) or ".." in candidate.parts:
+        raise FleetConfigError(
+            f"{label} pinPath must be a relative path inside the consumer "
+            "checkout"
+        )
+    return value
+
+
 def _parse_candidate_commands(
     item: Mapping[str, Any],
     label: str,
@@ -593,6 +628,8 @@ def _parse_fleet_consumers_without_policy(
                 name=name,
                 github=github,
                 path_hint=path_hint,
+                mode=_parse_consumer_mode(item, consumer_label),
+                pin_path=_parse_consumer_pin_path(item, consumer_label),
                 platforms=_parse_platforms(item, consumer_label),
                 rollout_priority=priority,
                 candidate_timeout_seconds=timeout,
