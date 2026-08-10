@@ -1595,6 +1595,47 @@ class ReviewControllerTests(InstallTestCase):
         state = json.loads(state_files[0].read_text(encoding="utf-8"))
         self.assertEqual(state["local"], clean)
 
+    def test_rejected_disposition_without_a_stored_report_recomputes(self) -> None:
+        # The companion of the test above, and the arm that actually recomputes.
+        # With a report already stored, a rejection leaves the stored one in
+        # place and the next invocation reuses it. With nothing stored — the
+        # very first invocation supplied dispositions and was rejected — there
+        # is no durable report to fall back on, so the next invocation must run
+        # the stage rather than replay the rejection.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+        clean = self.local_report(controller, {"head": head})
+        rejected = self.local_report(controller, {"head": head}, status="invalid")
+        rejected["diagnostic"] = "local disposition ids match no finding at this head"
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            side_effect=[rejected, clean],
+        ) as run_local, mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ):
+            first = controller.run(
+                self.branch_review_args(
+                    controller, root, artifacts, "--local-disposition", "id-1=rebutted"
+                )
+            )
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (2, "invalid"))
+        self.assertEqual((second[0], second[1]["status"]), (0, "ready"))
+        self.assertEqual(run_local.call_count, 2)
+        state_files = list(artifacts.glob("review-*.json"))
+        self.assertEqual(len(state_files), 1)
+        state = json.loads(state_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(state["local"], clean)
+
     def test_local_provider_failure_is_recomputed_on_the_next_invocation(self) -> None:
         # Provider reachability is environmental, not a function of the attempt
         # key, so an `unavailable` report is a verdict the next invocation is
