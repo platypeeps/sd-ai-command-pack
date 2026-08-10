@@ -37,6 +37,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SCANNER = HERE / "fleet-blocker-scan.py"
+REGISTRY = HERE.parents[3] / "docs/fleet/consumers.json"
 DEFAULT_SCAN = HERE / "fleet-blocker-scan.json"
 
 
@@ -208,6 +209,36 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
         "fix. The two rows together are what make the proof falsifiable",
     ),
     (
+        "loadsmith",
+        "docs/repomix-map.md",
+        1388,
+        "blockers",
+        "R11-C2",
+        "`scripts/sd-ai-command-pack-check.py --json` sits on a shell "
+        "continuation inside a ```bash fence. It carries no command token of "
+        "its own; disabling either fence or continuation recognition loses it",
+    ),
+    (
+        "sd-github-review",
+        ".trellis/tasks/08-09-review-coordinator-stale-check/implement.md",
+        139,
+        "blockers",
+        "R11-C2",
+        "the same shape in a second consumer and a different file type, which "
+        "is how the fleet writes nearly every long invocation",
+    ),
+    (
+        "loadsmith",
+        ".sd-ai-command-pack/manifest.json",
+        None,
+        "scheduled",
+        "R11-C2",
+        "generated bookkeeping: the manifest names every shipped target, so "
+        "classifying it line-by-line produces 1055 citations per consumer, 93% "
+        "of every advisory list. Reverting the rule moved `scheduled` from 182 "
+        "to 179 and failed nothing",
+    ),
+    (
         "rwbp-coordinator",
         ".prism/rules.json",
         55,
@@ -305,6 +336,60 @@ def symlink_cases(module) -> list[tuple[str, str, object, object]]:
                 None,
             ),
         ]
+
+
+def enumeration_cases(module) -> list[tuple[str, str, object, object]]:
+    """R11-C2: which files the scan is even allowed to see."""
+    with tempfile.TemporaryDirectory() as raw:
+        repo = Path(raw).resolve()
+        for args in (
+            ("init", "-q"),
+            ("config", "user.email", "harness@example.invalid"),
+            ("config", "user.name", "harness"),
+        ):
+            subprocess.run(
+                ["git", "-C", str(repo), *args], check=True, capture_output=True
+            )
+        (repo / "tracked.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (repo / ".gitignore").write_text("ignored.sh\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "tracked.sh", ".gitignore"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-qm", "seed"],
+            check=True,
+            capture_output=True,
+        )
+        # Untracked and non-ignored: the conversion runs against the working
+        # tree, so this file breaks exactly as hard as a committed one. Six
+        # real `se-ai-command-pack` blockers lived in files like it.
+        (repo / "untracked.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        # Ignored: bound by `receiptOccupancyDigest` where it matters, and not
+        # part of a conversion PR.
+        (repo / "ignored.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        found = set(module.enumerate_files(repo))
+    return [
+        (
+            "R11-C2",
+            "a tracked file is enumerated",
+            "tracked.sh" in found,
+            True,
+        ),
+        (
+            "H10-1/R11-C2",
+            "an untracked, non-ignored file is enumerated",
+            "untracked.sh" in found,
+            True,
+        ),
+        (
+            "H10-1",
+            "an ignored file is not",
+            "ignored.sh" in found,
+            False,
+        ),
+    ]
 
 
 def bytes_cases(module) -> list[tuple[str, str, object, object]]:
@@ -411,6 +496,7 @@ def bytes_cases(module) -> list[tuple[str, str, object, object]]:
 
 def unit_cases(module) -> list[tuple[str, str, bool, bool]]:
     """(round, description, actual, expected) for predicate-level cases."""
+    registry_module = importlib.import_module("installer.registry")
     removed = frozenset(
         {
             "scripts/sd-ai-command-pack-full-check.sh",
@@ -542,6 +628,57 @@ def unit_cases(module) -> list[tuple[str, str, bool, bool]]:
             False,
         ),
         (
+            "R11-C2",
+            "a runnable fence puts its lines in command position",
+            module.command_lines(["```bash", "scripts/x.sh", "```"]) == {2},
+            True,
+        ),
+        (
+            "R11-C2",
+            "a non-runnable fence does not",
+            module.command_lines(["```json", '{"a": 1}', "```"]) == set(),
+            True,
+        ),
+        (
+            "R11-C2",
+            "a shell continuation carries command position to the next line",
+            module.command_lines(["bash toolchain.sh run-python -- \\", "  scripts/x.py"])
+            == {2},
+            True,
+        ),
+        (
+            "R11-C2",
+            "a trailing backslash after prose is not a continuation",
+            module.command_lines(["a table cell ending in \\", "  scripts/x.py"]),
+            set(),
+        ),
+        (
+            "R11-C4",
+            "the OpenCode command namespace is the registry's, plural",
+            module.is_executable_surface(HERE, ".opencode/commands/custom.md"),
+            True,
+        ),
+        (
+            "R11-C4",
+            "a platform absent from the old hand-written list is covered",
+            module.is_executable_surface(HERE, ".zcode/commands/custom.md"),
+            True,
+        ),
+        (
+            "R11-C4",
+            "every platform directory the registry defines has a prefix",
+            sorted(
+                info.directory
+                for info in registry_module.PLATFORM_REGISTRY.values()
+                if info.directory != ".github"
+                and not any(
+                    prefix == f"{info.directory}/"
+                    for prefix in module.EXECUTABLE_PREFIXES
+                )
+            ),
+            [],
+        ),
+        (
             "U-3/R7-6",
             "a repeated marker label is unresolvable ownership, not two blocks",
             module.block_spans(
@@ -590,68 +727,93 @@ def main() -> int:
     passed = 0
 
     for round_id, description, actual, expected in (
-        unit_cases(module) + symlink_cases(module) + bytes_cases(module)
+        unit_cases(module)
+        + symlink_cases(module)
+        + bytes_cases(module)
+        + enumeration_cases(module)
     ):
         if actual == expected:
             passed += 1
         else:
             failures.append(f"unit  {round_id}: {description} -> {actual!r}")
 
-    scan = json.loads(args.scan.read_text(encoding="utf-8"))
-    # H10-3: a fleet assertion reads a stored result, so on its own it proves
-    # nothing about the scanner that is on disk right now. Mutation-testing
-    # this harness showed exactly that: reverting the R9-3 rule left all 15
-    # fleet cases green, because they were re-checking a JSON produced before
-    # the mutation. Requiring the recorded `scannerDigest` to match the
-    # scanner's current bytes is what makes "35 passed" a statement about this
-    # scanner rather than about some scanner.
-    current = module.file_digest(SCANNER)
-    if scan.get("scannerDigest") != current:
-        print(
-            f"FAIL scan {args.scan} was produced by a different scanner "
-            f"({scan.get('scannerDigest')} != {current}); re-run "
-            "fleet-blocker-scan.py before asserting fleet cases"
-        )
-        return 1
-    rows = {row["consumer"]: row for row in scan["consumers"]}
+    # R11-C1/R11-C2, both demonstrated. Two rounds tried to make a stored
+    # result trustworthy -- H10-3 pinned the scanner's bytes, R10-C1 checked
+    # each consumer's HEAD -- and a stored result still is not evidence about
+    # the scanner on disk. Codex swapped one consumer's fresh row for the
+    # committed one: same HEAD, 23 blockers recorded against 29 present, and
+    # all 40 cases passed, because six of the missing ones live in *untracked*
+    # files that no recorded binding covers. Reverting five separate scanner
+    # rules likewise left the harness green.
+    #
+    # So the fleet cases no longer read a stored row. They call `scan()` on the
+    # consumer, now, in this process, with the scanner that is on disk. There
+    # is nothing left to go stale: the binding fields exist to make the
+    # committed measurement re-derivable, not to certify a cached assertion.
+    # The cost is about 11 seconds fleet-wide.
+    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    platforms = {
+        entry["name"]: (Path(os.path.expanduser(entry["pathHint"])), entry["platforms"])
+        for entry in registry["consumers"]
+    }
+    named = {case[0] for case in FLEET_CASES}
+    rows: dict[str, dict] = {}
+    for consumer in sorted(named):
+        if consumer not in platforms:
+            continue
+        repo, consumer_platforms = platforms[consumer]
+        if not repo.is_dir():
+            continue
+        rows[consumer] = module.scan(consumer, repo, frozenset(consumer_platforms))
+
+    # The committed scan is still read, for one purpose: to say out loud when
+    # the numbers in the planning artifacts were produced by different bytes
+    # than the ones just asserted against.
+    if args.scan.exists():
+        stored = json.loads(args.scan.read_text(encoding="utf-8"))
+        current = module.file_digest(SCANNER)
+        if stored.get("scannerDigest") != current:
+            skipped.append(
+                f"committed scan {args.scan} came from a different scanner "
+                f"({stored.get('scannerDigest')} != {current}); the assertions "
+                "below ran live, but the artifacts' figures are stale"
+            )
     buckets = ("blockers", "packDefects", "scheduled", "advisories")
 
     for consumer, relative, line, expected, round_id, why in FLEET_CASES:
         row = rows.get(consumer)
         if row is None or "error" in row:
-            skipped.append(f"fleet {round_id}: {consumer} not in the scan")
-            continue
-        # R10-C1: the module docstring promised that a head mismatch becomes a
-        # skip, and nothing read a head. Now it does -- a result recorded
-        # against a different commit is not evidence about this one.
-        repo = Path(row["repo"])
-        try:
-            head = subprocess.run(
-                ["git", "-C", str(repo), "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-        except (OSError, subprocess.CalledProcessError):
-            skipped.append(f"fleet {round_id}: {consumer} checkout unreadable")
-            continue
-        if head != row["head"]:
-            skipped.append(
-                f"fleet {round_id}: {consumer} is at {head[:12]}, the scan "
-                f"recorded {row['head'][:12]}"
-            )
+            skipped.append(f"fleet {round_id}: {consumer} checkout unavailable")
             continue
         # R10-C2: a negative case names a file that must exist for its absence
         # from every bucket to mean anything. `.agents/skills/se-help/SKILL.md`
         # did not exist at the recorded head -- the real counterexample is
         # `templates/skills/se-help/SKILL.md` -- so the assertion passed by
         # naming nothing at all, for two rounds.
-        if not (repo / relative).exists():
+        repo = Path(row["repo"])
+        full = repo / relative
+        if not full.exists():
             failures.append(
                 f"fleet {round_id}: {consumer}/{relative} does not exist; a "
                 "case that names no file asserts nothing"
             )
             continue
+        # R11-C2: and the *line* must exist too. Codex moved a negative case's
+        # cited line to 999999 and the harness stayed green: "no bucket holds
+        # this file at this line" is trivially true of a line that is not
+        # there. Existence of the file was the same argument one level up.
+        if line is not None:
+            try:
+                present = len(full.read_bytes().split(b"\n"))
+            except OSError:
+                present = 0
+            if line > present:
+                failures.append(
+                    f"fleet {round_id}: {consumer}/{relative} has {present} "
+                    f"lines; line {line} does not exist, so the case asserts "
+                    "nothing"
+                )
+                continue
         found = {
             bucket
             for bucket in buckets
@@ -682,7 +844,7 @@ def main() -> int:
     print(
         f"{passed} passed, {len(failures)} failed, {len(skipped)} skipped "
         f"({len(FLEET_CASES)} fleet + "
-        f"{len(unit_cases(module)) + len(symlink_cases(module)) + len(bytes_cases(module))}"
+        f"{len(unit_cases(module)) + len(symlink_cases(module)) + len(bytes_cases(module)) + len(enumeration_cases(module))}"
         " unit)"
     )
     return 1 if failures or skipped else 0

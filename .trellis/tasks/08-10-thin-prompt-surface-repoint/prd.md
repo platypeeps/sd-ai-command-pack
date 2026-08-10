@@ -205,7 +205,8 @@ through `make sync` and `make generate`.
 - [ ] All seven still resolve in a fat checkout — the fat path is the one
       every consumer is on today, and breaking it to fix thin trades one
       outage for another.
-- [ ] `fleet-blocker-scan.py` (or the shipped resweep, once it exists)
+- [ ] `fleet-blocker-scan.py` (or the resweep, once it exists — released
+      with the pack, source-only, never installed into a consumer)
       reports `packDefects: 0` for a consumer refreshed to the new pack
       version **and** re-run through the KB refresh — five surfaces
       rewritten by the refresh, the `obsidian-kb` block rewritten by the

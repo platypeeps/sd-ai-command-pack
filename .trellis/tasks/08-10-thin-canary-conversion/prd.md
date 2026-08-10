@@ -25,8 +25,15 @@ revert-and-restore proof.
 
 1. Per consumer, in order: run the resweep against that consumer's
    exact HEAD **and clean worktree**, act on a `clear` verdict only,
-   convert, open the consumer PR, land it green, then flip `mode: thin`
-   in `docs/fleet/consumers.json`.
+   run `--thin`, open the consumer PR, land it green, then land the pack
+   PR carrying that consumer's `mode: thin` row in
+   `docs/fleet/consumers.json`. **The registry row is written by `--thin`,
+   not by hand afterwards**: one invocation writes both roots, which is
+   why it refuses unless both are writable (child 1's `design.md`). The
+   two edits then travel in two pull requests and land in that order. The
+   window between them — tree thin, registry row still `fat` — is the
+   pin-vs-mode skew the parent design accepts and `sd-status fleet`
+   reports.
 2. A `blocked` verdict stops that consumer's conversion and is reported
    with its reasons. It is not worked around. **It stops the whole
    canary cohort**, matching the existing rollout contract: the wave

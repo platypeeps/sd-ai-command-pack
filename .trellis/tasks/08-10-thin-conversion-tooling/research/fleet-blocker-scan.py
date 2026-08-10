@@ -47,6 +47,7 @@ from installer import conversion  # noqa: E402
 from installer.manifest import load_manifest  # noqa: E402
 from installer.provenance import PROVENANCE_FILE  # noqa: E402
 from installer.registry import (  # noqa: E402
+    PLATFORM_REGISTRY,
     COPILOT_GUIDANCE_START,
     COPILOT_INSTRUCTIONS_TARGET,
     FORCE_PRESERVED_TARGETS,
@@ -105,23 +106,35 @@ EXECUTABLE_SUFFIXES = frozenset(
 EXECUTABLE_SEGMENTS = frozenset(
     {"scripts", "bin", "tools", "test", "tests", ".githooks", ".husky"}
 )
-EXECUTABLE_PREFIXES = (
+# R11-C4, demonstrated. This list used to be written by hand, and a hand-written
+# list of platform directories drifts from the registry that defines them. It
+# named `.opencode/command/`; the registry's OpenCode surface is
+# `.opencode/commands/` (registry.py:309), so the prefix matched nothing at all.
+# Twelve further platform directories -- `.agent`, `.codebuddy`, `.cursor`,
+# `.devin`, `.factory`, `.kilocode`, `.kiro`, `.pi`, `.qoder`, `.reasonix`,
+# `.trae`, `.zcode` -- were absent outright. Every one of those holds commands,
+# rules, or skills an agent executes. Deriving the set from `PLATFORM_REGISTRY`
+# closes the class instead of fixing thirteen instances, and a platform added to
+# the pack later is covered without anyone remembering this file.
+#
+# `.github` is excluded from the wholesale rule and kept as explicit
+# sub-prefixes: it is the host's shared directory rather than one agent's, so
+# `.github/ISSUE_TEMPLATE/` is not an execution surface the way
+# `.github/workflows/` is.
+PLATFORM_PREFIXES = tuple(
+    sorted(
+        f"{info.directory}/"
+        for info in PLATFORM_REGISTRY.values()
+        if info.directory != ".github"
+    )
+)
+EXECUTABLE_PREFIXES = PLATFORM_PREFIXES + (
     ".github/workflows/",
     ".github/actions/",
     ".circleci/",
     ".devcontainer/",
-    # Agent-executed surfaces. A prompt or rule that tells an agent to run a
-    # script is an execution surface even though nothing about it is a shell
-    # file.
     ".github/prompts/",
     ".github/instructions/",
-    ".claude/commands/",
-    ".claude/rules/",
-    ".claude/skills/",
-    ".agents/",
-    ".gemini/commands/",
-    ".opencode/command/",
-    ".codex/",
     # R10-C6, demonstrated. `.prism/rules.json` is a list of *required review
     # rules* -- instructions a reviewing agent acts on, not inert config.
     # `rwbp-coordinator/.prism/rules.json:55` tells the reviewer that canonical
@@ -131,6 +144,7 @@ EXECUTABLE_PREFIXES = (
     # keeps the file (`shared`/`consumer-config`), so conversion leaves the
     # broken rule in place. The text is not in the pack's shipped template, so
     # it is consumer-authored and belongs in that consumer's own cleanup.
+    # `.prism` is not a platform directory, so it stays named here.
     ".prism/",
 )
 EXECUTABLE_NAMES = frozenset(
@@ -480,6 +494,57 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
     return digest_of("\n".join(parts))
 
 
+def enumerate_files(repo: Path) -> list[str]:
+    """Every file the conversion would run against: tracked *and* untracked.
+
+    H10-1. The conversion runs against a working tree, not against the index,
+    and an untracked script that invokes a removed path breaks exactly as hard
+    as a committed one. Enumerating only `git ls-files` left that class unread
+    while `worktreeClean` -- which the verdict does not require -- was the only
+    signal it existed. Measured: 8 untracked files across the fleet at the time
+    of the fix, all in `rwbp-coordinator`, none citing a removed path; by round
+    11, six real `se-ai-command-pack` blockers lived in untracked files.
+
+    Ignored files stay out: they are bound by `receiptOccupancyDigest` for the
+    targets that matter, and are not part of a conversion PR.
+
+    R11-C2: this was inline in `scan()`, so reverting it -- dropping untracked
+    files -- changed real blocker counts and failed no fixture. A rule the
+    harness cannot call is a rule the harness cannot protect.
+    """
+    files = [
+        entry
+        for entry in git(repo, "ls-files", "-z").split("\0")
+        if entry and not entry.startswith(SKIP_DIRS)
+    ]
+    files += [
+        entry
+        for entry in git(
+            repo, "ls-files", "-z", "--others", "--exclude-standard"
+        ).split("\0")
+        if entry and not entry.startswith(SKIP_DIRS)
+    ]
+    return files
+
+
+def symlink_targets_digest(repo: Path, files: list[str]) -> str:
+    """R11-C3, constructed. What each symlink in the tree actually resolves to.
+
+    An *ignored* symlink is bound by nothing: switch an intermediate `alias`
+    from `scripts` to `safe` and `resolve_link()` returns a different target,
+    so a tracked link through it changes bucket -- while HEAD, both index
+    digests, the hidden-bytes digest, the worktree digest and cleanliness, the
+    receipt-occupancy digest, the executable-bits digest, and the missing-file
+    list all stay identical. The resolution is the input; the link is not.
+    """
+    parts: list[str] = []
+    for relative in sorted(files):
+        if not (repo / relative).is_symlink():
+            continue
+        parts.append(f"{relative} -> {resolve_link(repo, relative)}")
+    return digest_of("\n".join(parts))
+
+
 def is_binary(raw: bytes) -> bool:
     """Whether these bytes are an asset that cannot carry a citation.
 
@@ -781,27 +846,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "scheduled": [],
         "advisories": [],
     }
-    # H10-1: tracked files *and* untracked, non-ignored ones. The conversion
-    # runs against a working tree, not against the index, and an untracked
-    # script that invokes a removed path breaks exactly as hard as a committed
-    # one. Enumerating only `git ls-files` left that class unread while
-    # `worktreeClean` -- which the verdict does not require -- was the only
-    # signal it existed. Measured: 8 untracked files across the fleet, all in
-    # `rwbp-coordinator`, none citing a removed path. Ignored files stay out:
-    # they are bound by `receiptOccupancyDigest` for the targets that matter
-    # and are not part of a conversion PR.
-    tracked = [
-        entry
-        for entry in git(repo, "ls-files", "-z").split("\0")
-        if entry and not entry.startswith(SKIP_DIRS)
-    ]
-    tracked += [
-        entry
-        for entry in git(
-            repo, "ls-files", "-z", "--others", "--exclude-standard"
-        ).split("\0")
-        if entry and not entry.startswith(SKIP_DIRS)
-    ]
+    tracked = enumerate_files(repo)
     survivors = frozenset(tracked) - removed
     binary: list[str] = []
     missing: list[str] = []
@@ -960,6 +1005,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "worktreeClean": not git(repo, "status", "--porcelain").strip(),
         "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),
         "executableBitsDigest": executable_bits_digest(repo, tracked),
+        "symlinkTargetsDigest": symlink_targets_digest(repo, tracked),
         "binaryTrackedFiles": len(binary),
         "missingTrackedFiles": sorted(missing),
         "receiptEntries": len(receipt.entries),
@@ -1008,6 +1054,19 @@ def main() -> int:
         "packHead": git(ROOT, "rev-parse", "HEAD").strip(),
         "packWorktreeDigest": worktree_digest(ROOT),
         "packWorktreeClean": not git(ROOT, "status", "--porcelain").strip(),
+        # R11-C3, demonstrated against five consumers. `shipped_template_digests()`
+        # reads the pack's own `templates/` bytes to decide whether a
+        # force-preserved consumer file is pack-owned or consumer-owned, so the
+        # *pack* worktree is an input too -- and `skip-worktree` on
+        # `templates/.github/PULL_REQUEST_TEMPLATE.md` hides a rewrite of it from
+        # `packWorktreeDigest` and `packWorktreeClean` alike. Codex did exactly
+        # that and moved five consumers' pack defects 16 to 14 and their blockers
+        # up by one, with every recorded binding unchanged. The consumer side got
+        # this in R10-C3; the pack side had the identical hole.
+        "packIndexFlagsDigest": digest_of(git(ROOT, "ls-files", "-v")),
+        "packHiddenBytesDigest": hidden_bytes_digest(
+            ROOT, git(ROOT, "ls-files", "-v")
+        ),
         "scannerDigest": file_digest(Path(__file__)),
         # R9: the counterexample list is executable and lives beside this
         # scanner. Binding its bytes here is what makes "all counterexamples

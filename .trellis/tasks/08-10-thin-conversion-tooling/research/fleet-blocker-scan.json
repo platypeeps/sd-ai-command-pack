@@ -1,23 +1,26 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "69a34b1866775b6bc20ecbe19ee656062ee22036",
-  "packWorktreeDigest": "sha256:9ec02ace13f0f5ef460bc11fa48b3b118b5dba505acb0780a636e34fce8e2465",
+  "packHead": "6f1d3317e31bd8f932143908bc144143bd674ca1",
+  "packWorktreeDigest": "sha256:5ddfa5d7dbed459e59a7ea35982f576d28dc80f1883e69f6a77f4f0d7d6ebe0f",
   "packWorktreeClean": false,
-  "scannerDigest": "sha256:7b351bc8714e64a53469c325e7b354c7c2237d8f63a60c5b19f74463d5db8197",
-  "counterexamplesDigest": "sha256:dc611c330bb6342cedb8e03a643cd2dcfffa2061bc068c5b85a38275530ae173",
+  "packIndexFlagsDigest": "sha256:79a5a17998e4d0ac882946e401204089f700b56f893637d337705f44b20e068d",
+  "packHiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "scannerDigest": "sha256:794520e14f659b369f07235bf254cd2197672335feb34fed47ea84eb6dce2f62",
+  "counterexamplesDigest": "sha256:b7a30271a95f56b84928551b7651826edad982e536100f526f03934d17f3844a",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
-      "head": "5044c11de3ab3dce1ce5c9ace7a8510a567680be",
-      "indexDigest": "sha256:3ad1b56b3a7e595d336b96b15c1d0ea7779c02abad3a1ca58b2cc178db121f4e",
-      "indexFlagsDigest": "sha256:8f31afff3be6612601cb41bd1d88354720c98f99817208a36518f358cf41043c",
+      "head": "873c8ecdcab18f5c0826817aa72da999fe37edec",
+      "indexDigest": "sha256:8606fe4ffaf4e689cf2a84ac3a20ef7dff954b7c616f0d5c69604a010428fd95",
+      "indexFlagsDigest": "sha256:94ee3af882e5cc1cea794dc06165f08a62c3a9200b82030cf962ce3515d61dbe",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:a2c9d964bf92b78e5afcb3ef60a8f578d956e50c6ff4628f4018710afd7dc8eb",
-      "executableBitsDigest": "sha256:fb6bf0719d6f8030500188c8a16f283ce75c2b62bc855c0d413482ea85595faa",
+      "executableBitsDigest": "sha256:9357bac91edb421c3619635a58acbbf8d51d58e58dd0fd5a82a0259d6334d8c6",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 16,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -1695,6 +1698,7 @@
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:9e43f8265eaff89914818c24604b53ab43fb8d5ce0e4bae56e3e6302dca39221",
       "executableBitsDigest": "sha256:239ce94c86823145a109709a74fc5ec4bbf0c0853fca02eb7c60b4e9e7eec631",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 2,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -3634,6 +3638,7 @@
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:bfd28edb38add0e33434e40559100fc42a2f3aa11cabc65051ebc465efb8c01f",
       "executableBitsDigest": "sha256:3bdc411f1570f0af3a430670638b6ff7421a91498667b8797d35a0e4e11618f5",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 6,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -5302,6 +5307,7 @@
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:def2fe6f7df8916494c63c827979490bf16bf2b51ba7a9d413f0344f8e002419",
       "executableBitsDigest": "sha256:b0f675502b9ce4f743c1774c4e962853c6ef78259b92e8b5f35926e543767faa",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 24,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -7014,6 +7020,7 @@
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:d9d117d57b8685fee05a4121d67bdc42c08a906d39193a76cf797c93d2a4bd87",
       "executableBitsDigest": "sha256:fd4f3299acd2ac3037961a2ad098873e21fcc77922758992cdb22edbb3b3671c",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 6,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -8582,10 +8589,11 @@
       "indexDigest": "sha256:2832c1dbde9b05b7b1489e842c2c5022ba3de70d151cce54184c7d8f0fb181bc",
       "indexFlagsDigest": "sha256:956571772c8feb18c4dba331bc324aa21e9c40518111aaa7cc072daeef02e39e",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:b1a284e2648d771de511fa57045eb2d93c7d3edc95e49c1d6df04a23f3fe4fb3",
+      "worktreeDigest": "sha256:ea9546707de616b2746820c620bc73376efe4f7ba841c498af3e745fa734d85c",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:5f07fda12898725c43dcc85efe9f587abedfe6aa586b69e369b715f352a64eb0",
       "executableBitsDigest": "sha256:45447d54176c1771614d6eda24566aea329e07fa62210cd148d07ccbc674c2a1",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 0,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -8737,32 +8745,32 @@
         },
         {
           "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
-          "line": 17,
+          "line": 26,
+          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- -c \\"
+        },
+        {
+          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
+          "line": 36,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         },
         {
           "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
-          "line": 29,
+          "line": 47,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run -- \\"
         },
         {
           "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
-          "line": 39,
+          "line": 64,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         },
         {
           "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
-          "line": 61,
+          "line": 98,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         },
         {
           "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
-          "line": 90,
-          "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-test-hermeticity/implement.md",
-          "line": 107,
+          "line": 171,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
         }
       ],
@@ -13650,6 +13658,7 @@
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:a7e3f41c7fa4e146f0a3c811743ed376d6b20a503376e026cfa2359a42396729",
       "executableBitsDigest": "sha256:3513fd16e205ea14116777d7432979d968451d08e4272369b68d53f0ca687013",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 0,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
@@ -14953,6 +14962,7 @@
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:0b68729aab21d49cbd879f1b9831d815f42278347407c0040473e67992a5f8c0",
       "executableBitsDigest": "sha256:fe047a33c8871e5b79a452de75c55d3e18ce487a7f0511b75a7cf8a75b8c82bd",
+      "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "binaryTrackedFiles": 0,
       "missingTrackedFiles": [],
       "receiptEntries": 210,

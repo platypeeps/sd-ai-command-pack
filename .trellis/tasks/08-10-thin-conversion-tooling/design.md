@@ -286,7 +286,8 @@ Emits a schema-versioned verdict object:
   "worktreeDigest": "sha256:<hash over dirty paths and their contents>",
   "worktreeClean": true,
   "receiptOccupancyDigest": "sha256:<hash over what each receipt target is on disk>",
-  "executableBitsDigest": "sha256:<hash over the exec bit of every tracked file>",
+  "executableBitsDigest": "sha256:<hash over the exec bit of every enumerated file>",
+  "symlinkTargetsDigest": "sha256:<hash over what each symlink resolves to>",
   "binaryTrackedFiles": 0,
   "missingTrackedFiles": [],
   "classifierDigest": "sha256:<hash over the pack-side inputs below>",
@@ -309,7 +310,16 @@ on a tracked Markdown file under `core.fileMode=false`
 (`executableBitsDigest`), a sparse or unreadable checkout
 (`missingTrackedFiles`, which forces `blocked`), and an `assume-unchanged`
 or `skip-worktree` entry whose bytes change invisibly to `git status`
-(`indexFlagsDigest` **and** `hiddenBytesDigest`). That last pair is one
+(`indexFlagsDigest` **and** `hiddenBytesDigest`), a symlink whose
+*resolution* changes because an ignored intermediate directory link was
+repointed (`symlinkTargetsDigest` — the link is bound, the thing it
+reaches was not), and the **pack's own** hidden bytes
+(`packIndexFlagsDigest`, `packHiddenBytesDigest`). That last pair is not
+symmetry for its own sake: ownership of a force-preserved consumer file
+is decided by comparing it against the pack's shipped `templates/` bytes,
+so `skip-worktree` on `templates/.github/PULL_REQUEST_TEMPLATE.md` moved
+five consumers' pack defects from 16 to 14 and their blockers up by one,
+with every recorded binding — consumer *and* pack — unchanged. That last pair is one
 field split in two after round 10 showed the first was not enough:
 `git ls-files -v` binds the flag letter and the path, not the content
 behind them, so a file already carrying `skip-worktree` could have its
@@ -342,7 +352,12 @@ survive. 13 of those survivors are pack-managed receipt entries: `.github/copilo
 `.prism/rules.json`, `.gitignore`, and the three `.sd-ai-command-pack/`
 bookkeeping files. Those are pack-shipped surfaces whose content the pack
 owns; blocking the consumer on them reproduces exactly the C-A failure
-this task exists to avoid. Reproduce with `research/fleet-blocker-scan.py`
+this task exists to avoid. **`.prism/rules.json` is the exception that
+proves the ownership test is per-line, not per-file**: the pack ships the
+file, but `rwbp-coordinator`'s copy has drifted, and the removed paths it
+cites are not in `templates/.prism/rules.json`. Ownership is decided by
+comparing against the pack's shipped bytes, so those lines are
+consumer-authored blockers (R10-C6) even though the file is pack-shipped. Reproduce with `research/fleet-blocker-scan.py`
 (command below).
 
 Four buckets, decided in order. Every step is measured below, and every
@@ -520,6 +535,16 @@ more blocking, not less.
    line is the case that a name-first search cannot see at all, and no
    amount of correct classification recovers a hit that was never found.
 
+   **The population is the working tree, not the index**: `git ls-files`
+   plus `git ls-files --others --exclude-standard`. A conversion mutates a
+   working tree, so an untracked script invoking a removed path breaks
+   exactly as hard as a committed one; six of `se-ai-command-pack`'s
+   blockers live in untracked files. Ignored files stay out — the receipt
+   targets among them are bound by `receiptOccupancyDigest`, and nothing
+   ignored is part of a conversion PR. An implementation that enumerates
+   only tracked files returns different answers from the reference
+   scanner, which is exactly the drift this paragraph exists to prevent.
+
 Every step answers from the same plan builder `--thin` uses, so the
 resweep and the conversion can never disagree about what is being removed
 — one enumeration, several readers.
@@ -541,7 +566,7 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 23 in 9,
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 29 in 10,
 `hoa-manager` 34 in 9, `mezmo_benchmark` 44 in 24,
 `rwbp-coordinator` 49 in 8, `loadsmith` 53 in 5, `rwbp-website` 65 in 8,
 `anomaly-metric-creator` 205 in 21. Plus the pack defects above. They are
@@ -549,7 +574,7 @@ CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the ninth measurement, and the eight before them were each
+**These are the tenth measurement, and the nine before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 
@@ -560,7 +585,8 @@ a rule that reasoning found sufficient, and measurement did not.
   string `sd-ai-command-pack`". `sd-github-review/test/metadata.test.js:490`
   names the removed `.agents/skills/sd-status/SKILL.md` with the pack name
   nowhere on the line, and was absent from those counts. Discovery now
-  enumerates tracked files and searches for the removal set itself.
+  enumerates every file in the working tree — tracked **and**
+  untracked-but-not-ignored — and searches for the removal set itself.
 - *Matching guessed.* Reference forms were widened to bare basenames,
   which let a surviving sibling collide with a removed path of the same
   name — `se-ai-command-pack/templates/skills/se-help/SKILL.md:51` cites
@@ -592,7 +618,7 @@ a rule that reasoning found sufficient, and measurement did not.
   pack's **own** managed block in `.github/copilot-instructions.md`, which
   cites `.agents/skills/sd-*/SKILL.md` and `**/skills/sd-*/**`. Any
   substring gate has this failure mode. There is no prefilter now: the
-  matcher sees every line of every tracked file, which costs 11 seconds
+  matcher sees every line of every enumerated file, which costs 11 seconds
   fleet-wide.
 
 - *The regression harness was itself unverified.* Round 9 turned the
@@ -799,6 +825,28 @@ Restores the fat payload, deletes the thin artifacts by reading
 `settingsAdditions` from the thin receipt, writes the per-repo
 `enabledPlugins` disable marker, and flips that consumer's `mode` back
 to `fat` in `ROOT`'s `docs/fleet/consumers.json`.
+
+**Written during conversion, landed after it — one authoritative
+sequence.** R11-C6: the conversion writes both roots in one invocation,
+while child 3 requires the consumer PR to land green *before* the
+registry says `thin`. Both are right, and they are about different verbs.
+`--thin` **writes** the registry edit into the pack working tree as part
+of the same validated, two-root, plan-then-mutate run — that is why an
+unwritable pack checkout must be caught before the first consumer
+deletion. It does not **land** it: the two edits travel in two pull
+requests, and the pack PR merges after the consumer PR does. The
+in-between window is a consumer whose tree is thin and whose registry row
+still says `fat`; the parent design already accepts exactly that window
+and points at `sd-status fleet`'s pin-vs-mode skew row as the thing that
+makes it observable rather than silent. If the consumer PR is abandoned,
+the pack-side edit is discarded with it and nothing needs undoing.
+
+Stated as the sequence child 3 executes per consumer: resweep at the
+exact head → `--thin` (writes consumer deletions **and** the registry
+row) → open the consumer PR from the consumer edits → land it green →
+land the pack PR carrying the registry row. "Flip the registry after the
+consumer PR lands" therefore means *land the flip `--thin` already
+wrote*, never *run a second tool*.
 
 **Consumer identity is carried, not inferred.** `--revert-thin` receives
 only `TARGET`, but it must flip exactly one registry row. Inferring the

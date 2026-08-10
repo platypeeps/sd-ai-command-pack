@@ -294,7 +294,7 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 23/9, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
+`se-ai-command-pack` 29/10, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
 `rwbp-coordinator` 49/8, `loadsmith` 53/5, `rwbp-website` 65/8,
 `anomaly-metric-creator` 205/21 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
@@ -1048,3 +1048,36 @@ control re-run with no mutation applied produces no failures, so the
 sweep's failures are attributable to the mutations and not to a dirty
 substrate. Measurement unchanged from the ninth: no rule changed, only its
 coverage.
+
+### Round 11 (Codex lane)
+
+Six blocking concern groups. Two of them — R11-C1 and R11-C2 — say the
+same thing the host lane had just said, and say it about the host lane's
+own fix: a stored result is not evidence, and a rule with no failing
+fixture is not protected. The host lane fixed four such rules; Codex found
+five more it had not thought to mutate.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R11-C1 | Codex | **Demonstrated: the harness accepted a stale row at an unchanged HEAD.** Codex swapped one consumer's fresh row for the committed one. Same HEAD, 23 blockers recorded against 29 actually present, and all 40 cases passed — six of the missing ones live in *untracked* files, which no recorded binding covers. Two rounds of trying to make a stored result trustworthy (H10-3 pinned the scanner bytes, R10-C1 checked HEAD) had not, and could not, close this | The fleet cases no longer read a stored row at all. They call `scan()` on the consumer, in-process, with the scanner that is on disk. Nothing is left to go stale; the binding fields exist to make the *committed measurement* re-derivable, not to certify a cached assertion. Cost: ~11 seconds. The committed JSON is still read for one purpose — to say out loud, as a skip, when the artifacts' figures came from different scanner bytes than the assertions just ran against |
+| R11-C2 | Codex | **Demonstrated: five more load-bearing rules had no falsifying fixture.** Reverting each left 40/0/0 while changing real consumer results: `.prism/` (blockers to advisories in two consumers), fenced/continued command recognition (5 real blockers in `loadsmith`, 2 in `se-ai-command-pack`, 1 in `sd-github-review`), generated-bookkeeping scheduling (182 scheduled to 179, +1055 advisories per consumer), untracked enumeration (`se-ai-command-pack` 29 to 23), NUL-based binary detection. Also constructed: moving a negative case's cited line to 999999 left the harness green, because "no bucket holds this file at this line" is trivially true of a line that does not exist | Live scanning (R11-C1) makes every fleet case detect a scanner regression, and eight fixtures were added on top: two fleet cases for fence/continuation (`loadsmith/docs/repomix-map.md:1388`, `sd-github-review/.trellis/tasks/08-09-review-coordinator-stale-check/implement.md:139`), one for generated bookkeeping, four unit cases for `command_lines`, and three for enumeration. `enumerate_files()` was extracted from `scan()` for the same reason `is_binary()` was in round 11's host lane: a rule the harness cannot call is a rule it cannot protect. A cited line that does not exist is now a **failure**. Verified by re-running the sweep: every one of the five reverts now fails |
+| R11-C3 | Codex | **Demonstrated against five consumers: the pack's own hidden bytes were unbound.** `shipped_template_digests()` reads the pack's `templates/` to decide whether a force-preserved consumer file is pack-owned or consumer-owned, so the pack worktree is an input to every consumer's classification. `skip-worktree` on `templates/.github/PULL_REQUEST_TEMPLATE.md` plus a byte change moved five consumers' pack defects 16 to 14 and their blockers up by one, with every recorded binding identical. R10-C3 closed this on the consumer side and left the identical hole on the pack side. Separately, constructed: an *ignored* intermediate symlink repointed from `scripts` to `safe` changes what a tracked link resolves to, and nothing bound the resolution | `packIndexFlagsDigest` and `packHiddenBytesDigest` at the payload top level, and `symlinkTargetsDigest` per consumer over what each symlink actually resolves to. `design.md`'s "every digest field is load-bearing" paragraph names all three and why |
+| R11-C4 | Codex | **Demonstrated from the registry: the execution-surface list was hand-written and had drifted.** It named `.opencode/command/`; the registry's surface is `.opencode/commands/` (`installer/registry.py:309`), so the prefix matched nothing. Enumerating `PLATFORM_REGISTRY` found the typo was the small half: **twelve** further platform directories — `.agent`, `.codebuddy`, `.cursor`, `.devin`, `.factory`, `.kilocode`, `.kiro`, `.pi`, `.qoder`, `.reasonix`, `.trae`, `.zcode` — were absent outright, every one of them holding commands, rules, or skills an agent executes | Derived from `PLATFORM_REGISTRY` instead of written down, so a platform added later is covered without anyone remembering this file. `.github` stays excluded from the wholesale rule and keeps its explicit sub-prefixes: it is the host's shared directory, not one agent's. A property fixture asserts every registry platform directory has a matching prefix — the check enumerates from the source rather than searching for the strings just typed. Fleet delta: **zero**. Twelve missing platform directories and not one consumer file under them cites a removed path, so the class is closed before it has an instance |
+| R11-C5 | Codex | **The production spec contradicted the round-10 untracked fix.** `design.md` specified enumerating tracked files and matching every line of every tracked file, while the scanner adds untracked, non-ignored files — a difference worth 6 real blockers in `se-ai-command-pack`. An implementer following the design would produce different answers from the reference | The resweep spec now states the population explicitly — `git ls-files` **plus** `git ls-files --others --exclude-standard`, ignored files excluded — and says why, at the point where an implementer reads it. The retrospective bullets and the `executableBitsDigest` schema line were corrected the same way |
+| R11-C6 | Codex | **Canary sequencing was incompatible with the specified `--thin`.** Child 3 requires "convert, open PR, land it green, then flip `mode: thin`"; child 1 defines `--thin` as writing both roots in one invocation, which is why it refuses unless both are writable | One authoritative sequence, written into both tasks. `--thin` **writes** the registry edit as part of the same validated two-root run; it does not **land** it. The two edits travel in two pull requests and the pack PR merges after the consumer PR. The window between them is exactly the pin-vs-mode skew the parent design already accepts and `sd-status fleet` reports. Child 3's requirement 1 now says *land the flip `--thin` already wrote*, never *run a second tool* |
+
+Both non-blocking contradictions were fixed: the parent's "Ships the
+resweep" now says shipped **in the pack release**, source-only, never
+installed into a consumer (the child PRD's `prd.md:70` is the
+authoritative statement), and `design.md`'s Prism paragraph no longer
+reads as though a pack-shipped file is pack-owned line by line —
+ownership is decided against the pack's shipped bytes, which is what makes
+`rwbp-coordinator`'s drifted rule a consumer-authored blocker.
+
+**Tenth measurement.** One figure moved: `se-ai-command-pack` 29 blockers
+in 10 files, up from 23 in 9, because that consumer's untracked working
+tree changed again between rounds — the same volatility R11-C1 showed a
+stored row cannot survive. Every other row is identical to the ninth.
+`packDefects` unchanged. No consumer is `clear`. Harness 63 passed, 0
+failed, 0 skipped — 23 fleet and 40 unit, up from 50, and every addition
+exists because a mutation proved the old set could not tell.

@@ -7,8 +7,11 @@ this file owns is the **order**, the **gate between children**, and the
 
 ## Ordered children
 
-1. `08-10-thin-conversion-tooling` — pack-internal. Ships the resweep
-   verdict, `install.py TARGET --thin`, `install.py TARGET
+1. `08-10-thin-conversion-tooling` — pack-internal. Ships, in the pack
+   release, the resweep verdict — the resweep is source-only and carries
+   no `manifest.json` row, so it never appears in a consumer tree
+   (`08-10-thin-conversion-tooling/prd.md:70`); "ships" here means the
+   pack release, not the consumer payload — `install.py TARGET --thin`, `install.py TARGET
    --revert-thin`, the `.claude/settings.json` marketplace/enable
    writer, and the pin receipt writer.
 2. `08-10-thin-candidate-loop-rescope` — pack-internal. Contract C-F.
