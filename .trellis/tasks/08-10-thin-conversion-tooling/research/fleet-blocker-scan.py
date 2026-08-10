@@ -504,29 +504,30 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
 # because Codex cannot consume the machine-installed plugin at all. Silently
 # deleting it is exactly the failure the gate exists to prevent.
 #
-# Trellis-local paths are excluded, from the pack's own constant rather than by
-# judgement: `PlatformInfo.trellis_local_only` is the pack stating which paths
-# under a platform directory are Trellis's and not its own. A `.codex/` holding
-# nothing but `trellis-*.toml` agents and hooks is a Trellis repository, not an
-# undeclared pack-codex consumer, and blocking it would block every Trellis repo
-# for a reason the conversion does not cause.
+# R12 excluded Trellis-local paths, reasoning that a `.codex/` holding nothing
+# but `trellis-*.toml` agents was a Trellis repository rather than an undeclared
+# pack-codex consumer. R13 demonstrated that this was wrong in both directions
+# and the PRD's unqualified rule is right.
+#
+# Hiding real usage: `.codex/config.toml` is on the Trellis-local list, so a
+# consumer whose entire Codex surface is a project-scoped `config.toml` returned
+# `clear` -- and `sd-github-review` is exactly that consumer, with
+# `.agents/skills/**` in its receipt that `retainVendoredFor` keeps only for a
+# declared codex or pi consumer. False blockers: an empty `.codex/hooks/` fired
+# anyway, because the directory probe counts an empty directory. And the
+# exclusion did not even work for pi: `is_trellis_local` matched patterns ending
+# in `/` with a literal `startswith`, so `.pi/skills/trellis-*/` never matched
+# the glob it contains.
+#
+# The exclusion's premise was that a Trellis-local `.codex/` is usage the
+# conversion does not affect. It is not. Whoever authored those files runs Codex
+# in that repository, and conversion deletes `.agents/**` out from under them
+# regardless of which tool wrote the `.codex/` file. The presence of the surface
+# is the fact that matters, so the marker is what `prd.md:19` says it is:
+# unqualified. The resolution is not "do not block" but the canary's recorded
+# choice -- declare `codex`, or remove the usage.
 MARKER_PLATFORMS = ("codex", "pi")
 CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
-
-
-def trellis_local_patterns(platform: str) -> tuple[str, ...]:
-    info = PLATFORM_REGISTRY.get(platform)
-    return tuple(getattr(info, "trellis_local_only", ()) or ())
-
-
-def is_trellis_local(platform: str, relative: str) -> bool:
-    for pattern in trellis_local_patterns(platform):
-        if pattern.endswith("/"):
-            if relative.startswith(pattern):
-                return True
-        elif fnmatch.fnmatch(relative, pattern):
-            return True
-    return False
 
 
 def platform_marker_hits(
@@ -570,23 +571,17 @@ def platform_marker_hits(
             for path in root.rglob("*")
             if path.is_file()
         )
-        owned = [
-            relative
-            for relative in present
-            if not is_trellis_local(platform, relative)
-        ]
-        if owned or not present:
-            hits.append(
-                {
-                    "file": info.directory,
-                    "line": None,
-                    "detail": (
-                        f"undeclared {platform} usage: {prefix} exists with "
-                        f"{len(owned)} non-Trellis-local file(s)"
-                        + (f", e.g. {owned[0]}" if owned else " and no files at all")
-                    ),
-                }
-            )
+        hits.append(
+            {
+                "file": info.directory,
+                "line": None,
+                "detail": (
+                    f"undeclared {platform} usage: {prefix} exists with "
+                    f"{len(present)} file(s)"
+                    + (f", e.g. {present[0]}" if present else " (empty)")
+                ),
+            }
+        )
         adapters = [
             relative
             for relative in files
@@ -609,13 +604,13 @@ def platform_marker_hits(
     if "codex" not in declared:
         referencing = []
         for relative in files:
-            # Three exclusions, each already a rule elsewhere in this scanner
-            # rather than a judgement made here: Trellis-local paths are the
-            # pack's own statement that they are not its concern; a file the
-            # conversion removes cannot be evidence of *surviving* usage (that
-            # is what `scheduled` means); and a historical record of something
-            # said is not current usage (R8-4).
-            if is_trellis_local("codex", relative) or relative in removed:
+            # Two exclusions, each already a rule elsewhere in this scanner
+            # rather than a judgement made here: a file the conversion removes
+            # cannot be evidence of *surviving* usage (that is what `scheduled`
+            # means), and a historical record of something said is not current
+            # usage (R8-4). R13: the Trellis-local exclusion that used to sit
+            # here is gone for the reason recorded above the marker platforms.
+            if relative in removed:
                 continue
             if relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES:
                 continue
@@ -1021,6 +1016,14 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
     survivors = frozenset(tracked) - removed
     binary: list[str] = []
     missing: list[str] = []
+    # R13-C3, constructed: a `.gitattributes` clean filter that maps any
+    # worktree content to the committed blob leaves `git status` empty, so
+    # `worktreeDigest` -- which hashes only the paths git reports dirty -- sees
+    # nothing, while the scanner reads the real worktree bytes and classifies
+    # them. Codex built one and moved a consumer from `clear` to `blocked` with
+    # all twelve bindings byte-identical. Every other binding is a proxy for the
+    # bytes; this one is the bytes, digested as they are read.
+    read: list[str] = []
     unambiguous = unambiguous_basenames(removed, survivors)
     for relative in tracked:
         if relative in removed:
@@ -1088,23 +1091,34 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 missing.append(relative)
             continue
+        read.append(f"{relative}\0{hashlib.sha256(raw).hexdigest()}")
         # R12-C4, constructed but executable: a NUL byte means "binary", and
         # binary does not mean "cannot execute". Codex fed bash a NUL-bearing
         # source stream and it ran, printing `NUL_SCRIPT_EXECUTED` -- so a
         # shell script carrying one NUL plus an invocation of a removed path
         # could clear. The NUL test decides whether the *bytes* look like an
         # asset; it is not licence to skip a file the execution-surface rule
-        # says can run. A file that is both is decoded leniently and classified
-        # like any other: matching still requires a removed path, so a
-        # replacement character cannot manufacture a citation.
-        if is_binary(raw) and not is_executable_surface(repo, relative):
+        # says can run.
+        #
+        # R13-C5: round 12 closed only the path-derived half. Execution is
+        # decided by *path* -- `nul.sh` is a script -- and by *content* -- a
+        # line in command position invokes what follows regardless of the file's
+        # name. Codex constructed the other combination, a NUL-bearing
+        # `notes.dat` whose second line runs a removed script, and it cleared.
+        # So an unmanaged asset is no longer skipped: it is decoded leniently
+        # and read for command position only. The weaker citation forms stay
+        # suppressed, which is what the NUL test is actually for -- a PNG whose
+        # bytes happen to contain a path is not a citation -- while the one form
+        # that executes still blocks. Matching always requires a removed path,
+        # so a replacement character cannot manufacture a citation.
+        asset = is_binary(raw) and not is_executable_surface(repo, relative)
+        if asset:
             if relative in managed:
                 buckets["packDefects"].append(
                     {"file": relative, "line": None, "detail": "unreadable pack target"}
                 )
-            else:
-                binary.append(relative)
-            continue
+                continue
+            binary.append(relative)
         body = raw.decode("utf-8", errors="replace")
         lines = body.splitlines()
         all_spans = block_spans(lines)
@@ -1138,6 +1152,12 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             ):
                 continue
             entry = {"file": relative, "line": number, "detail": line.strip()[:160]}
+            if asset:
+                # R13-C5. Command position only; every other form of citation in
+                # an asset's bytes is noise.
+                if COMMAND_CONTEXT.search(line) or number in commanded:
+                    buckets["blockers"].append(entry)
+                continue
             in_block = any(start <= number <= end for start, end in spans)
             in_pack_block = bool(all_spans) and any(
                 start <= number <= end for start, end in (all_spans or [])
@@ -1189,11 +1209,12 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),
         "executableBitsDigest": executable_bits_digest(repo, tracked),
         "symlinkTargetsDigest": symlink_targets_digest(repo, tracked),
+        "scannedBytesDigest": digest_of("\n".join(read)),
         "platformMarkerDigest": platform_marker_digest(
             marker_hits, repo, platforms
         ),
-        "binaryTrackedFiles": len(binary),
-        "missingTrackedFiles": sorted(missing),
+        "binaryFiles": len(binary),
+        "missingFiles": sorted(missing),
         "receiptEntries": len(receipt.entries),
         "removedTargets": len(removed),
         "trackedFiles": len(tracked),

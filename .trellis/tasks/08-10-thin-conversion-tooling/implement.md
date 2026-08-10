@@ -177,9 +177,9 @@ execution-surface prefixes are enumerated from `PLATFORM_REGISTRY` rather
 than re-typed from `design.md`'s prose. Records the full
 binding set from `design.md`'s verdict schema: `head`, `indexDigest`,
 `indexFlagsDigest`, `hiddenBytesDigest`, `symlinkTargetsDigest`,
-`platformMarkerDigest`, `worktreeDigest`, `worktreeClean`,
-`receiptOccupancyDigest`, `executableBitsDigest`, `binaryTrackedFiles`,
-`missingTrackedFiles`, and `classifierDigest`. The short list this step
+`platformMarkerDigest`, `scannedBytesDigest`, `worktreeDigest`,
+`worktreeClean`, `receiptOccupancyDigest`, `executableBitsDigest`,
+`binaryFiles`, `missingFiles`, and `classifierDigest`. The short list this step
 used to name — `head`, `indexDigest`, `worktreeClean`,
 `classifierDigest` — would have shipped a verdict *less* reproducible
 than the research measurement it derives from: every field added after
@@ -299,8 +299,8 @@ Per-consumer `head`, `indexDigest`, and `worktreeDigest` plus full
 per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
-removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 30/11, `hoa-manager` 36/11, `mezmo_benchmark` 46/26,
+removed paths: `sd-github-review` 15 hits in 11 files,
+`se-ai-command-pack` 25/11, `hoa-manager` 36/11, `mezmo_benchmark` 46/26,
 `rwbp-coordinator` 51/10, `loadsmith` 55/7, `rwbp-website` 67/10,
 `anomaly-metric-creator` 206/22 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
@@ -1132,3 +1132,43 @@ before conversion. If any declares it, `retainVendoredFor` retention runs
 against a real consumer for the first time — the parent design calls that
 path untested — so its residual is compared against that consumer's own
 receipt rather than assumed.
+
+### Round 13 (Codex lane)
+
+Six blocking groups, and five of the six attack round 12's own fixes one
+round after they landed. Round 12 fixed the missing marker pass; round
+13 showed the fix was wrong in both directions at once.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R13-C1 | Codex | **The Trellis-local exemption hid real usage and invented false blockers, demonstrated both ways.** A synthetic consumer whose entire Codex surface was `.codex/config.toml` returned `clear` — and `sd-github-review` is that consumer, with a project-scoped `config.toml`, an undeclared registry row, and `.agents/skills/**` in its receipt that `retainVendoredFor` keeps only for a declared codex or pi consumer. It was the one consumer round 12 reported as marker-free, which the ledger cited as proof the rule was falsifiable. Conversely an empty `.codex/hooks/` blocked. And the exemption never worked for pi at all: `is_trellis_local` matched patterns ending in `/` with a literal `startswith`, so `.pi/skills/trellis-*/` never matched the glob it contains | The exemption is gone and `prd.md:19` is implemented as written: the directory blocks, unqualified. Its premise was that Trellis-local content is usage the conversion does not affect, and that is false — whoever wrote those files runs Codex in that repository, and conversion deletes `.agents/**` regardless of which tool authored the `.codex/` file. The resolution was never "do not block": it is the canary's recorded choice, declare `codex` or remove the usage. `sd-github-review` gains its first marker; `se-ai-command-pack` gains a directory marker beside its `$CODEX_HOME` one |
+| R13-C2 | Codex | **The pi adapter branch had no fixture.** Disabling only `if adapters:` left the harness at 78 passed, 0 failed. The directory and `$CODEX_HOME` mechanisms were separately protected; the third of the three markers `prd.md:204` requires was not | A synthetic consumer carrying `.pi/prompts/trellis-continue.md` — one of the registry's own marker paths — asserts both that the directory blocks and that the adapter is a **separate** entry naming that file. Reverting the branch now fails |
+| R13-C3 | Codex | **A clean filter hides the bytes from every binding.** Codex built a repository whose `.gitattributes` maps a file through a clean filter to the committed blob. `git status` is empty, `worktreeClean` is true, `worktreeDigest` — which hashes only the paths git reports dirty — sees nothing, and all twelve per-consumer bindings including `platformMarkerDigest` stay identical, while the worktree file says `bash <removed script>` and the verdict moves `clear` to `blocked` | `scannedBytesDigest`: every path the scan read, paired with the hash of the bytes it read. Every other binding is a proxy for those bytes, and five rounds each found a different way for a proxy to be wrong. The fixture reproduces the state exactly, including the `git add` that refreshes the stat cache — without it git reports the file modified forever and the construction proves nothing |
+| R13-C4 | Codex | **The synthetic consumer was not one.** Its receipt listed three targets, omitted the three generated bookkeeping files, gave `manifest.json` no `files` list and `provenance.json` an empty map. The production structural audit rejects that repository with five errors, so assertions that `scan()` classifies it correctly say nothing about whether `--thin` would ever reach those states | The fixture writes the receipt the installer would have written: all six entries, a real `files` list, and a provenance map that vouches exactly what production vouches — **not** the managed-block and force-preserved targets, which is why the scanner has three separate ownership proofs. A synthetic case runs `scripts/sd-ai-command-pack-install-audit.py` against the fixture and requires exit 0 with no error lines, so the fixture's faithfulness is itself a checked assertion. Vouching `.github/copilot-instructions.md` immediately broke the malformed-marker case, which is the rule working |
+| R13-C5 | Codex | **Round 12 closed only the path half of the NUL fail-open.** Execution is decided by path — `nul.sh` is a script — *and* by content: a line in command position runs what follows whatever the file is named. Codex built the other combination, a NUL-bearing `notes.dat` whose second line invokes a removed script, and it returned `clear` while the identical file without the NUL blocked | An unmanaged asset is no longer skipped. It is decoded leniently and read for command position only: the one form that executes still blocks, and the weaker citation forms stay suppressed, which is what the NUL test is actually for — a PNG whose bytes happen to contain a path is not a citation. Fixtures assert both halves: `notes.dat:2` blocks, and nothing from that file reaches `advisories` |
+| R13-C6 | Codex | **Four remaining divergences between the production spec and the scanner.** The normative verdict object omitted `platformMarkerDigest`; the design's execution list named `Makefile` and `justfile` while the scanner also tests `makefile`, `GNUmakefile`, and `Justfile`; the design scoped agent instruction files to the repository root while the scanner tests the basename at any depth; and the PRD's unqualified marker rule disagreed with the scanner's exemption | The schema names `platformMarkerDigest` and `scannedBytesDigest`; the basename list is the scanner's, with the reason the case variants matter (`make` reads all three spellings); the agent-instruction clause says "at any depth, not only at the repository root"; and R13-C1 removed the disagreement by making the scanner do what the PRD says |
+
+Both non-blocking items fixed. `binaryTrackedFiles` and
+`missingTrackedFiles` are now `binaryFiles` and `missingFiles`: the
+population has included untracked, non-ignored files since H10-1, so the
+old names described the wrong set — ledger rows above round 13 keep the
+names they were written with. And the canary task named
+`platypeeps/rwbp-coordinator`; the owner is `rwbp`, which is also what
+its `pathHint` resolves to.
+
+**Twelfth measurement.** `sd-github-review` 15 blockers in 11 files (it
+gains the marker R13-C1 found), `se-ai-command-pack` 25 in 11,
+`hoa-manager` 36 in 11, `mezmo_benchmark` 46 in 26, `rwbp-coordinator`
+51 in 10, `loadsmith` 55 in 7, `rwbp-website` 67 in 10,
+`anomaly-metric-creator` 206 in 22. `packDefects` unchanged at 16 in 7,
+or 14 in 6 where the consumer owns its PR template. No consumer is
+`clear`. `se-ai-command-pack` moved 30 to 25 for the reason it has moved
+every round: its worktree is dirty and its HEAD advanced between scans,
+which is what the binding fields exist to record. Harness 89 passed, 0
+failed, 0 skipped — 28 fleet and 61 unit.
+
+Mutation sweep over the round-13 rules, each a true revert against a
+regenerated scan: directory marker off → 7 failed; pi adapter branch off
+→ 1 failed; `scannedBytesDigest` pinned to a constant → 1 failed; assets
+skipped before command-position detection → 1 failed; control → 89
+passed, 0 failed.

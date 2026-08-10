@@ -3,8 +3,10 @@
 Child 3 of `08-09-thin-migration`.
 
 **BLOCKED — requires explicit user authorization.** This task mutates
-repositories outside `sd-ai-command-pack`: `platypeeps/rwbp-coordinator`,
-`platypeeps/loadsmith`, `platypeeps/hoa-manager`. The autonomous
+repositories outside `sd-ai-command-pack`: `rwbp/rwbp-coordinator`,
+`platypeeps/loadsmith`, `platypeeps/hoa-manager`. The coordinator's owner
+is `rwbp`, not `platypeeps`: R13 found this file naming a repository that
+does not exist at the path it gives. The autonomous
 work-loop's run-level authority does not extend to them. Authorization
 is per cohort; authorizing this cohort does not authorize post-canary.
 
@@ -45,8 +47,12 @@ revert-and-restore proof.
    that override, invoked deliberately — not assumed.
 3. **Every canary declares `codex` or stops using it, before conversion.**
    Measured 2026-08-10 and true of all three canaries: each has a
-   `.codex/` directory holding files that are not Trellis-local, and each
-   registry row declares only `claude`, `gemini`, `github`, `opencode`.
+   `.codex/` directory, and each registry row declares only `claude`,
+   `gemini`, `github`, `opencode`. The rule is unqualified — the
+   directory's existence is the marker. R13 removed an exemption for
+   Trellis-authored paths under it, because whoever wrote those files
+   runs Codex in that repository and the conversion deletes `.agents/**`
+   regardless of which tool authored them.
    That is a blocker, not a warning, and the reason is not bookkeeping:
    `retainVendoredFor` intersects the consumer's **declared** platforms
    (parent `design.md:187`), so conversion deletes `.agents/**` out from

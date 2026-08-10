@@ -288,8 +288,10 @@ Emits a schema-versioned verdict object:
   "receiptOccupancyDigest": "sha256:<hash over what each receipt target is on disk>",
   "executableBitsDigest": "sha256:<hash over the exec bit of every enumerated file>",
   "symlinkTargetsDigest": "sha256:<hash over what each symlink resolves to>",
-  "binaryTrackedFiles": 0,
-  "missingTrackedFiles": [],
+  "platformMarkerDigest": "sha256:<hash over platform-directory occupancy and the marker hits>",
+  "scannedBytesDigest": "sha256:<hash over every path the scan read and its bytes>",
+  "binaryFiles": 0,
+  "missingFiles": [],
   "classifierDigest": "sha256:<hash over the pack-side inputs below>",
   "verdict": "clear" | "blocked",
   "blockers": [{"kind": "...", "file": "...", "line": 12, "detail": "..."}],
@@ -308,7 +310,7 @@ changed a classification while every recorded field stayed identical: a
 gitignored receipt target appearing (`receiptOccupancyDigest`), `chmod +x`
 on a tracked Markdown file under `core.fileMode=false`
 (`executableBitsDigest`), a sparse or unreadable checkout
-(`missingTrackedFiles`, which forces `blocked`), and an `assume-unchanged`
+(`missingFiles`, which forces `blocked`), and an `assume-unchanged`
 or `skip-worktree` entry whose bytes change invisibly to `git status`
 (`indexFlagsDigest` **and** `hiddenBytesDigest`), a symlink whose
 *resolution* changes because an ignored intermediate directory link was
@@ -331,6 +333,22 @@ what it covers. An earlier revision of this schema listed only
 `head`, `indexDigest`, `worktreeClean`, and `classifierDigest`, which
 would have shipped a verdict *less* reproducible than the research
 measurement it is derived from.
+
+Two more fields, each from a round that found the previous list still
+incomplete. `platformMarkerDigest` binds *directory occupancy*: an empty
+`.codex/` created after a commit changes the verdict from `clear` to
+`blocked` while every file-oriented binding stays byte-identical, because
+git does not track a directory. `scannedBytesDigest` binds the bytes
+themselves — every path the scan read, paired with its content hash.
+R13-C3 built a `.gitattributes` clean filter that maps any worktree
+content to the committed blob: after one `git add` refreshes the stat
+cache, `git status` is empty, `worktreeClean` is true, `worktreeDigest`
+sees nothing, and the file on disk still says `bash <removed script>`.
+Every other binding is a *proxy* for the bytes the classification reads,
+and each round found another way for a proxy to be wrong; this one is the
+bytes. It does not retire the proxies — `head` and the index digests are
+what make a verdict comparable to a git state a human can check out — but
+it is the field that closes the class.
 
 `blockers` and `packDefects` both stop conversion — the verdict is
 `clear` only when both are empty. They are separate arrays because they
@@ -505,10 +523,13 @@ more blocking, not less.
    the execution surface when **any** of these holds:
 
    - its suffix is one of `.sh .bash .zsh .py .mjs .cjs .js .ts .rb .pl`;
-   - its basename is a build/CI entry point — `Makefile`, `package.json`,
-     `pyproject.toml`, `tox.ini`, `noxfile.py`, `justfile`,
-     `Taskfile.y*ml`, `.pre-commit-config.yaml`, `.gitlab-ci.yml`,
-     `Dockerfile`;
+   - its basename is a build/CI entry point — `Makefile`, `makefile`,
+     `GNUmakefile`, `package.json`, `pyproject.toml`, `tox.ini`,
+     `noxfile.py`, `justfile`, `Justfile`, `Taskfile.y*ml`,
+     `.pre-commit-config.yaml`, `.gitlab-ci.yml`, `Dockerfile`. The case
+     variants are not decoration: `make` reads `GNUmakefile`, `makefile`,
+     and `Makefile`, and R13-C6 found this list naming one of the three
+     while the scanner tested all of them;
    - it is under `.github/workflows/`, `.github/actions/`, `.circleci/`,
      `.devcontainer/`, `.github/prompts/`, `.github/instructions/`,
      `.prism/`, or **any platform directory the registry defines**. That
@@ -525,7 +546,8 @@ more blocking, not less.
      explicit sub-prefixes above: it is the host's shared directory rather
      than one agent's, so `.github/ISSUE_TEMPLATE/` is not an execution
      surface the way `.github/workflows/` is;
-   - its basename is a root agent instruction file — `CLAUDE.md`,
+   - its basename — **at any depth, not only at the repository root** —
+     is an agent instruction file: `CLAUDE.md`,
      `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `copilot-instructions.md`,
      `.cursorrules`, `SKILL.md` — or ends in `.prompt.md` or
      `.instructions.md`. An agent reading "run this script" and running it
@@ -577,7 +599,7 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 30 in 11,
+`sd-github-review` 15 hits in 11 files, `se-ai-command-pack` 25 in 11,
 `hoa-manager` 36 in 11, `mezmo_benchmark` 46 in 26,
 `rwbp-coordinator` 51 in 10, `loadsmith` 55 in 7, `rwbp-website` 67 in 10,
 `anomaly-metric-creator` 206 in 22. Plus the pack defects above. They are
@@ -585,7 +607,7 @@ CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the eleventh measurement, and the ten before them were each
+**These are the twelfth measurement, and the eleven before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 

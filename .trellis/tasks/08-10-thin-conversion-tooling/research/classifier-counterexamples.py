@@ -28,16 +28,25 @@ Exit status is 0 only when every assertion passes and none was skipped.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SCANNER = HERE / "fleet-blocker-scan.py"
 REGISTRY = HERE.parents[3] / "docs/fleet/consumers.json"
+AUDIT = HERE.parents[3] / "scripts/sd-ai-command-pack-install-audit.py"
+SYNTHETIC_VERSION = "0.64.0"
+SYNTHETIC_BOOKKEEPING = (
+    ".sd-ai-command-pack/installed-targets.txt",
+    ".sd-ai-command-pack/manifest.json",
+    ".sd-ai-command-pack/provenance.json",
+)
 DEFAULT_SCAN = HERE / "fleet-blocker-scan.json"
 
 
@@ -220,14 +229,30 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
         "cannot consume the machine plugin at all",
     ),
     (
+        "sd-github-review",
+        ".codex",
+        None,
+        "blockers",
+        "R13-C1",
+        "the demonstration itself: this consumer's whole Codex surface is a "
+        "project-scoped `.codex/config.toml`, which round 12's exemption list "
+        "covered -- so it was the one consumer with no marker at all, while "
+        "its receipt carries the `.agents/skills/**` that `retainVendoredFor` "
+        "keeps only for a declared codex or pi consumer",
+    ),
+    (
         "se-ai-command-pack",
         ".codex",
         None,
-        None,
-        "R12-C1",
-        "this consumer's `.codex/` holds nothing but Trellis-local paths, so "
-        "the directory marker must NOT fire. Blocking it would block every "
-        "Trellis repository for a reason the conversion does not cause",
+        "blockers",
+        "R12-C1/R13-C1",
+        "round 12 exempted this consumer because its `.codex/` holds only "
+        "paths on `trellis_local_only`, and round 13 demonstrated that the "
+        "exemption is wrong in both directions: `.codex/config.toml` is on "
+        "that list, so `sd-github-review`'s entire real Codex surface was "
+        "invisible, while an empty Trellis-local directory blocked anyway. "
+        "Whoever wrote these files runs Codex here, and conversion deletes "
+        "`.agents/**` whatever wrote them, so `prd.md:19` is unqualified",
     ),
     (
         "se-ai-command-pack",
@@ -390,6 +415,15 @@ def _synthetic_consumer(raw: str, build) -> Path:
     63/0/0, because there was no way to *reach* them: every fixture was either a
     pure predicate or a real consumer. A consumer the harness builds is the
     missing third thing.
+
+    R13-C4: the receipt is the one the production installer would have written,
+    not the smallest one `scan()` accepts. Round 12's fixture listed three
+    targets, omitted the three generated bookkeeping files, gave `manifest.json`
+    no `files` list and `provenance.json` an empty map -- so the production
+    structural audit rejected it with five errors. Assertions about `scan()` on
+    a repository `--thin` would refuse to touch prove less than they appear to,
+    so `audit_cases()` now runs that audit against this fixture and requires it
+    to pass.
     """
     repo = Path(raw).resolve()
     for args in (
@@ -399,24 +433,70 @@ def _synthetic_consumer(raw: str, build) -> Path:
     ):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     (repo / ".sd-ai-command-pack").mkdir()
-    (repo / ".sd-ai-command-pack/installed-targets.txt").write_text(
-        "scripts/sd-ai-command-pack-full-check.sh\n"
-        ".github/copilot-instructions.md\n"
-        ".gitignore\n",
-        encoding="utf-8",
-    )
-    (repo / ".sd-ai-command-pack/provenance.json").write_text(
-        '{"pack": "sd-ai-command-pack", "version": "0.64.0", "files": {}}',
-        encoding="utf-8",
-    )
-    (repo / ".sd-ai-command-pack/manifest.json").write_text(
-        '{"version": "0.64.0"}', encoding="utf-8"
-    )
     (repo / "scripts").mkdir()
+    (repo / ".github").mkdir()
     (repo / "scripts/sd-ai-command-pack-full-check.sh").write_text(
         "#!/bin/sh\n", encoding="utf-8"
     )
+    (repo / ".github/copilot-instructions.md").write_text(
+        "consumer guidance\n", encoding="utf-8"
+    )
     (repo / ".gitignore").write_text("nothing\n", encoding="utf-8")
+    payload = (
+        "scripts/sd-ai-command-pack-full-check.sh",
+        ".github/copilot-instructions.md",
+        ".gitignore",
+    )
+    (repo / ".sd-ai-command-pack/installed-targets.txt").write_text(
+        "".join(f"{target}\n" for target in sorted(payload + SYNTHETIC_BOOKKEEPING)),
+        encoding="utf-8",
+    )
+    (repo / ".sd-ai-command-pack/provenance.json").write_text(
+        json.dumps(
+            {
+                "pack": "sd-ai-command-pack",
+                "version": SYNTHETIC_VERSION,
+                # Production provenance does not vouch a managed-block or
+                # force-preserved target -- that is why the scanner has three
+                # separate ownership proofs -- so neither does this. Vouching
+                # `.github/copilot-instructions.md` here would have made the
+                # malformed-marker fixture assert the wrong rule.
+                "files": {
+                    target: "sha256:"
+                    + hashlib.sha256((repo / target).read_bytes()).hexdigest()
+                    for target in payload
+                    if target == "scripts/sd-ai-command-pack-full-check.sh"
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo / ".sd-ai-command-pack/manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "name": "sd-ai-command-pack",
+                "version": SYNTHETIC_VERSION,
+                "files": [
+                    {
+                        "platform": "shared",
+                        "kind": "script",
+                        "source": "templates/scripts/sd-ai-command-pack-full-check.sh",
+                        "target": "scripts/sd-ai-command-pack-full-check.sh",
+                        "install": "always",
+                    },
+                    {
+                        "platform": "github",
+                        "kind": "instructions",
+                        "source": "templates/.github/copilot-instructions.md",
+                        "target": ".github/copilot-instructions.md",
+                        "install": "always",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     build(repo)
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
     subprocess.run(
@@ -437,8 +517,9 @@ BINDINGS = (
     "receiptOccupancyDigest",
     "executableBitsDigest",
     "symlinkTargetsDigest",
-    "binaryTrackedFiles",
-    "missingTrackedFiles",
+    "binaryFiles",
+    "missingFiles",
+    "scannedBytesDigest",
 )
 
 
@@ -551,7 +632,7 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
             (
                 "R8-3/R12-C3",
                 "an unreadable unmanaged file is missing, not binary",
-                result["missingTrackedFiles"],
+                result["missingFiles"],
                 ["unreadable.sh"],
             ),
             (
@@ -570,7 +651,7 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
         os.symlink(
             "../real-check.sh", repo / "scripts/sd-ai-command-pack-full-check.sh"
         )
-        (repo / ".github").mkdir()
+        (repo / ".github/copilot-instructions.md").unlink()
         os.symlink("../real-check.sh", repo / ".github/copilot-instructions.md")
 
     symlinked = scan_with(with_symlinked_target)
@@ -589,7 +670,6 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
     # R12-C3: malformed markers are unresolvable ownership, so pack-owned.
     def with_malformed_markers(repo):
         baseline(repo)
-        (repo / ".github").mkdir()
         (repo / ".github/copilot-instructions.md").write_text(
             f"{module.COPILOT_GUIDANCE_START}\n"
             "run scripts/sd-ai-command-pack-full-check.sh\n",
@@ -612,7 +692,7 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
     # R11-C4: .github is the host's shared directory, not one agent's.
     def with_issue_template(repo):
         baseline(repo)
-        (repo / ".github/ISSUE_TEMPLATE").mkdir(parents=True)
+        (repo / ".github/ISSUE_TEMPLATE").mkdir(parents=True, exist_ok=True)
         (repo / ".github/ISSUE_TEMPLATE/bug.md").write_text(
             "Paste the output of scripts/sd-ai-command-pack-full-check.sh here\n",
             encoding="utf-8",
@@ -632,6 +712,168 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
             ["advisories"],
         )
     )
+
+    # R13-C4: the fixture is only evidence if production would accept it.
+    with tempfile.TemporaryDirectory() as raw:
+        repo = _synthetic_consumer(raw, baseline)
+        audit = subprocess.run(
+            [sys.executable, str(AUDIT), "--repo", str(repo)],
+            capture_output=True,
+            text=True,
+        )
+    cases.append(
+        (
+            "R13-C4",
+            "the production structural audit accepts the synthetic consumer",
+            (audit.returncode, [
+                line for line in audit.stdout.splitlines() if line.startswith("error")
+            ]),
+            (0, []),
+        )
+    )
+
+    # R13-C1, demonstrated against a real consumer. Round 12 exempted paths on
+    # `PlatformInfo.trellis_local_only`, and `.codex/config.toml` is on that
+    # list -- so `sd-github-review`, whose entire Codex surface is a
+    # project-scoped `config.toml` and whose receipt carries `.agents/skills/**`,
+    # returned `clear`. Whoever wrote that file runs Codex there; the conversion
+    # deletes `.agents/**` regardless of which tool wrote it.
+    def with_trellis_local_codex(repo):
+        (repo / ".codex").mkdir()
+        (repo / ".codex/config.toml").write_text("[project]\n", encoding="utf-8")
+
+    local_codex = scan_with(with_trellis_local_codex)
+    cases += [
+        (
+            "R13-C1",
+            "a .codex/ holding only Trellis-local paths still blocks",
+            marker_fired(local_codex),
+            True,
+        ),
+        (
+            "R13-C1",
+            "and that is the whole verdict, not a citation somewhere else",
+            local_codex["verdict"],
+            "blocked",
+        ),
+    ]
+
+    # R13-C1/R13-C2: pi. The old exclusion matched `.pi/skills/trellis-*/` with
+    # a literal `startswith`, so the glob never matched -- and the adapter
+    # branch had no fixture at all: Codex disabled it and the harness stayed at
+    # 78/0/0. The registry's marker paths are the pack's own statement of what a
+    # pi adapter looks like.
+    def with_pi_adapter(repo):
+        (repo / ".pi/prompts").mkdir(parents=True)
+        (repo / ".pi/prompts/trellis-continue.md").write_text("go\n", encoding="utf-8")
+
+    pi = scan_with(with_pi_adapter)
+    cases += [
+        (
+            "R13-C1",
+            "an undeclared .pi/ directory blocks",
+            any(
+                "undeclared pi usage" in (entry.get("detail") or "")
+                for entry in pi["blockers"]
+            ),
+            True,
+        ),
+        (
+            "R13-C2",
+            "and the registry's adapter marker is a separate, own entry",
+            [
+                entry["file"]
+                for entry in pi["blockers"]
+                if "adapter file" in (entry.get("detail") or "")
+            ],
+            [".pi/prompts/trellis-continue.md"],
+        ),
+    ]
+
+    # R13-C5: the content half of the execution surface. `notes.dat` is not an
+    # executable path, so round 12's fix does not reach it -- but line 2 is in
+    # command position, and command position executes what follows whatever the
+    # file is called.
+    def with_nul_data(repo):
+        (repo / "notes.dat").write_bytes(
+            b"binary \x00 payload\nbash scripts/sd-ai-command-pack-full-check.sh\n"
+        )
+
+    nul_data = scan_with(with_nul_data)
+    cases += [
+        (
+            "R13-C5",
+            "a NUL-bearing data file still blocks on a command-position line",
+            [(e["file"], e["line"]) for e in nul_data["blockers"]],
+            [("notes.dat", 2)],
+        ),
+        (
+            "R13-C5",
+            "while its weaker citation forms stay suppressed as asset noise",
+            [e for e in nul_data["advisories"] if e["file"] == "notes.dat"],
+            [],
+        ),
+    ]
+
+    # R13-C3, constructed: a clean filter maps any worktree content to the
+    # committed blob, so `git status` stays empty and `worktreeDigest` -- which
+    # hashes only the paths git reports dirty -- sees nothing, while the scanner
+    # reads the real bytes.
+    def with_clean_filter(repo):
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "filter.blank.clean", "true"],
+            check=True,
+            capture_output=True,
+        )
+        (repo / ".gitattributes").write_text(
+            "notes.txt filter=blank\n", encoding="utf-8"
+        )
+        (repo / "notes.txt").write_text("placeholder\n", encoding="utf-8")
+
+    with tempfile.TemporaryDirectory() as raw:
+        repo = _synthetic_consumer(raw, with_clean_filter)
+        before = module.scan("synthetic", repo, platforms)
+        (repo / "notes.txt").write_text(
+            "bash scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+        )
+        # The clean filter already makes the converted content identical to the
+        # committed blob, but `git status` reports the file modified until the
+        # stat cache is refreshed. `git add` refreshes it and stages nothing --
+        # after this the tree is clean by every measure git offers, and the
+        # worktree still holds the citation.
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "notes.txt"],
+            check=True,
+            capture_output=True,
+        )
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        after = module.scan("synthetic", repo, platforms)
+
+    cases += [
+        (
+            "R13-C3",
+            "a clean filter hides changed worktree bytes from git entirely",
+            (status, before["worktreeDigest"] == after["worktreeDigest"]),
+            ("", True),
+        ),
+        (
+            "R13-C3",
+            "the hidden bytes still change the verdict",
+            (before["verdict"], after["verdict"]),
+            ("clear", "blocked"),
+        ),
+        (
+            "R13-C3",
+            "and scannedBytesDigest is the binding that records them",
+            [key for key in BINDINGS if before[key] != after[key]],
+            ["scannedBytesDigest"],
+        ),
+    ]
     return cases
 
 
