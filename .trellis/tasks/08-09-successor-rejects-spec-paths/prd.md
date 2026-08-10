@@ -13,7 +13,8 @@ to any session that followed the documented workflow.
 `07-31-completion-recovery-no-archive-anchor` shipped
 `active-task-review-successor` for exactly this branch shape: a task that ships
 work and stays `in_progress`, with no archive move to anchor on. Its documented
-contract, in `sd-finish-work/SKILL.md:188-196`, is:
+contract, in `templates/.agents/skills/sd-finish-work/SKILL.md:188-196`
+(mirrored to `.agents/`, `.claude/`, and `plugins/sd/`), is:
 
 > every commit in it is limited to the task's own directory, **ordinary
 > repository paths**, and journal/index workspace files.
@@ -81,9 +82,9 @@ evaluate it.
       still fails, with `completion_successor_scope_invalid` naming that path.
 - [ ] The same branch with an added change under `.trellis/.runtime/` or the
       `finish-work` receipt prefix under `.sd-ai-command-pack/` still fails.
-- [ ] `sd-finish-work/SKILL.md` and the predicate agree on what "ordinary
-      repository paths" admits, verified by a test that reads the documented
-      list rather than restating it.
+- [ ] `templates/.agents/skills/sd-finish-work/SKILL.md` and the predicate
+      agree on what "ordinary repository paths" admits, verified by a test that
+      reads the documented list rather than restating it.
 
 ## Notes
 
