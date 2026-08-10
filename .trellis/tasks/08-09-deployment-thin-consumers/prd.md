@@ -8,7 +8,7 @@ this task is not the implementation target.
 
 ## Problem
 
-Today `install.py` vendors the pack payload — 776 manifest files
+Today `install.py` vendors the pack payload — 777 manifest files
 (scripts, skills for `.claude`/`.agents`, rules, review-provider
 configs, docs) — into every consumer repository, committed there.
 The fleet registry (`docs/fleet/consumers.json`, schema 4) lists 8
@@ -42,7 +42,7 @@ fleet status becomes pin inventory instead of tree diffing.
 ## Requirements
 
 1. **Surface partition is explicit and complete.** Every one of the
-   776 payload files is classified into exactly one of FOUR
+   777 payload files is classified into exactly one of FOUR
    categories: machine-scoped Claude (plugin), machine-scoped other
    (machine installer), repo-native (platform surfaces only readable
    from the repository, e.g. GitHub instructions — stay vendored,

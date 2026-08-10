@@ -156,6 +156,13 @@
     {
       "platform": "shared",
       "kind": "script",
+      "source": "templates/scripts/sd-ai-command-pack-pack-update.sh",
+      "target": "scripts/sd-ai-command-pack-pack-update.sh",
+      "install": "always"
+    },
+    {
+      "platform": "shared",
+      "kind": "script",
       "source": "templates/scripts/sd-ai-command-pack-shell-lib.sh",
       "target": "scripts/sd-ai-command-pack-shell-lib.sh",
       "install": "always"

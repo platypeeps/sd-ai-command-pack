@@ -150,6 +150,12 @@ Quick links:
   preflight for broad behavior-changing diffs.
 - `scripts/sd-ai-command-pack-update-spec-kb.py`: Obsidian KB copy-folder
   refresh helper for the update-spec workflow.
+- `scripts/sd-ai-command-pack-pack-update.sh`: the single machine update
+  action — updates the Claude Code plugin, resolves the plugin root that
+  update produced, installs the machine-scope surfaces for the non-Claude
+  platforms from it, and reports the plugin and machine-receipt versions with
+  a `current`/`skew` verdict. Both halves are idempotent, so an update
+  interrupted between them shows as skew and a rerun converges.
 - `.sd-ai-command-pack/installed-targets.txt`: generated list of pack targets
   installed in this repo, used by the review-scope preflight. Normal shared
   installs should commit this file with the other pack-owned files; `--local-only`
