@@ -11,7 +11,7 @@ is per cohort; authorizing this cohort does not authorize post-canary.
 Also requires children 1, 2, and 2b shipped. Child 2b is not optional
 sequencing: until the pack's own surviving surfaces stop citing removed
 paths, every consumer's resweep returns `packDefects` and `--thin`
-refuses. Measured 2026-08-10: 14 such hits in 7 files in all three canary
+refuses. Measured 2026-08-10: 16 such hits in 7 files in all three canary
 consumers, which still carry the pack's own PR template.
 
 ## Deliverable
@@ -36,7 +36,18 @@ revert-and-restore proof.
    progression only through successful canaries absent an explicit
    parked-canary override. Continuing past a blocked canary would need
    that override, invoked deliberately — not assumed.
-3. Each conversion deletes the set enumerated **from that consumer's
+3. One consumer-authored blocker is already measured and belongs to this
+   task rather than to child 2b: `rwbp-coordinator/.prism/rules.json:55`
+   is a live Prism **required** rule naming three removed paths. Its text
+   is not in the pack's `templates/.prism/rules.json`, so it is
+   rwbp-coordinator's own drift, and the partition keeps `.prism/` as
+   `shared / consumer-config` — conversion leaves the broken rule
+   behind unless the consumer PR fixes it. Repoint it in the same PR that
+   converts rwbp-coordinator, before the resweep can return `clear`.
+   `.prism/rules.json` is agent-executed, not inert data: round 10
+   reclassified it from `advisories` to `blockers` for exactly that
+   reason.
+4. Each conversion deletes the set enumerated **from that consumer's
    own installed-targets receipt** and classified through the partition
    (parent contract C-B) — measured today at **179 removed targets per
    consumer**, being 166 machine files plus 13 retired files. The four
@@ -47,12 +58,12 @@ revert-and-restore proof.
    destructive scope by four files. It **keeps** the `repo-native` and
    `consumer-config` slices. The counts are recomputed per consumer, not
    assumed from this line.
-4. The revert proof executes `install.py TARGET --revert-thin` on one
+5. The revert proof executes `install.py TARGET --revert-thin` on one
    converted canary, confirms CI stays green in the reverted state,
    then re-converts. Reading the revert code is not the proof.
-5. `sd-status fleet` is the acceptance instrument, not a summary
+6. `sd-status fleet` is the acceptance instrument, not a summary
    written by hand.
-6. **Machine provisioning precedes conversion** (parent contract C-C2).
+7. **Machine provisioning precedes conversion** (parent contract C-C2).
    Conversion removes a repository's agent surfaces on the assumption
    the machine supplies them; for anyone without the plugin installed
    and the machine installer run, it is indistinguishable from
@@ -80,6 +91,10 @@ revert-and-restore proof.
       pre-conversion installed-targets receipt** — a comparison against
       the current partition alone would pass while orphan files from an
       older pin survive.
+- [ ] `rwbp-coordinator/.prism/rules.json` names no removed path at the
+      converted HEAD, verified by the resweep returning `clear` for that
+      consumer rather than by reading the file — the rule text moved once
+      already and a hand check would re-measure the old bytes.
 - [ ] Machine scope verified present (plugin + machine receipt) before
       the first canary mutation, with the `sd-status` output recorded.
 - [ ] The revert proof was executed on a named canary at a named

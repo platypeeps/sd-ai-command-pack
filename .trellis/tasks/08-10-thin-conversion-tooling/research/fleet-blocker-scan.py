@@ -122,6 +122,16 @@ EXECUTABLE_PREFIXES = (
     ".gemini/commands/",
     ".opencode/command/",
     ".codex/",
+    # R10-C6, demonstrated. `.prism/rules.json` is a list of *required review
+    # rules* -- instructions a reviewing agent acts on, not inert config.
+    # `rwbp-coordinator/.prism/rules.json:55` tells the reviewer that canonical
+    # behaviour lives in `scripts/sd-ai-command-pack-full-check.sh`,
+    # `scripts/sd-ai-command-pack-housekeeping.sh`, `docs/SD_AI_COMMAND_PACK.md`
+    # and `.agents/skills/` -- three paths the conversion removes. The partition
+    # keeps the file (`shared`/`consumer-config`), so conversion leaves the
+    # broken rule in place. The text is not in the pack's shipped template, so
+    # it is consumer-authored and belongs in that consumer's own cleanup.
+    ".prism/",
 )
 EXECUTABLE_NAMES = frozenset(
     {
@@ -445,6 +455,31 @@ def is_executable_surface(repo: Path, relative: str) -> bool:
 # line, and `cites_removed_path` is the only thing that decides.
 
 
+def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
+    """Digest over the content of entries `git status` cannot see.
+
+    `git ls-files -v` prefixes each path with a status letter. Lowercase means
+    `assume-unchanged`; `S` means `skip-worktree`. Either hides the file from
+    `git status`, so `worktreeDigest` and `worktreeClean` say nothing about it
+    while the scanner reads it anyway. Hashing the flag list alone -- round 9's
+    fix -- detects the flag being set and nothing about the bytes it hides.
+    """
+    parts: list[str] = []
+    for line in sorted(index_flags.splitlines()):
+        if len(line) < 3 or line[1] != " ":
+            continue
+        flag, relative = line[0], line[2:]
+        if not (flag.islower() or flag == "S"):
+            continue
+        full = repo / relative
+        try:
+            content = f"sha256:{hashlib.sha256(full.read_bytes()).hexdigest()}"
+        except OSError:
+            content = "unreadable"
+        parts.append(f"{flag} {relative} {content}")
+    return digest_of("\n".join(parts))
+
+
 def resolve_link(repo: Path, relative: str, limit: int = 16) -> str | None:
     """Repository-relative path a tracked symlink ultimately names.
 
@@ -458,30 +493,24 @@ def resolve_link(repo: Path, relative: str, limit: int = 16) -> str | None:
     was invisible. Both are still empty across the fleet; the code now keeps
     the fail-closed promise it was making.
     """
-    current = relative
-    for _ in range(limit):
-        full = repo / current
-        if not full.is_symlink():
-            return current
-        try:
-            link = os.readlink(full)
-        except OSError:
-            return None
-        if os.path.isabs(link):
-            resolved = os.path.normpath(link)
-            try:
-                current = str(Path(resolved).relative_to(repo))
-            except ValueError:
-                # Outside the repository: nothing the conversion removes.
-                return None
-        else:
-            parent = str(Path(current).parent)
-            current = os.path.normpath(
-                link if parent == "." else f"{parent}/{link}"
-            )
-        if current.startswith(".."):
-            return None
-    return None
+    try:
+        # R10-C4: resolve through the filesystem rather than lexically. Walking
+        # `os.readlink` a component at a time only ever inspects the *last*
+        # component, so `top -> alias/full-check.sh` where `alias -> scripts`
+        # returned `alias/full-check.sh` -- a path that is not in the removal
+        # set while the file it reaches is. `resolve(strict=True)` follows
+        # intermediate directory links, and raises rather than inventing an
+        # answer for a broken chain (ENOENT) or a cycle (ELOOP), which is the
+        # fail-closed behaviour R9-C4 claimed and did not have. `limit` is kept
+        # for signature stability; the OS enforces its own depth bound.
+        target = (repo / relative).resolve(strict=True)
+        return str(target.relative_to(repo.resolve()))
+    except (OSError, RuntimeError, ValueError):
+        # OSError: unreadable, broken, or cyclic. ValueError: outside the
+        # repository, which the conversion does not remove -- but the caller
+        # treats `None` as blocking either way, because a link this scan could
+        # not follow is not a link it cleared.
+        return None
 
 
 def unambiguous_basenames(
@@ -805,18 +834,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 )
             continue
         try:
-            body = full.read_text(encoding="utf-8", errors="strict")
-        except UnicodeError:
-            # Binary. Unreadable *pack* content is unverifiable and therefore
-            # blocking; a binary consumer asset cannot carry a citation a
-            # static reader could see, and is recorded rather than skipped.
-            if relative in managed:
-                buckets["packDefects"].append(
-                    {"file": relative, "line": None, "detail": "unreadable pack target"}
-                )
-            else:
-                binary.append(relative)
-            continue
+            raw = full.read_bytes()
         except OSError:
             # R9-C2: an OSError is not a binary file. Round 8's handler shared
             # one branch with UnicodeError, so a present-but-unreadable file --
@@ -834,6 +852,24 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 missing.append(relative)
             continue
+        # R10-C5: "did not decode as strict UTF-8" is not "cannot carry a
+        # citation". A shell script with one Latin-1 comment and an invocation
+        # of a removed path is still a shell script; round 9 sent it to
+        # `binaryTrackedFiles` and cleared it. A NUL byte is the signal that
+        # actually distinguishes a binary asset -- and it is what all 16 of
+        # `rwbp-coordinator`'s decode failures have, being PNG and ICO files.
+        # Everything else is decoded leniently and classified normally: a
+        # replacement character in a comment cannot manufacture a citation,
+        # because matching still requires a removed path.
+        if b"\0" in raw:
+            if relative in managed:
+                buckets["packDefects"].append(
+                    {"file": relative, "line": None, "detail": "unreadable pack target"}
+                )
+            else:
+                binary.append(relative)
+            continue
+        body = raw.decode("utf-8", errors="replace")
         lines = body.splitlines()
         all_spans = block_spans(lines)
         malformed_markers = all_spans is None
@@ -889,13 +925,18 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 buckets["advisories"].append(entry)
 
     index = git(repo, "ls-files", "-s")
-    # R9-C3. `git status` hides a file marked `assume-unchanged` or
+    # R9-C3 / R10-C3. `git status` hides a file marked `assume-unchanged` or
     # `skip-worktree`, so its bytes can change while `head`, `indexDigest`,
     # `worktreeDigest`, `worktreeClean`, `executableBitsDigest`, and
     # `missingTrackedFiles` all stay identical -- and the scanner still reads
-    # the new bytes and can classify them differently. `git ls-files -v`
-    # prefixes each path with its flag letter, so hashing that output binds the
-    # flag state itself. No consumer sets either flag today.
+    # the new bytes and can classify them differently.
+    #
+    # Round 9 hashed `git ls-files -v` and called that binding. It is not: the
+    # output carries the flag letter and the path, so it detects a flag being
+    # *set* and nothing about the content it hides. A file already carrying the
+    # flag when the scan ran could then change freely. `hidden_bytes_digest`
+    # hashes the content of exactly those entries, which is the only thing that
+    # closes it. No consumer sets either flag today.
     index_flags = git(repo, "ls-files", "-v")
     return {
         "consumer": name,
@@ -903,6 +944,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "head": git(repo, "rev-parse", "HEAD").strip(),
         "indexDigest": digest_of(index),
         "indexFlagsDigest": digest_of(index_flags),
+        "hiddenBytesDigest": hidden_bytes_digest(repo, index_flags),
         "worktreeDigest": worktree_digest(repo),
         "worktreeClean": not git(repo, "status", "--porcelain").strip(),
         "receiptOccupancyDigest": receipt_occupancy_digest(repo, receipt.entries),

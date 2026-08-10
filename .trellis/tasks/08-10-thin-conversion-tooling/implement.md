@@ -171,7 +171,7 @@ other `fleet-*` script. Imports step 1's builder for the removal set and
 applies `design.md`'s four-bucket rule — `scheduled`, `packDefects`,
 `blockers`, `advisories` — each step failing closed. Records the full
 binding set from `design.md`'s verdict schema: `head`, `indexDigest`,
-`indexFlagsDigest`, `worktreeDigest`, `worktreeClean`,
+`indexFlagsDigest`, `hiddenBytesDigest`, `worktreeDigest`, `worktreeClean`,
 `receiptOccupancyDigest`, `executableBitsDigest`, `binaryTrackedFiles`,
 `missingTrackedFiles`, and `classifierDigest`. The short list this step
 used to name — `head`, `indexDigest`, `worktreeClean`,
@@ -294,8 +294,8 @@ per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
 removed paths: `sd-github-review` 14 hits in 10 files,
-`se-ai-command-pack` 22/8, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
-`rwbp-coordinator` 48/7, `loadsmith` 53/5, `rwbp-website` 65/8,
+`se-ai-command-pack` 23/9, `hoa-manager` 34/9, `mezmo_benchmark` 44/24,
+`rwbp-coordinator` 49/8, `loadsmith` 53/5, `rwbp-website` 65/8,
 `anomaly-metric-creator` 205/21 — CI workflows, `package.json` scripts,
 repo-owned tests, shell preflights, root agent instruction files, and
 PR-template checklists. Plus 16 pack defects in 7 files (14 in 6 where
@@ -937,7 +937,7 @@ Fixture criteria this round adds:
 Every count rose or held; none fell, which is what a hidden-lines defect
 predicts and a mis-tightened rule would not.
 
-### Round 10 (host lane; Codex lane pending)
+### Round 10 (host lane)
 
 Round 9's deliverable was an executable counterexample list. Round 10's
 host lane began by asking the obvious question about it — *does it fail
@@ -984,3 +984,35 @@ unprotected:
 because that consumer's tree changed under the scan — which is what the
 recorded head and digests are for. Every other row is identical to the
 seventh. The untracked-file scope added zero hits.
+
+### Round 10 (Codex lane)
+
+Six blocking concerns, two of them demonstrated against the current fleet
+rather than constructed. The lane found nothing the host lane found — the
+second consecutive round with zero overlap.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R10-C1 | Codex | **The counterexample harness could pass a scanner regression.** Its 18 fleet assertions only queried the committed JSON: never called `scan()`, never compared `scannerDigest`, never read a consumer head. A regression that skipped every regular file would leave all unit cases unchanged and all fleet cases reading the old JSON — green. The docstring's claim that a head mismatch becomes `skipped` was also false: it skipped only an absent or `error` row | The digest gate landed in the host lane's `2e384eeb`; this round added the head check the docstring already promised. The harness now runs `git rev-parse HEAD` per consumer and skips explicitly on mismatch |
+| R10-C2 | Codex | **The U-2 counterexample was unguarded twice.** The fleet case named `.agents/skills/se-help/SKILL.md`, which does not exist at the recorded `se-ai-command-pack` head — the real file is `templates/skills/se-help/SKILL.md:51`. With an expected bucket of `None`, a file that does not exist passes by naming nothing. The matching unit case was tautological: the synthetic removal set held no colliding `references/examples.md`, so the predicate returned false whether or not bare-suffix guessing was restored. All three negative fleet cases used `line=None`, making them file-wide | Path corrected; all three negative cases anchored to lines (`templates/skills/se-help/SKILL.md:51`, `hoa-manager/scripts/update_repomix:8`, `templates/skills/se-author/SKILL.md:74`); `.agents/skills/sd-help/references/examples.md` added to the synthetic removal set; and a case whose file is absent at the recorded head is now a **failure**, not a silent pass. Verified by mutation: reverting the tail rule to plain `endswith` now fails 4 cases, including both U-2 forms — before this fix it failed neither |
+| R10-C3 | Codex | **R9-C3's fix was the wrong fix.** `indexFlagsDigest` hashes `git ls-files -v`, which binds the flag letter and the path — not the bytes the flag hides. A file already carrying `skip-worktree` can have its contents rewritten with `head`, `indexDigest`, `indexFlagsDigest`, `git status`, `worktreeDigest`, and `worktreeClean` all identical, and the scanner and converter then read different bytes | `hidden_bytes_digest()` hashes the contents of every flagged path alongside its flag letter. `design.md`'s schema gains `hiddenBytesDigest`, and the "every digest field is load-bearing" paragraph now records that this one field is two, and why. Still empty fleet-wide: no consumer sets either flag |
+| R10-C4 | Codex | **`resolve_link()` resolved lexically, not on the filesystem.** Only the final component was tested with `is_symlink()`, so `top -> alias/full-check.sh` where `alias -> scripts` returned `alias/full-check.sh` and the caller missed a symlink that ultimately executes a removed path. A broken chain returned its nonexistent lexical target instead of `None`, and the `is_symlink()` call sat outside the `try` | Rewritten to `(repo / relative).resolve(strict=True)` relative to the resolved repo root, with `OSError`/`RuntimeError`/`ValueError` all failing closed to `None` — which the caller already treats as an unresolvable-symlink blocker. Intermediate components, chains, cycles, and broken links are now one code path |
+| R10-C5 | Codex | **Invalid UTF-8 was treated as harmless binary.** Any unmanaged `UnicodeError` went to `binaryTrackedFiles` and continued without blocking. An executable shell file with one Latin-1 comment and an invocation of a removed script is still executable; strict decoding skipped every line of it and could yield `clear`. "Not UTF-8" does not establish "binary asset that cannot carry a citation" | Read path is now `read_bytes()`; a NUL byte decides binary, and everything else is decoded with `errors="replace"` and classified normally. At the recorded rwbp head the 16 decode failures were genuine NUL-bearing PNG/ICO files, so the measured counts do not move — the class is closed before it has an instance |
+| R10-C6 | Codex | **Demonstrated: Prism rules were classified advisory.** `rwbp-coordinator/.prism/rules.json:55` is a live Prism **required** rule naming three removed paths, recorded under `advisories`. `.prism/` was absent from the agent-executed prefixes: a `.json` suffix reads as inert data while the contents are rules an agent is expected to obey | `.prism/` added to `EXECUTABLE_PREFIXES`. Verified consumer-authored, not an eighth pack surface: the text is not in `templates/.prism/rules.json`, so the partition correctly keeps `.prism/` as `shared / consumer-config` and conversion leaves the rule behind. Filed as child 3's requirement 3 with its own acceptance criterion, not as child 2b work |
+
+Four non-blocking contradictions were also fixed: `design.md`'s Copilot
+block said five hits (now seven, with the two globs and both consumers'
+exact lines); `thin-prompt-surface-repoint/task.json` said `14 in 7 / 12
+in 6` (now `16 in 7 / 14 in 6`); `thin-canary-conversion/prd.md` said 14
+in seven; and the parent `design.md` plus this task's `design.md`
+summarized matching as exact/basename/glob against the authoritative five
+forms in `prd.md:42`. All four now agree with the scanner.
+
+**Ninth measurement.** Two figures moved, both from R10-C6 and both
+verified genuine rather than a counting change: `rwbp-coordinator`
+49 blockers in 8 files (was 48/7 — `.prism/rules.json:55` names three
+removed paths) and `se-ai-command-pack` 23 in 9 (was 22/8 — its
+`.prism/rules.json:43` names `scripts/sd-ai-command-pack-review-preflight.mjs`).
+Every other row is identical to the eighth. `packDefects` unchanged at
+16 in 7, or 14 in 6 where the consumer owns its PR template. No consumer
+is `clear`. The harness is 40 passed, 0 failed, 0 skipped.

@@ -1,35 +1,37 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "dbed118eb784d055da8e89c49084733952c59845",
-  "packWorktreeDigest": "sha256:bfb7ee9c0ea5a08034851628b7e7ea3a3487bc981c7dc497599139469c808a06",
+  "packHead": "2e384eebcb6d5ca952d7aab23df063f10e52671a",
+  "packWorktreeDigest": "sha256:88e69683215fd61f8ee644c8c3171f52c97e55906b439501c8d06af8b1ec8ad1",
   "packWorktreeClean": false,
-  "scannerDigest": "sha256:7994a3a98373557f2692f47d775f0b8a03ea1a083f5af1caec8c120268fea986",
-  "counterexamplesDigest": "sha256:1ef7c718b4694705dd33e78a631d7312b8d5cd7ff13145a630245aab5ebe9028",
+  "scannerDigest": "sha256:10f4792c4addabdd7f02eb84ab483bc5eb76c2bff62f36abe897d1c054ab2ab7",
+  "counterexamplesDigest": "sha256:75df1ef800b35b3732b4fd8e9fb3bd8777be167384f328b3e66a96a6dfefcaad",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
-      "head": "5c17320caeb2d68314b87c3c0af3392c52e3920e",
-      "indexDigest": "sha256:fe20b450ac3ebbb74f78633aa4c247f665060b0471d8534723a12f9a5d60f7bc",
-      "indexFlagsDigest": "sha256:0a8bb278834491eda6036c4b9c16e3f3c766f1ac07d972f5cd634d060c4367ed",
-      "worktreeDigest": "sha256:9727b2a45a6855aca4aaea1fce6c52b4b6c3637a8fa90731920f424afed54a19",
-      "worktreeClean": false,
-      "receiptOccupancyDigest": "sha256:f5607bd2f12123ebe43ad4cd3a9816eaef33c24285536a33fd991a0e04128cd3",
-      "executableBitsDigest": "sha256:8278416ac8bc2a0134f4a41394719fb5ff88e02aadbf334e5e0aadb6e0670994",
+      "head": "5044c11de3ab3dce1ce5c9ace7a8510a567680be",
+      "indexDigest": "sha256:3ad1b56b3a7e595d336b96b15c1d0ea7779c02abad3a1ca58b2cc178db121f4e",
+      "indexFlagsDigest": "sha256:8f31afff3be6612601cb41bd1d88354720c98f99817208a36518f358cf41043c",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "worktreeClean": true,
+      "receiptOccupancyDigest": "sha256:a2c9d964bf92b78e5afcb3ef60a8f578d956e50c6ff4628f4018710afd7dc8eb",
+      "executableBitsDigest": "sha256:fb6bf0719d6f8030500188c8a16f283ce75c2b62bc855c0d413482ea85595faa",
       "binaryTrackedFiles": 16,
       "missingTrackedFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
       "trackedFiles": 1406,
       "counts": {
-        "blockers": 48,
+        "blockers": 49,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 115
+        "advisories": 114
       },
       "blockerFiles": [
         ".github/workflows/ci.yml",
+        ".prism/rules.json",
         ".trellis/spec/web/operations/local-development.md",
         "package.json",
         "scripts/check-full.test.mjs",
@@ -67,6 +69,11 @@
           "file": ".github/workflows/ci.yml",
           "line": 118,
           "detail": "node --check scripts/sd-ai-command-pack-review-preflight.mjs"
+        },
+        {
+          "file": ".prism/rules.json",
+          "line": 55,
+          "detail": "\"text\": \"For SD AI command-pack changes, verify platform commands/prompts remain thin adapters and canonical behavior stays in scripts/sd-ai-command-pack-full-c"
         },
         {
           "file": ".trellis/spec/web/operations/local-development.md",
@@ -1106,11 +1113,6 @@
       ],
       "advisories": [
         {
-          "file": ".prism/rules.json",
-          "line": 55,
-          "detail": "\"text\": \"For SD AI command-pack changes, verify platform commands/prompts remain thin adapters and canonical behavior stays in scripts/sd-ai-command-pack-full-c"
-        },
-        {
           "file": ".trellis/audit/report-2026-07-17.md",
           "line": 217,
           "detail": "- scripts/sd-ai-command-pack-review-preflight.mjs:294 \u2014 existing guard doesn't check key/version drift"
@@ -1688,6 +1690,7 @@
       "head": "b770d1743429f899445e8bc13530245959041004",
       "indexDigest": "sha256:11417ddf076b72e3962d0df0c478e927144a52455feda41cbb615621d1e86826",
       "indexFlagsDigest": "sha256:24266d8c25caed66146818591f8be58c8f2fe1809b125c5402960ee0cb9686bb",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:9e43f8265eaff89914818c24604b53ab43fb8d5ce0e4bae56e3e6302dca39221",
@@ -3626,6 +3629,7 @@
       "head": "a487b283363012ea316f9c88e7b2deb641e02356",
       "indexDigest": "sha256:75c382c401976a78f5b035a3847c23983cc82ad7a84b8120120f1fd4e28eced0",
       "indexFlagsDigest": "sha256:031da61bf3e6242d52522221904f4a2077c069af371b430ef763c4d3cd9d3ee5",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:bfd28edb38add0e33434e40559100fc42a2f3aa11cabc65051ebc465efb8c01f",
@@ -5293,6 +5297,7 @@
       "head": "74c038bd038f3cd8a5804fe4e3c3a89a69b91381",
       "indexDigest": "sha256:879561d81217eaf4712ff7ea8141012571a1b7a9fbc752a0d45bdca45ee5250f",
       "indexFlagsDigest": "sha256:73741914fa25c8d8e72ced1a2e3e412bc68e1a1e2e661a13f0c11acec8ff617d",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:def2fe6f7df8916494c63c827979490bf16bf2b51ba7a9d413f0344f8e002419",
@@ -7004,6 +7009,7 @@
       "head": "aa8b6a451f0de8216eb87e524f03bbe70f085f3c",
       "indexDigest": "sha256:7b6ec67476400715b271824266fa14876ae8fa48532fa3a6b98f2018e7ca36cb",
       "indexFlagsDigest": "sha256:cb5d7db9b6e9cc6fb5ed797542fa581067812925911edfe17302d3ff052ef97d",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:d9d117d57b8685fee05a4121d67bdc42c08a906d39193a76cf797c93d2a4bd87",
@@ -8575,6 +8581,7 @@
       "head": "6fe98db56656a05320d2c0293fb73c54a41856f2",
       "indexDigest": "sha256:2832c1dbde9b05b7b1489e842c2c5022ba3de70d151cce54184c7d8f0fb181bc",
       "indexFlagsDigest": "sha256:956571772c8feb18c4dba331bc324aa21e9c40518111aaa7cc072daeef02e39e",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:5f07fda12898725c43dcc85efe9f587abedfe6aa586b69e369b715f352a64eb0",
@@ -8585,14 +8592,15 @@
       "removedTargets": 179,
       "trackedFiles": 1410,
       "counts": {
-        "blockers": 22,
+        "blockers": 23,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 812
+        "advisories": 811
       },
       "blockerFiles": [
         ".github/scripts/generate-skill-surfaces.py",
         ".github/workflows/tests.yml",
+        ".prism/rules.json",
         ".trellis/spec/backend/quality-guidelines.md",
         ".trellis/tasks/08-10-review-scope-late-arrival/prd.md",
         "Makefile",
@@ -8620,6 +8628,11 @@
           "file": ".github/workflows/tests.yml",
           "line": 133,
           "detail": "node scripts/sd-ai-command-pack-review-preflight.mjs"
+        },
+        {
+          "file": ".prism/rules.json",
+          "line": 43,
+          "detail": "\"text\": \"Do not report the lone generated `_example` row in a planning task's implement.jsonl or check.jsonl as leftover placeholder content. `task.py create` w"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
@@ -9547,11 +9560,6 @@
           "file": ".gitignore",
           "line": 51,
           "detail": ".claude/skills/*"
-        },
-        {
-          "file": ".prism/rules.json",
-          "line": 43,
-          "detail": "\"text\": \"Do not report the lone generated `_example` row in a planning task's implement.jsonl or check.jsonl as leftover placeholder content. `task.py create` w"
         },
         {
           "file": ".trellis/audit/ledger.md",
@@ -13606,6 +13614,7 @@
       "head": "8a5493b4002f1988f18c35952f6e9f28b8b6972f",
       "indexDigest": "sha256:be03736cdd85bab6d5455828089050fc3ac9f5c9fb155a41bc068834822f5dcd",
       "indexFlagsDigest": "sha256:f6408da435adfa47ca49788713e59131177c743e84b8fa452ff76d901e0bc37e",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:a7e3f41c7fa4e146f0a3c811743ed376d6b20a503376e026cfa2359a42396729",
@@ -14908,6 +14917,7 @@
       "head": "82ad2f5ea881d79ba35873268671a0330607ac92",
       "indexDigest": "sha256:396c8e2be7955db03dd5df79ddc1104558342cd6a015b9a1518519a349ae2fd3",
       "indexFlagsDigest": "sha256:56d415644624d9f44c53de2c55ada36e0e914d6a2e78dd8c27648002f1116d9d",
+      "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:0b68729aab21d49cbd879f1b9831d815f42278347407c0040473e67992a5f8c0",

@@ -137,8 +137,12 @@ The resweep greps the consumer for:
    The verdict is `clear` only when both blocking classes are empty.
    Child 1's `design.md` owns the decision procedure — what counts as
    the execution surface, and how a citation is matched — together with
-   the fleet measurement behind it. That check matches exact paths,
-   basenames, and globs, and is a **lower bound**: a runtime-composed
+   the fleet measurement behind it. That check matches a citation in five
+   forms — the exact path; a tail of the cited token at a path boundary; a
+   token resolved relative to the citing file; a glob whose **whole**
+   matched population the conversion removes; and a bare basename that is
+   both unique to the removal set and pack-distinctive — and is a
+   **lower bound**: a runtime-composed
    path is invisible to any static reader, so reversibility via
    `--revert-thin` is what makes the conversion safe, not resweep
    exhaustiveness.

@@ -31,6 +31,7 @@ import argparse
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -132,7 +133,7 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
     (
         "hoa-manager",
         "scripts/update_repomix",
-        None,
+        8,
         None,
         "R7-4",
         "INCLUDE_PATTERNS globs keep selecting surviving files, so the script "
@@ -170,8 +171,8 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
     ),
     (
         "se-ai-command-pack",
-        ".agents/skills/se-help/SKILL.md",
-        None,
+        "templates/skills/se-help/SKILL.md",
+        51,
         None,
         "U-2",
         "'Read `references/examples.md`' names its own sibling; matching it to "
@@ -180,7 +181,7 @@ FLEET_CASES: list[tuple[str, str, int | None, str | None, str, str]] = [
     (
         "se-ai-command-pack",
         "templates/skills/se-author/SKILL.md",
-        None,
+        74,
         None,
         "R9-3",
         "'`review.md`: findings, decisions' names a runtime workspace artifact; "
@@ -275,6 +276,10 @@ def unit_cases(module) -> list[tuple[str, str, bool, bool]]:
             "docs/SD_AI_COMMAND_PACK.md",
             ".agents/skills/sd-status/SKILL.md",
             ".claude/commands/sd/review.md",
+            # R10-C2: without the colliding path in the removal set, the U-2
+            # case below passed whether or not bare-suffix guessing was
+            # restored -- there was nothing for a bad rule to collide with.
+            ".agents/skills/sd-help/references/examples.md",
         }
     )
     # H10-2: `docs/review.md` used to be here, which made the R9-3 case
@@ -473,6 +478,37 @@ def main() -> int:
         row = rows.get(consumer)
         if row is None or "error" in row:
             skipped.append(f"fleet {round_id}: {consumer} not in the scan")
+            continue
+        # R10-C1: the module docstring promised that a head mismatch becomes a
+        # skip, and nothing read a head. Now it does -- a result recorded
+        # against a different commit is not evidence about this one.
+        repo = Path(row["repo"])
+        try:
+            head = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            skipped.append(f"fleet {round_id}: {consumer} checkout unreadable")
+            continue
+        if head != row["head"]:
+            skipped.append(
+                f"fleet {round_id}: {consumer} is at {head[:12]}, the scan "
+                f"recorded {row['head'][:12]}"
+            )
+            continue
+        # R10-C2: a negative case names a file that must exist for its absence
+        # from every bucket to mean anything. `.agents/skills/se-help/SKILL.md`
+        # did not exist at the recorded head -- the real counterexample is
+        # `templates/skills/se-help/SKILL.md` -- so the assertion passed by
+        # naming nothing at all, for two rounds.
+        if not (repo / relative).exists():
+            failures.append(
+                f"fleet {round_id}: {consumer}/{relative} does not exist; a "
+                "case that names no file asserts nothing"
+            )
             continue
         found = {
             bucket

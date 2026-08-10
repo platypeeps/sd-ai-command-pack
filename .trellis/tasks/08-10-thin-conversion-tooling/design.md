@@ -282,6 +282,7 @@ Emits a schema-versioned verdict object:
   "head": "<40-char SHA>",
   "indexDigest": "sha256:<hash of `git ls-files -s` output>",
   "indexFlagsDigest": "sha256:<hash of `git ls-files -v` output>",
+  "hiddenBytesDigest": "sha256:<hash over the contents of every flagged path>",
   "worktreeDigest": "sha256:<hash over dirty paths and their contents>",
   "worktreeClean": true,
   "receiptOccupancyDigest": "sha256:<hash over what each receipt target is on disk>",
@@ -308,7 +309,15 @@ on a tracked Markdown file under `core.fileMode=false`
 (`executableBitsDigest`), a sparse or unreadable checkout
 (`missingTrackedFiles`, which forces `blocked`), and an `assume-unchanged`
 or `skip-worktree` entry whose bytes change invisibly to `git status`
-(`indexFlagsDigest`). An earlier revision of this schema listed only
+(`indexFlagsDigest` **and** `hiddenBytesDigest`). That last pair is one
+field split in two after round 10 showed the first was not enough:
+`git ls-files -v` binds the flag letter and the path, not the content
+behind them, so a file already carrying `skip-worktree` could have its
+bytes rewritten with `head`, `indexDigest`, `indexFlagsDigest`,
+`git status`, `worktreeDigest`, and `worktreeClean` all unchanged while
+the scanner and the converter read different bytes. `hiddenBytesDigest`
+hashes the contents of each flagged path, so the flag can no longer hide
+what it covers. An earlier revision of this schema listed only
 `head`, `indexDigest`, `worktreeClean`, and `classifierDigest`, which
 would have shipped a verdict *less* reproducible than the research
 measurement it is derived from.
@@ -405,11 +414,16 @@ more blocking, not less.
    `anomaly-metric-creator`) — there the template is the consumer's, and
    its stale citations are blockers instead:
 
-   - `.github/copilot-instructions.md`, five hits — inside the pack's own
-     managed block, citing `docs/SD_AI_COMMAND_PACK.md` and
-     `scripts/sd-ai-command-pack-install-audit.py`. Line numbers move with
-     the consumer's own preamble above the block (27/51/54/106/108 in
-     `rwbp-coordinator`, 47/71/74/126/128 in `mezmo_benchmark`), so the
+   - `.github/copilot-instructions.md`, seven hits — inside the pack's own
+     managed block, citing `docs/SD_AI_COMMAND_PACK.md`,
+     `scripts/sd-ai-command-pack-install-audit.py`, and two
+     `.agents/skills/sd-*/SKILL.md` globs whose whole matched population
+     the conversion removes. The two globs were invisible until round 9
+     deleted the discovery prefilter, which could not see a glob because a
+     glob shares no literal substring with what it selects. Line numbers
+     move with the consumer's own preamble above the block
+     (26/27/36/51/54/106/108 in `rwbp-coordinator`,
+     46/47/56/71/74/126/128 in `mezmo_benchmark`), so the
      resweep reports them, artifacts do not hard-code them. Reached only
      through the marker rule above; digest comparison alone reports this
      file as consumer-authored and misses it.
@@ -442,13 +456,20 @@ more blocking, not less.
    asserting on `.sd-ai-command-pack/provenance.json` names a path the
    conversion **keeps**, so it is not a blocker; one invoking
    `scripts/sd-ai-command-pack-full-check.sh` names a path that
-   disappears, so it is. Three matchers, because one is not enough:
-   exact/suffix path, basename, and `fnmatch` for globs. The glob matcher
-   is not hypothetical — `loadsmith/.github/workflows/ci.yml:149`
-   addresses the deleted population as `scripts/sd-ai-command-pack-*.sh`
-   and names no exact path or basename anywhere.
+   disappears, so it is. Five forms, because one is not enough, and each
+   later one exists because an earlier round produced a case the ones
+   before it missed: the exact path; a tail of the cited token **at a
+   path boundary**; the token resolved relative to the citing file; a
+   glob whose **whole** matched population the conversion removes; and a
+   bare basename that is both unique to the removal set and
+   pack-distinctive. `prd.md:42` is the authoritative statement of the
+   five; this paragraph and the list at the end of this document restate
+   it and must not drift from it. The glob form is not hypothetical —
+   `loadsmith/.github/workflows/ci.yml:149` addresses the deleted
+   population as `scripts/sd-ai-command-pack-*.sh` and names no exact
+   path or basename anywhere.
 
-   All three are a **lower bound**, and the design says so rather than
+   All five are a **lower bound**, and the design says so rather than
    implying coverage it does not have: a path composed at runtime from
    variables is invisible to any static reader. What makes the conversion
    safe is `--revert-thin` restoring the payload, not the resweep being
@@ -477,7 +498,7 @@ more blocking, not less.
      `.devcontainer/`, or an agent-executed surface — `.github/prompts/`,
      `.github/instructions/`, `.claude/commands/`, `.claude/rules/`,
      `.claude/skills/`, `.agents/`, `.gemini/commands/`,
-     `.opencode/command/`, `.codex/`;
+     `.opencode/command/`, `.codex/`, `.prism/`;
    - its basename is a root agent instruction file — `CLAUDE.md`,
      `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `copilot-instructions.md`,
      `.cursorrules`, `SKILL.md` — or ends in `.prompt.md` or
@@ -520,15 +541,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 22 in 8,
+`sd-github-review` 14 hits in 10 files, `se-ai-command-pack` 23 in 9,
 `hoa-manager` 34 in 9, `mezmo_benchmark` 44 in 24,
-`rwbp-coordinator` 48 in 7, `loadsmith` 53 in 5, `rwbp-website` 65 in 8,
+`rwbp-coordinator` 49 in 8, `loadsmith` 53 in 5, `rwbp-website` 65 in 8,
 `anomaly-metric-creator` 205 in 21. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the seventh measurement, and the six before them were each
+**These are the ninth measurement, and the eight before them were each
 wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 
@@ -550,10 +571,13 @@ a rule that reasoning found sufficient, and measurement did not.
   normatively, and nothing else. An earlier revision of this bullet ended
   at "relative to the citing file", which contradicted the rule the
   scanner implements; the two are one list now.
-- *Enumerating execution surfaces did not converge.* Three consecutive
+- *Enumerating execution surfaces did not converge.* Four consecutive
   rounds each found a file type the previous enumeration missed: nested
   `scripts/` directories, agent prompt files, root `CLAUDE.md`, PR
-  templates. The rule was generalized to classify by **citation syntax** —
+  templates, and — in round 10 — `.prism/rules.json`, a JSON file whose
+  `.json` suffix reads as inert data while its contents are *required
+  rules* an agent is expected to obey. The rule was generalized to
+  classify by **citation syntax** —
   a path appearing in command position blocks regardless of the file it
   sits in — because the space of ways a command is written is far smaller
   and far more stable than the space of files that might run one.
@@ -570,6 +594,20 @@ a rule that reasoning found sufficient, and measurement did not.
   substring gate has this failure mode. There is no prefilter now: the
   matcher sees every line of every tracked file, which costs 11 seconds
   fleet-wide.
+
+- *The regression harness was itself unverified.* Round 9 turned the
+  accumulated counterexamples into `research/classifier-counterexamples.py`
+  so "all counterexamples still pass" would stop being re-established by
+  hand. Round 10 mutation-tested it — revert one scanner rule, re-run the
+  scan, re-run the harness — and **four of nine reverted rules produced no
+  failure**: two ownership proofs and the historical-scoping and
+  interpreter-case rules had no fixture depending on them, and the fleet
+  assertions read a stored JSON, so they could not detect a scanner
+  regression at all. Two negative cases named files that **did not exist**
+  at the recorded head, so they asserted nothing for two rounds. A test
+  suite that has never been shown to fail is a claim, not a check; the
+  harness now pins the scanner digest, verifies each consumer's head, and
+  fails a case whose file is absent.
 
 The lesson is specific and is why step 3 keeps the scanner as a committed,
 re-runnable artifact rather than a number in prose: when prose and
