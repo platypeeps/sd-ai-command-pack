@@ -107,18 +107,6 @@ or a housekeeping merge already authorized by the owning workflow, including a c
   Put the recommended candidates first and present only a
   host-supported group at a time.
 
-### `review-local.findings`
-
-- Owners: `sd-review-local`
-- Category: `finding-task-batch`
-- Header: `Review fixes`
-- Question: Which verified local-review findings should I fix now?
-- Multi-select: `yes`
-- Noninteractive: `report-only`
-- Options: derive from independent verified local-review findings.
-  Put the recommended candidates first and present only a
-  host-supported group at a time.
-
 ### `review.higher-risk-fixes`
 
 - Owners: `sd-ship`, `sd-review`, `sd-review-pr`
@@ -133,7 +121,7 @@ or a housekeeping merge already authorized by the owning workflow, including a c
 
 ### `review.scope-expansion`
 
-- Owners: `sd-ship`, `sd-review`, `sd-review-pr`, `sd-review-local`
+- Owners: `sd-ship`, `sd-review`, `sd-review-pr`
 - Category: `higher-risk-mutation`
 - Header: `Review scope`
 - Question: Should this review fix expand beyond the current scope?

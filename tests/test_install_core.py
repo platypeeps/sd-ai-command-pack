@@ -226,9 +226,7 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-retro/SKILL.md",
                 ".agents/skills/sd-review/SKILL.md",
                 ".agents/skills/sd-review-pr/SKILL.md",
-                ".agents/skills/sd-review-local/SKILL.md",
                 ".agents/skills/sd-review-learnings/SKILL.md",
-                ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-shell-lib.sh",
@@ -239,7 +237,6 @@ class InstallCoreTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-housekeeping.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
-                "scripts/sd-ai-command-pack-review-local.sh",
                 "scripts/sd-ai-command-pack-review.py",
                 "scripts/sd-ai-command-pack-review-learnings.py",
                 "scripts/sd-ai-command-pack-pr-body-scope.py",
@@ -268,9 +265,7 @@ class InstallCoreTests(InstallTestCase):
                 ".gemini/commands/sd/retro.toml",
                 ".gemini/commands/sd/review.toml",
                 ".gemini/commands/sd/review-pr.toml",
-                ".gemini/commands/sd/review-local.toml",
                 ".gemini/commands/sd/review-learnings.toml",
-                ".gemini/commands/sd/full-check.toml",
                 ".gemini/commands/sd/housekeeping.toml",
                 ".gemini/commands/sd/update-spec.toml",
             ],
@@ -309,9 +304,7 @@ class InstallCoreTests(InstallTestCase):
                 ".cursor/commands/sd-test-gaps.md",
                 ".cursor/commands/sd-retro.md",
                 ".cursor/commands/sd-review-pr.md",
-                ".cursor/commands/sd-review-local.md",
                 ".cursor/commands/sd-review-learnings.md",
-                ".cursor/commands/sd-full-check.md",
                 ".cursor/commands/sd-housekeeping.md",
                 ".cursor/commands/sd-update-spec.md",
                 ".github/prompts/sd-continue.prompt.md",
@@ -327,9 +320,7 @@ class InstallCoreTests(InstallTestCase):
                 ".github/prompts/sd-test-gaps.prompt.md",
                 ".github/prompts/sd-retro.prompt.md",
                 ".github/prompts/sd-review-pr.prompt.md",
-                ".github/prompts/sd-review-local.prompt.md",
                 ".github/prompts/sd-review-learnings.prompt.md",
-                ".github/prompts/sd-full-check.prompt.md",
                 ".github/prompts/sd-housekeeping.prompt.md",
                 ".github/prompts/sd-update-spec.prompt.md",
                 ".github/copilot-instructions.md",
@@ -346,9 +337,7 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-test-gaps.md",
                 ".opencode/commands/sd-retro.md",
                 ".opencode/commands/sd-review-pr.md",
-                ".opencode/commands/sd-review-local.md",
                 ".opencode/commands/sd-review-learnings.md",
-                ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
                 ".opencode/commands/sd-update-spec.md",
             ],
@@ -495,25 +484,17 @@ class InstallCoreTests(InstallTestCase):
         ):
             self.assertIn(phrase, template)
 
-    def test_tracked_full_check_skill_matches_template_and_documents_audit(
-        self,
-    ) -> None:
-        installed = (install.ROOT / ".agents/skills/sd-full-check/SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        template = (
-            install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
+    def test_the_manual_documents_the_structural_post_install_audit(self) -> None:
+        manual = (
+            install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
         ).read_text(encoding="utf-8")
 
-        self.assertEqual(installed, template)
         for expected in (
-            "Structural post-install audit",
             "scripts/sd-ai-command-pack-install-audit.py",
             "SD_AI_COMMAND_PACK_INSTALL_AUDIT=0",
             "SD_AI_COMMAND_PACK_INSTALL_AUDIT=required",
-            "post-install audit ran, skipped, or failed",
         ):
-            self.assertIn(expected, installed)
+            self.assertIn(expected, manual)
 
     def test_rejects_copilot_instruction_symlink_resolved_outside_repo(
         self,
@@ -2420,7 +2401,6 @@ class InstallCoreTests(InstallTestCase):
                 ".agents/skills/sd-update-deps/SKILL.md",
                 ".agents/skills/sd-test-gaps/SKILL.md",
                 ".agents/skills/sd-retro/SKILL.md",
-                ".agents/skills/sd-full-check/SKILL.md",
                 ".agents/skills/sd-housekeeping/SKILL.md",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd_ai_command_pack_lib.py",
@@ -2450,7 +2430,6 @@ class InstallCoreTests(InstallTestCase):
                 ".opencode/commands/sd-fleet-refresh.md",
                 ".opencode/commands/sd-test-gaps.md",
                 ".opencode/commands/sd-retro.md",
-                ".opencode/commands/sd-full-check.md",
                 ".opencode/commands/sd-housekeeping.md",
                 ".opencode/commands/sd-update-spec.md",
                 ".github/copilot-instructions.md",
@@ -3264,36 +3243,6 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("record each follow-up", work_backlog)
         self.assertIn("upstream Trellis pull request", work_backlog)
 
-        review_local = (
-            install.ROOT / "templates/.agents/skills/sd-review-local/SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("name: sd-review-local", review_local)
-        self.assertIn("# SD Local Review Loop", review_local)
-        self.assertIn("bash scripts/sd-ai-command-pack-review-local.sh", review_local)
-        self.assertIn("SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS", review_local)
-        self.assertIn("asks the user which findings to fix", review_local)
-        self.assertIn("Do not substitute `sd-full-check`", review_local)
-
-        # Full-codebase (`all`) mode content migrated from the retired
-        # sd-review-local-all skill lives in the merged sd-review-local skill.
-        self.assertIn(
-            "bash scripts/sd-ai-command-pack-review-local.sh --full-codebase",
-            review_local,
-        )
-        self.assertIn("prism review codebase", review_local)
-        self.assertIn("empty chunk response", review_local)
-        self.assertIn("gito review --all --path <repo-root>", review_local)
-        self.assertIn(
-            "replacing `<repo-root>` with the absolute repository root", review_local
-        )
-        self.assertIn("branch-diff deletions", review_local)
-        self.assertIn("continue stacking fixes", review_local)
-        self.assertIn("UV_CACHE_DIR", review_local)
-        self.assertIn(
-            "SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_<TOOL>_COMMAND",
-            review_local,
-        )
-
         review_learnings = (
             install.ROOT / "templates/.agents/skills/sd-review-learnings/SKILL.md"
         ).read_text(encoding="utf-8")
@@ -3303,24 +3252,6 @@ class InstallCoreTests(InstallTestCase):
             "scripts/sd-ai-command-pack-review-learnings.py", review_learnings
         )
         self.assertIn("sd-ai-command-pack-toolchain.sh run-python", review_learnings)
-
-        full_check = (
-            install.ROOT / "templates/.agents/skills/sd-full-check/SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("name: sd-full-check", full_check)
-        self.assertIn("# SD Full Check", full_check)
-        self.assertIn("bash scripts/sd-ai-command-pack-full-check.sh", full_check)
-        self.assertIn("sd-ai-command-pack-toolchain.sh doctor", full_check)
-        self.assertIn("Pack full-check:", full_check)
-        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", full_check)
-        # The skill lists common toggles and points at the canonical docs for
-        # the full env-var set (deprecated fallbacks included).
-        self.assertIn("docs/SD_AI_COMMAND_PACK.md", full_check)
-        self.assertIn("Configuration", full_check)
-        self.assertIn("sandboxed agent sessions", full_check)
-        self.assertIn("PYTHONPYCACHEPREFIX", full_check)
-        self.assertIn("UV_TOOL_DIR", full_check)
-        self.assertIn("RUFF_CACHE_DIR", full_check)
 
         finish_work = (
             install.ROOT / "templates/.agents/skills/sd-finish-work/SKILL.md"
@@ -3437,10 +3368,8 @@ class InstallCoreTests(InstallTestCase):
                 "retro",
                 "review",
                 "review-pr",
-                "review-local",
                 "review-learnings",
                 "check",
-                "full-check",
                 "housekeeping",
                 "update-spec",
             ]
@@ -3461,9 +3390,7 @@ class InstallCoreTests(InstallTestCase):
         ]
         runner_paths = [
             install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
-            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
         ]
         expected_dirs = (
             ".agent",
@@ -3529,10 +3456,8 @@ class InstallCoreTests(InstallTestCase):
         ]
         runner_paths = [
             install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
-            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
         ]
 
@@ -3553,12 +3478,10 @@ class InstallCoreTests(InstallTestCase):
         script_paths = [
             install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
             install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
             install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
-            install.ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
         ]
@@ -3613,7 +3536,7 @@ class InstallCoreTests(InstallTestCase):
         # Drift a vouched script, then force-refresh: the overwrite must be
         # re-vouched with the template hash (single-pass fleet refreshes
         # produce exactly this "overwritten" status for changed files).
-        script = root / "scripts/sd-ai-command-pack-review-local.sh"
+        script = root / "scripts/sd-ai-command-pack-review-scope.sh"
         script.write_text(
             script.read_text(encoding="utf-8") + "\n# drift\n",
             encoding="utf-8",
@@ -3627,7 +3550,7 @@ class InstallCoreTests(InstallTestCase):
             "sha256:"
             + hashlib.sha256(
                 (
-                    PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-local.sh"
+                    PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh"
                 ).read_bytes()
             ).hexdigest()
         )
@@ -3635,7 +3558,7 @@ class InstallCoreTests(InstallTestCase):
             (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
         )
         self.assertEqual(
-            provenance["files"]["scripts/sd-ai-command-pack-review-local.sh"],
+            provenance["files"]["scripts/sd-ai-command-pack-review-scope.sh"],
             template_digest,
         )
 

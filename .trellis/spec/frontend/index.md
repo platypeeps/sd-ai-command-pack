@@ -9,13 +9,11 @@
 Use these specs when changing files under `templates/`, especially:
 
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
-- `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-work-backlog/SKILL.md`
 - `templates/.agents/skills/sd-start/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
-- `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
 - `templates/.claude/commands/sd/start.md`
@@ -29,7 +27,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.commands/sd-start.md`
 - `templates/.commands/sd-continue.md`
 - `templates/.commands/sd-finish-work.md`
-- `templates/.commands/sd-full-check.md`
 - `templates/.commands/sd-housekeeping.md`
 - `templates/.commands/sd-work-backlog.md`
 - `templates/.commands/sd-review-pr.md`
@@ -45,7 +42,6 @@ Use these specs when changing files under `templates/`, especially:
 - `templates/.github/prompts/sd-start.prompt.md`
 - `templates/.github/prompts/sd-continue.prompt.md`
 - `templates/.github/prompts/sd-finish-work.prompt.md`
-- `templates/.github/prompts/sd-full-check.prompt.md`
 - `templates/.github/prompts/sd-housekeeping.prompt.md`
 - `templates/.github/prompts/sd-work-backlog.prompt.md`
 - `templates/.github/prompts/sd-review-pr.prompt.md`

@@ -121,36 +121,7 @@ CLAUDE_COMMAND_ALIAS_REWRITES = {
 # immediately before that anchor). Keep platform-specific mechanics here rather
 # than hand-editing generated adapters or duplicating them in the neutral body.
 # Parity tests import this mapping and remove the insert before body comparison.
-CLAUDE_COMMAND_BODY_INSERTIONS = {
-    "review-local": (
-        (
-            "4. Run the requested local review tools through "
-            "`scripts/sd-ai-command-pack-review-local.sh`."
-        ),
-        """Claude Code native Codex lane — apply while carrying out step 4:
-
-- Follow the shared skill's `Claude Code Native Codex Lane` section. Codex is
-  additive to the validated runner tool set; it is not a runner tool name.
-- Outside `all` mode, first check `command -v codex`. Only when that succeeds,
-  capability-check `codex review --help`. For local changes, use
-  `codex review --uncommitted`. For a clean-tree branch diff, use
-  `codex review --base <resolved-ref>` using the same base selected by the
-  shared skill.
-- Launch the validated runner command and the Codex command as separate Claude
-  background Bash tasks before waiting for either. Retain both task IDs and use
-  `BashOutput` to collect both terminal results even when one lane fails.
-- Treat a missing executable, failed help probe, or absent required target flag
-  as an unavailable optional lane: do not launch a Codex task, run the selected
-  runner stack normally, and report `Codex: skipped (CLI unavailable or
-  incompatible)` with CLI install and login guidance. The runner result remains
-  authoritative for that run. A started Codex failure makes the combined review
-  incomplete, never clean.
-- In `all` mode, do not run a narrower Codex review. Run the full-codebase
-  runner stack and report that native Codex review has no equivalent scope.
-- Do not inspect, install, patch, or invoke the OpenAI Codex Claude plugin; this
-  lane uses the supported `codex review` CLI directly.""",
-    ),
-}
+CLAUDE_COMMAND_BODY_INSERTIONS: dict[str, tuple[str, str]] = {}
 
 # (platform, command short form) -> reason. Intentionally divergent
 # hand-authored bespoke bodies; never regenerated. The parity tests import
@@ -172,7 +143,6 @@ GEMINI_SD_HEADING_STRIPPED = frozenset(
         "start",
         "finish-work",
         "review-pr",
-        "review-local",
         "review-learnings",
         "housekeeping",
         "update-spec",

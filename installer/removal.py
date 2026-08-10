@@ -66,12 +66,16 @@ RETIRED_REVIEW_LOCAL_ALL_TARGETS = retired_surface_targets("review-local-all-com
 SOURCE_ONLY_COMMAND_TARGETS = retired_surface_targets("fleet-refresh-consumer-targets")
 RETIRED_WORK_DESIGNS_TARGETS = retired_surface_targets("work-designs-command")
 RETIRED_WATCH_PR_TARGETS = retired_surface_targets("watch-pr-command")
+RETIRED_FULL_CHECK_TARGETS = retired_surface_targets("full-check-command")
+RETIRED_REVIEW_LOCAL_TARGETS = retired_surface_targets("review-local-command")
 
 RETIRED_TARGETS = (
     *RETIRED_REVIEW_LOCAL_ALL_TARGETS,
     *SOURCE_ONLY_COMMAND_TARGETS,
     *RETIRED_WORK_DESIGNS_TARGETS,
     *RETIRED_WATCH_PR_TARGETS,
+    *RETIRED_FULL_CHECK_TARGETS,
+    *RETIRED_REVIEW_LOCAL_TARGETS,
 )
 
 # remove_pack_file statuses renamed so the install summary reads as
