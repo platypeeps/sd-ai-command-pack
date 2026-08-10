@@ -1795,6 +1795,7 @@ class InstallAuditTests(InstallTestCase):
             "sd-ai-command-pack-check.py",
             # Born after the sd-command-pack -> sd-ai-command-pack rename, so it
             # has no legacy predecessor path to advise consumers about.
+            "sd-ai-command-pack-pack-update.sh",
             "sd-ai-command-pack-recovery-artifacts.py",
             "sd-ai-command-pack-review-full-check.sh",
             "sd-ai-command-pack-review-local.py",

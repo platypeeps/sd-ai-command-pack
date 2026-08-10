@@ -107,18 +107,47 @@ a deployment category. `agent` is registered for install and ships zero rows,
 so the first agent row fails the partition gate until it is classified. That is
 the intended behavior, not a defect — it is one line to resolve.
 
-Two schema flags carry contracts for downstream consumers (the plugin build,
+Three schema flags carry contracts for downstream consumers (the plugin build,
 the machine installer payload, and migration tooling):
 
 - `platforms.<id>.provisional: true` means the machine disposition is not
   verified yet. Consumers **fail closed**: treat the platform as not
   installable machine-scope — effectively repo-native — until verification
   flips the flag. `claude` is non-provisional because the plugin mechanism is
-  itself the verification.
+  itself the verification. Every other machine platform became
+  non-provisional through an **executed** user-scope probe against the
+  installed CLI (scratch `HOME` and `XDG_CONFIG_HOME`, empty working
+  directory, negative control), never through documentation alone.
 - `files[].sharedRuntime: true` means non-Claude surfaces invoke the file at
   runtime even though its primary category is `machine-claude`. The machine
   installer consumes the `machine-other` slice **plus** every `sharedRuntime`
   row; primary categories stay mutually exclusive.
+- `platforms.<id>.retainVendoredFor: [<platform-id>...]` (optional, additive
+  in schema version 1) names the platforms that still read this platform's
+  rows **repo-locally**, even though the platform itself installs
+  machine-scope. Migration tooling must keep those rows vendored in any
+  consumer that serves a listed platform. `shared` carries
+  `["codex", "pi"]`: OpenCode autoloads `~/.agents/skills`, but Codex
+  resolves `.agents` against the project root (its user root is
+  `$CODEX_HOME/skills`, a target family the pack does not ship) and Pi reads
+  the same layer repo-locally.
+
+The detection rule for `retainVendoredFor` is executable, not a judgement
+call: a consumer **still serves** a listed platform iff its
+`docs/fleet/consumers.json` `platforms` array intersects the list. The fleet
+registry is the single authority — no heuristic sniffing of consumer
+repositories decides retention. Because no consumer declares `codex` or `pi`
+today, current conversions delete the `shared` vendored rows; a consumer that
+starts serving either platform changes its registry row first, and that edit
+is what turns retention on. Conversion-time resweeps additionally grep the
+consumer for codex/pi usage markers and block conversion when usage exists
+without a matching registry declaration, so undeclared usage cannot be
+silently deleted.
+
+The field is optional and absent everywhere else, so consumers reading only
+`scope` and `provisional` keep working unchanged. The generator fails closed
+on a retention list that names an unknown platform, sits on a `repo-native`
+platform (where it would be meaningless), is empty, or repeats an entry.
 
 `counts` and `manifestVersion` exist to make the diff reviewable; downstream
 tooling reads `files` and `platforms`.
@@ -147,10 +176,22 @@ plugin is named `sd`, so `/sd:<short>` is preserved), and `scripts/` rows to
 installer, not exclusive to the plugin; the generator must keep shipping them.
 `.claude/rules/**` is `consumer-config` and never enters the plugin.
 
-Six conditions fail the build closed rather than shipping a broken plugin: a
-slice row with no manifest source row; an unreadable template source; a slice
-row whose kind has no plugin destination; rewrite residue; an empty pack
-version; and a dependency-closure gap. The residue gate has two scopes —
+Three further trees make the plugin the only thing a machine needs in order to
+install the non-Claude surfaces too: `installer/**` (the modules
+`installer.machinescope` imports, enumerated from the import graph rather than
+a hand-kept list), `machine-payload/**` (the machine-scope payload with its
+bundled `partition.json`), and the `bin/sd-machine-install` bootstrap. See
+Machine-Scope Installer below; the two trees are siblings at the plugin root
+because that is where the engine looks for its default payload.
+
+Eight conditions fail the build closed rather than shipping a broken plugin: a
+slice row with no manifest source row; an unreadable template source (including
+a command's authored source or its frontmatter description); a slice row whose
+kind has no plugin destination; rewrite residue; an empty pack
+version; a dependency-closure gap; an installer module the bootstrap imports
+that has no file or that imports a sibling relatively (the bundle loads the
+package by absolute name); and any machine-payload failure raised by
+`installer.machinestage`. The residue gate has two scopes —
 generated Markdown may keep no repository-root script path at all (any
 `sd-ai-command-pack-` or `sd_ai_command_pack_` name prefixed with the
 `scripts/` directory), while `bin/` contents may keep
@@ -158,7 +199,12 @@ only the consumer-layout *data* globs listed in the per-file allowlist with a
 written justification (`install-audit` and `pr-body-scope` region globs
 describing vendored installs). Closure means every bare pack-command reference
 in rewritten Markdown resolves to a file present in `bin/`, except entries in
-the justified in-generator allowlist.
+the justified allowlist. Rewrite rules and both gates live in
+`installer/references.py` and are parameterized per payload, so the plugin and
+the machine payload share one judgement about what is a reference; neither
+`installer/**` nor `machine-payload/**` is rewritten again on the way in, the
+first because it is code and the second because it already passed the machine
+profile's own gates.
 
 Two further contract points exist because `claude plugin validate --strict`
 rejects the alternative:
@@ -206,9 +252,196 @@ shipped script may build a sibling path from a repo-root `scripts/`
 literal outside its per-file justified `ALLOWED_LITERALS` allowlist
 (semantic data only — layout globs, changed-path classifiers, doctor
 repository probes, static-analysis annotations — never invocation). The
-generator's `BIN_LITERAL_ALLOWLIST` must stay set-for-set identical to
-that allowlist; `tests/test_generate_plugin.py` pins the parity and fails
-on stale entries in either direction.
+`BIN_LITERAL_ALLOWLIST` in `installer/references.py` — one allowlist
+shared by the plugin generator and the machine payload build, not a
+generator-local copy — must stay set-for-set identical to that
+allowlist; `tests/test_generate_plugin.py` pins the parity and fails on
+stale entries in either direction.
+
+## Machine-Scope Installer
+
+`installer/machinescope.py` installs the `machine-other` partition slice plus
+every `sharedRuntime` row into user-level destinations, so Gemini CLI and
+OpenCode resolve the pack without a vendored copy. It is the non-Claude half of
+the same release the plugin carries: the plugin bundles the engine, the payload,
+and the `bin/sd-machine-install` bootstrap, so a machine needs no pack checkout.
+`install.py --machine` is the checkout-side entry point — it stages the payload
+from the working tree through `installer/machinestage.py` and hands the staged
+root to the same engine, so a developer install and a plugin install converge on
+the same tree. `--machine` is mutually exclusive with a repo target and the
+platform flags, and `--home`/`--state-home` are only meaningful with it.
+
+### Destination families
+
+`installer/machinepayload.py` owns the family table, shared by the engine and by
+the generator that bundles the payload, so the two inventories cannot drift. A
+payload root is target-relative, and each target prefix maps to exactly one
+family root:
+
+| Family | Payload prefix | Destination root |
+|--------|----------------|------------------|
+| `agents-skills` | `.agents/skills/` | `<home>/.agents/skills` |
+| `agents-bin` | `scripts/` | `<home>/.agents/bin` (executable) |
+| `agents-docs` | `docs/` | `<home>/.agents/docs` |
+| `gemini-commands` | `.gemini/commands/` | `<home>/.gemini/commands` |
+| `opencode-commands` | `.opencode/commands/` | `${XDG_CONFIG_HOME:-<home>/.config}/opencode/commands` |
+
+A target matching no family is a build error in the generator and a fail-closed
+runtime refusal in the engine — never a guess. OpenCode reads its global
+commands from the XDG config root, so `XDG_CONFIG_HOME` is honored when it is
+absolute rather than hardcoding `~/.config`; `~/opencode/` is an unrelated
+artifact and is never a destination. The home directory comes from `Path.home()`
+(or the explicit `--home`), never a raw `$HOME` read, and an unresolvable home
+is an error: Gemini's own fallback to a temporary directory is treated as
+unsupported rather than writing a payload that vanishes on reboot. Executability
+is derived from the family, not from the source file's mode, so a checkout that
+lost its mode bits still produces the same payload digest, and
+`sd_ai_command_pack_*.py` library modules stay non-executable exactly as they do
+in the plugin's `bin/`.
+
+`--home` means "treat this directory as the home directory". An ambient
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`SD_AI_COMMAND_PACK_STATE_HOME`/`LOCALAPPDATA`
+describes the *real* home, so the CLI drops any such override that does not
+already resolve inside the given home; otherwise a scratch-prefix install would
+scatter commands or its receipt outside the prefix it was told to use. An
+explicit `--state-home` outranks the ladder and is never dropped.
+
+### Plan before apply, and the intent journal
+
+Phase 1 classifies every payload target against the receipt and the disk, phase
+2 applies, phase 3 commits the receipt. Nothing is written until every conflict
+is known, so a refusal can never leave a machine half-installed. The
+classification is `owned-current` (receipt-owned and already matching the new
+payload), `owned-stale` (matches the old receipt entry), `absent`, `drifted`
+(receipt-owned, matching neither), `unowned` (exists, not in the receipt), or
+one of `symlink` / `symlink-parent` / `not-a-file`. Any `drifted` or `unowned`
+path refuses the whole run before the first write, naming every conflicting
+path; `--force` displaces those after copying each one to a `.bak` sibling that
+the receipt records. A file whose receipt entry already carries a backup keeps
+that first one: a second copy would record the payload a previous forced run
+wrote and strand the user's own content under a name nothing explains.
+`--force` never displaces the symlink and non-file statuses: those cannot be
+backed up and restored faithfully, so allowing them would make `remove`'s
+restoration promise a lie.
+
+Byte identity alone never proves authorship. A pre-existing user file identical
+to the payload must not be adopted, because a later `remove` would delete
+something the installer never wrote. The only evidence that admits a
+receipt-absent path is the **intent journal**: `machine-install.intent.json`,
+written atomically beside the receipt before the first write and deleted after
+the receipt commits. On rerun, a receipt-absent path that matches the new
+payload classifies `owned-current` only when a journal carrying the same
+`payloadDigest` lists it — the signature of an interrupted run of this exact
+payload. No journal, an unreadable journal, or a journal for a different payload
+means `unowned`, and the run refuses without `--force`. A journal written for a
+different payload is discarded with a diagnostic rather than partially trusted.
+
+### Receipt
+
+The receipt is `machine-receipt.json`, schema version 1: `schemaVersion`,
+`packVersion`, `payloadDigest`, `installedAt`, `sourceRoot`, and `files[]` of
+`{family, path, digest, executable}` plus an optional
+`backup: {path, digest}` recorded when `--force` displaced a pre-existing file.
+`payloadDigest` is the canonical, domain-separated payload identity from
+`installer/machinepayload.py` (sorted targets, executable bits, contents). It is
+computed from whichever payload root is being read, never stamped into one, so a
+payload staged from a checkout and the payload the plugin bundles yield the same
+value exactly when their bytes agree — which is what makes `status --payload` a
+real comparison rather than a version-string check. It is deliberately *not* the
+release-candidate payload digest in `sd_ai_command_pack_fleet_lib`, which
+identifies a manifest and its sources; the domains differ so the two can never
+be compared by accident.
+
+The receipt authorizes overwrites and deletes, so it is validated like untrusted
+input on every load: `family` must be a known family, `path` must be relative,
+normalized, and traversal-free, and it must still resolve inside that family
+root; recorded backup paths are validated the same way; a receipt file that is
+itself a symlink is refused before it is read. One invalid entry invalidates the
+whole receipt — there is no partial trust, because a receipt half-honored is a
+receipt that can direct a write outside the family roots. A parent directory
+that turned into a symlink after install can still satisfy containment — one
+pointing back inside the root does — so it is caught a step later, by the
+planner, which neither writes nor deletes through it.
+
+The receipt and the intent journal live in the `machine/` subdirectory of the
+shared private state root (`SD_AI_COMMAND_PACK_STATE_HOME`, `XDG_STATE_HOME`,
+the Windows local-app-data path, then `~/.local/state/sd-ai-command-pack`),
+resolved through the shipped helper library's `resolve_state_root` rather than a
+second implementation, and created `0700` and non-symlink through
+`ensure_private_directory`. The engine loads that helper by path from `scripts/`
+or `bin/` beside the package, because it is a shipped script library and not an
+`installer` module.
+
+### Provisional platforms fail closed
+
+Every payload root carries a `partition.json` copy, and the engine gates the
+payload through it: a target belonging to a platform whose `platforms.<id>`
+entry is `provisional: true`, or that is not `machine` scope at all, is refused
+by name rather than installed. The gate travels with the payload, so a plugin
+install enforces the same dispositions as a checkout install with no partition
+lookup of its own. `load_payload` reports every refusal at once instead of
+stopping at the first.
+
+### Row removal and `remove`
+
+Paths in the old receipt that the new payload no longer ships are deleted only
+when they still match their receipt entry byte-for-byte and mode-for-mode;
+anything else is left in place with a diagnostic. A removed row carrying a
+verifiable backup restores its displaced original instead of being deleted,
+because the new receipt is about to forget that backup.
+
+`sd-machine-install remove` is the rollback commitment, and its "clean machine"
+claim is precise: it deletes the files this receipt recorded installing, and it
+restores the files this receipt recorded displacing, from digest-verified
+backups. It restores nothing it has no backup record for. Every refusal is
+decided before the first deletion; a drifted or missing-backup path refuses
+without `--force`, a path whose parent became a symlink after install is never
+deleted through with or without `--force`, and restoration renames the `.bak`
+back into place so bytes and mode return together. Emptied directories are
+pruned up to and including each family root, and no further: `~/.agents` is the
+shared parent of three families and other tools' territory, so it stays even
+when every family under it is gone.
+
+### Update sequence
+
+`sd-ai-command-pack-pack-update.sh` (shipped in the plugin's `bin/`) is the one
+machine update action: `claude plugin update <plugin>@<marketplace>`, then
+resolve the **new** plugin root from `claude plugin list --json` — never the
+running script's own location, because that copy lives in the old root — then
+run `<new-root>/bin/sd-machine-install install` from the resolved root, then
+report the plugin version and the receipt version. A missing, duplicated, or
+path-less plugin entry fails with its own exit code and runs no install. Both
+halves are idempotent and the receipt only advances on success, so an update
+interrupted between them is visible as version skew and a rerun converges.
+
+### `sd-status` machine-scope line
+
+The status collector reads the receipt directly through the engine — the shared
+state ladder finds it, no plugin required — and reports `machineScope` with
+`state`, `packVersion`, `pluginVersion`, and a separate `comparison`. `state` is
+`none` (the engine positively reports no install), `installed`, `invalid` (a
+malformed receipt, which is an anomaly rather than an absence), or `unavailable`
+(the collector could not consult the engine at all: no `installer/` package
+beside the script, an engine that raised, or a schema it does not recognize) —
+the same name, meaning, and missing-helper trigger the `workLoop` and
+`recoveryArtifacts` ledgers already use. `pluginVersion` is `unavailable` on
+*any* discovery failure: no `claude` on PATH, a nonzero exit, unparsable output,
+a missing or duplicated entry, or an entry without a version. `comparison` is
+`current` only when both versions are known and equal, `skew` when they are
+known and differ, and `unknown` whenever either side is unavailable — a broken
+CLI can never masquerade as an up-to-date machine. The line is advisory and does
+not change the exit status; `invalid` is promoted into `anomalies` like the two
+ledgers above it, so `--expect-clean` gates on it.
+
+Reference files:
+
+- `installer/machinescope.py`
+- `installer/machinepayload.py`
+- `installer/machinestage.py`
+- `installer/references.py`
+- `templates/scripts/sd-ai-command-pack-pack-update.sh`
+- `tests/test_machine_installer.py`, `tests/test_machine_stage.py`,
+  `tests/test_references.py`, `tests/test_pack_update.py`
 
 ## Release Payload Gate
 
@@ -1031,6 +1264,12 @@ changed content, or became a symlink between preflight and apply, fall through
 to the normal install path so conflict and symlink-conflict handling remains
 authoritative. Do not reuse preflight results for force overwrites, conflicts,
 generated files, or a mismatched `PackFile`.
+
+This is the repository-install boundary. The machine-scope engine runs a
+stricter variant of the same idea against user-level destinations — every
+target classified before the first write, and no `--force`-less run proceeding
+past an unowned or drifted path — described under Machine-Scope Installer
+above.
 
 Installer runs are not serialized. Atomic file replacement must keep each
 individual file parseable, while the last completed writer determines the

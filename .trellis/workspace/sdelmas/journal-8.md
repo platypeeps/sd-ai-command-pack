@@ -118,3 +118,55 @@ Shipped the Claude Code plugin generator, plugins/sd tree, marketplace catalog, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 354: Machine-scope installer for non-Claude surfaces + unified update action
+
+**Date**: 2026-08-09
+**Task**: Machine-scope installer for non-Claude surfaces + unified update action
+**Branch**: `feat/thin-machine-installer`
+
+### Summary
+
+Implemented task 08-09-thin-machine-installer through seven checked steps: executed per-surface platform probes flipping gemini/opencode/shared to non-provisional MACHINE (codex to REPO_NATIVE, shared retainVendoredFor codex+pi), machine-scope engine with plan-before-apply, intent journal, backup-recording receipts and digest-verified restore, shared reference rewrite serving plugin and machine payloads, install.py --machine, plugin bundling with bin/sd-machine-install bootstrap, sd-pack-update with fail-closed plugin resolution, sd-status machine skew line, spec/docs/release chain at v0.64.35. Rebased onto origin/main (0.64.34) before first push; PR #411 opened, local review clean after one rebutted gito finding; Copilot refused on diff size. Manual acceptance items remain outstanding for a human pass.
+
+### Main Changes
+
+- Machine-scope engine installer/machinescope.py: five destination families, plan-before-apply, conflict refusal, --force with receipt-recorded .bak backups, intent journal, receipt-trust fail-closed, remove with digest-verified restore
+- Shared rewrite installer/references.py with residue/closure/wrapped-reference gates; installer/machinestage.py payload staging; install.py --machine
+- generate-plugin.py bundles installer/, machine-payload/, partition.json, bin/sd-machine-install; 8 fail-closed conditions; payload digest parity
+- partition-surfaces.py dispositions flipped on executed probes; retainVendoredFor with fail-closed retention validation; manifest 776 to 777 rows
+- sd-pack-update script with 11-row fail-closed failure table; sd-status machineScope states none/installed/invalid/unavailable with separate current/skew/unknown comparison
+- Spec: Machine-Scope Installer section in manifest-and-filesystem.md; CHANGELOG 0.64.35; fleet candidate ledger refreshed 8/8
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a5387fb8` | docs(task): planning artifacts for 08-09-thin-machine-installer |
+| `3ba985df` | feat(partition): flip machine dispositions on executed probes, add retainVendoredFor |
+| `473a2389` | feat(installer): machine-scope engine with intent journal and backup-recording receipts |
+| `6d09999e` | fix(installer): report kept rows on install and correct forced-remove accounting |
+| `c278105b` | feat(installer): shared reference rewrite, machine payload staging, install.py --machine |
+| `6da4f707` | feat(plugin): bundle machine installer, payload, and bootstrap into plugins/sd |
+| `459a7b71` | feat(update): sd-pack-update script with fail-closed plugin resolution and skew report |
+| `9c22f1cf` | feat(status): machine-scope skew line in sd-status |
+| `edd0a1b2` | docs(release): machine-scope installer spec, user docs, changelog 0.64.35, fleet ledger |
+| `ea0cfbe9` | chore(generate): rebuild payloads and fleet ledger after rebase onto 0.64.34 |
+| `1c5c07fc` | chore(task): record branch for 08-09-thin-machine-installer |
+
+### Testing
+
+- [OK] make test: 2014 tests, 0 failures, coverage floors met (machinescope.py 100%)
+- [OK] make generate clean; generate-plugin.py --check passes; claude plugin validate --strict passes
+- [OK] review preflight 0 failures; make release-prep exit 0 at 0.64.35
+- [OK] sd-review scope=pr attempt 1: gito clean after one verified rebuttal (generator-owned _example scaffold); Copilot refused >20k lines (anomaly)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

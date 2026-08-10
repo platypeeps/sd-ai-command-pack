@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 353
+- **Total Sessions**: 354
 - **Last Active**: 2026-08-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~108 | Active |
+| `journal-8.md` | ~161 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 354 | 2026-08-09 | Machine-scope installer for non-Claude surfaces + unified update action | `a5387fb8`, `3ba985df`, `473a2389`, `6d09999e`, `c278105b`, `6da4f707`, `459a7b71`, `9c22f1cf`, `edd0a1b2`, `ea0cfbe9`, `1c5c07fc` | `feat/thin-machine-installer` |
 | 353 | 2026-08-09 | Thin plugin packaging: Claude Code plugin, marketplace, review-coordinator rebuttal fix | `10b9013c`, `0d971228`, `303f49e3`, `994af6cf`, `5bea9185`, `7beccf32` | `feat/thin-plugin-packaging` |
 | 352 | 2026-08-09 | Ship thin-surface-partition child: four-category partition artifact | `a37c7085`, `0fc5a4a1`, `545322d0`, `c2f9cf69`, `cef5903f` | `main` |
 | 351 | 2026-08-09 | sd-status worktree inventory shipped: held branches and leaked worktrees visible | `398c8cb5`, `611308bd` | `main` |

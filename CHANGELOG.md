@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.64.35 - 2026-08-09
+
+- The non-Claude surfaces now install once per machine instead of once per
+  repository. `install.py --machine` (from a checkout) and
+  `sd-machine-install` (bundled in the plugin) write the `machine-other`
+  partition slice plus the shared runtime scripts into `~/.agents/skills`,
+  `~/.agents/bin`, `~/.agents/docs`, `~/.gemini/commands`, and the XDG
+  OpenCode config root, so Gemini CLI and OpenCode resolve the pack with no
+  vendored copy. The engine plans before it applies: every target is
+  classified against the receipt and the disk first, and a single unowned or
+  locally changed file refuses the whole run naming each conflicting path.
+  `--force` displaces those after copying each one to a `.bak` the receipt
+  records, so `remove` can put the original back — it deletes what the receipt
+  recorded installing and restores what the receipt recorded displacing, and
+  nothing else. A run interrupted between writing files and committing its
+  receipt is recovered through the intent journal it wrote first; byte
+  identity alone never adopts a file, because a pre-existing user copy must
+  not become something a later `remove` deletes.
+- The plugin carries everything that install needs: the `installer/` package,
+  the machine payload in target-relative layout, its gating `partition.json`
+  copy, and a `bin/sd-machine-install` bootstrap (84 committed plugin files to
+  215). Skill and command text that named repository-root resources is
+  rewritten on the way into each payload — to bare `bin/` commands for the
+  plugin, to `~/.agents/bin` and `~/.agents/docs` for the machine payload — by
+  one shared implementation in `installer/references.py`, with residue and
+  dependency-closure gates that fail the build when a payload would ship an
+  instruction naming a file it does not carry.
+- `sd-ai-command-pack-pack-update.sh` is the single machine update action:
+  update the plugin, resolve the *new* plugin root from
+  `claude plugin list --json` (never the running script's own location, which
+  lives in the old root), install from there, then report both versions. Both
+  halves are idempotent and the receipt only advances on success, so an
+  interrupted update shows as version skew and a rerun converges.
+- `sd-status` gains an advisory machine-scope line comparing the receipt
+  against the installed plugin. Any plugin-discovery failure — no CLI, a
+  nonzero exit, unparsable output, a missing or duplicated entry — reports
+  `unavailable`, and the comparison is `unknown` whenever either side is
+  unavailable, so a broken `claude` can never present as up to date. A
+  malformed receipt is `invalid` and joins the other anomalies rather than
+  reading as "not installed".
+- Platform dispositions in `docs/fleet/surface-partition.json` are now
+  evidence-backed. `gemini`, `opencode`, and `shared` cleared executed
+  user-scope probes against the installed CLIs and are no longer provisional;
+  `codex` is re-dispositioned `repo-native`, because it resolves `.agents`
+  against the project root and never reads `~/.agents/skills`. `shared`
+  carries the new additive `retainVendoredFor: ["codex", "pi"]`, which tells
+  migration tooling to keep those rows vendored for any consumer whose fleet
+  registry row serves either platform.
 ## 0.64.34 - 2026-08-09
 
 - Skill frontmatter now pins a cost-appropriate Claude model tier where the
