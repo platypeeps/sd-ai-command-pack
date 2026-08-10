@@ -51,27 +51,27 @@ requirement 1, not a reimplementation; the code work is requirements 2–4.
 
 ## Acceptance criteria
 
-- [ ] `sd-status` on a machine with plugin + receipt installed
+- [x] `sd-status` on a machine with plugin + receipt installed
       reports both versions; absent sources reported unavailable, not
       empty-healthy.
-- [ ] Fleet mode on a mixed fat/thin registry renders both report
+- [x] Fleet mode on a mixed fat/thin registry renders both report
       shapes; a stale thin pin produces an F-row.
-- [ ] Schema bump documented; a schema-5 registry carrying no `mode` on
+- [x] Schema bump documented; a schema-5 registry carrying no `mode` on
       any consumer behaves exactly like the schema-4 registry it
       replaces (corrected 2026-08-10:
       `_parse_fleet_consumers_without_policy` demands exact version
       equality, so a *schema-4* file is rejected after the bump by
       design, as it was for 3 → 4. The invariant is default-behavior
       preservation, not cross-version parsing).
-- [ ] The candidate ledger is regenerated: `docs/fleet/candidate-validation.json`
+- [x] The candidate ledger is regenerated: `docs/fleet/candidate-validation.json`
       pins `fleetManifestDigest`, which the registry edit changes and
       `make check` validates by equality.
-- [ ] Skew rows survive `HUMAN_ITEM_LIMIT` truncation: follow-ups are
+- [x] Skew rows survive `HUMAN_ITEM_LIMIT` truncation: follow-ups are
       derived from the complete row set, not the truncated human list.
-- [ ] Plugin-vs-receipt divergence produces its own follow-up row
+- [x] Plugin-vs-receipt divergence produces its own follow-up row
       (`.trellis/tasks/08-09-deployment-thin-consumers/design.md:116-119`
       names it as reportable skew).
-- [ ] Shipped payload obligations met: `manifest.json` version bump plus a
+- [x] Shipped payload obligations met: `manifest.json` version bump plus a
       matching top `CHANGELOG.md` heading (`CONTRIBUTING.md:136`), and the
       `sd-status` skill / pack-guide fleet contract updated for the thin
       report shape.
