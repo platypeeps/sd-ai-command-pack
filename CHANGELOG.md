@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.65.0 - 2026-08-09
+
+- Skills that positioned themselves against `sd-full-check` and
+  `sd-review-local` — `sd-fix-ci`, `sd-test-gaps`, `sd-audit-repo`, `sd-check`,
+  and `sd-review` — now name `sd-check` and `sd-review` instead. `sd-fix-ci`
+  routed every local gate run through `sd-full-check`, so this is a behavior
+  change, not only wording.
+
 ## 0.64.35 - 2026-08-09
 
 - The non-Claude surfaces now install once per machine instead of once per

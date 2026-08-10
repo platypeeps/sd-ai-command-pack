@@ -1,9 +1,9 @@
 {
   "id": "remove-retired-review-surfaces",
   "name": "remove-retired-review-surfaces",
-  "title": "Remove all retired review and check surfaces",
-  "description": "Delete every obsolete review/check skill, adapter, script, environment contract, configuration reader, help entry, manifest target, doc reference, and generated artifact without aliases, wrappers, or dormant compatibility modes.",
-  "status": "planning",
+  "title": "Remove the retired sd-full-check and sd-review-local surfaces",
+  "description": "Delete the sd-full-check and sd-review-local command surfaces and sd-ai-command-pack-review-local.sh: skills, adapters, prompts, manifest targets, receipts, help entries, docs, tests, and the SD_AI_COMMAND_PACK_REVIEW_LOCAL_* readers (including the four dormant fallbacks inside the surviving full-check.sh), with no aliases, wrappers, or dormant compatibility modes. sd-review-pr and everything reachable only through it belong to 08-09-retire-review-pr-surface.",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
