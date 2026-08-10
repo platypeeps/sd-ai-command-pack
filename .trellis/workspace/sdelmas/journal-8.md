@@ -170,3 +170,53 @@ Implemented task 08-09-thin-machine-installer through seven checked steps: execu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 355: Retire the sd-full-check and sd-review-local command surfaces
+
+**Date**: 2026-08-10
+**Task**: Retire the sd-full-check and sd-review-local command surfaces
+**Branch**: `feat/retire-full-check-review-local-surfaces`
+
+### Summary
+
+Deleted both retired command surfaces (53 manifest rows), the legacy review-local.sh runner, the 23 SD_AI_COMMAND_PACK_REVIEW_LOCAL_* keys, and the four FULL_CHECK fallback readers, ahead of pack 0.65.0. Kept full-check.sh, review-local.py, and sd-review-pr, all owned by 08-09. Updated and merged four consumer repos first so the fleet candidate ledger validates against their default branches.
+
+### Main Changes
+
+- Deleted both skills, their .github/command-sources/ bodies, and every generated adapter across templates/ and the installed roots
+- Deleted scripts/sd-ai-command-pack-review-local.sh from all four script trees and registered the 23 REVIEW_LOCAL configuration keys on the retired-surface row so a reintroduced reader fails the drift lint
+- Added 59 bounded CommandSurfaceAllowance rows, each naming one identifier and one concrete path pattern, driving the drift lint from 490 findings to clean
+- Merged four consumer PRs (rwbp-coordinator#205, rwbp-website#221, loadsmith#215, anomaly-metric-creator#365) removing their assertions and links to the retired surfaces, then refreshed the candidate ledger
+- Captured two doc gates and one test-discovery blind spot in .trellis/spec/tooling/surface-retirement-doc-gates.md, and replaced the frontend spec's hand-maintained adapter inventory with runtime enumeration
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a49e4332` | refactor(skills): repoint local-gate references from sd-full-check to sd-check |
+| `3bbeb8a5` | refactor(commands): remove the retired sd-full-check and sd-review-local surfaces |
+| `957f55b5` | docs(pack): settle the retirement's doc classification and stale references |
+| `966cae62` | docs(task): record the retirement's follow-ups and audit-finding owners |
+| `005b1197` | docs(spec): capture the two doc gates that fire when a surface is retired |
+| `de29c7ff` | fix(tests): drop the deleted test_review_local module from the install facade |
+| `1719f9a6` | docs(spec): make the adapter scope list enumerate instead of drift |
+| `fc0372b4` | chore(task): record the finalization branch on 07-24 |
+
+### Testing
+
+- [OK] .github/scripts/check-command-surface-drift.py: clean; 988 files scanned, 272 allowed historical occurrence(s)
+- [OK] unittest discover -s tests -p 'test_*.py': Ran 1984 tests, OK (CI's exact command; the sharded runner skips the facade that broke)
+- [OK] make check: exit 0; make sync: exit 0
+- [OK] fleet-candidate-check.py: 8/8 consumers passed, ledger written
+- [OK] uninstall proven against a real 0.64.35 install: unchanged vouched copies removed, modified copy preserved and reported, dirs pruned, zero retired paths in the 0.65.0 receipt
+- [OK] reintroduction proven both ways: planted retired target reported by install-audit as unlisted pack-like; planted identifier and env key reported by the drift lint as retired_identifier_live and stale_configuration_key
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
