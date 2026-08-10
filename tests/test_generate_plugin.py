@@ -264,9 +264,10 @@ class PluginFixtureCase(InstallTestCase):
         """One allowlist, two payload builds, two module-level bindings."""
 
         for module in (self.generator, machinestage):
-            self.enterContext(
-                mock.patch.object(module, "BIN_LITERAL_ALLOWLIST", allowlist)
-            )
+            # TestCase.enterContext needs Python 3.11+; CI still runs 3.10.
+            patcher = mock.patch.object(module, "BIN_LITERAL_ALLOWLIST", allowlist)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def row_for(self, rows: list[dict[str, object]], target: str) -> dict[str, object]:
         """The fixture row for a target, so edits name what they change."""
