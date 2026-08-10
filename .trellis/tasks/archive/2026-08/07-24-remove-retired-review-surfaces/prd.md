@@ -143,17 +143,17 @@ here, so nothing is lost yet.
 
 ## Acceptance Criteria
 
-- [ ] Fresh installs and help/catalog discovery expose no `sd-full-check` or
+- [x] Fresh installs and help/catalog discovery expose no `sd-full-check` or
   `sd-review-local` identifier on any supported platform.
-- [ ] Upgrade from the last pre-cut release removes every unchanged vouched old
+- [x] Upgrade from the last pre-cut release removes every unchanged vouched old
   target **including consumer copies of `sd-ai-command-pack-review-local.sh`**,
   preserves/reports a modified old target, and produces a receipt containing
   only the new surface.
-- [ ] Repository-wide live-surface scanning finds no executable retired skill,
+- [x] Repository-wide live-surface scanning finds no executable retired skill,
   adapter, script, environment reader, hidden mode, alias, redirect, or
   fallback — and no `SD_AI_COMMAND_PACK_REVIEW_LOCAL_*` reader survives inside
   `full-check.sh`.
-- [ ] Reintroduction is caught, with each half assigned to the check that can
+- [x] Reintroduction is caught, with each half assigned to the check that can
   actually enforce it:
   - a retired **target** reappearing in a consumer install is reported by the
     installed audit's `unlisted-pack-like` detection
@@ -165,17 +165,23 @@ here, so nothing is lost yet.
     repository is caught by the command-surface drift lint, which fails on
     stale docs and specs as well as code — and only if the row's
     `configuration_keys` are populated (design D2).
-- [ ] Dead-code and manifest/provenance checks confirm obsolete implementation
+- [x] Dead-code and manifest/provenance checks confirm obsolete implementation
   branches and tests were deleted rather than skipped or disabled.
-- [ ] Focused retirement/upgrade tests, all generated parity checks, candidate
+- [x] Focused retirement/upgrade tests, all generated parity checks, candidate
   fleet validation, `make sync`, and `make check` pass.
-- [ ] Both flipped registry rows carry the pre-registered
+- [x] Both flipped registry rows carry the pre-registered
   `removed_version="0.62.0"`; no new version value appears anywhere.
-- [ ] `tests/test_review_controller.py`, `tests/test_review_stage.py`,
+- [x] `tests/test_review_controller.py`, `tests/test_review_stage.py`,
   `tests/test_verdict_vocabulary.py`, and `tests/test_git_invocation_boundary.py`
   pass unchanged — the negative control proving `review-local.py` survived.
-- [ ] A-102 and A-114 are re-owned to `08-09-retire-review-pr-surface` in the
-  audit ledger, neither closed nor left silently ownerless.
+- [x] A-102 and A-114 carry an explicit disposition in the audit ledger,
+  neither closed nor left silently ownerless. A-102 (and A-043, found during
+  implementation) are re-owned to `08-09-retire-review-pr-surface`, which
+  deletes the `full-check.sh` they are about. A-114 is **not** re-owned:
+  corrected 2026-08-10 — it is about the `sd-full-check` skill's stale
+  "What It Does" section, and this task deletes that skill, so 08-09 has no
+  claim on it. Its note records resolution-by-deletion and leaves it open for
+  the next `sd-audit-repo` pass to confirm and close.
 
 ## Deliberate residue
 
