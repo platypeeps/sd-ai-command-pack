@@ -3,7 +3,7 @@
 This task is a parent. It carries no direct implementation; each child
 below is planned, implemented, checked, and archived on its own. What
 this file owns is the **order**, the **gate between children**, and the
-**integration validation** that only makes sense across all five.
+**integration validation** that only makes sense across all six.
 
 ## Ordered children
 
@@ -12,6 +12,13 @@ this file owns is the **order**, the **gate between children**, and the
    --revert-thin`, the `.claude/settings.json` marketplace/enable
    writer, and the pin receipt writer.
 2. `08-10-thin-candidate-loop-rescope` — pack-internal. Contract C-F.
+2b. `08-10-thin-prompt-surface-repoint` — pack-internal. Repoints the
+   pack-shipped surfaces that survive conversion but cite paths it
+   removes: measured 13 hits in 6 files, identical in all 8 consumers.
+   These are `packDefects` in the resweep verdict, which blocks `--thin`,
+   so **no child 3-5 conversion can run until this ships**. It is listed
+   as 2b rather than renumbering because children 3-5 are referenced by
+   number throughout this task tree.
 3. `08-10-thin-canary-conversion` — converts rwbp-coordinator,
    loadsmith, hoa-manager sequentially; executes the revert proof.
 4. `08-10-thin-post-canary-conversion` — converts rwbp-website,
@@ -53,8 +60,13 @@ A child is not done — and the next child does not start — until:
   skew row names them" is neither machine-checkable nor capable of
   failing when it should.
 
-Children 3, 4, and 5 additionally require **explicit user authorization
-for that cohort** before any mutation of a consumer repository. That
+Children 3, 4, and 5 additionally require child 2b shipped. That is not
+a bookkeeping preference: a `packDefects` entry makes the resweep verdict
+`blocked`, and `--thin` refuses without a `clear` verdict, so the
+dependency is enforced by the tool rather than by this list.
+
+They also require **explicit user authorization for that cohort** before
+any mutation of a consumer repository. That
 authorization is per cohort, not once for the task: authorizing the
 canary cohort does not authorize post-canary.
 
@@ -123,7 +135,7 @@ Host lane completed. Codex lane completed
 
 | ID | Lane | Severity | Concern | Disposition |
 |----|------|----------|---------|-------------|
-| C-1 | Codex | blocking | Resweep blocks on pack references inside files the conversion itself deletes; `docs/SD_AI_COMMAND_PACK.md` is a `machine-other` row present in every consumer, so no consumer could ever return `clear` | addressed — C-A splits hits into *scheduled for removal* (informational) and *external callers* (blocking); child 1 req 1 |
+| C-1 | Codex | blocking | Resweep blocks on pack references inside files the conversion itself deletes; `docs/SD_AI_COMMAND_PACK.md` is a `machine-other` row present in every consumer, so no consumer could ever return `clear` | addressed — C-A splits hits by whether a *removed path* is cited, into `scheduled`, `packDefects`, `blockers`, `advisories`; child 1 req 1. **Superseded 2026-08-10:** the original two-class split (*scheduled for removal* / *external callers*) was itself measured wrong during child 1 step 3 and replaced with the four-class rule now in C-A; see child 1's `implement.md` round 4 ledger and `research/fleet-blocker-scan.json` |
 | C-2 | Codex | blocking | Candidate loop named as `fleet_lib` + `fleet-preflight.py`; it is really `validate_consumer` in `fleet-candidate-check.py` (`prepare-release.py:342`), and `prepare-release.py:338` skips it when the ledger is current. All 8 entries omit `mode`, so "run each in its declared mode" exercises zero thin checkouts | addressed — design evidence corrected, C-F rewritten to require a shadow-thin run regardless of declared modes and to depend on child 1; child 2 rewritten |
 | C-3 | Codex | blocking | Drift preservation (`removal.py:185`, `:408`) lets conversion succeed with vendored surfaces still present under a thin pin | addressed — C-B requires plan-then-mutate; unforced drift aborts with an unchanged tree; child 1 AC inverted from preserve-and-continue to abort |
 | C-4 | Codex | blocking | C-D says `--revert-thin` flips the registry; `implement.md` rollback said command *plus* a manual flip; child 1 omitted the flip entirely | addressed — one contract chosen: the command flips the registry in the pack checkout it runs from and does not commit. C-D, `implement.md` rollback, and child 1 req 4 + AC now agree |

@@ -88,22 +88,53 @@ and machine-readable, never prose a human eyeballs.
 
 The resweep greps the consumer for:
 
-1. pack references in files that **survive** conversion — workflows,
-   git hooks, Make targets, and consumer-authored docs. Any hit is a
-   blocker naming the file and line.
+1. references to paths that **do not survive** conversion, cited from
+   files that **do** — workflows, git hooks, Make targets, agent
+   prompts, repo-owned tests. A blocking hit names the file and line.
 
    **A reference inside an enumerated deletion target is not a
    blocker.** `docs/SD_AI_COMMAND_PACK.md` is itself a `machine-other`
    row and every consumer's copy references the pack in its opening
    lines; pack workflow steps are likewise scheduled for deletion. A
    resweep that blocked on those could never return `clear` for any
-   consumer that exists today. So the resweep computes the deletion set
-   first and reports hits in two classes: *scheduled for removal by this
-   conversion* (informational, listed so the conversion PR can be read
-   against them) and *external callers* (blocking, because something
-   that outlives the conversion still expects the pack in the repo).
-   Only the second class blocks, and clearing it is explicit cleanup
-   work carried in that consumer's conversion PR.
+   consumer that exists today.
+
+   **Nor is the mere string `sd-ai-command-pack` a blocker.** Measured
+   across the fleet, a surviving file citing the pack is the ordinary
+   case, not the exception (`rwbp-coordinator`: 53 surviving files cite
+   it). What blocks is a surviving file citing a path this conversion
+   *removes*. The resweep computes the removal set first and sorts hits
+   into four classes, each failing closed:
+
+   - *scheduled* — the hit lives in a file conversion removes.
+     Informational, listed so the conversion PR can be read against it.
+   - *packDefects* — a surviving file whose content is still the pack's
+     own cites a removed path. **Blocking, and ours to fix**: measured
+     uniformly across all 8 consumers, 13 hits in 6 files — five
+     pack-shipped prompts telling an agent to run removed scripts, plus
+     `.github/copilot-instructions.md`. Ownership is proven two ways,
+     because one is not enough: a receipt entry whose sha256 matches
+     provenance, or — for managed-block targets, which provenance
+     deliberately never vouches — content between the pack's block
+     markers. Receipt membership alone does not confer the
+     classification: a consumer-edited kept target is consumer-authored,
+     and content outside a managed block is the consumer's even when the
+     file is a pack target.
+   - *blockers* — a consumer-authored file on the execution surface
+     cites a removed path. **Blocking, and the consumer's to fix**;
+     clearing it is explicit cleanup work carried in that consumer's
+     conversion PR.
+   - *advisories* — any other consumer-authored citation. Stale prose a
+     human should fix, never a reason to refuse a conversion.
+
+   The verdict is `clear` only when both blocking classes are empty.
+   Child 1's `design.md` owns the decision procedure — what counts as
+   the execution surface, and how a citation is matched — together with
+   the fleet measurement behind it. That check matches exact paths,
+   basenames, and globs, and is a **lower bound**: a runtime-composed
+   path is invisible to any static reader, so reversibility via
+   `--revert-thin` is what makes the conversion safe, not resweep
+   exhaustiveness.
 
 2. codex/pi usage markers (`.codex/` directories, `$CODEX_HOME`
    references, pi adapter files) — a hit in a consumer whose registry
@@ -121,8 +152,12 @@ It binds the **pack side** too. The resweep and the conversion are two
 processes, so a shared plan builder guarantees the same result only if
 the builder's inputs are identical. The verdict therefore also records a
 digest over the partition, the consumer's registry entry, the plugin
-manifests, and the bytes of the modules that define `RETIRED_TARGETS`,
-`MANAGED_BLOCK_REMOVAL_TARGETS`, and the builder itself. Binding pack
+manifests, the bytes of the modules that define `RETIRED_TARGETS`,
+`MANAGED_BLOCK_REMOVAL_TARGETS`, and the builder itself, **and the bytes
+of the resweep script**. The builder decides what is removed; the resweep
+decides what counts as a citation, as the execution surface, and as
+pack-owned content. Omitting the second leaves a `clear` verdict valid
+under an unchanged digest after the rule that produced it changed. Binding pack
 `HEAD` instead would bind a commit while leaving uncommitted edits to
 those same files invisible.
 

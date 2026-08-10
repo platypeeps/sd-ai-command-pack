@@ -8,7 +8,11 @@ repositories outside `sd-ai-command-pack`: `platypeeps/rwbp-coordinator`,
 work-loop's run-level authority does not extend to them. Authorization
 is per cohort; authorizing this cohort does not authorize post-canary.
 
-Also requires children 1 and 2 shipped.
+Also requires children 1, 2, and 2b shipped. Child 2b is not optional
+sequencing: until the pack's own surviving surfaces stop citing removed
+paths, every consumer's resweep returns `packDefects` and `--thin`
+refuses. Measured 2026-08-10: 13 such hits in 6 files, identical in all
+8 consumers.
 
 ## Deliverable
 

@@ -29,8 +29,21 @@ would be a hand-edited deletion of 166 files with no reversal path.
    `machine-other` row and every consumer's copy references the pack in
    its opening lines, so a resweep that blocked on it could never return
    `clear` for any consumer that exists today. The resweep computes the
-   deletion set first and classifies hits as *scheduled for removal*
-   (informational) or *external callers* (blocking).
+   removal set first and sorts every hit into four buckets, each failing
+   closed: *scheduled* (the hit lives in a file conversion removes —
+   informational), *packDefects* (a surviving, still-byte-identical
+   pack-shipped file cites a removed path — blocking, and ours to fix),
+   *blockers* (a consumer-authored file on the execution surface cites a
+   removed path — blocking, and the consumer's to fix), and *advisories*
+   (any other consumer-authored citation — stale prose a human should
+   fix, never a reason to refuse). `design.md` carries the decision
+   procedure and the measurement behind it.
+
+   The citation check matches exact paths, basenames, and globs, and is
+   a **lower bound** by construction: a path composed at runtime from
+   variables is invisible to any static reader. Reversibility via
+   `--revert-thin`, not resweep exhaustiveness, is what makes conversion
+   safe.
 
    **The verdict binds to a worktree digest and requires a clean tree**,
    not just to `HEAD` — a file can change without `HEAD` moving, and a
@@ -149,8 +162,24 @@ would be a hand-edited deletion of 166 files with no reversal path.
 ## Acceptance criteria
 
 - [ ] The resweep emits `blocked` with file and line for a fixture
-      consumer carrying a workflow pack reference, and `clear` for one
-      that does not.
+      consumer whose workflow cites a path the conversion removes, and
+      `clear` for one whose only pack references are to paths the
+      conversion keeps. A bare "pack reference" is not the criterion:
+      every consumer has hundreds, and blocking on them is the C-A
+      failure this task exists to avoid.
+- [ ] The resweep classifies each of these fixture cases correctly, one
+      case per bucket boundary the measurement proved wrong: a removed
+      path cited by a glob (`scripts/sd-ai-command-pack-*.sh`); a removed
+      path cited from a nested `templates/**/scripts/*.py`; a removed
+      path cited by an agent-executed `.github/prompts/*.prompt.md`; a
+      removed path cited only in prose (`advisories`, not blocking); and
+      a *kept* path cited from a workflow (neither, verdict stays
+      `clear`).
+- [ ] A surviving pack-managed file citing a removed path lands in
+      `packDefects` and blocks; the same file, once edited by the
+      consumer so its digest no longer matches provenance, is
+      reclassified as consumer-authored. Receipt membership alone must
+      not confer the exemption.
 - [ ] The resweep emits `blocked` for each of three separate marker
       fixtures whose registry `platforms` omits the platform — a
       `.codex/` directory, a `$CODEX_HOME` reference, and a pi adapter

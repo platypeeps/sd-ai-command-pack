@@ -56,19 +56,33 @@ vendoring-gate retirement after the last conversion.
 
 ## Decomposition
 
-This task is a parent. The requirements above are delivered by five
+This task is a parent. The requirements above are delivered by six
 ordered children (see `design.md` for the contracts and `implement.md`
 for the gate between them):
 
 1. `08-10-thin-conversion-tooling` — pack-internal
 2. `08-10-thin-candidate-loop-rescope` — pack-internal
+2b. `08-10-thin-prompt-surface-repoint` — pack-internal, added
+   2026-08-10 after child 1's step-3 measurement. Six pack-shipped
+   surfaces survive conversion and still cite paths it removes — five
+   prompts telling agents to run removed scripts, plus the managed block
+   in `.github/copilot-instructions.md`: 13 hits in 6 files, identical in
+   all 8 consumers. The resweep reports these as `packDefects`, which
+   blocks `--thin`, so this child gates children 3–5 on the **pack** side
+   and must land before any real conversion.
 3. `08-10-thin-canary-conversion` — mutates consumer repositories
 4. `08-10-thin-post-canary-conversion` — mutates consumer repositories
 5. `08-10-thin-final-conversion-gate-retirement` — mutates a consumer
    repository, then retires gates
 
 Children 3–5 are blocked on explicit per-cohort user authorization,
-because they change repositories outside this one.
+because they change repositories outside this one. That work is also
+**larger than "run the converter"**: measured 2026-08-10, every one of
+the 8 registered consumers has consumer-authored executable callers of
+paths the conversion removes (6 hits in 4 files at the low end,
+181 in 17 at the high end), so each consumer needs its execution surface
+repointed before it can convert. Evidence and per-consumer figures:
+`08-10-thin-conversion-tooling/research/fleet-blocker-scan.json`.
 
 ## Acceptance criteria
 

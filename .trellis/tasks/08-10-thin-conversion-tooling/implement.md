@@ -167,9 +167,21 @@ or `--check` reports a phantom change. The first fixture attempt passed
 
 `scripts/sd-ai-command-pack-thin-resweep.py` — `scripts/` only, no
 `templates/scripts/` counterpart and no `manifest.json` row, like every
-other `fleet-*` script. Imports step 1's builder to split hits into
-`scheduled` and `blockers`. Records `head`, `indexDigest`,
-`worktreeClean`, and `classifierDigest`.
+other `fleet-*` script. Imports step 1's builder for the removal set and
+applies `design.md`'s four-bucket rule — `scheduled`, `packDefects`,
+`blockers`, `advisories` — each step failing closed. Records `head`,
+`indexDigest`, `worktreeClean`, and `classifierDigest`.
+
+`classifier_digest` in `installer/conversion.py` gains
+`scripts/sd-ai-command-pack-thin-resweep.py` in the same commit. The
+builder decides what is removed; the resweep decides what counts as a
+hit, as the execution surface, and as a citation. Without that input an
+edit to the surface rule or the glob matcher leaves an existing `clear`
+verdict valid under an unchanged digest.
+
+`research/fleet-blocker-scan.py` is the reference implementation of the
+rule and the source of the measurement below. The shipped resweep
+supersedes it; the research copy stays so the counts can be re-derived.
 
 Checks:
 - The resweep appears in no `manifest.json` row and under no
@@ -182,9 +194,107 @@ Checks:
   line.
 - A fixture whose only pack references are inside
   `docs/SD_AI_COMMAND_PACK.md` → `clear`, with those hits in
-  `scheduled`. **This is the criterion that proves any real consumer can
-  convert at all**; if it reports `blocked`, the C-A remediation did not
-  land.
+  `scheduled`. If it reports `blocked`, the C-A remediation did not
+  land. It proves that and only that — the earlier claim that this
+  criterion "proves any real consumer can convert at all" is retracted;
+  see the measurement below.
+- A fixture whose pack references live in **kept** pack-managed files
+  and cite only paths the conversion **keeps** → `clear`, and those
+  references appear in **no bucket at all**. A citation of a surviving
+  path is not a hit; recording it as `scheduled` would misreport it as
+  something the conversion removes. Measured: 13 of `rwbp-coordinator`'s
+  53 surviving pack-mentioning files are pack-managed, so a rule that
+  blocks on pack-managed files as such cannot clear any consumer.
+- A fixture whose kept pack-managed file cites a **removed** path →
+  `blocked`, that hit in `packDefects`, not `scheduled`. Measured
+  uniformly across all 8 consumers: 13 hits in 6 files — five surviving
+  pack prompts (`sd-housekeeping` 37/38, `sd-review-learnings` 44/46,
+  `sd-review` 43, `sd-status` 43, `sd-help` 31/32) plus
+  `.github/copilot-instructions.md` 27/51/54/106/108. Calling that
+  `scheduled` would ship known breakage against a release obligation no
+  artifact tracks.
+- A fixture managed-block target whose **in-block** content cites a
+  removed path → `packDefects`; the same file with the citation
+  **outside** the block → judged as consumer-authored. Provenance never
+  vouches managed-block targets (`installer/provenance.py:114`), so
+  digest comparison cannot reach this case at all — measured: it is how
+  `.github/copilot-instructions.md`'s 5 hits were missed entirely by the
+  digest-only rule.
+- A receipt entry that is a **symlink**, and one whose bytes are
+  **unreadable** → `packDefects` with a stated reason, not silently
+  skipped. Fail-closed is a claim the plan makes; these are the two
+  inputs that test it.
+- A fixture citing a removed path on a line that does **not** contain the
+  string `sd-ai-command-pack` → `blocked`. Discovery must start from the
+  removal set, not the pack name; measured live at
+  `sd-github-review/test/metadata.test.js:490`, which names
+  `.agents/skills/sd-status/SKILL.md`.
+- A fixture root `CLAUDE.md` instructing an agent to run a removed script
+  → `blocked`. Measured live at `mezmo_benchmark/CLAUDE.md:28`.
+- The same fixture file, edited so its sha256 no longer matches the
+  digest provenance recorded, is reclassified as consumer-authored.
+  Receipt membership alone must not confer the pack exemption. Guard
+  against the fail-open form specifically: provenance stores
+  `sha256:<hex>` and a bare-hex comparison never matches, which empties
+  `packDefects` while looking healthy — measured on the first run of
+  `research/fleet-blocker-scan.py`, which reported `packDefects=0` for
+  all 8 consumers until the prefix was handled.
+- A fixture whose consumer-authored **test** asserts on
+  `.sd-ai-command-pack/provenance.json` → `clear`. That path is kept, and
+  blocking on the string rather than on the removed paths would fail
+  this.
+- A fixture whose `.github/workflows/ci.yml` invokes a **removed** pack
+  script → `blocked`, naming file and line.
+- A fixture citing removed scripts by **glob**
+  (`scripts/sd-ai-command-pack-*.sh`) → `blocked`. Neither exact-path nor
+  basename matching sees it; measured live at
+  `loadsmith/.github/workflows/ci.yml:149`.
+- A fixture citing a removed script from a **nested** executable path
+  (`templates/skills/x/scripts/run.py`) → `blocked`. A root-anchored
+  `scripts/` prefix misses it; measured live at
+  `se-ai-command-pack/templates/skills/se-review-skills/scripts/skill_review.py`.
+- A fixture whose consumer-authored `.github/prompts/x.prompt.md` tells
+  an agent to run a removed script → `blocked`. An agent-executed prompt
+  is an execution surface even though nothing about it is a shell file.
+- A fixture whose `README.md` mentions a removed pack script → `clear`
+  with an `advisories` entry. Prose staleness is a human's follow-up,
+  never a reason to refuse a conversion.
+- A `block_strip` target citing a removed path **inside** the managed
+  block → `scheduled`; the same target citing one **outside** the block →
+  judged normally, so a pack-owned outside-block citation is a
+  `packDefects` entry. No consumer exercises this today, which is exactly
+  why it needs a fixture rather than a measurement.
+- `--thin` refuses on a verdict whose `blockers` is empty but whose
+  `packDefects` is not. This is the only thing that makes a pack defect
+  block rather than merely be recorded, so assert it against the refusal
+  path, not against the verdict object.
+
+**Measured before building: no registered consumer is `clear` today, and
+the pack blocks every one of them.** Reproduce with:
+
+```bash
+.venv/bin/python .trellis/tasks/08-10-thin-conversion-tooling/research/\
+fleet-blocker-scan.py --out .trellis/tasks/08-10-thin-conversion-tooling/\
+research/fleet-blocker-scan.json
+```
+
+Per-consumer `head`, `indexDigest`, and `worktreeDigest` plus full
+per-file results are committed in that JSON — several consumer trees are
+dirty, and `head` alone cannot identify a dirty tree, so the digests are
+what make a rerun comparable. Consumer-authored executable callers of
+removed paths: `sd-github-review` 6 hits in 4 files,
+`se-ai-command-pack` 12/7, `loadsmith` 19/3, `hoa-manager` 27/7,
+`mezmo_benchmark` 26/14, `rwbp-coordinator` 39/6, `rwbp-website` 51/5,
+`anomaly-metric-creator` 181/17 — CI workflows, `package.json` scripts,
+repo-owned tests, and root agent instruction files. Plus 13 pack defects
+in 6 files that every consumer carries identically.
+
+Step 3 is therefore expected to return `blocked` for every real consumer
+on its first run, and that is the correct answer, not a bug in the rule.
+Two remediations follow: the pack must repoint its four surviving prompts
+off the deleted `scripts/` paths, and each consumer must repoint its
+execution surface. The first is pack work that gates all conversions; the
+second belongs to children 3–5 and materially enlarges them.
 - Codex/pi markers, each asserted separately rather than as one case:
   a `.codex/` directory, a `$CODEX_HOME` reference, and a pi adapter
   file each block when the registry `platforms` omits that platform, and
@@ -236,6 +346,10 @@ Checks:
   to `installer/conversion.py` itself** — the builder is the largest
   determinant of the plan, and a test that only mutates the partition
   would pass while a builder edit silently moved the delete set.
+  **And for an edit to `scripts/sd-ai-command-pack-thin-resweep.py`** —
+  the builder decides what is removed, the resweep decides what counts as
+  a citation, and a mutation test that only touches the builder leaves
+  the second half unbound.
 - Missing or unreadable receipt: refuses, with the two diagnostics
   distinguished.
 - Read-only pack checkout with a writable target: `--thin` refuses
@@ -480,3 +594,94 @@ Z-2's formula is the one carrying independent evidence — it was
 measured against a real consumer checkout, not reasoned — while the
 others are corrections to artifact text whose defects round 3 stated
 precisely.
+
+## Concern ledger — round 4 (step-3 planning edits)
+
+New coherent edit batch, so the round budget restarts: step 3's
+classification rule was rewritten mid-implementation after measurement
+contradicted it, which materially changes `design.md`, `implement.md`,
+`prd.md`, and the parent's C-A. Host lane completed. Codex lane completed
+(`codex exec --cd . --sandbox read-only --ephemeral`, 6 blocking
+concerns). The two lanes overlapped on four of six; none was rebutted.
+
+| ID | Lane | Concern | Disposition |
+|---|---|---|---|
+| W-1 | both | The execution-surface enumeration was a root-anchored directory allowlist and failed **open** twice. Codex: agent-executed surfaces (`.github/prompts/**`, `.claude/commands/**`, `.agents/skills/**`) were absent, so `rwbp-coordinator/.github/prompts/sd-housekeeping.prompt.md:35,38` — which tells an agent to run a deleted script — classified as advisory. Host: the allowlist was anchored at the repository root, so `se-ai-command-pack/templates/skills/se-review-skills/scripts/skill_review.py` (real Python under a nested `scripts/`) also fell through | addressed — the rule is now property-based and fails closed: suffix, build/CI basename, CI *or agent-executed* prefix, **any** path segment in `{scripts,bin,tools,test,tests,.githooks,.husky}` at any depth, or the executable bit. `design.md` §1 step 4; two fixture criteria added, one per measured counterexample |
+| W-2 | both | The pack-managed exemption permitted known breakage. `scheduled` meant "inside a deleted file", then was overloaded to include kept files "a later release will fix" — an obligation no artifact tracks. Codex also noted receipt membership does not prove current bytes are still pack-owned, so a consumer-edited kept target inherited the exemption | addressed — new `packDefects` bucket that **blocks**, and the exemption now requires the file's sha256 to match the digest provenance recorded (unrecorded or mismatched ⇒ consumer-authored). Measured: 6 defects in 4 files, identical across all 8 consumers — four surviving pack prompts run deleted scripts. Filed as its own task; see W-2b |
+| W-2b | host | The pack-side prompt repointing W-2 exposes gates every consumer conversion but is not this task's deliverable | **parked with a task** — `08-10-thin-prompt-surface-repoint`, blocking children 3–5. Trigger: before the first real conversion. Parked, not deferred: a `packDefects` verdict blocks `--thin` regardless |
+| W-3 | both | Delete-set citation matching by exact path and basename has a real glob false negative. Codex: `loadsmith/.github/workflows/ci.yml:149` addresses the deleted population as `scripts/sd-ai-command-pack-*.sh`, naming no exact path or basename. Host: `se-ai-command-pack/repomix.config.json:57` does the same. Codex further noted the plan had no glob, constructed-path, or env-var fixture | addressed — three matchers (exact/suffix, basename, `fnmatch`), a glob fixture criterion, and an explicit statement in `design.md`, `prd.md`, and parent C-A that the check is a **lower bound**: runtime-composed paths are invisible to any static reader, and `--revert-thin` is the guarantee, not resweep exhaustiveness |
+| W-4 | both | Six locations still asserted the superseded two-bucket rule: parent C-A, the parent's C-1 ledger row, child `prd.md` requirement 1 and acceptance criterion 1, child `design.md`'s `scheduled` definition, and child `implement.md` step 3 | addressed — all six rewritten. The child acceptance criterion no longer says a bare "pack reference" blocks; the parent C-1 row is marked superseded with a pointer here. Codex separately confirmed the retracted "docs-only fixture proves a real consumer can convert" claim has no surviving positive occurrence |
+| W-5 | Codex | The fleet measurement was prose-only — no command, scanner, consumer heads, or per-consumer results — while materially resizing children 3–5. The "9 of 27 kept files" claim named only eight | addressed — `research/fleet-blocker-scan.py` + `research/fleet-blocker-scan.json` commit the rule, the command, each consumer's head and `worktreeClean`, and every per-file hit. The unverifiable claim is replaced by measured figures (138 citing files, 179 removed targets, 53 surviving citers, 13 pack-managed). Rerunning the scanner found a **fail-open bug in the measurement itself**: provenance stores `sha256:<hex>` and the first version compared bare hex, so `packDefects` was empty for all 8 consumers while appearing healthy. That is now its own fixture criterion |
+| W-6 | Codex | `classifierDigest` binds the builder but not the resweep, so an edit to hit discovery or citation logic leaves an existing `clear` verdict valid under an unchanged digest | addressed — `scripts/sd-ai-command-pack-thin-resweep.py` bytes join the digest inputs in `design.md` §2 and in step 3's plan, with the reasoning stated: the builder decides what is removed, the resweep decides what counts as a citation, and neither substitutes for the other |
+
+Round 4 verdict: six blocking concerns, six addressed, one carrying a
+parked follow-up task that blocks children 3–5 rather than this task.
+Two remediation rounds remain available under the contract.
+
+## Concern ledger — round 5 (remediation of round 4)
+
+Round 5 reviewed the round-4 remediations rather than re-listing them.
+Host lane completed. Codex lane completed (7 blocking concerns). Every
+one was verified against the cited evidence before acting; none was
+rebutted. Three invalidated numbers this task had already published,
+which is the reason the measurement is now committed as code.
+
+| ID | Lane | Concern | Disposition |
+|---|---|---|---|
+| V-1 | Codex | The rebuilt execution-surface rule still failed open: root agent instruction files were absent from it, so `mezmo_benchmark/CLAUDE.md:28` — which tells an agent to run `scripts/sd-ai-command-pack-full-check.sh` — was recorded as an advisory | addressed — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `copilot-instructions.md`, `.cursorrules`, `SKILL.md`, `*.prompt.md`, `*.instructions.md`, and the `.claude/rules/`, `.claude/skills/`, `.agents/`, `.github/instructions/`, `.codex/` prefixes joined the surface. That file is now a blocker; `mezmo_benchmark` went 23/11 → 26/14 |
+| V-2 | Codex | `packDefects` could not recognize all pack-owned content: provenance deliberately never records a whole-file digest for managed-block, force-preserved, or generated targets (`installer/provenance.py:114`), and the digest-only rule declared every one of them consumer-authored. `.github/copilot-instructions.md`'s pack block tells Copilot to run the removed install-audit script and was recorded as advisory | addressed — ownership is now proven two ways: digest match, or position between the pack's `SD-AI-COMMAND-PACK:*:START`/`:END` markers for targets provenance cannot vouch. Force-preserved and generated targets stay consumer-authored by design. `packDefects` went 6 hits in 4 files → **13 in 6**, and the new child's PRD was rewritten around the larger, differently-shaped set |
+| V-3 | Codex | The counts were reproducible but wrong. The scanner discovered candidates by grepping the literal `sd-ai-command-pack` while the prose claimed matching against removed paths. `sd-github-review/test/metadata.test.js:490` cites the removed `.agents/skills/sd-status/SKILL.md` with the pack name nowhere on the line, so the published `5/3` was at least `6/4` | addressed — discovery now enumerates tracked files and searches for the removal set itself (full paths, multi-segment suffixes, pack-named basenames), keeping the pack name only so globs stay discoverable. Codex's predicted `6/4` is exactly what the rerun produced. **Every fleet figure in this task, the parent, and the new child was restated**; all rose |
+| V-4 | Codex | The committed measurement was not reconstructible: pack and five consumer trees were dirty, and the payload recorded only `HEAD` plus a boolean, so different uncommitted bytes at the same HEAD are indistinguishable | addressed — the payload records `indexDigest` and `worktreeDigest` per consumer, plus `packWorktreeDigest` and the scanner's own digest, at `schemaVersion: 2` |
+| V-5 | Codex | "Blocks until a release fixes it" was not an executable dependency: the parent's implementation plan still said five children and omitted 2b, and the canary child still required only children 1 and 2 | addressed — 2b is in the parent's ordered list and gate section, and the canary PRD names it. The stronger point is stated in both: the dependency is enforced by the tool, not the list — a `packDefects` entry makes the verdict `blocked` and `--thin` refuses without a `clear` one |
+| V-6 | Codex | Fail-closed edge cases unimplemented and untested: the scanner silently skipped unreadable hits and followed symlinks, contradicting the fail-closed claim; `block_strip` was documented as unimplemented while `implement.md` called the scanner the reference implementation | addressed — symlinked and unreadable receipt entries are recorded as `packDefects` with a stated reason instead of skipped, `block_strip` spans are implemented, and both got fixture criteria. The remaining stated divergence is one line: the scanner records `scheduled` per removed file rather than per reference |
+| V-7 | Codex | Three normative disagreements: step 3 expected kept-path citations in `scheduled` while `design.md` reserved it for removed files and the PRD said neither bucket; parent C-A's digest contract omitted the resweep bytes child `design.md` requires; and the new child called the prompts `machine-other` when the partition classifies them `repo-native` | addressed — a citation of a surviving path is now stated to appear in **no** bucket; parent C-A carries the resweep bytes with the reasoning; the child PRD says `repo-native` (`platform: github`), verified against `docs/fleet/surface-partition.json` rather than assumed |
+
+Round 5 verdict: seven blocking concerns, seven addressed. One
+remediation round remains available under the contract.
+
+**What round 5 changed about how this task treats evidence.** Three of
+the seven were not reasoning errors but measurement errors, and each was
+found by someone re-deriving a number rather than reading the prose that
+quoted it. The scanner is committed for that reason. Where prose and
+implementation state the same predicate, the implementation produced the
+number, and only the implementation can be checked.
+
+## Concern ledger — round 6 (final permitted round) — **DOES NOT PASS**
+
+Round 6 is the third automatic round; the contract permits no fourth.
+Host lane completed. Codex lane completed. **Five concerns survive, all
+verified against their cited evidence.** Implementation of step 3 is
+therefore **blocked pending user judgment** under
+`.claude/sd-ai-command-pack/planning-adversarial-review.md` §4.
+
+The host lane found one of these independently before Codex returned
+(U-2's false positives): 67 fleet-wide entries matched only a generic
+bare basename — the removal set contains `SKILL.md`, `config.toml`, and
+`ci.yml` — of which 12 were in the two blocking buckets. Tightening the
+matcher to multi-segment suffixes plus pack-named basenames moved
+`mezmo_benchmark` from 27/15 to 26/14 and left every other figure
+unchanged. That fix is already in; the residual false positives below are
+a different, narrower case.
+
+| ID | Lane | Concern | Disposition |
+|---|---|---|---|
+| U-1 | Codex | **Execution surface still incomplete.** `sd-github-review/.github/PULL_REQUEST_TEMPLATE.md:15` is a checklist telling a developer to run the removed `scripts/sd-ai-command-pack-full-check.sh`; PR templates are not an execution surface in the rule, so it records as an advisory | **unresolved** — verified. The fix is one more surface class, but the pattern across rounds 4/5/6 is that each round found a *new* class the previous round's enumeration missed (nested `scripts/`, agent prompts, root `CLAUDE.md`, now PR templates). The open question is not this row but whether an enumerated surface list can converge at all |
+| U-2 | Codex | **A real citation is still undiscovered, and false positives remain.** `mezmo_benchmark/scripts/preflight-pr.sh:1449` assigns `"$repo_root/scripts/sd-ai-command-pack-review-learnings.py"`; tokenization yields `repo_root/scripts/...`, which exact and suffix matching both reject — no runtime-prefix normalization. Conversely `se-ai-command-pack/templates/skills/se-help/SKILL.md:51` cites its own **surviving** sibling `references/examples.md` and is recorded as a blocker via suffix collision with a removed skill copy | **unresolved** — both verified. These are opposite errors from one matcher, which is the uncomfortable part: tightening for the false positive worsens the false negative |
+| U-3 | Codex | **Pack ownership still wrong in two ways.** Malformed markers are not rejected — an unterminated start extends the block through EOF, so consumer tail content can be labelled pack-owned, while `installer/fileops.py:138` rejects incomplete and duplicate markers. And force-preserved targets are unconditionally consumer-authored: `.github/PULL_REQUEST_TEMPLATE.md` is force-preserved (`installer/registry.py:2265`), its shipped template cites the removed full-check script at line 14, and **rwbp-coordinator and loadsmith carry byte-identical copies** — verified by digest | **unresolved** — verified. This makes child 2b's scope wrong: the PR template is a seventh surviving pack surface where unmodified, and the "six files" figure in four artifacts would move again |
+| U-4 | Codex | **V-4's reconstructibility fix does not work.** `worktreeDigest` hashes `git status --porcelain` — the dirty *path set*, not file contents — so different bytes under the same dirty paths produce the same digest. Five consumer trees are dirty | **unresolved** — verified by reading the scanner. The fix is to hash contents, not status output |
+| U-5 | Codex | **Residual contradictions.** `design.md:328` says the scanner does not implement `block_strip`, `design.md:456` says it does; `implement.md:294` still says "four surviving prompts" against five elsewhere; and the child PRD says all five prompts instruct agents to run removed scripts when `sd-help` instructs the agent to *read references* — the distinction that makes its suffix matches arguable rather than clear-cut | **unresolved** — verified. Three are text; the `sd-help` one is substantive and interacts with U-2 |
+
+Codex confirmed one area clean: every per-consumer figure quoted in
+`design.md`, `implement.md`, the parent PRD, the canary PRD, and child
+2b matches the committed JSON exactly on current bytes. The figures are
+transcription-correct and substantively still moving.
+
+**Why this stops rather than continuing.** The remediations are known
+and each is small. What is not known is whether they are *complete* —
+and the evidence from three rounds is that they have not been: every
+round produced a new surface class, a new matcher failure, or a new
+ownership case that the previous round's enumeration did not contain, and
+each was found only by an independent lane re-deriving the measurement.
+Applying a fourth round of fixes with no review budget left would encode
+a rule whose incompleteness is demonstrated but unmeasured. The contract
+requires stopping here for user judgment, and the contract is right.
