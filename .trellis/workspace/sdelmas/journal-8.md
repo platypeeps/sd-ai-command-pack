@@ -220,3 +220,45 @@ Deleted both retired command surfaces (53 manifest rows), the legacy review-loca
 ### Next Steps
 
 - None - task complete
+
+
+## Session 356: Fleet/status rework to pin + plugin inventory
+
+**Date**: 2026-08-10
+**Task**: Fleet/status rework to pin + plugin inventory
+**Branch**: `feat/thin-fleet-status-pins`
+
+### Summary
+
+Bumped the fleet registry to schema 5 with per-consumer install mode and pin path, and taught sd-status fleet to report a thin consumer by its pin plus machine skew instead of installed-tree drift.
+
+### Main Changes
+
+- Fleet registry schema 4 -> 5: optional per-consumer mode (fat|thin) and pinPath, both defaulted so an all-fat schema-5 registry reports identically to the schema-4 one it replaces
+- sd-status fleet reports a thin consumer by pin state (present|absent|unreadable), collects machine scope once per run, and raises pin/machine/plugin skew rows gated on at least one thin consumer
+- Fixed follow-up truncation: F-* rows now derive from the complete row set with skew ranked ahead of advisory rows, so a skew row can no longer vanish behind advisory rows
+- Pin paths validated at load (no absolute, Windows-absolute, .., or whitespace-padded values) and contained at read with resolve(strict=True) + relative_to
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ad12cc442a1d31c0ee0bed8d5ba2e3298bbc8863` | feat(fleet): report thin consumers by pin and machine skew |
+| `0f15197a05e4ed6cb48a923cdd7acbd8bb040544` | fix(fleet): strip pinPath before validating and returning it |
+| `028cd4b5` | chore(task): record branch for 08-09-thin-fleet-status-pins |
+| `252a4675` | chore(task): mark thin-fleet-status-pins acceptance criteria satisfied |
+
+### Testing
+
+- [OK] python -m unittest discover -s tests -p 'test_*.py' — 1994 tests, OK
+- [OK] make generate && make sync && make release-prep — exit 0, 65 OK blocks, ledger refreshed to 0.66.0
+- [OK] AC3 paired all-fat proof over the real 8-consumer fleet: 8 rows, 2 nextSteps, 2 followUps identical apart from the additive fields; mutation defeat case exits 1
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
