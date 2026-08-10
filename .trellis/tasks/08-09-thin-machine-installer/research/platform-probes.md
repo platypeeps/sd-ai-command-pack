@@ -21,6 +21,9 @@ XDG_CONFIG_HOME=<scratch>/mprobe/xdg
 cwd=<scratch>/mprobe/work        # empty: no project-scope adapter files
 ```
 
+`<scratch-home>` below is that `HOME`; quoted CLI output is abbreviated to
+it so no absolute machine path appears in this file.
+
 `<scratch>` is the session scratchpad
 (`/private/tmp/claude-501/.../26fc345a-1f0c-4cc3-ada8-46763f160642/scratchpad`).
 `timeout(1)` does not exist on this machine, so each CLI ran under a small
@@ -41,7 +44,7 @@ Installed CLIs: `gemini` 0.46.0, `opencode` 1.18.15 (both under
 
 Gates the `gemini` rows (`~/.gemini/commands/sd/<name>.toml`).
 
-Artifact written to `<scratch>/mprobe/home/.gemini/commands/sd/probe.toml`:
+Artifact written to `<scratch-home>/.gemini/commands/sd/probe.toml`:
 
 ```toml
 description = "sd machine-scope user-file resolution probe"
@@ -158,7 +161,7 @@ first EXECUTED evidence for this surface; `platform-verification.md` had
 only the OpenCode binary's embedded scope table.
 
 Artifact written to
-`<scratch>/mprobe/home/.agents/skills/sd-probe/SKILL.md`:
+`<scratch-home>/.agents/skills/sd-probe/SKILL.md`:
 
 ```markdown
 ---
@@ -183,7 +186,7 @@ Decisive output (positive run, `name | location` per entry):
 
 ```
 customize-opencode | <built-in>
-sd-probe | /private/tmp/.../scratchpad/mprobe/home/.agents/skills/sd-probe/SKILL.md
+sd-probe | <scratch-home>/.agents/skills/sd-probe/SKILL.md
 ```
 
 The `location` field is the CLI's own report of where it loaded the skill

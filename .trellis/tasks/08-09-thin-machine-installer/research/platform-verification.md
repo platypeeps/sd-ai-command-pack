@@ -17,6 +17,9 @@ Three evidence lanes were used, strongest first:
 2. **Live command output** — running the installed CLI read-only.
 3. **On-disk state** — which user-level directories exist and are populated.
 
+Home directories in quoted command output are abbreviated to `~` so this file
+carries no absolute machine path; nothing else in the quoted output is edited.
+
 Nothing was installed, and no file outside this `research/` directory was written.
 All three CLIs are installed on this machine:
 
@@ -143,10 +146,10 @@ behavior to the repo-local copy the pack installs today at
 `gemini skills list` (run in this repo):
 
 ```
-Skill conflict detected: "caveman-stats" from "/Users/sven/.agents/skills/caveman-stats/SKILL.md" is overriding the same skill from "/Users/sven/.gemini/extensions/caveman/skills/caveman-stats/SKILL.md".
+Skill conflict detected: "caveman-stats" from "~/.agents/skills/caveman-stats/SKILL.md" is overriding the same skill from "~/.gemini/extensions/caveman/skills/caveman-stats/SKILL.md".
 ...
 archify [Enabled]
-  Location:    /Users/sven/.agents/skills/archify/SKILL.md
+  Location:    ~/.agents/skills/archify/SKILL.md
 ```
 
 This is live proof of `getUserAgentSkillsDir()` — Gemini reads `~/.agents/skills/`
@@ -155,7 +158,7 @@ the `shared` row, not for the `gemini` row (the pack ships no skills to `gemini`
 
 ### Open risks — Gemini
 
-- `~/.gemini/commands/` **does not exist on this machine** (`ls: /Users/sven/.gemini/commands: No such file or directory`). `~/.gemini/` itself exists with `GEMINI.md`, `settings.json`, `extensions/`, `hooks/`, `skills/`. The installer must create `commands/` rather than assume it.
+- `~/.gemini/commands/` **does not exist on this machine** (`ls: ~/.gemini/commands: No such file or directory`). `~/.gemini/` itself exists with `GEMINI.md`, `settings.json`, `extensions/`, `hooks/`, `skills/`. The installer must create `commands/` rather than assume it.
 - **Precedence between user and project scope was not pinned down.** The loader enumerates user first and project second and emits conflict diagnostics; which scope wins on a duplicate name was not verified. During migration a consumer repo that still vendors `.gemini/commands/sd/*.toml` will collide with the machine copy; the acceptance test for the installer should assert the resulting `/sd:*` command actually comes from the intended scope rather than assuming it.
 - `GEMINI_CLI_TRUSTED_FOLDERS_PATH`-style env overrides exist for other paths; `getGlobalGeminiDir()` has no env override, but it does fall back to `os.tmpdir()/.gemini` when `homedir()` is empty. Installer should resolve the same way rather than hardcoding `$HOME`.
 
@@ -203,11 +206,11 @@ The pack's flat `sd-<name>.md` layout matches; nested layout would also work
 ### Evidence 3 (on-disk): the global root exists but the command dir does not
 
 ```
-/Users/sven/.config/opencode/opencode.json
-/Users/sven/.config/opencode/AGENTS.md
-/Users/sven/.config/opencode/plugins/
-ls: /Users/sven/.config/opencode/command: No such file or directory
-ls: /Users/sven/.config/opencode/commands: No such file or directory
+~/.config/opencode/opencode.json
+~/.config/opencode/AGENTS.md
+~/.config/opencode/plugins/
+ls: ~/.config/opencode/command: No such file or directory
+ls: ~/.config/opencode/commands: No such file or directory
 ```
 
 ### Open risks — OpenCode
@@ -216,7 +219,7 @@ ls: /Users/sven/.config/opencode/commands: No such file or directory
   strings are `.config/opencode/{agent,command,skill,tui}`; the installer must
   honor `XDG_CONFIG_HOME` rather than hardcoding `$HOME/.config/opencode`, or it
   will write to a directory OpenCode never reads on machines that set it.
-- **`~/opencode/` is a decoy.** This machine has `/Users/sven/opencode/` containing
+- **`~/opencode/` is a decoy.** This machine has `~/opencode/` containing
   `commands/`, `skills/`, `agents/`, `AGENTS.md`, and an `opencode.json` that only
   registers `./plugins/caveman/plugin.js`. It is not a documented OpenCode
   resolution root and does not appear in the binary's scope table. Do not target it.
@@ -263,8 +266,9 @@ discovered project root, not the home directory.
 
 A byte search of the full 220 MB binary for `~/.agents/skills` returns **NOT
 FOUND**. Every `.agents` occurrence in the binary is either the repo skills root
-above, the plugin-marketplace manifests (`.agents/plugins/marketplace.json`,
-`.agents/plugins/api_marketplace.json`), or unrelated serde field names
+above, the plugin-marketplace manifest names it embeds (`plugins/marketplace.json`
+and `plugins/api_marketplace.json` under a `.agents` root Codex never reads
+here), or unrelated serde field names
 (`.agentsconnection`, `.agentssettings`, `.agentsstruct`).
 
 ### Evidence 3 (binary): the real user-level skills root is `$CODEX_HOME/skills`
@@ -340,11 +344,11 @@ rows flagged `machine-claude` + `sharedRuntime: true`, and 4 `consumer-config`
 
 - **`.agents/skills/**` at `~/.agents/skills/`** — user-level resolution is
   **proven live for Gemini** (`gemini skills list` prints
-  `Location: /Users/sven/.agents/skills/archify/SKILL.md`) and **documented in the
+  `Location: ~/.agents/skills/archify/SKILL.md`) and **documented in the
   OpenCode binary** ("External skills (auto-loaded) … `~/.agents/skills/<name>/SKILL.md`").
   The directory already exists and is populated on this machine, and
   `~/.claude/skills/archify` is a symlink into it
-  (`/Users/sven/.claude/skills/archify -> ../../.agents/skills/archify`) — that
+  (`~/.claude/skills/archify -> ../../.agents/skills/archify`) — that
   symlink is a user convention, not a Claude Code behavior, so it is not evidence
   that Claude reads `~/.agents`.
 - **`scripts/*` sharedRuntime rows** — machine scope for these is invocation by

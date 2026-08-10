@@ -17,8 +17,10 @@ belongs exclusively to the plugin (`thin-plugin-packaging`).
 Platforms whose `platforms.<id>` entry carries `provisional: true`
 are not installable machine-scope until this child's verification
 flips the flag; consumers of the artifact fail closed and treat them
-as repo-native until then. Plus `sd-pack-update` (shipped in plugin
-`bin/`) as the single machine update action.
+as repo-native until then. Plus `sd-pack-update` as the single machine
+update action — shipped under the pack's script naming convention as
+`sd-ai-command-pack-pack-update.sh` in the plugin's `bin/`, which is the
+command every criterion below names by its shorthand.
 
 ## Requirements
 
@@ -49,11 +51,12 @@ as repo-native until then. Plus `sd-pack-update` (shipped in plugin
 
 ## Acceptance criteria
 
-- [ ] Machine install into a scratch prefix produces receipt with
+- [x] Machine install into a scratch prefix produces receipt with
       correct version/digest; rerun is a no-op.
-- [ ] Unowned-file collision refused without force; diagnostic names
+- [x] Unowned-file collision refused without force; diagnostic names
       the path.
-- [ ] Interrupted update (plugin updated, machine install failed)
-      shows skew in `sd-status`; rerunning `sd-pack-update` converges.
-- [ ] Per-platform disposition verdicts recorded in task research and
+- [x] Interrupted update (plugin updated, machine install failed)
+      shows skew in `sd-status`; rerunning
+      `sd-ai-command-pack-pack-update.sh` converges.
+- [x] Per-platform disposition verdicts recorded in task research and
       reflected in the partition output.

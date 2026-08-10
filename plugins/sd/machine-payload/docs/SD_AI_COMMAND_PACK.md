@@ -2298,6 +2298,49 @@ pre-seed a warm plugin cache and point the CLI at it:
 export CLAUDE_CODE_PLUGIN_CACHE_DIR="$RUNNER_TEMP/claude-plugins"
 ```
 
+### Machine-scope install for the non-Claude tools
+
+Gemini CLI and OpenCode read user-level directories, so the surfaces they use
+install once per machine as well. The plugin carries that payload and the
+installer that writes it, so no pack checkout is needed:
+
+| What | Where it lands |
+| --- | --- |
+| shared `sd-*` skills | `~/.agents/skills/` |
+| pack scripts the skills invoke | `~/.agents/bin/` |
+| this guide | `~/.agents/docs/` |
+| Gemini `/sd:*` commands | `~/.gemini/commands/sd/` |
+| OpenCode `sd-*` commands | `${XDG_CONFIG_HOME:-~/.config}/opencode/commands/` |
+
+One command updates both halves — the plugin and the machine surfaces:
+
+```bash
+~/.agents/bin/sd-ai-command-pack-pack-update.sh
+```
+
+It updates the plugin first, resolves the plugin root that update produced,
+installs the machine payload from that root, and prints the plugin and
+machine-receipt versions. Run the machine half on its own from a pack checkout
+with `python3 install.py --machine`, which stages the payload from the checkout
+and installs the same bytes the plugin ships.
+
+Inspect or undo an install with the bootstrap the plugin ships in its `bin/`:
+
+```bash
+sd-machine-install status --json
+sd-machine-install remove
+```
+
+The installer writes a receipt recording the pack version, the payload digest,
+and every file it wrote, and it touches nothing else. A file it does not own —
+one you wrote yourself, or one you edited after an install — refuses the whole
+run before anything is written, naming each conflicting path. `--force`
+proceeds and copies each displaced file to a `.bak` sibling recorded in the
+receipt; `remove` then deletes what the receipt installed and restores those
+originals, and nothing else. `sd-status` reports the machine receipt against
+the installed plugin version, so an update that only half completed shows as
+`skew` and rerunning the update command converges.
+
 ## Troubleshooting
 
 - Missing an `sd-*` command: reinstall the pack and include the platform

@@ -239,6 +239,11 @@ extends over the new trees.
 
 ### 4. `sd-pack-update` (plugin `bin/`, the one update action)
 
+Naming: the pack's script convention prefixes every shipped script, so
+the deliverable ships as `sd-ai-command-pack-pack-update.sh`
+(`templates/scripts/`, installed to the plugin's `bin/`);
+`sd-pack-update` is the shorthand this document uses for it.
+
 Portable bash, shipped like existing bin scripts:
 
 1. `claude plugin update sd@sd-ai-command-pack` (flags can override
