@@ -720,8 +720,14 @@ def _record_stage(
 
     A non-resumable result still lands in ``state`` because `_report` reads both
     stage payloads straight out of it — the caller sees exactly what this run
-    computed. Only the write to the private state file is withheld, so any
-    result an earlier invocation did persist survives untouched on disk.
+    computed. What is withheld is the write to the private state file, and with
+    it the phase: ``phase`` names the last stage that completed, which is where
+    a resume re-enters. A verdict this run declined to store completed nothing,
+    so the phase stays on the stage before it. Naming this stage there would
+    assert a completion that did not happen and disagree with the state file a
+    resume actually reads; the failure is already carried by the report's
+    ``diagnostic`` and by the stage payload beside it. Any result an earlier
+    invocation did persist survives untouched on disk.
     """
 
     if resumable:

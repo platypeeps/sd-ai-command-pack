@@ -1511,6 +1511,12 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(first[1]["limitations"], ["deterministic-check-not-passed"])
         self.assertEqual((second[0], second[1]["status"]), (0, "ready"))
         self.assertEqual(run_check.call_count, 2)
+        # The blocked report carries the failing row it computed, and a phase
+        # that still names the last stage that actually completed — where a
+        # resume re-enters. Naming `check` here would assert a completed check
+        # and disagree with the state file the resume reads.
+        self.assertEqual(first[1]["check"], {"schemaVersion": 1, "status": "failed"})
+        self.assertEqual(first[1]["phase"], "capability")
         state_files = list(artifacts.glob("review-*.json"))
         self.assertEqual(len(state_files), 1)
         state = json.loads(state_files[0].read_text(encoding="utf-8"))
