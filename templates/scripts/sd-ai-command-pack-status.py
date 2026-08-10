@@ -79,6 +79,16 @@ PARKED_PREFIX_RE = re.compile(r"^PARKED\s*:\s*", re.IGNORECASE)
 PR_SEPARATOR = "\x1f"
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 TASK_STATUS_ORDER = {"in_progress": 0, "planning": 1, "completed": 2}
+MACHINE_SCOPE_SCHEMA_VERSION = 1
+# The plugin the machine-scope surfaces ship with; the identity
+# sd-ai-command-pack-pack-update.sh updates.
+MACHINE_PLUGIN_ID = "sd@sd-ai-command-pack"
+MACHINE_UNAVAILABLE = "unavailable"
+# States the machine-install engine reports from the receipt alone. A fourth
+# value, MACHINE_UNAVAILABLE, is this collector's own: it means the receipt
+# could not be read at all (no engine beside this script), which is neither a
+# missing install nor a corrupt one.
+MACHINE_RECEIPT_STATES = frozenset({"none", "installed", "invalid"})
 WORK_LOOP_TERMINAL_STATUSES = frozenset({"none", "invalid", "unavailable"})
 WORK_LOOP_RUN_STATUSES = frozenset({"active", "paused", "stopped", "completed"})
 WORK_LOOP_REQUIRED_STRING_FIELDS = (
@@ -1625,6 +1635,195 @@ def summarize_recovery(classified: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def machine_scope_api() -> Any:
+    """Load the machine-scope install engine from beside this script.
+
+    `installer/` sits next to the directory holding this script in every
+    shipped arrangement: `scripts/` in a pack checkout, `bin/` under a plugin
+    root. A vendored consumer repository carries the scripts without the
+    package; that absence is reported, never guessed around.
+
+    The engine resolves the shared helper library through
+    ``sys.modules["sd_ai_command_pack_lib"]`` first, and this script has
+    already registered that name from its own directory, so the state-root
+    ladder in play is the copy beside THIS script rather than the one beside
+    the package. Every shipped arrangement ships the same file in both places;
+    they diverge only mid-skew (a refreshed package beside stale scripts). The
+    loader's first-import-wins rule is deliberate and is not worked around
+    here.
+    """
+    root = Path(__file__).resolve().parent.parent
+    module_path = root / "installer" / "machinescope.py"
+    if not module_path.is_file():
+        raise RuntimeError(
+            f"machine-scope engine is not installed beside this script ({module_path})"
+        )
+    root_path = str(root)
+    inserted = root_path not in sys.path
+    if inserted:
+        sys.path.insert(0, root_path)
+    try:
+        with suppress_bytecode_writes():
+            from installer import machinescope
+    except ImportError as error:
+        raise RuntimeError(
+            f"machine-scope engine cannot be imported: {safe_text(error, limit=200)}"
+        ) from error
+    finally:
+        if inserted:
+            sys.path.remove(root_path)
+    return machinescope
+
+
+def collect_plugin_version(repo: Path) -> tuple[str, str | None]:
+    """The installed plugin version, or ``unavailable`` and why.
+
+    Every discovery failure -- no CLI, a nonzero exit, unparsable output, a
+    missing or duplicated entry, an entry without a version -- reports
+    ``unavailable``. A guess here would let a broken `claude` masquerade as an
+    up-to-date machine.
+    """
+    if shutil.which("claude") is None:
+        return MACHINE_UNAVAILABLE, "the Claude Code CLI is not on PATH"
+    result = run_command(["claude", "plugin", "list", "--json"], cwd=repo)
+    if result.returncode != 0:
+        return (
+            MACHINE_UNAVAILABLE,
+            f"claude plugin list --json exited {result.returncode}",
+        )
+    try:
+        entries = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return MACHINE_UNAVAILABLE, "claude plugin list --json output is not JSON"
+    if not isinstance(entries, list):
+        return (
+            MACHINE_UNAVAILABLE,
+            "claude plugin list --json did not return a plugin array",
+        )
+    matches = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("id") == MACHINE_PLUGIN_ID
+    ]
+    if not matches:
+        return MACHINE_UNAVAILABLE, f"plugin {MACHINE_PLUGIN_ID} is not installed"
+    if len(matches) > 1:
+        return (
+            MACHINE_UNAVAILABLE,
+            f"claude plugin list --json reports {MACHINE_PLUGIN_ID} more than once",
+        )
+    version = matches[0].get("version")
+    normalized = safe_text(version, limit=80) if isinstance(version, str) else ""
+    if not normalized:
+        return (
+            MACHINE_UNAVAILABLE,
+            f"the listed {MACHINE_PLUGIN_ID} entry carries no version",
+        )
+    return normalized, None
+
+
+def machine_receipt_state(
+    *,
+    home: Path | None,
+    environ: Mapping[str, str] | None,
+    state_home: Path | None,
+) -> dict[str, Any]:
+    """Receipt state from the engine, without needing a plugin to find it."""
+
+    def unavailable(detail: str) -> dict[str, Any]:
+        return {
+            "state": MACHINE_UNAVAILABLE,
+            "packVersion": None,
+            "receiptPath": None,
+            "detail": safe_text(detail, limit=300),
+        }
+
+    try:
+        machinescope = machine_scope_api()
+    except RuntimeError as error:
+        return unavailable(str(error))
+    try:
+        expected_schema = machinescope.STATUS_SCHEMA_VERSION
+        report = machinescope.status(
+            home=home,
+            environ=environ,
+            state_home=state_home,
+        )
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        # MachineInstallError (an unresolvable home or state root) subclasses
+        # RuntimeError, so a machine the engine cannot reason about reports
+        # unavailable instead of raising through a read-only status run.
+        return unavailable(f"machine-scope engine failed: {safe_text(error, limit=200)}")
+    if not isinstance(report, dict) or report.get("schemaVersion") != expected_schema:
+        return unavailable("machine-scope engine returned an unexpected schema version")
+    state = report.get("state")
+    if state not in MACHINE_RECEIPT_STATES:
+        return unavailable("machine-scope engine returned an unsupported state")
+    receipt_path = report.get("receiptPath")
+    pack_version = report.get("packVersion")
+    detail = report.get("detail")
+    return {
+        "state": state,
+        "packVersion": (
+            safe_text(pack_version, limit=80)
+            if state == "installed" and isinstance(pack_version, str) and pack_version.strip()
+            else None
+        ),
+        "receiptPath": (
+            safe_text(receipt_path, limit=500) if isinstance(receipt_path, str) else None
+        ),
+        "detail": safe_text(detail, limit=300) if isinstance(detail, str) and detail else None,
+    }
+
+
+def machine_comparison(
+    state: object,
+    pack_version: object,
+    plugin_version: object,
+) -> str:
+    """Compare the two halves of an update, refusing to guess at either.
+
+    ``unknown`` whenever a version is missing on either side: a broken `claude`
+    CLI or an unreadable receipt must never present as ``current``.
+    """
+    if plugin_version == MACHINE_UNAVAILABLE or state == MACHINE_UNAVAILABLE:
+        return "unknown"
+    if state == "installed" and pack_version and pack_version == plugin_version:
+        return "current"
+    return "skew"
+
+
+def collect_machine_scope(
+    repo: Path,
+    *,
+    home: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    state_home: Path | None = None,
+) -> dict[str, Any]:
+    """Machine-scope install state against the installed plugin.
+
+    Advisory: this reports on the machine, not the repository, and never
+    changes the exit status.
+    """
+    receipt = machine_receipt_state(home=home, environ=environ, state_home=state_home)
+    plugin_version, plugin_detail = collect_plugin_version(repo)
+    return {
+        "schemaVersion": MACHINE_SCOPE_SCHEMA_VERSION,
+        "state": receipt["state"],
+        "packVersion": receipt["packVersion"],
+        "receiptPath": receipt["receiptPath"],
+        "detail": receipt["detail"],
+        "pluginId": MACHINE_PLUGIN_ID,
+        "pluginVersion": plugin_version,
+        "pluginDetail": plugin_detail,
+        "comparison": machine_comparison(
+            receipt["state"],
+            receipt["packVersion"],
+            plugin_version,
+        ),
+    }
+
+
 def parse_gh_lines(output: str, *, kind: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for line in output.splitlines()[:MAX_ITEMS]:
@@ -2158,6 +2357,7 @@ def collect_local(
     dry_run: bool,
     prior_anomalies: Sequence[str],
     target_pack_version: str | None = None,
+    include_machine_scope: bool = True,
 ) -> dict[str, Any] | None:
     repo = resolve_repo(requested_repo)
     if repo is None:
@@ -2203,6 +2403,9 @@ def collect_local(
         "trellis": trellis,
         "workLoop": work_loop,
         "recoveryArtifacts": recovery,
+        # Machine scope describes the machine, not this checkout: a fleet run
+        # would repeat one identical answer per consumer, so it opts out.
+        "machineScope": collect_machine_scope(repo) if include_machine_scope else None,
         "cleanupContext": {
             "sourceBranch": source_branch,
             "keepRemoteBranch": keep_remote_branch,
@@ -2225,6 +2428,14 @@ def collect_local(
         report["anomalies"].append(
             "recovery-artifact state is invalid: "
             + safe_text(recovery.get("error") or "unknown error", limit=400)
+        )
+    machine_scope = report["machineScope"]
+    if isinstance(machine_scope, dict) and machine_scope.get("state") == "invalid":
+        # Same rule the two user-local ledgers above follow: a corrupt state
+        # file is an anomaly, an unreadable one (`unavailable`) is not.
+        report["anomalies"].append(
+            "machine-scope receipt is invalid: "
+            + safe_text(machine_scope.get("detail") or "unknown error", limit=400)
         )
     completed_outside_archive = trellis.get("completedOutsideArchive", [])
     if completed_outside_archive:
@@ -2267,6 +2478,32 @@ def format_working_tree(tree: Mapping[str, Any]) -> str:
         f"dirty (staged {tree.get('staged', 0)}, "
         f"unstaged {tree.get('unstaged', 0)}, untracked {tree.get('untracked', 0)})"
     )
+
+
+def format_machine_scope(section: object) -> str:
+    """One line carrying both halves of the update and their comparison.
+
+    Both diagnostics are spelled out rather than reduced to a bare
+    ``unavailable``: the reader has to be able to tell a machine with no
+    install from one whose plugin version could not be read.
+    """
+    if not isinstance(section, dict):
+        return "not collected; plugin unavailable; unknown"
+    state = section.get("state")
+    pack_version = section.get("packVersion")
+    machine = (
+        f"installed {pack_version}"
+        if state == "installed" and pack_version
+        else str(state)
+    )
+    detail = section.get("detail")
+    if detail:
+        machine += f" ({detail})"
+    plugin = str(section.get("pluginVersion"))
+    plugin_detail = section.get("pluginDetail")
+    if plugin_detail:
+        plugin += f" ({plugin_detail})"
+    return f"{machine}; plugin {plugin}; {section.get('comparison')}"
 
 
 def format_task(task: object) -> str:
@@ -2423,6 +2660,7 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     target = versions.get("targetPack")
     target_suffix = f"; target {target}" if target else ""
     print(f"- SD pack: {pack} ({versions.get('packState')}{target_suffix})")
+    print(f"- machine scope: {format_machine_scope(report.get('machineScope'))}")
     print(f"- Trellis: {versions.get('trellis') or 'unknown'}")
     pr = report["github"].get("currentPr")
     if isinstance(pr, dict):
@@ -2714,6 +2952,7 @@ def collect_fleet(
                 dry_run=False,
                 prior_anomalies=(),
                 target_pack_version=target,
+                include_machine_scope=False,
             )
         except Exception:
             # One unreachable or misbehaving consumer must not abort the whole

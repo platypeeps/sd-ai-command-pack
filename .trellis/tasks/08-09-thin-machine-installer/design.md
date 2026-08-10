@@ -271,6 +271,27 @@ masquerade as `current`. Human line spells out the unavailable case.
 Advisory only; exit stays zero. The fleet/pin rework stays in
 `thin-fleet-status-pins`.
 
+Amended during step 6 to match the collector's existing conventions for
+its two other user-local ledgers (`workLoop`, `recoveryArtifacts`):
+
+- A fourth machine state, `unavailable`, joins the three receipt states.
+  It is the collector's own, not the engine's: it means the receipt
+  could not be read at all (no `installer/` package beside the script,
+  an engine that raises, an engine schema or state the collector does
+  not recognize) — distinct from `none`, which is the engine's positive
+  report that no install is recorded. Same name, same meaning, and same
+  missing-helper trigger as `workLoop`/`recoveryArtifacts`
+  `unavailable`. Comparison is `unknown` whenever machine state is
+  `unavailable`, exactly as when the plugin version is.
+- `invalid` goes into `report["anomalies"]`, matching the two lines
+  above it that promote `workLoop` and `recoveryArtifacts` `invalid` the
+  same way; `unavailable` does not, also matching them. "Exit stays
+  zero" describes an ordinary run, which anomalies never change; under
+  the deliberate `--expect-clean` strict mode a corrupt machine receipt
+  gates the run like any other anomaly. Both user-local ledgers already
+  behave this way, so a reader cannot be asked to remember that one of
+  them gates housekeeping and another does not.
+
 ### 6. Partition changes
 
 `partition-surfaces.py` `PLATFORM_DISPOSITIONS`: `codex` ->
