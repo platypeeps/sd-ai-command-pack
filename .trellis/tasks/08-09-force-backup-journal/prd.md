@@ -8,7 +8,7 @@ interrupted before the receipt was committed.
 
 ## Problem
 
-The machine-scope installer (`installer/machinescope.py`, landed in
+The machine-scope installer engine (landed by task
 08-09-thin-machine-installer) records `--force` displacement backups only in
 the receipt, which is committed after all writes succeed. The intent journal
 (`machine-install.intent.json`) carries no backup data. If a `--force` install

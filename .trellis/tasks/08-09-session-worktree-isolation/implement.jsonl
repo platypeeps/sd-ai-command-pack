@@ -1,3 +1,2 @@
 {"file": ".trellis/spec/tooling/index.md", "reason": "Tooling spec index; locate gate-script and session-bootstrap conventions for the lock and worktree work"}
 {"file": ".trellis/spec/backend/error-handling.md", "reason": "Crash-safe locking: stale-lock takeover must follow the fail-safe error conventions"}
-{"file": ".trellis/tasks/08-09-session-worktree-isolation/prd.md", "reason": "Collision evidence and requirements captured from the 2026-08-09 concurrent-session incident"}

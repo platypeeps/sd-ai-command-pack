@@ -2,7 +2,7 @@
   "id": "session-worktree-isolation",
   "name": "session-worktree-isolation",
   "title": "Isolate concurrent agent sessions via git worktrees",
-  "description": "",
+  "description": "Give concurrent agent sessions isolated git worktrees, make the expensive test gate exclusive, and surface second-session evidence in sd-status.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

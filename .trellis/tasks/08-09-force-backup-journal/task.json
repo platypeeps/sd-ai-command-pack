@@ -2,7 +2,7 @@
   "id": "force-backup-journal",
   "name": "force-backup-journal",
   "title": "Preserve force-install backup records across interrupted installs",
-  "description": "",
+  "description": "Carry --force displacement backup records in the intent journal so an interrupted machine-scope install cannot orphan a .bak or break remove's restore promise.",
   "status": "planning",
   "dev_type": null,
   "scope": null,

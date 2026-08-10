@@ -11,10 +11,11 @@ is an isolated git worktree, and the shared expensive gate is exclusive.
 On 2026-08-09 two Claude sessions worked the same checkout concurrently while
 executing 08-09-thin-machine-installer. Observed collisions, all real:
 
-- Working-tree overwrites: one session's in-flight `installer/machinescope.py`
-  and `tests/test_machine_installer.py` were rewritten by the other between
-  validation and commit, invalidating pinned content digests and causing four
-  spurious test failures from a partially-written module import.
+- Working-tree overwrites: one session's in-flight machine-scope engine
+  module and its test module (on branch feat/thin-machine-installer) were
+  rewritten by the other between validation and commit, invalidating pinned
+  content digests and causing four spurious test failures from a
+  partially-written module import.
 - Coverage-shard clobbering: `run-tests.sh` begins with
   `rm -f .coverage .coverage.*`, so two concurrent `make test` runs delete each
   other's shards. Observed 31+ competing `coverage run` processes and bogus

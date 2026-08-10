@@ -1,2 +1,1 @@
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Gate-guard test requirements: lock contention and stale-lock takeover need proving tests"}
-{"file": ".trellis/tasks/08-09-session-worktree-isolation/prd.md", "reason": "Verify acceptance criteria: isolation, exclusive gate, sd-status visibility, docs"}

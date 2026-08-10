@@ -1,2 +1,1 @@
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Coverage floor and test conventions; fix must keep installer at 100% line+branch"}
-{"file": ".trellis/tasks/08-09-thin-machine-installer/design.md", "reason": "Check restoration semantics against the original engine design promises"}
