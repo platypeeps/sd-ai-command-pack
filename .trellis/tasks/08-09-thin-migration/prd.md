@@ -51,7 +51,24 @@ vendoring-gate retirement after the last conversion.
 - Last child. Requires `thin-surface-partition`,
   `thin-plugin-packaging`, `thin-machine-installer`, and
   `thin-fleet-status-pins` all shipped before the first consumer
-  converts.
+  converts. Verified 2026-08-10: all four are archived `completed`, so
+  this constraint is satisfied.
+
+## Decomposition
+
+This task is a parent. The requirements above are delivered by five
+ordered children (see `design.md` for the contracts and `implement.md`
+for the gate between them):
+
+1. `08-10-thin-conversion-tooling` — pack-internal
+2. `08-10-thin-candidate-loop-rescope` — pack-internal
+3. `08-10-thin-canary-conversion` — mutates consumer repositories
+4. `08-10-thin-post-canary-conversion` — mutates consumer repositories
+5. `08-10-thin-final-conversion-gate-retirement` — mutates a consumer
+   repository, then retires gates
+
+Children 3–5 are blocked on explicit per-cohort user authorization,
+because they change repositories outside this one.
 
 ## Acceptance criteria
 
