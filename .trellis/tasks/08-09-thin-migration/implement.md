@@ -14,7 +14,8 @@ this file owns is the **order**, the **gate between children**, and the
 2. `08-10-thin-candidate-loop-rescope` — pack-internal. Contract C-F.
 2b. `08-10-thin-prompt-surface-repoint` — pack-internal. Repoints the
    pack-shipped surfaces that survive conversion but cite paths it
-   removes: measured 13 hits in 6 files, identical in all 8 consumers.
+   removes: measured 12 hits in 6 files (11 in 5 where the consumer has
+   taken over its PR template).
    These are `packDefects` in the resweep verdict, which blocks `--thin`,
    so **no child 3-5 conversion can run until this ships**. It is listed
    as 2b rather than renumbering because children 3-5 are referenced by

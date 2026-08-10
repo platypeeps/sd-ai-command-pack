@@ -44,7 +44,9 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT))
 
 from installer import conversion  # noqa: E402
+from installer.manifest import load_manifest  # noqa: E402
 from installer.provenance import PROVENANCE_FILE  # noqa: E402
+from installer.registry import FORCE_PRESERVED_TARGETS  # noqa: E402
 
 PARTITION = ROOT / "docs/fleet/surface-partition.json"
 REGISTRY = ROOT / "docs/fleet/consumers.json"
@@ -109,6 +111,40 @@ EXECUTABLE_NAMES = frozenset(
 )
 EXECUTABLE_NAME_SUFFIXES = (".prompt.md", ".instructions.md")
 
+# U-1, generalized. Enumerating every file type that can execute did not
+# converge: rounds 4, 5, and 6 each found a class the previous enumeration
+# missed (nested scripts/, agent prompts, root CLAUDE.md, PR templates). The
+# space of ways a *command* is written is far smaller and far more stable than
+# the space of files that might run one, so a citation appearing in command
+# position blocks regardless of what file it sits in. This only ever adds
+# blockers; it never moves one to advisory.
+COMMAND_CONTEXT = re.compile(
+    r"""(
+        \b(?:ba|z|d)?sh\s | \bpython3?\s | \bnode\s | \bexec\s | \bsource\s
+      | \bnpx?\s | \buv(?:x|\srun)\s | \bmake\s | \bgo\srun\s
+      | \brun:\s | ^\s*run\s*[:=] | \bcommand\s*[:=] | \bentrypoint\s*[:=]
+      | \$\( | ^\s*[-*]?\s*\[[ x]\]        # checklist item: a human runs it
+      | \w+_(?:script|cmd|command|bin|path)\s*= # shell/py assignment of a runnable
+      | \brun\b.{0,24}\b(?:script|command)\b
+    )""",
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Historical records. A Trellis task artifact, journal, or dated audit report
+# quotes commands that were run at the time; it is a record of the past, not an
+# instruction for the future, and nothing re-executes it. Blocking a conversion
+# because an archived 2026-07 implement.md quotes a command is the same failure
+# as blocking on docs/SD_AI_COMMAND_PACK.md -- measured: the unscoped rule put
+# 28 of sd-github-review's 34 blockers in .trellis/tasks/archive/**. Live
+# guidance under .trellis/spec/** is deliberately NOT here: an agent reads a
+# spec and acts on it.
+HISTORICAL_PREFIXES = (
+    ".trellis/tasks/",
+    ".trellis/workspace/",
+    ".trellis/audit/",
+    ".trellis/journal/",
+)
+
 # Managed-block delimiters. A citation inside a block the conversion strips is
 # scheduled; the same citation outside it is judged normally.
 BLOCK_START = re.compile(
@@ -140,6 +176,36 @@ def digest_of(text: str) -> str:
     return f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
 
 
+def worktree_digest(repo: Path) -> str:
+    """Digest over the dirty *contents*, not over `git status` output.
+
+    Hashing the porcelain status hashes the set of dirty paths; two different
+    edits to the same file produce the same value, so a dirty tree stayed
+    unidentifiable exactly where identification mattered. Five consumer trees
+    are dirty, so this is the common case here, not the corner.
+    """
+    digest = hashlib.sha256()
+    for line in git(repo, "status", "--porcelain", "-z").split("\0"):
+        if not line:
+            continue
+        relative = line[3:] if len(line) > 3 else line
+        digest.update(line[:3].encode("utf-8"))
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        full = repo / relative
+        try:
+            if full.is_symlink():
+                digest.update(b"symlink:" + os.readlink(full).encode("utf-8"))
+            elif full.is_file():
+                digest.update(hashlib.sha256(full.read_bytes()).digest())
+            else:
+                digest.update(b"absent")
+        except OSError:
+            digest.update(b"unreadable")
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
 def is_executable_surface(repo: Path, relative: str) -> bool:
     path = Path(relative)
     if path.suffix in EXECUTABLE_SUFFIXES:
@@ -157,7 +223,10 @@ def is_executable_surface(repo: Path, relative: str) -> bool:
 
 
 def reference_forms(removed: frozenset[str]) -> frozenset[str]:
-    """Every string that unambiguously names a removed path.
+    """Every string worth searching for when looking for a removed path.
+
+    Discovery only. Matching is decided by ``cites_removed_path``, which is
+    stricter: a form here merely makes a line a candidate.
 
     Full paths, their >=2-segment suffixes (so a reference written relative to
     another directory still matches), and distinctive basenames -- only those
@@ -191,35 +260,100 @@ def needle_pattern(removed: frozenset[str]) -> re.Pattern[str]:
 
 
 def cites_removed_path(
-    token: str, removed: frozenset[str], suffixes: frozenset[str]
+    token: str,
+    removed: frozenset[str],
+    repo: Path,
+    relative_to: str,
 ) -> bool:
     """Does this token name something the conversion removes?
 
-    Exact, suffix, and fnmatch, in that order. All three are a lower bound: a
-    path composed at runtime from variables is invisible to any static reader,
-    which is why --revert-thin -- not this check -- is what makes the conversion
-    safe.
+    Four ways, and deliberately not a fifth:
+
+    1. the token is a removed path;
+    2. a tail of the token is, at a path boundary -- this is what handles a
+       runtime prefix, e.g. mezmo_benchmark's preflight-pr.sh assigning
+       "$repo_root/scripts/sd-ai-command-pack-review-learnings.py", which
+       tokenizes to repo_root/scripts/... and matches nothing exactly;
+    3. it resolves, relative to the citing file's own directory, to a removed
+       path;
+    4. it is a glob that matches one.
+
+    What is deliberately absent is bare-suffix guessing: associating a short
+    relative reference with any removed path that happens to end the same way.
+    That produced real false blockers -- se-ai-command-pack's se-help SKILL.md
+    says "Read `references/examples.md`", which collided with the removed
+    .agents/skills/sd-help/references/examples.md while naming its own sibling.
+    A reference that resolves nowhere is a broken reference, not evidence about
+    a path elsewhere in the tree, and a false blocker refuses a conversion that
+    should proceed.
+
+    Still a lower bound: a path assembled from a variable whose value is set
+    elsewhere remains invisible. --revert-thin, not this check, is what makes
+    the conversion safe.
     """
     token = token.strip("'\"`,;:()[]{}<>")
     if not token:
         return False
     if "*" in token or "?" in token:
         return any(fnmatch.fnmatch(entry, token) for entry in removed)
-    return token in removed or token in suffixes
+    if token in removed:
+        return True
+    parts = token.split("/")
+    if any("/".join(parts[index:]) in removed for index in range(1, len(parts))):
+        return True
+    parent = str(Path(relative_to).parent)
+    resolved = os.path.normpath(token if parent == "." else f"{parent}/{token}")
+    return resolved in removed
 
 
-def block_spans(lines: list[str]) -> list[tuple[int, int]]:
+def block_spans(lines: list[str]) -> list[tuple[int, int]] | None:
+    """Marker spans, or None when the markers are malformed.
+
+    None means "cannot determine ownership", which fails closed to a pack
+    defect rather than silently claiming a span. installer/fileops.py:138
+    rejects incomplete and duplicate markers; treating an unterminated start as
+    a block running to EOF -- the earlier behaviour -- would label consumer tail
+    content as pack-owned, which is the opposite of failing closed.
+    """
     spans: list[tuple[int, int]] = []
     start: int | None = None
     for number, line in enumerate(lines, start=1):
-        if start is None and BLOCK_START.search(line):
+        if BLOCK_START.search(line):
+            if start is not None:
+                return None
             start = number
-        elif start is not None and BLOCK_END.search(line):
+        elif BLOCK_END.search(line):
+            if start is None:
+                return None
             spans.append((start, number))
             start = None
     if start is not None:
-        spans.append((start, len(lines)))
+        return None
     return spans
+
+
+def shipped_template_digests() -> dict[str, str]:
+    """Digest of the pack's own shipped bytes, per force-preserved target.
+
+    Provenance never vouches a force-preserved target, and the earlier rule
+    concluded from that alone that the file was the consumer's. It is not, when
+    the bytes are still the pack's: .github/PULL_REQUEST_TEMPLATE.md is
+    force-preserved (installer/registry.py:2265), its shipped template cites the
+    removed full-check script, and rwbp-coordinator and loadsmith carry
+    byte-identical copies. Comparing against the shipped source recovers the
+    ownership that provenance deliberately declines to record.
+    """
+    _, files = load_manifest()
+    forced = {path.as_posix() for path in FORCE_PRESERVED_TARGETS}
+    digests: dict[str, str] = {}
+    for file in files:
+        target = file.target.as_posix()
+        if target not in forced or file.source is None:
+            continue
+        digest = file_digest(file.source)
+        if digest is not None:
+            digests[target] = digest
+    return digests
 
 
 def provenance_digests(repo: Path) -> dict[str, str]:
@@ -256,10 +390,10 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         receipt, partition, platforms, occupied=occupied
     )
     removed = frozenset(plan.delete) | frozenset(plan.retire)
-    suffixes = reference_forms(removed)
     stripped = frozenset(plan.block_strip)
     managed = frozenset(receipt.entries)
     recorded = provenance_digests(repo)
+    shipped = shipped_template_digests()
     needles = needle_pattern(removed)
 
     buckets: dict[str, list[dict]] = {
@@ -301,36 +435,49 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         if not needles.search(body):
             continue
 
-        spans = block_spans(lines) if relative in stripped else []
+        all_spans = block_spans(lines)
+        malformed_markers = all_spans is None
+        spans = (all_spans or []) if relative in stripped else []
         vouched = recorded.get(relative)
         actual = file_digest(full)
         pack_owned = relative in managed and vouched is not None and vouched == actual
-        # A receipt entry provenance never vouches (managed block, force
-        # preserved, generated) has no digest to compare. Managed-block content
-        # is still the pack's inside its markers; everything else in that class
-        # is user-tunable by design and is judged as consumer-authored.
+        # Provenance never vouches a managed-block, force-preserved, or generated
+        # target, so a missing digest proves nothing about ownership. Managed
+        # blocks are resolved by their markers; force-preserved targets are
+        # resolved against the pack's own shipped bytes; malformed markers are
+        # unresolvable and fail closed to pack-owned.
+        if relative in managed and vouched is None:
+            pack_owned = pack_owned or (
+                relative in shipped and shipped[relative] == actual
+            )
         unvouchable = relative in managed and vouched is None
         executable = is_executable_surface(repo, relative)
+        historical = relative.startswith(HISTORICAL_PREFIXES)
 
         for number, line in enumerate(lines, start=1):
             if not needles.search(line):
                 continue
             if not any(
-                cites_removed_path(token, removed, suffixes)
+                cites_removed_path(token, removed, repo, relative)
                 for token in TOKEN.findall(line)
             ):
                 continue
             entry = {"file": relative, "line": number, "detail": line.strip()[:160]}
             in_block = any(start <= number <= end for start, end in spans)
+            in_pack_block = bool(all_spans) and any(
+                start <= number <= end for start, end in (all_spans or [])
+            )
             if in_block:
                 # The block itself is stripped, so this reference leaves with it.
                 buckets["scheduled"].append(entry)
-            elif pack_owned or (unvouchable and _inside_pack_block(lines, number)):
-                # Kept, still the pack's own bytes, and it names something that
+            elif pack_owned or (unvouchable and (in_pack_block or malformed_markers)):
+                # Kept, still the pack's own content, and it names something that
                 # disappears: the pack ships a broken reference. A pack defect,
                 # not a consumer verdict, and it blocks until a release fixes it.
+                if malformed_markers and not in_pack_block:
+                    entry = {**entry, "detail": f"[malformed markers] {entry['detail']}"}
                 buckets["packDefects"].append(entry)
-            elif executable:
+            elif executable or (not historical and COMMAND_CONTEXT.search(line)):
                 buckets["blockers"].append(entry)
             else:
                 buckets["advisories"].append(entry)
@@ -341,7 +488,7 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         "repo": str(repo),
         "head": git(repo, "rev-parse", "HEAD").strip(),
         "indexDigest": digest_of(index),
-        "worktreeDigest": digest_of(git(repo, "status", "--porcelain")),
+        "worktreeDigest": worktree_digest(repo),
         "worktreeClean": not git(repo, "status", "--porcelain").strip(),
         "receiptEntries": len(receipt.entries),
         "removedTargets": len(removed),
@@ -356,16 +503,6 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         ),
         **buckets,
     }
-
-
-def _inside_pack_block(lines: list[str], number: int) -> bool:
-    """Is this line inside a pack-managed block in a file we cannot vouch?
-
-    Managed-block targets are shared ownership: provenance never records a
-    whole-file digest for them, so digest comparison cannot decide. The markers
-    can. Outside the markers the file is the consumer's.
-    """
-    return any(start <= number <= end for start, end in block_spans(lines))
 
 
 def main() -> int:
@@ -386,7 +523,7 @@ def main() -> int:
         "schemaVersion": 2,
         "kind": "thin-conversion-fleet-blocker-scan",
         "packHead": git(ROOT, "rev-parse", "HEAD").strip(),
-        "packWorktreeDigest": digest_of(git(ROOT, "status", "--porcelain")),
+        "packWorktreeDigest": worktree_digest(ROOT),
         "packWorktreeClean": not git(ROOT, "status", "--porcelain").strip(),
         "scannerDigest": file_digest(Path(__file__)),
         "consumers": results,

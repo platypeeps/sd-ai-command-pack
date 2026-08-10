@@ -110,16 +110,19 @@ The resweep greps the consumer for:
      Informational, listed so the conversion PR can be read against it.
    - *packDefects* — a surviving file whose content is still the pack's
      own cites a removed path. **Blocking, and ours to fix**: measured
-     uniformly across all 8 consumers, 13 hits in 6 files — five
-     pack-shipped prompts telling an agent to run removed scripts, plus
-     `.github/copilot-instructions.md`. Ownership is proven two ways,
+     12 hits in 6 files for the five consumers that have not edited their
+     PR template, 11 in 5 for the three that have — four pack-shipped
+     prompts telling an agent to run removed scripts, the pack's managed
+     block in `.github/copilot-instructions.md`, and
+     `.github/PULL_REQUEST_TEMPLATE.md`. Ownership is proven three ways,
      because one is not enough: a receipt entry whose sha256 matches
-     provenance, or — for managed-block targets, which provenance
-     deliberately never vouches — content between the pack's block
-     markers. Receipt membership alone does not confer the
-     classification: a consumer-edited kept target is consumer-authored,
-     and content outside a managed block is the consumer's even when the
-     file is a pack target.
+     provenance; for managed-block targets, which provenance deliberately
+     never vouches, content between the pack's block markers; and for
+     force-preserved targets, which it also never vouches, comparison
+     against the pack's own shipped bytes. Receipt membership alone does
+     not confer the classification: a consumer-edited kept target is
+     consumer-authored, and content outside a managed block is the
+     consumer's even when the file is a pack target.
    - *blockers* — a consumer-authored file on the execution surface
      cites a removed path. **Blocking, and the consumer's to fix**;
      clearing it is explicit cleanup work carried in that consumer's

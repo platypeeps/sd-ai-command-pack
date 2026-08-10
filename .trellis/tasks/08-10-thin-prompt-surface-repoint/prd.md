@@ -3,17 +3,21 @@
 ## Goal
 
 Six pack-shipped files survive a thin conversion and still cite paths the
-conversion removes — five prompts that instruct an agent to run removed
-scripts, plus the managed block inside `.github/copilot-instructions.md`.
-Until they are repointed, every consumer's resweep returns `packDefects`
-and no conversion can proceed. This task fixes the pack side so children
-3–5 of the thin migration can run at all.
+conversion removes — four prompts that instruct an agent to run removed
+scripts, the managed block inside `.github/copilot-instructions.md`, and
+the force-preserved `.github/PULL_REQUEST_TEMPLATE.md`. Until they are
+repointed, every consumer's resweep returns `packDefects` and no
+conversion can proceed. This task fixes the pack side so children 3–5 of
+the thin migration can run at all.
 
 ## Evidence
 
-Measured 2026-08-10 across all 8 registered consumers, identically in
-each — 13 hits in 6 files. Reproduce with the scanner committed under the
-sibling task:
+Measured 2026-08-10 across all 8 registered consumers: **12 hits in 6
+files** for the five that have not edited their PR template, **11 in 5**
+for `mezmo_benchmark`, `sd-github-review`, and `anomaly-metric-creator`,
+which have — there the template is consumer-owned and its stale command
+is a `blocker` in that consumer's own cleanup, not a pack defect.
+Reproduce with the scanner committed under the sibling task:
 
 ```bash
 .venv/bin/python .trellis/tasks/08-10-thin-conversion-tooling/research/\
@@ -26,28 +30,55 @@ fleet-blocker-scan.py --out /tmp/scan.json
 | `.github/prompts/sd-review-learnings.prompt.md` | 44, 46 | `scripts/sd-ai-command-pack-review-learnings.py` |
 | `.github/prompts/sd-review.prompt.md` | 43 | `scripts/sd-ai-command-pack-review.py`, `scripts/sd-ai-command-pack-toolchain.sh` |
 | `.github/prompts/sd-status.prompt.md` | 43 | `scripts/sd-ai-command-pack-toolchain.sh` |
-| `.github/prompts/sd-help.prompt.md` | 31, 32 | `references/command-catalog.md`, `references/examples.md` under the removed `.agents/skills/sd-help/` |
-| `.github/copilot-instructions.md` | 27, 51, 54, 106, 108 | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-install-audit.py` |
+| `.github/copilot-instructions.md` | 5 hits, consumer-dependent lines | `docs/SD_AI_COMMAND_PACK.md`, `scripts/sd-ai-command-pack-install-audit.py` |
+| `.github/PULL_REQUEST_TEMPLATE.md` | 14 (template) | `scripts/sd-ai-command-pack-full-check.sh` |
 
-Every one is a `repo-native` partition row (`platform: github`) that the
-conversion **keeps** — verified against `docs/fleet/surface-partition.json`,
-not assumed. `repo-native` is exactly why they survive and therefore
-exactly why their stale citations matter.
+The four prompts are whole-file pack targets, so their line numbers are
+stable fleet-wide. The Copilot hits are not: the block sits below whatever
+preamble the consumer wrote, so the same five citations land at 27/51/54/
+106/108 in `rwbp-coordinator` and 47/71/74/126/128 in `mezmo_benchmark`.
+The resweep reports the lines; this table does not fix them.
 
-The five prompts are byte-for-byte the pack's own copy in every consumer.
-`.github/copilot-instructions.md` is different in kind: it is a
-**managed-block** target, so provenance never records a whole-file digest
-for it and only the content between the pack's
-`SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START`/`:END` markers is ours. All
-five of its hits are inside that block. The repoint must stay inside the
-markers; editing outside them would rewrite consumer content.
+`.github/prompts/sd-help.prompt.md` is deliberately **not** listed, and an
+earlier revision of this PRD listed it in error. It tells the agent to
+resolve a skill and then read that skill's `references/*.md` — a path
+relative to a resolved skill, not to a location in the repository. Nothing
+static can tie it to a removed path without guessing, and the guess that
+put it here also produced a false blocker in `se-ai-command-pack`.
 
-`templates/.github/prompts/**` and
-`templates/.github/copilot-instructions.sd-ai-command-pack.md` are the
-canonical sources; `scripts/`, `plugins/sd/bin/`, and
-`plugins/sd/machine-payload/scripts/` are byte-verified mirrors, so the
-edit goes to the template and then through `make sync` and
-`make generate`.
+Every listed file is a `repo-native` partition row (`platform: github`)
+that the conversion **keeps** — verified against
+`docs/fleet/surface-partition.json`, not assumed. `repo-native` is exactly
+why they survive and therefore exactly why their stale citations matter.
+
+Three different ownership proofs are involved, which is why this set was
+undercounted twice:
+
+- The four prompts are byte-for-byte the pack's own copy in every
+  consumer, and provenance vouches them by digest.
+- `.github/copilot-instructions.md` is a **managed-block** target, so
+  provenance never records a whole-file digest for it and only the content
+  between the pack's `SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START`/`:END`
+  markers is ours. All five of its hits are inside that block. The repoint
+  must stay inside the markers; editing outside them would rewrite
+  consumer content.
+- `.github/PULL_REQUEST_TEMPLATE.md` is **force-preserved**
+  (`installer/registry.py:2265`), so provenance never vouches it either
+  and an install never overwrites it. Ownership is decided by comparing
+  the consumer's bytes against the pack's shipped template.
+
+That last one bounds this task's reach: fixing the shipped template fixes
+the five consumers still carrying it verbatim. The three that have taken
+it over will not receive the fix, and must repoint their own copy as part
+of their conversion — which is already true, because the resweep records
+it there as a `blocker` rather than a `packDefect`.
+
+`templates/.github/prompts/**`,
+`templates/.github/copilot-instructions.sd-ai-command-pack.md`, and
+`templates/.github/PULL_REQUEST_TEMPLATE.md` are the canonical sources;
+`scripts/`, `plugins/sd/bin/`, and `plugins/sd/machine-payload/scripts/`
+are byte-verified mirrors, so the edit goes to the template and then
+through `make sync` and `make generate`.
 
 ## Requirements
 
@@ -62,6 +93,10 @@ edit goes to the template and then through `make sync` and
 2b. The `copilot-instructions` edit stays within the pack's managed-block
    markers, and `make check`'s block-integrity handling still treats the
    file as `UPDATED` rather than `PRESERVED` on a consumer refresh.
+2c. The `PULL_REQUEST_TEMPLATE.md` edit is made to the shipped template
+   and must not attempt to reach consumers that own their copy. The task
+   states, in the conversion PR checklist for children 3–5, that those
+   three consumers repoint their own template.
 3. The resweep reports zero `packDefects` for every registered consumer
    after the change ships and consumers refresh. That is the acceptance
    signal, not a reading of the diff.
@@ -71,10 +106,13 @@ edit goes to the template and then through `make sync` and
 
 ## Non-goals
 
-- Repointing any **consumer-authored** execution surface. That is the
-  per-consumer work in children 3–5 and needs per-cohort authorization.
+- Repointing any **consumer-authored** execution surface, including a
+  consumer-owned PR template. That is the per-consumer work in children
+  3–5 and needs per-cohort authorization.
 - Changing what the thin conversion deletes. The delete set is contract
   C-B and is not up for renegotiation here.
+- Changing `sd-help.prompt.md`. It cites skill-relative references, not
+  repository paths, and is not a defect.
 
 ## Acceptance criteria
 
@@ -86,7 +124,10 @@ edit goes to the template and then through `make sync` and
       outage for another.
 - [ ] `fleet-blocker-scan.py` (or the shipped resweep, once it exists)
       reports `packDefects: 0` for a consumer refreshed to the new pack
-      version.
+      version and still carrying the pack's PR template.
+- [ ] For the three consumers that own their PR template, the resweep
+      still reports that line as a `blocker`, not as `clear` — the fix
+      must not silently absolve a file the pack no longer controls.
 - [ ] Template edited first, then `make sync` and `make generate`; the
       mirror gate passes with no manual mirror edits.
 - [ ] `manifest.json` bumped, CHANGELOG entry added, `make check` green.

@@ -11,8 +11,8 @@ is per cohort; authorizing this cohort does not authorize post-canary.
 Also requires children 1, 2, and 2b shipped. Child 2b is not optional
 sequencing: until the pack's own surviving surfaces stop citing removed
 paths, every consumer's resweep returns `packDefects` and `--thin`
-refuses. Measured 2026-08-10: 13 such hits in 6 files, identical in all
-8 consumers.
+refuses. Measured 2026-08-10: 12 such hits in 6 files in all three canary
+consumers, which still carry the pack's own PR template.
 
 ## Deliverable
 

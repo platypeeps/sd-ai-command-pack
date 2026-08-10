@@ -31,16 +31,20 @@ would be a hand-edited deletion of 166 files with no reversal path.
    `clear` for any consumer that exists today. The resweep computes the
    removal set first and sorts every hit into four buckets, each failing
    closed: *scheduled* (the hit lives in a file conversion removes —
-   informational), *packDefects* (a surviving, still-byte-identical
-   pack-shipped file cites a removed path — blocking, and ours to fix),
-   *blockers* (a consumer-authored file on the execution surface cites a
-   removed path — blocking, and the consumer's to fix), and *advisories*
+   informational), *packDefects* (a surviving file whose content is still
+   the pack's own cites a removed path — blocking, and ours to fix),
+   *blockers* (a consumer-authored file cites a removed path in command
+   position — blocking, and the consumer's to fix), and *advisories*
    (any other consumer-authored citation — stale prose a human should
    fix, never a reason to refuse). `design.md` carries the decision
    procedure and the measurement behind it.
 
-   The citation check matches exact paths, basenames, and globs, and is
-   a **lower bound** by construction: a path composed at runtime from
+   The citation check matches a removed path exactly, as a tail of the
+   cited token, resolved relative to the citing file, or by glob — and
+   nothing looser. Bare-basename matching was tried and removed: the
+   removal set contains names like `SKILL.md` and `config.toml`, so it
+   manufactured blockers out of surviving sibling files. The check is a
+   **lower bound** by construction: a path composed at runtime from
    variables is invisible to any static reader. Reversibility via
    `--revert-thin`, not resweep exhaustiveness, is what makes conversion
    safe.
@@ -180,6 +184,13 @@ would be a hand-edited deletion of 166 files with no reversal path.
       consumer so its digest no longer matches provenance, is
       reclassified as consumer-authored. Receipt membership alone must
       not confer the exemption.
+- [ ] Ownership is decided for the two target classes provenance
+      deliberately never vouches, not defaulted: a **managed-block**
+      target by marker position, with malformed markers falling to
+      pack-owned rather than to a guessed span; and a **force-preserved**
+      target by comparison against the pack's own shipped bytes, so a
+      pack-identical `.github/PULL_REQUEST_TEMPLATE.md` is a `packDefect`
+      while a consumer-edited one is a `blocker`.
 - [ ] The resweep emits `blocked` for each of three separate marker
       fixtures whose registry `platforms` omits the platform — a
       `.codex/` directory, a `$CODEX_HOME` reference, and a pi adapter

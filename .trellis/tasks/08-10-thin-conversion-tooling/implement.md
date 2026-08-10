@@ -206,13 +206,15 @@ Checks:
   53 surviving pack-mentioning files are pack-managed, so a rule that
   blocks on pack-managed files as such cannot clear any consumer.
 - A fixture whose kept pack-managed file cites a **removed** path →
-  `blocked`, that hit in `packDefects`, not `scheduled`. Measured
-  uniformly across all 8 consumers: 13 hits in 6 files — five surviving
+  `blocked`, that hit in `packDefects`, not `scheduled`. Measured:
+  **12 hits in 6 files** for the five consumers that have not edited
+  their PR template, **11 in 5** for the three that have — four surviving
   pack prompts (`sd-housekeeping` 37/38, `sd-review-learnings` 44/46,
-  `sd-review` 43, `sd-status` 43, `sd-help` 31/32) plus
-  `.github/copilot-instructions.md` 27/51/54/106/108. Calling that
-  `scheduled` would ship known breakage against a release obligation no
-  artifact tracks.
+  `sd-review` 43, `sd-status` 43), the pack's managed block in
+  `.github/copilot-instructions.md` (5 hits, at consumer-dependent line
+  numbers), and `.github/PULL_REQUEST_TEMPLATE.md:14`. Calling any of
+  that `scheduled` would ship known breakage against a release obligation
+  no artifact tracks.
 - A fixture managed-block target whose **in-block** content cites a
   removed path → `packDefects`; the same file with the citation
   **outside** the block → judged as consumer-authored. Provenance never
@@ -282,16 +284,18 @@ Per-consumer `head`, `indexDigest`, and `worktreeDigest` plus full
 per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
 what make a rerun comparable. Consumer-authored executable callers of
-removed paths: `sd-github-review` 6 hits in 4 files,
-`se-ai-command-pack` 12/7, `loadsmith` 19/3, `hoa-manager` 27/7,
-`mezmo_benchmark` 26/14, `rwbp-coordinator` 39/6, `rwbp-website` 51/5,
-`anomaly-metric-creator` 181/17 — CI workflows, `package.json` scripts,
-repo-owned tests, and root agent instruction files. Plus 13 pack defects
-in 6 files that every consumer carries identically.
+removed paths: `sd-github-review` 10 hits in 8 files,
+`se-ai-command-pack` 16/5, `mezmo_benchmark` 24/13, `hoa-manager` 32/9,
+`rwbp-coordinator` 40/7, `loadsmith` 48/4, `rwbp-website` 59/8,
+`anomaly-metric-creator` 168/20 — CI workflows, `package.json` scripts,
+repo-owned tests, shell preflights, root agent instruction files, and
+PR-template checklists. Plus 12 pack defects in 6 files (11 in 5 where
+the consumer has taken over its PR template).
 
 Step 3 is therefore expected to return `blocked` for every real consumer
 on its first run, and that is the correct answer, not a bug in the rule.
-Two remediations follow: the pack must repoint its four surviving prompts
+Two remediations follow: the pack must repoint its own six surviving
+surfaces — four prompts, the Copilot managed block, and the PR template —
 off the deleted `scripts/` paths, and each consumer must repoint its
 execution surface. The first is pack work that gates all conversions; the
 second belongs to children 3–5 and materially enlarges them.
@@ -685,3 +689,69 @@ each was found only by an independent lane re-deriving the measurement.
 Applying a fourth round of fixes with no review budget left would encode
 a rule whose incompleteness is demonstrated but unmeasured. The contract
 requires stopping here for user judgment, and the contract is right.
+
+### Round 6 remediation (user-authorized past the §4 cap)
+
+The user authorized continuing past the contract's three-round cap:
+apply the known fixes, then keep running rounds until one returns clean
+or stops finding new classes. All five concerns are now addressed, plus
+two the host lane found while fixing them.
+
+| ID | Fix |
+|---|---|
+| U-1 | Generalized instead of enumerated. Rounds 4, 5, and 6 each found a file type the previous enumeration missed, so the rule no longer classifies by file type alone: a citation appearing in **command position** blocks regardless of the file it sits in (`COMMAND_CONTEXT`, `fleet-blocker-scan.py`). The file-type list is retained as an additional trigger, so this only ever adds blockers. Scoped away from `.trellis/tasks|workspace|audit|journal/**`, which are archived records *of* commands — without that scoping 28 of `sd-github-review`'s 34 blockers were months-old history. `.trellis/spec/**` stays live |
+| U-2 | Both directions fixed with one change. Bare-suffix guessing is gone; matching is exact, tail-of-path, or resolved relative to the citing file. `preflight-pr.sh:1449` is now caught by relative resolution of `$repo_root/scripts/...`; `se-help/SKILL.md:51` no longer collides with a removed skill copy. Accepted consequence, stated rather than hidden: `sd-help.prompt.md` leaves `packDefects` and child 2b's scope changes shape again |
+| U-3 | Managed-block spans are parsed strictly; unterminated, nested, or unbalanced markers return *unresolvable* and the file falls to pack-owned rather than to a span running to EOF. Force-preserved targets are compared against the pack's own shipped bytes via `load_manifest()`, so `.github/PULL_REQUEST_TEMPLATE.md` is a `packDefect` where it is byte-identical to the template and a `blocker` where the consumer has taken it over |
+| U-4 | `worktreeDigest` and `packWorktreeDigest` now hash the dirty file *contents* (`git status --porcelain -z`, then each path's bytes), not the status output |
+| U-5 | All three text contradictions corrected; the fourth was substantive and resolved by U-2 — `sd-help` is out of the pack-defect set, and both `design.md` and child 2b's PRD now say why, as a rule consequence rather than a judgement call |
+
+Two further defects the host lane found while verifying the above, both
+of which had been silently passing:
+
+- **Digest prefix mismatch.** Provenance stores `"sha256:<hex>"`; the
+  scanner compared bare hex, so *every* pack file looked
+  consumer-authored and `packDefects` read 0 for all 8 consumers while
+  the report looked healthy. This is the failure mode the four-bucket
+  rule exists to prevent, reproduced inside the tool that measures it.
+- **`sd-help` false positive persisted after the U-2 tightening**,
+  because `references/examples.md` still matched by suffix. That is what
+  forced bare-suffix matching out entirely rather than merely narrowing
+  it.
+
+Verified after the fixes — all eight known counterexamples, each the
+subject of a prior round's concern:
+
+```
+se-help SKILL false positive gone? True
+preflight-pr.sh:1449 caught? True
+PR template packDefect where unmodified? True
+PR template blocker where edited? True
+mezmo CLAUDE.md blocker? True
+metadata.test.js:490 blocker? True
+archive history in blockers? False
+consumers with a clear verdict: 0 of 8
+```
+
+Additional fixture criteria this round adds, on top of those above:
+
+- A removed path cited in **command position** inside a file type the
+  execution-surface list does not name → `blocked`. This is the
+  generalization; without a case for it the rule silently degrades back
+  to enumeration.
+- The same citation inside `.trellis/tasks/archive/**` → **not** a
+  blocker. Historical records of commands are not an execution surface,
+  and treating them as one made 82% of one consumer's blockers noise.
+- A managed-block target with an **unterminated** start marker →
+  `packDefects` with `[malformed markers]` stated, not a block running
+  to EOF.
+- A force-preserved target byte-identical to the shipped template →
+  `packDefects`; the same target with one consumer edit → judged as
+  consumer-authored. One case per side; either alone passes while the
+  other is unimplemented.
+- Two runs over the same dirty tree with **different bytes under the
+  same paths** → different `worktreeDigest`. The previous fix passed a
+  test that only changed which paths were dirty.
+- A provenance digest recorded as `sha256:<hex>` matched against a file
+  whose bare hex is identical → recognized as pack-owned. The
+  fail-open direction is the one that matters: this bug reported zero
+  pack defects, not spurious ones.

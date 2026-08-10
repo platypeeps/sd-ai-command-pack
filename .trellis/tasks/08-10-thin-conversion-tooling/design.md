@@ -333,7 +333,9 @@ more blocking, not less.
    the resweep reads the span rather than re-deriving it. No consumer
    exercises this today — no `block_strip` target cites a removed path in
    any of the 8 — so it is correctness for the case that has not happened
-   yet, and the research scanner does not implement it.
+   yet. The research scanner implements it anyway
+   (`fleet-blocker-scan.py:440`), which is why the case can be asserted to
+   be empty rather than assumed to be.
 
 2. **Otherwise the file survives. Is it still byte-for-byte the pack's?**
    — present in the pre-conversion installed-targets receipt *and* its
@@ -346,32 +348,66 @@ more blocking, not less.
    Digest comparison cannot decide every case, and where it cannot the
    rule must not silently pick "consumer". Provenance deliberately never
    records a whole-file digest for managed-block, force-preserved, or
-   generated targets (`installer/provenance.py:114`) — for managed blocks
-   because ownership is genuinely shared. For those the **markers**
-   decide: content between the pack's `SD-AI-COMMAND-PACK:*:START` and
-   `:END` delimiters is the pack's, content outside them is the
-   consumer's, in the same file. Force-preserved and generated targets are
-   user-tunable by design and are judged as consumer-authored. A receipt
-   entry that is a symlink, or whose bytes cannot be read, is
+   generated targets (`installer/provenance.py:114`). Three resolutions,
+   one per class:
+
+   - **Managed blocks** — the markers decide. Content between the pack's
+     `SD-AI-COMMAND-PACK:*:START` and `:END` delimiters is the pack's,
+     content outside them is the consumer's, in the same file. Markers
+     that are unterminated, nested, or unbalanced are *unresolvable*, and
+     the file falls to pack-owned rather than to a guessed span:
+     `installer/fileops.py:138` rejects exactly those cases, and treating
+     an unterminated start as a block running to EOF would label consumer
+     tail content as the pack's — failing open in the one place the rule
+     claims to fail closed.
+   - **Force-preserved targets** — compared against the pack's own
+     shipped bytes. Concluding "consumer's" from the missing digest alone
+     was wrong: `.github/PULL_REQUEST_TEMPLATE.md` is force-preserved
+     (`installer/registry.py:2265`), its shipped template cites the
+     removed full-check script at line 14, and five of eight consumers
+     carry a byte-identical copy. Where the bytes match the template it is
+     pack content and a pack defect; where they differ the consumer has
+     taken it over, and it is judged as theirs.
+   - **Generated bookkeeping** — the three `.sd-ai-command-pack/` files
+     describe the install and are rewritten by it; they are not a source
+     of citations.
+
+   A receipt entry that is a symlink, or whose bytes cannot be read, is
    unverifiable and blocks as a pack defect rather than passing.
 
    A surviving pack file that cites a path this conversion removes is a
    `packDefects` entry, and it **blocks**. The earlier draft called this
    `scheduled` on the reasoning that a later release would fix it; that
    recorded an obligation no artifact tracks and shipped known breakage
-   in the meantime. Measured, and uniform across all 8 consumers — 13
-   hits in 6 files:
+   in the meantime. Measured: **12 hits in 6 files** for the five
+   consumers that have not edited their PR template, **11 in 5** for the
+   three that have (`mezmo_benchmark`, `sd-github-review`,
+   `anomaly-metric-creator`) — there the template is the consumer's, and
+   its stale command is a blocker instead:
 
-   - `.github/copilot-instructions.md` 27, 51, 54, 106, 108 — inside the
-     pack's own managed block, citing `docs/SD_AI_COMMAND_PACK.md` and
-     `scripts/sd-ai-command-pack-install-audit.py`. Reached only through
-     the marker rule above; digest comparison alone reports this file as
-     consumer-authored and misses it.
-   - `.github/prompts/sd-housekeeping.prompt.md` 37–38, `sd-review-learnings`
-     44/46, `sd-review` 43, `sd-status` 43, `sd-help` 31–32 — each telling
-     an agent to run or read something conversion removes.
+   - `.github/copilot-instructions.md`, five hits — inside the pack's own
+     managed block, citing `docs/SD_AI_COMMAND_PACK.md` and
+     `scripts/sd-ai-command-pack-install-audit.py`. Line numbers move with
+     the consumer's own preamble above the block (27/51/54/106/108 in
+     `rwbp-coordinator`, 47/71/74/126/128 in `mezmo_benchmark`), so the
+     resweep reports them, artifacts do not hard-code them. Reached only
+     through the marker rule above; digest comparison alone reports this
+     file as consumer-authored and misses it.
+   - `.github/prompts/sd-housekeeping.prompt.md` 37–38,
+     `sd-review-learnings` 44/46, `sd-review` 43, `sd-status` 43 — each
+     telling an agent to run something conversion removes. These are
+     whole-file pack targets, so their line numbers are stable fleet-wide.
+   - `.github/PULL_REQUEST_TEMPLATE.md` 14 — a checklist item telling a
+     human to run the removed full-check script.
 
-   Fixing those is pack work that must land before any consumer converts,
+   `sd-help.prompt.md` is deliberately **not** here, and for a rule
+   reason rather than a judgement call: it says to read
+   `references/command-catalog.md` relative to a *resolved skill*, not
+   relative to a path in the repository, so no static matcher can tie it
+   to a removed path without guessing. An earlier count included it via
+   exactly that guess.
+
+   Fixing these is pack work that must land before any consumer converts,
    so the resweep names it rather than deferring it.
 
 3. **Otherwise the file is consumer-authored. Does it cite a path this
@@ -457,29 +493,46 @@ The research scanner records one `scheduled` entry per removed file
 rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
-Consumer-authored executable callers, per consumer:
-`sd-github-review` 6 hits in 4 files, `se-ai-command-pack` 12 in 7,
-`loadsmith` 19 in 3, `hoa-manager` 27 in 7, `mezmo_benchmark` 26 in 14,
-`rwbp-coordinator` 39 in 6, `rwbp-website` 51 in 5,
-`anomaly-metric-creator` 181 in 17. Plus 13 pack defects in 6 files that
-every consumer carries identically. They are CI workflows, `package.json`
-scripts, repo-owned tests, and root agent instruction files that invoke
-or assert on vendored pack paths.
+Consumer-authored callers in command position, per consumer:
+`sd-github-review` 10 hits in 8 files, `se-ai-command-pack` 16 in 5,
+`mezmo_benchmark` 24 in 13, `hoa-manager` 32 in 9,
+`rwbp-coordinator` 40 in 7, `loadsmith` 48 in 4, `rwbp-website` 59 in 8,
+`anomaly-metric-creator` 168 in 20. Plus the pack defects above. They are
+CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
+root agent instruction files, and PR-template checklists that invoke or
+assert on vendored pack paths.
 
-**These figures are the second measurement, and the first was wrong in a
-way worth recording.** The original scanner discovered candidate files by
-grepping for the string `sd-ai-command-pack` and only then compared
-tokens against the removal set — while this design's prose already said
-the check was against removed paths, "not against the string
-`sd-ai-command-pack`". The two are different sets, and the gap is not
-theoretical: `sd-github-review/test/metadata.test.js:490` names the
-removed `.agents/skills/sd-status/SKILL.md` with the pack name nowhere on
-the line, and was absent from the first counts. Discovery now enumerates
-tracked files and searches for the removal set itself — full paths, their
-multi-segment suffixes, and pack-named basenames — with the pack name
-retained only so glob citations stay discoverable. Every count above rose.
-The lesson is specific: when prose and implementation describe the same
-predicate, the implementation is the one that produced the number.
+**These are the fourth measurement, and the three before them were each
+wrong in a way worth recording**, because the same failure shape recurred:
+a rule that reasoning found sufficient, and measurement did not.
+
+- *Discovery searched for the wrong thing.* The first scanner found
+  candidate files by grepping for the string `sd-ai-command-pack`, then
+  compared tokens against the removal set — while this design's prose
+  already said the check was against removed paths, "not against the
+  string `sd-ai-command-pack`". `sd-github-review/test/metadata.test.js:490`
+  names the removed `.agents/skills/sd-status/SKILL.md` with the pack name
+  nowhere on the line, and was absent from those counts. Discovery now
+  enumerates tracked files and searches for the removal set itself.
+- *Matching guessed.* Reference forms were widened to bare basenames,
+  which let a surviving sibling collide with a removed path of the same
+  name — `se-ai-command-pack/templates/skills/se-help/SKILL.md:51` cites
+  its own `references/examples.md` and was recorded as a blocker.
+  Matching is now exact, tail-of-path, or resolved relative to the citing
+  file, and nothing else.
+- *Enumerating execution surfaces did not converge.* Three consecutive
+  rounds each found a file type the previous enumeration missed: nested
+  `scripts/` directories, agent prompt files, root `CLAUDE.md`, PR
+  templates. The rule was generalized to classify by **citation syntax** —
+  a path appearing in command position blocks regardless of the file it
+  sits in — because the space of ways a command is written is far smaller
+  and far more stable than the space of files that might run one.
+
+The lesson is specific and is why step 3 keeps the scanner as a committed,
+re-runnable artifact rather than a number in prose: when prose and
+implementation describe the same predicate, the implementation is the one
+that produced the number, and only re-running it shows when the prose has
+drifted again.
 
 This is a real finding, not a tuning problem. It resizes children 3–5:
 each consumer needs its execution surface repointed off the vendored
