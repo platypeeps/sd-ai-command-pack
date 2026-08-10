@@ -320,3 +320,34 @@ unfixed. The recompute contract remains the requirement. The consumer's finding
 is still useful as design input: whichever remedy ships, the failing report must
 stay in the emitted result, because the coordinator's `check` diagnostics are how
 all five recurrences were identified in the first place.
+
+### Sixth recurrence, and proof that both documented escapes are unreachable (2026-08-09)
+
+`platypeeps/sd-github-review` PR #72, pack 0.64.3. Subject `knowledge.obsidian-kb`
+again, so under `7865666c` this one would downgrade to `skipped` rather than
+block — it is recorded for the escape evidence below, not as a blocking case.
+
+Shape as before: a spec edit made the KB stale, the check failed correctly, then
+`sd-ai-command-pack-update-spec-kb.py` reported `copies: 500 / 500, conflicts:
+none` and the standalone gate reported 7/7. The coordinator kept replaying
+`copies: 495 / conflicts: - Backend Spec` at an unchanged head. Escaped again
+with `--attempt-id review-1eb519c-kbfresh`.
+
+What is new is that **both documented escapes were tried first and neither
+works**, so the undocumented `--attempt-id` remains the only exit:
+
+| Escape | Result |
+|---|---|
+| `local=none` | `indeterminate` — *"optional router absence requires a clean local review"*, limitations `router-not-configured`, `local-skipped` |
+| `--successor bookkeeping` | identical result |
+
+Both produce a local receipt with `outcome: skipped`, and `sd-review`'s
+router-absent completion rule requires a **clean** local receipt: *"A router
+classified `absent` may complete locally only when routing is optional and the
+local receipt is clean."* A skipped receipt is not a clean one, so the rule
+refuses the very state the escape produces. The two escapes are not merely
+inapplicable to this check — they are unreachable in general whenever the
+router is absent, which is the only situation anyone would reach for them in.
+
+Worth pinning in whichever remedy ships: the escape hatch operators are told to
+use is gated on a receipt state the escape itself cannot produce.
