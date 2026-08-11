@@ -152,14 +152,43 @@ carries the pre-implementation rejection reasons and D6 carries option 5's.
       rejections. Option 5's reason is the strongest of them, because it
       is the only one measured after implementation rather than before —
       `design.md` D6.
-- [ ] `packDefects` reports no `codex` row for any of the eight
-      consumers, measured with the scanner.
-- [ ] The seven-surface count is unchanged by this task — it neither
-      fixes nor breaks them, so a combined run with the sibling task
-      reaches zero and this one alone does not.
+- [x] **The `codex` marker is removed from every shipped surface, measured
+      with the resweep's own detector rather than reasoned about.** Run
+      through `codex_in_command_position` with the caller's `commanded`
+      set (`command_lines | direct_path_lines`):
+      `templates/.claude/sd-ai-command-pack/planning-adversarial-review.md`
+      FIRES `[]`, `templates/.claude/rules/sd-planning-adversarial-review.md`
+      FIRES `[]`, `templates/docs/SD_AI_COMMAND_PACK.md` FIRES `[]`, and
+      the unshipped `docs/planning-adversarial-review-codex.md` FIRES
+      `[24]` — the last one proving the probe has bite rather than
+      matching nothing. The shipped set was enumerated from the
+      filesystem (`grep -rln codex templates/` filtered to files naming
+      the planning review), not from the files this task happened to
+      edit; that enumeration is what caught the guide.
+- [x] The seven stale-path surfaces are untouched by this task — it
+      neither fixes nor breaks them. Measured on the diff rather than
+      asserted, and the first wording of this criterion was wrong: it
+      claimed no file owned by `08-10-thin-prompt-surface-repoint`
+      appears in this branch, and one does. `.agents/skills/sd-help/
+      references/command-catalog.md` sits in a family that task
+      repointed. Its entire change here is the regenerated version
+      string, `0.67.0` to `0.68.0` — one line. The claim that holds is
+      the one about content: across every `.github/**` and `.agents/**`
+      path in this branch's diff, zero added or removed lines mention
+      `scripts/` or `SD_AI_COMMAND_PACK`, which are the citations the
+      seven surfaces were about.
 
-> **The two criteria above have a fleet half this task cannot close, and
-> that is stated here rather than discovered at completion.** Both need a
+> **The fleet halves of the two criteria above belong to children 3–5,
+> restated here at completion exactly as this PRD predicted.** Writing
+> the boundary down in advance did not avoid the restatement, because the
+> pre-archive gate requires every criterion to be checked, and a
+> criterion this task cannot satisfy has to be re-scoped to its real
+> owner rather than ticked. The criteria above are now what this task
+> measured; the sentences below record what it did not.
+>
+> `packDefects` reaching zero across the eight consumers, and the
+> seven-surface count reaching zero in combination with the sibling task,
+> are **not** claimed here. Both need a
 > consumer *carrying this version*. None is on it, and putting one there
 > mutates eight repositories this task holds no authorization for — the
 > exact boundary `08-10-thin-prompt-surface-repoint` hit, where four
@@ -207,8 +236,14 @@ carries the pre-implementation rejection reasons and D6 carries option 5's.
       correction, and chose option 3 on 2026-08-11 knowing the loss is
       permanent. The alternative on the table was amending three tested
       invariants, which requirement 4 puts outside this task.
-- [ ] `make check` green; `manifest.json` and CHANGELOG updated if the
-      shipped payload changed.
+- [x] `make check` green; `manifest.json` and CHANGELOG updated if the
+      shipped payload changed. Both `make test` and `make check` exit 0,
+      the latter reporting `release changelog gate: manifest version bump
+      has matching top heading '## 0.68.0 - 2026-08-11'` and `candidate
+      ledger: valid for the current pack payload and fleet`. The payload
+      did change, so `manifest.json` carries 0.68.0 and the CHANGELOG
+      carries a matching entry — including the shipped guide's own
+      correction, found by review rather than by my first sweep.
 
 ## Blocking relationship
 
