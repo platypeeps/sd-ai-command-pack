@@ -3642,5 +3642,141 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("git diff --check could not run", output.getvalue())
 
 
+class PayloadSourceBytesTests(unittest.TestCase):
+    """The one point where a thin consumer's payload text is decided.
+
+    Everything the installer records about a target -- its digest, its
+    provenance entry, the bytes on disk -- is derived from this value, so the
+    fat path returning anything other than the template verbatim would change
+    every existing consumer's receipt.
+    """
+
+    def setUp(self) -> None:
+        handle = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-payload-")
+        self.addCleanup(handle.cleanup)
+        self.root = Path(handle.name)
+
+    def pack_file(self, target: str) -> install.PackFile:
+        return install.PackFile(
+            target=Path(target),
+            source=self.root / "src",
+            platform="github",
+            kind="file",
+            anchor=None,
+            install=install.ALWAYS_INSTALL,
+        )
+
+    def source(self, text: str) -> Path:
+        path = self.root / "src"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_fat_target_gets_the_template_verbatim(self) -> None:
+        text = "run `scripts/sd-ai-command-pack-status.py` here\n"
+        source = self.source(text)
+        self.assertEqual(
+            install.payload_source_bytes(
+                self.pack_file("doc.md"), source, is_thin=False
+            ),
+            text.encode("utf-8"),
+        )
+
+    def test_a_thin_target_gets_the_machine_location(self) -> None:
+        source = self.source("run `scripts/sd-ai-command-pack-status.py` here\n")
+        out = install.payload_source_bytes(
+            self.pack_file("doc.md"), source, is_thin=True
+        ).decode("utf-8")
+        self.assertIn("~/.agents/bin/sd-ai-command-pack-status.py", out)
+        self.assertNotIn("scripts/sd-ai-command-pack-status.py", out)
+
+    def test_a_thin_target_naming_nothing_relocated_keeps_its_bytes(self) -> None:
+        raw = b"nothing to see here\n"
+        (self.root / "src").write_bytes(raw)
+        # Byte-for-byte, not merely "decodes the same": a file the rewrite
+        # does not touch must not be re-encoded, or its digest could move for
+        # a rewrite that changed nothing.
+        self.assertEqual(
+            install.payload_source_bytes(
+                self.pack_file("doc.md"), self.root / "src", is_thin=True
+            ),
+            raw,
+        )
+
+    def test_bytes_that_are_not_utf8_pass_through_a_thin_install(self) -> None:
+        raw = b"\xff\xfe scripts/sd-ai-command-pack-status.py \x00"
+        (self.root / "src").write_bytes(raw)
+        self.assertEqual(
+            install.payload_source_bytes(
+                self.pack_file("blob.bin"), self.root / "src", is_thin=True
+            ),
+            raw,
+        )
+
+
+class ManagedBlockEmissionTests(InstallTestCase):
+    """The Copilot block's two emissions, against the real shipped template.
+
+    The synthetic tests above prove the seam rewrites *a* string. They cannot
+    prove it rewrites *this* block, and that is the claim that matters: the
+    template's citations are hand-authored prose, so a reworded sentence or a
+    dropped `literal_rewrites` entry would reintroduce a thin `packDefect`
+    while every synthetic test still passed. Reading the shipped file is the
+    point of these two.
+    """
+
+    CITATIONS = (
+        "docs/SD_AI_COMMAND_PACK.md",
+        "scripts/sd-ai-command-pack-install-audit.py",
+        ".agents/skills/sd-*/SKILL.md",
+        "**/skills/sd-*/**",
+        "scripts/sd-ai-command-pack-*",
+    )
+
+    def block_file(self) -> install.PackFile:
+        return install.PackFile(
+            platform="github",
+            kind=install.MANAGED_BLOCK_KIND,
+            source=(
+                PACK_ROOT
+                / "templates/.github/copilot-instructions.sd-ai-command-pack.md"
+            ),
+            target=Path(".github/copilot-instructions.md"),
+            anchor=Path(".github"),
+            install="if-anchor-exists",
+        )
+
+    def test_a_fat_install_emits_every_vendored_citation(self) -> None:
+        # Not a formality: fat is what every consumer runs today, and in a fat
+        # checkout these paths resolve. Breaking them to fix thin would trade
+        # one outage for another.
+        block = install.normalize_managed_block_template(
+            self.block_file(), is_thin=False
+        )
+        for citation in self.CITATIONS:
+            with self.subTest(citation=citation):
+                self.assertIn(citation, block)
+
+    def test_a_thin_install_emits_none_of_them(self) -> None:
+        block = install.normalize_managed_block_template(
+            self.block_file(), is_thin=True
+        )
+        # One rewrite *prefixes* rather than replaces: `.agents/skills/sd-*`
+        # becomes `~/.agents/skills/sd-*`, so a plain substring check fails on
+        # correct output. The resweep does not, because a machine-rooted token
+        # selects nothing in the repository -- neither removed nor surviving --
+        # and its glob rule calls a glob broken only when it matches something
+        # removed and nothing that survives. Dropping the machine-rooted tokens
+        # first asks the question the classifier asks: does any
+        # *repository-relative* citation of a removed path survive?
+        repo_relative = re.sub(r"~/\S*", "", block)
+        for citation in self.CITATIONS:
+            with self.subTest(citation=citation):
+                self.assertNotIn(citation, repo_relative)
+        # A rewrite that emptied the block would satisfy every assertion
+        # above, so pin the markers the emission still has to carry.
+        self.assertIn(install.COPILOT_GUIDANCE_START, block)
+        self.assertIn(install.COPILOT_GUIDANCE_END, block)
+
+
 if __name__ == "__main__":
     unittest.main()

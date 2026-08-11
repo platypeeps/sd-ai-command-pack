@@ -21,6 +21,9 @@ unittest = _support.unittest
 Path = _support.Path
 install = _support.install
 
+import hashlib  # noqa: E402
+import os  # noqa: E402
+
 from installer import thin  # noqa: E402
 from installer.registry import PACK_REPOSITORY  # noqa: E402
 
@@ -685,6 +688,164 @@ class ReceiptAgreementTests(unittest.TestCase):
         self.write(install.PACK_MANIFEST_FILE, [1, 2])
         self.assertIn("is not an object",
                       thin.receipt_disagreement_reason(self.target))
+
+
+class RepointPlanTests(unittest.TestCase):
+    """What the conversion offers to the thin rewrite, and what it declines.
+
+    The rewrite is offered every kept file rather than a curated list, so the
+    interesting rows are the ones it must *not* touch: a directory, a symlink,
+    and bytes that are not text. Each of those is a way for a conversion to
+    corrupt a consumer's tree, and none of them carries a path reference.
+    """
+
+    def setUp(self) -> None:
+        self.target = _temp_dir(self)
+
+    def write(self, name: str, text: str) -> None:
+        path = self.target / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_a_kept_file_naming_a_removed_path_is_planned(self) -> None:
+        self.write("doc.md", "run `scripts/sd-ai-command-pack-status.py` here\n")
+        planned = thin.planned_repoints(self.target, ("doc.md",))
+        self.assertIn("doc.md", planned)
+        self.assertIn("~/.agents/bin/sd-ai-command-pack-status.py", planned["doc.md"])
+        self.assertNotIn("scripts/sd-ai-command-pack-status.py", planned["doc.md"])
+
+    def test_a_kept_file_naming_nothing_relocated_is_not_planned(self) -> None:
+        self.write("plain.md", "nothing to see here\n")
+        self.assertEqual(thin.planned_repoints(self.target, ("plain.md",)), {})
+
+    def test_a_missing_entry_is_skipped(self) -> None:
+        self.assertEqual(thin.planned_repoints(self.target, ("absent.md",)), {})
+
+    def test_a_directory_is_skipped(self) -> None:
+        (self.target / "adir").mkdir()
+        self.assertEqual(thin.planned_repoints(self.target, ("adir",)), {})
+
+    def test_a_symlink_is_skipped_even_when_its_target_matches(self) -> None:
+        self.write("real.md", "run `scripts/sd-ai-command-pack-status.py` here\n")
+        (self.target / "link.md").symlink_to(self.target / "real.md")
+        planned = thin.planned_repoints(self.target, ("link.md",))
+        # Following it would rewrite the file the link points at, which the
+        # plan never listed -- and replace the link with a regular file.
+        self.assertEqual(planned, {})
+
+    def test_bytes_that_are_not_utf8_are_skipped(self) -> None:
+        (self.target / "blob.bin").write_bytes(b"\xff\xfe scripts/x.py \x00")
+        self.assertEqual(thin.planned_repoints(self.target, ("blob.bin",)), {})
+
+    def test_an_unreadable_file_is_skipped_rather_than_raising(self) -> None:
+        path = self.target / "locked.md"
+        path.write_text("scripts/sd-ai-command-pack-status.py\n", encoding="utf-8")
+        path.chmod(0o000)
+        self.addCleanup(path.chmod, 0o644)
+        if os.access(path, os.R_OK):  # pragma: no cover - root ignores the mode
+            self.skipTest("this user can read a mode-000 file")
+        self.assertEqual(thin.planned_repoints(self.target, ("locked.md",)), {})
+
+    def test_applying_a_plan_writes_only_its_entries(self) -> None:
+        self.write("doc.md", "old\n")
+        self.write("other.md", "untouched\n")
+        changed = thin.repoint_kept_references(
+            self.target, {"doc.md": "new\n"}, backup=False
+        )
+        self.assertEqual(changed, 1)
+        self.assertEqual((self.target / "doc.md").read_text(encoding="utf-8"), "new\n")
+        self.assertEqual(
+            (self.target / "other.md").read_text(encoding="utf-8"), "untouched\n"
+        )
+
+    def test_applying_a_plan_skips_an_entry_that_vanished(self) -> None:
+        # The plan is computed before the removals run, so a file can be gone
+        # by the time it is applied. Writing it back would resurrect it.
+        changed = thin.repoint_kept_references(
+            self.target, {"gone.md": "new\n"}, backup=False
+        )
+        self.assertEqual(changed, 0)
+        self.assertFalse((self.target / "gone.md").exists())
+
+    def test_a_backup_keeps_the_pre_repoint_text_beside_the_file(self) -> None:
+        self.write("doc.md", "old\n")
+        thin.repoint_kept_references(self.target, {"doc.md": "new\n"}, backup=True)
+        self.assertEqual(
+            (self.target / "doc.md.bak").read_text(encoding="utf-8"), "old\n"
+        )
+
+    def test_repointed_digests_replace_the_carried_forward_ones(self) -> None:
+        digest = hashlib.sha256("new\n".encode("utf-8")).hexdigest()
+        updated = thin.repointed_provenance_files(
+            {"doc.md": "sha256:stale", "other.md": "sha256:kept"},
+            {"doc.md": "new\n"},
+        )
+        self.assertEqual(updated["doc.md"], f"sha256:{digest}")
+        self.assertEqual(updated["other.md"], "sha256:kept")
+
+    def test_a_repointed_file_outside_the_receipt_is_not_added(self) -> None:
+        # A file the receipt does not carry is not made vouchable by having
+        # been rewritten; provenance must not grow entries here.
+        updated = thin.repointed_provenance_files({}, {"doc.md": "new\n"})
+        self.assertEqual(updated, {})
+
+    def test_a_crlf_file_keeps_its_line_endings_through_the_repoint(self) -> None:
+        """Only the cited path changes -- not every line ending in the file.
+
+        `Path.read_text` applies universal newlines on every platform, not
+        only Windows, so reading a CRLF checkout in text mode hands back
+        LF-normalized text. The write side is byte-exact, so that
+        normalization would land on disk: a whole-file diff attributed to a
+        repoint that touched one line, in a conversion PR a human has to
+        review.
+        """
+
+        path = self.target / "doc.md"
+        path.write_bytes(
+            b"intro\r\nrun `scripts/sd-ai-command-pack-status.py` here\r\ntail\r\n"
+        )
+
+        planned = thin.planned_repoints(self.target, ("doc.md",))
+        thin.repoint_kept_references(self.target, planned, backup=False)
+
+        self.assertEqual(
+            path.read_bytes(),
+            b"intro\r\nrun `~/.agents/bin/sd-ai-command-pack-status.py` here"
+            b"\r\ntail\r\n",
+        )
+
+    def test_the_bytes_written_hash_to_the_digest_recorded(self) -> None:
+        """The invariant the whole seam rests on, asserted end to end.
+
+        `repointed_provenance_files` hashes `text.encode("utf-8")` while
+        `repoint_kept_references` writes the same text to disk. If those two
+        ever disagree -- a text-mode write translating line separators is the
+        way it happens -- a freshly converted consumer reports `state: invalid`
+        with "vouched target content drifted" for every file this step touched,
+        which is the failure the install-time seam exists to remove.
+
+        Carrying an embedded `\\r\\n` is deliberate. On a platform whose line
+        separator is `\\n` this passes either way, so it does not by itself
+        prove the write is byte-exact; what it pins is the contract, in the
+        one place where a future edit back to `Path.write_text` would break
+        it silently on a platform this repository's CI does not run.
+        """
+
+        root = self.target
+        path = root / "doc.md"
+        path.write_bytes(b"before\r\nsecond line\n")
+        rewritten = "after\r\nsecond line\n"
+
+        thin.repoint_kept_references(root, {"doc.md": rewritten}, backup=False)
+
+        recorded = thin.repointed_provenance_files(
+            {"doc.md": "sha256:carried-forward"}, {"doc.md": rewritten}
+        )["doc.md"]
+        on_disk = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertEqual(recorded, f"sha256:{on_disk}")
+        # And the bytes themselves, so a failure names the cause rather than
+        # only a hash mismatch.
+        self.assertEqual(path.read_bytes(), rewritten.encode("utf-8"))
 
 
 if __name__ == "__main__":

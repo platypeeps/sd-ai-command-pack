@@ -73,6 +73,16 @@ for the gate between them):
    citations themselves. The resweep reports these as `packDefects`,
    which blocks `--thin`, so this child gates children 3–5 on the **pack**
    side and must land before any real conversion.
+2c. `08-11-thin-undeclared-codex-marker` — pack-internal, added
+   2026-08-11. A second, different pack-side blocker found while
+   measuring 2b's baseline: the pack ships
+   `.claude/sd-ai-command-pack/planning-adversarial-review.md`, which
+   invokes the `codex` CLI, and no consumer declares `codex` as a
+   platform. The resweep reports one `undeclared codex usage`
+   `packDefect` for all eight consumers. It is not a path citation, so
+   2b's rewrite cannot reach it and the two are independent — but both
+   must reach zero before any consumer converts, so this child gates
+   children 3–5 alongside 2b.
 3. `08-10-thin-canary-conversion` — mutates consumer repositories
 4. `08-10-thin-post-canary-conversion` — mutates consumer repositories
 5. `08-10-thin-final-conversion-gate-retirement` — mutates a consumer

@@ -262,3 +262,52 @@ Bumped the fleet registry to schema 5 with per-consumer install mode and pin pat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 357: Repoint thin consumers' surviving pack surfaces off removed paths
+
+**Date**: 2026-08-11
+**Task**: Repoint thin consumers' surviving pack surfaces off removed paths
+**Branch**: `feat/thin-prompt-surface-repoint`
+
+### Summary
+
+A thin conversion deletes the vendored payload but keeps the repo-native slice, so seven pack-shipped surfaces survived still naming scripts/<name> and docs/SD_AI_COMMAND_PACK.md - 17 packDefects the resweep reports, blocking every consumer conversion. The fix is a third RewriteProfile applied at payload_source_bytes(), the single point where a target's installed bytes are decided, so source_digest, provenance, and the bytes on disk all derive from one value. The conversion-time mechanism the design originally approved was refuted by measurement: it made install.py --check report state: invalid with 'vouched target content drifted' and the next refresh exit 2.
+
+### Main Changes
+
+- Add THIN_PROFILE and apply it at the installer's single content seam, payload_source_bytes(), rather than as a pass that edits files after writing them. An after-the-fact edit desynchronizes the receipt from disk; measured, that is state: invalid on --check and rc 2 on the next refresh.
+- Thread is_thin through _install_payload, install_file, and normalize_managed_block_template so one authored Copilot block has two emissions. Fat is byte-identical by construction: is_thin false is the untouched code path.
+- Add planned_repoints() and repointed_provenance_files() to the conversion, because the receipt vouching for the kept files is written before they are. Most repo-native targets fall outside the residual payload (measured: 4 selected, 0 prompts), so their digests are carried forward from the fat receipt and need the overlay.
+- Change the KB script's .gitignore banner to name the pack instead of its own path - one hit per consumer, and the block is regenerated only by the script, never by the installer.
+- Write the two consumer-side conversion steps into child 3's per-consumer sequence: regenerate the KB block, and resweep the consumer's own PR template. Both are invisible in a diff that looks finished.
+- Reconcile four acceptance criteria that described the superseded D1/D2/D4 mechanism, and move two fleet-scoped halves to children 3-5, which hold the consumer-mutation authorization this task does not.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be05935a` | feat(installer): repoint thin consumers' repo-native surfaces |
+| `ffde1653` | docs(thin): write the two conversion steps a diff cannot show |
+| `49b676f4` | test(installer): assert both managed-block emissions on the real template |
+| `1a66c2e0` | docs(thin): reconcile acceptance criteria to the D6 mechanism |
+| `b927dd51` | chore(trellis): record the task's branch before finalization |
+| `040b86ae` | chore(task): archive 08-10-thin-prompt-surface-repoint |
+
+### Testing
+
+- [OK] make test / make check: MAKE-TEST-EXIT=0, MAKE-CHECK-EXIT=0, coverage gate fail-under=100 satisfied
+- [OK] Per-surface acceptance on a converted fixture, scored by the shipped resweep classifier: 17 fat hits, 0 thin, across all seven surfaces
+- [OK] Freshly converted consumer: install.py --check rc 0 (state: current), refresh rc 0, repoint still in place, --check after refresh rc 0
+- [OK] ManagedBlockEmissionTests against the real shipped template; mutation-tested, disabling the rewrite fails 5 subtests
+- [OK] Criterion 4 negative case measured: a converted fixture carrying the previous KB banner keeps the hit, proving the KB step is load-bearing
+- [OK] Copilot review clean at head 49b676f4; its one suppressed finding about untested thin managed-block emission was correct and is fixed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -9,13 +9,19 @@ before the first byte lands.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from installer.fileops import remove_text_block_file
+from installer.fileops import (
+    atomic_write_text,
+    backup_existing_file,
+    remove_text_block_file,
+)
+from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     COPILOT_GUIDANCE_END,
     COPILOT_GUIDANCE_START,
@@ -612,6 +618,106 @@ def load_install_audit_module(root: Path):
     return module
 
 
+def planned_repoints(target: Path, keep: tuple[str, ...]) -> dict[str, str]:
+    """The rewritten text for every kept file the thin rewrite changes.
+
+    Computed without writing anything, because the receipt that vouches for
+    these files is written before they are. The provenance entry has to be the
+    digest of the *rewritten* text -- a receipt describing the pre-conversion
+    bytes makes a freshly converted consumer report `state: invalid` with
+    "vouched target content drifted" on every file this step touches, which is
+    exactly the state a conversion is supposed to produce a clean result from.
+    """
+
+    planned: dict[str, str] = {}
+    for entry in keep:
+        path = target / entry
+        if not path.is_file() or path.is_symlink():
+            continue
+        try:
+            # Bytes then decode, not `read_text`: text mode applies universal
+            # newlines on every platform, not only Windows, so a file checked
+            # out with CRLF would come back LF-normalized. The rewrite would
+            # then "change" every line in it, and since the write side is
+            # byte-exact that normalization lands on disk -- a whole-file diff
+            # attributed to a path repoint that touched one line. This mirrors
+            # `payload_source_bytes`, which works from raw bytes for the same
+            # reason.
+            text = path.read_bytes().decode("utf-8")
+        except (UnicodeDecodeError, OSError):
+            # Not text, or unreadable. A conversion has no business guessing at
+            # bytes it cannot decode, and a kept binary carries no references.
+            continue
+        rewritten = rewrite_text(text, profile=THIN_PROFILE, key=entry)
+        if rewritten != text:
+            planned[entry] = rewritten
+    return planned
+
+
+def repointed_provenance_files(
+    files: dict[str, str], repoints: dict[str, str]
+) -> dict[str, str]:
+    """`files` with each repointed target's digest taken from its new text.
+
+    Entries outside the residual are not added back: a file the receipt does
+    not carry is not made vouchable by having been rewritten.
+    """
+
+    updated = dict(files)
+    for entry, text in repoints.items():
+        if entry not in updated:
+            continue
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        updated[entry] = f"sha256:{digest}"
+    return updated
+
+
+def repoint_kept_references(
+    target: Path, repoints: dict[str, str], *, backup: bool
+) -> int:
+    """Rewrite the deleted-path references inside the files the plan keeps.
+
+    Deleting the vendored payload is only half a conversion. The `repo-native`
+    slice stays -- Copilot reads the repository and cannot see the machine, so
+    its instructions have to live here -- and those files still say
+    `scripts/<name>` and `docs/SD_AI_COMMAND_PACK.md`, which is exactly what
+    the conversion just removed. Left alone they are stale instructions that an
+    agent follows into a file that is not there, and the resweep reports every
+    one of them as a `packDefect`.
+
+    This step only writes what `planned_repoints` already decided, so the
+    receipt written earlier in the conversion and the bytes written here come
+    from one computation rather than two reads that could disagree.
+
+    Returns the number of files actually changed.
+    """
+
+    changed = 0
+    for entry, rewritten in repoints.items():
+        path = target / entry
+        if not path.is_file() or path.is_symlink():
+            continue
+        # `backup` is the installer's flag, not a directory: every other
+        # conversion step routes through `backup_existing_file`, which writes a
+        # sibling `.bak`. Reusing it keeps one backup layout for the whole
+        # conversion instead of a second one only this step produces.
+        backup_existing_file(target, path, backup=backup, dry_run=False)
+        # `atomic_write_text`, not `Path.write_text`: this was the installer's
+        # only write site not routed through the helper, and both differences
+        # matter here. `write_text` opens in text mode, so a platform whose
+        # line separator is not `\n` translates on the way out -- and the
+        # digest `repointed_provenance_files` records is taken from
+        # `text.encode("utf-8")`, which does not. That desynchronizes the
+        # receipt from the bytes on disk and reintroduces the exact
+        # "vouched target content drifted" failure this whole seam exists to
+        # remove. It is also not atomic: an interrupted write leaves a kept
+        # file truncated, mid-conversion, with the receipt already vouching
+        # for its full text.
+        atomic_write_text(path, rewritten)
+        changed += 1
+    return changed
+
+
 def structural_audit_reasons(root: Path, target: Path) -> tuple[str, ...]:
     """Structural damage the receipt comparison cannot see.
 
@@ -773,6 +879,11 @@ def apply_conversion(
     """
     written: list[ConversionWrite] = []
 
+    # Decided before the first receipt is written, applied after the removals.
+    # The receipt below has to vouch for the text this conversion leaves on
+    # disk, not the text it found there.
+    repoints = planned_repoints(target, plan.keep)
+
     if settings.writes_anything:
         settings.path.parent.mkdir(parents=True, exist_ok=True)
         settings.path.write_text(render_settings(settings.merged), encoding="utf-8")
@@ -803,7 +914,9 @@ def apply_conversion(
     (target / PROVENANCE_FILE).write_text(
         thin_provenance_content(
             manifest_data,
-            files=residual_provenance_files(existing_files, residual),
+            files=repointed_provenance_files(
+                residual_provenance_files(existing_files, residual), repoints
+            ),
             platforms=platforms,
             consumer=consumer,
             additions=settings.record,
@@ -836,11 +949,13 @@ def apply_conversion(
             backup=backup,
             preserve_invalid_utf8=invalid_utf8,
         )
+    repointed = repoint_kept_references(target, repoints, backup=backup)
     written.append(
         ConversionWrite(
             "payload",
             f"{len(plan.delete)} deleted, {len(plan.retire)} retired, "
-            f"{len(plan.block_strip)} block(s) stripped",
+            f"{len(plan.block_strip)} block(s) stripped, "
+            f"{repointed} kept file(s) repointed",
         )
     )
 

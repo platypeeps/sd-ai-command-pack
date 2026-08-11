@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.67.0 - 2026-08-11
+
+- A converted consumer's repo-native surfaces now name the machine
+  installation instead of the vendored paths the conversion deleted. The
+  prompts, skills, workflows and the Copilot managed block that survive a thin
+  conversion said `scripts/<name>` and `docs/SD_AI_COMMAND_PACK.md` — the
+  files the conversion removes — so every one of them was a stale instruction
+  into a path that is not there, and the thin resweep reported each as a
+  `packDefect`. A third rewrite profile (`THIN_PROFILE`) supplies the thin
+  wording, and the installer applies it where the payload's content is decided,
+  so the digest, the provenance entry and the bytes on disk are one value. The
+  fat payload is byte-identical: the thin discriminator is the existing
+  `mode: "thin"` receipt, and a fat consumer takes the untouched path.
+- The conversion records the digest of the text it leaves behind rather than
+  the text it found. Previously a freshly converted consumer reported
+  `state: invalid` with "vouched target content drifted" on every repointed
+  file, and the next refresh exited 2 instead of reconciling.
+- The Copilot managed block's globs are rewritten for a thin consumer rather
+  than shipped in a second authored copy. The three globs select populations a
+  conversion removes entirely, and the resweep calls a glob broken exactly when
+  nothing it selects survives, so aiming them at another repository directory
+  was not available — there is no surviving pack tree in a thin checkout.
+- The KB script's generated `.gitignore` banner names the pack rather than the
+  script path. That block is written by *running* the script, so a converted
+  consumer keeps whatever text the last run emitted; both a path and a bare
+  basename would cite a deleted file, since the resweep classifies an
+  unambiguous basename exactly like the full path.
+
 ## 0.66.2 - 2026-08-11
 
 - The review coordinator no longer caches a terminal-failure verdict in its

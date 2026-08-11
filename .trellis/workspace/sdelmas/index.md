@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 356
-- **Last Active**: 2026-08-10
+- **Total Sessions**: 357
+- **Last Active**: 2026-08-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~254 | Active |
+| `journal-8.md` | ~300 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 357 | 2026-08-11 | Repoint thin consumers' surviving pack surfaces off removed paths | `be05935a`, `ffde1653`, `49b676f4`, `1a66c2e0`, `b927dd51`, `040b86ae` | `feat/thin-prompt-surface-repoint` |
 | 356 | 2026-08-10 | Fleet/status rework to pin + plugin inventory | `ad12cc442a1d31c0ee0bed8d5ba2e3298bbc8863`, `0f15197a05e4ed6cb48a923cdd7acbd8bb040544`, `028cd4b5`, `252a4675` | `feat/thin-fleet-status-pins` |
 | 355 | 2026-08-10 | Retire the sd-full-check and sd-review-local command surfaces | `a49e4332`, `3bbeb8a5`, `957f55b5`, `966cae62`, `005b1197`, `de29c7ff`, `1719f9a6`, `fc0372b4` | `feat/retire-full-check-review-local-surfaces` |
 | 354 | 2026-08-09 | Machine-scope installer for non-Claude surfaces + unified update action | `a5387fb8`, `3ba985df`, `473a2389`, `6d09999e`, `c278105b`, `6da4f707`, `459a7b71`, `9c22f1cf`, `edd0a1b2`, `ea0cfbe9`, `1c5c07fc` | `feat/thin-machine-installer` |
