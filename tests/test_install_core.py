@@ -3642,5 +3642,76 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("git diff --check could not run", output.getvalue())
 
 
+class PayloadSourceBytesTests(unittest.TestCase):
+    """The one point where a thin consumer's payload text is decided.
+
+    Everything the installer records about a target -- its digest, its
+    provenance entry, the bytes on disk -- is derived from this value, so the
+    fat path returning anything other than the template verbatim would change
+    every existing consumer's receipt.
+    """
+
+    def setUp(self) -> None:
+        handle = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-payload-")
+        self.addCleanup(handle.cleanup)
+        self.root = Path(handle.name)
+
+    def pack_file(self, target: str) -> install.PackFile:
+        return install.PackFile(
+            target=Path(target),
+            source=self.root / "src",
+            platform="github",
+            kind="file",
+            anchor=None,
+            install=install.ALWAYS_INSTALL,
+        )
+
+    def source(self, text: str) -> Path:
+        path = self.root / "src"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_fat_target_gets_the_template_verbatim(self) -> None:
+        text = "run `scripts/sd-ai-command-pack-status.py` here\n"
+        source = self.source(text)
+        self.assertEqual(
+            install.payload_source_bytes(
+                self.pack_file("doc.md"), source, is_thin=False
+            ),
+            text.encode("utf-8"),
+        )
+
+    def test_a_thin_target_gets_the_machine_location(self) -> None:
+        source = self.source("run `scripts/sd-ai-command-pack-status.py` here\n")
+        out = install.payload_source_bytes(
+            self.pack_file("doc.md"), source, is_thin=True
+        ).decode("utf-8")
+        self.assertIn("~/.agents/bin/sd-ai-command-pack-status.py", out)
+        self.assertNotIn("scripts/sd-ai-command-pack-status.py", out)
+
+    def test_a_thin_target_naming_nothing_relocated_keeps_its_bytes(self) -> None:
+        raw = b"nothing to see here\n"
+        (self.root / "src").write_bytes(raw)
+        # Byte-for-byte, not merely "decodes the same": a file the rewrite
+        # does not touch must not be re-encoded, or its digest could move for
+        # a rewrite that changed nothing.
+        self.assertEqual(
+            install.payload_source_bytes(
+                self.pack_file("doc.md"), self.root / "src", is_thin=True
+            ),
+            raw,
+        )
+
+    def test_bytes_that_are_not_utf8_pass_through_a_thin_install(self) -> None:
+        raw = b"\xff\xfe scripts/sd-ai-command-pack-status.py \x00"
+        (self.root / "src").write_bytes(raw)
+        self.assertEqual(
+            install.payload_source_bytes(
+                self.pack_file("blob.bin"), self.root / "src", is_thin=True
+            ),
+            raw,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

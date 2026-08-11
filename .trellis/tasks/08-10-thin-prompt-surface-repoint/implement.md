@@ -44,7 +44,19 @@ and the comment names the block's **owner** instead. Re-confirm against a
 fixture whose `.gitignore` carries the chosen wording — the classifier
 was read, not run, and the run is what counts.
 
-## 3. Generator change (D1)
+## 3. Generator change (D1, as revised by D6)
+
+**Superseded in shape, 2026-08-11 — see design D6.** There is no
+resolution clause and no anchored per-target replacement. A third
+`RewriteProfile` (`THIN_PROFILE`) supplies the thin wording, and the
+installer applies it at `payload_source_bytes()` in
+`installer/fileops.py`, the one point where a target's content is
+decided. The bullets below are the original plan, kept because the
+reasoning about *why token-level substitution fails* is still what rules
+that approach out; the anchor/clause-map mechanics they prescribe are
+not what was built.
+
+### Original plan (mechanics superseded)
 
 - Add the resolution clause to `RewriteProfile` in
   `installer/references.py` and replace the **whole authored clause** per
@@ -91,18 +103,17 @@ enumerated six and lost the third glob, which alone would have made
 Count the hits from the scanner output, not from this table, before
 declaring the file done.
 
-Per design D2 this is now **two block variants plus an installer
-branch**, not one edited file:
+**Superseded 2026-08-11 — see design D6.** The file is not edited at
+all. `normalize_managed_block_template()` takes the same `is_thin` flag
+as the rest of the payload and rewrites the block through
+`THIN_PROFILE`, so there is one authored template and two emissions.
+That removes the second variant this step called for, and with it the
+risk it was guarding against: the fat emission is byte-identical because
+`is_thin` false is the untouched code path, not because a reviewer
+compared two hand-maintained copies.
 
-- author the thin variant of the managed block alongside the fat one;
-- branch on install mode where the installer already rewrites the block
-  (`installer/removal.py:351`, `installer/registry.py:2326` name the
-  target; find the write site from there);
-- test both variants — a fat install still emits all three globs, a thin
-  install emits none and says the repository vendors no pack files.
-
-The fat variant must come out byte-identical to today's block, or the
-change is not additive and every existing consumer sees churn.
+Both emissions still need a test — a fat install emits all three globs,
+a thin install emits none.
 
 ## 5. KB script provenance comment (D3)
 
@@ -111,7 +122,16 @@ line 1116 and `BIN_LITERAL_ALLOWLIST` alone — see design D3.
 
 ## 6. PR template (D4)
 
-`templates/.github/PULL_REQUEST_TEMPLATE.md` lines 7 and 14. Ship-only.
+**No edit needed, 2026-08-11 — see design D6.** Lines 7 and 14 are
+ordinary path citations (`docs/SD_AI_COMMAND_PACK.md` and
+`` `bash scripts/sd-ai-command-pack-full-check.sh` ``), so the profile
+rewrites them like any other text. Verified by running the rewrite over
+the template: both lines change, nothing else does.
+
+The force-preserved behaviour is unchanged and still bounds the claim —
+an existing consumer's own copy is never overwritten by a refresh
+(`installer/fileops.py:366`). A *conversion* does repoint it, because
+the file is in `plan.keep`.
 
 ## 7. Version and changelog — before release-prep, not after
 
@@ -150,9 +170,20 @@ PRD acceptance criteria 1 and 2 say "all seven", so a run that reports
 only an aggregate does not close them. Breaking fat to fix thin trades
 one outage for another, and fat is what all eight consumers run today.
 
-Step 3's generator change gets its own assertion here: the plugin body
-contains no `~/.agents/bin` arm and the machine body contains exactly
-one. That is the D1 failure mode, and only a built payload shows it.
+Step 3's generator change gets its own assertion here. The original D1
+failure mode (duplicate arms in the machine body, an unsatisfiable arm
+in the plugin body) cannot occur under D6 — there are no arms, and the
+payload builders are untouched. What replaces it is the pair D6 makes
+load-bearing, and both are measured on a real converted fixture rather
+than read off a diff:
+
+- `install.py --check` on a *freshly converted* consumer reports
+  `state: current`, not `invalid`;
+- a subsequent refresh exits 0 and leaves the repointed text in place.
+
+**Measured 2026-08-11** — both hold; before D6 they were `invalid` and
+rc 2. Per-surface counts are in design D6's verification table: 17 fat
+hits, 0 thin, across all seven surfaces.
 
 ## 10. Checklist steps for children 3–5
 

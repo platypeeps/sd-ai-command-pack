@@ -48,6 +48,66 @@ machine-payload sentence naming `~/.agents/bin/<name>` twice.
 nonsense. A gate that is satisfied by broken output is the failure mode
 this repo keeps finding, so the design does not create another one.
 
+## D1 superseded — measured 2026-08-11, at implementation start
+
+Everything below in this section described adding resolution *arms* to
+the repo-native text. Measurement against `cites_removed_path` refutes
+the premise: **the scanner classifies tokens, not reachability.** A
+sentence that offers `~/.agents/bin/<name>` and `scripts/<name>` still
+contains the `scripts/<name>` token, so the surface still reports a
+`packDefect`. Arms satisfy requirement 1 and fail acceptance criterion 3.
+
+Measured vocabulary (synthetic removed-set, real rule shapes):
+
+| Form | Verdict |
+|---|---|
+| `~/.agents/bin/<script>`, `~/.agents/bin` | ok |
+| `~/.agents/docs`, `~/.agents/skills`, `~/.agents/skills/sd-*/SKILL.md` | ok |
+| `scripts/<name>`, bare `<name>` | HIT |
+| `docs/SD_AI_COMMAND_PACK.md`, bare `SD_AI_COMMAND_PACK.md` | HIT |
+| `~/.agents/docs/SD_AI_COMMAND_PACK.md` | HIT |
+| `.agents/skills/sd-*/SKILL.md`, `**/skills/sd-*/**`, `scripts/sd-ai-command-pack-*` | HIT |
+
+The last two rows matter most. `thin-resweep.py:1225` matches **path
+suffixes** — `any("/".join(parts[index:]) in removed ...)` — so
+`~/.agents/docs/SD_AI_COMMAND_PACK.md` ends with the removed
+`docs/SD_AI_COMMAND_PACK.md` and is flagged. The machine payload's own
+`AGENTS_DOC_REFERENCE` has exactly that shape; it is latent there only
+because payload files are not scanned. A thin variant cannot reuse it.
+
+**Chosen (user, 2026-08-11): a third `RewriteProfile`, applied to
+surviving repo-native text at conversion time.** Same machinery that
+already serves the plugin and machine payloads, so the authored source
+stays canonical and the fat tree is untouched — zero churn for the eight
+consumers that exist today.
+
+```python
+THIN_PROFILE = RewriteProfile(
+    name="thin",
+    script_template=f"{AGENTS_BIN_REFERENCE}/{{name}}",
+    doc_template="the pack reference manual under `~/.agents/docs`",
+    ...
+)
+```
+
+`doc_template` deliberately diverges from `MACHINE_PROFILE`'s: it must
+not end in `docs/<file>`, per the suffix rule above.
+
+Two limits this profile does not cover, handled separately:
+
+- The three Copilot **globs** are not matched by `SCRIPT_REFERENCE_RE`
+  (`_PACK_SCRIPT_NAME` requires a real `.py`/`.sh`/`.mjs` extension, and
+  `scripts/sd-ai-command-pack-*` has none). They keep the mode-aware
+  managed-block treatment decided in D2.
+- The PR template is force-preserved, so conversion-time rewriting
+  reaches only fresh installs — unchanged from D4.
+
+The superseded reasoning is kept below because it is still the correct
+account of *why the arms idea was tempting*, and the payload-input
+collision it documents remains true and still constrains the profile.
+
+---
+
 A first draft of this design said "generator emits the clause per
 platform, plugin and machine untouched." That is wrong, and the reason is
 worth writing down because it is not visible from the generator alone:
@@ -217,13 +277,95 @@ never hand-edited. This is a shipped-payload change, so it needs a
 `manifest.json` bump and a matching top `CHANGELOG.md` heading or the
 release gate fails.
 
+## D6 — The rewrite is the payload's content, not an edit after the write
+
+**Measured 2026-08-11, during implementation. Supersedes D2's install-time
+managed-block branch and D4's template edit, and completes D1's
+`THIN_PROFILE`.** Both earlier decisions were about *which text to ship*.
+The measurement moved the question to *where the text is decided*.
+
+`THIN_PROFILE` was first applied as a post-write pass at the end of the
+conversion (`thin.repoint_kept_references`). Built as a fixture and run:
+
+| step | before D6 | after D6 |
+|---|---|---|
+| conversion | rc 0 | rc 0 |
+| `install.py --check` | **`state: invalid`** | `state: current` |
+| — reason | "vouched target content drifted" ×4 | — |
+| refresh | **rc 2** (conflicts) | rc 0 |
+| repoint survives refresh | n/a — refresh refused | yes |
+
+Two independent causes, both structural rather than incidental:
+
+1. `.github/copilot-instructions.md` and 550 other rows are `repo-native`
+   (`docs/fleet/surface-partition.json`), so they are inside the residual
+   slice a thin refresh reinstalls (`install.py:792`). Anything written
+   after the install is overwritten by the next one.
+2. Provenance records `result.source_digest`, which is the digest of the
+   bytes the installer decided to write (`provenance.py:183`). Editing the
+   file afterwards desynchronizes the receipt from the disk, and the
+   inspection reports exactly that.
+
+So the seam is `payload_source_bytes()` in `installer/fileops.py`: the one
+point where a target's content is decided. `source_digest` hashes its
+return value, provenance records that hash, and the bytes on disk are it —
+three facts from one value instead of three that must be kept in step. The
+same flag reaches `normalize_managed_block_template()`, which is why the
+Copilot block needs no second authored variant: `is_thin` false is the
+untouched path, so the fat emission is byte-identical by construction
+rather than by review.
+
+The conversion keeps its repoint, for the window the installer does not
+cover: a conversion does not reinstall, so without it a converted consumer
+carries the fat text until someone refreshes. It now writes only what
+`planned_repoints()` decided *before* the receipts, and the receipt takes
+those digests through `repointed_provenance_files()` — most repo-native
+targets fall outside the residual payload, so their provenance entries are
+carried forward from the fat receipt rather than recomputed, and the
+overlay is what stops a freshly converted consumer reporting every
+repointed file as drifted.
+
+D4 needs no template edit at all: both PR-template lines are ordinary path
+citations, so the profile rewrites them like any other. The line that does
+still need authoring is D3's, because that block is written by *running*
+the KB script rather than by installing a template — the profile never
+sees it. Its cost, measured: changing the banner rewrites the generated
+`.gitignore` block on every consumer's next KB refresh, which dirties the
+tree once. `.gitignore` is a real defect row (1 hit per consumer in the
+baseline), so the change is required, not optional.
+
 ## Verification strategy
 
 The acceptance signal is a measurement, not a diff reading. Baseline,
-already measured 2026-08-10: **16 hits in 7 files** for the five
-consumers carrying the pack's PR template, **14 in 6** for the three that
-own theirs. After the change, for a consumer refreshed to the new pack
-version and re-run through the KB refresh: `packDefects: 0`. The negative
-case is load-bearing and gets its own run — refreshed but *not*
-KB-refreshed still reports the `obsidian-kb` hit, or the extra conversion
-step is ceremonial and the PRD's central claim is wrong.
+re-measured 2026-08-11 with the current detector: **17 hits in 8 files**
+for the five consumers carrying the pack's PR template, **15 in 7** for
+the three that own theirs. The eighth file is the `codex` row owned by
+`08-11-thin-undeclared-codex-marker`; this task's ceiling is therefore
+one remaining defect, not zero, until that task lands.
+
+**Measured 2026-08-11, per surface, against the shipped classifier**
+(`cites_removed_path` from `scripts/sd-ai-command-pack-thin-resweep.py`,
+with `removed`/`survivors` taken from a real converted fixture rather than
+a hand-written list):
+
+| surface | fat | thin |
+|---|---|---|
+| `.github/copilot-instructions.md` | 7 | 0 |
+| `.github/PULL_REQUEST_TEMPLATE.md` | 2 | 0 |
+| `.github/prompts/sd-housekeeping.prompt.md` | 3 | 0 |
+| `.github/prompts/sd-review-learnings.prompt.md` | 2 | 0 |
+| `.github/prompts/sd-review.prompt.md` | 2 | 0 |
+| `.github/prompts/sd-status.prompt.md` | 1 | 0 |
+| `.gitignore` | 0 | 0 |
+| **total** | **17** | **0** |
+
+Fat keeps citing the vendored paths, which is correct there — they exist
+in a fat checkout, and breaking fat to fix thin trades one outage for
+another. `.gitignore` reads 0 in both columns because D3's banner change
+fixes it in both layouts rather than only after conversion.
+
+The negative case is load-bearing and gets its own run — refreshed but
+*not* KB-refreshed still reports the `obsidian-kb` hit, or the extra
+conversion step is ceremonial and the PRD's central claim is wrong. That
+one is consumer-side and belongs to children 3–5; nothing in this
+repository can measure it.

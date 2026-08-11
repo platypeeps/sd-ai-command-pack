@@ -19,6 +19,7 @@ from installer.manifest import (
     target_destination,
     validate_resolved_target_path,
 )
+from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     ACTIVE_TRELLIS_PLATFORM_MARKERS,
     ALWAYS_INSTALL,
@@ -255,6 +256,41 @@ def planned_result_matches_destination(
     return False
 
 
+def payload_source_bytes(file: PackFile, source: Path, *, is_thin: bool) -> bytes:
+    """The bytes this target's payload actually installs.
+
+    A converted consumer keeps the repo-native slice and nothing else, so the
+    shipped text -- which names `scripts/<name>` and
+    `docs/SD_AI_COMMAND_PACK.md` -- is an instruction pointing into files the
+    conversion deleted. The rewrite belongs *here*, at the single point where
+    the payload's content is decided, rather than in a pass that edits the
+    files afterwards. Everything downstream is derived from this one value:
+    `source_digest` hashes it, provenance records that hash, and the installed
+    bytes are it. An after-the-fact edit desynchronizes all three, which is not
+    a cosmetic difference -- it makes `install.py --check` report `invalid`
+    with "vouched target content drifted" for every file it touched, and the
+    next refresh exit 2 rather than reconciling.
+
+    Undecodable bytes pass through unchanged: a payload file that is not UTF-8
+    text carries no path references to rewrite, and guessing at an encoding to
+    find some would be a worse answer than leaving it alone.
+    """
+
+    raw = source.read_bytes()
+    if not is_thin:
+        return raw
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw
+    rewritten = rewrite_text(text, profile=THIN_PROFILE, key=file.target.as_posix())
+    if rewritten == text:
+        # Return the original bytes rather than a re-encode, so a file the
+        # rewrite does not touch keeps its exact digest on both paths.
+        return raw
+    return rewritten.encode("utf-8")
+
+
 def install_file(
     file: PackFile,
     target: Path,
@@ -262,6 +298,7 @@ def install_file(
     force: bool,
     dry_run: bool,
     backup: bool,
+    is_thin: bool = False,
     planned_result: InstallResult | None = None,
 ) -> InstallResult:
     source = file.source
@@ -313,7 +350,7 @@ def install_file(
                 source_executable=executable,
             )
 
-    new_content = source.read_bytes()
+    new_content = payload_source_bytes(file, source, is_thin=is_thin)
     digest = source_digest(new_content)
     executable = source_is_executable(source)
     if destination.is_symlink():
@@ -410,13 +447,22 @@ def install_file(
     )
 
 
-def normalize_managed_block_template(file: PackFile) -> str:
+def normalize_managed_block_template(file: PackFile, *, is_thin: bool = False) -> str:
     if file.source is None:
         raise SystemExit(f"error: managed block has no source: {file.target}")
     block = read_text_strict(
         file.source,
         f"managed block template {file.source}",
     ).strip("\n") + "\n"
+    if is_thin:
+        # One template, two emissions. Copilot reads the repository and cannot
+        # see the machine install, so a converted consumer's block has to name
+        # what survives -- and the globs it carries select whole populations
+        # the conversion removed, which the resweep calls broken exactly when
+        # nothing they select survives. Rewriting the block rather than
+        # authoring a second one keeps the fat emission byte-identical by
+        # construction: `is_thin` false is the untouched path.
+        block = rewrite_text(block, profile=THIN_PROFILE, key=file.target.as_posix())
     if COPILOT_GUIDANCE_START not in block or COPILOT_GUIDANCE_END not in block:
         raise SystemExit(
             f"error: managed block template missing markers: {file.source}"
@@ -555,6 +601,7 @@ def install_managed_block(
     target: Path,
     *,
     dry_run: bool,
+    is_thin: bool = False,
 ) -> InstallResult:
     if file.target != COPILOT_INSTRUCTIONS_TARGET:
         raise SystemExit(f"error: unsupported managed block target: {file.target}")
@@ -565,7 +612,7 @@ def install_managed_block(
         return InstallResult(file, status)
     _require_file_destination(destination, file.target)
 
-    block = normalize_managed_block_template(file)
+    block = normalize_managed_block_template(file, is_thin=is_thin)
     if destination.exists():
         current = destination.read_bytes().decode(
             "utf-8",
@@ -849,6 +896,7 @@ __all__ = [
     "merge_trellis_gitignore_block",
     "next_backup_path",
     "normalize_managed_block_template",
+    "payload_source_bytes",
     "path_is_occupied",
     "prune_empty_parent_dirs",
     "read_bytes_for_remove",

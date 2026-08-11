@@ -569,6 +569,25 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
             if path.is_file() or path.is_symlink():
                 path.unlink()
 
+        # A real conversion repoints the kept files off the paths it just
+        # deleted, and records the digest of the repointed text
+        # (`thin.apply_conversion`). Most repo-native targets fall outside the
+        # residual payload, so their provenance entries are carried forward
+        # from the fat receipt rather than recomputed from this run's results
+        # -- the overlay is what stops a converted consumer reporting every
+        # repointed file as drifted. This fixture models the end state rather
+        # than the conversion's write order, so it does both here.
+        repoints = install.thin.planned_repoints(root, plan.keep)
+        install.thin.repoint_kept_references(root, repoints, backup=False)
+        provenance_path = root / install.PROVENANCE_FILE
+        document = json.loads(provenance_path.read_text(encoding="utf-8"))
+        document["files"] = install.thin.repointed_provenance_files(
+            document["files"], repoints
+        )
+        provenance_path.write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
         pin = {
             "mode": "thin",
             "platforms": sorted(THIN_PLATFORMS),
@@ -596,6 +615,11 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
             dry_run=True,
             backup=False,
             install_gitignore=False,
+            # A converted consumer's repo-native text names the machine
+            # locations, so the receipt this fixture writes has to vouch for
+            # that text and not for the fat template it was installed from.
+            # Without it the fixture models a consumer no conversion produces.
+            is_thin=True,
         )
         install._install_receipt_files(
             # The installed manifest carries `mode: "thin"` too: it is the

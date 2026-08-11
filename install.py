@@ -39,6 +39,7 @@ from installer.fileops import (
     merge_trellis_gitignore_block,
     next_backup_path,
     normalize_managed_block_template,
+    payload_source_bytes,
     remove_marked_block,
     remove_text_block_file,
     remove_unmanaged_trellis_blanket_entries,
@@ -235,6 +236,7 @@ __all__ = [
     "never_vouched_targets",
     "next_backup_path",
     "normalize_managed_block_template",
+    "payload_source_bytes",
     "os",
     "parse_args",
     "preserved_receipt_targets",
@@ -621,6 +623,7 @@ def _install_payload(
     backup: bool,
     planned_results: dict[Path, InstallResult] | None = None,
     install_gitignore: bool = True,
+    is_thin: bool = False,
 ) -> tuple[list[InstallResult], list[Path]]:
     results: list[InstallResult] = []
     generated_targets: list[Path] = []
@@ -634,7 +637,9 @@ def _install_payload(
 
     for file in selected:
         if file.kind == MANAGED_BLOCK_KIND:
-            result = install_managed_block(file, target, dry_run=dry_run)
+            result = install_managed_block(
+                file, target, dry_run=dry_run, is_thin=is_thin
+            )
         else:
             result = install_file(
                 file,
@@ -642,6 +647,7 @@ def _install_payload(
                 force=force,
                 dry_run=dry_run,
                 backup=backup,
+                is_thin=is_thin,
                 planned_result=(
                     planned_results.get(file.target) if planned_results else None
                 ),
@@ -1350,6 +1356,7 @@ def _run_inspection(
                 dry_run=True,
                 backup=False,
                 install_gitignore=not is_thin,
+                is_thin=is_thin,
             )
             retired_results = retire_stale_targets(
                 target,
@@ -1588,6 +1595,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=True,
             backup=False,
             install_gitignore=not thin_refresh,
+            is_thin=thin_refresh,
         )
         preflight_conflicts = _conflict_results(preflight_results)
         if preflight_conflicts:
@@ -1647,6 +1655,10 @@ def main(argv: list[str] | None = None) -> int:
         # repository. Reinstalling it would make every thin inspection report
         # a pending change and would relist .gitignore as an installed target.
         install_gitignore=not thin_refresh,
+        # The same discriminator decides the payload's text: a thin consumer's
+        # repo-native files must name the machine locations, and deciding it
+        # here keeps the preflight above and this apply pass byte-identical.
+        is_thin=thin_refresh,
     )
 
     # Retired-target cleanup must run before the receipt files are rewritten:

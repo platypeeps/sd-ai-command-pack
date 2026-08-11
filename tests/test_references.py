@@ -387,5 +387,82 @@ class AllowlistShapeTests(unittest.TestCase):
         )
 
 
+class ThinProfileTests(unittest.TestCase):
+    """The third profile, whose output is read back by the thin resweep.
+
+    Its constraint is not shared with the two payload profiles: a converted
+    consumer's own files are scanned, so a rewritten reference has to survive
+    `cites_removed_path` as well as be true.
+    """
+
+    def test_script_references_move_to_the_machine_bin_directory(self) -> None:
+        rewritten = references.rewrite_text(
+            "run `bash scripts/sd-ai-command-pack-housekeeping.sh` now",
+            profile=references.THIN_PROFILE,
+        )
+        self.assertIn(
+            "~/.agents/bin/sd-ai-command-pack-housekeeping.sh", rewritten
+        )
+        self.assertNotIn("scripts/sd-ai-command-pack-housekeeping.sh", rewritten)
+
+    def test_the_doc_reference_avoids_the_removed_path_as_a_suffix(self) -> None:
+        """The machine payload's own doc form would be reported as a citation.
+
+        `cites_removed_path` matches path suffixes, so
+        `~/.agents/docs/SD_AI_COMMAND_PACK.md` ends with the removed
+        `docs/SD_AI_COMMAND_PACK.md`. The machine payload is never scanned and
+        keeps the fuller form; this profile cannot.
+        """
+
+        rewritten = references.rewrite_text(
+            "see docs/SD_AI_COMMAND_PACK.md", profile=references.THIN_PROFILE
+        )
+        self.assertNotIn("docs/SD_AI_COMMAND_PACK.md", rewritten)
+        self.assertIn("~/.agents/docs", rewritten)
+        self.assertNotEqual(
+            references.THIN_PROFILE.doc_template,
+            references.MACHINE_PROFILE.doc_template,
+        )
+
+    def test_the_doc_replacement_carries_no_markdown_of_its_own(self) -> None:
+        """Every occurrence replaced already sits inside a code span."""
+
+        self.assertNotIn("`", references.THIN_DOC_REFERENCE)
+
+    def test_the_copilot_globs_are_rewritten_by_literal(self) -> None:
+        """`SCRIPT_REFERENCE_RE` cannot see them: a glob has no script suffix."""
+
+        source = (
+            "- entry points: `.agents/skills/sd-*/SKILL.md`, and\n"
+            "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,\n"
+            "- `scripts/sd-ai-command-pack-*`, legacy `scripts/trellis-*.sh`, and\n"
+        )
+        rewritten = references.rewrite_text(
+            source, profile=references.THIN_PROFILE
+        )
+        self.assertIn("`~/.agents/skills/sd-*/SKILL.md`", rewritten)
+        self.assertNotIn("`**/skills/sd-*/**`", rewritten)
+        self.assertNotIn("`scripts/sd-ai-command-pack-*`", rewritten)
+        # The Trellis glob beside it is not the pack's to repoint.
+        self.assertIn("`**/skills/trellis-*/**`", rewritten)
+        self.assertIn("`scripts/trellis-*.sh`", rewritten)
+
+    def test_the_payload_profiles_rewrite_no_literals(self) -> None:
+        """The glob problem belongs to the converted repository alone."""
+
+        for profile in (references.PLUGIN_PROFILE, references.MACHINE_PROFILE):
+            with self.subTest(profile=profile.name):
+                self.assertEqual(dict(profile.literal_rewrites), {})
+
+    def test_text_naming_nothing_relocated_is_returned_unchanged(self) -> None:
+        """Conversion offers every kept file, so a no-op has to stay a no-op."""
+
+        source = "Nothing here names a pack resource at all.\n"
+        self.assertEqual(
+            references.rewrite_text(source, profile=references.THIN_PROFILE),
+            source,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
