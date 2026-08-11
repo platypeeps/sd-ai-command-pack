@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-10",
   "completedAt": null,
-  "branch": null,
+  "branch": "feat/candidate-validator-digest",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
