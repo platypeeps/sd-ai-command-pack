@@ -40,11 +40,11 @@ branch's PR shows failing checks, or the default branch's latest run failed
 settled blocked on red checks, a push that went red, or a scheduled
 default-branch run that failed while nobody was looking.
 
-It complements `sd-full-check` (the local gate every fix must pass),
+It complements `sd-check` (the local gate every fix must pass),
 `sd-ship` (whose Stage 3 watch points here on red checks), and `sd-review`
 (review feedback, not CI state). It is not a review loop: it works CI runs and
 checks, never review threads. For failures that only occur locally, run
-`sd-full-check` instead.
+`sd-check` instead.
 
 ## Arguments
 
@@ -106,7 +106,7 @@ variables; tuning is arguments-only.
      `run:` steps, and prefer the repo's documented make target over
      retyping raw commands; if no local equivalent exists, say so in the
      report instead of guessing. Reproduce locally, fix the cause, run
-     the full local gate (the `sd-full-check` flow or the repo's
+     the full local gate (the `sd-check` flow or the repo's
      documented equivalent), and push to the PR branch through the
      normal flow.
    - `real-code` on the default branch: never push a non-chore fix

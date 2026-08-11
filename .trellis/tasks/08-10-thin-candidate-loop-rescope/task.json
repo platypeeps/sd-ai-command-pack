@@ -1,0 +1,28 @@
+{
+  "id": "thin-candidate-loop-rescope",
+  "name": "thin-candidate-loop-rescope",
+  "title": "Rescope the release-prep candidate loop to the thin shape",
+  "description": "Rescope the release-prep candidate validation loop to the thin shape so it validates a machine-provided payload instead of re-installing the full vendored surface into every candidate.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-08-10",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-09-thin-migration",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "order": "2"
+  }
+}

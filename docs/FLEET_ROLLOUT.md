@@ -4,7 +4,20 @@ This repository tracks the known sd-ai-command-pack consumer fleet in
 `docs/fleet/consumers.json`. The manifest is operator-triggered inventory, not
 an unattended rollout system.
 
-The schema-version-4 manifest owns rollout order and cohort policy explicitly.
+The schema-version-5 manifest owns rollout order and cohort policy explicitly.
+It also carries each consumer's install mode: an optional `mode` of `fat`
+(the default) or `thin`, plus an optional `pinPath` that defaults to
+`.sd-ai-command-pack/provenance.json` and must stay relative to and contained
+inside the consumer checkout. Every consumer is `fat` today, so the registry
+currently reports exactly as it did under schema 4.
+
+A `fat` consumer is judged by installed-versus-target tree drift. A `thin`
+consumer vendors no tree, so fleet status reports its pin — `present` with a
+version, `absent`, or `unreadable` — and compares it to the machine install.
+Once any consumer is thin, the report also collects one machine-scope
+inventory per run and raises skew rows for pin versus machine install, machine
+install versus target, and plugin versus machine receipt. Skew rows are built
+before the human list is truncated, so a long advisory list never hides one.
 The current fast-first order is rwbp-coordinator, loadsmith, hoa-manager,
 rwbp-website, mezmo_benchmark, se-ai-command-pack, sd-github-review, then
 anomaly-metric-creator. The first three are sequential canaries. The next four
@@ -227,15 +240,21 @@ Operator ergonomics, none of which mutate a repository:
 
 ## Refresh Shape
 
-For each `refresh-needed` repo:
+For each `refresh-needed` or `residual-damaged` repo (the second is a converted
+consumer that is already at the target version but has lost a recorded target;
+the refresh reinstalls its residual):
 
 1. Record the exact default-branch commit, then create a PR-only branch in that
    consumer repo. During checkout validation, create or activate one dedicated
    Trellis task with substantive release, ownership, validation, and completion
    criteria before installing. Stop when an unrelated active task or dirty
    Trellis state makes ownership ambiguous.
-2. Run the printed `python3 install.py <repo> --force --platform ...` command
-   from this pack checkout.
+2. Run the printed `python3 install.py <repo> --force [--platform ...]` command
+   from this pack checkout, exactly as printed. A converted consumer's command
+   carries no `--platform`: its platform set is owned by its thin pin, and a
+   thin-aware refresh rejects the flag rather than re-deriving the residual
+   from the registry's list. Changing a converted consumer's platform set is a
+   `--revert-thin` plus a reviewed reconversion, never a fleet sweep.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
    <repo> --expected-platform ...` command. This audit vouches pack-owned
    receipt targets only — the files recorded in `installed-targets.txt` and

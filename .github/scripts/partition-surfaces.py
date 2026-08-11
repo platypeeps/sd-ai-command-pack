@@ -37,7 +37,7 @@ Rules are evaluated in order, first match wins:
    `KNOWN_KINDS` (a new manifest kind must be classified deliberately, not
    absorbed), and a target-path override that matches zero rows.
 
-Two flags in the emitted schema carry contracts for downstream consumers
+Three flags in the emitted schema carry contracts for downstream consumers
 (the plugin build, the machine installer payload, and migration tooling):
 
 - `provisional: true` on a platform means its machine disposition has not
@@ -48,6 +48,11 @@ Two flags in the emitted schema carry contracts for downstream consumers
   runtime even though its primary category is `machine-claude`. The machine
   installer consumes the `machine-other` slice plus every `sharedRuntime`
   row; the primary category stays exclusive.
+- `retainVendoredFor: [<platform-id>...]` on a machine platform names the
+  platforms that still read that platform's rows repo-locally. Migration
+  tooling must keep the rows vendored in any consumer that serves a listed
+  platform. The field is optional and absent on platforms with no such
+  dependants.
 
 `--check` regenerates the artifact in memory and byte-compares it against
 the committed file, exiting nonzero on drift. The default mode writes it.
@@ -126,11 +131,16 @@ MACHINE = "machine"
 PLATFORM_DISPOSITIONS: dict[str, tuple[str, bool]] = {
     # Verified: the Claude Code plugin is itself the machine mechanism.
     "claude": (MACHINE, False),
-    # Provisional pending the machine-installer per-platform verification.
-    "shared": (MACHINE, True),
-    "gemini": (MACHINE, True),
-    "opencode": (MACHINE, True),
-    "codex": (MACHINE, True),
+    # Verified by executed user-scope probes against the installed CLIs;
+    # see the machine-installer task research (`platform-probes.md`).
+    # `shared` is verified through OpenCode's `~/.agents/skills` autoload.
+    "shared": (MACHINE, False),
+    "gemini": (MACHINE, False),
+    "opencode": (MACHINE, False),
+    # Repo-native, not provisional: the Codex binary resolves `.agents`
+    # against the project root and never reads `~/.agents/skills`; its user
+    # root is `$CODEX_HOME/skills`, a target family the pack does not ship.
+    "codex": (REPO_NATIVE, False),
     # Repo-native by construction: GitHub reads workflows and prompts from
     # the consumer repository itself.
     "github": (REPO_NATIVE, False),
@@ -147,6 +157,18 @@ PLATFORM_DISPOSITIONS: dict[str, tuple[str, bool]] = {
     "reasonix": (REPO_NATIVE, False),
     "trae": (REPO_NATIVE, False),
     "zcode": (REPO_NATIVE, False),
+}
+
+
+# Machine platforms whose rows another platform still reads repo-locally.
+# `shared` ships `.agents/**`, which OpenCode autoloads from the user scope
+# but Codex and Pi resolve against the project root, so those two keep
+# needing a vendored copy. Migration tooling reads this list; the executable
+# detection rule is documented in the spec and in the emitted artifact's
+# consumers: a consumer still serves a listed platform iff its
+# `docs/fleet/consumers.json` `platforms` array intersects the list.
+PLATFORM_RETAIN_VENDORED_FOR: dict[str, tuple[str, ...]] = {
+    "shared": ("codex", "pi"),
 }
 
 
@@ -192,6 +214,40 @@ def validate_dispositions(
             raise PartitionError(
                 f"platform {platform} has unknown scope disposition {scope!r}; "
                 f"expected {MACHINE!r} or {REPO_NATIVE!r}"
+            )
+
+
+def validate_retentions(
+    retentions: dict[str, tuple[str, ...]],
+    dispositions: dict[str, tuple[str, bool]],
+) -> None:
+    """Retention lists name real platforms and only qualify machine rows."""
+    for platform, dependants in sorted(retentions.items()):
+        if platform not in dispositions:
+            raise PartitionError(
+                f"retainVendoredFor names platform {platform!r}, which has no "
+                "PLATFORM_DISPOSITIONS entry"
+            )
+        scope, _provisional = dispositions[platform]
+        if scope != MACHINE:
+            raise PartitionError(
+                f"platform {platform} is {scope!r}, so its rows already stay "
+                "vendored; retainVendoredFor is meaningless there"
+            )
+        if not dependants:
+            raise PartitionError(
+                f"platform {platform} has an empty retainVendoredFor list; "
+                "drop the entry instead"
+            )
+        if len(set(dependants)) != len(dependants):
+            raise PartitionError(
+                f"platform {platform} repeats a platform in retainVendoredFor"
+            )
+        unknown = sorted(set(dependants) - set(dispositions))
+        if unknown:
+            raise PartitionError(
+                f"platform {platform} retains rows for unknown platform(s): "
+                + ", ".join(unknown)
             )
 
 
@@ -272,6 +328,7 @@ def build_partition(root: Path) -> dict[str, object]:
         raise PartitionError("manifest `files` holds a non-object entry")
 
     validate_dispositions(PLATFORM_DISPOSITIONS, dict(PLATFORM_REGISTRY))
+    validate_retentions(PLATFORM_RETAIN_VENDORED_FOR, PLATFORM_DISPOSITIONS)
     files = classify_rows(rows, PLATFORM_DISPOSITIONS, dict(PLATFORM_REGISTRY))
     files.sort(key=lambda entry: str(entry["target"]))
 
@@ -279,10 +336,13 @@ def build_partition(root: Path) -> dict[str, object]:
     for entry in files:
         counts[str(entry["category"])] += 1
 
-    platforms = {
-        platform: {"scope": scope, "provisional": provisional}
-        for platform, (scope, provisional) in sorted(PLATFORM_DISPOSITIONS.items())
-    }
+    platforms: dict[str, dict[str, object]] = {}
+    for platform, (scope, provisional) in sorted(PLATFORM_DISPOSITIONS.items()):
+        disposition: dict[str, object] = {"scope": scope, "provisional": provisional}
+        retained = PLATFORM_RETAIN_VENDORED_FOR.get(platform)
+        if retained:
+            disposition["retainVendoredFor"] = sorted(retained)
+        platforms[platform] = disposition
     return {
         "schemaVersion": SCHEMA_VERSION,
         "manifestVersion": str(manifest.get("version", "")),

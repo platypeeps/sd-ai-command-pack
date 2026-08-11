@@ -1,13 +1,17 @@
 """Claude Code plugin generation from the machine-claude partition slice.
 
-Three concerns, matching the three ways `.github/scripts/generate-plugin.py`
+Four concerns, matching the four ways `.github/scripts/generate-plugin.py`
 can go wrong:
 
 * Mapping: the slice lands in the plugin layout (skills keep their tree,
   commands flatten under the `sd` plugin name, scripts become `bin/`
   executables), consumer-config rows never travel, and Markdown invocations
   lose their repository-root prefix.
-* Fail-closed conditions: each of the six documented conditions is exercised
+* Self-containment: the bundled `installer/**`, the `machine-payload/**` tree
+  it installs, and the `bin/` bootstrap that connects them are present, are
+  siblings the way the engine resolves them, and actually run from the emitted
+  tree with no pack checkout on `sys.path`.
+* Fail-closed conditions: each of the eight documented conditions is exercised
   against a synthetic root, so a silently skipped row is impossible.
 * Freshness and allowlist hygiene against the committed tree: `--check` is the
   CI gate, and both allowlists must stay in step with the payload they excuse.
@@ -17,6 +21,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +29,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+from installer import machinepayload, machinescope, machinestage, references
 
 try:
     import install_test_support as _support
@@ -47,7 +54,17 @@ PLUGIN_ROOT = PACK_ROOT / "plugins/sd"
 PARTITION_ARTIFACT = PACK_ROOT / "docs/fleet/surface-partition.json"
 
 MACHINE_CLAUDE = "machine-claude"
+MACHINE_OTHER = "machine-other"
 CONSUMER_CONFIG = "consumer-config"
+
+# The fixture's platforms, all machine-scope and none provisional: what a row
+# is allowed to do is the partition's decision, and these tests are about the
+# generator, so the gate is held open and exercised where it belongs
+# (tests/test_machine_stage.py).
+FIXTURE_PLATFORMS = {
+    name: {"scope": "machine", "provisional": False}
+    for name in ("claude", "shared", "gemini")
+}
 
 # A skill body carrying both rewrite forms: the `-f scripts/...` probe arm of
 # the layout-neutral existence test, and a `node scripts/...` invocation.
@@ -135,6 +152,27 @@ class PluginFixtureCase(InstallTestCase):
                 "category": CONSUMER_CONFIG,
                 "content": "# Rules\n",
             },
+            # The machine slice: a shared `.agents` skill and one non-Claude
+            # command adapter, so the bundled payload has both a rewritten body
+            # and a second destination family. It authors its own source rather
+            # than sharing the Claude skill's, so a test can remove one without
+            # silently removing the other.
+            {
+                "target": ".agents/skills/sd-machine/SKILL.md",
+                "kind": "skill",
+                "platform": "shared",
+                "category": MACHINE_OTHER,
+                "source": "templates/.agents/skills/sd-machine/SKILL.md",
+                "content": SKILL_BODY,
+            },
+            {
+                "target": ".gemini/commands/sd/thing.toml",
+                "kind": "command",
+                "platform": "gemini",
+                "category": MACHINE_OTHER,
+                "source": "templates/.gemini/commands/sd/thing.toml",
+                "content": 'prompt = "Run the thing."\n',
+            },
         ]
 
     def build_root(
@@ -148,6 +186,15 @@ class PluginFixtureCase(InstallTestCase):
         tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
         self.addCleanup(tempdir.cleanup)
         root = Path(tempdir.name)
+        # The generator bundles the installer modules it finds under the root
+        # it is pointed at, so a synthetic root carries the real package: the
+        # bundled set is then the real import closure rather than a shape
+        # invented by the fixture.
+        shutil.copytree(
+            PACK_ROOT / "installer",
+            root / "installer",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
 
         manifest_rows: list[dict[str, str]] = []
         partition_rows: list[dict[str, object]] = []
@@ -178,7 +225,9 @@ class PluginFixtureCase(InstallTestCase):
                 path = root / source
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(str(row.get("content", "# Thing\n")), encoding="utf-8")
-            if kind == "command" and row.get("commandSource", True):
+            if target.startswith(".claude/commands/sd/") and row.get(
+                "commandSource", True
+            ):
                 short = target[len(".claude/commands/sd/") : -len(".md")]
                 authored = root / ".github/command-sources" / f"sd-{short}.md"
                 authored.parent.mkdir(parents=True, exist_ok=True)
@@ -196,13 +245,42 @@ class PluginFixtureCase(InstallTestCase):
             artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_text(
                 json.dumps(
-                    {"schemaVersion": 1, "manifestVersion": version, "files": partition_rows},
+                    {
+                        "schemaVersion": 1,
+                        "manifestVersion": version,
+                        "files": partition_rows,
+                        "platforms": FIXTURE_PLATFORMS,
+                    },
                     indent=2,
                 )
                 + "\n",
                 encoding="utf-8",
             )
         return root
+
+    def patch_bin_allowlist(
+        self, allowlist: dict[str, tuple[str, frozenset[str]]]
+    ) -> None:
+        """One allowlist, two payload builds, two module-level bindings."""
+
+        for module in (self.generator, machinestage):
+            # TestCase.enterContext needs Python 3.11+; CI still runs 3.10.
+            patcher = mock.patch.object(module, "BIN_LITERAL_ALLOWLIST", allowlist)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def row_for(self, rows: list[dict[str, object]], target: str) -> dict[str, object]:
+        """The fixture row for a target, so edits name what they change."""
+
+        for row in rows:
+            if row["target"] == target:
+                return row
+        raise AssertionError(f"fixture has no row for {target}")
+
+    def native_paths(self, files: dict[str, object]) -> list[str]:
+        """Only what this build maps itself, without the two bundled trees."""
+
+        return sorted(path for path in files if self.generator.plugin_native(path))
 
     def written_tree(self, root: Path) -> dict[str, tuple[bytes, bool]]:
         """Everything under the written plugin, as content plus exec bit."""
@@ -227,11 +305,12 @@ class PluginLayoutTests(PluginFixtureCase):
         files = self.generator.build_files(root)
 
         self.assertEqual(
-            sorted(files),
+            self.native_paths(files),
             [
                 ".claude-plugin/plugin.json",
                 "bin/sd-ai-command-pack-probe.mjs",
                 "bin/sd-ai-command-pack-probe.sh",
+                "bin/sd-machine-install",
                 "bin/sd_ai_command_pack_lib.py",
                 "commands/thing.md",
                 "skills/sd-thing/SKILL.md",
@@ -322,6 +401,90 @@ class PluginLayoutTests(PluginFixtureCase):
         self.assertEqual(self.generator.main(["--root", str(root)]), 0)
 
         self.assertEqual(self.written_tree(root), first)
+
+
+class PluginSelfContainmentTests(PluginFixtureCase):
+    """A machine with only the plugin still has the machine-scope installer."""
+
+    def test_bundled_installer_is_the_engine_import_closure(self) -> None:
+        root = self.build_root()
+
+        files = self.generator.build_files(root)
+        bundled = {
+            path[len("installer/") :]
+            for path in files
+            if path.startswith("installer/")
+        }
+
+        self.assertIn("machinescope.py", bundled)
+        self.assertIn("__init__.py", bundled)
+        # Transitive, through fileops: the walk follows imports, it does not
+        # stop at the entry module's own line.
+        self.assertIn("registry.py", bundled)
+        # Fat-install modules nothing in that graph imports stay behind.
+        self.assertNotIn("removal.py", bundled)
+        self.assertNotIn("machinestage.py", bundled)
+
+    def test_installer_and_payload_land_where_the_engine_looks(self) -> None:
+        """The engine resolves its default payload beside its own package."""
+
+        root = self.build_root()
+        self.assertEqual(self.generator.main(["--root", str(root)]), 0)
+        plugin_root = root / self.generator.PLUGIN_PATH
+
+        package = plugin_root / "installer" / "machinescope.py"
+        payload = package.parent.parent / machinescope.DEFAULT_PAYLOAD_DIRNAME
+
+        self.assertTrue(package.is_file())
+        self.assertTrue((payload / machinepayload.PARTITION_FILE).is_file())
+
+    def test_machine_payload_ships_rewritten_bodies_and_its_own_gate(self) -> None:
+        root = self.build_root()
+
+        files = self.generator.build_files(root)
+        skill = files["machine-payload/.agents/skills/sd-machine/SKILL.md"]
+        body = skill.content.decode("utf-8")
+
+        self.assertIn("~/.agents/bin/sd-ai-command-pack-probe.mjs", body)
+        self.assertNotIn("scripts/", body)
+        # The machine profile keeps the runner: it names a path, not a command.
+        self.assertIn("node ~/.agents/bin/sd-ai-command-pack-probe.mjs", body)
+        self.assertIn("machine-payload/.gemini/commands/sd/thing.toml", files)
+        self.assertIn("machine-payload/partition.json", files)
+
+    def test_machine_payload_keeps_the_family_executable_rule(self) -> None:
+        root = self.build_root()
+
+        files = self.generator.build_files(root)
+
+        self.assertTrue(
+            files["machine-payload/scripts/sd-ai-command-pack-probe.sh"].executable
+        )
+        self.assertFalse(
+            files["machine-payload/scripts/sd_ai_command_pack_lib.py"].executable
+        )
+        self.assertFalse(
+            files["machine-payload/.agents/skills/sd-machine/SKILL.md"].executable
+        )
+
+    def test_bootstrap_is_an_executable_that_calls_the_engine(self) -> None:
+        root = self.build_root()
+
+        files = self.generator.build_files(root)
+        bootstrap = files["bin/sd-machine-install"]
+
+        self.assertTrue(bootstrap.executable)
+        body = bootstrap.content.decode("utf-8")
+        self.assertTrue(body.startswith("#!/usr/bin/env python3\n"))
+        self.assertIn("from installer.machinescope import main", body)
+
+    def test_bundled_trees_do_not_answer_to_the_plugin_rewrite_profile(self) -> None:
+        """Their gates ran in their own profile; this one would misjudge them."""
+
+        self.assertFalse(self.generator.plugin_native("machine-payload/docs/x.md"))
+        self.assertFalse(self.generator.plugin_native("installer/machinescope.py"))
+        self.assertTrue(self.generator.plugin_native("skills/sd-thing/SKILL.md"))
+        self.assertTrue(self.generator.plugin_native("bin/sd-machine-install"))
 
 
 class PluginFailClosedTests(PluginFixtureCase):
@@ -439,11 +602,14 @@ class PluginFailClosedTests(PluginFixtureCase):
                 frozenset({"scripts/sd-ai-command-pack-other.sh"}),
             )
         }
+        # The script ships in both payloads, and each build reads the allowlist
+        # through its own module-level name, so an excuse has to reach both.
+        self.patch_bin_allowlist(allowlist)
 
-        with mock.patch.object(self.generator, "BIN_LITERAL_ALLOWLIST", allowlist):
-            files = self.generator.build_files(root)
+        files = self.generator.build_files(root)
 
         self.assertIn("bin/sd-ai-command-pack-probe.sh", files)
+        self.assertIn("machine-payload/scripts/sd-ai-command-pack-probe.sh", files)
 
     def test_bin_allowlist_entry_without_a_justification_fails(self) -> None:
         rows = self.baseline_rows()
@@ -490,6 +656,84 @@ class PluginFailClosedTests(PluginFixtureCase):
             files = self.generator.build_files(root)
 
         self.assertIn("skills/sd-thing/references/notes.md", files)
+
+    def test_installer_module_without_a_file_fails(self) -> None:
+        root = self.build_root()
+        (root / "installer/machinescope.py").write_text(
+            "from installer.absent import thing\n", encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(
+            self.generator.PluginError,
+            r"imports installer/absent.py, which the plugin cannot bundle",
+        ):
+            self.generator.build_files(root)
+
+    def test_installer_package_without_its_marker_fails(self) -> None:
+        root = self.build_root()
+        (root / "installer/__init__.py").unlink()
+
+        with self.assertRaisesRegex(
+            self.generator.PluginError, "the plugin bootstrap imports"
+        ):
+            self.generator.build_files(root)
+
+    def test_relative_import_inside_the_installer_fails(self) -> None:
+        """The bundle loads the package by absolute name, so it must be one."""
+
+        root = self.build_root()
+        (root / "installer/machinescope.py").write_text(
+            "from . import fileops\n", encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(
+            self.generator.PluginError, "imports a sibling relatively"
+        ):
+            self.generator.build_files(root)
+
+    def test_machine_row_without_a_destination_family_fails(self) -> None:
+        rows = self.baseline_rows()
+        rows.append(
+            {
+                "target": ".agents/agents/sd-thing.md",
+                "kind": "agent",
+                "platform": "shared",
+                "category": MACHINE_OTHER,
+                "source": "templates/.agents/agents/sd-thing.md",
+                "content": "# Agent\n",
+            }
+        )
+        root = self.build_root(rows)
+
+        with self.assertRaisesRegex(
+            self.generator.PluginError,
+            r"machine payload: machine row has no destination family",
+        ):
+            self.generator.build_files(root)
+
+    def test_machine_payload_closure_failure_fails_the_plugin_build(self) -> None:
+        rows = self.baseline_rows()
+        agents = self.row_for(rows, ".agents/skills/sd-machine/SKILL.md")
+        agents["content"] = "Then run sd-ai-command-pack-absent.py to finish.\n"
+        root = self.build_root(rows)
+
+        with self.assertRaisesRegex(
+            self.generator.PluginError,
+            r"machine payload: .*references sd-ai-command-pack-absent.py",
+        ):
+            self.generator.build_files(root)
+
+    def test_machine_payload_residue_fails_the_plugin_build(self) -> None:
+        rows = self.baseline_rows()
+        agents = self.row_for(rows, ".agents/skills/sd-machine/SKILL.md")
+        # A glob is not an invocation, so no rewrite rule relocates it.
+        agents["content"] = "Audit `scripts/sd-ai-command-pack-*.py` first.\n"
+        root = self.build_root(rows)
+
+        with self.assertRaisesRegex(
+            self.generator.PluginError, r"machine payload: rewrite residue"
+        ):
+            self.generator.build_files(root)
 
     def test_empty_manifest_version_fails(self) -> None:
         root = self.build_root(version="")
@@ -630,18 +874,120 @@ class CommittedPluginTreeTests(PluginFixtureCase):
     def test_committed_tree_holds_no_markdown_residue(self) -> None:
         offenders: dict[str, list[str]] = {}
         for path in sorted(PLUGIN_ROOT.rglob("*.md")):
+            relative = path.relative_to(PLUGIN_ROOT).as_posix()
+            if not self.generator.plugin_native(relative):
+                continue
             found = sorted(
                 {
                     match.rstrip(".")
-                    for match in self.generator.RESIDUE_RE.findall(
+                    for match in references.RESIDUE_RE.findall(
                         path.read_text(encoding="utf-8")
                     )
                 }
             )
             if found:
-                offenders[path.relative_to(PLUGIN_ROOT).as_posix()] = found
+                offenders[relative] = found
 
         self.assertEqual(offenders, {})
+
+    def test_committed_machine_payload_holds_only_exempted_residue(self) -> None:
+        """The bundled payload answers to the machine profile, so check that."""
+
+        prefix = self.generator.MACHINE_PAYLOAD_PREFIX
+        offenders: dict[str, str] = {}
+        for path in sorted((PLUGIN_ROOT / "machine-payload").rglob("*")):
+            if not path.is_file() or path.suffix not in {".md", ".toml"}:
+                continue
+            target = path.relative_to(PLUGIN_ROOT).as_posix()[len(prefix) :]
+            try:
+                references.check_text_residue(
+                    target,
+                    path.read_text(encoding="utf-8"),
+                    profile=references.MACHINE_PROFILE,
+                )
+            except references.ReferenceRewriteError as error:
+                offenders[target] = str(error)
+
+        self.assertEqual(offenders, {})
+
+    def bootstrap_report(self, entry: Path) -> dict[str, object]:
+        """One dry-run install report, produced by running a bootstrap entry."""
+
+        home = Path(tempfile.mkdtemp(prefix="sd-ai-command-pack-test-"))
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PYTHONPATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME"}
+        }
+
+        result = subprocess.run(
+            [
+                str(entry),
+                "install",
+                "--home",
+                str(home),
+                "--state-home",
+                str(home / "state"),
+                "--dry-run",
+                "--json",
+            ],
+            # Anywhere but the pack: an implicit checkout on sys.path would
+            # make a missing bundled module look like a working bootstrap.
+            cwd=home,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_bootstrap_installs_the_bundled_payload_from_the_plugin_alone(
+        self,
+    ) -> None:
+        """The self-containment claim, executed: no pack checkout in sight."""
+
+        report = self.bootstrap_report(PLUGIN_ROOT / "bin/sd-machine-install")
+        payload_root = PLUGIN_ROOT / "machine-payload"
+        partition = json.loads(
+            (payload_root / machinepayload.PARTITION_FILE).read_text(encoding="utf-8")
+        )
+        targets = machinepayload.payload_targets(payload_root)
+        self.assertIsInstance(targets, list)
+        self.assertTrue(report["dryRun"])
+        self.assertEqual(report["packVersion"], partition["manifestVersion"])
+        self.assertEqual(
+            report["counts"], {str(machinescope.PlanStatus.ABSENT): len(targets)}
+        )
+
+    def test_bootstrap_resolves_its_own_root_through_a_symlink(self) -> None:
+        """A linked plugin still installs the payload beside the code that ran.
+
+        Plugin roots and their `bin/` entries are both reachable through links.
+        The bootstrap derives its root from its own resolved file, so neither
+        shape can point the engine at a payload from somewhere else -- and the
+        linked-entry shape has no installer package beside it at all, so a
+        bootstrap that trusted the link's parent would not even start.
+        """
+
+        scratch = Path(tempfile.mkdtemp(prefix="sd-ai-command-pack-test-"))
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        linked_root = scratch / "linked-root"
+        linked_root.symlink_to(PLUGIN_ROOT)
+        linked_entry = scratch / "sd-machine-install"
+        linked_entry.symlink_to(PLUGIN_ROOT / "bin/sd-machine-install")
+
+        direct = self.bootstrap_report(PLUGIN_ROOT / "bin/sd-machine-install")
+
+        for entry in (linked_root / "bin/sd-machine-install", linked_entry):
+            with self.subTest(entry=str(entry.relative_to(scratch))):
+                report = self.bootstrap_report(entry)
+
+                self.assertEqual(report["payloadDigest"], direct["payloadDigest"])
+                self.assertEqual(report["packVersion"], direct["packVersion"])
+                self.assertEqual(report["counts"], direct["counts"])
 
 
 class AllowlistHygieneTests(PluginFixtureCase):
@@ -663,7 +1009,7 @@ class AllowlistHygieneTests(PluginFixtureCase):
             self.assertTrue(path.is_file(), f"allowlisted script is missing: {name}")
             found = {
                 match.rstrip(".")
-                for match in self.generator.RESIDUE_RE.findall(
+                for match in references.RESIDUE_RE.findall(
                     path.read_text(encoding="utf-8")
                 )
             }

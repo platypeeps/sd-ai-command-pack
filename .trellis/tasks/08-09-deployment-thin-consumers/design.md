@@ -26,7 +26,7 @@ sd-ai-command-pack repo (single source of truth)
 
 per machine
 ├── ~/.claude/plugins/cache/…  plugin install (user scope)
-└── ~/.codex ~/.gemini ~/.agents …  machine installer output
+└── ~/.agents ~/.gemini <xdg>/opencode  machine installer output
 
 per consumer repo (thin)
 ├── .claude/settings.json      extraKnownMarketplaces + enabledPlugins
@@ -179,14 +179,32 @@ per consumer repo (thin)
   **conversion-time resweep** of that consumer at its exact HEAD: the
   2026-08-09 fleet sweep is a dated snapshot, so each conversion PR
   re-greps workflows, git hooks, Make targets, and docs for pack
-  references before deleting anything. One PR then: deletes the
-  vendored payload (minus the `repo-native` + `consumer-config`
-  slices), deletes all pack CI steps (lints + the
-  anomaly-metric-creator advisory call per D2), **deletes consumer-
+  references before deleting anything. The resweep additionally greps
+  for **codex/pi usage markers** (`.codex/` directories, `$CODEX_HOME`
+  references, pi adapter files); usage found in a consumer that does
+  not declare the platform in its `docs/fleet/consumers.json`
+  `platforms` array **blocks conversion** until the consumer either
+  declares the platform (turning retention on) or removes the usage.
+  One PR then: deletes the vendored payload (minus the `repo-native` +
+  `consumer-config` slices, **and minus any platform's rows whose
+  partition entry carries `retainVendoredFor` intersecting this
+  consumer's declared `platforms`** — `shared` carries
+  `["codex", "pi"]`, so a consumer serving either keeps its
+  `.agents/**` rows vendored; the fleet registry is the single
+  authority, never repo sniffing; evidence in
+  `08-09-thin-machine-installer/research/platform-verification.md`),
+  deletes all pack CI steps (lints +
+  the anomaly-metric-creator advisory call per D2), **deletes consumer-
   side sync automation** (anomaly-metric-creator's
   `sd-ai-command-pack-sync.yml`, which would otherwise recreate the
   vendored state), and adds `.claude/settings.json`
   marketplace/enable entries plus the pin receipt.
+- Vendored `scripts/` deletion has one extra precondition: retained
+  `.agents/**` invokes pack scripts and the contract doc
+  repo-relatively, so it is only safe once the machine payload's
+  reference rewrite (`~/.agents/bin`, `~/.agents/docs`) ships in
+  `08-09-thin-machine-installer`. A consumer retaining `.agents/**`
+  for codex/pi keeps whatever those rewritten references name.
 - Revert is a single command that actually reverses conversion
   (working name `install.py TARGET --revert-thin`): restores the fat
   payload, removes the thin artifacts it added (marketplace/enable

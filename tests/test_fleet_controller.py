@@ -38,7 +38,7 @@ class FleetControllerTests(InstallTestCase):
         fleet.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 4,
+                    "schemaVersion": 5,
                     "rolloutPolicy": {
                         "defaultConcurrency": 2,
                         "cohorts": [
