@@ -162,13 +162,38 @@ def missing_recorded_targets(repo_path: Path) -> tuple[str, ...]:
     Absolute and parent-escaping entries are skipped rather than stat'ed: a
     receipt is consumer-side content, and preflight walks a whole fleet, so
     it must never follow one out of the checkout it was handed.
+
+    Textual containment is not enough to keep that promise, which is why the
+    resolved path is checked too. `exists()` follows symlinks, and a link can
+    sit anywhere on the path -- `docs/thing.md` escapes just as effectively
+    when `docs` is a link as when the leaf is. An entry that resolves outside
+    the root joins the absolute and `..` entries in the skipped bucket, so a
+    receipt can still never aim a stat out of the checkout.
     """
+    try:
+        root = repo_path.resolve()
+    except OSError:
+        return ()
     missing: list[str] = []
     for entry in read_recorded_targets(repo_path):
         candidate = Path(entry)
         if candidate.is_absolute() or ".." in candidate.parts:
             continue
-        if not (repo_path / candidate).exists():
+        target = repo_path / candidate
+        try:
+            resolved = target.resolve()
+        except OSError:
+            # Defensive, and deliberately untested: non-strict `resolve()`
+            # returns a path for the shapes reachable from a receipt --
+            # including a self-referential link, which resolves inside the
+            # root and then reads as missing, which is the right answer for a
+            # residual nothing can open. This catches whatever a filesystem
+            # raises anyway, because one consumer's link must not end a
+            # fleet-wide sweep.
+            continue
+        if not resolved.is_relative_to(root):
+            continue
+        if not target.exists():
             missing.append(entry)
     return tuple(missing)
 

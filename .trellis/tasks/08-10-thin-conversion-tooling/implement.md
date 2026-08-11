@@ -2323,3 +2323,36 @@ checks are `git.whitespace.unstaged` and `git.whitespace.staged` — both look
 at the working tree, and the offending line was already committed. CI runs the
 same check across the branch delta. Worth a follow-up: a local gate that
 checks the delta, not just the index.
+
+### Round 2 — the same family, one path deeper
+
+One open finding and one suppressed, both real.
+
+`missing_recorded_targets` guarded against absolute and `..` entries and then
+called `exists()`, which follows symlinks. Textual containment is not
+containment: `docs/thing.md` carries neither marker and still lands outside
+the moment `docs` is a link, so the stat the docstring promised never to take
+outside the checkout was taken there anyway. The guard is now on the
+*resolved* path, and an entry that resolves out joins the absolute and `..`
+entries in the skipped bucket.
+
+The discriminating fixture is worth naming, because the obvious one proves
+nothing: a link pointing at an existing outside file reads as present both
+before and after the fix. The test points `docs` at a real outside directory
+that does *not* contain the recorded file, so a reader that follows the link
+sees `False` and routes the consumer to `residual-damaged` on the strength of
+a stat taken in somebody else's directory.
+
+One claim in the first draft of that fix was wrong and is recorded rather than
+quietly dropped: the `except OSError` around `resolve()` was commented as the
+symlink-loop path, and a test written against that claim failed. Non-strict
+`resolve()` does not raise for a self-referential link — it returns a path
+inside the root, which then reads as missing, which is the right answer for a
+residual nothing can open. The handler stays as a genuine defensive catch,
+with a comment that now says what it actually does.
+
+The suppressed finding was in `tests/test_thin_resweep.py`: `unittest.main()`
+sat at line 286, ahead of `PlatformMarkerTests` and `CommandLineTests`.
+`make test` uses discovery and was unaffected, which is exactly why it
+survived — running the file directly executed 16 of its 27 tests and exited 0.
+Moved to the end of the file; direct execution now reports `Ran 27 tests`.

@@ -283,10 +283,6 @@ class ShippingBoundaryTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PlatformMarkerTests(ResweepFixture):
     """Four markers, each asserted separately (step 3, prd.md:19)."""
 
@@ -406,3 +402,7 @@ class CommandLineTests(ResweepFixture):
         (repo / "src/main.py").write_text("print('edited')\n", encoding="utf-8")
         document = resweep.resweep_consumer(self.registry_name(), repo)
         self.assertIn("(dirty)", resweep.render(document))
+
+
+if __name__ == "__main__":
+    unittest.main()

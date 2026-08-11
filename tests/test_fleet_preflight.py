@@ -686,6 +686,28 @@ class ThinFleetPreflightTests(InstallTestCase):
         self.assertEqual(result.status, "at-target")
         self.assertFalse((root.parent / "outside-absent.md").exists())
 
+    def test_a_recorded_target_that_resolves_outside_is_never_stated(self) -> None:
+        # Textual containment is not enough: `docs/gone.md` has no `..` and is
+        # not absolute, yet it lands outside the checkout the moment `docs` is
+        # a link. `exists()` follows it, so before the resolved-path guard this
+        # consumer was routed to repair on the strength of a stat taken in
+        # somebody else's directory. The outside directory is real and the file
+        # inside it is not, which is what makes at-target the discriminator:
+        # a reader that follows the link sees False and reports damage.
+        fleet = self.load_fleet_module()
+        root = self.temp_root()
+        self.write_consumer(root, targets=("docs/gone.md",), create=False)
+        outside = root.parent / "outside-tree"
+        outside.mkdir()
+        (root / "docs").symlink_to(outside, target_is_directory=True)
+
+        self.assertEqual(fleet.missing_recorded_targets(root), ())
+        result = fleet.preflight_consumer(
+            self.make_consumer(fleet, root), target_version="0.8.5"
+        )
+        self.assertEqual(result.status, "at-target")
+        self.assertFalse((outside / "gone.md").exists())
+
     def test_the_printed_repair_command_is_one_a_thin_consumer_accepts(self) -> None:
         # The headline check. A repair command that a thin-aware refresh
         # rejects is worse than no repair command: the operator runs it, gets
