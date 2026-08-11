@@ -1335,11 +1335,11 @@ leaving it to a later paragraph — and the matcher docstring says five
 ways, matching what it then lists.
 
 One environment note, recorded because it would otherwise look like a
-missing consumer: the review prompt named
-`/Users/sven/repos/platypeeps/mezmo_benchmark`, which does not exist. The
-registry's `pathHint` resolves to `/Users/sven/repos/mezmo/mezmo_benchmark`
-and that is the checkout both the scanner and the review used. The
-scanner has never read the path from prose.
+missing consumer: the review prompt named a `mezmo_benchmark` checkout
+under a `platypeeps/` parent directory, which does not exist. The
+registry's `pathHint` resolves it under `mezmo/` instead, and that is the
+checkout both the scanner and the review used. The scanner has never read
+the path from prose.
 
 **Eleventh measurement.** Seven rows moved, all from R12-C1 and all
 verified by naming the marker that fired: `rwbp-coordinator` 51 blockers
