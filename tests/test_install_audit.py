@@ -128,6 +128,12 @@ class InstallAuditTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-fleet-controller.py",
                 ".agents/skills/sd-fleet-refresh/references/controller-recovery.md",
                 "scripts/sd_ai_command_pack_fleet_lib.py",
+                # The thin resweep decides whether a consumer may be
+                # converted. It reads the surface partition, the fleet
+                # registry, and the pack's own classification constants, none
+                # of which a consumer checkout has, so it is source-only for
+                # the same reason the fleet helpers are.
+                "scripts/sd-ai-command-pack-thin-resweep.py",
             },
             set(install.SOURCE_ONLY_COMMAND_TARGETS),
         )
