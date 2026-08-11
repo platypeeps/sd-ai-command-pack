@@ -151,10 +151,24 @@ def git_tree_entries(
     return entries
 
 
-def normalize_tree_path(path: PurePosixPath, source: str) -> str:
+#: What a tree-loading diagnostic calls the thing it failed to load. The loader
+#: is shared, but its callers are not: the payload digest reads manifest rows,
+#: while the candidate-validator digest reads sources that have deliberately
+#: never had one. Naming the subject at each raise keeps every failure mode's
+#: own reason intact -- the alternative, re-wrapping at the call site, can only
+#: guess a single reason for all six of them.
+MANIFEST_SOURCE_SUBJECT = "pack manifest source"
+VALIDATOR_SOURCE_SUBJECT = "candidate validator source"
+
+
+def normalize_tree_path(
+    path: PurePosixPath,
+    source: str,
+    subject: str = MANIFEST_SOURCE_SUBJECT,
+) -> str:
     if path.is_absolute():
         raise ReleaseIdentityError(
-            f"pack manifest source resolves outside the repository at commit: {source}"
+            f"{subject} resolves outside the repository at commit: {source}"
         )
     parts: list[str] = []
     for part in path.parts:
@@ -163,15 +177,14 @@ def normalize_tree_path(path: PurePosixPath, source: str) -> str:
         if part == "..":
             if not parts:
                 raise ReleaseIdentityError(
-                    "pack manifest source resolves outside the repository at commit: "
-                    f"{source}"
+                    f"{subject} resolves outside the repository at commit: {source}"
                 )
             parts.pop()
             continue
         parts.append(part)
     if not parts:
         raise ReleaseIdentityError(
-            f"pack manifest source does not resolve to a file at commit: {source}"
+            f"{subject} does not resolve to a file at commit: {source}"
         )
     return PurePosixPath(*parts).as_posix()
 
@@ -181,8 +194,9 @@ def payload_source_at_commit(
     commit_sha: str,
     source: str,
     entries: Mapping[bytes, tuple[str, str, str]],
+    subject: str = MANIFEST_SOURCE_SUBJECT,
 ) -> PayloadSource:
-    current = normalize_tree_path(PurePosixPath(source), source)
+    current = normalize_tree_path(PurePosixPath(source), source, subject)
     visited: set[str] = set()
 
     while current not in visited:
@@ -193,38 +207,37 @@ def payload_source_at_commit(
             entry = entries.get(prefix.encode("utf-8"))
             if entry is None:
                 raise ReleaseIdentityError(
-                    f"pack manifest source is absent at {commit_sha}: {source}"
+                    f"{subject} is absent at {commit_sha}: {source}"
                 )
             mode, object_type, object_id = entry
             if mode == "120000":
                 if object_type != "blob":
                     raise ReleaseIdentityError(
-                        f"pack manifest source has an invalid symlink at {commit_sha}: "
-                        f"{source}"
+                        f"{subject} has an invalid symlink at {commit_sha}: {source}"
                     )
                 target_bytes = git_bytes(repo, "cat-file", "blob", object_id)
                 try:
                     target = target_bytes.decode("utf-8", errors="strict")
                 except UnicodeError as exc:
                     raise ReleaseIdentityError(
-                        "pack manifest source has a non-UTF-8 symlink target at "
+                        f"{subject} has a non-UTF-8 symlink target at "
                         f"{commit_sha}: {source}: {exc}"
                     ) from exc
                 combined = PurePosixPath(*parts[: index - 1]) / PurePosixPath(target)
                 if index < len(parts):
                     combined = combined.joinpath(*parts[index:])
-                current = normalize_tree_path(combined, source)
+                current = normalize_tree_path(combined, source, subject)
                 break
             if index < len(parts):
                 if mode != "040000" or object_type != "tree":
                     raise ReleaseIdentityError(
-                        "pack manifest source traverses a non-directory at "
+                        f"{subject} traverses a non-directory at "
                         f"{commit_sha}: {source}"
                     )
                 continue
             if mode not in {"100644", "100755"} or object_type != "blob":
                 raise ReleaseIdentityError(
-                    f"pack manifest source is not a regular file at {commit_sha}: {source}"
+                    f"{subject} is not a regular file at {commit_sha}: {source}"
                 )
             return PayloadSource(
                 content=git_bytes(repo, "cat-file", "blob", object_id),
@@ -232,7 +245,7 @@ def payload_source_at_commit(
             )
 
     raise ReleaseIdentityError(
-        f"pack manifest source has a symlink cycle at {commit_sha}: {source}"
+        f"{subject} has a symlink cycle at {commit_sha}: {source}"
     )
 
 
@@ -263,16 +276,16 @@ def candidate_validator_digest_at_commit(repo: Path, commit_sha: str) -> str:
     entries = git_tree_entries(repo, commit_sha)
 
     def load_source(source: str) -> bytes:
-        try:
-            return payload_source_at_commit(repo, commit_sha, source, entries).content
-        except ReleaseIdentityError as exc:
-            # Reuses the payload loader, so an absent source would otherwise
-            # be reported as a missing *manifest* source -- sending a reader
-            # to look for a manifest row that has never existed for this file.
-            # That absence is the whole reason it is digested separately.
-            raise ReleaseIdentityError(
-                f"candidate validator source is absent at {commit_sha}: {source}"
-            ) from exc
+        # The payload loader is reused, but its diagnostics are not: left to
+        # its default they would report a missing *manifest* source, sending a
+        # reader to look for a row that has never existed for this file --
+        # which is the whole reason it is digested separately. The subject is
+        # renamed at each raise rather than by re-wrapping here, so an invalid
+        # symlink, a non-directory traversal, or a non-regular file keeps its
+        # own reason instead of being flattened into "absent".
+        return payload_source_at_commit(
+            repo, commit_sha, source, entries, VALIDATOR_SOURCE_SUBJECT
+        ).content
 
     try:
         return candidate_validator_digest(load_source)

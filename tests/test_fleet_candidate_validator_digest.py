@@ -270,6 +270,38 @@ class CandidateValidatorDigestTests(InstallTestCase):
         self.assertIn("candidate validator source is absent", message)
         self.assertIn(fleet.CANDIDATE_VALIDATOR_SOURCES[0], message)
 
+    def test_commit_digest_keeps_a_non_absent_reason_for_the_validator(self) -> None:
+        """Absence is one of six ways the load fails; the other five survive.
+
+        The loader is shared with the payload digest, so its subject is renamed
+        rather than its exception re-wrapped. Wrapping at the call site could
+        only assert one reason for all of them, and reporting a path that is
+        occupied by a file as "absent" sends a reader looking for the wrong
+        defect entirely.
+        """
+        fleet = self.load_fleet()
+        identity = self.load_identity()
+        root, _commit = self.make_validator_repo(fleet)
+        source = fleet.CANDIDATE_VALIDATOR_SOURCES[0]
+        directory = source.split("/", 1)[0]
+
+        # Occupy the validator's parent directory with a regular file, so the
+        # source exists as a path prefix but cannot be traversed.
+        self.run_git(root, "rm", "-r", "-q", directory)
+        (root / directory).write_text("not a directory\n", encoding="utf-8")
+        self.run_git(root, "add", directory)
+        self.run_git(root, "commit", "-m", "occupy the validator's directory")
+        occupied = self.git_output(root, "rev-parse", "HEAD")
+
+        with self.assertRaises(identity.ReleaseIdentityError) as raised:
+            identity.candidate_validator_digest_at_commit(root, occupied)
+
+        message = str(raised.exception)
+        self.assertIn("candidate validator source traverses a non-directory", message)
+        self.assertNotIn("is absent", message)
+        self.assertNotIn("pack manifest source", message)
+        self.assertIn(source, message)
+
 
 if __name__ == "__main__":
     unittest.main()

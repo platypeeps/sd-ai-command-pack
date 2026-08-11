@@ -663,6 +663,18 @@ release verdict.
      raises a `ReleaseIdentityError` naming the validator specifically, and
      never falls back to the working tree. Both fail closed: "assume unchanged"
      is the one behavior that would reintroduce the defect.
+   - **Rename the subject, do not re-wrap the exception.** The commit-scoped
+     loader reuses `payload_source_at_commit`, whose diagnostics all name a
+     *pack manifest source* — a row that has never existed for the validator.
+     It is corrected by passing a `subject` through to each raise
+     (`MANIFEST_SOURCE_SUBJECT` / `VALIDATOR_SOURCE_SUBJECT`), not by catching
+     `ReleaseIdentityError` at the call site: absence is one of six failure
+     modes there — the others are an invalid symlink, a non-UTF-8 symlink
+     target, a non-directory traversal, a non-regular file, and a symlink cycle
+     — and a single catch can assert only one reason for all of them. Reporting
+     a path occupied by a regular file as "absent" sends a reader after the
+     wrong defect. `test_commit_digest_keeps_a_non_absent_reason_for_the_validator`
+     pins it: the wrapping form fails it, the subject form passes.
    - A stale ledger surfaces through the existing `provenance.candidate-stale`
      finding against `docs/fleet/candidate-validation.json`, not a new code.
      `_candidate_refresh_required` (`prepare-release.py:109-160`) validates that
