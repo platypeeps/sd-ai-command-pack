@@ -37,6 +37,14 @@
   is the whole review and must be held to the standard two lanes would have
   met. A consumer that wants a second lane defines its own, outside the pack.
 
+- `docs/SD_AI_COMMAND_PACK.md` no longer describes the planning review as
+  launching a `codex exec` peer lane. That guide installs `always`, so it
+  reaches every consumer regardless of platform, and it would have contradicted
+  the contract shipped beside it — telling a repository the lane runs while the
+  contract states it is the whole review. Its "Local Review" section is
+  untouched: `codex review --uncommitted` is `sd-review`'s own optional lane,
+  a different surface this release does not change.
+
 ## 0.67.0 - 2026-08-11
 
 - A converted consumer's repo-native surfaces now name the machine
