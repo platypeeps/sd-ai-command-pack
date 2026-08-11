@@ -61,7 +61,12 @@ ordered children (see `design.md` for the contracts and `implement.md`
 for the gate between them):
 
 1. `08-10-thin-conversion-tooling` — pack-internal
-2. `08-10-thin-candidate-loop-rescope` — pack-internal
+2. `08-10-thin-candidate-loop-rescope` — pack-internal. **Narrowed
+   2026-08-11** to contract C-F's reachability half only: binding a
+   validator digest into the candidate ledger so `make release-prep` stops
+   skipping a changed validator. Its title now reads "Make release-prep
+   reach a changed candidate validator"; the directory slug predates the
+   split and `task.py` has no rename.
 2b. `08-10-thin-prompt-surface-repoint` — pack-internal, added
    2026-08-10 after child 1's step-3 measurement. Seven pack-shipped
    surfaces survive conversion and still cite paths it removes — four
@@ -83,6 +88,15 @@ for the gate between them):
    2b's rewrite cannot reach it and the two are independent — but both
    must reach zero before any consumer converts, so this child gates
    children 3–5 alongside 2b.
+2d. `08-11-thin-candidate-loop-shape` — pack-internal, split out of child 2
+   on 2026-08-11 after three planning-review rounds found four blocking
+   concerns against the thin-shape half: the conversion mutates this
+   repository's own fleet registry, the clean-tree precondition defeats the
+   install-then-resweep ordering, already-thin checkouts reject
+   `--platform`, and a `blocked` consumer has no representation in the
+   current ledger contract. Carries the release-gate policy question.
+   Ordered after child 2 for observability — until the digest binding lands,
+   an edited validator is not reached by release-prep at all.
 3. `08-10-thin-canary-conversion` — mutates consumer repositories
 4. `08-10-thin-post-canary-conversion` — mutates consumer repositories
 5. `08-10-thin-final-conversion-gate-retirement` — mutates a consumer

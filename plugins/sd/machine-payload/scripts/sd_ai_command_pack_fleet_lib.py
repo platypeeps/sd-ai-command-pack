@@ -25,7 +25,29 @@ FLEET_PROFILE_SCHEMA_VERSION = 1
 FLEET_CONSUMER_MODES = ("fat", "thin")
 DEFAULT_FLEET_CONSUMER_MODE = "fat"
 DEFAULT_FLEET_PIN_PATH = ".sd-ai-command-pack/provenance.json"
-CANDIDATE_LEDGER_SCHEMA_VERSION = 2
+# Schema 3 adds `validatorDigest`. See CANDIDATE_VALIDATOR_SOURCES below for
+# what it covers and why.
+CANDIDATE_LEDGER_SCHEMA_VERSION = 3
+
+# The candidate validator source the payload digest cannot see.
+#
+# Measured 2026-08-11: `scripts/sd-ai-command-pack-fleet-candidate-check.py`
+# has no `manifest.json` row and no `templates/` twin -- zero rows match it --
+# so `payload_digest` is blind to it. Editing the validator therefore moved
+# neither the payload digest nor the fleet digest, the ledger stayed current,
+# and `prepare-release.py` returned before ever running the new code. That
+# single omission was the whole reachability defect.
+#
+# This file is deliberately absent from the tuple. It looks like a second
+# blind spot and is not one: it has a manifest row whose `source` is its
+# authoritative `templates/` twin and whose `target` is the root mirror, so
+# `payload_digest` -- which reads `source` -- already moves when the real file
+# is edited. Naming it here would instead hash the `make sync` mirror, a file
+# regenerated from that source: a second, weaker answer to a question
+# `payloadDigest` already answers correctly.
+CANDIDATE_VALIDATOR_SOURCES: tuple[str, ...] = (
+    "scripts/sd-ai-command-pack-fleet-candidate-check.py",
+)
 MAX_CANDIDATE_TIMEOUT_SECONDS = 3600
 MAX_FLEET_CONCURRENCY = 4
 SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
@@ -763,6 +785,55 @@ def filesystem_payload_digest(manifest_path: Path) -> str:
     return payload_digest(manifest, load_source)
 
 
+def candidate_validator_digest(source_loader: Callable[[str], bytes]) -> str:
+    """Digest the validator sources the payload digest cannot see.
+
+    Composed like `payload_digest` above -- sorted, path-qualified, one
+    sha256 per source -- with one deliberate departure: the executable bit
+    does not participate. `payload_digest` is right to include it for files
+    that are executed directly; every source named here is run as
+    `sys.executable <path>`, so its permission bit changes no behavior and
+    hashing it would let `chmod +x` invalidate a ledger whose validator is
+    byte-identical.
+
+    Takes a loader rather than a root so a caller validating a ledger
+    recorded at some commit can supply that commit's blobs. Pairing a
+    historical ledger with the working tree's validator would report a
+    routine post-release edit as tampered evidence.
+    """
+    digest = hashlib.sha256()
+    digest.update(b"sd-ai-command-pack-candidate-validator-v1\0")
+    for source in sorted(CANDIDATE_VALIDATOR_SOURCES):
+        digest.update(source.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(source_loader(source)).digest())
+    return f"sha256:{digest.hexdigest()}"
+
+
+def filesystem_candidate_validator_digest(root: Path) -> str:
+    """The working-tree loader. Fails closed; never substitutes a default.
+
+    `root` is resolved here rather than trusted from the caller: the
+    containment check below compares against a resolved source path, so an
+    unresolved root turns every symlinked prefix -- `/var` on macOS, most
+    obviously -- into a spurious escape.
+    """
+    root = root.resolve()
+
+    def load_source(relative_path: str) -> bytes:
+        path = root / relative_path
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(root)
+            return resolved.read_bytes()
+        except (OSError, ValueError) as error:
+            raise FleetConfigError(
+                f"cannot read candidate validator source {relative_path}: {error}"
+            ) from None
+
+    return candidate_validator_digest(load_source)
+
+
 def fleet_manifest_digest(content: bytes) -> str:
     return f"sha256:{hashlib.sha256(content).hexdigest()}"
 
@@ -773,6 +844,7 @@ def validate_candidate_ledger(
     expected_version: str,
     expected_payload_digest: str,
     expected_fleet_digest: str,
+    expected_validator_digest: str,
     consumers: list[FleetConsumer],
 ) -> list[str]:
     errors: list[str] = []
@@ -785,6 +857,7 @@ def validate_candidate_ledger(
         ("packVersion", expected_version),
         ("payloadDigest", expected_payload_digest),
         ("fleetManifestDigest", expected_fleet_digest),
+        ("validatorDigest", expected_validator_digest),
     ):
         if ledger.get(field) != expected:
             errors.append(

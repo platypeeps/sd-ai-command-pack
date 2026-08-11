@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 358
+- **Total Sessions**: 359
 - **Last Active**: 2026-08-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~349 | Active |
+| `journal-8.md` | ~396 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 359 | 2026-08-11 | Bind the candidate validator's own sources into the candidate ledger | `ff82e490`, `9e8fead2`, `36e1958b`, `adcbe2ad` | `feat/candidate-validator-digest` |
 | 358 | 2026-08-11 | Stop shipping the Codex review lane to consumers | `caf010c0`, `70eb2017`, `d72737e9`, `792775fe`, `a281da84`, `16547f3d` | `feat/thin-undeclared-codex-marker` |
 | 357 | 2026-08-11 | Repoint thin consumers' surviving pack surfaces off removed paths | `be05935a`, `ffde1653`, `49b676f4`, `1a66c2e0`, `b927dd51`, `040b86ae` | `feat/thin-prompt-surface-repoint` |
 | 356 | 2026-08-10 | Fleet/status rework to pin + plugin inventory | `ad12cc442a1d31c0ee0bed8d5ba2e3298bbc8863`, `0f15197a05e4ed6cb48a923cdd7acbd8bb040544`, `028cd4b5`, `252a4675` | `feat/thin-fleet-status-pins` |

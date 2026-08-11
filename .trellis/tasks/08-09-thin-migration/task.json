@@ -25,7 +25,8 @@
     "08-10-thin-post-canary-conversion",
     "08-10-thin-final-conversion-gate-retirement",
     "08-10-thin-prompt-surface-repoint",
-    "08-11-thin-undeclared-codex-marker"
+    "08-11-thin-undeclared-codex-marker",
+    "08-11-thin-candidate-loop-shape"
   ],
   "parent": "08-09-deployment-thin-consumers",
   "relatedFiles": [],

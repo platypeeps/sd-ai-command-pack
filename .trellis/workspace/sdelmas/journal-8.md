@@ -359,3 +359,50 @@ Resolved the undeclared codex usage packDefect blocking all eight consumers' thi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 359: Bind the candidate validator's own sources into the candidate ledger
+
+**Date**: 2026-08-11
+**Task**: Bind the candidate validator's own sources into the candidate ledger
+**Branch**: `feat/candidate-validator-digest`
+
+### Summary
+
+make release-prep skipped fleet validation whenever the candidate ledger read as current, and ledger currency could not see the validator itself: scripts/sd-ai-command-pack-fleet-candidate-check.py has no manifest row and no templates/ twin, so editing it moved no payload source. A fourth binding, validatorDigest (schema 2 -> 3), closes that reachability gap; the digest takes a caller-supplied loader so a ledger recorded at a commit is paired with that commit's blobs rather than the working tree.
+
+### Main Changes
+
+- Added CANDIDATE_VALIDATOR_SOURCES and the candidate_validator_digest / filesystem_candidate_validator_digest pair to the authoritative template fleet_lib, bumped CANDIDATE_LEDGER_SCHEMA_VERSION to 3, and made expected_validator_digest a required keyword argument of validate_candidate_ledger
+- Wired the digest through all three production call sites, including verify_candidate_ledger_at_commit, which reads its expected digest from the same commit as its ledger
+- Excluded fleet_lib from the tuple deliberately: its manifest row's source is its templates/ twin, so payloadDigest already moves; naming it would hash the make sync mirror instead
+- Excluded the executable bit, unlike payload_digest: the validator is invoked as sys.executable <path>, so chmod +x must not invalidate a byte-identical ledger
+- Review round 1 (Copilot): the commit-scoped loader flattened six distinct tree-load failures into 'candidate validator source is absent'. Fixed by threading a subject through normalize_tree_path and payload_source_at_commit rather than re-wrapping at the call site, so each failure keeps its own reason
+- Review round 2 (Copilot): removed an unreachable except FleetConfigError copied from payload_digest_at_commit, where it is live because payload_digest parses the manifest
+- Recorded the mechanism, the loader seam, the executable-bit asymmetry, and the rename-the-subject rule in the manifest-and-filesystem code-spec; documented the new binding in docs/FLEET_ROLLOUT.md
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ff82e490` | feat: make release-prep reach a changed candidate validator |
+| `9e8fead2` | fix: name the validator subject at each tree-load raise |
+| `36e1958b` | fix: drop an unreachable FleetConfigError handler |
+| `adcbe2ad` | chore: record the task branch before finalization |
+
+### Testing
+
+- [OK] Gate 2 end to end: one comment appended to the validator moved exactly one ledger field (validatorDigest), with packVersion, payloadDigest, and fleetManifestDigest byte-identical; release-prep then ran all 8 consumers instead of printing the skip
+- [OK] Gate 3: a second release-prep on an unchanged tree printed 'candidate ledger is current; skipping fleet validation', exit 0
+- [OK] Mutation testing over the digest comparison: 3 mutants, all killed (7/7/5 failures); a 4th mutant over the review fix reproduced the exact misreport the reviewer described
+- [OK] Full suite: Ran 2378 tests, OK
+- [OK] make check exit 0; review preflight 0 failures, 3 dispositioned warnings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

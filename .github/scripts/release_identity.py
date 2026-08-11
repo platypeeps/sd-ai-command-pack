@@ -18,6 +18,8 @@ if str(SCRIPT_DIR) not in sys.path:
 from sd_ai_command_pack_fleet_lib import (  # noqa: E402
     FleetConfigError,
     PayloadSource,
+    candidate_validator_digest,
+    filesystem_candidate_validator_digest,
     filesystem_payload_digest,
     fleet_manifest_digest,
     load_fleet_consumers,
@@ -149,10 +151,24 @@ def git_tree_entries(
     return entries
 
 
-def normalize_tree_path(path: PurePosixPath, source: str) -> str:
+#: What a tree-loading diagnostic calls the thing it failed to load. The loader
+#: is shared, but its callers are not: the payload digest reads manifest rows,
+#: while the candidate-validator digest reads sources that have deliberately
+#: never had one. Naming the subject at each raise keeps every failure mode's
+#: own reason intact -- the alternative, re-wrapping at the call site, can only
+#: guess a single reason for all six of them.
+MANIFEST_SOURCE_SUBJECT = "pack manifest source"
+VALIDATOR_SOURCE_SUBJECT = "candidate validator source"
+
+
+def normalize_tree_path(
+    path: PurePosixPath,
+    source: str,
+    subject: str = MANIFEST_SOURCE_SUBJECT,
+) -> str:
     if path.is_absolute():
         raise ReleaseIdentityError(
-            f"pack manifest source resolves outside the repository at commit: {source}"
+            f"{subject} resolves outside the repository at commit: {source}"
         )
     parts: list[str] = []
     for part in path.parts:
@@ -161,15 +177,14 @@ def normalize_tree_path(path: PurePosixPath, source: str) -> str:
         if part == "..":
             if not parts:
                 raise ReleaseIdentityError(
-                    "pack manifest source resolves outside the repository at commit: "
-                    f"{source}"
+                    f"{subject} resolves outside the repository at commit: {source}"
                 )
             parts.pop()
             continue
         parts.append(part)
     if not parts:
         raise ReleaseIdentityError(
-            f"pack manifest source does not resolve to a file at commit: {source}"
+            f"{subject} does not resolve to a file at commit: {source}"
         )
     return PurePosixPath(*parts).as_posix()
 
@@ -179,8 +194,9 @@ def payload_source_at_commit(
     commit_sha: str,
     source: str,
     entries: Mapping[bytes, tuple[str, str, str]],
+    subject: str = MANIFEST_SOURCE_SUBJECT,
 ) -> PayloadSource:
-    current = normalize_tree_path(PurePosixPath(source), source)
+    current = normalize_tree_path(PurePosixPath(source), source, subject)
     visited: set[str] = set()
 
     while current not in visited:
@@ -191,38 +207,37 @@ def payload_source_at_commit(
             entry = entries.get(prefix.encode("utf-8"))
             if entry is None:
                 raise ReleaseIdentityError(
-                    f"pack manifest source is absent at {commit_sha}: {source}"
+                    f"{subject} is absent at {commit_sha}: {source}"
                 )
             mode, object_type, object_id = entry
             if mode == "120000":
                 if object_type != "blob":
                     raise ReleaseIdentityError(
-                        f"pack manifest source has an invalid symlink at {commit_sha}: "
-                        f"{source}"
+                        f"{subject} has an invalid symlink at {commit_sha}: {source}"
                     )
                 target_bytes = git_bytes(repo, "cat-file", "blob", object_id)
                 try:
                     target = target_bytes.decode("utf-8", errors="strict")
                 except UnicodeError as exc:
                     raise ReleaseIdentityError(
-                        "pack manifest source has a non-UTF-8 symlink target at "
+                        f"{subject} has a non-UTF-8 symlink target at "
                         f"{commit_sha}: {source}: {exc}"
                     ) from exc
                 combined = PurePosixPath(*parts[: index - 1]) / PurePosixPath(target)
                 if index < len(parts):
                     combined = combined.joinpath(*parts[index:])
-                current = normalize_tree_path(combined, source)
+                current = normalize_tree_path(combined, source, subject)
                 break
             if index < len(parts):
                 if mode != "040000" or object_type != "tree":
                     raise ReleaseIdentityError(
-                        "pack manifest source traverses a non-directory at "
+                        f"{subject} traverses a non-directory at "
                         f"{commit_sha}: {source}"
                     )
                 continue
             if mode not in {"100644", "100755"} or object_type != "blob":
                 raise ReleaseIdentityError(
-                    f"pack manifest source is not a regular file at {commit_sha}: {source}"
+                    f"{subject} is not a regular file at {commit_sha}: {source}"
                 )
             return PayloadSource(
                 content=git_bytes(repo, "cat-file", "blob", object_id),
@@ -230,7 +245,7 @@ def payload_source_at_commit(
             )
 
     raise ReleaseIdentityError(
-        f"pack manifest source has a symlink cycle at {commit_sha}: {source}"
+        f"{subject} has a symlink cycle at {commit_sha}: {source}"
     )
 
 
@@ -248,6 +263,37 @@ def payload_digest_at_commit(
         return payload_digest(manifest, load_source)
     except FleetConfigError as exc:
         raise ReleaseIdentityError(f"release payload is invalid: {exc}") from exc
+
+
+def candidate_validator_digest_at_commit(repo: Path, commit_sha: str) -> str:
+    """The validator digest as of `commit_sha`, never the working tree.
+
+    The ledger this pairs with was read from the same commit. Digesting the
+    working tree instead would report an ordinary post-release edit to the
+    validator as tampered release evidence -- a failure that reads as a
+    security event rather than the design error it would actually be.
+    """
+    entries = git_tree_entries(repo, commit_sha)
+
+    def load_source(source: str) -> bytes:
+        # The payload loader is reused, but its diagnostics are not: left to
+        # its default they would report a missing *manifest* source, sending a
+        # reader to look for a row that has never existed for this file --
+        # which is the whole reason it is digested separately. The subject is
+        # renamed at each raise rather than by re-wrapping here, so an invalid
+        # symlink, a non-directory traversal, or a non-regular file keeps its
+        # own reason instead of being flattened into "absent".
+        return payload_source_at_commit(
+            repo, commit_sha, source, entries, VALIDATOR_SOURCE_SUBJECT
+        ).content
+
+    # No `except FleetConfigError` here, unlike `payload_digest_at_commit`
+    # above. That one is live: `payload_digest` reads the manifest and rejects a
+    # malformed one. `candidate_validator_digest` reads a constant tuple and
+    # raises nothing of its own, so the only failures are the loader's, and the
+    # loader above raises `ReleaseIdentityError`. Copying the handler across
+    # would be unreachable code claiming a failure mode that cannot occur.
+    return candidate_validator_digest(load_source)
 
 
 def verify_candidate_ledger_at_commit(
@@ -280,11 +326,13 @@ def verify_candidate_ledger_at_commit(
             f"fleet manifest {fleet_path}",
         )
         expected_payload = payload_digest_at_commit(repo, commit_sha, manifest)
+        expected_validator = candidate_validator_digest_at_commit(repo, commit_sha)
         errors = validate_candidate_ledger(
             ledger,
             expected_version=version,
             expected_payload_digest=expected_payload,
             expected_fleet_digest=fleet_manifest_digest(fleet_bytes),
+            expected_validator_digest=expected_validator,
             consumers=consumers,
         )
     except FleetConfigError as exc:
@@ -335,6 +383,9 @@ def _current_candidate_errors(
         expected_version=version,
         expected_payload_digest=payload,
         expected_fleet_digest=fleet_manifest_digest(fleet_bytes),
+        expected_validator_digest=filesystem_candidate_validator_digest(
+            manifest_path.resolve().parent
+        ),
         consumers=consumers,
     )
 

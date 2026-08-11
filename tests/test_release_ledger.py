@@ -23,6 +23,20 @@ FLEET_LIB = PACK_ROOT / "scripts/sd_ai_command_pack_fleet_lib.py"
 
 
 class ReleaseLedgerTests(InstallTestCase):
+    def write_validator_source(self, root: Path, content: str = "# validator\n") -> None:
+        """Materialize the sources `CANDIDATE_VALIDATOR_SOURCES` names.
+
+        The digest loader fails closed on an absent source, so a fixture tree
+        that omits these looks identical to a release whose validator was
+        deleted. Fixtures carry a stand-in body: the digest binds the bytes,
+        never their meaning.
+        """
+        fleet = self.load_module_from_path(FLEET_LIB, "release_test_fleet_lib")
+        for source in fleet.CANDIDATE_VALIDATOR_SOURCES:
+            path = root / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
     def write_candidate_ledger(self, root: Path, version: str) -> None:
         fleet = self.load_module_from_path(FLEET_LIB, "release_test_fleet_lib")
         fleet_path = root / "docs/fleet/consumers.json"
@@ -34,6 +48,7 @@ class ReleaseLedgerTests(InstallTestCase):
             "packVersion": version,
             "payloadDigest": fleet.filesystem_payload_digest(root / "manifest.json"),
             "fleetManifestDigest": fleet.fleet_manifest_digest(fleet_bytes),
+            "validatorDigest": fleet.filesystem_candidate_validator_digest(root),
             "consumers": [
                 {
                     "name": consumer.name,
@@ -89,6 +104,7 @@ class ReleaseLedgerTests(InstallTestCase):
             + "\n",
             encoding="utf-8",
         )
+        self.write_validator_source(root)
         self.write_candidate_ledger(root, "1.0.0")
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "release 1.0.0")
