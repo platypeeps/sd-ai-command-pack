@@ -82,4 +82,4 @@ everywhere but this repository. Here, these amendments apply:
   stop condition is reachable.
 - **Section 5, completion report.** Report Codex status as completed, skipped,
   or failed. A consumer omits that line rather than reporting it skipped: a
-  lane that repository never had was not skipped, it was never available.
+  lane the consumer never had was not skipped, it was never available.

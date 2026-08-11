@@ -66,7 +66,14 @@ class ClaudePlanningReviewTests(InstallTestCase):
         reference = (install.ROOT / f"templates/{self.REFERENCE}").read_text(
             encoding="utf-8"
         )
-        appendix = (install.ROOT / self.APPENDIX).read_text(encoding="utf-8")
+        # Assert existence before reading. The appendix is the one file here
+        # with no manifest row and no template twin, so nothing else in the
+        # suite would catch it being moved or renamed -- and a bare
+        # `read_text` would report that as a FileNotFoundError inside a
+        # contract-wording test rather than as a missing file.
+        appendix_path = install.ROOT / self.APPENDIX
+        self.assertTrue(appendix_path.is_file(), f"missing {self.APPENDIX}")
+        appendix = appendix_path.read_text(encoding="utf-8")
 
         for expected in (
             "`prd.md`",
@@ -134,7 +141,7 @@ class ClaudePlanningReviewTests(InstallTestCase):
         # only the standard the single lane is held to instead.
         self.assertNotIn("planning-adversarial-review-codex", reference)
         self.assertIn("the pack ships none", reference)
-        self.assertIn("hold it to the standard two lanes", reference)
+        self.assertIn("hold it to the standard that two lanes", reference)
 
     def test_appendix_is_absent_from_the_shipped_payload(self) -> None:
         # The resolution this task shipped. The Codex lane really does invoke

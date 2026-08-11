@@ -41,7 +41,7 @@ is also cited outside it, such as in a spec, report, or ledger.
 This contract defines exactly one lane: the host's own. A repository may define
 an additional independent lane of its own, outside this contract, and sections
 3 through 5 keep a place for one; the pack ships none. Assume you are the whole
-review -- hold it to the standard two lanes would have met, because nothing
+review -- hold it to the standard that two lanes would have met, because nothing
 else will catch what it misses.
 
 ## 3. Concern disposition
