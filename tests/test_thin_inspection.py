@@ -294,6 +294,67 @@ class ThinPinStateTests(InstallTestCase):
         self.assertEqual(self.state(), "fat")
 
 
+class SecondThinWitnessTests(InstallTestCase):
+    """R19-C4b: `manifest.json` is the witness that survives pin loss.
+
+    The gap the pin cannot close is a thin consumer whose provenance is
+    destroyed outright: nothing legible says thin, so it reads fat, and an
+    ordinary install rebuilds a fat receipt over a narrowed payload. The
+    write order puts `manifest.json` before `provenance.json` precisely so
+    that whichever one survives an interruption, the earlier is thin.
+    """
+
+    def setUp(self) -> None:
+        self.target = _temp_dir(self)
+
+    def state(self):
+        from installer.conversion import thin_pin_state
+
+        return thin_pin_state(self.target)
+
+    def write_manifest(self, payload: object) -> Path:
+        path = self.target / install.PACK_MANIFEST_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            payload if isinstance(payload, str) else json.dumps(payload),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_a_thin_manifest_alone_reads_thin(self) -> None:
+        # The whole point: no provenance at all, and the consumer still does
+        # not read as fat.
+        self.write_manifest({"mode": "thin", "files": {}})
+        self.assertEqual(self.state(), "thin")
+
+    def test_a_thin_manifest_outvotes_a_destroyed_pin(self) -> None:
+        self.write_manifest({"mode": "thin", "files": {}})
+        write_provenance(self.target, "{truncated")
+        self.assertEqual(self.state(), "thin")
+
+    def test_a_fat_manifest_leaves_provenance_to_decide(self) -> None:
+        self.write_manifest({"pack": "p", "version": "1", "files": {}})
+        write_provenance(self.target, thin_payload(mode="thin-corrupt"))
+        self.assertEqual(self.state(), "malformed")
+
+    def test_a_damaged_manifest_is_not_evidence_either_way(self) -> None:
+        # Narrower than the provenance reading on purpose: the second witness
+        # answers only "does this legibly say thin", so damage here must not
+        # manufacture a `malformed` a fat consumer would then trip over.
+        for payload in ("{not json", [1, 2, 3], {"mode": "thin-corrupt"}):
+            with self.subTest(payload=payload):
+                self.write_manifest(payload)
+                self.assertEqual(self.state(), "fat")
+
+    def test_a_symlinked_manifest_is_not_read_through(self) -> None:
+        elsewhere = _temp_dir(self) / "manifest.json"
+        elsewhere.write_text(json.dumps({"mode": "thin"}), encoding="utf-8")
+        link = self.target / install.PACK_MANIFEST_FILE
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(elsewhere)
+        self.assertEqual(self.state(), "fat")
+
+
 class UnusableThinPinTests(InstallTestCase):
     """R18-C1: the pin is a file on a consumer's disk, not a proof."""
 

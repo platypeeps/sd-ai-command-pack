@@ -413,6 +413,29 @@ PIN_STATE_THIN = "thin"
 PIN_STATE_MALFORMED = "malformed"
 
 
+def _receipt_declares_thin(target: Path, receipt: Path) -> bool:
+    """True only when `receipt` legibly says `mode: "thin"`.
+
+    Deliberately narrower than `thin_pin_state`: this is the *second* witness,
+    so it answers only the question it can answer well. Damaged bytes here are
+    not evidence of anything -- provenance remains the receipt whose damage is
+    classified -- and a symlink is refused rather than followed, matching the
+    unresolved `is_symlink()` check the install preflight makes on the same
+    three paths.
+    """
+    try:
+        path = target_destination(target, receipt)
+    except SystemExit:
+        return False
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("mode") == THIN_MODE
+
+
 def thin_pin_state(target: Path) -> str:
     """Discriminate fat, thin, and malformed provenance as three states.
 
@@ -437,8 +460,12 @@ def thin_pin_state(target: Path) -> str:
     The residual gap this leaves is a thin consumer whose pin is destroyed
     outright, which reads as fat because nothing legible says otherwise. The
     fix for that is a durable thin marker in a second receipt, not a broader
-    reading of these bytes; see design.md R19-C4b.
+    reading of these bytes; see design.md R19-C4b. That marker is read first,
+    below: two independent witnesses, and the write order (`manifest.json`
+    before `provenance.json`) guarantees the surviving one is the earlier.
     """
+    if _receipt_declares_thin(target, PACK_MANIFEST_FILE):
+        return PIN_STATE_THIN
     try:
         provenance = target_destination(target, PROVENANCE_FILE)
     except SystemExit:

@@ -1885,3 +1885,26 @@ Two honesty notes on that fixture, both recorded rather than papered over:
 **Mutation evidence, tree layer.** `if thin_state != conversion.PIN_STATE_FAT`
 forced to `if False` fails 2 of the 3 fixture tests; the fat control correctly
 still passes.
+
+#### Step 4 addendum — the second thin witness, and why it was nearly lost
+
+`design.md:1000` assigns the R19-C4b guard extension to step 4: *"Step 6
+owns writing the marker; step 4 owns extending the guard to read it."*
+Step 4's own section in this file never mentions it. Two artifacts, two
+scopes — the same defect class round 19 produced and round 20 caught, this
+time between the design and the plan rather than inside one of them.
+
+Shipped here rather than deferred, because the alternative is step 6
+writing a `mode: "thin"` marker into `manifest.json` that nothing reads.
+
+`thin_pin_state` now consults `manifest.json` first, via
+`_receipt_declares_thin`. That helper is deliberately narrower than the
+provenance reading: it answers only *does this legibly say thin*, and
+damaged bytes are not evidence either way. Widening it would let a damaged
+manifest in a perfectly fat consumer manufacture a refusal — the reverse of
+the failure it exists to prevent. Symlinks are refused rather than
+followed, matching the unresolved `is_symlink()` check the R20-C1 receipt
+preflight makes on the same three paths.
+
+Mutation evidence: deleting the two-line manifest consultation fails 2 of
+the 5 new tests; the three negative cases correctly still pass.
