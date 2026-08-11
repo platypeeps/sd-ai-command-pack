@@ -635,7 +635,15 @@ def planned_repoints(target: Path, keep: tuple[str, ...]) -> dict[str, str]:
         if not path.is_file() or path.is_symlink():
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            # Bytes then decode, not `read_text`: text mode applies universal
+            # newlines on every platform, not only Windows, so a file checked
+            # out with CRLF would come back LF-normalized. The rewrite would
+            # then "change" every line in it, and since the write side is
+            # byte-exact that normalization lands on disk -- a whole-file diff
+            # attributed to a path repoint that touched one line. This mirrors
+            # `payload_source_bytes`, which works from raw bytes for the same
+            # reason.
+            text = path.read_bytes().decode("utf-8")
         except (UnicodeDecodeError, OSError):
             # Not text, or unreadable. A conversion has no business guessing at
             # bytes it cannot decode, and a kept binary carries no references.

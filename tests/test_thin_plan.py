@@ -789,6 +789,31 @@ class RepointPlanTests(unittest.TestCase):
         updated = thin.repointed_provenance_files({}, {"doc.md": "new\n"})
         self.assertEqual(updated, {})
 
+    def test_a_crlf_file_keeps_its_line_endings_through_the_repoint(self) -> None:
+        """Only the cited path changes -- not every line ending in the file.
+
+        `Path.read_text` applies universal newlines on every platform, not
+        only Windows, so reading a CRLF checkout in text mode hands back
+        LF-normalized text. The write side is byte-exact, so that
+        normalization would land on disk: a whole-file diff attributed to a
+        repoint that touched one line, in a conversion PR a human has to
+        review.
+        """
+
+        path = self.target / "doc.md"
+        path.write_bytes(
+            b"intro\r\nrun `scripts/sd-ai-command-pack-status.py` here\r\ntail\r\n"
+        )
+
+        planned = thin.planned_repoints(self.target, ("doc.md",))
+        thin.repoint_kept_references(self.target, planned, backup=False)
+
+        self.assertEqual(
+            path.read_bytes(),
+            b"intro\r\nrun `~/.agents/bin/sd-ai-command-pack-status.py` here"
+            b"\r\ntail\r\n",
+        )
+
     def test_the_bytes_written_hash_to_the_digest_recorded(self) -> None:
         """The invariant the whole seam rests on, asserted end to end.
 
