@@ -1908,3 +1908,68 @@ preflight makes on the same three paths.
 
 Mutation evidence: deleting the two-line manifest consultation fails 2 of
 the 5 new tests; the three negative cases correctly still pass.
+
+### Steps 5 and 6 — the plan phase, built
+
+`installer/thin.py` holds everything that answers *may this conversion
+proceed, and what exactly would it write*, without writing anything.
+`tests/test_thin_plan.py` covers it at 100% with 46 tests.
+
+**Verdict binding is whole-document, not a named field list.** The step's
+checks enumerate the mismatches to catch — moved HEAD, edit with HEAD
+unchanged, partition edit, registry edit, `installer/conversion.py` edit,
+resweep edit — and every one of them is a field the resweep already
+records. So `verdict_binding_reasons` re-runs the resweep and compares
+every key except `repo`, rather than listing the keys that matter.
+
+The reason is the resweep's own history: `indexFlagsDigest`,
+`hiddenBytesDigest`, `symlinkTargetsDigest`, and `platformMarkerDigest`
+were each added across rounds 9 through 12 *because an earlier named list
+had missed the state they cover*. A named list here would be the same list
+again, in a second file, with the same failure mode. Comparing everything
+means a field added to the resweep tomorrow binds tomorrow with no edit
+here — and `repo` is excluded because the binding is about the tree, not
+about how the path is spelled.
+
+Two directions, both refused: a verdict missing a field the resweep records
+(an older verdict), and a verdict carrying a field the resweep dropped (a
+resweep that stopped asking, which must not silently widen what an old
+verdict authorizes).
+
+**The marketplace locator.** `PACK_REPOSITORY` is declared once in
+`installer/registry.py` and validated against `ROOT`'s `origin` by exact
+equality. R18-C3's row — `platypeeps/sd-ai-command-pack-fork`, the same
+owner's *other* repository — has its own test, alongside a non-GitHub host,
+a different owner, a missing origin, a three-segment path, and a `file://`
+remote. Five spellings of the canonical remote normalize equal, including
+one carrying userinfo.
+
+**The settings merge blocks on every collision row.** The file is
+consumer-owned: zero partition rows, no ownership proof available, and no
+way to tell a deliberate `false` from a stale one. One test per row of
+`design.md` §4's table, plus the row that is easy to get backwards: an
+entry already present with the right value succeeds, writes nothing, and
+**does not appear in `settingsAdditions`**. That record is what a revert
+undoes, so recording a value the consumer set for itself is how revert
+deletes their setting.
+
+**R20-C3, closed with a file rather than more prose.**
+`.sd-ai-command-pack/pending-removal.json` is written with the receipts and
+deleted after the removals it authorizes. The design's recovery table
+promises that re-running converges from four of its five interrupted
+states; without this it does not, because the write order rewrites the
+receipts *before* deleting the payload, so from the moment the pin lands
+the receipt no longer lists what is still on disk. A re-run planning from
+the receipt alone computes an empty remainder and calls a half-deleted
+consumer finished.
+
+`read_removal_inventory` fails closed to `None` on anything unreadable —
+truncated bytes, a foreign `kind`, a future schema version, a missing
+bucket, a non-string entry, a symlink. `None` means "plan from the
+receipt", which is the correct pre-interruption behavior. Returning a
+partial inventory would be worse than returning none: the remainder it
+names would be a subset presented as the whole.
+
+**The residual is receipt-derived, asserted directly.** The partition has
+557 keep rows; `rwbp-coordinator` has 26 of them. A partition-derived
+residual writes a receipt vouching for files that are not on disk.
