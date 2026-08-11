@@ -772,10 +772,15 @@ def platform_marker_hits(
 ) -> dict[str, list[dict]]:
     """Undeclared codex/pi usage, as blocker entries.
 
-    Three markers, because `prd.md:204` requires three fixtures and says why:
-    "One combined case would pass while two of the three markers were never
-    implemented." A directory, an environment reference, and a pi adapter file
-    are three different ways to be a codex or pi consumer.
+    Four markers, each with its own fixture, for the reason `prd.md` gives:
+    one combined case would pass while the others were never implemented. A
+    populated platform directory, a `$CODEX_HOME` reference, a pi adapter
+    file, and a `codex` CLI invocation in command position are four different
+    ways to be a codex or pi consumer. Two things that look like markers are
+    not: an empty directory (R14-C1) and prose naming the command (R16-C2).
+    The docstring said "three" through round 16 because the CLI marker was
+    added to the rule and not to the paragraph describing it -- the same
+    corrected-in-one-artifact drift the ledger keeps recording.
 
     Each marker aggregates to one entry per consumer rather than one per hit.
     The finding is a fact about the consumer -- "this repository uses Codex and

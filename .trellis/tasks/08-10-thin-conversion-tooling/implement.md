@@ -326,7 +326,18 @@ research/fleet-blocker-scan.json
 Per-consumer `head`, `indexDigest`, and `worktreeDigest` plus full
 per-file results are committed in that JSON — several consumer trees are
 dirty, and `head` alone cannot identify a dirty tree, so the digests are
-what make a rerun comparable. Consumer-authored executable callers of
+what make a rerun comparable.
+
+> **Superseded measurement — kept for the shape, not the numbers
+> (R17).** The per-consumer counts in the next paragraph are an early
+> reading and disagree with the current one. Every later round moved
+> them, and the authoritative figures are the most recent ledger entry at
+> the end of this file. Read this paragraph for *what* the citations are
+> — CI workflows, `package.json` scripts, repo-owned tests, shell
+> preflights, agent instruction files, PR-template checklists — and never
+> for *how many*.
+
+Consumer-authored executable callers of
 removed paths: `sd-github-review` 15 hits in 11 files,
 `se-ai-command-pack` 26/11, `hoa-manager` 39/14, `mezmo_benchmark` 47/27,
 `rwbp-coordinator` 52/11, `loadsmith` 56/8, `rwbp-website` 67/10,
@@ -344,9 +355,13 @@ paths, and each consumer must repoint its
 execution surface. The first is pack work that gates all conversions; the
 second belongs to children 3–5 and materially enlarges them.
 - Codex/pi markers, each asserted separately rather than as one case:
-  a `.codex/` directory, a `$CODEX_HOME` reference, and a pi adapter
-  file each block when the registry `platforms` omits that platform, and
-  each clears when it is declared.
+  a **populated** `.codex/` or `.pi/` directory, a `$CODEX_HOME`
+  reference, a pi adapter file, and a `codex` CLI invocation in command
+  position each block when the registry `platforms` omits that platform,
+  and each clears when it is declared. Four markers, not three; an empty
+  directory is not usage and must not block (R14-C1), and prose naming
+  the command must not block (R16-C2). Each disposition is decided by
+  ownership first, per step 3's table.
 
 ### 4. Argument compatibility matrix
 
@@ -451,6 +466,15 @@ Merge `extraKnownMarketplaces` and `enabledPlugins` into
 `.claude/settings.json`, reading the marketplace name from
 `.claude-plugin/marketplace.json` and the plugin name from
 `plugins/sd/.claude-plugin/plugin.json` rather than hardcoding either.
+The marketplace **source locator** is in neither manifest: derive
+`{"source": "github", "repo": "<owner>/<name>"}` from `ROOT`'s `origin`
+remote per `design.md` §4, cross-check the owner against
+`marketplace.json`'s `owner.url`, and **block** on a non-GitHub host, a
+missing or unparseable `origin`, or an owner mismatch. Write no
+`autoUpdate` key. For this pack the merged additions are exactly
+`{"extraKnownMarketplaces": {"sd-ai-command-pack": {"source": {"source":
+"github", "repo": "platypeeps/sd-ai-command-pack"}}}, "enabledPlugins":
+{"sd@sd-ai-command-pack": true}}` — assert that literal, not a shape.
 
 Checks:
 - Every residual entry exists on disk, asserted before the write.
@@ -460,6 +484,13 @@ Checks:
 - `install.py --check` on the fixture reports `state: current`.
 - `read_consumer_pin` reports `state: "present"` with the expected
   version **and** `mode: "thin"` and a populated `settingsAdditions`.
+- The written `extraKnownMarketplaces` entry equals the literal above,
+  byte for byte after `json.dumps(sort_keys=True)`.
+- A pack checkout whose `origin` is `git@gitlab.com:platypeeps/sd-ai-command-pack.git`
+  blocks; so does one whose `origin` owner is `someone-else`. Neither
+  writes any part of `settings.json` — the locator is validated in the
+  plan phase, before the first consumer deletion.
+- No key named `autoUpdate` appears anywhere in the merged file.
   Asserting `present` alone proves nothing: an untouched fat provenance
   already passes it.
 - Settings: the exact marketplace and plugin entries are asserted by
@@ -1378,3 +1409,59 @@ mutation sweep that reports no failures is a broken sweep until proven
 otherwise. The valid form mutates the scanner in place and restores it in
 a `finally`.
 
+
+### Round 17 — Codex lane against `ef9e8fe5`, unaimed
+
+Round 16 returned no new defect classes, which is the stop condition this
+task has been running toward. It did not count, and the reason is worth
+recording: the round-16 prompt named round 15's five fixes as the place
+to look, so "no new classes" was partly a description of the prompt. Round
+17 was launched deliberately unaimed — told not to assume recent changes
+are the likely defect site, and told that the production `installer/` code
+the research scanner never calls is fair game. It returned three blockers,
+two of them in that production code, on the first look.
+
+| ID | Source | Defect | Fix |
+| --- | --- | --- | --- |
+| R17-C1 | Codex | **`expected_residual_targets()` never applies `retainVendoredFor`.** `classify_target` keeps a machine row whose platform is retained for a declared consumer platform; the residual formula considered only ordinary keep categories. A `codex` consumer's 75 retained targets were kept by the conversion and absent from what `--check` expects, so a correctly converted consumer would report refresh-required forever. `design.md:142` stated the same incomplete formula | The residual now walks machine rows through the same `_retained_for_consumer` predicate the classifier uses. Three unit tests, one of them asserting the two functions agree in *both* directions on the same target — the assertion that fails if either side is changed alone |
+| R17-C2 | Codex | **An unknown consumer platform failed open.** `build_conversion_plan()` never validated the supplied platforms against the partition's platform map. An unrecognized name retains nothing, so every machine surface a real declaration would have kept was classified for deletion, with `blocked` empty and `is_convertible` true. `prd.md:152` requires an unknown platform to stop the conversion | The plan blocks before classification, naming every unrecognized platform, with an empty delete set. Two unit tests, the second asserting all unknown platforms are reported rather than the first |
+| R17-C3 | Codex | **The settings writer could not derive its own required configuration.** "Read the values from the manifests, never hardcode" is not satisfiable: `extraKnownMarketplaces` needs a GitHub source locator and neither manifest carries one. An implementer would have had to guess `owner-name/marketplace-name`, which is correct here by coincidence | `design.md` §4 now defines the locator normatively: derived from `ROOT`'s `origin` remote, normalized to `<owner>/<name>`, cross-checked against `marketplace.json`'s `owner.url`, blocking on a non-GitHub host, a missing or unparseable remote, or an owner mismatch. The exact merged JSON is written out literally, and `autoUpdate` is deliberately absent with the reason — a self-updating marketplace moves a converted consumer off its pinned version with no PR, no resweep, and no receipt change |
+
+Three non-blocking items, all fixed in the same commit: the canary's
+global-Codex declaration is now an acceptance gate with a stated form and
+three answers rather than a paragraph the sequence could advance past;
+the scanner docstring and step 3's later checklist still said "three
+markers"; and the early per-consumer measurement table is now labeled
+superseded, with a pointer to the current ledger.
+
+**Harness blindness, demonstrated rather than argued.** Codex mutated the
+research scanner so `build_conversion_plan()` received an empty platform
+set, and all eight fleet rows plus all 121 unit cases were unchanged. The
+platform set reaching the plan was unbound by anything. It is unbound
+because the consumer platform argument changes the plan only through
+`retainVendoredFor`, and none of the eight consumers declares `codex` or
+`pi` — so the whole fleet is blind to it by construction. The synthetic
+case that already scans the same checkout with and without `codex`
+declared now also asserts `removedTargets` *falls* when it is declared.
+Re-running the same mutant against that case: `FAIL unit R17-C1 ... 121
+passed, 1 failed`.
+
+**Sixteenth measurement, and the first that equals its predecessor.**
+`sd-github-review` 16 blockers in 12 files, `se-ai-command-pack` 27 in 12,
+`hoa-manager` 37 in 12, `mezmo_benchmark` 47 in 27, `rwbp-coordinator` 52
+in 11, `loadsmith` 56 in 8, `rwbp-website` 68 in 11,
+`anomaly-metric-creator` 207 in 23; `packDefects` 17 in 8 files, 15 in 7
+where the consumer owns its PR template; 0 of 8 clear. Both fixes are on
+the declared-`codex` path, which no consumer takes, so an unchanged
+measurement is what a correct fix looks like here. Harness 122 passed, 0
+failed, 0 skipped — 28 fleet and 94 unit. Production suite unchanged and
+green.
+
+Codex's own verdict: not converged, and it expects another round to find
+more, "because examining production code that the scanner never calls
+immediately exposed two blockers — and the actual converter, settings
+merge, and revert mutators do not exist yet." That last clause is the
+honest limit of this whole review sequence: sixteen rounds have hardened a
+plan and a research scanner, and the three mutators the plan describes
+have no code to review. Round 18 is authorized and runs against this
+commit, again unaimed.

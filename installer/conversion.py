@@ -35,6 +35,10 @@ BOOKKEEPING_TARGETS = frozenset(
 MACHINE_CATEGORIES = frozenset({"machine-claude", "machine-other"})
 KEEP_CATEGORIES = frozenset({"repo-native", "consumer-config"})
 
+# The blocked-entry subject for a platform the partition cannot classify: the
+# defect is in the partition-to-registry relationship, not in any one target.
+PARTITION_SOURCE = "docs/fleet/surface-partition.json"
+
 RECEIPT_PRESENT = "present"
 RECEIPT_MISSING = "missing"
 RECEIPT_UNREADABLE = "unreadable"
@@ -215,6 +219,25 @@ def build_conversion_plan(
             blocked=(BlockedEntry(INSTALLED_TARGETS_FILE.as_posix(), detail),)
         )
 
+    # R17-C2: an unknown platform has no disposition, so `_retained_for_consumer`
+    # returns False for every row and the conversion deletes the machine surfaces
+    # a retained platform would have kept -- silently, with `blocked` empty. A
+    # platform this partition cannot classify is a question, not a permission.
+    unknown = sorted(
+        platform for platform in consumer_platforms if platform not in partition.platforms
+    )
+    if unknown:
+        return ConversionPlan(
+            blocked=tuple(
+                BlockedEntry(
+                    PARTITION_SOURCE,
+                    f"consumer declares platform {platform!r}, which the surface "
+                    f"partition does not classify",
+                )
+                for platform in unknown
+            )
+        )
+
     buckets: dict[str, list[str]] = {
         "delete": [],
         "retire": [],
@@ -270,16 +293,29 @@ def expected_residual_targets(
     would report `current` forever. Deriving it from every partition keep row
     fails the other way -- 557 rows against the ~27 a consumer can install.
     """
-    expected = {
-        target
-        for target in source_targets
-        if (row := partition.row(target)) is not None
-        and row.category in KEEP_CATEGORIES
-        # consumer-config rows are platform-independent (they carry
-        # platform "shared"); everything else must be a platform the
-        # consumer actually declares, or it is not installable here.
-        and (row.platform in consumer_platforms or row.category == "consumer-config")
-    }
+    expected: set[str] = set()
+    for target in source_targets:
+        row = partition.row(target)
+        if row is None:
+            continue
+        if row.category in KEEP_CATEGORIES:
+            # consumer-config rows are platform-independent (they carry
+            # platform "shared"); everything else must be a platform the
+            # consumer actually declares, or it is not installable here.
+            if row.platform in consumer_platforms or row.category == "consumer-config":
+                expected.add(target)
+            continue
+        # R17-C1: a machine row the consumer's platform choice retains is part
+        # of the residual, and this function used to compute the residual from
+        # keep categories alone. `classify_target` puts a retained machine row
+        # in `keep`, so a consumer declaring codex converts to 102 residual
+        # targets while this said 27 -- and `--check` measured the wrong tree.
+        # The two must ask `_retained_for_consumer` the same way or the
+        # converter and the inspector disagree by construction.
+        if row.category in MACHINE_CATEGORIES and _retained_for_consumer(
+            partition, row, consumer_platforms
+        ):
+            expected.add(target)
     # Managed-block files belong whenever they still exist, partition row or
     # not: a .gitignore whose block strip returned UPDATED survives, and
     # excluding it would make the source- and receipt-derived sets disagree on

@@ -1,28 +1,28 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "eec09c8cbdf41f40eb2d0c3ddc4ba71da116a9f7",
-  "packWorktreeDigest": "sha256:754f9f5cc82374d5ce53b1bc5296d3b9085d8a3c7315456dc142c789b113cf71",
+  "packHead": "ef9e8fe577504a6e6c7e676183cacf88328699da",
+  "packWorktreeDigest": "sha256:4114e54af0262b696fa8e61bb8546c4dd3db72acfd6f0587489b9205fe42539e",
   "packWorktreeClean": false,
   "packIndexFlagsDigest": "sha256:79a5a17998e4d0ac882946e401204089f700b56f893637d337705f44b20e068d",
   "packHiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "scannerDigest": "sha256:9b37064c532433682de2bb10d1001da63506156c2cc17794ae9ed6f13ee3fd08",
-  "counterexamplesDigest": "sha256:83eaa1da379cfae05df3a079cb1a5231294d86dc48e949e5e69948c06024fa22",
+  "scannerDigest": "sha256:81a56bc6985c3e097c428198d6e0f83e8cfa6c69bd68055c85ffc6fc29fc61c9",
+  "counterexamplesDigest": "sha256:08c9e7583c7351211a6883739b1510c8d1176cf4fb80388204c7b8717cc4229a",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
-      "head": "3229a402bb9296695add56d00340dc0d4fab0953",
-      "indexDigest": "sha256:851ac6b8650814a081943a79399782141241b440bfe33873ba2963e5dc97a129",
-      "indexFlagsDigest": "sha256:4f9600b56c9b9128dd82f735213beacc2ed75b27f875e6ce2a703fcc3678e1b5",
+      "head": "41915694fa1b74a7ed16cddff4966fc4afcac3dd",
+      "indexDigest": "sha256:1275a2cc1a0d0ebfd1dd5704cd47e0e35eebe52a962e0abd6f1a336632b2dc94",
+      "indexFlagsDigest": "sha256:6918385c03f11aac2acdb248817f4fddd0ff3d559acfd0cfc63a716039e54e90",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:32d4dcec3c59009edf4e0d89f843858a2f24c29387137553110af1b127fb6494",
-      "executableBitsDigest": "sha256:b5515e57714368207c6a8a3ac4a3da49c689df102e1b96418616d47cb1af9322",
+      "executableBitsDigest": "sha256:5cdc9c3a697096ce4c786126ce47258480a1615790b7b57b53033052a5c66774",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:69410c7e5ee8e4c2d351a1ed18a39f3119bef9849997566b25a9286ec9732ab3",
-      "platformMarkerDigest": "sha256:ee9dc2625070fc659f84b12a39d0d635f03dd09cc1df9e01876a23ffc2ff488b",
+      "scannedBytesDigest": "sha256:ecd3535c9c137b1c440582d97714fd352d8659a9010507e174f5a504f49f1ea1",
+      "platformMarkerDigest": "sha256:45cf7a4a633593241bf5043c82346d2dc3efe472209267ee924d578403ca6c3a",
       "binaryFiles": 10,
       "missingFiles": [],
       "receiptEntries": 210,
@@ -312,7 +312,7 @@
         {
           "file": "codex",
           "line": null,
-          "detail": "undeclared codex usage: the codex CLI is invoked in 34 surviving file(s), e.g. .agents/skills/playwright/SKILL.md"
+          "detail": "undeclared codex usage: the codex CLI is invoked in 33 surviving file(s), e.g. .agents/skills/playwright/SKILL.md"
         },
         {
           "file": "$CODEX_HOME",
@@ -1262,11 +1262,6 @@
           "detail": "`scripts/classify-ci-changes.sh`, `scripts/sd-ai-command-pack-full-check.sh`,"
         },
         {
-          "file": ".trellis/tasks/08-10-undici-8-ssrf-guard/planning-review.md",
-          "line": 44,
-          "detail": "| C-14 (NEW-1) | codex | blocking | `task.json` `description` is `\"\"`; the full-check preflight fails `task.json field description must be a non-empty string`, "
-        },
-        {
           "file": ".trellis/tasks/archive/2026-07/07-17-boot-secret-guards/check.jsonl",
           "line": 10,
           "detail": "{\"timestamp\":\"2026-07-20T13:48:00-06:00\",\"command\":\"SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-f"
@@ -1350,6 +1345,11 @@
           "file": ".trellis/tasks/archive/2026-08/08-03-refresh-sd-ai-command-pack-0-64-0/task.json",
           "line": 5,
           "detail": "\"description\": \"Managed fleet refresh of the vendored sd-ai-command-pack from installed 0.55.2 to release 0.64.0 (tag v0.64.0, commit ac1243b934bdcaefed72adfff8"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/08-10-undici-8-ssrf-guard/planning-review.md",
+          "line": 44,
+          "detail": "| C-14 (NEW-1) | codex | blocking | `task.json` `description` is `\"\"`; the full-check preflight fails `task.json field description must be a non-empty string`, "
         },
         {
           "file": ".trellis/workspace/sdelmas/journal-1.md",

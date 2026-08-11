@@ -574,6 +574,12 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
             marker_fired(declared),
             False,
         ),
+        (
+            "R17-C1",
+            "and the declaration reaches the plan: codex retains the vendored slice",
+            declared["removedTargets"] < occupied["removedTargets"],
+            True,
+        ),
     ]
 
     # R12-C4: a NUL byte does not mean "cannot execute".

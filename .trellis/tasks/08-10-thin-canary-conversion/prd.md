@@ -28,8 +28,10 @@ revert-and-restore proof.
 
 ## Requirements
 
-1. Per consumer, in order: run the resweep against that consumer's
-   exact HEAD **and clean worktree**, act on a `clear` verdict only,
+1. Per consumer, in order: record the operator's answer to the
+   global-Codex question below **in this file**, run the resweep against
+   that consumer's exact HEAD **and clean worktree**, act on a `clear`
+   verdict only,
    run `--thin`, open the consumer PR, land it green, then land the pack
    PR carrying that consumer's `mode: thin` row in
    `docs/fleet/consumers.json`. **The registry row is written by `--thin`,
@@ -124,6 +126,18 @@ revert-and-restore proof.
    repository whether they run Codex against it, and record the answer
    here alongside the marker evidence. An unanswered question is not a
    `clear` verdict.
+
+   **This is an acceptance gate, not advice (R17).** Requirement 1's
+   sequence advanced on a `clear` resweep alone, so a careful implementer
+   could execute the whole plan without the answer ever existing —
+   exactly the outcome this paragraph was written to prevent. The gate:
+   for each canary, a dated line in this file naming the consumer, who
+   was asked, and one of `runs codex`, `does not run codex`, or
+   `unanswered`. `unanswered` blocks that consumer. `runs codex` is not a
+   blocker — it selects the declared branch (`codex` in the registry
+   `platforms`, 104 removals, 102 retained) rather than the Claude-only
+   one, and the acceptance criteria compare against that branch. Only
+   `does not run codex` permits the 179-removal branch.
 4. One consumer-authored blocker is already measured and belongs to this
    task rather than to child 2b: `rwbp-coordinator/.prism/rules.json:55`
    is a live Prism **required** rule naming three removed paths. Its text

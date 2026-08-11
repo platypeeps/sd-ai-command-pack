@@ -22,6 +22,7 @@ def _temp_dir(case: unittest.TestCase) -> Path:
 
 from installer.conversion import (  # noqa: E402
     BOOKKEEPING_TARGETS,
+    PARTITION_SOURCE,
     RECEIPT_MISSING,
     RECEIPT_PRESENT,
     RECEIPT_UNREADABLE,
@@ -106,6 +107,11 @@ def simple_partition(tmp: Path):
                     "retainVendoredFor": ["codex", "pi"],
                 },
                 "github": {"scope": "repo-native", "provisional": False},
+                # gemini and opencode carry no rows in this fixture but the
+                # partition still classifies them; a consumer may declare a
+                # platform whose surfaces this slice happens not to include.
+                "gemini": {"scope": "machine", "provisional": False},
+                "opencode": {"scope": "machine", "provisional": False},
                 "cursor": {"scope": "repo-native", "provisional": False},
                 "weird": {"scope": "repo-native", "provisional": False},
                 "provisionaly": {"scope": "machine", "provisional": True},
@@ -291,6 +297,41 @@ class BuildConversionPlanTests(InstallTestCase):
         )
         self.assertIn("unusable", plan.blocked[0].reason)
 
+    def test_a_platform_the_partition_cannot_classify_blocks(self) -> None:
+        # R17-C2. An unknown platform used to fail *open*: no row retains for
+        # it, so every machine surface a real declaration would have kept got
+        # classified for deletion with `blocked` empty. The plan has to refuse
+        # instead -- the partition is the only thing that knows what a platform
+        # name means, and it does not know this one.
+        from installer.conversion import ReceiptLoad
+
+        entries = frozenset({".agents/skills/sd-check/SKILL.md"})
+        plan = build_conversion_plan(
+            ReceiptLoad(state=RECEIPT_PRESENT, entries=entries),
+            self.partition,
+            frozenset({"claude", "not-a-platform"}),
+            occupied=entries,
+        )
+        self.assertFalse(plan.is_convertible)
+        self.assertEqual(plan.delete, ())
+        self.assertEqual(len(plan.blocked), 1)
+        self.assertEqual(plan.blocked[0].target, PARTITION_SOURCE)
+        self.assertIn("not-a-platform", plan.blocked[0].reason)
+
+    def test_every_unknown_platform_is_named_not_just_the_first(self) -> None:
+        from installer.conversion import ReceiptLoad
+
+        plan = build_conversion_plan(
+            ReceiptLoad(state=RECEIPT_PRESENT, entries=frozenset()),
+            self.partition,
+            frozenset({"zeta-platform", "alpha-platform"}),
+            occupied=frozenset(),
+        )
+        self.assertEqual(
+            [entry.reason.split("'")[1] for entry in plan.blocked],
+            ["alpha-platform", "zeta-platform"],
+        )
+
     def test_entries_land_in_their_buckets(self) -> None:
         plan = self.build(
             [
@@ -334,6 +375,7 @@ class ExpectedResidualTests(InstallTestCase):
                 ".github/copilot-instructions.md",
                 ".prism/rules.json",
                 ".cursor/commands/sd-check.md",
+                ".agents/skills/sd-check/SKILL.md",
             }
         )
 
@@ -370,6 +412,49 @@ class ExpectedResidualTests(InstallTestCase):
 
     def test_bookkeeping_files_are_always_expected(self) -> None:
         self.assertTrue(BOOKKEEPING_TARGETS.issubset(self.residual()))
+
+    def test_a_source_target_with_no_partition_row_is_skipped(self) -> None:
+        # The source manifest and the partition are generated separately, so a
+        # freshly shipped file can reach one before the other. An unclassified
+        # target cannot be judged expected or unexpected, and guessing either
+        # way would make --check wrong until the partition catches up.
+        expected = expected_residual_targets(
+            self.source | {".newly/shipped.md"},
+            self.partition,
+            CONSUMER_PLATFORMS,
+            present_managed_blocks=frozenset(),
+        )
+        self.assertNotIn(".newly/shipped.md", expected)
+
+    def test_a_vendor_retained_machine_row_is_expected(self) -> None:
+        # R17-C1. `.agents/skills/sd-check/SKILL.md` is machine-other on the
+        # shared platform, which declares retainVendoredFor ["codex", "pi"].
+        # classify_target keeps it for a consumer that declares codex, so the
+        # expected residual has to hold it too or --check reports a permanent
+        # drift against a file conversion deliberately left in place.
+        platforms = frozenset(CONSUMER_PLATFORMS | {"codex"})
+        self.assertIn(".agents/skills/sd-check/SKILL.md", self.residual(platforms=platforms))
+
+    def test_the_same_row_is_absent_without_the_vendor_platform(self) -> None:
+        self.assertNotIn(".agents/skills/sd-check/SKILL.md", self.residual())
+
+    def test_classification_and_residual_agree_in_both_directions(self) -> None:
+        # The two halves of R17-C1: whichever way the platform set falls, the
+        # bucket classify_target picks and the membership --check expects must
+        # be the same answer. This is the assertion that fails if either side
+        # is changed alone.
+        target = ".agents/skills/sd-check/SKILL.md"
+        for platforms, bucket, expected in (
+            (frozenset(CONSUMER_PLATFORMS | {"codex"}), "keep", True),
+            (CONSUMER_PLATFORMS, "delete", False),
+        ):
+            with self.subTest(platforms=sorted(platforms)):
+                self.assertEqual(
+                    classify_target(target, self.partition, platforms), (bucket, None)
+                )
+                self.assertEqual(
+                    target in self.residual(platforms=platforms), expected
+                )
 
 
 class ClassifierDigestTests(InstallTestCase):

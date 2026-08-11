@@ -149,9 +149,23 @@ expected_residual(source, consumer) =
       | partition[target].category ∈ {repo-native, consumer-config}
         AND ( partition[target].platform ∈ consumer.platforms
               OR partition[target].category == "consumer-config" ) }
+  ∪ { target ∈ source manifest
+      | partition[target].category ∈ MACHINE_CATEGORIES
+        AND retained_for_consumer(partition[target], consumer.platforms) }
   ∪ every MANAGED_BLOCK_REMOVAL_TARGETS member that exists in the target
   ∪ the three .sd-ai-command-pack/ bookkeeping files
 ```
+
+**The second clause is R17-C1 and was missing until round 17.** It is the
+same `retained_for_consumer` predicate `classify_target` uses to decide a
+machine row's bucket — provisional platform, or `retainVendoredFor`
+intersecting the consumer's declared platforms. Omitting it here while
+the classifier applies it there makes the two disagree by exactly the 75
+targets a declared-`codex` consumer keeps: conversion leaves them in
+place, `--check` does not expect them, and the consumer reports
+`refresh-required` forever for files that are correctly present. Whatever
+the classifier calls `keep`, this set contains — that equivalence is
+asserted in both directions in `tests/test_conversion_plan.py`.
 
 **The platform predicate is the part round 2 left undefined, and it is
 measured rather than assumed.** Without it, hundreds of `repo-native`
@@ -660,9 +674,16 @@ CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the fifteenth measurement, and the fourteen before them were
+**These are the sixteenth measurement, and the fifteen before them were
 each wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
+
+The sixteenth is the first that equals its predecessor: round 17's two
+defects were in `installer/conversion.py`, on the path only a consumer
+declaring `codex` or `pi` takes, and none of the eight declares either.
+An unchanged number is evidence about *where* the round looked, not that
+the rule has stopped moving — round 17 reached production code the
+scanner never calls, and found blockers there on its first look.
 
 - *Discovery searched for the wrong thing.* The first scanner found
   candidate files by grepping for the string `sd-ai-command-pack`, then
@@ -926,6 +947,54 @@ the pack source does not consume itself as a plugin. The exact additions are rec
 `settingsAdditions` so revert removes precisely those and nothing else.
 A malformed existing `settings.json` is a blocker, not something to
 overwrite.
+
+**The exact merged JSON, normatively (R17-C3).** "Read the names from the
+manifests" was underdetermined: `extraKnownMarketplaces` needs a *source
+locator*, and neither manifest carries one. `marketplace.json` names the
+owner (`owner.url`, `https://github.com/platypeeps`) and the marketplace
+(`name`, `sd-ai-command-pack`); `plugin.json` names the plugin (`sd`).
+Nothing there says which GitHub repository serves the marketplace, and an
+implementer who guessed `owner-name/marketplace-name` would be guessing —
+the two are equal here by coincidence, not by contract. The writer
+therefore derives the locator from the pack source checkout it is already
+running against, and refuses when the derivation is not unambiguous:
+
+- `repo` is `ROOT`'s `origin` remote, normalized to `<owner>/<name>`:
+  `git@github.com:owner/name.git`, `https://github.com/owner/name.git`,
+  and `https://github.com/owner/name` all normalize to `owner/name`. A
+  host other than `github.com`, a missing `origin`, more than two path
+  segments, or an unparseable URL is a **blocker** — never a fallback
+  guess, because a wrong locator points every converted consumer at
+  someone else's marketplace.
+- The derived owner must equal the final path segment of
+  `marketplace.json`'s `owner.url`. A mismatch means the checkout being
+  converted from is a fork or a rename in flight, and blocks.
+- The `extraKnownMarketplaces` key is `marketplace.json`'s `name`; the
+  `enabledPlugins` key is `<plugin name>@<marketplace name>`.
+
+For this pack that resolves to exactly:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "sd-ai-command-pack": {
+      "source": { "source": "github", "repo": "platypeeps/sd-ai-command-pack" }
+    }
+  },
+  "enabledPlugins": { "sd@sd-ai-command-pack": true }
+}
+```
+
+**No `autoUpdate` key is written, deliberately.** The thin footprint is
+version-bound: the pin records a version, `--check` compares against it,
+and `--revert-thin` restores the payload that version shipped. A
+marketplace that updated itself would move a converted consumer off its
+pinned version with no PR, no resweep, and no receipt change — the pin
+would claim a version the consumer no longer runs. Updates travel the
+same path as every other pack change: a fleet refresh that rewrites the
+pin. If a future settings schema makes auto-update the default rather
+than an opt-in key, that is a change to this contract and gets written
+down here, not absorbed silently.
 
 ### 5. `install.py TARGET --revert-thin` (contract C-D)
 
