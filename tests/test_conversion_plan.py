@@ -472,32 +472,40 @@ class ClassifierDigestTests(InstallTestCase):
         )
         self.assertNotEqual(first, second)
 
-    def test_digest_covers_every_declared_input_file(self) -> None:
+    def test_a_manifest_that_is_not_an_object_yields_no_template_sources(self) -> None:
+        # A digest input must not raise on bytes it cannot use: `manifest.json`
+        # is itself hashed, so an unusable manifest still moves the digest, and
+        # failing here would break the digest on a condition every other caller
+        # reports properly.
+        from installer.conversion import force_preserved_template_sources
+
         scratch = _temp_dir(self) / "pack"
-        for relative in (
-            "docs/fleet/surface-partition.json",
-            ".claude-plugin/marketplace.json",
-            "plugins/sd/.claude-plugin/plugin.json",
-            "installer/removal.py",
-            "installer/registry.py",
-            "installer/conversion.py",
-        ):
+        scratch.mkdir(parents=True, exist_ok=True)
+        (scratch / "manifest.json").write_text("[1, 2, 3]\n", encoding="utf-8")
+        self.assertEqual(force_preserved_template_sources(scratch), ())
+
+        (scratch / "manifest.json").write_text("{not json\n", encoding="utf-8")
+        self.assertEqual(force_preserved_template_sources(scratch), ())
+
+    def test_digest_covers_every_declared_input_file(self) -> None:
+        # Enumerated from the constant the function itself reads, never from a
+        # second copy of the list: an input added to one and not the other is
+        # exactly the drift this test exists to catch.
+        from installer.conversion import (
+            CLASSIFIER_DIGEST_PATHS,
+            force_preserved_template_sources,
+        )
+
+        declared = (*CLASSIFIER_DIGEST_PATHS, *force_preserved_template_sources(ROOT))
+        scratch = _temp_dir(self) / "pack"
+        for relative in declared:
             destination = scratch / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, destination)
 
         entry = {"name": "demo", "platforms": ["claude"]}
         baseline = classifier_digest(scratch, entry)
-        for relative in (
-            "docs/fleet/surface-partition.json",
-            ".claude-plugin/marketplace.json",
-            "plugins/sd/.claude-plugin/plugin.json",
-            "installer/removal.py",
-            "installer/registry.py",
-            # The builder itself: an edit here moves the delete set while
-            # every other digest input stays byte-identical.
-            "installer/conversion.py",
-        ):
+        for relative in declared:
             path = scratch / relative
             original = path.read_bytes()
             path.write_bytes(original + b"\n# drift\n")
@@ -507,7 +515,6 @@ class ClassifierDigestTests(InstallTestCase):
                 f"editing {relative} left the classifier digest unchanged",
             )
             path.write_bytes(original)
-
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -1787,3 +1787,58 @@ Round 20's verification: harness 124 passed, 0 failed; production suite
 produced `121 passed, 3 failed`; restore digest matched before and after;
 724 partition rows matched 724 manifest rows with declared counts
 `6 / 79 / 88 / 551` correct; worktree clean at exit.
+
+### Step 3 — built
+
+`scripts/sd-ai-command-pack-thin-resweep.py` ships, `classifier_digest`
+gains its four inputs, and `tests/test_thin_resweep.py` carries 27
+fixtures.
+
+**Where the rule lives, changed from the plan.** Step 3 said the builder
+belongs under `installer/` because that inherits the 100% coverage gate,
+and I first read that as applying to the rule too. It does not, and
+shouldn't: `installer/` is the *installed* library and the resweep never
+ships, so putting 573 statements of classification there would hold
+non-shipping research code to a stricter bar than the installer it is
+not part of. The deciding argument is the digest: `classifier_digest`
+hashes `scripts/sd-ai-command-pack-thin-resweep.py`, and that only binds
+the rule if the rule is in that file. Split across a module, an edit to
+the classification could move a verdict while the hashed path stayed
+byte-identical — the exact failure the four new digest inputs exist to
+prevent. So the rule sits in the script, under the shipped-script
+coverage floor, mirroring the research scanner's own shape.
+
+**The port reproduces the reference exactly.** Independent code path,
+same consumer, same numbers: `rwbp-coordinator` → `blockers 52,
+packDefects 17, scheduled 182, advisories 115`, matching
+`research/fleet-blocker-scan.json` field for field. That is the check
+worth having, because a port is precisely where a rule quietly changes.
+
+**Two divergences from the research copy, both deliberate:**
+
+- The scan no longer decides. `decide()` owns the verdict and returns
+  *reasons*, plural — a caller told `blocked` and not why cannot act, and
+  "the tree was dirty" and "the pack ships a broken reference" call for
+  opposite responses. The shipped tool refuses a dirty worktree
+  (`prd.md:62`); the research copy must not, since six of eight consumers
+  are dirty and gating on cleanliness would report `blocked` everywhere
+  for a reason unrelated to conversion.
+- `scheduled` is per citation. Verified rather than assumed: two
+  references to the same removed path in two surviving files produce two
+  entries.
+
+**What the fixtures caught about the plan's own description.** Platform
+markers are recorded against the *platform* as subject — `codex`,
+`$CODEX_HOME` — with the citing file in `detail`, not against the file.
+That is right (one undeclared platform is one finding however many files
+evidence it) and it is not what step 3's prose implies. Two of my first
+assertions encoded the prose and failed; the code was correct.
+
+**Mutation evidence.** `is_executable_surface` forced to `False` fails 1
+fixture; `cites_removed_path` forced to `None` fails 3. File digest
+identical before and after each restore.
+
+Coverage: the new script measures 76%, at the shipped-script aggregate
+floor. Uncovered lines are concentrated in the symlink-resolution and
+managed-block-span branches, which no fixture reaches yet — recorded
+here rather than left implicit, since 76% is the floor and not a target.

@@ -16,6 +16,7 @@ from pathlib import Path
 from installer.manifest import target_destination
 from installer.provenance import PIN_KEYS
 from installer.registry import (
+    FORCE_PRESERVED_TARGETS,
     INSTALLED_TARGETS_FILE,
     PACK_MANIFEST_FILE,
     PROVENANCE_FILE,
@@ -509,6 +510,29 @@ def read_thin_receipt(target: Path) -> ThinReceipt | None:
     )
 
 
+# Every file whose bytes decide what a conversion does. Declared once so
+# `classifier_digest` and the test that proves each input is covered read the
+# same list -- a second hand-maintained copy is how an input gets added to one
+# and not the other.
+CLASSIFIER_DIGEST_PATHS = (
+    "docs/fleet/surface-partition.json",
+    ".claude-plugin/marketplace.json",
+    "plugins/sd/.claude-plugin/plugin.json",
+    "installer/removal.py",
+    "installer/registry.py",
+    "installer/conversion.py",
+    # The builder decides what is removed; the resweep decides what counts
+    # as a hit, as an execution surface, and as a citation. Without it, an
+    # edit to the surface rule or the glob matcher leaves an existing
+    # `clear` verdict valid under an unchanged digest.
+    "scripts/sd-ai-command-pack-thin-resweep.py",
+    # The manifest names the payload and the force-preserved templates;
+    # `installer/manifest.py` decides how those rows are read.
+    "manifest.json",
+    "installer/manifest.py",
+)
+
+
 def classifier_digest(root: Path, consumer_entry: dict) -> str:
     """Hash everything that determines what a conversion does.
 
@@ -519,22 +543,48 @@ def classifier_digest(root: Path, consumer_entry: dict) -> str:
     invisible.
     """
     digest = hashlib.sha256()
-    for relative in (
-        "docs/fleet/surface-partition.json",
-        ".claude-plugin/marketplace.json",
-        "plugins/sd/.claude-plugin/plugin.json",
-        "installer/removal.py",
-        "installer/registry.py",
-        "installer/conversion.py",
-    ):
+    for relative in CLASSIFIER_DIGEST_PATHS:
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         digest.update((root / relative).read_bytes())
+        digest.update(b"\0")
+    # The force-preserved ownership proof compares a consumer's file against
+    # the pack's shipped template bytes, so a changed template flips
+    # `.github/PULL_REQUEST_TEMPLATE.md` between `packDefects` and `blockers`
+    # while every path above stays byte-identical. Enumerated from the
+    # manifest rather than re-typed, so a new force-preserved target is
+    # covered by existing.
+    for source in force_preserved_template_sources(root):
+        digest.update(source.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((root / source).read_bytes())
         digest.update(b"\0")
     digest.update(
         json.dumps(consumer_entry, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
     return f"sha256:{digest.hexdigest()}"
+
+
+def force_preserved_template_sources(root: Path) -> tuple[str, ...]:
+    """Template sources for the force-preserved targets, in manifest order.
+
+    An unparseable manifest yields no rows rather than raising: this is a
+    digest input, and `manifest.json`'s own bytes are already hashed above, so
+    a manifest nobody can read still moves the digest. Raising here would make
+    the *digest* fail on a condition every other caller reports properly.
+    """
+    try:
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    if not isinstance(manifest, dict):
+        return ()
+    preserved = {path.as_posix() for path in FORCE_PRESERVED_TARGETS}
+    return tuple(
+        row["source"]
+        for row in manifest.get("files", ())
+        if row.get("target") in preserved and row.get("source")
+    )
 
 
 __all__ = [
@@ -555,6 +605,7 @@ __all__ = [
     "classifier_digest",
     "classify_target",
     "expected_residual_targets",
+    "force_preserved_template_sources",
     "load_partition",
     "occupied_receipt_targets",
     "read_installed_targets_receipt",
