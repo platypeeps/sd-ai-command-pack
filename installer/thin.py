@@ -16,7 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from installer.fileops import backup_existing_file, remove_text_block_file
+from installer.fileops import (
+    atomic_write_text,
+    backup_existing_file,
+    remove_text_block_file,
+)
 from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     COPILOT_GUIDANCE_END,
@@ -690,7 +694,18 @@ def repoint_kept_references(
         # sibling `.bak`. Reusing it keeps one backup layout for the whole
         # conversion instead of a second one only this step produces.
         backup_existing_file(target, path, backup=backup, dry_run=False)
-        path.write_text(rewritten, encoding="utf-8")
+        # `atomic_write_text`, not `Path.write_text`: this was the installer's
+        # only write site not routed through the helper, and both differences
+        # matter here. `write_text` opens in text mode, so a platform whose
+        # line separator is not `\n` translates on the way out -- and the
+        # digest `repointed_provenance_files` records is taken from
+        # `text.encode("utf-8")`, which does not. That desynchronizes the
+        # receipt from the bytes on disk and reintroduces the exact
+        # "vouched target content drifted" failure this whole seam exists to
+        # remove. It is also not atomic: an interrupted write leaves a kept
+        # file truncated, mid-conversion, with the receipt already vouching
+        # for its full text.
+        atomic_write_text(path, rewritten)
         changed += 1
     return changed
 

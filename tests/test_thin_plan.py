@@ -789,6 +789,39 @@ class RepointPlanTests(unittest.TestCase):
         updated = thin.repointed_provenance_files({}, {"doc.md": "new\n"})
         self.assertEqual(updated, {})
 
+    def test_the_bytes_written_hash_to_the_digest_recorded(self) -> None:
+        """The invariant the whole seam rests on, asserted end to end.
+
+        `repointed_provenance_files` hashes `text.encode("utf-8")` while
+        `repoint_kept_references` writes the same text to disk. If those two
+        ever disagree -- a text-mode write translating line separators is the
+        way it happens -- a freshly converted consumer reports `state: invalid`
+        with "vouched target content drifted" for every file this step touched,
+        which is the failure the install-time seam exists to remove.
+
+        Carrying an embedded `\\r\\n` is deliberate. On a platform whose line
+        separator is `\\n` this passes either way, so it does not by itself
+        prove the write is byte-exact; what it pins is the contract, in the
+        one place where a future edit back to `Path.write_text` would break
+        it silently on a platform this repository's CI does not run.
+        """
+
+        root = self.target
+        path = root / "doc.md"
+        path.write_bytes(b"before\r\nsecond line\n")
+        rewritten = "after\r\nsecond line\n"
+
+        thin.repoint_kept_references(root, {"doc.md": rewritten}, backup=False)
+
+        recorded = thin.repointed_provenance_files(
+            {"doc.md": "sha256:carried-forward"}, {"doc.md": rewritten}
+        )["doc.md"]
+        on_disk = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertEqual(recorded, f"sha256:{on_disk}")
+        # And the bytes themselves, so a failure names the cause rather than
+        # only a hash mismatch.
+        self.assertEqual(path.read_bytes(), rewritten.encode("utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
