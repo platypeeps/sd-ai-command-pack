@@ -372,14 +372,30 @@ direction, `--force` on revert, `--consumer` alone and with each
 non-conversion mode, and the allowed rows. Land this before the mutators
 so dispatch order can never silently pick a winner.
 
-One row is not about flag pairs and is easy to lose because of that:
-**standalone `--remove` on a `mode: thin` consumer must refuse**
-(R18-C2). It reads the same `read_thin_receipt` predicate `--check`
-uses, exits nonzero without touching anything, and names `--revert-thin`
-as the first step. Land it in this step, with the other matrix rows,
-rather than inside step 7 — it is a guard on an *existing* shipped
-command, and every day it is missing is a day `--remove` can strand an
-enabled plugin in a repository with no receipt.
+Two rows are not about flag pairs and were lost because of that. Both
+are **shipped** as of round 19 rather than deferred to this step, because
+each guards a command that exists today and corrupts a thin consumer:
+
+- **`--remove` on a thin consumer refuses** (R18-C2). It deleted
+  provenance while leaving the plugin enabled and the registry saying
+  `thin`.
+- **Ordinary `install.py TARGET` refuses** (R19-C1). This is the worse
+  one because it is routine: a fleet refresh rewrites the receipt without
+  the pin and discards `settingsAdditions`, silently de-thinning every
+  converted consumer at once while the registry still reads `thin`.
+
+Both read `conversion.thin_pin_state()`, not `read_thin_receipt` as this
+step originally said — that reader collapses "fat" and "damaged" into the
+same `None`, which is right for narrowing a payload and wrong for a
+destructive guard (R19-C4). `malformed` refuses alongside `thin`.
+
+Refusal rather than thin-awareness, for both, on the argument the matrix
+gives: refreshing or undoing a thin consumer needs the pack root as well
+as the target, and neither command takes one. **A thin-aware refresh is a
+real surface and it is not optional** — `sd-fleet-refresh` runs ordinary
+install against every consumer, so a converted consumer cannot be
+refreshed until it exists. It is filed as its own step below and blocks
+the canary, not this task's shipping.
 
 Check: each rejected row exits nonzero with a message naming both flags;
 each allowed row reaches its handler. A row that merely "does something
@@ -435,6 +451,31 @@ Checks:
   this, the failure surfaces only after the consumer is already gutted.
 - Mid-operation failure injection on `--thin`: consumer written, registry
   write failing, reports which half completed and exits nonzero.
+- **One injection per write step, not one for the pair (R19-C6).** The
+  design fixes the order — settings, receipts with provenance last,
+  deletions, registry — precisely so each interruption is a named state.
+  Inject a failure after each and assert the state the table predicts,
+  **and** that re-running the same command converges:
+  - after the settings merge → reads fat with additions; re-run is a
+    no-op merge and completes;
+  - between the three receipt rewrites → `--check` says `invalid`
+    (`inspection` requires all three); re-run completes;
+  - immediately after provenance, before any deletion → `--check` says
+    thin, the payload is still present, re-run deletes exactly the
+    remainder;
+  - part-way through the deletions → same, and the second run's plan is
+    the remainder rather than the original 179.
+  The negative is the point of the ordering: assert that no injection
+  produces a consumer with deleted machine surfaces and a *fat* receipt,
+  which is the one state a re-run cannot tell from a botched manual
+  deletion.
+- `--force` scope (R19-C6): a forced conversion overrides removal drift
+  in **all three** buckets — a drifted delete target, a drifted retire
+  target, and a drifted block-strip file — and overrides nothing else. A
+  settings collision, a stale receipt, an unwritable root, and a missing
+  resweep verdict each still refuse under `--force`. One test per row;
+  the matrix previously said "delete drift, nothing else" while this plan
+  applied it to three buckets and the reused helper honored all three.
 
 ### 6. Receipt rewrite and `settings.json` merge
 
@@ -457,6 +498,42 @@ source targets whose partition platform the consumer declares (or whose
 category is `consumer-config`, which is platform-independent), plus
 every existing `MANAGED_BLOCK_REMOVAL_TARGETS` member, plus the three
 bookkeeping files.
+
+**The two sets diverge when the receipt is stale, and right now they do
+(R19-C2).** All eight consumer receipts hold 210 entries and none of
+them lists `scripts/sd-ai-command-pack-pack-update.sh`, which the current
+manifest ships and the partition classifies as a `shared` machine row —
+so a consumer declaring `codex` retains it. Round 19 measured the gap
+with the production functions:
+
+```text
+planned residual:  106
+expected residual: 107
+missing from every planned residual: scripts/sd-ai-command-pack-pack-update.sh
+```
+
+A receipt-derived residual can therefore convert cleanly and fail
+`--check` on the next command, for a file the conversion never had a
+chance to keep because the consumer never had it. This is not a bug in
+either formula: one describes what is here, the other what should be,
+and a stale install makes them different by construction.
+
+**Conversion requires a current install, checked explicitly.** Before
+planning, compare the consumer's installed version against the source
+manifest version and refuse when they differ, naming both and the
+`install.py TARGET` that fixes it. The version comparison is the cheap
+proxy; the exact assertion is the one that matters, so also compute both
+residuals and refuse when the source-derived set is not a subset of the
+receipt-derived one, naming every missing target. That second check
+catches a consumer whose version matches but whose tree was refreshed
+against a partially applied install.
+
+Rejected alternative: having conversion *add* the missing retained
+targets. It sounds accommodating and it makes conversion a partial
+installer — a two-root command that writes new files into a consumer
+while deleting 179 others, in a single PR whose reviewers were told it
+only removes. The resweep verdict would also not cover the added files.
+A conversion that refuses a stale consumer costs one `install.py` run.
 
 Checks on the formula itself, each one able to fail:
 - The two sets agree immediately after conversion **on a fixture whose
@@ -557,6 +634,18 @@ Checks:
   container the consumer already had keeps its other entries. `settings.json`
   itself is deleted only when `createdFile` is true and the object is
   empty.
+- Disable-marker precedence (R19-C5), three tests against `design.md`
+  §5's table: conversion-added and unedited → the key ends as `false`,
+  not absent; conversion-added and edited since → left as edited, named
+  in the report; already `true` before conversion → left `true`, named
+  in the report. The third is the one that would be silently wrong: it
+  disables a plugin the consumer enabled themselves.
+- Restore-path collision (R19-C3): a consumer file created at a path the
+  conversion deleted makes revert refuse **before any write**, naming
+  every occupied path, with receipts and registry unflipped and the
+  tree otherwise untouched. `--force` does not override it and is still
+  rejected outright. A path re-created with bytes equal to the source is
+  **not** a collision and reverts as a no-op.
 - Pin version ≠ source manifest version: refuses, naming both. Byte
   restoration is not reconstructible across versions
   (`install.py:803`).
@@ -594,6 +683,36 @@ not per directory.
 Record in this file, on completion, that no live consumer exercises this
 path: the coverage is synthetic and must not be reported as
 fleet-proven.
+
+### 9b. Thin-aware refresh (blocks the canary, not this task)
+
+Ordinary `install.py TARGET` currently **refuses** a thin consumer
+(R19-C1). That is fail-closed and it is not the end state: `sd-fleet-refresh`
+runs exactly that command against every consumer, so no converted
+consumer can receive a pack update until this step exists. Nothing is
+converted yet, which is the only reason refusing is survivable.
+
+The shape, reusing what step 2 already built:
+
+- Narrow the payload with the same `_residual_files_for_thin` predicate
+  `--check` uses, so refresh and inspection agree by construction rather
+  than by a second formula.
+- Carry the pin forward: `read_existing_provenance_pin` already exists
+  and `_run_inspection` already passes it. The fat writer drops the pin
+  deliberately (`provenance.py:88`); the thin path must pass it and
+  update only `version`.
+- Refuse a refresh that would change the residual *set* rather than its
+  contents — a newly shipped repo-native file legitimately enlarges it,
+  but a platform change does not belong in a refresh, and silently
+  re-deriving the residual from a different platform set is how a refresh
+  becomes an unreviewed conversion.
+- `--platform`/`--all` stay rejected on a thin consumer: the pin owns the
+  platform set.
+
+Checks: a converted fixture refreshes to a new version, stays thin, keeps
+`settingsAdditions` byte-identical, and reports `state: current`
+afterwards; the machine payload is not re-created; a fat consumer's
+refresh is unchanged.
 
 ### 10. Spec and release obligations
 
@@ -1551,3 +1670,78 @@ something another review round can fix. Three of the four blockers this
 round were in code that exists; the fourth was in a contract for code
 that does not. The remaining review surface is thinning, and what is left
 is mostly a demand for implementation rather than for more planning.
+
+### Round 19 — Codex lane against `08e76be9`, unaimed, third in a row
+
+Round 18's fixes were named in the prompt as **not** the likely defect
+site. Round 19 returned six blockers and opened its verdict by answering
+the question the prompt asked: none of them is merely a demand to write
+the missing mutators — each is a contract gap that has to be resolved
+*before* that code can be written safely. Two were live defects in
+shipped commands.
+
+| ID | Source | Defect | Fix |
+| --- | --- | --- | --- |
+| R19-C1 | Codex | **Ordinary `install.py TARGET` silently de-thins a consumer.** A converted fixture followed by a plain refresh exited 0, rewrote provenance without `mode: thin`, and discarded `settingsAdditions` — while the plugin stayed enabled and the registry still read `thin`. This is the command `sd-fleet-refresh` runs against every consumer, so one fleet refresh would have de-thinned the whole fleet at once. The matrix guarded `--remove` and had no row for the routine case | **Shipped**: ordinary install and `--remove` both refuse a thin or malformed consumer, before any work. Thin-aware refresh is filed as step 9b and **blocks the canary** — a converted consumer cannot receive a pack update until it exists. Refusing is survivable only because nothing is converted yet |
+| R19-C2 | Codex | **A receipt-first residual can convert cleanly and immediately fail `--check`.** Conversion derives the residual from the old receipt; inspection derives expectations from the current source. All eight receipts hold 210 entries and none lists `scripts/sd-ai-command-pack-pack-update.sh`, a shared machine row a `codex` consumer retains. Measured: `planned residual 106, expected residual 107` | Conversion requires a current install — version equality as the cheap check, plus the exact assertion that the source-derived residual is a subset of the receipt-derived one. Rejected the accommodating alternative: having conversion *add* the missing targets makes it a partial installer that writes new files into a consumer in a PR whose reviewers were told it only removes, and the resweep verdict would not cover them |
+| R19-C3 | Codex | **Revert has an unhandled restore collision.** A consumer may create a file at a path the conversion deleted; `fileops` returns `conflict` unforced and `overwritten` forced, but the matrix forbids `--force` on revert on the ground that revert makes no drift decision — true of deletion drift, false of restore-path occupancy | Revert preflights every restore path and refuses the whole operation, listing the occupied paths, before touching receipts or registry. `--force` stays rejected: overwriting a consumer's file to reach a state they had before is the wrong default and the wrong flag. A path re-created with source-equal bytes is not a collision |
+| R19-C4 | Codex | **The planned thin-removal predicate was not fail-closed.** `read_thin_receipt` collapses unreadable, malformed-mode, and fat provenance to the same `None` — right for narrowing a payload, wrong for a destructive guard. A receipt carrying thin pin keys under `mode: "thin-corrupt"` read as fat. And `platforms: [1]` reached `unusable_thin_pin_reason`, which raised `TypeError` joining it | **Shipped**: `thin_pin_state()` returns `fat` / `thin` / `malformed`, and the guards refuse on the last two. `malformed` means the receipt parses and carries thin pin keys that are not a readable pin — **not** merely "unreadable"; see the correction below. Platform parsing is all-or-nothing: `["claude", 1]` filtered element-wise yields `{"claude"}`, which looks like a deliberate single-platform declaration |
+| R19-C5 | Codex | **Settings ownership and the disable marker cannot both hold.** §4 says revert leaves an edited recorded value and never touches a key conversion did not add; §5 says revert writes the plugin key as `false`. For a pre-existing `true`, or a value edited after conversion, both are impossible | A precedence table. The marker is written only over a value this conversion wrote and still owns; otherwise revert leaves it and says so. Disabling a plugin someone else enabled is a decision about their tooling made by a command they ran to undo ours |
+| R19-C6 | Codex | **`--force` scope stated three ways, and no partial-failure model.** The matrix said "delete drift, nothing else", the plan applied force to delete/retire/block-strip, and the reused helper honors all three. Separately, failure injection covered only "consumer completed, registry failed" — not failure after the 50th deletion, during settings, or between the three receipt rewrites | Force covers removal drift in all three buckets and nothing outside removal. Write order is now part of the contract: settings, then receipts with **provenance last**, then deletions, then registry — which yields four named interrupted states, each recoverable by re-running the same command. One injection per step, each asserting convergence |
+
+**Why the order in C6 is the load-bearing part.** Provenance is the
+discriminator every other command reads, so writing it *before* the
+deletions makes an interrupted run read as thin-with-payload — and a
+re-run computes its plan from the now-thin receipt and deletes exactly
+the remainder. Deleting first would produce a consumer with no machine
+surfaces and a fat receipt: `--check` calls that `invalid`, and nothing
+can distinguish it from a botched manual deletion. There is no rollback,
+so the only available guarantee is that every interruption lands
+somewhere nameable.
+
+**Three unaimed rounds, three sets of blockers, and a shifting location.**
+Round 17 found two in production code the scanner never calls. Round 18
+found four in the cross-command lifecycle. Round 19 found six, of which
+two were in shipped commands that predate this task. The research scanner
+— sixteen rounds of polishing — has produced nothing new since round 16.
+The defects are all in the seam between the conversion and the installer
+that already exists, which is exactly where a plan gets least attention:
+it is not new code, so it does not feel like something being designed.
+
+Harness unchanged at 124 passed, 0 failed (28 fleet + 96 unit); no
+scanner rule moved. Round 19 independently re-ran R18-C5's mutation and
+confirmed both layers now catch it: `122 passed, 2 failed`.
+
+Codex's verdict: not converged, expecting more in ordinary-install/thin
+lifecycle transitions, typed pin-state discrimination, source-versus-receipt
+freshness, restore-path collisions, disable-marker ownership, and
+intra-root write ordering. Four of those six are the classes this round
+just addressed, which is the first time the expected-next list has been
+mostly a restatement of the current one.
+
+**Correction inside round 19, found by the gate rather than by Codex.** The
+first `thin_pin_state` answered `malformed` for anything it could not read:
+unparseable bytes, a JSON array, a symlink. The unit suite was green and the
+100%-coverage gate was not: `tests/test_install_audit.py:1389` and `:1417`
+failed. Both are shipped behaviors the guard had preempted — install *rebuilds*
+a mangled fat provenance, and a symlinked provenance already has its own
+refusal with its own message and exit code. "Refuse when unsure" read as the
+safer default and was not: it replaced two working recoveries with a dead end,
+for consumers that were never thin.
+
+`malformed` is now positive evidence only — the receipt parses as an object and
+carries thin pin keys that do not form a readable pin, which is exactly
+R19-C4's demonstrated case. Both branches were true-reverted after narrowing:
+disabling the install guard fails 3 tests, disabling the `PIN_KEYS` branch
+fails 2.
+
+The residual gap — a thin consumer whose pin is destroyed outright — is real
+and is not closable by reading a pin that is gone. It is filed as R19-C4b: a
+durable thin marker in `manifest.json`, which the fixed write order guarantees
+is already thin whenever provenance is the receipt that was lost.
+
+The generalizable part: the unit suite passing is not the gate passing, and the
+difference here was entirely tests I did not write and had not read. A guard
+added to a shipped command is a behavior change to that command, and the
+question to ask before adding one is not "is this safe" but "which existing
+behaviors does this now come before".

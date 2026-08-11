@@ -231,11 +231,75 @@ class PinnedPlatformTests(InstallTestCase):
         )
 
 
+class ThinPinStateTests(InstallTestCase):
+    """R19-C4: fat and damaged are different answers, not both `None`."""
+
+    def setUp(self) -> None:
+        self.target = _temp_dir(self)
+
+    def state(self):
+        from installer.conversion import thin_pin_state
+
+        return thin_pin_state(self.target)
+
+    def test_absent_provenance_is_fat(self) -> None:
+        self.assertEqual(self.state(), "fat")
+
+    def test_a_fat_receipt_is_fat(self) -> None:
+        write_provenance(self.target, {"pack": "p", "version": "1", "files": {}})
+        self.assertEqual(self.state(), "fat")
+
+    def test_a_thin_receipt_is_thin(self) -> None:
+        write_provenance(self.target, thin_payload())
+        self.assertEqual(self.state(), "thin")
+
+    def test_unparseable_provenance_is_fat_because_install_rebuilds_it(self) -> None:
+        # Not "unknown, therefore refuse": rebuilding a mangled fat receipt is
+        # a shipped recovery path (`tests/test_install_audit.py:1417`), and
+        # these bytes carry no evidence that this consumer was ever thin.
+        write_provenance(self.target, "{not json")
+        self.assertEqual(self.state(), "fat")
+
+    def test_non_object_provenance_is_fat(self) -> None:
+        write_provenance(self.target, [1, 2, 3])
+        self.assertEqual(self.state(), "fat")
+
+    def test_a_corrupt_mode_carrying_pin_keys_is_malformed(self) -> None:
+        # The case round 19 demonstrated: `read_thin_receipt` returns None
+        # here, so a guard built on it reads "fat" and permits destruction.
+        write_provenance(self.target, thin_payload(mode="thin-corrupt"))
+        self.assertEqual(self.state(), "malformed")
+
+    def test_a_symlinked_provenance_is_not_read_through(self) -> None:
+        # The link points at a thin payload, and this predicate still answers
+        # `fat` -- deliberately. Reading through an attacker-placed symlink to
+        # decide a guard is worse than not reading it, and install refuses a
+        # symlinked provenance on its own (`tests/test_install_audit.py:1389`)
+        # before anything can be written through the link.
+        elsewhere = _temp_dir(self) / "provenance.json"
+        elsewhere.write_text(json.dumps(thin_payload()), encoding="utf-8")
+        link = self.target / PROVENANCE_FILE
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(elsewhere)
+        self.assertEqual(self.state(), "fat")
+
+    def test_a_provenance_symlink_inside_the_target_is_also_not_read_through(
+        self,
+    ) -> None:
+        inside = self.target / "elsewhere.json"
+        inside.write_text(json.dumps(thin_payload()), encoding="utf-8")
+        link = self.target / PROVENANCE_FILE
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(inside)
+        self.assertEqual(self.state(), "fat")
+
+
 class UnusableThinPinTests(InstallTestCase):
     """R18-C1: the pin is a file on a consumer's disk, not a proof."""
 
     def setUp(self) -> None:
         self.partition = load_partition(ROOT / install.SURFACE_PARTITION_FILE)
+        self.target_dir = _temp_dir(self)
 
     def pin(self, platforms) -> ThinReceipt:
         return ThinReceipt(
@@ -255,6 +319,19 @@ class UnusableThinPinTests(InstallTestCase):
     def test_an_empty_platform_set_is_unusable(self) -> None:
         self.assertEqual(
             unusable_thin_pin_reason(self.pin([]), self.partition),
+            "thin pin declares no platforms",
+        )
+
+    def test_an_invalid_list_element_makes_the_whole_pin_unusable(self) -> None:
+        # R19-C4: `["claude", 1]` filtered element-wise yields {"claude"} --
+        # a set that looks like a deliberate single-platform declaration.
+        # All-or-nothing instead, and the non-string never reaches the
+        # message, where joining it raised TypeError.
+        write_provenance(self.target_dir, thin_payload(platforms=["claude", 1]))
+        receipt = read_thin_receipt(self.target_dir)
+        self.assertEqual(receipt.platforms, frozenset())
+        self.assertEqual(
+            unusable_thin_pin_reason(receipt, self.partition),
             "thin pin declares no platforms",
         )
 
@@ -474,6 +551,54 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
         # which is what an untrusted pin must fall back to: 79, one per
         # machine surface the conversion deleted.
         self.assertGreater(corrupt["changeCount"], 50, corrupt)
+
+    def test_ordinary_install_refuses_to_de_thin_a_consumer(self) -> None:
+        # R19-C1. A plain refresh exited 0, rewrote provenance without the
+        # pin, and discarded settingsAdditions -- while the plugin stayed
+        # enabled and the registry still read `thin`. This is the routine
+        # command a fleet refresh runs, so it would have de-thinned every
+        # converted consumer at once.
+        root = self.install_fat()
+        self.convert(root)
+        before = (root / PROVENANCE_FILE).read_bytes()
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual((root / PROVENANCE_FILE).read_bytes(), before)
+
+    def test_remove_refuses_on_a_thin_consumer(self) -> None:
+        # R18-C2, with the three facts round 18's probe found false:
+        # provenance survives, settings are untouched, exit is nonzero.
+        root = self.install_fat()
+        self.convert(root)
+        before = (root / PROVENANCE_FILE).read_bytes()
+
+        result = self.run_install_inproc(root, "--remove", "--skip-diff-check")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertTrue((root / PROVENANCE_FILE).is_file())
+        self.assertEqual((root / PROVENANCE_FILE).read_bytes(), before)
+
+    def test_a_receipt_with_a_corrupt_mode_also_refuses(self) -> None:
+        # `malformed` is not `fat`: a receipt that carried the pin and has
+        # since been edited must not be treated as an unconverted consumer.
+        root = self.install_fat()
+        self.convert(root)
+        provenance = root / PROVENANCE_FILE
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        payload["mode"] = "thin-corrupt"
+        provenance.write_text(json.dumps(payload), encoding="utf-8")
+
+        self.assertEqual(self.run_install_inproc(root, "--remove").returncode, 2)
+        self.assertEqual(self.run_install_inproc(root).returncode, 2)
+
+    def test_a_fat_consumer_still_installs_and_removes(self) -> None:
+        # The guard must add nothing to the path every existing consumer
+        # takes. Both commands are the shipped ones, unchanged.
+        root = self.install_fat()
+        self.assertEqual(self.run_install_inproc(root).returncode, 0)
+        self.assertEqual(
+            self.run_install_inproc(root, "--remove", "--skip-diff-check").returncode, 0
+        )
 
     def test_a_half_converted_consumer_is_reported_invalid(self) -> None:
         # Payload deleted, receipts left fat: the thin predicate is false, so

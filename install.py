@@ -864,6 +864,41 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     if args.status or args.check:
         return _run_inspection(args, target, manifest_data, files)
+    thin_state = conversion.thin_pin_state(target)
+    if thin_state != conversion.PIN_STATE_FAT:
+        # R18-C2 and R19-C1. Two shipped commands mutate a consumer without
+        # ever asking whether it is thin, and both corrupt one when it is.
+        # `--remove` deletes provenance and leaves the plugin enabled and the
+        # registry saying `thin`: a repository with no pack files, no receipt
+        # that a pack was ever there, and a live plugin still serving it.
+        # Ordinary install is worse because it is routine -- a fleet refresh
+        # rewrites the receipt without the pin, silently de-thinning every
+        # converted consumer while the registry still reads `thin`.
+        #
+        # Both refuse rather than becoming thin-aware, and the reason is the
+        # same one the argument matrix gives: undoing or refreshing a thin
+        # consumer needs the pack root as well as the target, and neither
+        # command takes one. A thin-aware refresh is a real surface and it is
+        # planned as its own step; until it exists, the safe answer is to stop
+        # loudly. No consumer is thin yet, so this refuses nothing that works
+        # today.
+        #
+        # `malformed` refuses too. It means a receipt that carried the pin has
+        # since been edited, which is exactly the state that must not be
+        # treated as "fat, go ahead".
+        detail = (
+            "provenance records mode: thin"
+            if thin_state == conversion.PIN_STATE_THIN
+            else "provenance carries thin pin keys it cannot be read against"
+        )
+        action = "--remove" if args.remove else "install"
+        print(
+            f"error: {display_path(ROOT, target)} is a thin consumer "
+            f"({detail}); {action} would leave it half-converted.\n"
+            "       Run install.py TARGET --revert-thin first, then retry.",
+            file=sys.stderr,
+        )
+        return 2
     if args.remove:
         return remove_installed_pack(
             manifest_data,

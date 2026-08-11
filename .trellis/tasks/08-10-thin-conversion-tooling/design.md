@@ -922,6 +922,86 @@ enabling the plugin and writing a thin pin over surviving vendored
 surfaces produces a repo that is neither fat nor thin while the pin
 claims it is thin. Drift aborts the whole conversion.
 
+**`--force`'s scope is all three removal buckets, stated once (R19-C5).**
+The matrix used to say "delete drift, nothing else" while the
+implementation plan applied force-aware preflight to delete, retire, and
+block-strip — and the reused retirement helper does remove drifted
+retired files when forced (`installer/removal.py:256`). Three artifacts,
+three scopes. The rule: `--force` overrides *removal* drift wherever the
+conversion removes something, which is all three buckets. It overrides
+nothing outside removal — not a settings collision, not a stale receipt,
+not an unwritable root, not a resweep verdict.
+
+**Write order is part of the contract, because there is no rollback
+(R19-C6).** The design promises no rollback, and the failure-injection
+plan only covered "consumer completed, registry failed". Failure after
+the fiftieth deletion, during the settings merge, or between the three
+receipt rewrites are each a different half-state, and "consumer half
+completed" is not a model of them. The order is fixed so that every
+interruption lands in a state that is *recognizable* rather than
+ambiguous:
+
+1. Both roots validated writable; plan built; settings merge validated
+   against §4's collision table; resweep verdict verified. Nothing is
+   written. Every refusal in this task happens here.
+2. `.claude/settings.json` merged. It is first among the writes because
+   it is the only one that is a pure addition — reversible by deleting
+   keys, with the file's prior bytes still fully derivable from the
+   recorded additions.
+3. The three receipts rewritten, **provenance last**. The pin is the
+   discriminator every other command reads, so it is the commit point:
+   before it, the consumer reads as fat with extra settings; after it,
+   as thin.
+4. The payload deleted.
+5. The registry row flipped in `ROOT`.
+
+Which yields exactly four interrupted states, each named and each
+recoverable by re-running the same command:
+
+| Interrupted after | Consumer reads as | Recovery |
+| --- | --- | --- |
+| settings merge | fat, with settings additions | re-run `--thin`; §4's idempotent row makes the merge a no-op |
+| some receipts | fat or invalid — `inspection` requires all three | re-run `--thin` |
+| provenance (the commit point) | thin, payload still present | re-run `--thin`; the plan is computed from the receipt, which is now thin, so it deletes exactly what remains |
+| some deletions | thin, partially deleted | same |
+| everything but the registry | thin; registry says fat | the pin-vs-mode skew the parent design already accepts and `sd-status fleet` reports |
+
+Deleting the payload before writing the pin would produce the one state
+that is *not* recognizable: a consumer with no machine surfaces and a fat
+receipt, which `--check` calls `invalid` and which no re-run can
+distinguish from a botched manual deletion. That is why the order is
+specified rather than left to whatever the code does.
+
+**R19-C4b — the pin is a single point of failure, and the fix belongs in
+a second receipt.** R19-C4's guard reads `provenance.json` and answers
+`fat` / `thin` / `malformed`. `malformed` is defined narrowly: the
+receipt parses as an object and carries thin pin keys that do not
+constitute a readable pin. Bytes that carry *no* legible thin evidence —
+truncated, non-JSON, a JSON array, a symlink — answer `fat`, because
+that is what the installer has always done with them and it does the
+right thing: `test_install_recovers_from_malformed_provenance` rebuilds a
+mangled fat receipt, and `test_install_conflicts_on_symlinked_provenance`
+refuses a symlinked one with its own message and exit 2. Widening
+`malformed` to swallow both was tried and reverted; it is not a stricter
+guard, it is a different command that breaks two shipped behaviors.
+
+That leaves one real gap: a *thin* consumer whose pin is destroyed
+outright reads as fat, and an ordinary install would rebuild a fat
+receipt over a narrowed payload. The pin cannot close this, because the
+premise is that the pin is gone. Close it in a second receipt instead:
+`manifest.json` — written **before** provenance in the order above, so it
+is already thin whenever the pin is the thing that was lost — carries a
+durable `mode: "thin"` marker, and the guard treats *either* receipt
+saying thin as thin. Two independent witnesses, with the write order
+guaranteeing the surviving one is the earlier.
+
+Until that marker ships, the guard's honest coverage is: every thin
+consumer with a legible receipt, and every consumer whose receipt was
+edited rather than destroyed. Step 6 owns writing the marker; step 4
+owns extending the guard to read it. Neither is a canary blocker on its
+own — the canary converts consumers whose pins this run writes — but a
+converted consumer is not safe against pin loss until both land.
+
 ### 4. `.claude/settings.json` merge (contract C-C)
 
 Zero partition rows — entirely consumer-owned. The writer parses the
@@ -1079,6 +1159,28 @@ Restores the fat payload, deletes the thin artifacts by reading
 `enabledPlugins` disable marker, and flips that consumer's `mode` back
 to `fat` in `ROOT`'s `docs/fleet/consumers.json`.
 
+**The disable marker and the ownership rule collide, and ownership wins
+(R19-C5).** §4 says revert leaves a recorded value that has since been
+edited, and never touches a key conversion did not add. This section says
+revert writes `enabledPlugins["sd@sd-ai-command-pack"]: false`. For a key
+that was already `true` before conversion, or edited after it, those two
+cannot both happen. The precedence, and it is the same rule in three
+cases:
+
+| State of the plugin key at revert | Revert writes |
+| --- | --- |
+| Conversion added it, value still `true` as recorded | `false` — the marker. Not a deletion: a fat consumer with the plugin merely *absent* re-enables on the next `claude plugin` interaction, which is the state the marker exists to prevent |
+| Conversion added it, value edited since | leaves it, reports it | 
+| Conversion did not add it (already `true`) | leaves it, reports it |
+
+The marker is only ever written over a value this conversion wrote and
+still owns. Where it is not written, revert says so explicitly — "the
+plugin remains enabled by a setting this pack did not add" — because a
+fat consumer running the plugin as well is a real double-surface state
+and an operator has to know. What revert must never do is disable a
+plugin someone else enabled: that is a decision about their tooling, made
+by a command they ran to undo *ours*.
+
 **Written during conversion, landed after it — one authoritative
 sequence.** R11-C6: the conversion writes both roots in one invocation,
 while child 3 requires the consumer PR to land green *before* the
@@ -1108,6 +1210,37 @@ alternate clone — and picking the wrong row silently mislabels two
 consumers at once. The thin receipt therefore records the canonical
 `consumer` name, `--consumer NAME` overrides it, and revert refuses on
 a mismatch between receipt, registry, and flag rather than choosing.
+
+**A consumer may have put a file where the payload goes (R19-C3).**
+Conversion deletes 179 paths; nothing stops the consumer from creating
+one of them afterwards, and revert then restores onto an occupied path.
+The reused helper already has an answer — `installer/fileops.py:365`
+returns `conflict` unforced and `overwritten` forced, which round 19
+confirmed by probe:
+
+```text
+unforced conflict
+forced overwritten
+```
+
+But the matrix forbids `--force` with `--revert-thin`, on the ground
+that revert makes no drift decision. That was true of *deletion* drift
+and false of restore-path occupancy, so the rule is split rather than
+loosened:
+
+- Revert **preflights every restore path** before writing anything, and
+  refuses the whole operation when any is occupied, listing them. It
+  does not restore 178 files and stop at the 179th, and it does not flip
+  the receipts or the registry.
+- `--force` stays rejected on `--revert-thin`. Overwriting a consumer's
+  file to reach a state they had before is the wrong default *and* the
+  wrong flag: the recovery is to move or delete the colliding file and
+  re-run, which is a decision only they can make with the file in front
+  of them. The refusal message names the paths so that is a two-minute
+  job.
+- A path occupied by a file whose bytes already equal the source is not
+  a collision. Restoring it is a no-op, and refusing there would block
+  revert on a consumer who simply re-created a pack file correctly.
 
 **Byte-identical restoration is version-bound.** `install.py` installs
 from the *current* checkout's manifest (`install.py:803`), so a newer
@@ -1159,7 +1292,7 @@ tested, not left to ordering:
 | `--consumer` with `--thin` or `--revert-thin` | allowed — overrides the receipt's recorded name, refuses on registry mismatch |
 | `--consumer` alone, or with `--remove`/`--machine`/inspection | error — identity override has no meaning outside the two conversion directions |
 | `--dry-run` with either direction | allowed |
-| `--force` with `--thin` | allowed — overrides delete drift, nothing else |
+| `--force` with `--thin` | allowed — overrides removal drift on delete, retire, **and** block-strip; nothing outside removal |
 | `--force` with `--revert-thin` | error — no drift decision exists to override |
 | `--backup` with either direction | allowed — same semantics as `--remove` |
 | **standalone `--remove` on a `mode: thin` consumer** | **error — names `--revert-thin` first** |

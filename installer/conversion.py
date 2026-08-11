@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from installer.manifest import target_destination
+from installer.provenance import PIN_KEYS
 from installer.registry import (
     INSTALLED_TARGETS_FILE,
     PACK_MANIFEST_FILE,
@@ -406,6 +407,72 @@ class ThinReceipt:
         return self.mode == THIN_MODE
 
 
+PIN_STATE_FAT = "fat"
+PIN_STATE_THIN = "thin"
+PIN_STATE_MALFORMED = "malformed"
+
+
+def thin_pin_state(target: Path) -> str:
+    """Discriminate fat, thin, and malformed provenance as three states.
+
+    R19-C4: `read_thin_receipt` collapses "this is fat" and "this receipt is
+    damaged" into the same `None`, which is right for narrowing a payload --
+    both mean "do not narrow" -- and wrong for a destructive guard. A receipt
+    carrying thin-only pin keys under `mode: "thin-corrupt"` is not a fat
+    consumer, and treating it as one lets a removal proceed against a
+    checkout that may still have a plugin enabled and a registry row saying
+    `thin`.
+
+    `malformed` means *this receipt carries thin evidence that cannot be read
+    as a pin* -- not merely "unreadable". Bytes that yield no thin evidence at
+    all are `fat`, because that is what they have always been: a truncated or
+    hand-mangled provenance is a recoverable fat state the installer already
+    rebuilds (`tests/test_install_audit.py:1417`), and a symlinked one already
+    has its own refusal further down the install path
+    (`tests/test_install_audit.py:1389`). Widening `malformed` to cover them
+    replaces two working shipped behaviors with a refusal, which is not more
+    fail-closed -- it is a different command.
+
+    The residual gap this leaves is a thin consumer whose pin is destroyed
+    outright, which reads as fat because nothing legible says otherwise. The
+    fix for that is a durable thin marker in a second receipt, not a broader
+    reading of these bytes; see design.md R19-C4b.
+    """
+    try:
+        provenance = target_destination(target, PROVENANCE_FILE)
+    except SystemExit:
+        # A provenance path resolving outside the target is the manifest
+        # layer's hard refusal, raised again by the install path itself.
+        return PIN_STATE_FAT
+    if provenance.is_symlink():
+        return PIN_STATE_FAT
+    if not provenance.is_file():
+        return PIN_STATE_FAT
+    try:
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return PIN_STATE_FAT
+    if not isinstance(payload, dict):
+        return PIN_STATE_FAT
+    if payload.get("mode") == THIN_MODE:
+        return PIN_STATE_THIN
+    # A fat receipt carries none of the pin keys at all: the fat writer drops
+    # every one of them (`provenance.py:88`). Any survivor means this receipt
+    # was thin and something has since edited it.
+    if any(key in payload for key in PIN_KEYS):
+        return PIN_STATE_MALFORMED
+    return PIN_STATE_FAT
+
+
+def _pinned_platforms(platforms: object) -> frozenset[str]:
+    """The pin's platform list, or an empty set if any part of it is unusable."""
+    if not isinstance(platforms, list):
+        return frozenset()
+    if not all(isinstance(name, str) and name.strip() for name in platforms):
+        return frozenset()
+    return frozenset(platforms)
+
+
 def read_thin_receipt(target: Path) -> ThinReceipt | None:
     """Return the thin pin, or None when this consumer is not thin.
 
@@ -428,7 +495,14 @@ def read_thin_receipt(target: Path) -> ThinReceipt | None:
     return ThinReceipt(
         mode=THIN_MODE,
         version=version if isinstance(version, str) and version.strip() else None,
-        platforms=frozenset(platforms) if isinstance(platforms, list) else frozenset(),
+        # R19-C4: an all-or-nothing coercion, not a filter. `["claude", 1]`
+        # filtered element-wise yields {"claude"} -- a set that looks like a
+        # deliberate single-platform declaration and passes every downstream
+        # check. Any invalid element makes the whole list unusable, which
+        # `unusable_thin_pin_reason` reports as "declares no platforms" and
+        # every caller treats as fail-closed. It also keeps a non-string out
+        # of the error message that would otherwise raise while joining it.
+        platforms=_pinned_platforms(platforms),
         consumer=consumer if isinstance(consumer, str) and consumer.strip() else None,
         settings_additions=additions if isinstance(additions, dict) else {},
         forced=tuple(forced) if isinstance(forced, list) else (),
@@ -486,5 +560,9 @@ __all__ = [
     "read_installed_targets_receipt",
     "read_thin_receipt",
     "residual_source_files",
+    "thin_pin_state",
     "unusable_thin_pin_reason",
+    "PIN_STATE_FAT",
+    "PIN_STATE_MALFORMED",
+    "PIN_STATE_THIN",
 ]

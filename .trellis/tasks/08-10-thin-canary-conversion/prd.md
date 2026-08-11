@@ -47,6 +47,12 @@ revert-and-restore proof.
    plan:
 
    ```bash
+   # 0. the consumer must already hold the current payload (R19-C2):
+   #    every one of the eight receipts is missing at least one shipped
+   #    target today, and conversion computes its residual from the
+   #    receipt while --check computes it from the source, so a stale
+   #    consumer converts cleanly and fails --check immediately.
+   .venv/bin/python install.py <path> --check --json   # state must be current
    # 1. exact head, clean tree, verdict written to a file
    git -C <path> status --porcelain          # must be empty
    bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
