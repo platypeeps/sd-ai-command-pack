@@ -170,9 +170,14 @@ or `--check` reports a phantom change. The first fixture attempt passed
 other `fleet-*` script. Imports step 1's builder for the removal set and
 applies `design.md`'s four-bucket rule — `scheduled`, `packDefects`,
 `blockers`, `advisories` — each step failing closed, **plus the
-undeclared-platform marker pass** (`prd.md:19`): a codex or pi directory,
-a surviving `$CODEX_HOME` reference, or a pi adapter file in a consumer
-whose registry `platforms` omits that platform is a blocker. The
+undeclared-platform marker pass** (`prd.md:19`): a **populated** codex or
+pi directory, a surviving `$CODEX_HOME` reference, a pi adapter file, or
+the `codex` CLI invoked in command position, in a consumer whose registry
+`platforms` omits that platform. Four markers, not three, and each is
+bucketed by `design.md`'s ownership prerequisite rather than blocked
+unconditionally — pack-owned content gives a `packDefect`, a stripped
+block gives `scheduled`, everything else blocks. An empty directory and a
+prose mention of the command are not markers. The
 execution-surface prefixes are enumerated from `PLATFORM_REGISTRY` rather
 than re-typed from `design.md`'s prose. Records the full
 binding set from `design.md`'s verdict schema: `head`, `indexDigest`,
@@ -186,18 +191,41 @@ than the research measurement it derives from: every field added after
 that list was added because something changed a classification while the
 short list stayed identical.
 
-`classifier_digest` in `installer/conversion.py` gains
-`scripts/sd-ai-command-pack-thin-resweep.py` in the same commit. The
-builder decides what is removed; the resweep decides what counts as a
-hit, as the execution surface, and as a citation. Without that input an
-edit to the surface rule or the glob matcher leaves an existing `clear`
-verdict valid under an unchanged digest.
+`classifier_digest` in `installer/conversion.py` gains **four** inputs in
+the same commit, not one. `scripts/sd-ai-command-pack-thin-resweep.py`
+because the builder decides what is removed while the resweep decides
+what counts as a hit, as the execution surface, and as a citation —
+without it an edit to the surface rule or the glob matcher leaves an
+existing `clear` verdict valid under an unchanged digest. And
+`manifest.json`, `installer/manifest.py`, and the bytes of every
+force-preserved template the manifest names, because the force-preserved
+ownership proof compares a consumer's file against the pack's shipped
+template: a changed template flips
+`.github/PULL_REQUEST_TEMPLATE.md` between `packDefects` and `blockers`
+while every input the function hashes today stays byte-identical.
+
+Those three have been in `design.md` §2 since round 7 (`R7-8`) and are
+**absent from the shipped function** — `installer/conversion.py:372`
+hashes six paths plus the consumer entry. Step 1 shipped the gap and no
+round caught it, because every round measured the research scanner and
+this is production code the research scanner does not call. Step 3 closes
+it, and the closing check is a fixture that edits a shipped template and
+asserts `classifierDigest` moves.
 
 `research/fleet-blocker-scan.py` is the reference implementation of the
 rule and the source of the measurement below. The shipped resweep
 supersedes it; the research copy stays so the counts can be re-derived.
 
 Checks:
+- Two references to the same removed file, in two different surviving
+  files, produce **two** `scheduled` entries. The research scanner
+  records one entry per removed file rather than per reference — stated
+  at `design.md`'s scheduled definition and harmless there, because its
+  output is a summary — but the shipped resweep emits a verdict, and the
+  four-bucket claim is per citation. Round 16 noted this as the one
+  research-to-production divergence the harness cannot currently see.
+- Editing a shipped force-preserved template moves `classifierDigest`.
+  Without it the four new digest inputs above are asserted by nothing.
 - The resweep appears in no `manifest.json` row and under no
   `templates/scripts/` path. A row for it is failure — it would ship
   classification data into every consumer.
@@ -1275,3 +1303,78 @@ recording: `str.replace(old, new, 1)` hit an identical line inside
 parameter left `managed` undefined rather than reverting behavior. A
 mutation that crashes proves nothing; both were redone with index
 targeting so the reverted scanner still runs.
+
+### Round 16 — Codex lane against `eec09c8c`
+
+Five blocking groups, and every one of them lands inside a round-15 fix.
+That is the fourth consecutive round to fault its predecessor, but it is
+also the first round to find **no new defect class**: R16-C1 through
+R16-C5 map one-to-one onto R15-C1 through R15-C5. The rules are no longer
+wrong; the *granularity and completeness* of four specific seams were.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R16-C1 | Codex | **Ownership was neither complete nor correctly ordered.** R15 passed the marker pass a set of whole-file paths, but managed-block ownership is a per-line span, so the same `codex exec --help` line inside and outside the pack's block got the same verdict. A digest-proven pack file invoking codex produced **no entry in any bucket** — the hit was dropped, not classified, which makes the four-bucket claim false. And a consumer-edited force-preserved PR template with an unmatched marker was called a `packDefect`, because the malformed-marker rule overrode the shipped-bytes comparison that actually decides that file | Ownership is recorded per file as evidence — whole-file proof, pack-block spans, stripped spans, malformed flag — and `owned_at(relative, line)` answers the question at the granularity the proof has. Markers are bucketed rather than dropped: pack-owned to `packDefects`, inside a stripped block to `scheduled`, everything else to `blockers`. Force-preserved targets are decided by the shipped-bytes comparison alone; markers do not speak for them |
+| R16-C2 | Codex | **The subcommand list was the wrong axis.** Round 15 replaced four adjacent words with an enumeration of accepted subcommands, and one round broke it from both ends: `codex plugin list` and a bare interactive `codex <prompt>` are invocations the list omits, a `package.json` script `"agent": "codex exec --help"` ran under npm with no marker emitted, and `worker: codex exec --help` in a Procfile and `& codex exec --help` in PowerShell both failed detection — while the Markdown sentence `` `codex exec` is prohibited here. `` blocked | The enumeration is gone. The marker is the command **word** in command position, which is the rule this scanner already applies to `./path` and to runners: `codex(?![\w./:-])` excludes the `.codex/` path segment, a `codex:` key, and `codex-cli`. Position covers line start behind shell prefixes, shell separators including PowerShell's `&`, assignments, and structured-data command values. The backtick left the Markdown leader class — stripping it turned an inline code span into a line that starts with the command |
+| R16-C3 | Codex | **`scannedBytesDigest` still hashed a different read from the one ownership parsed.** R15 bound the bookkeeping bytes without making them the *same* bytes: ownership parsed provenance at one call site and the digest hashed it at another. Codex's split-read fixture moved a hit from `blockers` to `packDefects` with `changedBindings: []` and an identical `scannedBytesDigest` | The generated bookkeeping files are read once, before anything consults them; `provenance_digests` takes bytes rather than a path. The marker pass reads from the same preloaded bytes, because a marker is a classification too. The fixture poisons every read after the first and asserts all four buckets are unchanged |
+| R16-C4 | Codex | **The direct-path grammar failed in both directions outside its two fixtures.** `env -i ./scripts/…full-check.sh` executed and was filed as an advisory, because the prefix rule demanded the path immediately after the keyword and real prefix commands take their own options. And valid JSON whose `"description"` read "After setup; ./scripts/…sh is obsolete prose." blocked, because `.json` is not a prose suffix — the suffix test was standing in for two different questions | `SHELL_PREFIX` allows a prefix word its own options. Structured data is a third file class, not a subcase of shell: in JSON the document is parsed and the command strings are the values hanging from execution keys — `scripts` at any depth, `command`, `run`, `entrypoint` — matched in their **quoted** form so a sentence quoting a path is not the path. In mapping formats the key decides; in a Procfile every line is a process, so every key does |
+| R16-C5 | Codex | **The normative artifacts permitted three different dispositions for one input.** The PRD required `packDefects` for a pack-owned marker, `design.md` listed three markers and said they are always blocked, `implement.md`'s step-3 checklist omitted the CLI marker entirely, and the scanner did a fourth thing | One rule in all three. The design carries the four markers and a disposition table keyed on ownership, with the two negatives (empty directory, prose mention) and the operator declaration for global configuration. Step 3 carries the same four and points at the ownership prerequisite instead of saying "is a blocker" |
+
+Two further defects were found by reading the plan rather than by the
+review lane, and are fixed in the same commit. **`classifier_digest` has
+been under-binding since step 1 shipped**: `design.md` §2 has required
+`manifest.json`, `installer/manifest.py`, and every force-preserved
+template's bytes since round 7 (`R7-8`), and `installer/conversion.py:372`
+hashes six paths plus the consumer entry. It is the same failure the
+digest exists to prevent — a template edit flips
+`.github/PULL_REQUEST_TEMPLATE.md` between `packDefects` and `blockers`
+while every hashed input stays identical — and no round caught it because
+every round measured the research scanner, which does not call that
+function. Step 3 now gains four digest inputs rather than one, with a
+fixture that edits a shipped template and asserts the digest moves. Step
+3's marker sentence was also still the pre-R14 three-marker form.
+
+**Fifteenth measurement.** `sd-github-review` 16 blockers in 12 files,
+`se-ai-command-pack` 27 in 12, `hoa-manager` 37 in 12, `mezmo_benchmark`
+47 in 27, `rwbp-coordinator` 52 in 11, `loadsmith` 56 in 8,
+`rwbp-website` 68 in 11, `anomaly-metric-creator` 207 in 23.
+`packDefects` moved for the first time since round 7, 16 to **17** in 8
+files (15 in 7 where the consumer owns its PR template): every consumer
+now carries one pack-owned codex invocation that round 15 dropped on the
+floor. Three consumer markers each for `rwbp-coordinator`, `loadsmith`,
+`hoa-manager`, `rwbp-website`, `mezmo_benchmark`, and
+`se-ai-command-pack`; two each for `sd-github-review` and
+`anomaly-metric-creator`. No consumer is `clear`. Harness 120 passed, 0
+failed, 0 skipped — 28 fleet and 93 unit.
+
+Mutation sweep, each a true revert against a regenerated scan: ownership
+back to whole-file → 1 failed; pack-owned markers dropped → 2 failed;
+force-preserved decided by markers → 1 failed; codex subcommand
+enumeration restored → 4 failed; provenance read twice → 1 failed; shell
+prefix without options → 1 failed; JSON matched by bare substring → 1
+failed; structured data treated as text → 1 failed; Procfile keys
+filtered by the exec list → 1 failed; control → 121 passed, 0 failed.
+
+Two of those survived their first valid run, and both were holes in the
+*fixtures* rather than in the code — worth recording because a surviving
+mutation is ambiguous evidence and the ambiguity has to be resolved
+before it is reported as either. The ownership mutation was never reached
+because the stripped-span test runs first, so both existing cases
+returned `scheduled` whichever way the branch went; the missing case is a
+marker inside a pack block the conversion *keeps*, which is the only
+shape that exercises per-line proof. The force-preserved mutation was
+never reached because the fixture wrote its marker label in lowercase and
+`BLOCK_START` requires `[A-Z-]+`, so `malformed_markers` stayed false and
+the branch under test never ran. Both fixtures were corrected and both
+mutations then failed.
+
+The first attempt at the mutation sweep was invalid and is recorded
+because the failure is easy to repeat: it mutated an isolated *copy* of
+the scanner and ran the harness with `--scan` pointing at that copy's
+output. Every mutation "passed", including the control, because the
+harness imports the scanner from its canonical path — only the fleet rows
+saw the mutant and the 92 unit fixtures exercised pristine code. A
+mutation sweep that reports no failures is a broken sweep until proven
+otherwise. The valid form mutates the scanner in place and restores it in
+a `finally`.
+

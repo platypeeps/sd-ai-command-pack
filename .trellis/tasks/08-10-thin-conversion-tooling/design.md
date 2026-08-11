@@ -652,15 +652,15 @@ rather than per reference; otherwise it implements the rule above,
 including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
-`sd-github-review` 15 hits in 11 files, `se-ai-command-pack` 26 in 11,
-`hoa-manager` 36 in 11, `mezmo_benchmark` 47 in 27,
-`rwbp-coordinator` 51 in 10, `loadsmith` 56 in 8, `rwbp-website` 67 in 10,
-`anomaly-metric-creator` 206 in 22. Plus the pack defects above. They are
+`sd-github-review` 16 hits in 12 files, `se-ai-command-pack` 27 in 12,
+`hoa-manager` 37 in 12, `mezmo_benchmark` 47 in 27,
+`rwbp-coordinator` 52 in 11, `loadsmith` 56 in 8, `rwbp-website` 68 in 11,
+`anomaly-metric-creator` 207 in 23. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the fourteenth measurement, and the thirteen before them were
+**These are the fifteenth measurement, and the fourteen before them were
 each wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 
@@ -734,9 +734,31 @@ surviving prompts first. It also narrows what the step-3 fixture
 criterion can claim — a synthetic fixture reaching `clear` proves the
 C-A remediation landed, not that any real consumer can convert.
 
-Codex/pi markers (`.codex/` directories, `$CODEX_HOME` references, pi
-adapter files) are always `blocked` when the consumer's registry
-`platforms` omits that platform, regardless of the delete set.
+Codex/pi markers are evidence that the consumer uses a platform its
+registry row omits, and they are bucketed by the same two prerequisites
+as any other citation rather than blocked unconditionally. R16-C5 found
+this sentence saying three markers, always `blocked`, while the PRD said
+pack-owned markers are `packDefects` and the scanner did a third thing —
+three artifacts, three dispositions, one input.
+
+There are **four** markers: a **populated** platform directory (an empty
+one is not evidence), a surviving `$CODEX_HOME` reference, a pi adapter
+file the registry names, and the `codex` CLI invoked in command
+position. And each lands where its content's ownership puts it:
+
+| Where the marker lives | Bucket |
+| --- | --- |
+| content the pack demonstrably owns | `packDefects` |
+| a block the conversion strips | `scheduled` |
+| anywhere else | `blockers` |
+
+A pack-owned marker is the pack shipping text that names a tool the
+consumer never declared — a real defect, and not the consumer's verdict.
+Ownership is the same per-content proof the classifier uses: whole-file
+digest, managed-block span, or force-preserved comparison. Never receipt
+membership, and never at file granularity for a proof that is per line.
+Globally-configured usage leaves no repository trace and needs an
+operator declaration instead; an unanswered question is not `clear`.
 
 ### 2. Verdict binding (contract C-A)
 

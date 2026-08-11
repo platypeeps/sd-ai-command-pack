@@ -273,16 +273,117 @@ FENCE = re.compile(r"^\s*(?:```+|~~~+)\s*([\w-]*)")
 # is an invocation only where a sentence cannot be: not in prose. Prose is where
 # the false positive lives and shell is where the true positive lives, and no
 # regex can tell a sentence from a command without knowing which it is reading.
-SHELL_PREFIX = r"(?:(?:if|while|until|then|else|elif|do|time|command|exec|env|nohup|sudo|!)\s+|\w+=\S*\s+)*"
-DIRECT_AT_START = re.compile(rf"^\s*{SHELL_PREFIX}\.{{1,2}}/[-\w.$~/]*")
+#
+# R16-C4 corrected both halves again. Missed: `env -i ./scripts/x.sh` executes,
+# and a prefix rule that demands the path *immediately* after the keyword does
+# not see it -- real prefix commands take their own options. Wrongly blocked:
+# valid JSON whose `"description"` value reads "After setup; ./scripts/x.sh is
+# obsolete prose." is data, and the separator rule called it a command because
+# `.json` is not a prose suffix. Suffix was standing in for two different
+# questions -- "can a sentence live here?" and "does anything execute this?" --
+# and structured data answers them differently from both prose and shell.
+SHELL_WORD = r"(?:if|while|until|then|else|elif|do|time|command|exec|env|nohup|sudo|xargs|!)"
+SHELL_PREFIX = (
+    rf"(?:{SHELL_WORD}(?:\s+-{{1,2}}[\w-]+(?:[= ]\S+)?)*\s+|\w+=\S*\s+)*"
+)
+DIRECT_PATH = r"\.{1,2}/[-\w.$~/]*"
+DIRECT_AT_START = re.compile(rf"^\s*{SHELL_PREFIX}{DIRECT_PATH}")
 DIRECT_AFTER_SEPARATOR = re.compile(
-    rf"(?:[;&|(]|&&|\|\|)\s*{SHELL_PREFIX}\.{{1,2}}/[-\w.$~/]*"
+    rf"(?:[;&|(]|&&|\|\|)\s*{SHELL_PREFIX}{DIRECT_PATH}"
 )
 PROSE_SUFFIXES = frozenset({".md", ".rst", ".txt", ".markdown"})
+# Structured data. Nothing in these files executes because of where a string
+# sits on a line; it executes because of the key it hangs from.
+JSON_SUFFIXES = frozenset({".json"})
+MAPPING_SUFFIXES = frozenset({".yaml", ".yml", ".toml", ".ini", ".cfg"})
+MAPPING_BASENAMES = frozenset({"Procfile", "procfile"})
+# Keys whose values a runner hands to a shell. `scripts` is the npm container:
+# every string beneath it is a command regardless of its own key, which is why
+# `"scripts": {"agent": "codex exec --help"}` runs under `npm run agent`.
+EXEC_KEYS = frozenset(
+    {
+        "args", "build", "cmd", "command", "commands", "entrypoint", "exec",
+        "postinstall", "poststart", "preinstall", "prestart", "run", "script",
+        "scripts", "start", "test",
+    }
+)
+MAPPING_EXEC_KEY = re.compile(r"^\s*(?:-\s+)?[\"']?([\w][\w.-]*)[\"']?\s*[:=]\s*\S")
 
 
-def direct_path_lines(lines: list[str], relative: str) -> set[int]:
+def json_command_strings(body: str) -> set[str] | None:
+    """Every string a JSON document hands to a runner, or None if it is not JSON.
+
+    None means "ask the shell rules instead": an unparseable `.json` is not a
+    document whose keys can be trusted, and failing to the text rules keeps a
+    malformed file that a runner still reads from going quiet.
+    """
+    try:
+        payload = json.loads(body)
+    except (ValueError, RecursionError):
+        return None
+    found: set[str] = set()
+
+    def walk(node, executable: bool) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, executable or (isinstance(key, str) and key.lower() in EXEC_KEYS))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, executable)
+        elif isinstance(node, str) and executable and node.strip():
+            found.add(node)
+
+    walk(payload, False)
+    return found
+
+
+def structured_command_lines(lines: list[str], relative: str, body: str) -> set[int] | None:
+    """Command-position lines in structured data, or None if this is not data.
+
+    Returning a set means the file's execution surface is fully described by it:
+    the caller must not also apply the line-start or separator rules, because in
+    a data file those describe typography rather than execution.
+    """
+    path = Path(relative)
+    suffix = path.suffix.lower()
+    if suffix in JSON_SUFFIXES:
+        strings = json_command_strings(body)
+        if strings is None:
+            return None
+        # The *quoted* form, not the bare text: a `"description"` that quotes a
+        # command in a sentence contains the command's characters and is not the
+        # command. R16-C4's demonstration was exactly that collision.
+        quoted = [json.dumps(value) for value in strings]
+        return {
+            number
+            for number, line in enumerate(lines, start=1)
+            if any(value in line for value in quoted)
+        }
+    if suffix in MAPPING_SUFFIXES or path.name in MAPPING_BASENAMES:
+        # A Procfile is nothing but commands: every `name: value` line is a
+        # process the runner starts, and the name is the consumer's choice, so
+        # no key list can enumerate it. Elsewhere the key is what decides.
+        every_key = path.name in MAPPING_BASENAMES
+        hits = set()
+        for number, line in enumerate(lines, start=1):
+            match = MAPPING_EXEC_KEY.match(line)
+            if match and (every_key or match.group(1).lower() in EXEC_KEYS):
+                hits.add(number)
+        return hits
+    return None
+
+
+def direct_path_lines(lines: list[str], relative: str, body: str | None = None) -> set[int]:
     """Line numbers carrying a direct `./path` invocation."""
+    if body is None:
+        body = "\n".join(lines)
+    structured = structured_command_lines(lines, relative, body)
+    if structured is not None:
+        return {
+            number
+            for number in structured
+            if re.search(DIRECT_PATH, lines[number - 1])
+        }
     prose = Path(relative).suffix.lower() in PROSE_SUFFIXES
     hits = set()
     for number, line in enumerate(lines, start=1):
@@ -579,6 +680,14 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
 # canary task carries it as an operator declaration instead (child 3,
 # requirement 3), which is the only place the fact exists.
 MARKER_PLATFORMS = ("codex", "pi")
+# The three dispositions a marker can have, named the same way the classifier
+# names them: the pack's own text is a pack defect, text inside a block the
+# conversion strips leaves with it, and everything else is the consumer's.
+BUCKET_FOR_OWNERSHIP = {
+    "pack": "packDefects",
+    "stripped": "scheduled",
+    "consumer": "blockers",
+}
 CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
 # The CLI. R15-C2 demonstrated both failure directions in the first attempt.
 # False positive: "This repository does not use codex exec; that command is
@@ -591,35 +700,66 @@ CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
 # So the pattern accepts global options and every subcommand, and the *line* has
 # to be in command position -- the same test the classifier already applies to a
 # citation. A sentence about Codex is not an invocation of it.
-CODEX_CLI = re.compile(
-    r"\bcodex\b(?:\s+-{1,2}[\w-]+(?:[= ]\S+)?)*"
-    r"\s+(?:e|exec|resume|apply|login|review|mcp|completion)\b"
-)
-
-
-# What counts as running the CLI rather than talking about it. Three accepted
-# forms, each already a rule this scanner applies to script citations: the line
-# is command context or a runnable fence; the invocation starts the line, after
-# the prompt, list, and code-span punctuation Markdown wraps commands in; or an
-# imperative names it, which is the same "an agent reads this and does it" rule
-# that makes `Use scripts/x.sh as the gate` a blocker.
-CODEX_LEADER = re.compile(r"^[\s>*\-+#$`|]*")
+# R16-C2 retired the subcommand enumeration. Round 15 replaced four adjacent
+# words with a list of accepted subcommands, and Codex broke it from both ends
+# in one round: `codex plugin list` and a bare interactive `codex <prompt>` are
+# real invocations the list does not contain, and the list will keep going stale
+# every time the CLI grows a verb. Enumerating the callee was the wrong axis.
+# What makes a line an invocation is the *position* of the command word, which
+# is the same rule this scanner already applies to `./path` and to runners.
+#
+# `codex(?![\w./:-])` is the command word and nothing else: it excludes the
+# `.codex/` path segment, a `codex:` mapping key, and `codex-cli`, none of which
+# is a call.
+CODEX_WORD = r"codex(?![\w./:-])"
+CODEX_AT_START = re.compile(rf"^\s*{SHELL_PREFIX}{CODEX_WORD}")
+CODEX_AFTER_SEPARATOR = re.compile(rf"(?:[;&|(]|&&|\|\|)\s*{SHELL_PREFIX}{CODEX_WORD}")
+CODEX_ASSIGNED = re.compile(rf"^\s*\w+=[\"']?{CODEX_WORD}")
+CODEX_TOKEN = re.compile(CODEX_WORD)
+# Markdown wraps commands in prompts, bullets, quotes and headings, and those
+# leaders precede a real invocation. The backtick used to be in this class and
+# was R16-C2's false positive: stripping it turned the inline code span in
+# "`codex exec` is prohibited here." into a line that starts with the command.
+# A code span is how prose *names* a command; a prompt is how it *runs* one.
+CODEX_LEADER = re.compile(r"^[\s>*\-+#$|]*")
 # Anchored after the leader, not searched: an imperative *opens* a clause.
 # R15-C2's false positive -- "This repository does not use codex exec" -- has
 # `use` in the middle of a sentence that forbids the tool, and an unanchored
 # search reads a prohibition as an instruction.
 CODEX_IMPERATIVE = re.compile(
-    r"^(?:use|run|invoke|execute|call|launch)\b[^\n]{0,32}?\bcodex\b",
+    rf"^(?:use|run|invoke|execute|call|launch)\b[^\n]{{0,32}}?\b{CODEX_WORD}",
     re.IGNORECASE,
 )
 
 
-def codex_in_command_position(line: str, number: int, commanded: set[int]) -> bool:
+def codex_in_command_position(
+    line: str,
+    number: int,
+    commanded: set[int],
+    structured: set[int] | None = None,
+) -> bool:
+    """Whether this line *calls* codex rather than mentioning it.
+
+    In structured data the answer is the key the value hangs from and nothing
+    else -- `"scripts": {"agent": "codex exec --help"}` runs under `npm run
+    agent`, while a `"description"` containing the same words does not run at
+    all. Line shape describes typography there, not execution, so the structured
+    answer is returned alone rather than unioned with the text rules.
+    """
+    if structured is not None:
+        return number in structured
     if number in commanded or COMMAND_CONTEXT.search(line):
         return True
-    if CODEX_LEADER.sub("", line).startswith("codex"):
+    if (
+        CODEX_AT_START.search(line)
+        or CODEX_AFTER_SEPARATOR.search(line)
+        or CODEX_ASSIGNED.search(line)
+    ):
         return True
-    return bool(CODEX_IMPERATIVE.search(CODEX_LEADER.sub("", line)))
+    stripped = CODEX_LEADER.sub("", line)
+    if CODEX_AT_START.search(stripped):
+        return True
+    return bool(CODEX_IMPERATIVE.search(stripped))
 
 
 def platform_marker_hits(
@@ -627,8 +767,9 @@ def platform_marker_hits(
     files: list[str],
     declared: frozenset[str],
     removed: frozenset[str],
-    pack_owned: frozenset[str] = frozenset(),
-) -> list[dict]:
+    owned_at=None,
+    preread: dict[str, bytes] | None = None,
+) -> dict[str, list[dict]]:
     """Undeclared codex/pi usage, as blocker entries.
 
     Three markers, because `prd.md:204` requires three fixtures and says why:
@@ -642,7 +783,21 @@ def platform_marker_hits(
     `$CODEX_HOME` in 49 files. Forty-nine copies of one fact is noise that
     hides the other blockers.
     """
-    hits: list[dict] = []
+    hits: dict[str, list[dict]] = {"blockers": [], "packDefects": [], "scheduled": []}
+
+    def ownership(relative: str, number: int | None) -> str:
+        # R16-C1: ownership is per content, not per path. A managed block is a
+        # span inside a file whose other lines the consumer wrote, so a marker
+        # is the pack's text only if the *line* is, and the round-15 whole-file
+        # set answered a question nobody asked. The classifier already proves
+        # this per line; the marker pass now asks it the same way.
+        if owned_at is None:
+            return "consumer"
+        return owned_at(relative, number)
+
+    def record(bucket: str, entry: dict) -> None:
+        hits[bucket].append(entry)
+
     for platform in MARKER_PLATFORMS:
         if platform in declared:
             continue
@@ -665,15 +820,24 @@ def platform_marker_hits(
             if path.is_file()
         )
         if present:
-            hits.append(
+            # R16-C1: a directory whose every file the pack installed is the
+            # pack's own occupancy, not the consumer's. It is still recorded --
+            # a surviving pack directory for a platform the registry omits is a
+            # pack defect -- but it does not decide the consumer's verdict.
+            consumer_present = [
+                relative for relative in present if ownership(relative, None) != "pack"
+            ]
+            evidence = consumer_present or present
+            record(
+                "blockers" if consumer_present else "packDefects",
                 {
                     "file": info.directory,
                     "line": None,
                     "detail": (
                         f"undeclared {platform} usage: {prefix} exists with "
-                        f"{len(present)} file(s), e.g. {present[0]}"
+                        f"{len(evidence)} file(s), e.g. {evidence[0]}"
                     ),
-                }
+                },
             )
         adapters = [
             relative
@@ -684,90 +848,102 @@ def platform_marker_hits(
             )
         ]
         if adapters:
-            hits.append(
+            consumer_adapters = [
+                relative for relative in adapters if ownership(relative, None) != "pack"
+            ]
+            evidence = consumer_adapters or adapters
+            record(
+                "blockers" if consumer_adapters else "packDefects",
                 {
-                    "file": adapters[0],
+                    "file": evidence[0],
                     "line": None,
                     "detail": (
-                        f"undeclared {platform} adapter file: {len(adapters)} of "
+                        f"undeclared {platform} adapter file: {len(evidence)} of "
                         f"the registry's marker paths are present"
                     ),
-                }
+                },
             )
     if "codex" not in declared:
-        referencing: list[str] = []
-        invoking: list[str] = []
+        empty = {"blockers": [], "packDefects": [], "scheduled": []}
+        referencing: dict[str, list[str]] = {key: [] for key in empty}
+        invoking: dict[str, list[str]] = {key: [] for key in empty}
         for relative in files:
-            # Three exclusions, each already a rule elsewhere in this scanner
+            # Two exclusions, each already a rule elsewhere in this scanner
             # rather than a judgement made here: a file the conversion removes
             # cannot be evidence of *surviving* usage (that is what `scheduled`
             # means), and a historical record of something said is not current
-            # usage (R8-4). And R14: a file the *pack* installed is the pack's
-            # text, not the consumer's -- a fat install carries pack guidance
-            # that names `codex exec`, and reading that back as "this consumer
-            # uses Codex" would fire on every consumer that installed the pack,
-            # which is all of them.
+            # usage (R8-4).
             #
-            # R15-C1: that third exclusion was keyed on *receipt membership*,
-            # which `prd.md:197` says is not ownership -- the same reason the
-            # classifier has three separate ownership proofs. Codex edited a
-            # receipt-member `.prism/rules.json` to invoke `codex exec`, the
-            # ordinary classifier correctly called the bytes consumer-owned, and
-            # the marker pass hid them anyway. It is now keyed on the ownership
-            # the classifier proved: only content the pack demonstrably owns is
-            # the pack's text. R13: the Trellis-local exclusion that used
-            # to sit here is gone for the reason recorded above the marker
-            # platforms.
-            if relative in removed or relative in pack_owned:
+            # The third exclusion is gone. R14 keyed it on receipt membership,
+            # which `prd.md:197` says is not ownership; R15 keyed it on
+            # whole-file ownership, which R16 showed is not the granularity the
+            # proof has -- and both *dropped* the hit rather than bucketing it,
+            # so a marker in the pack's own text left every bucket and the
+            # four-bucket claim with it. Pack-owned markers are now recorded as
+            # what they are: the pack shipping text that names an undeclared
+            # tool. That is a pack defect, and it is not the consumer's verdict.
+            if relative in removed:
                 continue
             if relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES:
                 continue
-            try:
-                raw = (repo / relative).read_bytes()
-            except OSError:
-                continue
+            # R16-C3 is a rule, not one call site: bytes that decide a
+            # classification are read once. A marker is a classification.
+            raw = (preread or {}).get(relative)
+            if raw is None:
+                try:
+                    raw = (repo / relative).read_bytes()
+                except OSError:
+                    continue
             if is_binary(raw) and not is_executable_surface(repo, relative):
                 continue
             body = raw.decode("utf-8", errors="replace")
-            if CODEX_HOME.search(body):
-                referencing.append(relative)
             lines = body.splitlines()
-            commanded = command_lines(lines) | direct_path_lines(lines, relative)
-            if any(
-                CODEX_CLI.search(line) and codex_in_command_position(line, number, commanded)
-                for number, line in enumerate(lines, start=1)
-            ):
-                invoking.append(relative)
-        if invoking:
-            hits.append(
-                {
-                    "file": "codex exec",
-                    "line": None,
-                    "detail": (
-                        f"undeclared codex usage: the codex CLI is invoked in "
-                        f"{len(invoking)} surviving file(s), e.g. {invoking[0]}"
-                    ),
-                }
-            )
-        if referencing:
-            hits.append(
-                {
-                    # A stable synthetic key, not `referencing[0]`: the first
-                    # matching path is whatever `git ls-files` happened to sort
-                    # first, so anchoring a fixture to it anchors to nothing.
-                    "file": "$CODEX_HOME",
-                    "line": None,
-                    "detail": (
-                        f"undeclared codex usage: $CODEX_HOME referenced in "
-                        f"{len(referencing)} surviving file(s), e.g. "
-                        f"{referencing[0]}"
-                    ),
-                }
-            )
+            structured = structured_command_lines(lines, relative, body)
+            commanded = command_lines(lines) | direct_path_lines(lines, relative, body)
+            for number, line in enumerate(lines, start=1):
+                bucket = BUCKET_FOR_OWNERSHIP[ownership(relative, number)]
+                if CODEX_HOME.search(line) and relative not in referencing[bucket]:
+                    referencing[bucket].append(relative)
+                if (
+                    CODEX_TOKEN.search(line)
+                    and codex_in_command_position(line, number, commanded, structured)
+                    and relative not in invoking[bucket]
+                ):
+                    invoking[bucket].append(relative)
+        for bucket, found in invoking.items():
+            if found:
+                record(
+                    bucket,
+                    {
+                        "file": "codex",
+                        "line": None,
+                        "detail": (
+                            f"undeclared codex usage: the codex CLI is invoked in "
+                            f"{len(found)} surviving file(s), e.g. {found[0]}"
+                        ),
+                    },
+                )
+        for bucket, found in referencing.items():
+            if found:
+                record(
+                    bucket,
+                    {
+                        # A stable synthetic key, not `found[0]`: the first
+                        # matching path is whatever `git ls-files` happened to
+                        # sort first, so anchoring a fixture to it anchors to
+                        # nothing.
+                        "file": "$CODEX_HOME",
+                        "line": None,
+                        "detail": (
+                            f"undeclared codex usage: $CODEX_HOME referenced in "
+                            f"{len(found)} surviving file(s), e.g. {found[0]}"
+                        ),
+                    },
+                )
     return hits
 
 
-def platform_marker_digest(hits: list[dict], repo: Path, declared: frozenset[str]) -> str:
+def platform_marker_digest(hits, repo: Path, declared: frozenset[str]) -> str:
     """R12-C2: bind directory occupancy, which no file-oriented digest sees.
 
     An empty `.codex/` directory added to a clean checkout leaves `head`, both
@@ -783,7 +959,10 @@ def platform_marker_digest(hits: list[dict], repo: Path, declared: frozenset[str
             continue
         present = (repo / info.directory).is_dir()
         parts.append(f"{platform}:{info.directory}:{'present' if present else 'absent'}")
-    parts += [f"hit:{hit['file']}:{hit['detail']}" for hit in hits]
+    for bucket in sorted(hits):
+        parts += [
+            f"hit:{bucket}:{hit['file']}:{hit['detail']}" for hit in hits[bucket]
+        ]
     return digest_of("\n".join(parts))
 
 
@@ -1100,11 +1279,21 @@ def shipped_template_digests() -> dict[str, str]:
     return digests
 
 
-def provenance_digests(repo: Path) -> dict[str, str]:
-    path = repo / PROVENANCE_FILE
+def provenance_digests(raw: bytes | None) -> dict[str, str]:
+    """Ownership's recorded digests, parsed from bytes the caller already read.
+
+    R16-C3: this used to open the file itself, so ownership parsed one read
+    while `scannedBytesDigest` hashed another. R15 bound the bookkeeping bytes
+    without making them the *same* bytes, and Codex moved a hit from `blockers`
+    to `packDefects` through the gap with `changedBindings: []` and an identical
+    `scannedBytesDigest`. Taking bytes rather than a path is what closes it:
+    there is no second read to disagree with.
+    """
+    if raw is None:
+        return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8", errors="strict"))
-    except (OSError, UnicodeError, ValueError):
+        payload = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, ValueError):
         return {}
     files = payload.get("files")
     return files if isinstance(files, dict) else {}
@@ -1136,7 +1325,16 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
     removed = frozenset(plan.delete) | frozenset(plan.retire)
     stripped = frozenset(plan.block_strip)
     managed = frozenset(receipt.entries)
-    recorded = provenance_digests(repo)
+    # One read per generated bookkeeping file, before anything consults them.
+    # Ownership parses these bytes and `scannedBytesDigest` hashes these bytes.
+    bookkeeping: dict[str, bytes] = {}
+    bookkeeping_unreadable: set[str] = set()
+    for relative in sorted(GENERATED_BOOKKEEPING):
+        try:
+            bookkeeping[relative] = (repo / relative).read_bytes()
+        except OSError:
+            bookkeeping_unreadable.add(relative)
+    recorded = provenance_digests(bookkeeping.get(PROVENANCE_FILE.as_posix()))
     shipped = shipped_template_digests()
 
     buckets: dict[str, list[dict]] = {
@@ -1158,8 +1356,11 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
     # bytes; this one is the bytes, digested as they are read.
     read: list[str] = []
     # R15-C1: the marker pass needs the ownership the classifier proves, not the
-    # receipt membership it used to stand in for.
-    proven_pack_owned: list[str] = []
+    # receipt membership it used to stand in for. R16-C1: and it needs it at the
+    # granularity the proof has -- per line for a managed block, per file for a
+    # digest or a shipped-bytes comparison -- so what is recorded here is the
+    # evidence, and `owned_at` below answers the question from it.
+    ownership_info: dict[str, dict] = {}
     unambiguous = unambiguous_basenames(removed, survivors)
     for relative in tracked:
         if relative in removed:
@@ -1172,16 +1373,16 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             # Codex moved a hit from `blockers` to `packDefects` by feeding
             # ownership different provenance while every digest stayed identical.
             # The bytes that decide a classification are inputs to it.
-            try:
-                buckets["scheduled"].append(
-                    {"file": relative, "line": None, "detail": "generated bookkeeping"}
-                )
-                read.append(
-                    f"{relative}\0"
-                    f"{hashlib.sha256((repo / relative).read_bytes()).hexdigest()}"
-                )
-            except OSError:
+            if relative in bookkeeping_unreadable:
                 missing.append(relative)
+                continue
+            buckets["scheduled"].append(
+                {"file": relative, "line": None, "detail": "generated bookkeeping"}
+            )
+            read.append(
+                f"{relative}\0"
+                f"{hashlib.sha256(bookkeeping[relative]).hexdigest()}"
+            )
             continue
         full = repo / relative
         if full.is_symlink():
@@ -1291,18 +1492,31 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
         # blocks are resolved by their markers; force-preserved targets are
         # resolved against the pack's own shipped bytes; malformed markers are
         # unresolvable and fail closed to pack-owned.
-        if relative in managed and vouched is None:
-            pack_owned = pack_owned or (
-                relative in shipped and shipped[relative] == actual
-            )
-        unvouchable = relative in managed and vouched is None
-        if pack_owned:
-            proven_pack_owned.append(relative)
+        forced = relative in shipped
+        if relative in managed and vouched is None and forced:
+            # R16-C1: a force-preserved target's ownership *is* the comparison
+            # against the pack's shipped bytes -- identical means the pack wrote
+            # it, edited means the consumer did. Nothing else decides it. This
+            # used to fall through to the malformed-marker rule below, and Codex
+            # showed a consumer-edited PR template carrying an unmatched pack
+            # marker being called a pack defect on the strength of the marker
+            # while the byte comparison said consumer.
+            pack_owned = shipped[relative] == actual
+        elif relative in managed and vouched is None:
+            pack_owned = pack_owned or (forced and shipped[relative] == actual)
+        unvouchable = relative in managed and vouched is None and not forced
+        ownership_info[relative] = {
+            "whole": pack_owned,
+            "unvouchable": unvouchable,
+            "malformed": malformed_markers,
+            "packSpans": all_spans or [],
+            "strippedSpans": spans,
+        }
         executable = is_executable_surface(repo, relative)
         historical = (
             relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES
         )
-        commanded = command_lines(lines) | direct_path_lines(lines, relative)
+        commanded = command_lines(lines) | direct_path_lines(lines, relative, body)
 
         for number, line in enumerate(lines, start=1):
             if not any(
@@ -1350,10 +1564,32 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 buckets["advisories"].append(entry)
 
+    def owned_at(relative: str, number: int | None) -> str:
+        info = ownership_info.get(relative)
+        if info is None:
+            # Never classified -- untracked, removed, or unreadable. Nothing
+            # proved the pack owns it, so it is the consumer's.
+            return "consumer"
+        if number is not None and any(
+            start <= number <= end for start, end in info["strippedSpans"]
+        ):
+            return "stripped"
+        if info["whole"]:
+            return "pack"
+        if number is None:
+            return "consumer"
+        if info["unvouchable"] and (
+            info["malformed"]
+            or any(start <= number <= end for start, end in info["packSpans"])
+        ):
+            return "pack"
+        return "consumer"
+
     marker_hits = platform_marker_hits(
-        repo, tracked, platforms, removed, frozenset(proven_pack_owned)
+        repo, tracked, platforms, removed, owned_at, bookkeeping
     )
-    buckets["blockers"].extend(marker_hits)
+    for bucket, entries in marker_hits.items():
+        buckets[bucket].extend(entries)
 
     index = git(repo, "ls-files", "-s")
     # R9-C3 / R10-C3. `git status` hides a file marked `assume-unchanged` or

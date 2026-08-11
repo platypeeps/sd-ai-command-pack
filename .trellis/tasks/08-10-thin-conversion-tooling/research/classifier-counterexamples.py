@@ -28,6 +28,7 @@ Exit status is 0 only when every assertion passes and none was skipped.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -868,7 +869,7 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
                 for entry in cli["blockers"]
                 if "codex CLI is invoked" in (entry.get("detail") or "")
             ],
-            ["codex exec"],
+            ["codex"],
         ),
         (
             "R14-C1",
@@ -895,7 +896,7 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
                 for entry in forms["blockers"]
                 if "codex CLI is invoked" in (entry.get("detail") or "")
             ],
-            ["codex exec"],
+            ["codex"],
         ),
         (
             "R15-C2",
@@ -915,7 +916,317 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
                 for entry in edited["blockers"]
                 if "codex CLI is invoked" in (entry.get("detail") or "")
             ],
-            ["codex exec"],
+            ["codex"],
+        ),
+    ]
+
+    # ---- Round 16 -------------------------------------------------------
+    # Ownership is per content. Codex put the same `codex exec --help` line
+    # inside and outside the pack's managed block in one file and got the same
+    # verdict for both, because round 15 asked a whole-file question.
+    def _vouch(repo, relative):
+        """Make provenance vouch a file's current bytes, as a real install does."""
+        provenance = repo / module.PROVENANCE_FILE
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        digest = hashlib.sha256((repo / relative).read_bytes()).hexdigest()
+        payload.setdefault("files", {})[relative] = f"sha256:{digest}"
+        provenance.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    def with_codex_inside_stripped_block(repo):
+        # `.gitignore` is this consumer's only `block_strip` target, so its pack
+        # block is the one span the conversion actually removes.
+        path = repo / ".gitignore"
+        out = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            out.append(line)
+            if module.BLOCK_START.search(line):
+                out.append("codex exec --help")
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    def with_codex_inside_surviving_pack_block(repo):
+        # `.github/copilot-instructions.md`'s pack block is not in this
+        # consumer's `block_strip`, so it survives the conversion. A marker
+        # there is the pack's own text in a file the consumer also writes --
+        # the per-line case, which no whole-file question can answer.
+        path = repo / ".github/copilot-instructions.md"
+        out = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            out.append(line)
+            if module.BLOCK_START.search(line):
+                out.append("codex exec --help")
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    def with_codex_outside_any_block(repo):
+        path = repo / ".github/copilot-instructions.md"
+        body = path.read_text(encoding="utf-8")
+        path.write_text(body + "\ncodex exec --help\n", encoding="utf-8")
+
+    def with_vouched_pack_file_invoking_codex(repo):
+        # A target the conversion *keeps*, whose bytes provenance vouches. A
+        # removed target could not demonstrate this: it is `scheduled` before
+        # ownership is ever consulted.
+        relative = ".github/prompts/sd-check.prompt.md"
+        (repo / relative).write_text(
+            "# check\n\ncodex exec --help\n", encoding="utf-8"
+        )
+        _vouch(repo, relative)
+
+    def with_edited_force_preserved_template(repo):
+        # Consumer-edited *and* carrying an unmatched pack marker. The marker
+        # used to win; the shipped-bytes comparison is what decides this file.
+        path = repo / ".github/PULL_REQUEST_TEMPLATE.md"
+        path.write_text(
+            "<!-- SD-AI-COMMAND-PACK:PR-TEMPLATE:START -->\n"
+            "consumer wrote this\n"
+            "bash scripts/sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+    in_block = scan_with(with_codex_inside_stripped_block)
+    in_pack_block = scan_with(with_codex_inside_surviving_pack_block)
+    out_block = scan_with(with_codex_outside_any_block)
+    vouched = scan_with(with_vouched_pack_file_invoking_codex)
+    forced = scan_with(with_edited_force_preserved_template)
+
+    def marker_counts(result):
+        """Files reported per bucket by the aggregated codex-CLI marker.
+
+        Every synthetic consumer carries a pack-owned invocation -- the pack's
+        own guidance names `codex exec` -- so the interesting quantity is the
+        per-bucket file count, not which buckets are non-empty.
+        """
+        counts = {"blockers": 0, "packDefects": 0, "scheduled": 0}
+        for bucket in counts:
+            for entry in result[bucket]:
+                detail = entry.get("detail") or ""
+                if "codex CLI is invoked" in detail:
+                    counts[bucket] = int(detail.split("invoked in ")[1].split(" ")[0])
+        return counts
+
+    base_counts = marker_counts(base)
+
+    def marker_delta(result):
+        counts = marker_counts(result)
+        return {
+            bucket: counts[bucket] - base_counts[bucket]
+            for bucket in counts
+            if counts[bucket] != base_counts[bucket]
+        }
+
+    cases += [
+        (
+            "R16-C1",
+            "a codex invocation inside the block the conversion strips leaves "
+            "with it",
+            marker_delta(in_block),
+            {"scheduled": 1},
+        ),
+        (
+            "R16-C1",
+            "a codex invocation inside a surviving pack block is the pack's "
+            "text, proven per line",
+            marker_delta(in_pack_block),
+            {"packDefects": 1},
+        ),
+        (
+            "R16-C1",
+            "the identical line outside the block is the consumer's usage",
+            marker_delta(out_block),
+            {"blockers": 1},
+        ),
+        (
+            "R16-C1",
+            "a digest-vouched pack file invoking codex is a pack defect, not a "
+            "dropped hit",
+            marker_delta(vouched),
+            {"packDefects": 1},
+        ),
+        (
+            "R16-C1",
+            "a consumer-edited force-preserved template is the consumer's, "
+            "whatever its markers say",
+            sorted(
+                bucket
+                for bucket in ("blockers", "packDefects")
+                for entry in forced[bucket]
+                if entry["file"] == ".github/PULL_REQUEST_TEMPLATE.md"
+            ),
+            ["blockers"],
+        ),
+    ]
+
+    # R16-C2: the subcommand list was the wrong axis. Every form below is a real
+    # invocation Codex executed or read out of `codex --help`.
+    def with_codex_package_json(repo):
+        (repo / "package.json").write_text(
+            json.dumps(
+                {
+                    "name": "synthetic",
+                    "description": "does not run codex exec anywhere",
+                    "scripts": {"agent": "codex exec --help"},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def with_codex_procfile(repo):
+        (repo / "Procfile").write_text("worker: codex exec --help\n", encoding="utf-8")
+
+    def with_codex_powershell(repo):
+        (repo / "run.ps1").write_text(
+            "Write-Host start & codex exec --help\n", encoding="utf-8"
+        )
+
+    def with_codex_bare_forms(repo):
+        (repo / "extra.sh").write_text(
+            "#!/bin/sh\ncodex plugin list\ncodex \"write me a test\"\n",
+            encoding="utf-8",
+        )
+
+    def with_codex_code_span(repo):
+        (repo / "POLICY2.md").write_text(
+            "`codex exec` is prohibited here.\n", encoding="utf-8"
+        )
+
+    def with_codex_key(repo):
+        # Not a call: a mapping key, a path segment, and a hyphenated name.
+        (repo / "tools.yml").write_text(
+            "codex: disabled\npath: .codex/config.toml\nname: codex-cli\n",
+            encoding="utf-8",
+        )
+
+    def invokes(result):
+        return [
+            entry["file"]
+            for entry in result["blockers"]
+            if "codex CLI is invoked" in (entry.get("detail") or "")
+        ]
+
+    cases += [
+        (
+            "R16-C2",
+            "a package.json script value is an invocation; a description is not",
+            invokes(scan_with(with_codex_package_json)),
+            ["codex"],
+        ),
+        (
+            "R16-C2",
+            "a Procfile process line is an invocation",
+            invokes(scan_with(with_codex_procfile)),
+            ["codex"],
+        ),
+        (
+            "R16-C2",
+            "a PowerShell call operator is a separator",
+            invokes(scan_with(with_codex_powershell)),
+            ["codex"],
+        ),
+        (
+            "R16-C2",
+            "`codex plugin list` and a bare interactive call are invocations "
+            "no subcommand list contained",
+            invokes(scan_with(with_codex_bare_forms)),
+            ["codex"],
+        ),
+        (
+            "R16-C2",
+            "an inline code span names the command without running it",
+            invokes(scan_with(with_codex_code_span)),
+            [],
+        ),
+        (
+            "R16-C2",
+            "a mapping key, a path segment, and a hyphenated name are not the "
+            "command word",
+            invokes(scan_with(with_codex_key)),
+            [],
+        ),
+    ]
+
+    # R16-C3: ownership must parse the bytes the digest hashed. With one read
+    # there is nothing to disagree with, so the assertion is the read count.
+    def with_nothing(repo):
+        (repo / "noop.txt").write_text("nothing\n", encoding="utf-8")
+
+    control = scan_with(with_nothing)
+    seen: list[str] = []
+    real_read_bytes = Path.read_bytes
+
+    def poisoning_read_bytes(self):
+        raw = real_read_bytes(self)
+        if self.name == "provenance.json":
+            seen.append(str(self))
+            if len(seen) > 1:
+                # Every read after the first returns provenance that vouches
+                # nothing. If any classification consults a later read, ownership
+                # collapses and the buckets move.
+                return b'{"schemaVersion": 1, "files": {}}'
+        return raw
+
+    Path.read_bytes = poisoning_read_bytes
+    try:
+        poisoned = scan_with(with_nothing)
+    finally:
+        Path.read_bytes = real_read_bytes
+
+    cases.append(
+        (
+            "R16-C3",
+            "no classification consults a second read of provenance",
+            {bucket: len(poisoned[bucket]) for bucket in ("scheduled", "packDefects", "blockers", "advisories")},
+            {bucket: len(control[bucket]) for bucket in ("scheduled", "packDefects", "blockers", "advisories")},
+        )
+    )
+
+    # R16-C4: the prefix rule demanded the path immediately after the keyword,
+    # and the prose rule was a suffix list that called JSON shell.
+    def with_env_prefixed_direct_path(repo):
+        (repo / "hook").write_text(
+            "#!/bin/sh\nenv -i ./scripts/sd-ai-command-pack-full-check.sh\n",
+            encoding="utf-8",
+        )
+
+    def with_json_prose_and_script(repo):
+        (repo / "app.json").write_text(
+            json.dumps(
+                {
+                    "description": (
+                        "After setup; ./scripts/sd-ai-command-pack-full-check.sh "
+                        "is obsolete prose."
+                    ),
+                    "scripts": {
+                        "check": "./scripts/sd-ai-command-pack-full-check.sh"
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    env_prefixed = scan_with(with_env_prefixed_direct_path)
+    json_mixed = scan_with(with_json_prose_and_script)
+    cases += [
+        (
+            "R16-C4",
+            "`env -i ./script` executes, and a prefix may take its own options",
+            sorted(
+                entry["file"] for entry in env_prefixed["blockers"] if entry["file"] == "hook"
+            ),
+            ["hook"],
+        ),
+        (
+            "R16-C4",
+            "a JSON description is data and a JSON script value is a command",
+            sorted(
+                (bucket, entry["line"])
+                for bucket in ("blockers", "advisories")
+                for entry in json_mixed[bucket]
+                if entry["file"] == "app.json"
+            ),
+            [("advisories", 2), ("blockers", 4)],
         ),
     ]
 
