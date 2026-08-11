@@ -10,6 +10,7 @@ before the first byte lands.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -569,6 +570,73 @@ def stale_receipt_reason(
         + ", ".join(missing)
         + ". Run `install.py TARGET` first."
     )
+
+
+def load_install_audit_module(root: Path):
+    """Import the shipped install audit as a module.
+
+    By path, for the same reason `load_resweep_module` is: the file name has
+    hyphens. Importing rather than shelling out is what makes the *structural*
+    half reachable on its own -- `inspection.run_install_audit` runs the whole
+    script and answers with one exit code, and refusing `--thin` on that answer
+    would fold content drift into the refusal and make `--force` unreachable.
+    """
+    import importlib.util
+
+    scripts = root / "scripts"
+    path = scripts / "sd-ai-command-pack-install-audit.py"
+    spec = importlib.util.spec_from_file_location("sd_install_audit", path)
+    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
+        raise SystemExit(f"error: cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    # The audit imports its sibling `sd_ai_command_pack_lib` by bare name,
+    # which resolves only because a direct `python scripts/...` invocation puts
+    # that directory on `sys.path[0]`. A spec load gets no such entry, so the
+    # import fails partway through `exec_module`. Supplied here and removed
+    # again rather than left behind, because this runs inside the installer.
+    # And the audit sets `sys.dont_write_bytecode` at import time, which is an
+    # entrypoint's decision to make about its own process. Executing the module
+    # here makes it ours, permanently, for every import the installer performs
+    # afterwards. Restored for the same reason the path entry is: a loader that
+    # runs inside another program leaves that program as it found it.
+    added = str(scripts) not in sys.path
+    bytecode = sys.dont_write_bytecode
+    if added:
+        sys.path.insert(0, str(scripts))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = bytecode
+        if added:
+            sys.path.remove(str(scripts))
+    return module
+
+
+def structural_audit_reasons(root: Path, target: Path) -> tuple[str, ...]:
+    """Structural damage the receipt comparison cannot see.
+
+    The receipt comparisons above read *from* the receipt: they ask whether
+    every path it lists is accounted for. Nothing asks the other direction --
+    whether a pack-like file on disk is absent from the receipt. Such a file is
+    in neither `plan.keep` nor `plan.delete`, because the plan is computed from
+    the receipt, so conversion walks straight past it and it survives into the
+    thin tree as an orphan while every receipt check still passes.
+
+    The audit already decides this (`audit_structural_state`), so this asks it
+    rather than reimplementing the pack-like scan, the allow-lists, and the
+    gitignore policy a second time and keeping them in step.
+
+    Only the structural failures are consulted. The audit's provenance half is
+    per-file content drift, and refusing on it here would make `--force`
+    unreachable -- overriding drift is what `--force` is for, which is the same
+    boundary `receipt_disagreement_reason` draws.
+    """
+    audit = load_install_audit_module(root)
+    targets, receipt_reasons = audit.load_installed_targets(target)
+    if receipt_reasons:
+        return tuple(receipt_reasons)
+    failures, _warnings = audit.audit_structural_state(target, targets)
+    return tuple(failures)
 
 
 BLOCK_MARKERS = {
