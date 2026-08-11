@@ -287,10 +287,13 @@ def candidate_validator_digest_at_commit(repo: Path, commit_sha: str) -> str:
             repo, commit_sha, source, entries, VALIDATOR_SOURCE_SUBJECT
         ).content
 
-    try:
-        return candidate_validator_digest(load_source)
-    except FleetConfigError as exc:
-        raise ReleaseIdentityError(f"release validator is invalid: {exc}") from exc
+    # No `except FleetConfigError` here, unlike `payload_digest_at_commit`
+    # above. That one is live: `payload_digest` reads the manifest and rejects a
+    # malformed one. `candidate_validator_digest` reads a constant tuple and
+    # raises nothing of its own, so the only failures are the loader's, and the
+    # loader above raises `ReleaseIdentityError`. Copying the handler across
+    # would be unreachable code claiming a failure mode that cannot occur.
+    return candidate_validator_digest(load_source)
 
 
 def verify_candidate_ledger_at_commit(
