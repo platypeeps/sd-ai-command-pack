@@ -1842,3 +1842,46 @@ Coverage: the new script measures 76%, at the shipped-script aggregate
 floor. Uncovered lines are concentrated in the symlink-resolution and
 managed-block-span branches, which no fixture reaches yet — recorded
 here rather than left implicit, since 76% is the floor and not a target.
+
+### Step 4 — built
+
+`install.py` gained the four conversion flags — `--thin`, `--revert-thin`,
+`--resweep-verdict`, `--consumer` — and one function,
+`_reject_incompatible_conversion_flags`, called at the end of `parse_args`.
+Landed before the mutators, as the step requires: once two mutators can both
+be passed, dispatch order picks a winner silently, and the winner is decided
+by whichever `if` an unrelated edit happens to move.
+
+**The matrix is declared, not ordered.** Every rejection names both flags in
+its message, so the operator learns which pair conflicted rather than which
+one the parser noticed first. `tests/test_thin_argument_matrix.py` covers 15
+argv rows: opposing mutators, `--remove`, `--machine`, both inspections,
+`--configure-fleet`, all three payload selectors against both directions,
+`--thin` without a verdict, a verdict without `--thin`, `--force` on revert,
+`--consumer` outside a conversion, plus the allowed rows.
+
+**Mutation evidence, argv layer.** `_reject_incompatible_conversion_flags`
+replaced by `pass` fails 9 of 15. Restored: 15 pass.
+
+**The rows argv cannot express.** `--remove` alone is legal argv; whether it
+is refused depends on the target, not the arguments. So `ConvertedFixtureTests`
+builds a real installed tree, flips its provenance to `mode: thin`, and asserts
+the three facts round 18's probe found false: exit 2, `.claude/settings.json`
+byte-identical, `provenance.json` still present.
+
+Two honesty notes on that fixture, both recorded rather than papered over:
+
+- The `settings.json` assertion is not live today. Today's `install.py` never
+  writes that file at all — verified by probing a fat `--remove`, which leaves
+  a fixture-written `settings.json` byte-identical whether or not the guard
+  exists. Step 6's conversion is the first code that will touch it, so this is
+  a guard registered ahead of the mutator that can break it, and the comment
+  in the fixture says exactly that.
+- A refusal test alone passes on an installer that refuses *every* `--remove`.
+  `test_the_same_removal_on_a_fat_consumer_still_works` deletes `mode` from the
+  same fixture and asserts exit 0 with the receipt gone, so the refusal is
+  provably about the pin.
+
+**Mutation evidence, tree layer.** `if thin_state != conversion.PIN_STATE_FAT`
+forced to `if False` fails 2 of the 3 fixture tests; the fat control correctly
+still passes.

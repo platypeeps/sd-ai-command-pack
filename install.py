@@ -397,6 +397,39 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--thin",
+        action="store_true",
+        help=(
+            "Convert the target repo to a thin install: delete the machine-scope "
+            "payload, keep the repo-native surfaces, and record a thin pin. "
+            "Requires --resweep-verdict."
+        ),
+    )
+    parser.add_argument(
+        "--revert-thin",
+        action="store_true",
+        help=(
+            "Undo a thin conversion: restore the machine-scope payload from this "
+            "checkout and rewrite the receipts as a fat install."
+        ),
+    )
+    parser.add_argument(
+        "--resweep-verdict",
+        type=Path,
+        help=(
+            "Path to the `clear` verdict document from "
+            "scripts/sd-ai-command-pack-thin-resweep.py. Mandatory with --thin: "
+            "a conversion is only safe against a tree somebody has swept."
+        ),
+    )
+    parser.add_argument(
+        "--consumer",
+        help=(
+            "With --thin or --revert-thin, the fleet registry name for this "
+            "target, overriding the receipt's recorded name."
+        ),
+    )
+    parser.add_argument(
         "--remove",
         action="store_true",
         help=(
@@ -509,7 +542,69 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             )
     if args.remove and args.configure_fleet:
         parser.error("--remove cannot be combined with --configure-fleet")
+    _reject_incompatible_conversion_flags(parser, args, inspecting=inspecting)
     return args
+
+
+def _reject_incompatible_conversion_flags(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    *,
+    inspecting: bool,
+) -> None:
+    """Enforce design.md's conversion matrix, declared rather than ordered.
+
+    `--thin` and `--revert-thin` are two more mutators entering a dispatch that
+    already has three, and dispatch order silently picks a winner when two are
+    passed. Every rejection here names both flags: a caller who passed two
+    destructive selectors needs to know which one was ignored, and "did
+    something reasonable" is the failure mode, not the fallback.
+    """
+    direction = "--thin" if args.thin else "--revert-thin" if args.revert_thin else None
+
+    if args.thin and args.revert_thin:
+        parser.error("--thin cannot be combined with --revert-thin: opposing mutators")
+
+    if direction is not None:
+        incompatible = [
+            option
+            for option, enabled in (
+                ("--remove", args.remove),
+                ("--machine", args.machine),
+                ("--status", args.status),
+                ("--check", args.check),
+                ("--configure-fleet", args.configure_fleet),
+                # Payload selectors do not apply in *either* direction: the
+                # conversion's payload is derived from the receipt and the
+                # partition, so a selector could only disagree with it.
+                ("--platform", bool(args.platform)),
+                ("--all", args.all),
+                ("--local-only", args.local_only),
+            )
+            if enabled
+        ]
+        if incompatible:
+            parser.error(
+                f"{direction} cannot be combined with {', '.join(incompatible)}"
+            )
+
+    if args.thin and args.resweep_verdict is None:
+        parser.error(
+            "--thin requires --resweep-verdict: a conversion is only safe "
+            "against a tree somebody has swept"
+        )
+    if args.resweep_verdict is not None and not args.thin:
+        parser.error("--resweep-verdict requires --thin")
+
+    if args.revert_thin and args.force:
+        # Revert makes no drift decision, so there is nothing for --force to
+        # override. Restore-path occupancy is refused outright (R19-C3), not
+        # forced over: overwriting a consumer's file to reach a state they had
+        # before is the wrong default and the wrong flag.
+        parser.error("--force cannot be combined with --revert-thin")
+
+    if args.consumer is not None and direction is None:
+        parser.error("--consumer requires --thin or --revert-thin")
 
 
 def _install_payload(
