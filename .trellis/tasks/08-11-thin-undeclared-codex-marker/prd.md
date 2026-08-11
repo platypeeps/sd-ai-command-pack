@@ -71,10 +71,12 @@ never installed codex still carries the file. Whether that should count
 is the question, and it is a real one rather than a bug to be patched
 away.
 
-## Options, none yet chosen
+## Options — option 5 chosen 2026-08-11
 
 Recorded so the design phase starts from evidence rather than a blank
-page. Each has a named cost.
+page. Each has a named cost. Options 1-4 were enumerated before design
+and are all rejections; option 5 was added during design and is the
+chosen resolution, with `design.md` D2 carrying the rejection reasons.
 
 1. **Declare `codex` for the eight consumers.** Cheapest edit, worst
    outcome: `retainVendoredFor` carries `["codex", "pi"]`, so declaring
@@ -91,6 +93,25 @@ page. Each has a named cost.
 4. **Rewrite the contract** so the lane is described without a literal
    invocation. Clears the scan, makes the document worse, and is the
    option most likely to be chosen for the wrong reason.
+5. **Split the document and ship the lane conditionally** — added
+   2026-08-11 during design, and **chosen**. The host-side contract (80
+   of 129 lines) keeps shipping to every consumer; the Codex lane (lines
+   41–89) moves to `templates/.codex/sd-ai-command-pack/`, under a
+   manifest row carrying `platform: "codex"`. It is not a sibling of the
+   host contract — the `.codex/` placement is load-bearing, because
+   `.claude/sd-ai-command-pack/**` is an unconditional `consumer-config`
+   override that would break the conversion on receipt drift
+   (`design.md` D1). The row reaches only repositories that declare the
+   platform **or pass `--all` or `--platform codex`**; a normal install
+   in an undeclared repository does not select it. None of the eight
+   declares the platform, so the marker disappears without weakening the
+   detector, degrading the document, or retaining the shared machine
+   slice. It was not in the original four because it
+   depends on a measured fact this PRD did not have:
+   `ACTIVE_TRELLIS_PLATFORM_MARKERS` has no `codex` entry, so a
+   `codex` row is never auto-selected even in the eight repositories
+   that *do* have a populated `.codex/` directory. Evidence and the
+   rejected alternatives are in `design.md`.
 
 ## Requirements
 
@@ -114,15 +135,68 @@ page. Each has a named cost.
 
 ## Acceptance criteria
 
-- [ ] The chosen option is recorded with its evidence, and the three
-      rejected options each carry a stated reason.
+- [ ] The chosen option is recorded with its evidence, and the **four**
+      rejected options each carry a stated reason. Four, not three: the
+      chosen resolution is option 5, added during design, so all four of
+      the originally enumerated options are rejections.
 - [ ] `packDefects` reports no `codex` row for any of the eight
       consumers, measured with the scanner.
 - [ ] The seven-surface count is unchanged by this task — it neither
       fixes nor breaks them, so a combined run with the sibling task
       reaches zero and this one alone does not.
+
+> **The two criteria above have a fleet half this task cannot close, and
+> that is stated here rather than discovered at completion.** Both need a
+> consumer *carrying this version*. None is on it, and putting one there
+> mutates eight repositories this task holds no authorization for — the
+> exact boundary `08-10-thin-prompt-surface-repoint` hit, where four
+> criteria had to be restated at completion because they had been written
+> as if the fleet were in scope. Writing the boundary down now avoids
+> repeating that.
+>
+> What this task measures: both on the disposable fixture, plus the
+> mechanism proof (runs 1–5 and 8 of `implement.md`) that the row is not
+> selected without the declaration. What children 3–5 measure: the fleet
+> halves, through each consumer's pre-conversion resweep, which already
+> gates on `packDefects` reaching zero. The fixture is explicitly **not**
+> a stand-in for the fleet — it cannot see a consumer installed with
+> `--all`, nor one whose developers run Codex without declaring it, and
+> both are consumer-specific facts only that consumer's own resweep
+> reports.
 - [ ] Any capability a consumer loses is named in the PRD and in the
-      CHANGELOG entry.
+      CHANGELOG entry. Option 5 **does** lose one, and the first draft of
+      this criterion said otherwise: the Codex lane is gated by runtime
+      probes (`command -v codex`, `codex exec --help`), not by
+      `docs/fleet/consumers.json`, so every consumer whose developers
+      have the CLI on PATH runs the lane today and stops after the split.
+      Three effects get named: that loss, this repository no longer
+      installing the appendix into its own tree (`design.md` D4), and all
+      eight consumers gaining an `install.py` hint offering
+      `--platform codex`, which installs the appendix without recording a
+      declaration and thereby re-arms the very `packDefect` this task
+      removes (`design.md` D4.1).
+- [x] The lane loss above is **accepted by the operator**, recorded with
+      a date, before implementation starts. It is a capability decision,
+      not an implementation detail, and requirement 3 makes acceptance
+      explicit rather than implied by shipping. **Accepted 2026-08-11**,
+      after the two alternatives were offered with their prices
+      (declaring `codex` fleet-wide, which partly defeats the conversion;
+      narrowing the detector, which weakens the gate).
+
+      **The restore path shown with that decision was wrong, and the
+      correction goes back to the operator.** It said the lane returns
+      with `install.py <repo> --platform codex`. Round 2 refuted all
+      three parts: the flag does not declare the platform
+      (`fileops.py:184` filters selection only), does not buy the
+      75-target retention (conversion reads `entry.get("platforms")` from
+      the fleet registry, `install.py:919`), and is refused outright on
+      an already-converted consumer (`install.py:1268-1273`) — which is
+      every one of the eight, once children 3-5 land. The durable
+      restore is a `docs/fleet/consumers.json` declaration; see
+      `design.md` D4.1's corrected table. Either form is recorded there and
+      in the CHANGELOG rather than in the shipped contract, because
+      `--platform codex` carries the `codex` token and would reintroduce
+      the marker into the file the split clears.
 - [ ] `make check` green; `manifest.json` and CHANGELOG updated if the
       shipped payload changed.
 
