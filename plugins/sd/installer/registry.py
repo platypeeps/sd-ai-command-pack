@@ -2262,6 +2262,15 @@ LOCAL_ONLY_TRACKED_CHECK_PATHS = (
     ),
 )
 TRELLIS_INSTALL_DOCS_URL = "https://docs.trytrellis.app/start/install-and-first-task"
+# The marketplace source locator a thin conversion writes into every
+# consumer's `.claude/settings.json`. It is in neither plugin manifest --
+# `marketplace.json` names the marketplace, `plugin.json` names the plugin,
+# and neither says where the marketplace is fetched from -- so it is declared
+# once here and validated against `ROOT`'s `origin` remote before any write.
+# Hardcoding it *without* that validation is what R18-C3 caught: an
+# owner-only check accepts `platypeeps/sd-ai-command-pack-fork` and writes it
+# into every consumer in the fleet.
+PACK_REPOSITORY = "platypeeps/sd-ai-command-pack"
 FORCE_PRESERVED_TARGETS = frozenset(
     {
         Path(".prism/rules.json"),
