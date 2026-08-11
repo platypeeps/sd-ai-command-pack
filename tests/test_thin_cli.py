@@ -252,6 +252,46 @@ class ThinCommandTests(InstallTestCase):
         )
         self.assert_refused(self.run_thin(), kept)
 
+    def test_a_tracked_pack_like_file_absent_from_the_receipt_is_refused(self) -> None:
+        # Every other receipt check reads outward from the receipt and asks
+        # whether each path it lists is accounted for. This file is the other
+        # direction, and it is invisible to all of them: the plan is computed
+        # *from* the receipt, so a pack-shaped file the receipt never listed is
+        # in neither `keep` nor `delete`. Conversion walks past it, every
+        # receipt comparison still passes, and it survives into the thin tree
+        # as an orphan -- which is the whole reason the residual is supposed to
+        # be enumerable.
+        #
+        # Tracked, not gitignored: the audit tolerates a gitignored local-only
+        # adapter by policy, so an ignored file here would be a warning and
+        # would prove the opposite of the criterion.
+        stray = self.root / ".claude/skills/sd-ghost/SKILL.md"
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_text("# not from any install\n", encoding="utf-8")
+        self.run_git(self.root, "add", "-A")
+        receipt = self.root / install.INSTALLED_TARGETS_FILE
+        self.assertNotIn(
+            ".claude/skills/sd-ghost/SKILL.md",
+            receipt.read_text(encoding="utf-8").split(),
+        )
+
+        self.assert_refused(self.run_thin(), ".claude/skills/sd-ghost/SKILL.md")
+
+    def test_the_structural_refusal_does_not_swallow_the_force_override(self) -> None:
+        # The boundary this check has to respect. Folding the audit's
+        # provenance half in here would refuse on per-file content drift, and
+        # overriding that drift is exactly what `--force` is for -- so a
+        # drifted tree with no structural damage must still convert under
+        # `--force` rather than being refused by the new preflight.
+        target = self.root / ".gito/config.toml"
+        target.write_text("# edited by the consumer\n", encoding="utf-8")
+        self.run_git(self.root, "add", "-A")
+
+        result = self.run_thin("--force")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(conversion.thin_pin_state(self.root), conversion.PIN_STATE_THIN)
+
     # -- the happy path -----------------------------------------------------
 
     def test_a_dry_run_writes_nothing_and_names_the_plan(self) -> None:

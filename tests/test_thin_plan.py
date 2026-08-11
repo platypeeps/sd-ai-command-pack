@@ -544,6 +544,108 @@ class ResweepModuleTests(unittest.TestCase):
         self.assertEqual(module.SCHEMA_VERSION, 1)
 
 
+class StructuralAuditTests(unittest.TestCase):
+    """The one preflight that reads from the disk toward the receipt.
+
+    Every other receipt check asks whether each path the receipt lists is
+    accounted for. A pack-shaped file the receipt never listed is invisible to
+    all of them, because the conversion plan is computed from that receipt, so
+    the file is in neither `keep` nor `delete` and survives into the thin tree.
+    """
+
+    def setUp(self) -> None:
+        self.target = _temp_dir(self)
+        (self.target / ".sd-ai-command-pack").mkdir()
+
+    def write_receipt(self, *entries: str) -> None:
+        (self.target / install.INSTALLED_TARGETS_FILE).write_text(
+            "\n".join(entries) + "\n", encoding="utf-8"
+        )
+
+    def test_an_unusable_receipt_is_reported_rather_than_scanned(self) -> None:
+        # The receipt is the scan's input, so a receipt the audit cannot use
+        # makes the structural answer meaningless rather than empty. Returning
+        # its reasons refuses; falling through to the scan would compare every
+        # pack-like file against nothing and report the whole install missing.
+        self.write_receipt("/etc/passwd")
+
+        reasons = thin.structural_audit_reasons(_support.PACK_ROOT, self.target)
+
+        self.assertTrue(reasons)
+        self.assertTrue(
+            any("/etc/passwd" in reason for reason in reasons), reasons
+        )
+
+    def test_a_missing_receipt_is_reported_the_same_way(self) -> None:
+        reasons = thin.structural_audit_reasons(_support.PACK_ROOT, self.target)
+
+        self.assertTrue(any("is missing" in reason for reason in reasons), reasons)
+
+    def test_an_intact_receipt_reports_nothing(self) -> None:
+        self.write_receipt(".sd-ai-command-pack/installed-targets.txt")
+
+        self.assertEqual(
+            thin.structural_audit_reasons(_support.PACK_ROOT, self.target), ()
+        )
+
+
+class InstallAuditModuleTests(unittest.TestCase):
+    def test_the_shipped_audit_imports_as_a_module(self) -> None:
+        # Imported rather than shelled out to, because the structural half has
+        # to be reachable on its own: the script's exit code folds content
+        # drift into the same answer, and refusing `--thin` on that would make
+        # `--force` unreachable.
+        module = thin.load_install_audit_module(_support.PACK_ROOT)
+        self.assertTrue(callable(module.audit_structural_state))
+        self.assertTrue(callable(module.load_installed_targets))
+
+    def test_the_bytecode_flag_the_audit_sets_does_not_escape(self) -> None:
+        # The audit sets `sys.dont_write_bytecode` at import time, which is a
+        # decision an entrypoint makes about its own process. Executing it here
+        # makes it the installer's, permanently, for every import afterwards.
+        #
+        # Asserted in both directions: restoring must put back what was there
+        # rather than clearing the flag, or a caller that had deliberately set
+        # it loses its own setting to this loader.
+        import sys
+
+        original = sys.dont_write_bytecode
+        self.addCleanup(lambda: setattr(sys, "dont_write_bytecode", original))
+
+        for setting in (False, True):
+            sys.dont_write_bytecode = setting
+            thin.load_install_audit_module(_support.PACK_ROOT)
+            self.assertIs(sys.dont_write_bytecode, setting)
+
+    def test_the_scripts_path_entry_is_left_exactly_as_it_was_found(self) -> None:
+        # The loader supplies `scripts/` on `sys.path` because the audit
+        # imports its sibling library by bare name, and a direct `python
+        # scripts/...` invocation is what normally provides it. This runs
+        # inside the installer, so the entry is removed again -- and an entry
+        # somebody else already owns is left alone rather than removed out
+        # from under them.
+        # Both states are set up explicitly rather than assumed. Whether
+        # `scripts/` is already on `sys.path` is a property of how the suite
+        # was launched -- the shell-coverage lane runs with it present and the
+        # ordinary lane without -- so asserting either as a precondition makes
+        # the test pass or fail on the runner rather than on the loader.
+        import sys
+
+        scripts = str(_support.PACK_ROOT / "scripts")
+        original = list(sys.path)
+        self.addCleanup(lambda: sys.path.__setitem__(slice(None), original))
+
+        sys.path[:] = [entry for entry in original if entry != scripts]
+        thin.load_install_audit_module(_support.PACK_ROOT)
+        self.assertNotIn(scripts, sys.path, "the loader left its own entry behind")
+
+        sys.path.insert(0, scripts)
+        thin.load_install_audit_module(_support.PACK_ROOT)
+        self.assertEqual(
+            sys.path.count(scripts), 1, "an entry the loader did not add was disturbed"
+        )
+
+
 class ReceiptAgreementTests(unittest.TestCase):
     """Do the two version-bearing receipts describe the same install?
 
