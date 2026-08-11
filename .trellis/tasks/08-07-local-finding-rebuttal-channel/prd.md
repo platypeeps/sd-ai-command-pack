@@ -97,3 +97,78 @@ Filed 2026-08-07 while shipping PR #353, which is blocked by exactly this gap.
 Sibling of `08-06-review-check-receipt-pinning` (T-27) and
 `08-06-local-provider-empty-scope` (T-28): all three are local-provider
 evidence-handling defects.
+
+## Second failure mode: non-convergence, not false positives (2026-08-09)
+
+Filed from `platypeeps/sd-github-review` on `0.64.3`, which predates PR #402's
+`_local_outstanding` rebuttal gate. The evidence is still current for this task,
+because it describes a shape the rebuttal channel alone does not close.
+
+The PR #353 evidence above is about findings that are *wrong* — a misread fence,
+a hallucinated typo. A rebuttal channel answers that. This is the other case:
+findings that are individually defensible and still never terminate.
+
+### PR #70: three rounds, thirty findings, zero confirmed defects
+
+Three rounds against the same branch, each at a new head after real fixes:
+
+| Round | prism | gito | Overlap with prior round |
+| --- | --- | --- | --- |
+| 1 | 9 findings | clean | — |
+| 2 | 11 findings | clean | none |
+| 3 | 10 findings | clean | 2 residuals of one family |
+
+Every finding was verified against the checkout. The two that claimed a real
+defect were refuted by the code. The one genuine signal — managed-resource
+enumeration drift, which that repository's own `review-recurrence-prevention`
+rule targets — recurred across all three rounds and was fixed, with rounds 2 and
+3 confirming the fix by narrowing it.
+
+Rounds 1 and 2 shared **no finding at all**. That is the operative evidence: the
+provider emits a fresh observation set per invocation, so a fourth round
+converges on nothing. Per-finding rebuttal disposes of each round's set and the
+next round produces a different one — the loop is unbounded in rounds, not in
+findings-per-round.
+
+The upstream cause is configuration this repository does not own: `.prism/rules.json`
+sets `focus` across eight categories including `docs`, `maintainability`, and
+`style`. That produces useful signal, but most of it is commentary on the change
+rather than a defect in it, and `_remote_gate` cannot tell the two apart —
+`if outstanding or outcome == "findings"` blocks on any finding of any category
+at any severity.
+
+### The documented local-only escape is unreachable in this topology
+
+`sd-review`'s rule is that "a router classified `absent` may complete locally
+only when routing is optional and the local receipt is clean". That consumer's
+remote lane is `absent`/`setup-descriptor-absent` **by design** — its
+`08-09-descriptor-contract-path` moved the published setup descriptor off the
+probe path precisely so the router does not self-match its own artifact. So the
+escape's precondition holds on the routing side and fails on the receipt side:
+the receipt can never be clean while any advisory finding stands.
+
+The other documented exits do not apply either:
+
+- `--successor bookkeeping` requires evidence that the whole `base..head` delta
+  is bookkeeping. False for any real change.
+- `--successor low-risk` still selects a provider, which returns a fresh set.
+- `--remote-disposition <id>=rebutted` is remote-receipt-only and explicitly not
+  for an unfixed finding.
+- `review.round-extension` asks a human every time. That is a prompt in place of
+  a gate, not convergence. PR #70 required it after three rounds.
+
+### Requirement this adds
+
+Severity or category must be usable in the gate decision, so an observation-only
+category cannot block indefinitely while a `high correctness` finding still does.
+A per-finding rebuttal channel is necessary but not sufficient: without a
+category dimension, a converging PR still pays one manual disposition per
+advisory finding per round, forever.
+
+Corresponding acceptance criterion: replaying the three-round PR #70 sequence
+against the new gate terminates without a human `review.round-extension`
+decision, while a synthetic `high correctness` finding with no disposition still
+blocks.
+
+Tracked in that consumer as `08-09-review-gate-advisory-convergence`, parked
+there on this repository's ownership of `_remote_gate`.

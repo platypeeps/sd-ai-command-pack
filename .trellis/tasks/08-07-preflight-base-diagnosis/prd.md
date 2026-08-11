@@ -215,3 +215,76 @@ the correct base being the pack-refresh work commit.
 This is a diagnosis defect only. No bundle was accepted that should have been
 rejected, and none was rejected that should have been accepted. The cost is
 operator time and the risk of "fixing" a bundle that was never broken.
+
+## Second instance: a correct base, and the actionable diagnosis is discarded (2026-08-09)
+
+Reported from `platypeeps/sd-github-review` PR #72 at pack 0.64.3. Same operator
+cost as the `loadsmith` case, but a different mechanism, and this one is not
+caused by a wrong `--base`. It is worth folding in here because the remedy is
+the same shape: name the cause once instead of emitting findings about
+something else.
+
+`validateCompletionSuccessorRecovery`
+(`scripts/sd-ai-command-pack-review-preflight.mjs:1727`) tries the archive
+anchor, then the active-task anchor, then chooses **which** failure to report:
+
+```js
+const findingsToCommit = (archiveResult.shapedTailCount > 0 || archiveResult.status === 'indeterminate')
+  ? archiveResult.findings
+  : activeTaskResult.findings;
+```
+
+On a `--base == --head` call for a branch with exactly one `in_progress` task,
+the archive search walked back into the default branch's history, found one
+shaped archive/journal tail there (`shapedTailCount = 1`), and failed against
+it. That count alone routed the report to the archive diagnosis. The operator
+received:
+
+```
+completion_successor_history_non_linear
+completion_successor_history_oversized
+  completion successor contains more than 50 commits
+  successor commit 19c9ee6d6f45 must have exactly one parent
+  ... 9 more merge commits, all on the default branch
+```
+
+Every one of those findings is about commits the operator did not write, on a
+branch they were not finalizing, and none is actionable.
+
+The suppressed `activeTaskResult.findings` — recovered by running a patched
+copy of the validator that commits the active-task findings unconditionally —
+named the real problem on the first line, with exact repo-relative paths:
+
+```
+completion_successor_scope_invalid | .trellis/tasks/<other-task>/prd.md
+completion_successor_scope_invalid | .trellis/tasks/<other-task>/task.json
+completion_successor_scope_invalid | .trellis/spec/backend/directory-structure.md
+completion_successor_scope_invalid | .trellis/spec/guides/cross-layer-thinking-guide.md
+```
+
+Four paths on the operator's own branch, two of which are a genuine design
+question in their own right (see the sibling report on `.trellis/spec/**` and
+`active-task-review-successor`).
+
+### Why the heuristic misfires
+
+The comment above it reasons that a shaped tail means "a specific, actionable
+reason already exists there." That holds when the shaped tail is on the branch
+being finalized. It does not hold when the search escapes into the default
+branch, where *any* long-lived repository has a shaped tail and
+`shapedTailCount > 0` is therefore near-certain rather than informative. The
+condition selects the archive diagnosis in exactly the case where it is least
+relevant.
+
+A minimal correction consistent with this PRD's existing goal: when the archive
+search's shaped tail lies outside the range under finalization, prefer the
+active-task diagnosis, or emit both with the active-task findings first. The
+present behavior discards the only findings the operator can act on.
+
+### Acceptance criteria (additive)
+
+- [ ] When both successor recoveries fail and the archive search's shaped tail
+      is not reachable within the branch being finalized, the reported findings
+      include the active-task diagnosis.
+- [ ] A reproduction is recorded showing both finding sets for one invocation,
+      as above.
