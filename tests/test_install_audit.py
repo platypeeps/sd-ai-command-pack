@@ -1414,6 +1414,35 @@ class InstallAuditTests(InstallTestCase):
             "sha256:" + "0" * 64,
         )
 
+    def test_a_receipt_conflict_installs_nothing_at_all(self) -> None:
+        # R20-C1. The test above asserts the exit code and the untouched
+        # symlink, and passed the whole time the payload was being written
+        # anyway: the receipts are written after the payload, so their
+        # conflicts were detected after it. Exit 2 read as "nothing happened"
+        # while the tree had already changed underneath it. The thin-conversion
+        # case is the damaging one -- a consumer whose machine surfaces were
+        # deliberately deleted gets them all back -- but the property is
+        # general, so assert it on a plain removed payload file.
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+
+        witness = root / "scripts/sd-ai-command-pack-full-check.sh"
+        self.assertTrue(witness.exists())
+        witness.unlink()
+
+        provenance = root / install.PROVENANCE_FILE
+        elsewhere = root / ".sd-ai-command-pack/moved-provenance.json"
+        provenance.rename(elsewhere)
+        provenance.symlink_to(elsewhere.name)
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertFalse(
+            witness.exists(),
+            "install refused with exit 2 and restored the payload anyway",
+        )
+
     def test_install_recovers_from_malformed_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

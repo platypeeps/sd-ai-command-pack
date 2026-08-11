@@ -29,6 +29,7 @@ from installer.fileops import (
     RemoveStatus,
     atomic_write_bytes,
     display_path,
+    generated_text_file_status,
     install_file,
     install_managed_block,
     install_trellis_gitignore,
@@ -967,6 +968,37 @@ def main(argv: list[str] | None = None) -> int:
             for conflict in preflight_conflicts:
                 print(f"{conflict.status:11} {conflict.file.target}")
             _print_conflicts(preflight_conflicts)
+            return 2
+        # R20-C1: the payload preflight above covers selected files only. The
+        # three receipts are written afterwards, by a different path, so a
+        # conflict on one of them was reported only after the payload had
+        # already landed -- which is how a thin consumer with a symlinked
+        # provenance got its machine surfaces rewritten while the command
+        # exited 2. "Plan before apply" has to include the files the plan
+        # itself writes.
+        receipt_conflicts = [
+            (destination, status)
+            for destination, status in (
+                # Deliberately unresolved: `is_symlink()` is the question, so
+                # the path must not be resolved through the link first.
+                (receipt, generated_text_file_status(target / receipt))
+                for receipt in (
+                    PACK_MANIFEST_FILE,
+                    PROVENANCE_FILE,
+                    INSTALLED_TARGETS_FILE,
+                )
+            )
+            if status is not None
+        ]
+        if receipt_conflicts:
+            for destination, status in receipt_conflicts:
+                print(f"{status.value:11} {destination}")
+            print(
+                "error: a pack receipt cannot be written in place; nothing was "
+                "installed.\n"
+                "       Resolve the paths above, or re-run with --force.",
+                file=sys.stderr,
+            )
             return 2
         planned_results = {
             result.file.target: result

@@ -101,11 +101,13 @@ Checks:
 - `fleet-review-classify` against that fixture classifies it as not
   needing a refresh.
 - A half-converted fixture (payload deleted, receipt still `fat`) takes
-  the **unchanged fat path** and reports `refresh-required` — which is
-  the honest answer, since files really are missing. Asserting `invalid`
-  here would contradict the byte-identical-fat-path requirement two
-  lines above: `mode: "thin"` is the only discriminator, and this
-  fixture does not carry it.
+  the **unchanged fat path** and reports **`invalid`** — measured, not
+  predicted; see the correction below, which supersedes the
+  `refresh-required` this line originally guessed (R20-C7). The fat path
+  really is unchanged: the receipt still lists the deleted targets, so
+  `inspect_receipts` calls them missing-or-invalid exactly as it always
+  has. `mode: "thin"` remains the only discriminator, and this fixture
+  does not carry it.
 - The half-converted case that matters is the inverse: receipt says
   `mode: "thin"` but the residual slice is incomplete. That reports
   `refresh-required` through the thin comparison, and `sd-status` shows
@@ -1745,3 +1747,43 @@ difference here was entirely tests I did not write and had not read. A guard
 added to a shipped command is a behavior change to that command, and the
 question to ask before adding one is not "is this safe" but "which existing
 behaviors does this now come before".
+
+### Round 20 — Codex lane against `460c52e9`, unaimed, fourth in a row
+
+Seven blockers and one non-blocking contradiction. Round 20 was asked
+directly to attack R19-C4b's claim that total pin destruction is the only
+way a genuinely thin consumer reads as `fat`. It refuted that claim by
+construction on its first attempt.
+
+| ID | Defect | Disposition |
+| --- | --- | --- |
+| R20-C1 | **A symlinked thin provenance is classified `fat` and ordinary install damages the consumer.** It built a thin consumer, moved the pin bytes to a sibling, and symlinked provenance at them — the pin intact and readable, not destroyed. Install exited 2 with `symlink-conflict`, and the machine witness went `absent` → `present`. The payload preflight (`install.py:956`) covers selected files only; the three receipts are written afterwards by a different path, so their conflicts were detected *after* the payload had landed | **Shipped**: the preflight now checks the three receipt destinations before the first payload write, and refuses with `nothing was installed`. New test asserts a removed payload file is **still absent** after the refusal — the pre-existing symlink test only checked the exit code and passed throughout |
+| R20-C2 | **Byte-identical revert cannot restore the 13 retired files.** All 13 are in the live 210-row receipts and absent from the manifest, source tree, and templates; provenance keeps hashes, not bytes (`provenance.py:136`). A same-version checkout cannot recreate them | Open. Three ways out: preserve the bytes durably, leave legacy retired files in place, or narrow the revert guarantee. The last is probably right — revert restores what the pack can still produce — but it changes what `--revert-thin` promises and must be said in prd.md, not assumed |
+| R20-C3 | **The R19-C6 write order destroys its own recovery inventory.** It rewrites `installed-targets.txt` to the residual before deleting, but `build_conversion_plan` discovers deletion candidates *from* that receipt (`conversion.py:204`). After the rewrite, an interrupted rerun cannot find what remains undeleted — the exact opposite of the property the order was specified to guarantee | Open, and it invalidates the table of four interrupted states. Needs a durable removal inventory or journal that survives until deletion completes. This is the finding that most argues for writing code rather than more contract |
+| R20-C4 | **The freshness preflight invalidates the canary's acceptance figures.** The 210-row totals reproduce against the stale receipts, but R19-C2 now requires a current install first, and a fresh 0.66.1 install measures **198**: `167 delete + 0 retire + 27 keep + 3 receipts + 1 strip` without Codex, `91 + 0 + 103 + 3 + 1` with. The refresh drops the 13 retired rows and adds the pack-update target | Open. The canary prd still asserts 210/13 (`prd.md:114`). 210 can stay as a compatibility fixture but cannot be the expected post-refresh result |
+| R20-C5 | **R19-C4b's second thin marker exists in design.md and nowhere in the checklist.** Step 4 defines mode recognition around `thin_pin_state` alone; step 6 rewrites the manifest without specifying a mode witness; no disagreement, pin-loss, or symlinked-thin test is listed | Open. As written, the remedy for R20-C1's class would never get implemented |
+| R20-C6 | **Fleet refresh skips damaged same-version thin consumers.** Preflight declares a consumer at target on provenance version alone (`fleet-preflight.py:93`), so a same-version thin consumer with a corrupted residual never reaches the repair path. Step 9b covers version-bump refresh only | Open, folded into step 9b |
+| R20-C7 | **Two expected states for one fixture.** Step-1 checks said a half-converted consumer reports `refresh-required`; the measured correction below said `invalid`. Tests follow `invalid` | **Fixed** in this file: the guess is replaced by the measurement, with the reasoning that the fat path really is unchanged |
+| R20-C8 | Candidate checking clones the consumer's default branch and force-installs into the clone (`fleet-candidate-check.py:138`), so once a default branch is thin the R19 guard refuses it — the parent design says the scratch checkout is always fat | Non-blocking; the candidate-loop sibling owns this and remains a hard pre-canary dependency |
+
+**What round 20 says about the review loop itself.** Three of its seven
+findings (C2, C3, C4) are defects *in round 19's fixes*, and round 19 did
+the same to round 18. The loop is now generating contracts about
+unwritten code faster than it retires them, and C3 is the clearest
+example: "the write order destroys its own recovery inventory" cannot be
+fixed on paper with any confidence, because the fix is a durable removal
+inventory — an artifact that has to exist before rerun-after-interruption
+can be tested at all.
+
+So the disposition for this round is deliberately uneven: C1 and C7 are
+closed now, and C2, C3, C4, C5, C6 stay open as inputs to steps 3 and 6
+rather than as another round of prose. They are recorded here with enough
+measurement to be actionable — 198 rows not 210, deletion discovery reads
+the receipt, the 13 retired files have no surviving bytes — which is what
+a contract needs to be worth writing.
+
+Round 20's verification: harness 124 passed, 0 failed; production suite
+`Ran 2078 tests in 482.294s OK`; true-revert of `_retained_for_consumer`
+produced `121 passed, 3 failed`; restore digest matched before and after;
+724 partition rows matched 724 manifest rows with declared counts
+`6 / 79 / 88 / 551` correct; worktree clean at exit.
