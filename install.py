@@ -954,6 +954,18 @@ def _run_thin_conversion(
     if drifted_receipt is not None:
         return _refuse([drifted_receipt], "this consumer's receipt is stale")
 
+    # Every check above reads outward from the receipt. This one reads back:
+    # a tracked pack-like file the receipt never listed is in neither `keep`
+    # nor `delete` -- the plan is built from the receipt -- so conversion walks
+    # past it and it survives into the thin tree while the receipt comparisons
+    # all still pass. Structural failures only, so `--force` stays reachable
+    # for the content drift it exists to override.
+    structural = thin.structural_audit_reasons(ROOT, target)
+    if structural:
+        return _refuse(
+            list(structural), "this consumer's installed tree is not structurally sound"
+        )
+
     marketplace_name, plugin_name = _plugin_identity(ROOT)
     settings, settings_reason = thin.plan_settings_merge(
         target / thin.CLAUDE_SETTINGS_FILE, marketplace_name, plugin_name

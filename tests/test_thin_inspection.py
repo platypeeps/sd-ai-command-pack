@@ -442,6 +442,44 @@ class ResidualSelectionTests(InstallTestCase):
             self.assertIsNotNone(row, file.target)
             self.assertIn(row.category, {"repo-native", "consumer-config"})
 
+    def test_the_residual_is_the_measured_thirty_one_targets(self) -> None:
+        # The criterion's arithmetic, asserted rather than described.
+        # `THIN_PLATFORMS` is rwbp-coordinator's recorded platform set, so this
+        # is that consumer's shape and not a shape invented for the test.
+        #
+        # The union is what makes the figure worth pinning: the managed-block
+        # files are added to a residual that already contains keep rows, and
+        # `.github/copilot-instructions.md` is in both. Adding two files moves
+        # the total by one, which is the only way to see that it was counted
+        # once -- a set makes double counting invisible from the total alone.
+        partition = load_partition(ROOT / install.SURFACE_PARTITION_FILE)
+        every_target = frozenset(file.target.as_posix() for file in self.files)
+        blocks = frozenset({".github/copilot-instructions.md", ".gitignore"})
+
+        without = install.conversion.expected_residual_targets(
+            every_target, partition, frozenset(THIN_PLATFORMS),
+            present_managed_blocks=frozenset(),
+        )
+        residual = install.conversion.expected_residual_targets(
+            every_target, partition, frozenset(THIN_PLATFORMS),
+            present_managed_blocks=blocks,
+        )
+
+        self.assertEqual(len(residual), 31, sorted(residual))
+        self.assertEqual(len(residual) - len(without), 1)
+        self.assertIn(".github/copilot-instructions.md", without)
+        self.assertLessEqual(blocks, residual)
+        bookkeeping = {
+            ".sd-ai-command-pack/installed-targets.txt",
+            ".sd-ai-command-pack/manifest.json",
+            ".sd-ai-command-pack/provenance.json",
+        }
+        self.assertLessEqual(bookkeeping, residual)
+        for target in residual - blocks - bookkeeping:
+            row = partition.row(target)
+            self.assertIsNotNone(row, target)
+            self.assertIn(row.category, {"repo-native", "consumer-config"}, target)
+
     def test_a_pin_naming_an_unclassifiable_platform_falls_back(self) -> None:
         # R18-C1. The pin chooses the residual it is then measured against, so
         # an unusable pin that still narrows would certify itself: the slice it
@@ -592,6 +630,82 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
         self.assertEqual(payload["state"], "current", result.stdout)
         self.assertEqual(payload["changeCount"], 0)
         self.assertEqual(result.returncode, 0)
+
+    def forget_target(self, root: Path, target: str) -> None:
+        """Drop one path from both receipts, leaving a consumer that never had it."""
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        kept = [
+            line
+            for line in receipt.read_text(encoding="utf-8").split()
+            if line != target
+        ]
+        receipt.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        for name in (install.PROVENANCE_FILE, install.PACK_MANIFEST_FILE):
+            path = root / name
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload.get("files"), dict):
+                payload["files"].pop(target, None)
+            elif isinstance(payload.get("files"), list):
+                payload["files"] = [
+                    row
+                    for row in payload["files"]
+                    if not (isinstance(row, dict) and row.get("target") == target)
+                ]
+            path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    def test_a_missing_repo_native_file_for_a_declared_platform_needs_a_refresh(
+        self,
+    ) -> None:
+        # The residual is what `--check` measures a thin consumer against, so
+        # the check is only worth anything if a gap inside it still registers.
+        # A repo-native file the pack ships for a platform this consumer
+        # declares is in that residual; absent from disk it is a real gap, and
+        # `current` would be a false clean bill.
+        # "New" means absent from the receipt as well as from disk. Deleting an
+        # installed file only is a different finding: the receipt still lists
+        # it, so the structural audit reports drift and the state is `invalid`,
+        # which would pass an assertion about "not current" while proving
+        # nothing about the residual's platform predicate.
+        root = self.install_fat()
+        self.convert(root)
+        target = ".github/prompts/sd-check.prompt.md"
+        newly_shipped = root / target
+        self.assertTrue(newly_shipped.is_file(), "fixture must start from a present file")
+        newly_shipped.unlink()
+        self.forget_target(root, target)
+
+        payload = json.loads(self.run_install_inproc(root, "--check", "--json").stdout)
+
+        self.assertEqual(payload["state"], "refresh-required", payload)
+
+    def test_a_repo_native_file_for_an_undeclared_platform_does_not(self) -> None:
+        # The other half: a platform this consumer never declared contributes
+        # nothing to the residual, so its absence is not a gap and the state
+        # stays `current`. Without the narrowing entirely -- the behaviour
+        # before the thin branch -- this same fixture reports
+        # `refresh-required` permanently, which is the state
+        # `fleet-review-classify` refuses.
+        #
+        # What this pair does *not* prove on its own is the platform predicate
+        # inside `expected_residual_targets`: dropping it widens the residual,
+        # but the installer skips a platform whose directory the repo does not
+        # have, so this consumer's state is unmoved.
+        # `test_the_residual_is_the_measured_thirty_one_targets` is where that
+        # predicate is actually pinned.
+        root = self.install_fat()
+        self.convert(root)
+        absent = root / ".agent/skills/sd-check/SKILL.md"
+        self.assertFalse(
+            absent.exists(), "an undeclared platform's files are never installed"
+        )
+        partition = load_partition(ROOT / install.SURFACE_PARTITION_FILE)
+        row = partition.row(".agent/skills/sd-check/SKILL.md")
+        self.assertEqual(row.category, "repo-native")
+        self.assertNotIn(row.platform, THIN_PLATFORMS)
+
+        payload = json.loads(self.run_install_inproc(root, "--check", "--json").stdout)
+
+        self.assertEqual(payload["state"], "current", payload)
 
     def test_a_converted_consumer_still_reports_its_pinned_platforms(self) -> None:
         # Every fleet reader compares installed platforms against the

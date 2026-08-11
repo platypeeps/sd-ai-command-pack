@@ -2379,3 +2379,75 @@ the claim that it produced one does not hold for these two.
 
 The second suppressed comment renamed `test_the_machine_payload_is_not_re_created`
 to `..._is_not_recreated`. Cosmetic, applied.
+
+## Acceptance-criteria audit before archive — four gaps, all closed
+
+Archiving requires every acceptance criterion to be met, so the 24 criteria in
+`prd.md` were mapped to named tests rather than assumed from the shipped PRs.
+Twenty mapped cleanly. Four did not, and one of those was missing code rather
+than a missing test.
+
+`make test` was green on `main` throughout, which is the point: none of these
+gaps was visible as a failure. A criterion with no test does not fail — it is
+silently absent, which is exactly the state the criteria were written to make
+impossible.
+
+| AC | What was missing | Disposition |
+| --- | --- | --- |
+| AC2 | 3 of 5 citation-bucket fixtures: a glob naming a wholly removed population, a citation from a nested `scripts/` directory, a citation from an agent prompt | Three fixtures added. The matchers were already implemented — W-3's `fnmatch` branch and `EXECUTABLE_PREFIXES` — so this was coverage, not behaviour |
+| AC5 | The pi adapter marker, the fourth of four | Two fixtures added, plus the empty-directory negative for pi. `MARKER_PLATFORMS` already carried `pi`; the criterion's own warning — "one combined case would pass while three of the four markers were never implemented" — described the test suite, not the code |
+| AC6 | The measured 31-target residual, and the declared-vs-undeclared `repo-native` predicate | Three tests added: the count with its union arithmetic, and the `--check` pair |
+| AC16 | The pre-conversion structural audit did not exist in the `--thin` path | **Code.** `thin.structural_audit_reasons` plus a preflight in `install.py`, with tests |
+
+### AC16 was a real hole, not a bookkeeping one
+
+Every receipt check in the `--thin` preflight reads outward from the receipt:
+it asks whether each path the receipt lists is accounted for. Nothing asked the
+other direction. A tracked pack-shaped file the receipt never listed is in
+neither `plan.keep` nor `plan.delete` — the plan is *computed from* that
+receipt — so the conversion walks straight past it and it survives into the
+thin tree as an orphan, while every receipt comparison still passes. The
+residual is supposed to be enumerable; this made it not.
+
+The audit already decided this case (`audit_structural_state`: "pack-like file
+is not listed in installed targets"), so the fix asks it rather than
+reimplementing the pack-like scan, the allow-lists, and the gitignore policy a
+second time.
+
+Two things it deliberately does not do:
+
+- It consults only the *structural* failures. `inspection.run_install_audit`
+  runs the whole script and answers with one exit code, and refusing on that
+  would fold per-file content drift into the refusal and make `--force`
+  unreachable — the same boundary `receipt_disagreement_reason` already draws.
+  `test_the_structural_refusal_does_not_swallow_the_force_override` pins it.
+- It imports the audit rather than shelling out, which required supplying
+  `scripts/` on `sys.path`: the audit imports its sibling library by bare name,
+  and only a direct `python scripts/...` invocation normally provides that. The
+  entry is removed again, and an entry somebody else owns is left alone.
+
+### Two of my own tests were wrong, and mutation testing is what said so
+
+Both were caught by reverting the rule each test claimed to cover and checking
+that the test failed.
+
+- **The nested-`scripts` fixture proved nothing.** Disabling
+  `EXECUTABLE_SEGMENTS` entirely left it passing: `templates/consumer/scripts/deploy.py`
+  is classified by its `.py` suffix, and the nesting costs it nothing. Removing
+  the suffix was not enough either — a citation in command position blocks
+  whether or not the file is an executable surface. Only a bare mention inside
+  an extensionless nested helper leaves `executable` as the sole route to
+  `blockers`. That fixture is now a second test; the criterion's own
+  `templates/**/scripts/*.py` shape stays, with its comment corrected to say
+  what actually classifies it.
+- **The undeclared-platform comment overclaimed.** It said a residual computed
+  without the platform predicate would report `refresh-required` forever.
+  Dropping the predicate left that test passing, because the installer skips a
+  platform whose directory the repo does not have. The predicate is pinned by
+  the 31-target test instead, and the comment now says so.
+
+Mutations run, each failing exactly its own test and nothing else: the glob
+branch, `EXECUTABLE_SEGMENTS`, the `.prompt.md` suffix with the
+`.github/prompts/` prefix, `pi` in `MARKER_PLATFORMS`, the platform predicate
+in `expected_residual_targets`, the narrowing in `residual_source_files`, and
+the new structural preflight.

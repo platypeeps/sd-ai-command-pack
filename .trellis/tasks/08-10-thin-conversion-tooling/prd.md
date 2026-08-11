@@ -191,13 +191,13 @@ would be a hand-edited deletion of 166 files with no reversal path.
 
 ## Acceptance criteria
 
-- [ ] The resweep emits `blocked` with file and line for a fixture
+- [x] The resweep emits `blocked` with file and line for a fixture
       consumer whose workflow cites a path the conversion removes, and
       `clear` for one whose only pack references are to paths the
       conversion keeps. A bare "pack reference" is not the criterion:
       every consumer has hundreds, and blocking on them is the C-A
       failure this task exists to avoid.
-- [ ] The resweep classifies each of these fixture cases correctly, one
+- [x] The resweep classifies each of these fixture cases correctly, one
       case per bucket boundary the measurement proved wrong: a removed
       path cited by a glob (`scripts/sd-ai-command-pack-*.sh`); a removed
       path cited from a nested `templates/**/scripts/*.py`; a removed
@@ -205,19 +205,19 @@ would be a hand-edited deletion of 166 files with no reversal path.
       removed path cited only in prose (`advisories`, not blocking); and
       a *kept* path cited from a workflow (neither, verdict stays
       `clear`).
-- [ ] A surviving pack-managed file citing a removed path lands in
+- [x] A surviving pack-managed file citing a removed path lands in
       `packDefects` and blocks; the same file, once edited by the
       consumer so its digest no longer matches provenance, is
       reclassified as consumer-authored. Receipt membership alone must
       not confer the exemption.
-- [ ] Ownership is decided for the two target classes provenance
+- [x] Ownership is decided for the two target classes provenance
       deliberately never vouches, not defaulted: a **managed-block**
       target by marker position, with malformed markers falling to
       pack-owned rather than to a guessed span; and a **force-preserved**
       target by comparison against the pack's own shipped bytes, so a
       pack-identical `.github/PULL_REQUEST_TEMPLATE.md` is a `packDefect`
       while a consumer-edited one is a `blocker`.
-- [ ] The resweep emits `blocked` for each of four separate marker
+- [x] The resweep emits `blocked` for each of four separate marker
       fixtures whose registry `platforms` omits the platform — a
       **populated** `.codex/` directory, a `$CODEX_HOME` reference, a pi
       adapter file, and a `codex exec`-family CLI invocation in command
@@ -231,7 +231,7 @@ would be a hand-edited deletion of 166 files with no reversal path.
       demonstrably owns is a `packDefect`, never an undeclared-platform
       blocker, and ownership there means a proof — digest, managed-block
       span, or force-preserved comparison — not receipt membership.
-- [ ] `install.py --check` on the converted fixture computes its
+- [x] `install.py --check` on the converted fixture computes its
       expected residual as keep-category source targets whose partition
       platform the consumer declares, plus platform-independent
       `consumer-config` rows, plus every existing managed-block file,
@@ -243,7 +243,7 @@ would be a hand-edited deletion of 166 files with no reversal path.
       `refresh-required`; one for an **undeclared** platform must not.
       Testing only the first passes while the platform predicate is
       missing entirely.
-- [ ] `--thin` on a disposable fat checkout of a real consumer's shape
+- [x] `--thin` on a disposable fat checkout of a real consumer's shape
       deletes exactly the enumerated set and leaves intact the
       `repo-native` + `consumer-config` slices **plus every machine
       target the consumer's recorded platform choice retains** —
@@ -254,12 +254,12 @@ would be a hand-edited deletion of 166 files with no reversal path.
       against the current partition — a partition-only
       comparison passes even when orphans survive, which is the defect
       this criterion exists to catch.
-- [ ] A fixture consumer whose receipt lists a file that is absent from
+- [x] A fixture consumer whose receipt lists a file that is absent from
       the current partition, absent from `RETIRED_TARGETS`, and not one
       of the named special cases **blocks** conversion, naming that
       file. The same fixture converts cleanly once the file is
       classified.
-- [ ] A fixture consumer carrying the 17 real orphan entries observed
+- [x] A fixture consumer carrying the 17 real orphan entries observed
       on the fleet converts with all 13 `RETIRED_TARGETS` entries
       removed, the pack's `.gitignore` managed block removed while the
       consumer's own `.gitignore` lines survive,
@@ -270,48 +270,48 @@ would be a hand-edited deletion of 166 files with no reversal path.
       it retires stale targets before rewriting the receipt
       (`install.py:903`), so a fresh install would never reach the
       `retire` bucket at all.
-- [ ] `scripts/sd-ai-command-pack-install-audit.py --repo FIXTURE` exits
+- [x] `scripts/sd-ai-command-pack-install-audit.py --repo FIXTURE` exits
       **0** against the converted fixture, and `install.py --check`
       reports `state: current`. Asserting the absence of selected audit
       messages is not accepted: that passes while the audit fails on
       `provenance.json has no files map`.
-- [ ] `read_consumer_pin` on the converted fixture reports
+- [x] `read_consumer_pin` on the converted fixture reports
       `state: "present"` **and** `mode: "thin"` with a populated
       settings-additions record. `present` alone proves nothing — an
       untouched fat `provenance.json` already satisfies it.
-- [ ] The existing inspection test suite passes **unchanged**, proving
+- [x] The existing inspection test suite passes **unchanged**, proving
       fat consumers take byte-identical paths through the thin-aware
       `--status`/`--check` change.
-- [ ] A fixture consumer with a pre-existing `.claude/settings.json`
+- [x] A fixture consumer with a pre-existing `.claude/settings.json`
       carrying unrelated keys keeps every one of them after `--thin`,
       and after `--revert-thin` differs from its original only by the
       `enabledPlugins` disable marker.
-- [ ] `--thin` refuses to run without a `clear` verdict, refuses when
+- [x] `--thin` refuses to run without a `clear` verdict, refuses when
       the verdict was produced against a different HEAD, and **refuses
       when a file changed after the resweep without `HEAD` moving** —
       the last case proven by editing a file post-verdict and asserting
       an unchanged tree afterward.
-- [ ] A drifted pack file makes `--thin` **abort** without `--force`,
+- [x] A drifted pack file makes `--thin` **abort** without `--force`,
       leaving the tree byte-identical and writing no settings entry, no
       pin, and no mode flip — verified by comparing the full tree before
       and after the refused run. Preserve-and-continue, which is
       `--remove`'s behavior, fails this criterion.
-- [ ] A tracked pack-like file absent from the receipt is caught by the
+- [x] A tracked pack-like file absent from the receipt is caught by the
       pre-conversion structural audit and blocks, rather than surviving
       conversion while the receipt comparison still passes.
-- [ ] `--revert-thin` on an **unforced** converted disposable checkout
+- [x] `--revert-thin` on an **unforced** converted disposable checkout
       restores the fat payload byte-identically, leaves only the
       `enabledPlugins` disable marker behind, verified by a tree
       comparison against the pre-conversion state, **and flips that
       consumer's registry entry back to `mode: fat`** — asserted by
       reading `docs/fleet/consumers.json` after the command, not by
       inspecting the code.
-- [ ] A `--force` conversion that deleted a drifted file reverts that
+- [x] A `--force` conversion that deleted a drifted file reverts that
       path to **source** bytes, with the path named in the receipt's
       `forced` list and reported as restored-to-source. The drifted bytes
       no longer exist anywhere, so byte-identical restoration is scoped
       to the unforced case rather than promised unconditionally.
-- [ ] **Revert restores what the pack can still produce, and names what
+- [x] **Revert restores what the pack can still produce, and names what
       it cannot (R20-C2).** A *retired* file — one the pre-conversion
       receipt listed and the manifest no longer ships — has no surviving
       bytes anywhere: it is absent from the manifest, the source tree,
@@ -327,7 +327,7 @@ would be a hand-edited deletion of 166 files with no reversal path.
       that passes the currency preflight is expected to record an empty
       list — the list exists so that expectation is asserted rather than
       assumed.
-- [ ] **A converted consumer stays reachable by the fleet, and a damaged
+- [x] **A converted consumer stays reachable by the fleet, and a damaged
       one is routed to repair (R20-C6).** An ordinary
       `install.py TARGET` — the command `sd-fleet-refresh` runs — refreshes
       a thin consumer to the new version without re-creating the machine
@@ -341,21 +341,21 @@ would be a hand-edited deletion of 166 files with no reversal path.
       command carrying `--platform` is rejected by a thin-aware refresh, so
       before this criterion every converted consumer's printed repair
       command was guaranteed to exit 2.
-- [ ] Failure injection on both roots, in **both directions**: a
+- [x] Failure injection on both roots, in **both directions**: a
       read-only pack checkout and, separately, a read-only target each
       make `--thin` *and* `--revert-thin` refuse before any write, exit
       nonzero, and leave **both** the consumer tree and the registry
       byte-identical. `--thin` flips the registry too, so an unwritable
       pack checkout discovered after 166 consumer deletions is the
       failure this criterion exists to prevent.
-- [ ] `--dry-run` output is compared against the executed run across all
+- [x] `--dry-run` output is compared against the executed run across all
       six change categories — deletes, retires, managed-block edits, the
       three receipt rewrites, the settings additions, and the registry
       flip. An unchanged tree alone is satisfied by an empty printout.
-- [ ] `retainVendoredFor` retention is exercised by a synthetic fixture
+- [x] `retainVendoredFor` retention is exercised by a synthetic fixture
       consumer declaring `codex`; the task records explicitly that no
       live consumer exercises it.
-- [ ] `make release-prep` passes if this task changed the payload or
+- [x] `make release-prep` passes if this task changed the payload or
       `docs/fleet/consumers.json` (contract C-G — a `mode` flip moves
       the fleet-manifest digest pinned into the candidate ledger);
       `make check` otherwise. If this task touched `templates/**` or
