@@ -23,6 +23,7 @@ from sd_ai_command_pack_lib import CacheSetupError, run_git_cached  # noqa: E402
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 PACK_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")
+THIN_MODE = "thin"
 GIT_TIMEOUT_SECONDS = 60
 STABLE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
@@ -459,7 +460,12 @@ def installed_mode(root: Path) -> str | None:
     if not isinstance(payload, dict):
         return None
     mode = payload.get("mode")
-    return mode if isinstance(mode, str) else None
+    # Narrowed to the one recognized value rather than any string. Today's
+    # single caller compares against "thin" and could not tell the difference,
+    # but the docstring above promises None for an unrecognized value, and a
+    # reader that trusts that promise -- `if installed_mode(root):` -- would
+    # otherwise treat `mode: "thin-corrupt"` as a thin install.
+    return THIN_MODE if mode == THIN_MODE else None
 
 
 def audit_expected_targets(
@@ -1005,7 +1011,7 @@ def main() -> int:
     expected_count: int | None = None
     expected_platforms: set[str] = set()
     expected_warnings: list[str] = []
-    thin_install = installed_mode(root) == "thin"
+    thin_install = installed_mode(root) == THIN_MODE
     if thin_install:
         # The manifest-derived completeness check asks "does this checkout hold
         # everything the pack ships for these platforms?" -- the wrong question

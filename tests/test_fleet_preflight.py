@@ -742,6 +742,86 @@ class ThinFleetPreflightTests(InstallTestCase):
 
         self.assertEqual(fleet.read_recorded_targets(root), ())
 
+    def test_a_symlinked_provenance_is_refused_rather_than_followed(self) -> None:
+        # Preflight walks a fleet of checkouts it did not write, so a receipt
+        # that is a link is a way out of the one it was handed. The link here
+        # points at a perfectly legible thin pin: every assertion below fails
+        # if the reader resolves it, and none of them can be satisfied by an
+        # unreadable file, which is the other way to reach an empty result.
+        fleet = self.load_fleet_module()
+        root = self.temp_root()
+        self.write_consumer(root)
+        outside = root.parent / "outside-provenance.json"
+        outside.write_text(
+            json.dumps(
+                {
+                    "pack": "sd-ai-command-pack",
+                    "version": "9.9.9",
+                    "mode": "thin",
+                    "platforms": ["claude"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        provenance = root / ".sd-ai-command-pack/provenance.json"
+        provenance.unlink()
+        provenance.symlink_to(outside)
+
+        self.assertEqual(fleet.read_provenance(root), {})
+        self.assertIsNone(fleet.read_installed_version(root))
+        self.assertEqual(fleet.read_installed_mode(root), (None, ()))
+
+    def test_a_symlinked_install_receipt_is_refused_rather_than_followed(self) -> None:
+        # The same refusal, and more is riding on it: every line this reader
+        # returns becomes a filesystem probe, so a followed link would aim
+        # those probes with content from outside the checkout.
+        fleet = self.load_fleet_module()
+        root = self.temp_root()
+        self.write_consumer(root)
+        outside = root.parent / "outside-targets.txt"
+        outside.write_text("docs/SD_AI_COMMAND_PACK.md\n", encoding="utf-8")
+        receipt = root / ".sd-ai-command-pack/installed-targets.txt"
+        receipt.unlink()
+        receipt.symlink_to(outside)
+
+        self.assertEqual(fleet.read_recorded_targets(root), ())
+
+    def test_the_manifest_witness_alone_still_marks_the_consumer_thin(self) -> None:
+        # A half-converted consumer: the installed manifest survived, the pin
+        # in provenance lost its mode. `thin_pin_state` reads the manifest
+        # first and calls this thin, so a thin-aware refresh rejects
+        # `--platform` -- and a preflight that read provenance alone would
+        # print exactly that flag, handing the operator a command guaranteed
+        # to exit 2 on the one consumer that most needs repairing.
+        fleet = self.load_fleet_module()
+        root = self.temp_root()
+        self.write_consumer(root, create=False)
+        provenance = root / ".sd-ai-command-pack/provenance.json"
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        del payload["mode"]
+        provenance.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+        (root / ".sd-ai-command-pack/manifest.json").write_text(
+            json.dumps({"version": "0.8.5", "mode": "thin"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(fleet.read_installed_mode(root), ("thin", ("claude",)))
+        result = fleet.preflight_consumer(
+            self.make_consumer(fleet, root), target_version="0.8.5"
+        )
+        self.assertEqual(result.mode, "thin")
+        self.assertEqual(result.status, "residual-damaged")
+
+        command = fleet.install_command(result)
+        self.assertNotIn("--platform", command)
+        pinned = mock.Mock()
+        pinned.platforms = frozenset({"claude"})
+        printed = install.parse_args(shlex.split(command)[2:])
+        self.assertIsNone(install._thin_refresh_rejection(printed, pinned))
+
     def write_single_consumer_fleet(self, root: Path) -> tuple[Path, Path]:
         fleet_manifest = root.parent / "fleet.json"
         fleet_manifest.write_text(

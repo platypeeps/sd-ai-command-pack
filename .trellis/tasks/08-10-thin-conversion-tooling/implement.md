@@ -2287,3 +2287,39 @@ would reinstall every deleted machine surface while the registry still read
 `thin`. Its assertion pins the backstop's exact wording — both messages share
 "cannot be read against the surface partition", so the shared fragment alone
 would pass while the path was never reached.
+
+## PR #418 first review round — four findings, all real, all fixed
+
+The branch's first Copilot round produced four findings and no false
+positives. All four are in the same family as R20-C6 itself: preflight is the
+one reader in the sweep that decides where a converted consumer is *routed*,
+so a reader that is more trusting than the writers it mirrors sends the wrong
+command to the wrong consumer.
+
+| Finding | Verdict | Fix |
+| --- | --- | --- |
+| `read_provenance` follows a symlinked `provenance.json` | confirmed | shared `_read_receipt_object` refuses symlinks and non-files |
+| `read_recorded_targets` follows a symlinked `installed-targets.txt` | confirmed | same refusal, and it matters more here — every line becomes a filesystem probe |
+| `installed_mode` returns any string despite promising `None` for an unrecognized value | confirmed | narrowed to `THIN_MODE`; the constant replaces the inline literal at the one call site |
+| `read_installed_mode` reads only provenance, ignoring the manifest witness `thin_pin_state` reads *first* | confirmed | both witnesses, in `thin_pin_state`'s order |
+
+The fourth is the one worth remembering, because it is step 9c's own defect
+reproduced through the other witness. A half-converted consumer — installed
+manifest says `thin`, provenance pin damaged — reads as fat to a
+provenance-only reader, so preflight prints `--force --platform ...`;
+`thin_pin_state` reads the manifest first, sees thin, and the thin-aware
+refresh rejects `--platform` with exit 2. That is exactly the "printed command
+has to be the one that works" property step 9c was built to establish, and it
+held only for consumers whose provenance survived.
+
+Two of the three symlink refusals already existed elsewhere in the codebase
+(`_receipt_declares_thin`, `installed_mode`), which is what made the gap a
+real inconsistency rather than a style preference: the writers refuse a link
+on these exact paths and the fleet reader did not.
+
+CI also failed on one defect the local loop could not see: trailing
+whitespace in this task's `design.md`. The review coordinator's whitespace
+checks are `git.whitespace.unstaged` and `git.whitespace.staged` — both look
+at the working tree, and the offending line was already committed. CI runs the
+same check across the branch delta. Worth a follow-up: a local gate that
+checks the delta, not just the index.

@@ -1814,6 +1814,32 @@ class InstallAuditTests(InstallTestCase):
         self.assertIn("legacy pack reference remains", result.stdout)
         self.assertIn("install audit passed", result.stdout)
 
+    def test_installed_mode_reports_none_for_an_unrecognized_pin(self) -> None:
+        # The docstring promises None for an unrecognized value, and a reader
+        # that trusts it -- `if installed_mode(root):` rather than the one
+        # caller's `== THIN_MODE` -- would otherwise read `thin-corrupt` as a
+        # thin install and skip the completeness check on a damaged pin.
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_installed_mode",
+        )
+        root = self.make_repo()
+        provenance = root / ".sd-ai-command-pack/provenance.json"
+        provenance.parent.mkdir(parents=True, exist_ok=True)
+
+        for mode, expected in (
+            ("thin", "thin"),
+            ("thin-corrupt", None),
+            ("fat", None),
+            (5, None),
+        ):
+            with self.subTest(mode=mode):
+                provenance.write_text(
+                    json.dumps({"version": "0.1.0", "mode": mode}) + "\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(module.installed_mode(root), expected)
+
     def test_install_audit_legacy_advisories_cover_all_pack_scripts(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",

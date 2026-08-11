@@ -30,6 +30,7 @@ DEFAULT_FLEET_MANIFEST = ROOT / "docs/fleet/consumers.json"
 DEFAULT_PACK_MANIFEST = ROOT / "manifest.json"
 DEFAULT_CANDIDATE_LEDGER = ROOT / "docs/fleet/candidate-validation.json"
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
+INSTALLED_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 THIN_MODE = "thin"
 # How many missing paths a damaged-residual detail names before it stops. The
@@ -64,21 +65,32 @@ def load_fleet_consumers(path: Path = DEFAULT_FLEET_MANIFEST) -> list[FleetConsu
         raise SystemExit(f"error: {error}") from None
 
 
-def read_provenance(repo_path: Path) -> dict:
-    """The consumer's provenance receipt, or an empty mapping.
+def _read_receipt_object(repo_path: Path, receipt: Path) -> dict:
+    """One consumer-side JSON receipt, or an empty mapping.
 
     Every unreadable shape collapses to `{}`: preflight decides where a
     consumer is routed, and a receipt it cannot parse must land in
     `refresh-needed` rather than raise out of a fleet-wide sweep.
+
+    A symlink is refused rather than followed, matching the unresolved
+    `is_symlink()` check `_receipt_declares_thin` and the install audit's
+    `installed_mode` make on the same paths. That check matters more here than
+    anywhere else: preflight walks a whole fleet of checkouts it did not write,
+    so a receipt that is a link is a way out of the checkout it was handed.
     """
-    provenance = repo_path / PROVENANCE_FILE
+    path = repo_path / receipt
     try:
-        payload = json.loads(
-            provenance.read_text(encoding="utf-8", errors="strict")
-        )
+        if path.is_symlink() or not path.is_file():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8", errors="strict"))
     except (FileNotFoundError, OSError, UnicodeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def read_provenance(repo_path: Path) -> dict:
+    """The consumer's provenance receipt, or an empty mapping."""
+    return _read_receipt_object(repo_path, PROVENANCE_FILE)
 
 
 def read_installed_version(repo_path: Path) -> str | None:
@@ -91,15 +103,30 @@ def read_installed_version(repo_path: Path) -> str | None:
 def read_installed_mode(repo_path: Path) -> tuple[str | None, tuple[str, ...]]:
     """The thin pin's mode and platform set, or `(None, ())`.
 
-    Only `mode: "thin"` is recognized; absent, malformed, and unrecognized
-    all report None so a guess never relaxes the fat contract. Mirrors
-    `installed_mode` in the install audit, which is the consumer-side reader
-    of the same two keys.
+    Only `mode: "thin"` is recognized as the mode; an absent or unrecognized
+    value reports None so a guess never relaxes the fat contract.
+
+    Both thin witnesses are read, in `thin_pin_state`'s order: the installed
+    `manifest.json` first, provenance second. Reading provenance alone would
+    miss a half-converted consumer whose manifest survived and whose
+    provenance did not -- and that consumer is exactly the one that must not
+    be handed a `--platform` repair command, because `thin_pin_state` sees the
+    manifest witness and the thin-aware refresh rejects the flag with exit 2.
+
+    The platform set has only one home, the provenance pin, so a thin
+    consumer whose provenance is gone reports `()` rather than a guess. That
+    is not a downgrade: `()` makes the caller print the registry's platforms
+    for information while the thin mode still suppresses the `--platform`
+    flag itself.
     """
-    payload = read_provenance(repo_path)
-    if payload.get("mode") != THIN_MODE:
+    provenance = read_provenance(repo_path)
+    manifest_declares_thin = (
+        _read_receipt_object(repo_path, INSTALLED_MANIFEST_FILE).get("mode")
+        == THIN_MODE
+    )
+    if not manifest_declares_thin and provenance.get("mode") != THIN_MODE:
         return None, ()
-    platforms = payload.get("platforms")
+    platforms = provenance.get("platforms")
     if not isinstance(platforms, list):
         return THIN_MODE, ()
     return THIN_MODE, tuple(
@@ -108,8 +135,17 @@ def read_installed_mode(repo_path: Path) -> tuple[str | None, tuple[str, ...]]:
 
 
 def read_recorded_targets(repo_path: Path) -> tuple[str, ...]:
+    """The paths the consumer's install receipt records, or `()`.
+
+    Symlinked and non-file receipts are refused for the same reason
+    `_read_receipt_object` refuses them, and with more at stake: every line
+    read here becomes a filesystem probe below, so a linked receipt would aim
+    those probes with content from outside the checkout.
+    """
     receipt = repo_path / INSTALLED_TARGETS_FILE
     try:
+        if receipt.is_symlink() or not receipt.is_file():
+            return ()
         content = receipt.read_text(encoding="utf-8", errors="strict")
     except (FileNotFoundError, OSError, UnicodeError):
         return ()

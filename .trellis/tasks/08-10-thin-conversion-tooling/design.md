@@ -1170,7 +1170,7 @@ cases:
 | State of the plugin key at revert | Revert writes |
 | --- | --- |
 | Conversion added it, value still `true` as recorded | `false` — the marker. Not a deletion: a fat consumer with the plugin merely *absent* re-enables on the next `claude plugin` interaction, which is the state the marker exists to prevent |
-| Conversion added it, value edited since | leaves it, reports it | 
+| Conversion added it, value edited since | leaves it, reports it |
 | Conversion did not add it (already `true`) | leaves it, reports it |
 
 The marker is only ever written over a value this conversion wrote and
