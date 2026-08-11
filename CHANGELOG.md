@@ -1,6 +1,26 @@
 # Changelog
 
+## 0.66.2 - 2026-08-11
+
+- The review coordinator no longer caches a terminal-failure verdict in its
+  per-attempt resume state. Resume caching is keyed by the attempt identity —
+  repository, scope, base, head, worktree bytes, pull-request number and the
+  typed controls — which does not cover every input a stage reads, so a stored
+  failure survived the operator remedying the input it turned on. A
+  deterministic-check failure (`pack.review-scope` reads the pull-request body),
+  a rejected `--local-disposition` set, and a local provider
+  `unavailable`/`failed`/`cancelled` report are now reported without being
+  written, and the next invocation of the same attempt recomputes that stage.
+  Previously each pinned the attempt to the stale verdict with no escape short
+  of a fresh `--attempt-id`, which discards the attempt's local and remote
+  review evidence too.
+- A `blocked` local report stays cached, and a passing check and clean report
+  still replay: local policy is decided by the configuration digest, which the
+  attempt identity does cover, and the interrupted-resume guarantee is
+  unchanged.
+
 ## 0.66.1 - 2026-08-10
+
 
 - `install.py --status` / `--check` now understand a thin install. When the
   provenance receipt pins `mode: "thin"`, the inspection compares the checkout
@@ -62,22 +82,6 @@
   printed repair command for a thin consumer omits `--platform`, which a
   thin-aware refresh rejects outright, and the text and JSON rows report the
   install mode and the *pinned* platform set rather than the registry's.
-- The review coordinator no longer caches a terminal-failure verdict in its
-  per-attempt resume state. Resume caching is keyed by the attempt identity —
-  repository, scope, base, head, worktree bytes, pull-request number and the
-  typed controls — which does not cover every input a stage reads, so a stored
-  failure survived the operator remedying the input it turned on. A
-  deterministic-check failure (`pack.review-scope` reads the pull-request body),
-  a rejected `--local-disposition` set, and a local provider
-  `unavailable`/`failed`/`cancelled` report are now reported without being
-  written, and the next invocation of the same attempt recomputes that stage.
-  Previously each pinned the attempt to the stale verdict with no escape short
-  of a fresh `--attempt-id`, which discards the attempt's local and remote
-  review evidence too.
-- A `blocked` local report stays cached, and a passing check and clean report
-  still replay: local policy is decided by the configuration digest, which the
-  attempt identity does cover, and the interrupted-resume guarantee is
-  unchanged.
 
 ## 0.66.0 - 2026-08-10
 
