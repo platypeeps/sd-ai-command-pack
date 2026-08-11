@@ -318,10 +318,6 @@ class SettingsCollisionTests(SettingsFixture):
         self.assert_blocks("is a symlink")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RemovalInventoryTests(unittest.TestCase):
     """R20-C3: the record that makes "re-run converges" true.
 
@@ -587,3 +583,7 @@ class ReceiptAgreementTests(unittest.TestCase):
         self.write(install.PACK_MANIFEST_FILE, [1, 2])
         self.assertIn("is not an object",
                       thin.receipt_disagreement_reason(self.target))
+
+
+if __name__ == "__main__":
+    unittest.main()

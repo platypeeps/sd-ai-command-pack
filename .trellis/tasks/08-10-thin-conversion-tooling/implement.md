@@ -2356,3 +2356,26 @@ sat at line 286, ahead of `PlatformMarkerTests` and `CommandLineTests`.
 `make test` uses discovery and was unaffected, which is exactly why it
 survived — running the file directly executed 16 of its 27 tests and exited 0.
 Moved to the end of the file; direct execution now reports `Ran 27 tests`.
+
+### Round 3 — clean, plus the sibling sweep round 2 should have done
+
+No open findings and every CI lane green. Two suppressed comments, and the
+first is the one worth recording: `unittest.main()` mid-file in
+`tests/test_thin_apply.py`, the same defect round 2 fixed in
+`test_thin_resweep.py`. Round 2 fixed the one file it was handed instead of
+sweeping the family, which is exactly what the review contract's sibling audit
+exists to prevent.
+
+The sweep found a second file the reviewer did not flag,
+`tests/test_thin_plan.py`, hiding seven classes. Both are fixed.
+
+The honest qualifier: for these two files the block is currently *unreachable*,
+not silently truncating. `python tests/test_thin_apply.py` fails on
+`import install` before reaching it, because `sys.path[0]` is `tests/` and the
+support shim needs the repository root. `test_thin_resweep.py` had no such
+import and really did report `Ran 16 tests ... OK` while 11 were never
+defined. So the fix here removes a latent trap rather than a live false green;
+the claim that it produced one does not hold for these two.
+
+The second suppressed comment renamed `test_the_machine_payload_is_not_re_created`
+to `..._is_not_recreated`. Cosmetic, applied.

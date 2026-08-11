@@ -282,10 +282,6 @@ class DriftPreflightTests(ConversionFixture):
         self.assertTrue(any(".gitignore" in reason for reason in reasons), reasons)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RetentionFixtureTests(ConversionFixture):
     """`retainVendoredFor` across the whole shared platform, not one row of it.
 
@@ -478,3 +474,7 @@ class RegistryWriteDuringConversionTests(ConversionFixture):
             (pack / "docs/fleet/consumers.json").read_text(encoding="utf-8")
         )
         self.assertEqual(payload["consumers"][0]["mode"], "thin")
+
+
+if __name__ == "__main__":
+    unittest.main()

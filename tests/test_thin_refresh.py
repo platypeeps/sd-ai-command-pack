@@ -106,7 +106,7 @@ class ThinRefreshTests(RefreshFixture):
             conversion.thin_pin_state(self.root), conversion.PIN_STATE_THIN
         )
 
-    def test_the_machine_payload_is_not_re_created(self) -> None:
+    def test_the_machine_payload_is_not_recreated(self) -> None:
         # The whole point. A refresh that reinstalled the deleted surfaces
         # would silently de-thin every converted consumer in the fleet, while
         # the registry went on saying `thin`.
