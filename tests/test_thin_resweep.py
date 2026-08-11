@@ -27,6 +27,18 @@ PARTITION = ROOT / "docs/fleet/surface-partition.json"
 REMOVED = ".claude/commands/sd/check.md"
 KEPT = ".agent/skills/sd-check/SKILL.md"
 CONSUMER_PLATFORMS = frozenset({"claude", "github"})
+# The whole `scripts/sd-ai-command-pack-*.sh` population, read from the
+# partition rather than listed by hand: the glob fixture's premise is that
+# every member is removed and none survives, so a member added to the pack
+# later must join the fixture instead of quietly weakening it.
+SHELL_HELPERS = tuple(
+    sorted(
+        entry["target"]
+        for entry in json.loads(PARTITION.read_text(encoding="utf-8"))["files"]
+        if entry["target"].startswith("scripts/sd-ai-command-pack-")
+        and entry["target"].endswith(".sh")
+    )
+)
 
 
 def load_resweep():
@@ -143,6 +155,78 @@ class CitationBucketTests(ResweepFixture):
             if entry["file"] in {"docs/one.md", "docs/two.md"}
         ]
         self.assertEqual(len(advisories), 2, advisories)
+
+    def test_a_glob_naming_a_wholly_removed_population_blocks(self) -> None:
+        # W-3, measured on the real fleet: `loadsmith/.github/workflows/ci.yml`
+        # addresses the deleted scripts as `scripts/sd-ai-command-pack-*.sh`
+        # and names no exact path and no basename, so exact-and-suffix matching
+        # alone reports this consumer `clear` and the conversion breaks its CI.
+        #
+        # The glob qualifies only because its whole population is removed: the
+        # matcher requires at least one removed entry and no surviving one, so
+        # a glob that straddles the boundary stays out of every bucket rather
+        # than blocking on a guess.
+        repo = self.make_consumer(
+            {
+                ".github/workflows/ci.yml": (
+                    "jobs:\n  run:\n    x: bash scripts/sd-ai-command-pack-*.sh\n"
+                )
+            },
+            receipt=[REMOVED, KEPT, *SHELL_HELPERS],
+        )
+        result = self.scan(repo)
+        self.assertEqual(self.only_bucket(result, ".github/workflows/ci.yml"), "blockers")
+
+    def test_a_citation_from_a_nested_scripts_directory_blocks(self) -> None:
+        # Round 6's missed class: a runnable file nested well below any known
+        # top level. This is the criterion's own shape,
+        # `templates/**/scripts/*.py`, and it is classified by the `.py`
+        # suffix -- the depth costs it nothing, which is the point. The
+        # directory-segment rule is what covers the same nesting for a file
+        # whose name carries no such signal; `test_a_citation_from_a_nested_
+        # scripts_directory_blocks_without_a_runnable_suffix` isolates it.
+        repo = self.make_consumer(
+            {"templates/consumer/scripts/deploy.py": f"subprocess.run(['./{REMOVED}'])\n"}
+        )
+        result = self.scan(repo)
+        self.assertEqual(
+            self.only_bucket(result, "templates/consumer/scripts/deploy.py"), "blockers"
+        )
+
+    def test_a_citation_from_a_nested_scripts_directory_blocks_without_a_runnable_suffix(
+        self,
+    ) -> None:
+        # The discriminator for the segment rule itself, and it takes two
+        # subtractions to reach. A `.py` under `scripts/` is classified by its
+        # suffix alone, so the fixture above passes with `EXECUTABLE_SEGMENTS`
+        # disabled entirely. Removing the suffix is not enough either: a
+        # citation in command position blocks whether or not the file is an
+        # executable surface, so `./path` on its own line passes too.
+        #
+        # A bare mention inside an extensionless nested helper is the only
+        # shape left where `executable` is the sole route to `blockers` -- with
+        # the segment rule disabled this same fixture is an advisory.
+        repo = self.make_consumer(
+            {"templates/consumer/scripts/deploy": f"# superseded by {REMOVED}\n"}
+        )
+        result = self.scan(repo)
+        self.assertEqual(
+            self.only_bucket(result, "templates/consumer/scripts/deploy"), "blockers"
+        )
+
+    def test_a_citation_from_an_agent_prompt_blocks(self) -> None:
+        # An agent prompt executes by being read: `.prompt.md` is instructions
+        # a model acts on, so a removed path inside one is a broken
+        # instruction, not prose about one. Classified by both the
+        # `.github/prompts/` prefix and the `.prompt.md` suffix, because a
+        # consumer may keep prompts outside that directory.
+        repo = self.make_consumer(
+            {".github/prompts/sd-one.prompt.md": f"Run ./{REMOVED} before review.\n"}
+        )
+        result = self.scan(repo)
+        self.assertEqual(
+            self.only_bucket(result, ".github/prompts/sd-one.prompt.md"), "blockers"
+        )
 
     def test_prose_mentioning_a_removed_script_is_only_advisory(self) -> None:
         repo = self.make_consumer({"README.md": f"We used to run {REMOVED}.\n"})
@@ -306,6 +390,35 @@ class PlatformMarkerTests(ResweepFixture):
         repo = self.make_consumer({".codex/prompts/x.md": "do a thing\n"})
         result = self.scan(repo, platforms=CONSUMER_PLATFORMS | {"codex"})
         self.assertEqual(self.buckets_for(result, ".codex")["blockers"], [])
+
+    def test_a_pi_adapter_file_blocks_when_undeclared(self) -> None:
+        # The fourth marker, and the one a combined case would have hidden:
+        # `MARKER_PLATFORMS` carries `pi` alongside `codex`, and the criterion
+        # exists because three markers can pass while the fourth was never
+        # wired. It matters for the same reason codex does -- `retainVendoredFor`
+        # intersects the *declared* platforms, so an undeclared pi user has the
+        # `.agents/**` their adapter reads deleted out from under them.
+        #
+        # R13 also found the exclusion broken specifically for pi: patterns
+        # ending in `/` were compared with a literal `startswith`, so
+        # `.pi/skills/trellis-*/` never matched the glob it contains.
+        repo = self.make_consumer({".pi/skills/sd-check/SKILL.md": "do a thing\n"})
+        result = self.scan(repo)
+        self.assertEqual(self.only_bucket(result, ".pi"), "blockers")
+
+    def test_declaring_pi_clears_the_same_adapter(self) -> None:
+        repo = self.make_consumer({".pi/skills/sd-check/SKILL.md": "do a thing\n"})
+        result = self.scan(repo, platforms=CONSUMER_PLATFORMS | {"pi"})
+        self.assertEqual(self.buckets_for(result, ".pi")["blockers"], [])
+
+    def test_an_empty_pi_directory_is_not_usage(self) -> None:
+        # The permissive direction, asserted for pi as well as codex: R14-C1's
+        # rule is that a directory marker requires at least one file, and a
+        # rule implemented once per platform is a rule that holds for one.
+        repo = self.make_consumer({"src/main.py": "x = 1\n"})
+        (repo / ".pi").mkdir()
+        result = self.scan(repo)
+        self.assertEqual(self.buckets_for(result, ".pi")["blockers"], [])
 
     def test_a_codex_home_reference_blocks_when_undeclared(self) -> None:
         repo = self.make_consumer({"scripts/setup.sh": 'echo "$CODEX_HOME"\n'})
