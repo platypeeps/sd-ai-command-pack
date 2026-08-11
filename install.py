@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 import shutil
 import sys
@@ -20,6 +21,7 @@ from installer import (
     machinestage,
     manifest,
     removal,
+    thin,
 )
 from installer.fileops import (
     CONFLICT_STATUSES,
@@ -126,6 +128,7 @@ from installer.registry import (
     validate_source_only_command_names,
 )
 from installer.removal import (
+    MANAGED_BLOCK_REMOVAL_TARGETS,
     RETIRED_FULL_CHECK_TARGETS,
     RETIRED_REVIEW_LOCAL_ALL_TARGETS,
     RETIRED_REVIEW_LOCAL_TARGETS,
@@ -205,6 +208,7 @@ __all__ = [
     "ensure_trellis_for_local_only",
     "fileops",
     "inspection",
+    "thin",
     "git_info_exclude_path",
     "git_output",
     "install_file",
@@ -814,6 +818,189 @@ def _residual_files_for_thin(
     return conversion.residual_source_files(files, target, partition, receipt), True
 
 
+def _refuse(reasons: list[str] | tuple[str, ...], headline: str) -> int:
+    """Every conversion refusal, in one shape: nothing was written."""
+    for reason in reasons:
+        print(f"blocked     {reason}", file=sys.stderr)
+    print(f"error: {headline}; nothing was written.", file=sys.stderr)
+    return 2
+
+
+def _run_thin_conversion(
+    args: argparse.Namespace,
+    target: Path,
+    manifest_data: dict,
+    files: list[PackFile],
+) -> int:
+    """Plan the whole conversion, validate all of it, then write in fixed order.
+
+    Every refusal below happens before the first byte lands. That is not a
+    stylistic preference: a conversion deletes ~170 files across two roots and
+    has no rollback, so a check that runs one step late is a consumer that has
+    already lost them.
+    """
+    resweep = thin.load_resweep_module(ROOT)
+    try:
+        entry, checkout = resweep.resolve_consumer(args.consumer, target)
+    except SystemExit as error:
+        print(system_exit_detail(error), file=sys.stderr)
+        return 2
+
+    verdict_load = thin.load_verdict(args.resweep_verdict)
+    if verdict_load.document is None:
+        return _refuse(
+            [verdict_load.detail or ""],
+            f"the resweep verdict is {verdict_load.state}",
+        )
+    fresh = resweep.resweep_consumer(args.consumer, checkout)
+    binding = thin.verdict_binding_reasons(verdict_load.document, fresh)
+    if binding:
+        return _refuse(binding, "this verdict does not authorize this conversion")
+
+    origin = _origin_url(ROOT)
+    locator_reason = thin.pack_repository_reason(origin)
+    if locator_reason is not None:
+        return _refuse([locator_reason], "the marketplace source cannot be validated")
+
+    for root, label in ((target, "target"), (ROOT, "pack root")):
+        reason = thin.writability_reason(root, label)
+        if reason is not None:
+            return _refuse([reason], "both roots must be writable before either is")
+
+    receipt = conversion.read_installed_targets_receipt(target)
+    if receipt.state != conversion.RECEIPT_PRESENT:
+        return _refuse(
+            [receipt.detail or ""], "the installed-targets receipt is unusable"
+        )
+    partition = conversion.load_partition(ROOT / SURFACE_PARTITION_FILE)
+    platforms = frozenset(entry.get("platforms") or ())
+    plan = conversion.build_conversion_plan(
+        receipt,
+        partition,
+        platforms,
+        occupied=conversion.occupied_receipt_targets(target, receipt),
+    )
+    if plan.blocked:
+        return _refuse(
+            [f"{blocked.target}: {blocked.reason}" for blocked in plan.blocked],
+            "the conversion plan does not classify every installed target",
+        )
+
+    # Deliberately not `inspection.inspect_receipts(target).errors`, which was
+    # the first attempt: that bundles per-file content drift into the same
+    # answer, so refusing on it would make `--force` unreachable -- and
+    # overriding removal drift is exactly what `--force` is for. The question
+    # here is narrower and is the one the staleness test exposed: do the two
+    # receipts describe the same install? A conversion rewrites all three from
+    # the state of these ones, so contradictory inputs produce a thin receipt
+    # certifying a tree nobody measured.
+    disagreement = thin.receipt_disagreement_reason(target)
+    if disagreement is not None:
+        return _refuse([disagreement], "this consumer's receipts do not agree")
+    installed_version = inspection.inspect_receipts(target).installed_version
+    stale = thin.version_currency_reason(installed_version, manifest_data["version"])
+    if stale is not None:
+        return _refuse([stale], "this consumer is not current enough to convert")
+
+    residual = frozenset(plan.keep) | frozenset(plan.receipts)
+    expected = conversion.expected_residual_targets(
+        frozenset(file.target.as_posix() for file in files),
+        partition,
+        platforms,
+        present_managed_blocks=frozenset(
+            managed
+            for managed in MANAGED_BLOCK_REMOVAL_TARGETS
+            if (target / managed).exists() and managed not in plan.block_strip
+        ),
+    )
+    drifted_receipt = thin.stale_receipt_reason(expected, residual)
+    if drifted_receipt is not None:
+        return _refuse([drifted_receipt], "this consumer's receipt is stale")
+
+    marketplace_name, plugin_name = _plugin_identity(ROOT)
+    settings, settings_reason = thin.plan_settings_merge(
+        target / thin.CLAUDE_SETTINGS_FILE, marketplace_name, plugin_name
+    )
+    if settings is None:
+        return _refuse(
+            [settings_reason or ""], "the settings merge cannot proceed"
+        )
+
+    files_by_target = {file.target.as_posix(): file for file in files}
+    provenance_files = read_existing_provenance_files(target)
+    drift = thin.removal_preflight_reasons(
+        target,
+        plan,
+        files_by_target=files_by_target,
+        provenance_files=provenance_files,
+        force=args.force,
+    )
+    if drift:
+        return _refuse(drift, "removal drift; re-run with --force to override it")
+
+    print(f"{manifest_data['name']} {manifest_data['version']}")
+    print(f"target: {target}")
+    print("mode: thin")
+    print(
+        f"plan: delete {len(plan.delete)}, retire {len(plan.retire)}, "
+        f"block-strip {len(plan.block_strip)}, keep {len(plan.keep)}, "
+        f"receipts {len(plan.receipts)}"
+    )
+    if args.dry_run:
+        print("mode: dry-run")
+        for entry_path in (*plan.delete, *plan.retire):
+            print(f"would-remove {entry_path}")
+        for entry_path in plan.block_strip:
+            print(f"would-strip  {entry_path}")
+        return 0
+
+    for write in thin.apply_conversion(
+        ROOT,
+        target,
+        plan=plan,
+        settings=settings,
+        manifest_data=manifest_data,
+        residual=residual,
+        existing_files=provenance_files,
+        platforms=tuple(sorted(platforms)),
+        consumer=args.consumer,
+        forced=(),
+        files_by_target=files_by_target,
+        provenance_files=provenance_files,
+        force=args.force,
+        backup=args.backup,
+    ):
+        print(f"{write.step:26} {write.detail}")
+    return 0
+
+
+def _origin_url(root: Path) -> str | None:
+    """The pack checkout's `origin`, or None when there isn't one.
+
+    `git_output` rather than a second subprocess call: it is the installer's
+    one git surface, it already carries the timeout and the missing-binary
+    handling, and `tests/test_git_invocation_boundary.py` exists to keep the
+    count at one.
+    """
+    return git_output(root, "remote", "get-url", "origin") or None
+
+
+def _plugin_identity(root: Path) -> tuple[str, str]:
+    """The marketplace and plugin names, read rather than hardcoded.
+
+    Renaming either in one place cannot then leave consumers enabling a plugin
+    that no longer exists -- and both manifests are classifier-digest inputs,
+    so a rename also invalidates every outstanding verdict.
+    """
+    marketplace = json.loads(
+        (root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8")
+    )
+    plugin = json.loads(
+        (root / "plugins/sd/.claude-plugin/plugin.json").read_text(encoding="utf-8")
+    )
+    return str(marketplace["name"]), str(plugin["name"])
+
+
 def _run_inspection(
     args: argparse.Namespace,
     target: Path,
@@ -960,6 +1147,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     if args.status or args.check:
         return _run_inspection(args, target, manifest_data, files)
+    if args.thin:
+        # Before the thin-consumer guard below, deliberately: converting an
+        # already-thin consumer is the documented recovery from an interrupted
+        # run, and the guard exists to stop *fat-shaped* commands, not this
+        # one.
+        return _run_thin_conversion(args, target, manifest_data, files)
     thin_state = conversion.thin_pin_state(target)
     if thin_state != conversion.PIN_STATE_FAT:
         # R18-C2 and R19-C1. Two shipped commands mutate a consumer without

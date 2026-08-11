@@ -1973,3 +1973,63 @@ names would be a subset presented as the whole.
 **The residual is receipt-derived, asserted directly.** The partition has
 557 keep rows; `rwbp-coordinator` has 26 of them. A partition-derived
 residual writes a receipt vouching for files that are not on disk.
+
+### Steps 5 and 6 — the write phase and the command, built
+
+`install.py TARGET --thin --resweep-verdict PATH` runs end to end.
+`installer/thin.py` gained `apply_conversion`, which executes the fixed write
+order and nothing else, and `install.py` gained `_run_thin_conversion`, which
+is entirely refusals until the last twenty lines.
+
+**Order asserted by consequence, not by call sequence.** A test that checks
+four functions run in order passes on a version that writes them all to the
+wrong paths. `tests/test_thin_apply.py` asserts what the order is *for*: a
+run cut short between the receipts leaves a consumer that reads thin (the
+manifest witness is written first); the residual receipt equals the plan's
+keep plus receipts; the pre-conversion receipt equals delete + retire +
+block-strip + residual exactly; and the inventory is gone when the
+conversion completes, because its presence means unfinished.
+
+**Two defects this step's own tests found, both fixed rather than noted:**
+
+- *A `.gitignore` with no markers is a no-op, not a refusal.* The first
+  drift test wrote a marker-free file and passed nothing. The genuinely
+  unstrippable case is a half-block — the opener with no closer — which is
+  what `remove_marked_block` returns `PRESERVED` for. The test now
+  constructs that.
+- *Nothing checked that a consumer's two receipts agree.* Writing the
+  staleness test by editing provenance's `version` produced a consumer whose
+  manifest and provenance disagreed, and the conversion completed: the
+  currency check reads the *manifest's* version, so the edit was invisible
+  to it. A conversion rewrites all three receipts from the state of these
+  ones, so contradictory inputs produce a thin receipt certifying a tree
+  nobody measured.
+
+  The first fix was to refuse on `inspect_receipts(target).errors`, and that
+  was wrong in a way worth recording: that list bundles per-file content
+  drift, so refusing on it made `--force` unreachable — and overriding
+  removal drift is precisely what `--force` is for. `receipt_disagreement_
+  reason` asks the narrow question instead. The `--force` test is what
+  caught it.
+
+**A blocking finding, not a convenience.** `tests/test_thin_cli.py` doubles
+the resweep. The reason is not test ergonomics: **no real consumer produces
+a `clear` verdict today.** Round 20 measured all eight as blocked, and a
+freshly installed fixture is blocked for the same reason — the pack's own
+surviving surfaces still cite paths a conversion removes. Repointing them is
+the sibling task `08-10-thin-prompt-surface-repoint`.
+
+So step 5's "disposable checkout converts" check is **not reachable
+end-to-end today**, and the honest options were to double the resweep or to
+weaken the binding until a blocked verdict passed. Weakening it would delete
+the only thing that makes a verdict mean anything, so the double stands and
+this paragraph records why. The resweep itself has 27 fixture tests and the
+binding rule has 12; what the doubled tests cover is the orchestration.
+
+Coverage: `installer/thin.py` and `install.py` both at 100%. Full gate green.
+
+**Still open from step 5's list**, and deliberately not claimed: per-write
+failure injection (four interruption points, each asserting the state the
+table predicts *and* that a re-run converges). The inventory that makes
+convergence possible is in place and asserted; driving the four injections
+needs a seam in `apply_conversion` that does not exist yet.

@@ -14,7 +14,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from installer.registry import PACK_REPOSITORY
+from installer.fileops import remove_text_block_file
+from installer.registry import (
+    COPILOT_GUIDANCE_END,
+    COPILOT_GUIDANCE_START,
+    COPILOT_INSTRUCTIONS_TARGET,
+    INSTALLED_TARGETS_FILE,
+    PACK_MANIFEST_FILE,
+    PACK_REPOSITORY,
+    PROVENANCE_FILE,
+    TRELLIS_GITIGNORE_END,
+    TRELLIS_GITIGNORE_START,
+    TRELLIS_GITIGNORE_TARGET,
+)
+from installer.removal import remove_pack_file
+from installer.status import RemoveStatus
 
 # The verdict document's `repo` records where the resweep found the checkout.
 # A conversion run against the same tree by a different path -- a symlinked
@@ -22,6 +36,10 @@ from installer.registry import PACK_REPOSITORY
 # field that actually describes its contents is compared. Excluding the path
 # is what keeps the binding about the tree rather than about the spelling.
 BINDING_EXEMPT_FIELDS = frozenset({"repo"})
+
+# The consumer-owned settings file the conversion merges into. Zero
+# partition rows: the pack has never owned a byte of it.
+CLAUDE_SETTINGS_FILE = Path(".claude/settings.json")
 
 MARKETPLACE_KEY = "extraKnownMarketplaces"
 PLUGINS_KEY = "enabledPlugins"
@@ -411,7 +429,342 @@ def residual_targets_content(residual: frozenset[str]) -> str:
     return "\n".join(sorted(residual)) + "\n"
 
 
+def load_resweep_module(root: Path):
+    """Import the shipped resweep script as a module.
+
+    By path, because the file name has hyphens. Importing it rather than
+    reimplementing its digests is the point: the verdict's binding fields are
+    whatever that script computes, so recomputing them anywhere else would be
+    a second implementation to keep in step -- and `classifier_digest` hashes
+    that script's bytes, so the two are already bound to each other.
+    """
+    import importlib.util
+
+    path = root / "scripts/sd-ai-command-pack-thin-resweep.py"
+    spec = importlib.util.spec_from_file_location("sd_thin_resweep", path)
+    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
+        raise SystemExit(f"error: cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def writability_reason(root: Path, label: str) -> str | None:
+    """Why this root cannot be written, checked before either root is.
+
+    `--thin` writes the consumer *and* the pack registry. Discovering an
+    unwritable registry after 166 consumer deletions is the worse ordering,
+    not the safer one, so both are probed up front -- by actually creating and
+    removing a file, because `os.access` answers the wrong question on a
+    read-only mount and under an ACL.
+    """
+    if not root.is_dir():
+        return f"{label} {root} is not a directory"
+    probe = root / ".sd-ai-command-pack-writability-probe"
+    try:
+        probe.touch()
+        probe.unlink()
+    except OSError as error:
+        return f"{label} {root} is not writable: {error}"
+    return None
+
+
+def version_currency_reason(
+    installed_version: str | None, source_version: str
+) -> str | None:
+    """Why this consumer is too stale to convert.
+
+    The cheap proxy for the real question, which is whether the receipt still
+    describes what the pack ships. It is a proxy and not the answer: R19-C2
+    measured a consumer whose receipt was a version behind and therefore
+    missing `scripts/sd-ai-command-pack-pack-update.sh`, which the current
+    manifest ships and the partition classifies as a machine row a `codex`
+    consumer retains. A receipt-derived residual would convert cleanly and
+    fail `--check` on the very next command, for a file the conversion never
+    had a chance to keep. The exact assertion -- source-derived residual is a
+    subset of the receipt-derived one -- runs alongside this, not instead.
+    """
+    if installed_version is None:
+        return (
+            "this consumer's provenance records no version, so the receipt "
+            "cannot be shown to describe what the pack ships; run "
+            "`install.py TARGET` first"
+        )
+    if installed_version != source_version:
+        return (
+            f"this consumer has {installed_version} installed and the pack "
+            f"ships {source_version}; run `install.py TARGET` first, because a "
+            "conversion plan built from a stale receipt cannot keep a file the "
+            "consumer never received"
+        )
+    return None
+
+
+def receipt_disagreement_reason(target: Path) -> str | None:
+    """Why this consumer's two version-bearing receipts describe different installs.
+
+    Narrower than `inspect_receipts` on purpose. That reports per-file content
+    drift in the same list, and refusing on the whole list would make `--force`
+    unreachable -- overriding removal drift is precisely what `--force` is for.
+    This asks only whether the receipts agree about *which install* they
+    describe, which is the input the conversion rewrites all three from.
+    """
+    versions: dict[str, object] = {}
+    for receipt in (PACK_MANIFEST_FILE, PROVENANCE_FILE):
+        path = target / receipt
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            return f"{receipt.as_posix()} cannot be read: {error}"
+        if not isinstance(payload, dict):
+            return f"{receipt.as_posix()} is not an object"
+        versions[receipt.as_posix()] = payload.get("version")
+    if len(set(versions.values())) != 1:
+        rendered = ", ".join(
+            f"{name} says {value!r}" for name, value in sorted(versions.items())
+        )
+        return f"installed manifest and provenance versions do not match: {rendered}"
+    return None
+
+
+def stale_receipt_reason(
+    source_residual: frozenset[str], receipt_residual: frozenset[str]
+) -> str | None:
+    """The exact assertion the version comparison only approximates."""
+    missing = sorted(source_residual - receipt_residual)
+    if not missing:
+        return None
+    return (
+        "this consumer's receipt does not list "
+        f"{len(missing)} target(s) a thin install must retain, so converting "
+        "would leave `--check` reporting refresh-required immediately: "
+        + ", ".join(missing)
+        + ". Run `install.py TARGET` first."
+    )
+
+
+BLOCK_MARKERS = {
+    TRELLIS_GITIGNORE_TARGET.as_posix(): (
+        TRELLIS_GITIGNORE_START,
+        TRELLIS_GITIGNORE_END,
+        ".gitignore",
+        False,
+    ),
+    COPILOT_INSTRUCTIONS_TARGET.as_posix(): (
+        COPILOT_GUIDANCE_START,
+        COPILOT_GUIDANCE_END,
+        ".github/copilot-instructions.md",
+        True,
+    ),
+}
+
+
+def removal_preflight_reasons(
+    target: Path,
+    plan,
+    *,
+    files_by_target: dict,
+    provenance_files: dict[str, str],
+    force: bool,
+) -> tuple[str, ...]:
+    """Drift across all three removal buckets, found before anything is written.
+
+    Not just `delete`. `retire_stale_targets` preserves a drifted retired file
+    and keeps going (`installer/removal.py:263`), and managed-block removal
+    can come back `PRESERVED` on a malformed or unreadable target
+    (`installer/fileops.py:683`). Validating only ordinary delete drift would
+    let a conversion complete while a retired file or an unstrippable block
+    survives -- exactly the half-converted state the thin pin would then
+    certify as clean.
+
+    `--force` overrides removal drift in all three buckets and nothing else
+    (R19-C5): not a settings collision, not a stale receipt, not an unwritable
+    root, not a missing verdict.
+    """
+    reasons: list[str] = []
+    for entry in (*plan.delete, *plan.retire):
+        result = remove_pack_file(
+            target,
+            Path(entry),
+            file=files_by_target.get(entry),
+            recorded_hash=provenance_files.get(entry),
+            force=force,
+            dry_run=True,
+            backup=False,
+        )
+        if result.status is RemoveStatus.PRESERVED:
+            reasons.append(f"{entry} cannot be removed: {result.detail}")
+    for entry in plan.block_strip:
+        markers = BLOCK_MARKERS.get(entry)
+        if markers is None:
+            # A managed-block file the conversion plan named and this table
+            # does not know how to strip. Guessing a marker pair is how a
+            # consumer loses a surface silently.
+            reasons.append(f"{entry} carries no known managed block to strip")
+            continue
+        start, end, label, invalid_utf8 = markers
+        result = remove_text_block_file(
+            target,
+            Path(entry),
+            start_marker=start,
+            end_marker=end,
+            label=label,
+            dry_run=True,
+            backup=False,
+            preserve_invalid_utf8=invalid_utf8,
+        )
+        if result.status is RemoveStatus.PRESERVED:
+            reasons.append(f"{entry} block cannot be stripped: {result.detail}")
+    return tuple(reasons)
+
+
+@dataclass(frozen=True)
+class ConversionWrite:
+    """One completed write, so an interrupted run can report which half landed."""
+
+    step: str
+    detail: str
+
+
+def apply_conversion(
+    root: Path,
+    target: Path,
+    *,
+    plan,
+    settings: SettingsPlan,
+    manifest_data: dict,
+    residual: frozenset[str],
+    existing_files: dict[str, str],
+    platforms: tuple[str, ...],
+    consumer: str | None,
+    forced: tuple[str, ...],
+    files_by_target: dict,
+    provenance_files: dict[str, str],
+    force: bool,
+    backup: bool,
+) -> list[ConversionWrite]:
+    """Execute the validated plan in the order design.md fixes, and only that order.
+
+    The order is part of the contract because there is no rollback: it exists
+    so that every interruption lands in a state that is *recognizable* rather
+    than ambiguous. Settings first (a pure addition, reversible by deleting
+    keys); then the receipts with provenance last, because the pin is the
+    discriminator every other command reads and therefore the commit point;
+    then the payload; then the registry.
+
+    Deleting the payload before writing the pin would produce the one state
+    that is not recognizable -- a consumer with no machine surfaces and a fat
+    receipt, which `--check` calls `invalid` and which no re-run can tell from
+    a botched manual deletion.
+    """
+    written: list[ConversionWrite] = []
+
+    if settings.writes_anything:
+        settings.path.parent.mkdir(parents=True, exist_ok=True)
+        settings.path.write_text(render_settings(settings.merged), encoding="utf-8")
+        written.append(ConversionWrite("settings", str(settings.path)))
+
+    # The removal inventory rides with the receipts, before the pin, because
+    # the pin is what makes the receipt stop describing the remainder.
+    inventory = target / REMOVAL_INVENTORY_FILE
+    inventory.parent.mkdir(parents=True, exist_ok=True)
+    inventory.write_text(
+        removal_inventory_content(
+            delete=plan.delete, retire=plan.retire, block_strip=plan.block_strip
+        ),
+        encoding="utf-8",
+    )
+    written.append(ConversionWrite("removal-inventory", str(inventory)))
+
+    (target / PACK_MANIFEST_FILE).write_text(
+        thin_manifest_content(manifest_data), encoding="utf-8"
+    )
+    written.append(ConversionWrite("manifest", PACK_MANIFEST_FILE.as_posix()))
+
+    (target / INSTALLED_TARGETS_FILE).write_text(
+        residual_targets_content(residual), encoding="utf-8"
+    )
+    written.append(ConversionWrite("installed-targets", INSTALLED_TARGETS_FILE.as_posix()))
+
+    (target / PROVENANCE_FILE).write_text(
+        thin_provenance_content(
+            manifest_data,
+            files=residual_provenance_files(existing_files, residual),
+            platforms=platforms,
+            consumer=consumer,
+            additions=settings.additions,
+            forced=forced,
+        ),
+        encoding="utf-8",
+    )
+    written.append(ConversionWrite("provenance", PROVENANCE_FILE.as_posix()))
+
+    for entry in (*plan.delete, *plan.retire):
+        remove_pack_file(
+            target,
+            Path(entry),
+            file=files_by_target.get(entry),
+            recorded_hash=provenance_files.get(entry),
+            force=force,
+            dry_run=False,
+            backup=backup,
+        )
+    for entry in plan.block_strip:
+        start, end, label, invalid_utf8 = BLOCK_MARKERS[entry]
+        remove_text_block_file(
+            target,
+            Path(entry),
+            start_marker=start,
+            end_marker=end,
+            label=label,
+            dry_run=False,
+            backup=backup,
+            preserve_invalid_utf8=invalid_utf8,
+        )
+    written.append(
+        ConversionWrite(
+            "payload",
+            f"{len(plan.delete)} deleted, {len(plan.retire)} retired, "
+            f"{len(plan.block_strip)} block(s) stripped",
+        )
+    )
+
+    # Last, and only now: the inventory's removals have all been performed, so
+    # its presence from here on would mean unfinished work that is finished.
+    inventory.unlink()
+    written.append(ConversionWrite("removal-inventory-cleared", str(inventory)))
+
+    if consumer is not None:
+        flip_registry_mode(root, consumer)
+        written.append(ConversionWrite("registry", f"{consumer} -> thin"))
+    return written
+
+
+def flip_registry_mode(root: Path, consumer: str, mode: str = "thin") -> None:
+    """Record the consumer's new mode in the pack's own fleet registry.
+
+    Written last. An unwritable registry is refused in the preflight, so
+    reaching here and failing is a genuine mid-operation failure -- reported
+    as "consumer converted, registry did not", which is the pin-vs-mode skew
+    the parent design already accepts and `sd-status fleet` already reports.
+    """
+    path = root / "docs/fleet/consumers.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for entry in payload.get("consumers", ()):
+        if entry.get("name") == consumer:
+            entry["mode"] = mode
+            break
+    else:
+        raise SystemExit(f"error: {consumer} is not in {path}")
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 __all__ = [
+    "BLOCK_MARKERS",
+    "CLAUDE_SETTINGS_FILE",
+    "ConversionWrite",
+    "apply_conversion",
+    "flip_registry_mode",
     "REMOVAL_INVENTORY_FILE",
     "REMOVAL_INVENTORY_KIND",
     "BINDING_EXEMPT_FIELDS",
@@ -422,17 +775,23 @@ __all__ = [
     "VERDICT_PRESENT",
     "VERDICT_UNREADABLE",
     "VerdictLoad",
+    "load_resweep_module",
     "load_verdict",
     "normalize_github_remote",
     "pack_repository_reason",
     "plan_settings_merge",
     "read_removal_inventory",
+    "receipt_disagreement_reason",
     "removal_inventory_content",
+    "removal_preflight_reasons",
     "render_settings",
     "residual_provenance_files",
     "residual_targets_content",
     "settings_additions",
+    "stale_receipt_reason",
     "thin_manifest_content",
     "thin_provenance_content",
     "verdict_binding_reasons",
+    "version_currency_reason",
+    "writability_reason",
 ]

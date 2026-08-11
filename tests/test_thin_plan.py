@@ -473,3 +473,114 @@ class RemoteEdgeTests(unittest.TestCase):
             )
         )
         self.assertNotIn("consumer", payload)
+
+
+class StalenessTests(unittest.TestCase):
+    """A conversion refuses a stale consumer rather than becoming an installer.
+
+    R19-C2: all eight consumer receipts hold 210 entries and none lists
+    `scripts/sd-ai-command-pack-pack-update.sh`, which the current manifest
+    ships and the partition classifies as a machine row a `codex` consumer
+    retains. Converting anyway produces a consumer that passes conversion and
+    fails `--check` on the very next command, for a file it never received.
+    """
+
+    def test_a_matching_version_is_current(self) -> None:
+        self.assertIsNone(thin.version_currency_reason("0.66.1", "0.66.1"))
+
+    def test_a_stale_version_names_both_and_the_fix(self) -> None:
+        reason = thin.version_currency_reason("0.65.0", "0.66.1")
+        self.assertIn("0.65.0", reason)
+        self.assertIn("0.66.1", reason)
+        self.assertIn("install.py TARGET", reason)
+
+    def test_a_receipt_with_no_version_at_all_is_refused(self) -> None:
+        self.assertIn("records no version", thin.version_currency_reason(None, "1"))
+
+    def test_the_exact_assertion_names_every_missing_target(self) -> None:
+        # The check that catches a consumer whose version matches but whose
+        # tree was refreshed against a partially applied install -- the case
+        # the version comparison is only a proxy for.
+        reason = thin.stale_receipt_reason(
+            frozenset({"a.md", "b.md", "c.md"}), frozenset({"b.md"})
+        )
+        self.assertIn("a.md", reason)
+        self.assertIn("c.md", reason)
+        self.assertIn("2 target(s)", reason)
+
+    def test_a_receipt_that_is_a_superset_is_current(self) -> None:
+        self.assertIsNone(
+            thin.stale_receipt_reason(frozenset({"a.md"}), frozenset({"a.md", "b.md"}))
+        )
+
+
+class WritabilityTests(unittest.TestCase):
+    """Both roots, before either is written."""
+
+    def test_a_writable_directory_passes(self) -> None:
+        self.assertIsNone(thin.writability_reason(_temp_dir(self), "target"))
+
+    def test_a_missing_directory_is_named(self) -> None:
+        reason = thin.writability_reason(_temp_dir(self) / "absent", "pack root")
+        self.assertIn("pack root", reason)
+        self.assertIn("not a directory", reason)
+
+    def test_a_read_only_directory_is_refused(self) -> None:
+        # Probed by writing, not by `os.access`: access answers the wrong
+        # question on a read-only mount and under an ACL.
+        root = _temp_dir(self) / "readonly"
+        root.mkdir()
+        root.chmod(0o500)
+        self.addCleanup(root.chmod, 0o700)
+        self.assertIn("not writable", thin.writability_reason(root, "target"))
+
+
+class ResweepModuleTests(unittest.TestCase):
+    def test_the_shipped_resweep_imports_as_a_module(self) -> None:
+        # Imported rather than reimplemented: the verdict's binding fields are
+        # whatever that script computes, and classifier_digest hashes its
+        # bytes, so the two are already bound to each other.
+        module = thin.load_resweep_module(_support.PACK_ROOT)
+        self.assertTrue(callable(module.resweep_consumer))
+        self.assertEqual(module.SCHEMA_VERSION, 1)
+
+
+class ReceiptAgreementTests(unittest.TestCase):
+    """Do the two version-bearing receipts describe the same install?
+
+    Narrower than `inspect_receipts` deliberately: that reports per-file
+    content drift in the same list, and refusing on the whole list would make
+    `--force` unreachable, which is precisely what `--force` is for.
+    """
+
+    def setUp(self) -> None:
+        self.target = _temp_dir(self)
+        (self.target / ".sd-ai-command-pack").mkdir()
+
+    def write(self, receipt, payload) -> None:
+        (self.target / receipt).write_text(
+            payload if isinstance(payload, str) else json.dumps(payload),
+            encoding="utf-8",
+        )
+
+    def test_matching_versions_agree(self) -> None:
+        for receipt in (install.PACK_MANIFEST_FILE, install.PROVENANCE_FILE):
+            self.write(receipt, {"version": "0.66.1"})
+        self.assertIsNone(thin.receipt_disagreement_reason(self.target))
+
+    def test_differing_versions_are_reported_with_both_values(self) -> None:
+        self.write(install.PACK_MANIFEST_FILE, {"version": "0.66.1"})
+        self.write(install.PROVENANCE_FILE, {"version": "0.0.1"})
+        reason = thin.receipt_disagreement_reason(self.target)
+        self.assertIn("0.66.1", reason)
+        self.assertIn("0.0.1", reason)
+
+    def test_an_unreadable_receipt_is_named(self) -> None:
+        self.write(install.PACK_MANIFEST_FILE, "{truncated")
+        self.assertIn("manifest.json cannot be read",
+                      thin.receipt_disagreement_reason(self.target))
+
+    def test_a_receipt_that_is_not_an_object_is_named(self) -> None:
+        self.write(install.PACK_MANIFEST_FILE, [1, 2])
+        self.assertIn("is not an object",
+                      thin.receipt_disagreement_reason(self.target))
