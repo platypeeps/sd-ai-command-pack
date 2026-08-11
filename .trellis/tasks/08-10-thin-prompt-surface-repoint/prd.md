@@ -27,9 +27,13 @@ defects.
 Reproduce with the scanner committed under the sibling task:
 
 ```bash
-.venv/bin/python .trellis/tasks/08-10-thin-conversion-tooling/research/\
-fleet-blocker-scan.py --out /tmp/scan.json
+.venv/bin/python .trellis/tasks/archive/2026-08/\
+08-10-thin-conversion-tooling/research/fleet-blocker-scan.py --out /tmp/scan.json
 ```
+
+The sibling task was archived on 2026-08-11, so the scanner moved under
+`archive/2026-08/`. An earlier revision of this PRD gave the live path,
+which no longer exists.
 
 | Surviving file | Line | Cites |
 |---|---|---|
@@ -114,7 +118,8 @@ undercounted twice:
   must stay inside the markers; editing outside them would rewrite
   consumer content.
 - `.github/PULL_REQUEST_TEMPLATE.md` is **force-preserved**
-  (`installer/registry.py:2265`), so provenance never vouches it either
+  (`FORCE_PRESERVED_TARGETS`, `installer/registry.py:2274`, with this
+  target at 2278), so provenance never vouches it either
   and an install never overwrites it. Ownership is decided by comparing
   the consumer's bytes against the pack's shipped template.
 
@@ -143,7 +148,14 @@ change to install semantics for a file class explicitly designed to be
 user-tunable. It is not in this task's scope and would need its own
 task and its own review.
 
-`templates/.github/prompts/**`,
+The four prompts are **generated**, and an earlier revision of this PRD
+named `templates/.github/prompts/**` as their canonical source, which is
+false and would have sent the edit to a file `make generate` overwrites.
+The authored source is `.github/command-sources/sd-<name>.md`, fanned out
+read at `.github/scripts/generate-command-surfaces.py:429` and fanned out
+to the platform adapters at `:652`. See `design.md`.
+
+`.github/command-sources/sd-{housekeeping,review,review-learnings,status}.md`,
 `templates/.github/copilot-instructions.sd-ai-command-pack.md`,
 `templates/.github/PULL_REQUEST_TEMPLATE.md`, and the `obsidian-kb` block
 text emitted by `templates/scripts/sd-ai-command-pack-update-spec-kb.py`
@@ -207,8 +219,10 @@ through `make sync` and `make generate`.
       outage for another.
 - [ ] `fleet-blocker-scan.py` (or the resweep, once it exists — released
       with the pack, source-only, never installed into a consumer)
-      reports `packDefects: 0` for a consumer refreshed to the new pack
-      version **and** re-run through the KB refresh — five surfaces
+      reports **no remaining hit among these seven surfaces**, and a
+      total of exactly one `packDefect` — the `codex` row owned by
+      `08-11-thin-undeclared-codex-marker` — for a consumer refreshed to
+      the new pack version **and** re-run through the KB refresh — five surfaces
       rewritten by the refresh, the `obsidian-kb` block rewritten by the
       KB script, and the PR template leaving the bucket by becoming
       consumer-owned.
@@ -225,6 +239,42 @@ through `make sync` and `make generate`.
 - [ ] Template edited first, then `make sync` and `make generate`; the
       mirror gate passes with no manual mirror edits.
 - [ ] `manifest.json` bumped, CHANGELOG entry added, `make check` green.
+- [ ] The Copilot managed block has a thin and a fat variant and the
+      installer picks between them at install time. A fat install emits
+      today's block **byte-identical** — an additive change, not churn
+      for the eight consumers that exist — and a thin install emits the
+      variant that names no repository-owned pack paths.
+
+## Baseline correction (2026-08-11)
+
+The Evidence section's **16 in 7 / 14 in 6** was measured on 2026-08-10
+and was correct then. Re-measured at implementation start the totals are
+**17 in 8 / 15 in 7**. The fleet did not move and the seven surfaces are
+unchanged; the *detector* improved. `undeclared codex usage` landed in
+the tooling task's rounds 12–14 on 2026-08-10, after this measurement,
+and reached `main` on 2026-08-11.
+
+The extra hit is a synthetic `codex` row present in every consumer,
+caused by a pack-shipped document that instructs an agent to run
+`codex exec`. It is not a stale path and shares no mechanism with these
+seven surfaces, so it is owned by
+`08-11-thin-undeclared-codex-marker`. Both tasks must land before
+children 3–5 can convert; neither alone reaches `packDefects: 0`.
+
+Also recorded so it is not rediscovered: the archived scanner does not
+run from its archived path. It computes
+`ROOT = Path(__file__).resolve().parents[4]`, correct at the live path
+and wrong two levels deeper under `archive/2026-08/`. Run it from a copy
+with `ROOT` pinned.
+
+## Decision log
+
+**2026-08-11 (user):** the Copilot glob problem is solved by a mode-aware
+managed block chosen at install time, not by repointing the globs at
+machine scope and not by dropping them. This is the "detects the mode and
+branches explicitly" arm of requirement 1, and it widens the task to
+include an installer branch and a test per variant. Rationale and the two
+rejected options are recorded in `design.md` D2.
 
 ## Blocking relationship
 

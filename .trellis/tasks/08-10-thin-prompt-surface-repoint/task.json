@@ -3,7 +3,7 @@
   "name": "thin-prompt-surface-repoint",
   "title": "Repoint surviving pack surfaces off removed paths",
   "description": "Repoint the seven pack-shipped surfaces that survive a thin conversion but still cite paths it removes - four .github/prompts/* files, the managed block in .github/copilot-instructions.md, the force-preserved .github/PULL_REQUEST_TEMPLATE.md, and the surviving obsidian-kb block in .gitignore; 16 packDefects hits in 7 files for the five consumers still carrying the pack's PR template (14 in 6 for the three that own their own), blocking every consumer conversion in children 3-5.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "templates",
