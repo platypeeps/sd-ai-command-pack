@@ -418,12 +418,14 @@ class ResidualReceiptTests(unittest.TestCase):
                 consumer="demo",
                 additions={"enabledPlugins": {"sd@sd-ai-command-pack": True}},
                 forced=("AGENTS.md",),
+                retired=("docs/gone.md",),
             )
         )
         self.assertEqual(payload["mode"], "thin")
         self.assertEqual(payload["platforms"], ["claude", "codex"])
         self.assertEqual(payload["consumer"], "demo")
         self.assertEqual(payload["forced"], ["AGENTS.md"])
+        self.assertEqual(payload["retired"], ["docs/gone.md"])
         self.assertEqual(payload["files"], {"kept.md": "sha256:a"})
         self.assertEqual(payload["version"], "0.66.1")
 
@@ -470,6 +472,7 @@ class RemoteEdgeTests(unittest.TestCase):
                 consumer=None,
                 additions={},
                 forced=(),
+                retired=(),
             )
         )
         self.assertNotIn("consumer", payload)

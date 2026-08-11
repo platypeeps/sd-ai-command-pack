@@ -32,7 +32,7 @@ Path = _support.Path
 install = _support.install
 InstallTestCase = _support.InstallTestCase
 
-from installer import conversion, thin  # noqa: E402
+from installer import conversion, fileops, thin  # noqa: E402
 
 
 class FakeResweep:
@@ -214,6 +214,22 @@ class ThinCommandTests(InstallTestCase):
         self.addCleanup(self.root.chmod, 0o700)
         self.assert_refused(self.run_thin(), "not writable")
 
+    def test_an_unwritable_pack_checkout_is_refused_before_the_target_is_touched(
+        self,
+    ) -> None:
+        # Doubled rather than chmod'ed: the pack root here is this repository.
+        # The probe itself has direct tests in `tests/test_thin_plan.py`; what
+        # this row owns is that the *registry* root is probed at all, before
+        # 166 consumer deletions rather than after them.
+        def unwritable(root, label):
+            return f"{label} {root} is not writable" if label == "pack root" else None
+
+        witness = self.root / ".claude/commands/sd/check.md"
+        with mock.patch.object(thin, "writability_reason", side_effect=unwritable):
+            result = self.run_thin()
+        self.assert_refused(result, "pack root")
+        self.assertTrue(witness.exists())
+
     def test_a_pack_checkout_that_is_not_this_repository_is_refused(self) -> None:
         with mock.patch.object(
             install, "_origin_url", return_value="git@github.com:someone/else.git"
@@ -242,9 +258,126 @@ class ThinCommandTests(InstallTestCase):
         result = self.run_thin("--dry-run")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("mode: dry-run", result.stdout)
-        self.assertIn("would-remove", result.stdout)
+        self.assertIn("would-delete", result.stdout)
         self.assertEqual(conversion.thin_pin_state(self.root), conversion.PIN_STATE_FAT)
         self.assertFalse((self.root / thin.CLAUDE_SETTINGS_FILE).exists())
+
+    def test_a_dry_run_over_an_existing_settings_file_announces_no_creation(
+        self,
+    ) -> None:
+        # `createdFile` is what tells revert whether it may delete the file,
+        # so the dry run has to distinguish "I will create this" from "I will
+        # add keys to yours" -- and the fixture's default is the first.
+        settings = self.root / thin.CLAUDE_SETTINGS_FILE
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        result = self.run_thin("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("would-create ", result.stdout)
+        self.assertIn("would-set      enabledPlugins.", result.stdout)
+
+    def test_a_retired_target_is_announced_in_its_own_category(self) -> None:
+        # Retire is not delete: `retire_stale_targets` preserves a drifted
+        # retired file and keeps going, so folding the two into one printed
+        # category would hide the bucket whose failure mode is silent.
+        retired = sorted(install.RETIRED_TARGETS)[0]
+        path = self.root / retired
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("legacy\n", encoding="utf-8")
+        receipt = self.root / install.INSTALLED_TARGETS_FILE
+        receipt.write_text(
+            receipt.read_text(encoding="utf-8") + f"{retired}\n", encoding="utf-8"
+        )
+        # Vouched, so the row exercises the retire *category* rather than the
+        # drift refusal that guards it -- which has its own row above.
+        provenance = self.root / install.PROVENANCE_FILE
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        # `sha256_file`'s prefixed form, which is what removal compares
+        # against -- `source_digest` returns the bare hex and would silently
+        # never match.
+        payload["files"][retired] = fileops.sha256_file(path)[0]
+        provenance.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+        result = self.run_thin("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"would-retire   {retired}", result.stdout)
+        self.assertNotIn(f"would-delete   {retired}", result.stdout)
+
+    def announced(self, stdout: str, prefix: str) -> set[str]:
+        return {
+            line.split(maxsplit=1)[1].strip()
+            for line in stdout.splitlines()
+            if line.startswith(prefix)
+        }
+
+    def test_the_dry_run_set_matches_the_executed_run_in_all_six_categories(
+        self,
+    ) -> None:
+        # "The tree was unchanged" is satisfied by an empty or wrong printout,
+        # and a delete-only comparison passes while the settings and registry
+        # writes go unannounced. So each category is compared against what the
+        # real run actually did.
+        flips: list[tuple[str, str]] = []
+        with mock.patch.object(
+            thin,
+            "flip_registry_mode",
+            side_effect=lambda root, consumer, mode="thin": flips.append(
+                (consumer, mode)
+            ),
+        ):
+            dry = self.run_thin("--dry-run", "--consumer", "demo")
+            self.assertEqual(dry.returncode, 0, dry.stdout)
+            before = set(self.installed_paths())
+            real = self.run_thin("--consumer", "demo")
+        self.assertEqual(real.returncode, 0, real.stdout)
+
+        removed = before - set(self.installed_paths())
+        announced_removals = (
+            self.announced(dry.stdout, "would-delete")
+            | self.announced(dry.stdout, "would-retire")
+        )
+        self.assertTrue(announced_removals, "the dry run announced no removals")
+
+        # A stripped file can also vanish, and `.gitignore` does here: the
+        # managed block was its entire contents. So the strip category is
+        # announced separately and its disappearances are accounted for
+        # rather than swept into the delete comparison.
+        strips = self.announced(dry.stdout, "would-strip")
+        self.assertEqual(strips, {".gitignore"})
+        emptied = {entry for entry in strips if not (self.root / entry).exists()}
+        self.assertEqual(announced_removals | emptied, removed)
+        self.assertEqual(
+            self.announced(dry.stdout, "would-rewrite"),
+            {
+                install.PACK_MANIFEST_FILE.as_posix(),
+                install.INSTALLED_TARGETS_FILE.as_posix(),
+                install.PROVENANCE_FILE.as_posix(),
+            },
+        )
+        settings = json.loads(
+            (self.root / thin.CLAUDE_SETTINGS_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            self.announced(dry.stdout, "would-set"),
+            {
+                f"{container}.{key}"
+                for container, entries in settings.items()
+                for key in entries
+            },
+        )
+        self.assertEqual(
+            self.announced(dry.stdout, "would-create"),
+            {thin.CLAUDE_SETTINGS_FILE.as_posix()},
+        )
+        self.assertEqual(self.announced(dry.stdout, "would-registry"), {"demo -> thin"})
+        self.assertEqual(flips, [("demo", "thin")])
+
+    def installed_paths(self) -> list[str]:
+        return [
+            path.relative_to(self.root).as_posix()
+            for path in sorted(self.root.rglob("*"))
+            if path.is_file() and ".git" not in path.relative_to(self.root).parts
+        ]
 
     def test_a_conversion_converts(self) -> None:
         result = self.run_thin()
@@ -254,13 +387,43 @@ class ThinCommandTests(InstallTestCase):
         self.assertTrue((self.root / install.PROVENANCE_FILE).is_file())
         self.assertFalse((self.root / thin.REMOVAL_INVENTORY_FILE).exists())
 
-    def test_ordinary_install_then_refuses_the_converted_consumer(self) -> None:
-        # The two halves meeting: conversion writes the pin, and R19-C1's
-        # guard reads it. Without this the pin is written and never enforced.
+    def test_a_registry_that_cannot_be_written_reports_which_half_landed(self) -> None:
+        # Both roots are probed before either is touched, so reaching here
+        # means something changed underneath a validated plan. There is no
+        # rollback and inventing one would be worse than the skew -- but
+        # exiting zero over it would be worse than both.
+        with mock.patch.object(
+            thin, "flip_registry_mode", side_effect=OSError("read-only file system")
+        ):
+            result = self.run_thin("--consumer", "demo")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("converted and the registry still reads fat", result.stdout)
+        self.assertIn("nothing is rolled back", result.stdout)
+        self.assertEqual(
+            conversion.thin_pin_state(self.root), conversion.PIN_STATE_THIN
+        )
+        self.assertFalse((self.root / ".claude/commands/sd/check.md").exists())
+
+    def test_the_pin_conversion_writes_is_the_pin_later_commands_read(self) -> None:
+        # The two halves meeting. Without this the pin is written and never
+        # enforced. `--remove` is the reader that still refuses outright: it
+        # has no thin form, and running it would leave a live plugin, no
+        # receipts, and a registry saying `thin`. The ordinary install is the
+        # reader that changed in step 9b -- it refreshes rather than refuses,
+        # because a fleet sweep runs exactly that command -- and it is proved
+        # here to read the same pin by leaving the machine payload deleted.
         self.assertEqual(self.run_thin().returncode, 0)
-        refused = self.run_install(self.root)
+
+        refused = self.run_install(self.root, "--remove", "--skip-diff-check")
         self.assertEqual(refused.returncode, 2, refused.stdout)
         self.assertIn("--revert-thin", refused.stdout)
+
+        refreshed = self.run_install(self.root)
+        self.assertEqual(refreshed.returncode, 0, refreshed.stdout)
+        self.assertEqual(
+            conversion.thin_pin_state(self.root), conversion.PIN_STATE_THIN
+        )
+        self.assertFalse((self.root / ".claude/commands/sd/check.md").exists())
 
 
 if __name__ == "__main__":

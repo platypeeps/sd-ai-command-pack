@@ -1758,11 +1758,11 @@ construction on its first attempt.
 | ID | Defect | Disposition |
 | --- | --- | --- |
 | R20-C1 | **A symlinked thin provenance is classified `fat` and ordinary install damages the consumer.** It built a thin consumer, moved the pin bytes to a sibling, and symlinked provenance at them — the pin intact and readable, not destroyed. Install exited 2 with `symlink-conflict`, and the machine witness went `absent` → `present`. The payload preflight (`install.py:956`) covers selected files only; the three receipts are written afterwards by a different path, so their conflicts were detected *after* the payload had landed | **Shipped**: the preflight now checks the three receipt destinations before the first payload write, and refuses with `nothing was installed`. New test asserts a removed payload file is **still absent** after the refusal — the pre-existing symlink test only checked the exit code and passed throughout |
-| R20-C2 | **Byte-identical revert cannot restore the 13 retired files.** All 13 are in the live 210-row receipts and absent from the manifest, source tree, and templates; provenance keeps hashes, not bytes (`provenance.py:136`). A same-version checkout cannot recreate them | Open. Three ways out: preserve the bytes durably, leave legacy retired files in place, or narrow the revert guarantee. The last is probably right — revert restores what the pack can still produce — but it changes what `--revert-thin` promises and must be said in prd.md, not assumed |
+| R20-C2 | **Byte-identical revert cannot restore the 13 retired files.** All 13 are in the live 210-row receipts and absent from the manifest, source tree, and templates; provenance keeps hashes, not bytes (`provenance.py:136`). A same-version checkout cannot recreate them | **Fixed** in step 7, by the third way out. The conversion records `retired` in the thin receipt and revert prints `not-restored <path>` for each; the guarantee is now written down in `prd.md` as "the payload the pinned version ships", not "every path the pre-conversion receipt listed". The list is written even when empty, because an absent key and an empty list read the same to a defaulting reader |
 | R20-C3 | **The R19-C6 write order destroys its own recovery inventory.** It rewrites `installed-targets.txt` to the residual before deleting, but `build_conversion_plan` discovers deletion candidates *from* that receipt (`conversion.py:204`). After the rewrite, an interrupted rerun cannot find what remains undeleted — the exact opposite of the property the order was specified to guarantee | Open, and it invalidates the table of four interrupted states. Needs a durable removal inventory or journal that survives until deletion completes. This is the finding that most argues for writing code rather than more contract |
-| R20-C4 | **The freshness preflight invalidates the canary's acceptance figures.** The 210-row totals reproduce against the stale receipts, but R19-C2 now requires a current install first, and a fresh 0.66.1 install measures **198**: `167 delete + 0 retire + 27 keep + 3 receipts + 1 strip` without Codex, `91 + 0 + 103 + 3 + 1` with. The refresh drops the 13 retired rows and adds the pack-update target | Open. The canary prd still asserts 210/13 (`prd.md:114`). 210 can stay as a compatibility fixture but cannot be the expected post-refresh result |
+| R20-C4 | **The freshness preflight invalidates the canary's acceptance figures.** The 210-row totals reproduce against the stale receipts, but R19-C2 now requires a current install first, and a fresh 0.66.1 install measures **198**: `167 delete + 0 retire + 27 keep + 3 receipts + 1 strip` without Codex, `91 + 0 + 103 + 3 + 1` with. The refresh drops the 13 retired rows and adds the pack-update target | Fixed. `prd.md` now carries both measurements and says which one a conversion is expected to produce: 198/0 after the mandatory R19-C2 refresh, with 210/17 kept as a fixture shape to seed deliberately because the preflight makes the retire bucket empty on the fleet without making it unreachable |
 | R20-C5 | **R19-C4b's second thin marker exists in design.md and nowhere in the checklist.** Step 4 defines mode recognition around `thin_pin_state` alone; step 6 rewrites the manifest without specifying a mode witness; no disagreement, pin-loss, or symlinked-thin test is listed | Open. As written, the remedy for R20-C1's class would never get implemented |
-| R20-C6 | **Fleet refresh skips damaged same-version thin consumers.** Preflight declares a consumer at target on provenance version alone (`fleet-preflight.py:93`), so a same-version thin consumer with a corrupted residual never reaches the repair path. Step 9b covers version-bump refresh only | Open, folded into step 9b |
+| R20-C6 | **Fleet refresh skips damaged same-version thin consumers.** Preflight declares a consumer at target on provenance version alone (`fleet-preflight.py:93`), so a same-version thin consumer with a corrupted residual never reaches the repair path. Step 9b covers version-bump refresh only | Fixed in step 9c |
 | R20-C7 | **Two expected states for one fixture.** Step-1 checks said a half-converted consumer reports `refresh-required`; the measured correction below said `invalid`. Tests follow `invalid` | **Fixed** in this file: the guess is replaced by the measurement, with the reasoning that the fat path really is unchanged |
 | R20-C8 | Candidate checking clones the consumer's default branch and force-installs into the clone (`fleet-candidate-check.py:138`), so once a default branch is thin the R19 guard refuses it — the parent design says the scratch checkout is always fat | Non-blocking; the candidate-loop sibling owns this and remains a hard pre-canary dependency |
 
@@ -2033,3 +2033,257 @@ failure injection (four interruption points, each asserting the state the
 table predicts *and* that a re-run converges). The inventory that makes
 convergence possible is in place and asserted; driving the four injections
 needs a seam in `apply_conversion` that does not exist yet.
+
+### Step 7 — `--revert-thin`, built
+
+The undo runs: `install.py TARGET --revert-thin` restores the fat payload,
+undoes exactly the settings the conversion recorded, and unflips the
+registry row. 45 tests in `tests/test_thin_revert.py`, and two more rows
+added to `tests/test_thin_cli.py` for the conversion side of the same two
+contracts.
+
+**The headline check is a round trip, not a list of properties.** Install,
+convert, revert, and compare the two trees byte for byte, because every
+narrower assertion has a version that passes while the payload comes back
+wrong: restoring 178 of 179 paths, restoring them from the wrong version,
+and restoring them while leaving the pin thin all satisfy "revert ran and
+exited zero".
+
+**Two defects the round trip found immediately, both fixed here:**
+
+- *`settingsAdditions` was never the shape `design.md` §4 specifies.* The
+  conversion recorded the added pairs and dropped `createdContainers` and
+  `createdFile`, so revert could not tell a container it created from one
+  the consumer already had. Every conversion that created
+  `extraKnownMarketplaces` left an empty one behind forever. Fixed with
+  `SettingsPlan.record`, which is now what the receipt carries; the two
+  `tests/test_thin_apply.py` rows that asserted the old shape assert the
+  new one and say why.
+- *Nothing implemented the partial-completion diagnostic.* `flip_registry_
+  mode`'s docstring promised a report of "consumer converted, registry did
+  not" that no code produced: an `OSError` on the registry propagated as a
+  traceback in one direction and was unreachable in the other.
+  `PartialConversion` carries the writes that landed, and both directions
+  print which half completed, name the recovery, and exit 2. The recoveries
+  differ and that is the point — a failed conversion re-runs `--thin`, and
+  a failed revert *cannot* re-run `--revert-thin`, because the pin is
+  already fat and the re-run refuses. Advising it would send an operator in
+  a circle, so revert names the hand edit.
+
+**The pinned platform set, and a claim I had to correct.** The first
+version's comment said revert must not re-detect platforms because "a
+converted consumer has had the platform directories deleted". Mutating
+`platforms` to `None` did not fail a single test — because the activation
+markers are Trellis-owned and survive conversion, so detection agrees. The
+real divergence is the opposite one: a consumer who activates *another*
+Trellis platform while converted would have revert install that platform's
+payload, with receipts vouching for files the pre-conversion tree never
+had. That is now the test, the mutation dies, and the comment says what is
+true rather than what sounded true.
+
+**R19-C3 restore-path collisions reuse the installer's own answer.**
+`install_file` already returns `CONFLICT` unforced, so the preflight is a
+dry-run `_install_payload` plus `_conflict_results` — every occupied path
+named at once, nothing written, and `--force` still rejected by the parser
+rather than by a later check. A path re-created with the source bytes comes
+back `UNCHANGED` and is correctly not a collision.
+
+**R20-C2 closed by narrowing the promise and writing it down.** Retired
+files have no surviving bytes anywhere, so the conversion records them and
+revert prints `not-restored <path>` for each. `prd.md` now says the
+guarantee covers the payload the pinned version ships, not every path the
+pre-conversion receipt happened to list.
+
+Mutation evidence, one true revert each: collision preflight removed (1
+failure); marker written as a deletion instead of `false` (3 failures, 1
+error); platform set re-detected (1 failure); version-bound check removed (1
+failure); drifted recorded value overwritten (2 failures); pending-removal
+inventory left behind (1 failure); `pathHint` cross-check removed (1
+failure); created containers not removed (2 failures). Baseline OK after
+each.
+
+**The registry is doubled in the CLI rows, and the reason is mechanical
+rather than methodological**: `flip_registry_mode` writes this repository's
+own `docs/fleet/consumers.json`, so letting it run for real would edit a
+tracked file during the test run. Its behavior has direct tests against a
+fixture root, in both directions.
+
+### Step 8 — `--dry-run` on both directions, built
+
+The conversion's dry run printed deletions and nothing else. That is the
+failure mode step 8 exists to catch: an unchanged tree is satisfied by an
+empty printout, and a delete-only comparison passes while the settings
+merge, the three receipt rewrites, and the registry flip — most of what
+makes this command irreversible — go unannounced.
+
+Both directions now print all six categories, and
+`test_the_dry_run_set_matches_the_executed_run_in_all_six_categories`
+compares each against what the real run actually did rather than against
+itself.
+
+One correction the comparison forced: `.gitignore` is a managed-block
+target whose block is its *entire* contents, so stripping it removes the
+file. Folding that into the delete comparison would have hidden a real
+distinction, so the strip category is announced separately and its
+disappearances are accounted for explicitly.
+
+### Step 9 — the retention fixture, built
+
+`RetentionFixtureTests` in `tests/test_thin_apply.py`, three rows: every
+shared-platform machine row in the receipt lands in `keep` for a consumer
+declaring `codex`; the same rows land in `delete` without it; and a real
+`apply_conversion` leaves them on disk and in the residual receipt.
+
+The whole platform, not one row of it. `retainVendoredFor` is declared per
+platform — `shared` retains for `codex` and `pi` — so a fixture checking one
+`.agents/` file proves nothing about `scripts/`, and a retention bug sparing
+one directory would pass it. The test asserts both directories are
+represented before it asserts anything about retention, so a partition that
+stopped shipping one of them fails loudly instead of silently narrowing the
+check.
+
+**Recorded as required: no live consumer exercises this path.** The fleet
+registry declares no `codex` or `pi` consumer today, so this coverage is
+synthetic and must not be reported as fleet-proven.
+
+True-revert mutation: `_retained_for_consumer` forced to `return False`
+produces 2 failures; baseline OK.
+
+### Step 9b — the thin-aware refresh, built
+
+Ordinary `install.py TARGET` now refreshes a converted consumer instead of
+refusing it. That refusal was fail-closed and never the end state:
+`sd-fleet-refresh` runs exactly this command against every consumer, so for
+as long as it refused, a converted consumer could not receive a pack update
+— which means it could not receive a security fix. `--remove` still refuses,
+and so does a malformed pin, in both directions.
+
+**A live defect this step's first test found.** `--check` reported
+`refresh-required` **forever** on any genuinely converted consumer. Step 4's
+second thin witness put `mode: "thin"` into the installed `manifest.json`,
+and `_run_inspection` went on computing the dry-run receipt from the plain
+manifest — so the two disagreed about exactly one key, every time, with no
+refresh able to close the gap. The existing thin-inspection fixtures did not
+catch it because they write a thin *provenance* by hand and never a thin
+manifest; only a real `apply_conversion` produces the state. `_receipt_
+manifest` is now the single answer for both paths.
+
+**One selection helper, for the same reason.** Inspection re-detected
+platforms while the refresh used the pin's. Left alone that is the same bug
+in a second costume: a consumer who activates another Trellis platform after
+converting gets `refresh-required` from `--check` against a refresh that
+would change nothing. `_selection_for_target` decides both, and its docstring
+records why the pin wins over detection.
+
+**`retired` joins `PIN_KEYS`.** It was not there, so the first refresh of any
+converted consumer would have silently dropped revert's record of what it
+cannot restore — turning "these files cannot come back" into "everything came
+back". The list is one list precisely so a key cannot be carried by the
+refresh and not recognized by `thin_pin_state`, or the reverse.
+
+14 tests in `tests/test_thin_refresh.py`, including the one that matters most
+for blast radius: a fat consumer's refresh is byte-identical and its receipt
+grows no pin key. The thin branch sits inside the single code path every
+consumer in the fleet runs.
+
+**R20-C6 is not closed by this step.** Fleet preflight still declares a
+consumer at target on provenance version alone, so a same-version thin
+consumer with a corrupted residual never reaches the repair path. What
+changed is that the repair now *exists*: before this step there was nothing
+for the preflight to route to. The preflight amendment is step 9c.
+
+## Step 9c — the fleet preflight amendment (R20-C6), built
+
+`scripts/sd-ai-command-pack-fleet-preflight.py` decided every consumer's
+routing on `installed_version == target_version`. For a fat consumer that is
+sound: a deleted surface is caught by the install audit's manifest-derived
+completeness check on the next sweep that reaches it. A thin install skips
+that check on purpose — for a converted consumer the receipt *is* the
+allowlist — so a residual file that went missing and a machine surface the
+conversion removed look identical to everything else in the sweep. Preflight
+is the only place that can tell them apart, and skipping on version alone is
+what left the damage unrouted indefinitely.
+
+The check it now runs is deliberately the cheap half: every path recorded in
+`installed-targets.txt` must still exist. Drifted *content* stays the install
+audit's job — preflight prints the audit command — but a missing path is a
+plain `exists()` and needs no hashing. A thin consumer that fails it reports
+the new `residual-damaged` status, which is not `at-target` and therefore
+already flows through `--fail-on-refresh-needed` and the rollout runbook.
+Fat consumers are untouched by design: widening the stat to the whole fleet
+would change every consumer's routing under a thin-mode finding, and the
+asymmetry has a reason rather than being an oversight.
+
+The second half is the command the operator is handed. Preflight printed
+`install.py <repo> --force --platform ...` for every consumer, and step 9b's
+thin-aware refresh rejects `--platform` outright — its platform set is owned
+by the pin. Every converted consumer's printed repair command was therefore
+guaranteed to exit 2. It now omits `--platform` for a thin consumer, and the
+text row reports `mode: thin` with the *pinned* platform set rather than the
+registry's, which is what the consumer was converted from. The JSON rows gain
+`mode` and `installedPlatforms` so the rollout controller can tell the two
+apart. `audit_command` is unchanged: the audit already reads
+`installed_mode` itself and ignores `--expected-platform` for a thin install.
+
+10 tests in `tests/test_fleet_preflight.py::ThinFleetPreflightTests`. The
+headline check is `test_the_printed_repair_command_is_one_a_thin_consumer_accepts`:
+it parses the printed command with `install.parse_args` and asserts
+`install._thin_refresh_rejection` returns None for it *and* returns the
+"owned by its pin" rejection for the registry-shaped command it replaces —
+without the second half the assertion would pass for a command that never
+had a problem. Three mutations killed: skipping on version alone (3 rows),
+always emitting `--platform` (2 rows), and dropping the absolute/`..` guard
+that keeps a consumer-side receipt from being stat'ed outside the checkout
+(1 row). `README.md` and `docs/FLEET_ROLLOUT.md` carry the new status and the
+run-the-printed-command rule.
+
+## Step 10 — spec, release obligations, and two fixtures that outlived their contract, built
+
+`.trellis/spec/backend/manifest-and-filesystem.md` gains a **Thin Install
+Conversion Contract** in the file's 7-section code-spec shape, sitting next to
+the Installer Inspection Contract it depends on. It records the parts a future
+change is most likely to get wrong by reading only the code: the delete set is
+derived from the consumer's receipt and never listed; the verdict binds the
+consumer *and* the classifier digest; all three bookkeeping files survive; the
+two thin witnesses are ordered (manifest first) and the write order depends on
+it; `PIN_KEYS` is one list serving two roles; `retired` is written even when
+empty; the revert guarantee is narrowed rather than absolute; the pin owns the
+platform set in both directions; and fleet preflight routes on the receipt
+rather than the version.
+
+Release obligations were already met by the branch — `manifest.json` is at
+0.66.1 with a matching `CHANGELOG.md` heading — so this step added the five
+entries the heading was missing: `--thin`, `--revert-thin`, the thin-aware
+refresh, and the preflight amendment. `README.md`'s `install.py` invocation
+list gained both flags: it is an inventory, and an inventory that omits two
+shipped commands is how the next reader concludes they do not exist.
+
+Two existing fixtures asserted contracts this task deliberately replaced, and
+both are recorded here rather than quietly edited:
+
+- `tests/test_thin_inspection.py`'s `convert()` wrote a thin *provenance* over
+  a plain installed manifest. That is a half-converted consumer, and after
+  step 4's second witness the inspection correctly reported it
+  `refresh-required`. The fixture now writes the thin manifest too, which is
+  what `apply_conversion` does (`thin.thin_manifest_content`). The test that
+  was failing is the acceptance test for the whole step, so the fixture was
+  the thing that was wrong.
+- `test_ordinary_install_refuses_to_de_thin_a_consumer` (inspection) and
+  `test_ordinary_install_then_refuses_the_converted_consumer` (CLI) both
+  asserted R19-C1's *refusal*. Step 9b replaced it with a refresh on purpose:
+  a consumer a fleet sweep cannot refresh is a consumer that cannot receive a
+  security fix. Both now assert the property that never changed — the refresh
+  must not de-thin — and the CLI row keeps a reader that still refuses
+  outright (`--remove`, which has no thin form) so the pin is still proved to
+  be read by a command that rejects.
+
+Coverage closed the last two gaps in `install.py` with tests rather than
+`# pragma`: a revert over a consumer that deleted its own `settings.json`
+(the plan's `none` action — revert says so and does not write the file back),
+and a refresh against a pin the partition cannot classify. The second is the
+backstop behind `_thin_refresh_rejection`, and it matters more than its line
+count suggests: the fallback for an untrusted pin is the *full* payload, which
+would reinstall every deleted machine surface while the registry still read
+`thin`. Its assertion pins the backstop's exact wording — both messages share
+"cannot be read against the surface partition", so the shared fragment alone
+would pass while the path was never reached.

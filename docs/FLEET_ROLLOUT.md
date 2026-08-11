@@ -240,15 +240,21 @@ Operator ergonomics, none of which mutate a repository:
 
 ## Refresh Shape
 
-For each `refresh-needed` repo:
+For each `refresh-needed` or `residual-damaged` repo (the second is a converted
+consumer that is already at the target version but has lost a recorded target;
+the refresh reinstalls its residual):
 
 1. Record the exact default-branch commit, then create a PR-only branch in that
    consumer repo. During checkout validation, create or activate one dedicated
    Trellis task with substantive release, ownership, validation, and completion
    criteria before installing. Stop when an unrelated active task or dirty
    Trellis state makes ownership ambiguous.
-2. Run the printed `python3 install.py <repo> --force --platform ...` command
-   from this pack checkout.
+2. Run the printed `python3 install.py <repo> --force [--platform ...]` command
+   from this pack checkout, exactly as printed. A converted consumer's command
+   carries no `--platform`: its platform set is owned by its thin pin, and a
+   thin-aware refresh rejects the flag rather than re-deriving the residual
+   from the registry's list. Changing a converted consumer's platform set is a
+   `--revert-thin` plus a reviewed reconversion, never a fleet sweep.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
    <repo> --expected-platform ...` command. This audit vouches pack-owned
    receipt targets only — the files recorded in `installed-targets.txt` and

@@ -37,7 +37,20 @@ GIT_TIMEOUT_SECONDS = 60
 # live between "version" and "files" in the emitted JSON, and the ordering is
 # load-bearing -- the inspection dry-run regenerates this file and compares it
 # byte-for-byte, so writer and regenerator must agree on key order.
-PIN_KEYS = ("mode", "platforms", "consumer", "settingsAdditions", "forced")
+# Every key only a thin conversion writes. Two roles, and they have to stay
+# one list: a thin-aware refresh carries these forward unchanged (updating
+# only `version`), and `thin_pin_state` treats any survivor on an otherwise
+# fat receipt as evidence the receipt was edited. A key missing here is
+# silently dropped by the first refresh -- which is what would have happened
+# to `retired`, and with it revert's record of what it cannot restore.
+PIN_KEYS = (
+    "mode",
+    "platforms",
+    "consumer",
+    "settingsAdditions",
+    "forced",
+    "retired",
+)
 
 
 def installed_targets_set(

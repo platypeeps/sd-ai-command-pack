@@ -402,6 +402,12 @@ class ThinReceipt:
     consumer: str | None
     settings_additions: dict
     forced: tuple[str, ...]
+    # R20-C2. The files the conversion deleted that the pack no longer ships:
+    # they are in the pre-conversion receipt and absent from the manifest, the
+    # source tree, and the templates, and provenance keeps hashes rather than
+    # bytes. A same-version checkout cannot recreate them, so revert names them
+    # instead of silently restoring 178 of 179 paths and reporting success.
+    retired: tuple[str, ...]
 
     @property
     def is_thin(self) -> bool:
@@ -520,6 +526,7 @@ def read_thin_receipt(target: Path) -> ThinReceipt | None:
     platforms = payload.get("platforms")
     additions = payload.get("settingsAdditions")
     forced = payload.get("forced")
+    retired = payload.get("retired")
     return ThinReceipt(
         mode=THIN_MODE,
         version=version if isinstance(version, str) and version.strip() else None,
@@ -534,6 +541,11 @@ def read_thin_receipt(target: Path) -> ThinReceipt | None:
         consumer=consumer if isinstance(consumer, str) and consumer.strip() else None,
         settings_additions=additions if isinstance(additions, dict) else {},
         forced=tuple(forced) if isinstance(forced, list) else (),
+        retired=(
+            tuple(str(entry) for entry in retired)
+            if isinstance(retired, list)
+            else ()
+        ),
     )
 
 

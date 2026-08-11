@@ -150,10 +150,24 @@ class WriteOrderTests(ConversionFixture):
         provenance = json.loads(
             (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
         )
+        # The two provenance flags are part of the record, not decoration:
+        # "remove what we added" is ambiguous at the container boundary, and
+        # `tests/test_thin_revert.py` is where dropping them showed up as an
+        # empty `extraKnownMarketplaces` surviving every revert.
         self.assertEqual(
             sorted(provenance["settingsAdditions"]),
+            [
+                "createdContainers",
+                "createdFile",
+                "enabledPlugins",
+                "extraKnownMarketplaces",
+            ],
+        )
+        self.assertEqual(
+            sorted(provenance["settingsAdditions"]["createdContainers"]),
             ["enabledPlugins", "extraKnownMarketplaces"],
         )
+        self.assertIs(provenance["settingsAdditions"]["createdFile"], True)
 
     def test_a_second_conversion_of_the_same_tree_adds_no_settings_twice(self) -> None:
         # The idempotent row: re-running after an interruption must not record
@@ -171,7 +185,10 @@ class WriteOrderTests(ConversionFixture):
         provenance = json.loads(
             (root / install.PROVENANCE_FILE).read_text(encoding="utf-8")
         )
-        self.assertEqual(provenance["settingsAdditions"], {})
+        self.assertEqual(
+            provenance["settingsAdditions"],
+            {"createdContainers": [], "createdFile": False},
+        )
 
 
 class InterruptionTests(ConversionFixture):
@@ -267,6 +284,104 @@ class DriftPreflightTests(ConversionFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetentionFixtureTests(ConversionFixture):
+    """`retainVendoredFor` across the whole shared platform, not one row of it.
+
+    The disposition is declared per *platform* -- `shared` retains for `codex`
+    and `pi` -- so a fixture that checks one `.agents/` file proves nothing
+    about `scripts/`, and a retention bug that spared one directory and not
+    the other would pass it. This asserts the whole platform and requires
+    both directories to be represented.
+
+    **No live consumer exercises this path.** The fleet registry declares no
+    `codex` or `pi` consumer today, so this coverage is synthetic and must not
+    be reported as fleet-proven.
+    """
+
+    VENDOR_PLATFORMS = frozenset({"claude", "codex"})
+
+    def shared_machine_rows(self, root: Path) -> frozenset[str]:
+        partition = conversion.load_partition(
+            _support.PACK_ROOT / install.SURFACE_PARTITION_FILE
+        )
+        installed = conversion.read_installed_targets_receipt(root).entries
+        return frozenset(
+            target
+            for target in installed
+            if (row := partition.row(target)) is not None
+            and row.platform == "shared"
+            and row.category in conversion.MACHINE_CATEGORIES
+        )
+
+    def plan_with_codex(self, root: Path):
+        receipt = conversion.read_installed_targets_receipt(root)
+        partition = conversion.load_partition(
+            _support.PACK_ROOT / install.SURFACE_PARTITION_FILE
+        )
+        return conversion.build_conversion_plan(
+            receipt,
+            partition,
+            self.VENDOR_PLATFORMS,
+            occupied=conversion.occupied_receipt_targets(root, receipt),
+        )
+
+    def test_every_shared_machine_row_is_kept_for_a_codex_consumer(self) -> None:
+        root = self.installed_consumer()
+        retained = self.shared_machine_rows(root)
+        self.assertTrue(retained, "the fixture installed no shared machine rows")
+        # Both halves of the platform must be represented, or the assertion
+        # below is satisfied by a partition that only ever ships one of them.
+        self.assertTrue(any(entry.startswith(".agents/") for entry in retained))
+        self.assertTrue(any(entry.startswith("scripts/") for entry in retained))
+
+        plan = self.plan_with_codex(root)
+        self.assertEqual(retained - frozenset(plan.keep), frozenset())
+        self.assertEqual(retained & frozenset(plan.delete), frozenset())
+
+    def test_the_same_rows_are_deleted_without_the_vendor_platform(self) -> None:
+        # The other direction, and the one that makes the test above mean
+        # something: retention that kept these rows for every consumer would
+        # satisfy it while converting nothing.
+        root = self.installed_consumer()
+        retained = self.shared_machine_rows(root)
+        _, plan = self.plan_for(root)
+        self.assertEqual(retained - frozenset(plan.delete), frozenset())
+
+    def test_a_real_conversion_leaves_them_on_disk(self) -> None:
+        # The plan and the write agreeing: a `keep` bucket the writer ignores
+        # is a plan that describes a conversion nobody performed.
+        root = self.installed_consumer()
+        retained = self.shared_machine_rows(root)
+        manifest_data, files = install.load_manifest()
+        plan = self.plan_with_codex(root)
+        settings, _ = thin.plan_settings_merge(
+            root / thin.CLAUDE_SETTINGS_FILE, "sd-ai-command-pack", "sd"
+        )
+        provenance_files = install.read_existing_provenance_files(root)
+        thin.apply_conversion(
+            _support.PACK_ROOT,
+            root,
+            plan=plan,
+            settings=settings,
+            manifest_data=manifest_data,
+            residual=frozenset(plan.keep) | frozenset(plan.receipts),
+            existing_files=provenance_files,
+            platforms=tuple(sorted(self.VENDOR_PLATFORMS)),
+            consumer=None,
+            forced=(),
+            files_by_target={file.target.as_posix(): file for file in files},
+            provenance_files=provenance_files,
+            force=False,
+            backup=False,
+        )
+        for entry in sorted(retained):
+            self.assertTrue((root / entry).is_file(), f"{entry} was deleted")
+        residual = (root / install.INSTALLED_TARGETS_FILE).read_text(
+            encoding="utf-8"
+        ).split()
+        self.assertEqual(retained - frozenset(residual), frozenset())
 
 
 class RegistryFlipTests(InstallTestCase):

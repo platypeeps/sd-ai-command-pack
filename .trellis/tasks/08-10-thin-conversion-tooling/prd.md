@@ -88,11 +88,22 @@ would be a hand-edited deletion of 166 files with no reversal path.
    `docs/fleet/surface-partition.json`, delete the `machine-claude` and
    `machine-other` entries, keep `repo-native`, `consumer-config`, and
    `retainVendoredFor` matches. Never from a list stored in this task or
-   in code, and never from the current partition alone. Measured across
-   all 8 consumers: each receipt holds 210 entries, 17 of which no
-   current partition row classifies. Conversion therefore also runs
+   in code, and never from the current partition alone. Two measurements,
+   and only the second is the expected result of a conversion (R20-C4).
+   Against the *stale* receipts as first surveyed, each of the 8
+   consumers held 210 entries, 17 of which no current partition row
+   classifies. R19-C2 now requires a current install before conversion,
+   and a fresh 0.66.1 install measures **198** entries with **0**
+   unclassified: the install retires stale targets before rewriting the
+   receipt (`install.py:903`), so the refresh drops the 13 retired rows
+   and adds the pack-update target. Conversion still runs
    `installer/removal.py:256` `retire_stale_targets` (covering 13 of the
-   17 through `RETIRED_TARGETS`) and handles two named special cases.
+   17 through `RETIRED_TARGETS`) and still handles two named special
+   cases: the preflight makes the retire bucket empty on the fleet, it
+   does not make it unreachable, and a consumer converted from a receipt
+   the preflight did not refresh is exactly the case it must survive.
+   210/17 therefore remains a fixture shape to seed deliberately, never
+   the number to expect from a converted consumer.
 
    **The three `.sd-ai-command-pack/` bookkeeping files are all kept and
    rewritten**, not replaced by a single pin. `install.py --status/--check`
@@ -300,6 +311,36 @@ would be a hand-edited deletion of 166 files with no reversal path.
       `forced` list and reported as restored-to-source. The drifted bytes
       no longer exist anywhere, so byte-identical restoration is scoped
       to the unforced case rather than promised unconditionally.
+- [ ] **Revert restores what the pack can still produce, and names what
+      it cannot (R20-C2).** A *retired* file — one the pre-conversion
+      receipt listed and the manifest no longer ships — has no surviving
+      bytes anywhere: it is absent from the manifest, the source tree,
+      and the templates, and provenance keeps hashes rather than bytes.
+      A same-version checkout cannot recreate it, so the conversion
+      records every retired path in the thin receipt and revert reports
+      each one as **not restored**, naming it, rather than exiting zero
+      over the gap. Byte-identical restoration is therefore promised for
+      the payload the pinned version ships, not for every path the
+      pre-conversion receipt happened to list. The 13 retired rows the
+      live fleet still carries are the concrete case; R20-C4 measured a
+      freshly refreshed consumer at **0** retired rows, so a conversion
+      that passes the currency preflight is expected to record an empty
+      list — the list exists so that expectation is asserted rather than
+      assumed.
+- [ ] **A converted consumer stays reachable by the fleet, and a damaged
+      one is routed to repair (R20-C6).** An ordinary
+      `install.py TARGET` — the command `sd-fleet-refresh` runs — refreshes
+      a thin consumer to the new version without re-creating the machine
+      payload, reinstalling the `.gitignore` block, or dropping any pin
+      key; a fat consumer's refresh is proved byte-identical with no pin
+      key added. `sd-ai-command-pack-fleet-preflight.py` no longer skips a
+      thin consumer on version equality alone: every path recorded in
+      `installed-targets.txt` must still exist, or the row is
+      `residual-damaged`. Asserted by running the *printed* repair command
+      through the installer's own argument handling, not by reading it: a
+      command carrying `--platform` is rejected by a thin-aware refresh, so
+      before this criterion every converted consumer's printed repair
+      command was guaranteed to exit 2.
 - [ ] Failure injection on both roots, in **both directions**: a
       read-only pack checkout and, separately, a read-only target each
       make `--thin` *and* `--revert-thin` refuse before any write, exit

@@ -30,6 +30,12 @@ DEFAULT_FLEET_MANIFEST = ROOT / "docs/fleet/consumers.json"
 DEFAULT_PACK_MANIFEST = ROOT / "manifest.json"
 DEFAULT_CANDIDATE_LEDGER = ROOT / "docs/fleet/candidate-validation.json"
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
+INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
+THIN_MODE = "thin"
+# How many missing paths a damaged-residual detail names before it stops. The
+# operator needs enough to recognize what broke, not the whole list; the audit
+# command printed alongside it reports every one.
+RESIDUAL_SAMPLE = 3
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,8 @@ class FleetPreflightResult:
     installed_version: str | None
     target_version: str
     detail: str
+    mode: str | None = None
+    installed_platforms: tuple[str, ...] = ()
 
 
 def pack_version(manifest_path: Path = DEFAULT_PACK_MANIFEST) -> str:
@@ -56,18 +64,77 @@ def load_fleet_consumers(path: Path = DEFAULT_FLEET_MANIFEST) -> list[FleetConsu
         raise SystemExit(f"error: {error}") from None
 
 
-def read_installed_version(repo_path: Path) -> str | None:
+def read_provenance(repo_path: Path) -> dict:
+    """The consumer's provenance receipt, or an empty mapping.
+
+    Every unreadable shape collapses to `{}`: preflight decides where a
+    consumer is routed, and a receipt it cannot parse must land in
+    `refresh-needed` rather than raise out of a fleet-wide sweep.
+    """
     provenance = repo_path / PROVENANCE_FILE
     try:
         payload = json.loads(
             provenance.read_text(encoding="utf-8", errors="strict")
         )
     except (FileNotFoundError, OSError, UnicodeError, ValueError):
-        return None
-    version = payload.get("version") if isinstance(payload, dict) else None
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def read_installed_version(repo_path: Path) -> str | None:
+    version = read_provenance(repo_path).get("version")
     if isinstance(version, str) and version.strip():
         return version.strip()
     return None
+
+
+def read_installed_mode(repo_path: Path) -> tuple[str | None, tuple[str, ...]]:
+    """The thin pin's mode and platform set, or `(None, ())`.
+
+    Only `mode: "thin"` is recognized; absent, malformed, and unrecognized
+    all report None so a guess never relaxes the fat contract. Mirrors
+    `installed_mode` in the install audit, which is the consumer-side reader
+    of the same two keys.
+    """
+    payload = read_provenance(repo_path)
+    if payload.get("mode") != THIN_MODE:
+        return None, ()
+    platforms = payload.get("platforms")
+    if not isinstance(platforms, list):
+        return THIN_MODE, ()
+    return THIN_MODE, tuple(
+        sorted(entry for entry in platforms if isinstance(entry, str) and entry)
+    )
+
+
+def read_recorded_targets(repo_path: Path) -> tuple[str, ...]:
+    receipt = repo_path / INSTALLED_TARGETS_FILE
+    try:
+        content = receipt.read_text(encoding="utf-8", errors="strict")
+    except (FileNotFoundError, OSError, UnicodeError):
+        return ()
+    return tuple(
+        line
+        for line in (raw.strip() for raw in content.splitlines())
+        if line and not line.startswith("#")
+    )
+
+
+def missing_recorded_targets(repo_path: Path) -> tuple[str, ...]:
+    """Recorded targets that are no longer on disk.
+
+    Absolute and parent-escaping entries are skipped rather than stat'ed: a
+    receipt is consumer-side content, and preflight walks a whole fleet, so
+    it must never follow one out of the checkout it was handed.
+    """
+    missing: list[str] = []
+    for entry in read_recorded_targets(repo_path):
+        candidate = Path(entry)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            continue
+        if not (repo_path / candidate).exists():
+            missing.append(entry)
+    return tuple(missing)
 
 
 def consumer_repo_path(consumer: FleetConsumer) -> Path:
@@ -91,14 +158,44 @@ def preflight_consumer(
         )
 
     installed_version = read_installed_version(repo_path)
+    mode, installed_platforms = read_installed_mode(repo_path)
     if installed_version == target_version:
+        # R20-C6. Version equality is the fat contract's evidence of health,
+        # and it does not carry over to a thin consumer. On a fat checkout a
+        # deleted surface is visible to the audit's manifest-derived
+        # completeness check, which a thin install deliberately skips -- for a
+        # converted consumer the receipt *is* the allowlist, so a residual
+        # file that went missing looks exactly like a machine surface the
+        # conversion was supposed to remove. Nothing else in the sweep can
+        # tell those apart, so skipping on version alone here is what would
+        # leave a damaged thin consumer unrepaired indefinitely.
+        damaged = missing_recorded_targets(repo_path) if mode == THIN_MODE else ()
+        if not damaged:
+            return FleetPreflightResult(
+                consumer=consumer,
+                repo_path=repo_path,
+                status="at-target",
+                installed_version=installed_version,
+                target_version=target_version,
+                detail="skip; already at target version",
+                mode=mode,
+                installed_platforms=installed_platforms,
+            )
+        sample = ", ".join(damaged[:RESIDUAL_SAMPLE])
+        if len(damaged) > RESIDUAL_SAMPLE:
+            sample += f", +{len(damaged) - RESIDUAL_SAMPLE} more"
         return FleetPreflightResult(
             consumer=consumer,
             repo_path=repo_path,
-            status="at-target",
+            status="residual-damaged",
             installed_version=installed_version,
             target_version=target_version,
-            detail="skip; already at target version",
+            detail=(
+                f"repair needed; at target but {len(damaged)} recorded "
+                f"target(s) are missing: {sample}"
+            ),
+            mode=mode,
+            installed_platforms=installed_platforms,
         )
     if installed_version is None:
         detail = "refresh needed; provenance missing or unreadable"
@@ -111,6 +208,8 @@ def preflight_consumer(
         installed_version=installed_version,
         target_version=target_version,
         detail=detail,
+        mode=mode,
+        installed_platforms=installed_platforms,
     )
 
 
@@ -128,8 +227,14 @@ def audit_command(result: FleetPreflightResult) -> str:
 
 def install_command(result: FleetPreflightResult) -> str:
     command = ["python3", "install.py", str(result.repo_path), "--force"]
-    for platform in result.consumer.platforms:
-        command.extend(["--platform", platform])
+    # A thin consumer's platform set is owned by its pin, and a thin-aware
+    # refresh rejects `--platform` outright rather than re-deriving the
+    # residual from a set the registry happens to carry. Emitting the
+    # registry's platforms here would print a repair command that exits 2
+    # every time -- the printed command has to be the one that works.
+    if result.mode != THIN_MODE:
+        for platform in result.consumer.platforms:
+            command.extend(["--platform", platform])
     return " ".join(shlex.quote(part) for part in command)
 
 
@@ -249,6 +354,8 @@ def main() -> int:
                                 for command in result.consumer.candidate_checks
                             ],
                             "status": result.status,
+                            "mode": result.mode,
+                            "installedPlatforms": list(result.installed_platforms),
                             "installedVersion": result.installed_version,
                             "targetVersion": result.target_version,
                             "detail": result.detail,
@@ -268,11 +375,16 @@ def main() -> int:
         print(f"sd-ai-command-pack fleet target: {target_version}")
         for result in results:
             installed = result.installed_version or "unknown"
+            # The pinned platform set, when there is one: for a thin consumer
+            # the registry's list is what it was converted *from*, and a row
+            # that prints it reads as though those surfaces are installed.
+            platforms = result.installed_platforms or result.consumer.platforms
+            mode = f"; mode: {result.mode}" if result.mode else ""
             print(
                 f"{result.status:19} P{result.consumer.rollout_priority:02d} "
                 f"{result.consumer.github} "
-                f"(installed: {installed}; platforms: "
-                f"{', '.join(result.consumer.platforms)})"
+                f"(installed: {installed}{mode}; platforms: "
+                f"{', '.join(platforms)})"
             )
             print(f"  {result.detail}")
             if result.status != "at-target" and result.repo_path.is_dir():

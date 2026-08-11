@@ -37,6 +37,11 @@ from installer.status import RemoveStatus
 # is what keeps the binding about the tree rather than about the spelling.
 BINDING_EXEMPT_FIELDS = frozenset({"repo"})
 
+# The pack's own fleet registry. Read by revert to resolve a consumer name and
+# written by both directions to record the mode; declared once so the reader
+# and the writer cannot drift onto two paths.
+FLEET_REGISTRY_FILE = Path("docs/fleet/consumers.json")
+
 # The consumer-owned settings file the conversion merges into. Zero
 # partition rows: the pack has never owned a byte of it.
 CLAUDE_SETTINGS_FILE = Path(".claude/settings.json")
@@ -225,6 +230,24 @@ class SettingsPlan:
     def writes_anything(self) -> bool:
         return bool(self.additions) or self.created_file
 
+    @property
+    def record(self) -> dict:
+        """`settingsAdditions` as the receipt carries it -- the shape revert reads.
+
+        The added pairs alone are not enough, and the revert tests are what
+        found it: "remove what we added" is ambiguous at the container
+        boundary. A consumer who already had an `enabledPlugins` object with
+        three other plugins must keep it; one whose `enabledPlugins` we created
+        must not be left holding `{}`. Recording the pairs and dropping the two
+        provenance flags left revert unable to tell those apart, so it left an
+        empty container behind on every conversion that created one.
+        """
+        return {
+            **self.additions,
+            "createdContainers": list(self.created_containers),
+            "createdFile": self.created_file,
+        }
+
 
 def plan_settings_merge(
     settings_path: Path,
@@ -399,6 +422,7 @@ def thin_provenance_content(
     consumer: str | None,
     additions: dict,
     forced: tuple[str, ...],
+    retired: tuple[str, ...],
 ) -> str:
     payload: dict = {
         "pack": manifest["name"],
@@ -410,6 +434,10 @@ def thin_provenance_content(
         payload["consumer"] = consumer
     payload["settingsAdditions"] = additions
     payload["forced"] = list(forced)
+    # R20-C2: written even when empty, because an absent key and an empty list
+    # are the same to a reader that defaults, and revert's promise depends on
+    # telling "nothing was unrestorable" from "this receipt predates the field".
+    payload["retired"] = list(retired)
     payload["files"] = dict(sorted(files.items()))
     return json.dumps(payload, indent=2) + "\n"
 
@@ -626,6 +654,24 @@ class ConversionWrite:
     detail: str
 
 
+class PartialConversion(Exception):
+    """The second root failed after the first one was written.
+
+    Both roots are probed for writability before either is touched, so
+    reaching here means something changed underneath a validated plan -- a
+    mount going read-only, a concurrent edit, a full disk. There is no
+    rollback and inventing one would be worse than the skew: the consumer is
+    converted and the registry still says otherwise, which is exactly the
+    pin-vs-mode skew `sd-status fleet` already reports. So the command says
+    which half landed, names the one-line fix, and exits nonzero.
+    """
+
+    def __init__(self, written: tuple[ConversionWrite, ...], detail: str):
+        super().__init__(detail)
+        self.written = written
+        self.detail = detail
+
+
 def apply_conversion(
     root: Path,
     target: Path,
@@ -692,8 +738,9 @@ def apply_conversion(
             files=residual_provenance_files(existing_files, residual),
             platforms=platforms,
             consumer=consumer,
-            additions=settings.additions,
+            additions=settings.record,
             forced=forced,
+            retired=tuple(plan.retire),
         ),
         encoding="utf-8",
     )
@@ -735,7 +782,10 @@ def apply_conversion(
     written.append(ConversionWrite("removal-inventory-cleared", str(inventory)))
 
     if consumer is not None:
-        flip_registry_mode(root, consumer)
+        try:
+            flip_registry_mode(root, consumer)
+        except OSError as error:
+            raise PartialConversion(tuple(written), str(error)) from None
         written.append(ConversionWrite("registry", f"{consumer} -> thin"))
     return written
 
@@ -748,7 +798,7 @@ def flip_registry_mode(root: Path, consumer: str, mode: str = "thin") -> None:
     as "consumer converted, registry did not", which is the pin-vs-mode skew
     the parent design already accepts and `sd-status fleet` already reports.
     """
-    path = root / "docs/fleet/consumers.json"
+    path = root / FLEET_REGISTRY_FILE
     payload = json.loads(path.read_text(encoding="utf-8"))
     for entry in payload.get("consumers", ()):
         if entry.get("name") == consumer:
@@ -759,12 +809,233 @@ def flip_registry_mode(root: Path, consumer: str, mode: str = "thin") -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def read_registry(root: Path) -> dict:
+    """The pack's own fleet registry, keyed by consumer name."""
+    payload = json.loads(
+        (root / FLEET_REGISTRY_FILE).read_text(encoding="utf-8")
+    )
+    return {str(entry["name"]): entry for entry in payload.get("consumers", ())}
+
+
+def revert_consumer_identity(
+    root: Path,
+    target: Path,
+    *,
+    receipt_consumer: str | None,
+    flag_consumer: str | None,
+) -> tuple[str | None, str | None]:
+    """Which registry row this revert flips, or why it will not guess.
+
+    `--revert-thin` receives only `TARGET`, and it must flip exactly one row.
+    Inferring the name from `pathHint` fails for a disposable checkout, a
+    worktree, or an alternate clone, and picking the wrong row mislabels two
+    consumers at once -- the converted one stays `thin` forever and an
+    untouched one is announced as fat-again. So the receipt carries the name,
+    `--consumer` overrides it, and every disagreement refuses.
+
+    The path lookup is a cross-check and never a source: a checkout at no
+    known `pathHint` still reverts on the receipt's name, and a checkout whose
+    `pathHint` names a *different* consumer refuses rather than choosing which
+    of the two evidences to believe.
+    """
+    if (
+        receipt_consumer is not None
+        and flag_consumer is not None
+        and receipt_consumer != flag_consumer
+    ):
+        return None, (
+            f"--consumer names {flag_consumer} and the thin receipt records "
+            f"{receipt_consumer}; revert will not choose between them"
+        )
+    name = flag_consumer or receipt_consumer
+    if name is None:
+        return None, (
+            "the thin receipt records no consumer name, so the registry row to "
+            "flip back to fat is unknown; pass --consumer NAME"
+        )
+    try:
+        entries = read_registry(root)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return None, f"the fleet registry cannot be read: {error}"
+    if name not in entries:
+        known = ", ".join(sorted(entries)) or "none"
+        return None, (
+            f"{name} is not a registered consumer; known consumers: {known}"
+        )
+    for other, entry in sorted(entries.items()):
+        hint = entry.get("pathHint")
+        if other == name or not isinstance(hint, str):
+            continue
+        if Path(hint).expanduser().resolve() == target:
+            return None, (
+                f"{target} is registered as {other}, and this revert was told "
+                f"{name}; revert will not choose between them"
+            )
+    return name, None
+
+
+def revert_version_reason(
+    pin_version: str | None, source_version: str
+) -> str | None:
+    """Why this checkout cannot reproduce the payload this pin recorded.
+
+    `install.py` installs from the *current* checkout's manifest, so a newer
+    pack cannot reconstruct an older payload's bytes from a pin that carries
+    only a version string. Restoring the newer bytes would be a fat re-install
+    at a different version -- a legitimate thing to want, and not what "restore
+    to the pre-conversion state" promises.
+    """
+    if pin_version is None:
+        return (
+            "this consumer's thin pin records no version, so the payload it "
+            "was converted from cannot be identified"
+        )
+    if pin_version != source_version:
+        return (
+            f"this consumer was converted from {pin_version} and this checkout "
+            f"is {source_version}; byte-identical restoration is version-bound. "
+            f"Check out {pin_version} and re-run, or re-install at "
+            f"{source_version} instead of reverting"
+        )
+    return None
+
+
+@dataclass(frozen=True)
+class SettingsRevert:
+    """What revert does to `settings.json`, decided before it does any of it."""
+
+    path: Path
+    action: str  # "write", "delete", or "none"
+    merged: dict
+    notes: tuple[str, ...] = ()
+
+
+def plan_settings_revert(
+    path: Path, additions: dict, *, plugin_key: str
+) -> tuple[SettingsRevert | None, str | None]:
+    """Undo exactly what the conversion recorded, and nothing else.
+
+    Two rules from `design.md` collide here and ownership wins (R19-C5). §4
+    says revert leaves a recorded value that has since been edited; §5 says
+    revert writes the `enabledPlugins` disable marker. For a key that was
+    already `true` before the conversion, or edited after it, both cannot
+    happen -- so the marker is only ever written over a value this conversion
+    wrote and still owns.
+
+    Where the marker is *not* written, revert says so, because a fat consumer
+    running the plugin as well is a real double-surface state and an operator
+    has to know. What revert must never do is disable a plugin somebody else
+    enabled: that is a decision about their tooling, made by a command they ran
+    to undo ours.
+    """
+    if path.is_symlink():
+        return None, (
+            f"{path} is a symlink; the pack edits regular files only, and "
+            "following it would write outside the target"
+        )
+    if not path.exists():
+        # Not an error. The consumer may have deleted the file, and there is
+        # then nothing of ours left in it to remove.
+        return (
+            SettingsRevert(
+                path,
+                "none",
+                {},
+                (f"{path.name} is absent; no recorded settings were removed",),
+            ),
+            None,
+        )
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return None, f"{path} cannot be read as JSON ({error})"
+    if not isinstance(document, dict):
+        return None, f"{path} is not a JSON object; there is nothing to undo in it"
+
+    before = json.dumps(document, sort_keys=True)
+    notes: list[str] = []
+    marker_written = False
+    plugin_recorded = False
+    for container_key in (MARKETPLACE_KEY, PLUGINS_KEY):
+        recorded = additions.get(container_key)
+        if not isinstance(recorded, dict) or not recorded:
+            continue
+        container = document.get(container_key)
+        if not isinstance(container, dict):
+            notes.append(
+                f"{container_key} is no longer an object; its recorded entries "
+                "were left in place"
+            )
+            continue
+        for name, value in sorted(recorded.items()):
+            is_marker_key = container_key == PLUGINS_KEY and name == plugin_key
+            plugin_recorded = plugin_recorded or is_marker_key
+            if name not in container:
+                notes.append(f"{container_key}.{name} was already absent")
+                continue
+            if container[name] != value:
+                notes.append(
+                    f"{container_key}.{name} was edited after the conversion "
+                    "and was left as it is"
+                )
+                continue
+            if is_marker_key:
+                container[name] = False
+                marker_written = True
+            else:
+                del container[name]
+
+    created = additions.get("createdContainers")
+    for container_key in created if isinstance(created, list) else ():
+        container = document.get(container_key)
+        if isinstance(container, dict) and not container:
+            del document[container_key]
+
+    plugins = document.get(PLUGINS_KEY)
+    if (
+        not marker_written
+        and isinstance(plugins, dict)
+        and plugins.get(plugin_key) is not False
+        and plugin_key in plugins
+        and not plugin_recorded
+    ):
+        notes.append(
+            f"{plugin_key} remains enabled by a setting this pack did not add; "
+            "this consumer now runs both the plugin and the installed files"
+        )
+
+    if additions.get("createdFile") is True and not document:
+        return SettingsRevert(path, "delete", {}, tuple(notes)), None
+    if json.dumps(document, sort_keys=True) == before:
+        return SettingsRevert(path, "none", document, tuple(notes)), None
+    return SettingsRevert(path, "write", document, tuple(notes)), None
+
+
+def apply_settings_revert(plan: SettingsRevert) -> str | None:
+    """Execute a planned settings revert; returns what it did, or None."""
+    if plan.action == "write":
+        plan.path.write_text(render_settings(plan.merged), encoding="utf-8")
+        return f"rewrote {plan.path}"
+    if plan.action == "delete":
+        plan.path.unlink()
+        return f"removed {plan.path}"
+    return None
+
+
 __all__ = [
     "BLOCK_MARKERS",
     "CLAUDE_SETTINGS_FILE",
     "ConversionWrite",
+    "FLEET_REGISTRY_FILE",
+    "PartialConversion",
+    "SettingsRevert",
     "apply_conversion",
+    "apply_settings_revert",
     "flip_registry_mode",
+    "plan_settings_revert",
+    "read_registry",
+    "revert_consumer_identity",
+    "revert_version_reason",
     "REMOVAL_INVENTORY_FILE",
     "REMOVAL_INVENTORY_KIND",
     "BINDING_EXEMPT_FIELDS",

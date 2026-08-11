@@ -953,6 +953,127 @@ Reference file:
    Correct: reserve exit 3 for valid operator action and exit 1 for invalid state
    ```
 
+## Thin Install Conversion Contract
+
+1. **Scope / Trigger**: Use this contract when changing conversion to or from
+   a thin install, the thin pin, the residual payload, thin-aware refresh, or
+   how any fleet reader routes a converted consumer. A thin install is a
+   consumer whose machine-provided surfaces were deleted because a machine-
+   scope plugin serves them; the pack keeps the repo-native, consumer-config,
+   and vendored-retained surfaces plus its three bookkeeping files.
+2. **Signatures**:
+   - `python3 install.py TARGET --thin --resweep-verdict PATH --consumer NAME
+     [--dry-run]`
+   - `python3 install.py TARGET --revert-thin [--dry-run]`
+   - `python3 install.py TARGET` against a thin consumer — the thin-aware
+     refresh, which is what `sd-fleet-refresh` runs.
+   - `installer/conversion.py` owns classification and receipt reading;
+     `installer/thin.py` owns the settings merge, the write phase, and the
+     registry flip. Neither module ships to `plugins/sd/`.
+3. **Contracts**:
+   - **The delete set is derived, never listed.** Start from the consumer's
+     installed-targets receipt, classify each entry through
+     `docs/fleet/surface-partition.json`, and delete only the
+     `machine-claude` / `machine-other` rows. Never from a list stored in code
+     or in a task, and never from the partition alone — the partition says
+     what the pack ships, the receipt says what this consumer has.
+   - **The verdict binds two things.** A resweep verdict is accepted only when
+     it names this consumer *and* carries the current `classifierDigest` over
+     the partition, the registry entry, `RETIRED_TARGETS`,
+     `MANAGED_BLOCK_REMOVAL_TARGETS`, both plugin manifests, and pack HEAD.
+     Binding the consumer alone lets a verdict outlive the rules that produced
+     it.
+   - **All three `.sd-ai-command-pack/` bookkeeping files survive and are
+     rewritten** to the residual payload. Inspection treats the footprint as
+     incomplete unless all three are occupied, and the audit requires a
+     non-empty provenance `files` map, so replacing them with a single pin
+     makes every converted consumer read as damaged.
+   - **Two thin witnesses, ordered.** The installed `manifest.json` carries
+     `mode: "thin"` and `thin_pin_state` reads it *first*; provenance is the
+     fallback. Conversion writes the manifest before provenance, and revert
+     relies on the same order, so an interruption anywhere in the write phase
+     leaves a consumer that reads thin and re-runs cleanly.
+   - **`PIN_KEYS` is one list with two roles** (`installer/provenance.py`): a
+     thin-aware refresh carries every key forward unchanged (updating only
+     `version`), and `thin_pin_state` treats any survivor on an otherwise fat
+     receipt as evidence of a hand edit. A key missing from it is silently
+     dropped by the first refresh.
+   - **`retired` is written even when empty.** An absent key and an empty list
+     are the same to a reader that defaults, and revert's promise depends on
+     telling "nothing was unrestorable" from "this receipt predates the field".
+   - **The revert guarantee is narrowed, not absolute.** Revert restores the
+     payload the pinned version ships and *names* what it cannot: a file the
+     conversion deleted that the pack no longer ships is reported
+     `not-restored`, because provenance keeps hashes rather than bytes.
+   - **A thin consumer's platform set is owned by its pin**, in both
+     directions. Revert passes the pinned set explicitly rather than
+     re-detecting (detection answers "what is active now"; revert asks "what
+     was taken away"), and the refresh rejects `--platform` / `--all` rather
+     than re-deriving the residual.
+   - **Fleet preflight routes on the receipt, not on the version alone.** For
+     a thin consumer at the target version, every path in
+     `installed-targets.txt` must still exist; otherwise the status is
+     `residual-damaged`. The install audit skips its manifest-derived
+     completeness check for a thin install, so preflight is the only place a
+     missing residual file is distinguishable from a deliberately removed
+     machine surface. Its printed repair command omits `--platform`.
+4. **Validation & Error Matrix**:
+   - Any drifted or unvouched file in the delete set -> refuse before any
+     write. Unlike `--remove`, conversion fails closed at preflight: a partial
+     conversion is a consumer that is neither fat nor thin.
+   - Verdict missing, stale, or bound to another consumer/classifier -> exit 2.
+   - `--thin` on an already-thin consumer, or `--revert-thin` on a fat one ->
+     exit 2 naming the pin state.
+   - A malformed pin (`PIN_STATE_MALFORMED`) -> refuse in *both* directions and
+     route to `install.py TARGET --check` for the diagnosis.
+   - `--remove` against a thin consumer -> refuse; it has no thin form, and
+     running it leaves a live plugin, no receipts, and a registry saying thin.
+   - Registry write fails after the payload landed -> report which half landed
+     and exit nonzero. Never claim a clean run, and never advertise a recovery
+     command the current pin state would reject.
+   - Unwritable pack checkout or consumer root -> refuse before the target is
+     touched (revert restores from the pack, so both roots matter).
+5. **Good / Base / Bad Cases**:
+   - Good: convert, then revert, and the tree is byte-identical to the
+     pre-conversion tree except for paths named in `retired`.
+   - Base: a thin consumer a version behind refreshes to the new version with
+     the machine payload still absent, the `.gitignore` block still stripped,
+     and every pin key carried forward.
+   - Bad: a refresh silently re-creates the machine payload (de-thinning the
+     consumer while the registry still says thin), revert re-detects platforms
+     and restores a payload the pre-conversion tree never had, or a dry run
+     announces only the deletions.
+6. **Tests Required**: A convert/revert round trip asserting the whole tree,
+   not selected paths — every narrower assertion has a version that passes
+   while the payload comes back subtly wrong. Settings ownership (only the
+   conversion's own additions are removed, including an empty container it
+   created). Restore-path collisions. Consumer-identity disagreement between
+   flag, receipt, and registry. Version mismatch. Partial-completion
+   reporting. Dry-run parity: the announced set must equal the executed set in
+   all six categories. Refresh rejections for `--platform`, `--all`,
+   `--local-only`, and `--remove`. A fat consumer's refresh proven
+   byte-identical with no pin key added — the thin branch sits inside the one
+   code path every consumer in the fleet runs. `install.py` and `installer/*`
+   stay at 100 percent line and branch coverage.
+7. **Wrong vs Correct**:
+
+   ```text
+   Wrong: derive the residual from the partition's kept rows
+   Correct: derive it from the pre-conversion receipt minus the plan's removals
+
+   Wrong: record only the settings key/value pairs the conversion added
+   Correct: record the created containers and created-file flags too, or revert
+            cannot tell an adopted container from one it made
+
+   Wrong: refuse an ordinary install against a thin consumer
+   Correct: refresh it — a consumer a fleet sweep cannot refresh is a consumer
+            that cannot receive a security fix
+
+   Wrong: skip a thin consumer in fleet preflight because its version matches
+   Correct: also require every recorded target to still exist; for a thin
+            install the receipt is the allowlist and nothing else sees the gap
+   ```
+
 ## Selection Rules
 
 Use `selected_files()` for platform filtering, anchor checks, and active

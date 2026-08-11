@@ -66,6 +66,10 @@ def thin_payload(**overrides: object) -> dict:
         "consumer": "demo",
         "settingsAdditions": {"hooks": {}},
         "forced": ["AGENTS.md"],
+        # R20-C2: written even when empty. An absent key and an empty list are
+        # the same to a reader that defaults, and revert's report of what it
+        # cannot restore depends on telling those apart.
+        "retired": [],
         "files": {},
     }
     payload.update(overrides)
@@ -132,6 +136,7 @@ class ReadThinReceiptTests(InstallTestCase):
             consumer=None,
             settings_additions={},
             forced=(),
+            retired=(),
         )
         self.assertFalse(receipt.is_thin)
 
@@ -370,6 +375,7 @@ class UnusableThinPinTests(InstallTestCase):
             consumer="demo",
             settings_additions={},
             forced=(),
+            retired=(),
         )
 
     def test_a_classifiable_platform_set_is_usable(self) -> None:
@@ -531,6 +537,7 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
             "consumer": "fixture",
             "settingsAdditions": {},
             "forced": [],
+            "retired": [],
         }
         thin = read_thin_receipt(root) or ThinReceipt(
             mode="thin",
@@ -539,6 +546,7 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
             consumer="fixture",
             settings_additions={},
             forced=(),
+            retired=(),
         )
         residual = residual_source_files(files, root, partition, thin)
         selected, skipped = install.selected_files(residual, root, None, False)
@@ -552,7 +560,11 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
             install_gitignore=False,
         )
         install._install_receipt_files(
-            manifest_data,
+            # The installed manifest carries `mode: "thin"` too: it is the
+            # first witness `thin_pin_state` reads, and a fixture that writes
+            # only the provenance pin is a half-converted consumer that the
+            # inspection correctly reports as needing a refresh.
+            install._receipt_manifest(manifest_data, is_thin=True),
             files,
             root,
             selected=selected,
@@ -613,19 +625,28 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
         # machine surface the conversion deleted.
         self.assertGreater(corrupt["changeCount"], 50, corrupt)
 
-    def test_ordinary_install_refuses_to_de_thin_a_consumer(self) -> None:
-        # R19-C1. A plain refresh exited 0, rewrote provenance without the
-        # pin, and discarded settingsAdditions -- while the plugin stayed
-        # enabled and the registry still read `thin`. This is the routine
-        # command a fleet refresh runs, so it would have de-thinned every
-        # converted consumer at once.
+    def test_ordinary_install_does_not_de_thin_a_consumer(self) -> None:
+        # R19-C1, and the shape it settled into. A plain refresh once exited
+        # 0, rewrote provenance without the pin, and discarded
+        # settingsAdditions -- while the plugin stayed enabled and the
+        # registry still read `thin`. R19-C1's fix was to refuse, which was
+        # fail-closed and never the end state: this is the routine command a
+        # fleet refresh runs, so a consumer it could not refresh was a
+        # consumer that could not receive a security fix. Step 9b made it a
+        # thin-aware refresh. The property under test is the one that never
+        # changed -- the refresh must not de-thin -- not the exit code that
+        # temporarily enforced it. `tests/test_thin_refresh.py` owns the rest.
         root = self.install_fat()
         self.convert(root)
-        before = (root / PROVENANCE_FILE).read_bytes()
+        before = json.loads((root / PROVENANCE_FILE).read_text(encoding="utf-8"))
 
         result = self.run_install_inproc(root)
-        self.assertEqual(result.returncode, 2, result.stdout)
-        self.assertEqual((root / PROVENANCE_FILE).read_bytes(), before)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        after = json.loads((root / PROVENANCE_FILE).read_text(encoding="utf-8"))
+        for key in ("mode", "platforms", "consumer", "settingsAdditions", "forced"):
+            self.assertEqual(after[key], before[key], key)
+        self.assertEqual(after["files"], before["files"])
 
     def test_remove_refuses_on_a_thin_consumer(self) -> None:
         # R18-C2, with the three facts round 18's probe found false:
