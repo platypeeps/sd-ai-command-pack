@@ -18,6 +18,8 @@ if str(SCRIPT_DIR) not in sys.path:
 from sd_ai_command_pack_fleet_lib import (  # noqa: E402
     FleetConfigError,
     PayloadSource,
+    candidate_validator_digest,
+    filesystem_candidate_validator_digest,
     filesystem_payload_digest,
     fleet_manifest_digest,
     load_fleet_consumers,
@@ -250,6 +252,34 @@ def payload_digest_at_commit(
         raise ReleaseIdentityError(f"release payload is invalid: {exc}") from exc
 
 
+def candidate_validator_digest_at_commit(repo: Path, commit_sha: str) -> str:
+    """The validator digest as of `commit_sha`, never the working tree.
+
+    The ledger this pairs with was read from the same commit. Digesting the
+    working tree instead would report an ordinary post-release edit to the
+    validator as tampered release evidence -- a failure that reads as a
+    security event rather than the design error it would actually be.
+    """
+    entries = git_tree_entries(repo, commit_sha)
+
+    def load_source(source: str) -> bytes:
+        try:
+            return payload_source_at_commit(repo, commit_sha, source, entries).content
+        except ReleaseIdentityError as exc:
+            # Reuses the payload loader, so an absent source would otherwise
+            # be reported as a missing *manifest* source -- sending a reader
+            # to look for a manifest row that has never existed for this file.
+            # That absence is the whole reason it is digested separately.
+            raise ReleaseIdentityError(
+                f"candidate validator source is absent at {commit_sha}: {source}"
+            ) from exc
+
+    try:
+        return candidate_validator_digest(load_source)
+    except FleetConfigError as exc:
+        raise ReleaseIdentityError(f"release validator is invalid: {exc}") from exc
+
+
 def verify_candidate_ledger_at_commit(
     repo: Path,
     commit_sha: str,
@@ -280,11 +310,13 @@ def verify_candidate_ledger_at_commit(
             f"fleet manifest {fleet_path}",
         )
         expected_payload = payload_digest_at_commit(repo, commit_sha, manifest)
+        expected_validator = candidate_validator_digest_at_commit(repo, commit_sha)
         errors = validate_candidate_ledger(
             ledger,
             expected_version=version,
             expected_payload_digest=expected_payload,
             expected_fleet_digest=fleet_manifest_digest(fleet_bytes),
+            expected_validator_digest=expected_validator,
             consumers=consumers,
         )
     except FleetConfigError as exc:
@@ -335,6 +367,9 @@ def _current_candidate_errors(
         expected_version=version,
         expected_payload_digest=payload,
         expected_fleet_digest=fleet_manifest_digest(fleet_bytes),
+        expected_validator_digest=filesystem_candidate_validator_digest(
+            manifest_path.resolve().parent
+        ),
         consumers=consumers,
     )
 

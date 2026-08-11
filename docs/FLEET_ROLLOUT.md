@@ -82,8 +82,8 @@ these commands so local cache permissions cannot make a candidate fail.
 
 A full all-pass run atomically updates
 `docs/fleet/candidate-validation.json`. That ledger is bound to the pack
-version, installable payload, fleet manifest, declared preparation and checks,
-and consumer base commits. Release PR/full-check validation and automatic
+version, installable payload, fleet manifest, the candidate validator's own
+sources, declared preparation and checks, and consumer base commits. Release PR/full-check validation and automatic
 tagging reject a missing, stale, partial, or failing ledger. Verify it without
 running consumer commands:
 
@@ -608,6 +608,14 @@ The fleet candidate ledger (`docs/fleet/candidate-validation.json`) carries a
 (`provenance.candidate-stale`, `scripts/sd-ai-command-pack-surface-check.py:553`).
 A shipped-payload change that forgets to regenerate the ledger reds CI. Two
 failure paths, two mitigations:
+
+Since 0.69.0 the ledger also carries a `validatorDigest`, so **editing
+`scripts/sd-ai-command-pack-fleet-candidate-check.py` marks the ledger stale
+too** and needs the same regeneration. That file has no `manifest.json` row, so
+before 0.69.0 it moved no digest at all: the ledger stayed current and
+`make release-prep` skipped fleet validation entirely rather than running the
+edited validator. The staleness is the fix, not a new hazard — but it is a new
+reason to regenerate, and it reaches a file whose edits used to be free.
 
 - **Feature branch (author forgot regen).** The pre-push hook
   (`.githooks/pre-push`) now runs `sd-ai-command-pack-fleet-candidate-check.py

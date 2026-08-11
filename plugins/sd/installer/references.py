@@ -210,6 +210,15 @@ BIN_LITERAL_ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
         "names the generator by its canonical repository path",
         frozenset({"scripts/sd-ai-command-pack-update-spec-kb.py"}),
     ),
+    "sd_ai_command_pack_fleet_lib.py": (
+        "release-evidence layout data: CANDIDATE_VALIDATOR_SOURCES names the "
+        "candidate validator's path in the pack source repository's own tree, "
+        "the one tree a candidate ledger is ever recorded against. It is never "
+        "resolved against this file's location -- the digest takes a "
+        "caller-supplied loader so the same names can be read from a working "
+        "tree or from a git commit's blobs",
+        frozenset({"scripts/sd-ai-command-pack-fleet-candidate-check.py"}),
+    ),
 }
 
 # (payload-relative Markdown path, bare command) -> justification for a

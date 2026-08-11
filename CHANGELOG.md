@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.69.0 - 2026-08-11
+
+- `make release-prep` can now see a changed candidate validator. It skips fleet
+  validation whenever the candidate ledger is current
+  (`prepare-release.py:338`), and currency was decided by the pack version, the
+  payload digest, and the fleet manifest digest — none of which move when
+  `scripts/sd-ai-command-pack-fleet-candidate-check.py` is edited, because that
+  file has no `manifest.json` row and no `templates/` twin. Editing the
+  validator therefore left the ledger current and release-prep returned before
+  ever running the new code.
+
+  The candidate ledger gains a fourth binding, `validatorDigest`, over the
+  validator sources the payload digest cannot see; `CANDIDATE_LEDGER_SCHEMA_VERSION`
+  goes 2 → 3. The digest takes a source loader rather than a root, so the
+  commit-scoped check in `verify_candidate_ledger_at_commit` reads the same
+  commit's blobs as the ledger it validates — pairing a historical ledger with
+  the working tree would report an ordinary post-release edit as tampered
+  release evidence. It fails closed on an unreadable or absent source and never
+  substitutes a default.
+
+  Unlike `payload_digest`, this digest excludes the executable bit. The
+  validator is invoked as `sys.executable <path>`, never as a bare executable,
+  so hashing its permission bit would let `chmod +x` invalidate a ledger whose
+  validator is byte-identical.
+
+  No new finding code: a mismatch surfaces through the existing
+  `provenance.candidate-stale` finding, which `prepare-release.py` already
+  validates the exact shape of. Old ledgers self-migrate in both directions —
+  the schema mismatch alone marks them stale, and a stale ledger is a
+  regeneration, not a failure.
+
 ## 0.68.0 - 2026-08-11
 
 - The planning adversarial review contract no longer ships its Codex lane. The

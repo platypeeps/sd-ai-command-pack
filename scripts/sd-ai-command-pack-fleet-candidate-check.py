@@ -25,6 +25,7 @@ from sd_ai_command_pack_fleet_lib import (  # noqa: E402
     CANDIDATE_LEDGER_SCHEMA_VERSION,
     FleetConfigError,
     FleetConsumer,
+    filesystem_candidate_validator_digest,
     filesystem_payload_digest,
     fleet_manifest_digest,
     load_fleet_consumers,
@@ -323,15 +324,29 @@ def validate_consumer(
 def current_evidence(
     manifest_path: Path,
     fleet_path: Path,
-) -> tuple[str, str, str, list[FleetConsumer]]:
+) -> tuple[str, str, str, str, list[FleetConsumer]]:
+    """The single producer of every expected ledger field.
+
+    Both the ledger writer (`ledger_content`) and the ledger checker
+    (`check_ledger`, which is what the surface check shells out to) read this
+    one tuple. Computing the written field and the checked field in two places
+    is how they drift.
+    """
     manifest = load_json_object(manifest_path, "pack manifest")
     version = manifest_version(manifest)
     payload = filesystem_payload_digest(manifest_path)
+    validator = filesystem_candidate_validator_digest(manifest_path.resolve().parent)
     try:
         fleet_bytes = fleet_path.read_bytes()
     except OSError as error:
         raise FleetConfigError(f"cannot read fleet manifest {fleet_path}: {error}") from None
-    return version, payload, fleet_manifest_digest(fleet_bytes), load_fleet_consumers(fleet_path)
+    return (
+        version,
+        payload,
+        fleet_manifest_digest(fleet_bytes),
+        validator,
+        load_fleet_consumers(fleet_path),
+    )
 
 
 def ledger_content(
@@ -339,6 +354,7 @@ def ledger_content(
     version: str,
     payload_digest: str,
     fleet_digest: str,
+    validator_digest: str,
     results: list[CandidateResult],
 ) -> dict[str, object]:
     return {
@@ -349,6 +365,7 @@ def ledger_content(
         "packVersion": version,
         "payloadDigest": payload_digest,
         "fleetManifestDigest": fleet_digest,
+        "validatorDigest": validator_digest,
         "consumers": [
             {
                 "name": result.consumer.name,
@@ -389,7 +406,7 @@ def check_ledger(
     fleet_path: Path,
     ledger_path: Path,
 ) -> list[str]:
-    version, payload, fleet_digest, consumers = current_evidence(
+    version, payload, fleet_digest, validator, consumers = current_evidence(
         manifest_path, fleet_path
     )
     try:
@@ -401,6 +418,7 @@ def check_ledger(
         expected_version=version,
         expected_payload_digest=payload,
         expected_fleet_digest=fleet_digest,
+        expected_validator_digest=validator,
         consumers=consumers,
     )
 
@@ -447,7 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("candidate ledger: valid for the current pack payload and fleet")
             return 0
 
-        version, payload, fleet_digest, consumers = current_evidence(
+        version, payload, fleet_digest, validator, consumers = current_evidence(
             args.manifest, args.fleet
         )
         selected = set(args.consumer or [])
@@ -517,6 +535,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 version=version,
                 payload_digest=payload,
                 fleet_digest=fleet_digest,
+                validator_digest=validator,
                 results=results,
             ),
         )

@@ -23,6 +23,7 @@ PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
 CANDIDATE_SCRIPT = PACK_ROOT / "scripts/sd-ai-command-pack-fleet-candidate-check.py"
+FLEET_LIB = PACK_ROOT / "scripts/sd_ai_command_pack_fleet_lib.py"
 
 
 class FleetCandidateTests(InstallTestCase):
@@ -33,6 +34,20 @@ class FleetCandidateTests(InstallTestCase):
             CANDIDATE_SCRIPT,
             "sd_ai_command_pack_fleet_candidate",
         )
+
+    def write_validator_source(self, root: Path, content: str = "# validator\n") -> None:
+        """Materialize the sources `CANDIDATE_VALIDATOR_SOURCES` names.
+
+        The digest loader fails closed on an absent source, so a fixture tree
+        that omits these looks identical to a checkout whose validator was
+        deleted. Fixtures carry a stand-in body: the digest binds the bytes,
+        never their meaning.
+        """
+        fleet = self.load_module_from_path(FLEET_LIB, "fleet_candidate_test_fleet_lib")
+        for source in fleet.CANDIDATE_VALIDATOR_SOURCES:
+            path = root / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
 
     def consumer(
         self,
@@ -385,8 +400,9 @@ class FleetCandidateTests(InstallTestCase):
             encoding="utf-8",
         )
         fleet = self.write_fleet(root, root / "unused")
-        version, payload, fleet_digest, consumers = candidate.current_evidence(
-            manifest, fleet
+        self.write_validator_source(root)
+        version, payload, fleet_digest, validator, consumers = (
+            candidate.current_evidence(manifest, fleet)
         )
         result = candidate.CandidateResult(
             consumer=consumers[0],
@@ -402,6 +418,7 @@ class FleetCandidateTests(InstallTestCase):
                 version=version,
                 payload_digest=payload,
                 fleet_digest=fleet_digest,
+                validator_digest=validator,
                 results=[result],
             ),
         )
@@ -427,6 +444,30 @@ class FleetCandidateTests(InstallTestCase):
             ledger_path=ledger,
         )
         self.assertTrue(any("payloadDigest" in error for error in errors), errors)
+
+        # The defect this task fixes: the validator has no manifest row, so an
+        # edit to it moves no payload source. Only `validatorDigest` can make
+        # the ledger stale, and only a stale ledger makes release-prep run the
+        # validator at all.
+        source.write_text("candidate one\n", encoding="utf-8")
+        self.assertEqual(
+            candidate.check_ledger(
+                manifest_path=manifest,
+                fleet_path=fleet,
+                ledger_path=ledger,
+            ),
+            [],
+        )
+        fleet_lib = candidate.sys.modules["sd_ai_command_pack_fleet_lib"]
+        validator_source = root / fleet_lib.CANDIDATE_VALIDATOR_SOURCES[0]
+        validator_source.write_text("# validator, edited\n", encoding="utf-8")
+        errors = candidate.check_ledger(
+            manifest_path=manifest,
+            fleet_path=fleet,
+            ledger_path=ledger,
+        )
+        self.assertTrue(any("validatorDigest" in error for error in errors), errors)
+        self.assertFalse(any("payloadDigest" in error for error in errors), errors)
 
     def test_fleet_library_rejects_malformed_manifests_and_ledgers(self) -> None:
         candidate = self.load_candidate_module()
@@ -523,6 +564,7 @@ class FleetCandidateTests(InstallTestCase):
             "packVersion": "old",
             "payloadDigest": "old",
             "fleetManifestDigest": "old",
+            "validatorDigest": "old",
             "validatedAt": "",
             "consumers": [
                 "bad",
@@ -543,6 +585,7 @@ class FleetCandidateTests(InstallTestCase):
             expected_version="1.0.0",
             expected_payload_digest="sha256:payload",
             expected_fleet_digest="sha256:fleet",
+            expected_validator_digest="sha256:validator",
             consumers=[consumer],
         )
         for expected in (
@@ -550,6 +593,7 @@ class FleetCandidateTests(InstallTestCase):
             "packVersion",
             "payloadDigest",
             "fleetManifestDigest",
+            "validatorDigest",
             "validatedAt",
             "must be an object",
             "has no name",
@@ -638,7 +682,13 @@ class FleetCandidateTests(InstallTestCase):
             mock.patch.object(
                 candidate,
                 "current_evidence",
-                return_value=("1.2.3", "sha256:payload", "sha256:fleet", [consumer]),
+                return_value=(
+                    "1.2.3",
+                    "sha256:payload",
+                    "sha256:fleet",
+                    "sha256:validator",
+                    [consumer],
+                ),
             ),
             mock.patch.object(candidate, "validate_consumer", return_value=result),
             contextlib.redirect_stdout(output),
@@ -680,7 +730,13 @@ class FleetCandidateTests(InstallTestCase):
             mock.patch.object(
                 candidate,
                 "current_evidence",
-                return_value=("1.2.3", "sha256:payload", "sha256:fleet", [consumer]),
+                return_value=(
+                    "1.2.3",
+                    "sha256:payload",
+                    "sha256:fleet",
+                    "sha256:validator",
+                    [consumer],
+                ),
             ),
             mock.patch.object(candidate, "validate_consumer", return_value=result),
             contextlib.redirect_stdout(io.StringIO()),
@@ -726,7 +782,13 @@ class FleetCandidateTests(InstallTestCase):
             mock.patch.object(
                 candidate,
                 "current_evidence",
-                return_value=("1.2.3", "sha256:payload", "sha256:fleet", [consumer]),
+                return_value=(
+                    "1.2.3",
+                    "sha256:payload",
+                    "sha256:fleet",
+                    "sha256:validator",
+                    [consumer],
+                ),
             ),
             mock.patch.object(candidate, "validate_consumer", return_value=result),
             contextlib.redirect_stdout(output),

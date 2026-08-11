@@ -88,9 +88,11 @@ class PackDriftTests(InstallTestCase):
             root / "scripts/sd-ai-command-pack-fleet-candidate-check.py",
             "pack_drift_candidate_ledger",
         )
-        version, payload, fleet_digest, consumers = candidate.current_evidence(
-            root / "manifest.json",
-            root / "docs/fleet/consumers.json",
+        version, payload, fleet_digest, validator, consumers = (
+            candidate.current_evidence(
+                root / "manifest.json",
+                root / "docs/fleet/consumers.json",
+            )
         )
         results = [
             candidate.CandidateResult(
@@ -108,6 +110,7 @@ class PackDriftTests(InstallTestCase):
                 version=version,
                 payload_digest=payload,
                 fleet_digest=fleet_digest,
+                validator_digest=validator,
                 results=results,
             ),
         )

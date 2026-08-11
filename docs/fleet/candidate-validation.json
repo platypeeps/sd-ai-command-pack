@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 2,
-  "validatedAt": "2026-08-11T21:22:53Z",
-  "packVersion": "0.68.0",
-  "payloadDigest": "sha256:95c9849e7cdf72c9801225f58b0079c8d5faa66448c5caeafce97cd23ea51182",
+  "schemaVersion": 3,
+  "validatedAt": "2026-08-11T22:37:59Z",
+  "packVersion": "0.69.0",
+  "payloadDigest": "sha256:0e29ad50a9c56f950696e281345aa6ec92975887f6ea4c96ad2f8ed31ad57372",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
+  "validatorDigest": "sha256:16be194dd69e58a20b780adc424130b18dca8e0a61cda8cdf919534365e65e81",
   "consumers": [
     {
       "name": "rwbp-coordinator",

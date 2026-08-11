@@ -614,10 +614,62 @@ release verdict.
    - Schema version 5 also requires `rolloutPolicy`: a bounded default
      concurrency, a first sequential `canary` cohort, and ordered cohorts that
      include every consumer exactly once in rollout-priority order.
-   - `docs/fleet/candidate-validation.json` schema version 2 records
-     `packVersion`, `payloadDigest`, `fleetManifestDigest`, and one passing row
-     per consumer with its checked base commit plus exact preparation and check
-     command arrays.
+   - `docs/fleet/candidate-validation.json` schema version 3 records
+     `packVersion`, `payloadDigest`, `fleetManifestDigest`, `validatorDigest`,
+     and one passing row per consumer with its checked base commit plus exact
+     preparation and check command arrays.
+   - `validatorDigest` (added in schema 3) exists because ledger currency
+     decides whether `make release-prep` runs the fleet validation at all
+     (`prepare-release.py:338` returns before `CANDIDATE_CHECK`), and the other
+     three fields cannot see the validator itself:
+     `scripts/sd-ai-command-pack-fleet-candidate-check.py` has no `manifest.json`
+     row and no `templates/` twin, so `payload_digest` — which reads each row's
+     `source` — is blind to it. Editing the validator moved nothing, the ledger
+     stayed current, and release-prep skipped the very code the edit changed.
+     `CANDIDATE_VALIDATOR_SOURCES` names exactly the sources in that gap;
+     `sd_ai_command_pack_fleet_lib.py` is deliberately excluded because its
+     manifest row's `source` is its authoritative `templates/` twin, so
+     `payloadDigest` already covers it. Naming it would hash the `make sync`
+     mirror instead — a weaker answer to a question already answered.
+   - The validator digest is composed like `payload_digest` — sorted,
+     path-qualified, one `sha256` per source under a distinct domain separator —
+     **minus the executable marker**. That asymmetry is deliberate: the
+     validator is invoked as `sys.executable <path>` (`surface-check.py:679`),
+     never as a bare executable, so hashing its permission bit would let
+     `chmod +x` invalidate a ledger whose validator is byte-identical.
+     `payload_digest` is right to include it for files that *are* executed
+     directly.
+   - Signatures: `candidate_validator_digest(source_loader: Callable[[str],
+     bytes]) -> str` takes a loader, not a root, so a caller validating a ledger
+     recorded at some commit supplies that commit's blobs;
+     `filesystem_candidate_validator_digest(root: Path) -> str` is the
+     working-tree loader and resolves `root` itself before its containment
+     check, because comparing a resolved source path against an unresolved root
+     rejects every symlinked prefix (`/var` on macOS).
+     `validate_candidate_ledger` takes a required keyword-only
+     `expected_validator_digest`.
+   - **Wrong vs correct at the commit-scoped site.** `release_identity.py`'s
+     `verify_candidate_ledger_at_commit` reads its ledger from a commit, so it
+     must pair that ledger with `candidate_validator_digest_at_commit`, never
+     the working tree. Feeding it the working tree reports an ordinary
+     post-release edit to the validator as tampered release evidence — a
+     failure that reads as a security event rather than the design error it is.
+     The two working-tree call sites correctly use the filesystem loader.
+   - Validation and error matrix for ledger currency: a `schemaVersion` other
+     than the current constant, an absent `validatorDigest`, or a differing one
+     each mark the ledger stale, which makes the validator run — the intended
+     outcome, not a failure. An unreadable or absent validator source in the
+     working tree raises `FleetConfigError`; one absent at a historical commit
+     raises a `ReleaseIdentityError` naming the validator specifically, and
+     never falls back to the working tree. Both fail closed: "assume unchanged"
+     is the one behavior that would reintroduce the defect.
+   - A stale ledger surfaces through the existing `provenance.candidate-stale`
+     finding against `docs/fleet/candidate-validation.json`, not a new code.
+     `_candidate_refresh_required` (`prepare-release.py:109-160`) validates that
+     finding's exact shape and raises on anything else, so a new code would fail
+     release-prep with "surface closure contains a non-candidate finding"
+     instead of triggering validation. Reusing the code is a compatibility
+     requirement, not a shortcut.
    - Candidate execution orders clone, install, audit, preparation, then
      checks. Preparation may mutate only the disposable clone; candidate checks
      remain read-only. Repositories without a preparation step declare `[]`
