@@ -1214,3 +1214,64 @@ empty directory blocking restored → 2 failed; codex CLI marker off → 1
 failed; pack-managed exclusion off → 4 failed; managed NUL as unreadable
 target restored → 1 failed; asset weak citations dropped → 1 failed;
 control → 100 passed, 0 failed.
+
+### Round 15 — Codex lane against `844650bb`
+
+Five blocking groups. Four fault a round-14 fix, and the fifth faults the
+round-14 documentation of a rule the scanner had implemented correctly
+since round 7. The pattern of the last three rounds holds: the defects
+are no longer in the classification rules themselves but at the seams
+between them — what counts as ownership, what counts as an invocation,
+which bytes a binding actually covers.
+
+| ID | Lane | Concern | Resolution |
+| --- | --- | --- | --- |
+| R15-C1 | Codex | **Receipt membership still masqueraded as pack ownership in marker discovery.** R14 excluded pack-managed files from content markers by skipping every receipt member — the exact test `prd.md:197` forbids elsewhere. Codex installed a real 160-entry consumer, edited its receipt-member `.prism/rules.json` to say `Run codex exec, then bash scripts/…`, and watched the ordinary classifier call the bytes consumer-owned while the marker pass hid them | `platform_marker_hits` takes a `pack_owned` set built from the same three proofs the classifier uses — provenance digest, managed-block span, force-preserved comparison. `scan()` collects `proven_pack_owned` as it classifies and passes it in. Receipt membership excludes nothing |
+| R15-C2 | Codex | **The CLI marker was neither an invocation nor complete.** It searched whole file bodies for four adjacent words. `"This repository does not use codex exec; that command is prohibited."` blocked, while `codex -C . exec`, `codex review`, and `codex e` — all documented forms, confirmed against the local `codex --help` — did not | The pattern accepts global options before the subcommand and the full subcommand set including the `e` alias, and the hit must be in command position: an existing command line, a line that starts with `codex` after Markdown leaders are stripped, or an imperative anchored at the start of the line. "does not use codex exec" is none of those |
+| R15-C3 | Codex | **Ownership still consumed unbound bytes.** R14 removed the second read of the *consumer* file, but ownership also reads the provenance record, and `scannedBytesDigest` skipped generated bookkeeping. Codex fed different provenance bytes to ownership, moved a citation from `blockers` to `packDefects`, and every binding stayed identical — `changedBindings: []`, same `scannedBytesDigest`, same `receiptOccupancyDigest`. The exact failure class R14-C2 claimed closed | The three generated bookkeeping files are hashed into `scannedBytesDigest`. Provenance decides ownership, so provenance bytes are a scan input; a read failure there routes to `missing` rather than silently vanishing |
+| R15-C4 | Codex | **The direct-path grammar missed execution and blocked prose.** It understood separators but not shell control prefixes. A temp `.envrc` containing `if ./scripts/sd-ai-command-pack-full-check.sh; then :; fi` executed and printed `R15_EXECUTED` while the scanner filed it as an advisory; conversely `After setup; ./scripts/…sh is obsolete prose.` blocked | `direct_path_lines` is file-aware. `SHELL_PREFIX` covers `if`, `while`, `until`, `then`, `else`, `elif`, `do`, `time`, `command`, `exec`, `env`, `nohup`, `sudo`, `!`, and leading assignments. A path at line start counts everywhere; a path after a separator counts only outside prose suffixes, because a semicolon in Markdown is punctuation |
+| R15-C5 | Codex | **The "full" disposition matrix omitted historical scope.** The matrix said `text × non-execution path × command position` is a blocker; the scanner suppresses command-position blocking in historical files, and an archived `implement.md` reciting `bash scripts/…full-check.sh` produced an advisory. Claimed-complete specification and implementation disagreed on a real input | Historical scope is written as an explicit prerequisite above the matrix, alongside ownership, naming the five historical roots and the reason: an archived plan quoting a command is a record of what was run. Execution-surface *paths* still block there. Round 7 measured what the unscoped rule costs — 28 of `sd-github-review`'s 34 blockers were archived plans |
+
+Three non-blocking items fixed. Canary requirement 5 no longer states 179
+removals as unconditional; it names the declaration branch's 104 and the
+75 retained targets that produce it. The parent's `--thin` acceptance
+criterion now requires the residual to include everything the recorded
+platform choice retains, not only `repo-native` + `consumer-config`. The
+pre-R14 "directory existence is the marker" wording is gone from the
+canary PRD and the design's `platformMarkerDigest` paragraph. Codex's
+third note — that calling the canary's command sequence "literal" is
+overstated while child 1's script does not yet exist — is accurate and
+needs no edit: the sequence is the contract child 1 must satisfy.
+
+`prd.md`'s marker acceptance criterion now names **four** markers rather
+than three, adds the two negative fixtures R14 and R15 forced (empty
+directory, prose prohibition), and states that ownership there means a
+proof rather than receipt membership.
+
+**Fourteenth measurement.** `sd-github-review` 15 blockers in 11 files,
+`se-ai-command-pack` 26 in 11, `hoa-manager` 36 in 11, `mezmo_benchmark`
+47 in 27, `rwbp-coordinator` 51 in 10, `loadsmith` 56 in 8,
+`rwbp-website` 67 in 10, `anomaly-metric-creator` 206 in 22.
+`packDefects` unchanged at 16 in 7, or 14 in 6 where the consumer owns
+its PR template. No consumer is `clear`. The R15-C1 and R15-C2 fixes move
+in opposite directions and both landed: excluding proven-pack-owned
+content dropped `hoa-manager` from 39 to 36 and `rwbp-coordinator` from
+52 to 51, while the corrected CLI marker found `loadsmith` and
+`mezmo_benchmark` invoking `codex` in command position. Markers per
+consumer: three for `loadsmith` and `mezmo_benchmark`; two for
+`rwbp-coordinator`, `hoa-manager`, `rwbp-website`, and
+`se-ai-command-pack`; one for `sd-github-review` and
+`anomaly-metric-creator`. Harness 107 passed, 0 failed, 0 skipped — 28
+fleet and 79 unit.
+
+Mutation sweep, each a true revert against a regenerated scan: ownership
+exclusion back to receipt membership → 1 failed; CLI marker without
+command position → 1 failed; CLI marker's old four-word pattern → 1
+failed; bookkeeping bytes unbound → 1 failed; direct-path grammar off →
+2 failed; prose separator re-enabled → 2 failed; control → 107 passed, 0
+failed. Two of these misfired on the first attempt in a way worth
+recording: `str.replace(old, new, 1)` hit an identical line inside
+`platform_marker_hits` instead of the classification site, and renaming a
+parameter left `managed` undefined rather than reverting behavior. A
+mutation that crashes proves nothing; both were redone with index
+targeting so the reverted scanner still runs.

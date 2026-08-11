@@ -834,6 +834,30 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
             encoding="utf-8",
         )
 
+    # R15-C2: the invocation forms `codex --help` documents, none of which the
+    # first pattern matched, and none of which is a sentence.
+    def with_codex_cli_forms(repo):
+        (repo / "release.sh").write_text(
+            "#!/bin/sh\ncodex -C . exec\ncodex review\ncodex e\n",
+            encoding="utf-8",
+        )
+
+    # R15-C2, the other direction: a sentence forbidding the tool is not usage.
+    def with_codex_prose(repo):
+        (repo / "POLICY.md").write_text(
+            "This repository does not use codex exec; that command is "
+            "prohibited.\n",
+            encoding="utf-8",
+        )
+
+    # R15-C1: receipt membership is not ownership. A consumer that edits a pack
+    # file owns the edited bytes, and the marker pass used to hide them.
+    def with_edited_pack_file_invoking_codex(repo):
+        (repo / ".github/copilot-instructions.md").write_text(
+            "codex exec --sandbox read-only\n", encoding="utf-8"
+        )
+
+
     cli = scan_with(with_codex_cli)
     cases += [
         (
@@ -856,6 +880,42 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
                 if "codex CLI is invoked" in (entry.get("detail") or "")
             ],
             [],
+        ),
+    ]
+
+    forms = scan_with(with_codex_cli_forms)
+    prose = scan_with(with_codex_prose)
+    edited = scan_with(with_edited_pack_file_invoking_codex)
+    cases += [
+        (
+            "R15-C2",
+            "every documented codex subcommand form is an invocation",
+            [
+                entry["file"]
+                for entry in forms["blockers"]
+                if "codex CLI is invoked" in (entry.get("detail") or "")
+            ],
+            ["codex exec"],
+        ),
+        (
+            "R15-C2",
+            "a sentence forbidding the tool is not an invocation of it",
+            [
+                entry["file"]
+                for entry in prose["blockers"]
+                if "codex CLI is invoked" in (entry.get("detail") or "")
+            ],
+            [],
+        ),
+        (
+            "R15-C1",
+            "a pack file the consumer edited is the consumer's, marker included",
+            [
+                entry["file"]
+                for entry in edited["blockers"]
+                if "codex CLI is invoked" in (entry.get("detail") or "")
+            ],
+            ["codex exec"],
         ),
     ]
 
@@ -887,6 +947,67 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
             [("direct.dat", 2)],
         ),
     ]
+
+    # R15-C4: the two boundaries of the direct-path grammar.
+    def with_shell_control(repo):
+        (repo / "hooks.sh").write_text(
+            "#!/bin/sh\n"
+            "if ./scripts/sd-ai-command-pack-full-check.sh; then :; fi\n",
+            encoding="utf-8",
+        )
+        (repo / "NOTES.md").write_text(
+            "After setup; ./scripts/sd-ai-command-pack-full-check.sh is "
+            "obsolete prose.\n",
+            encoding="utf-8",
+        )
+
+    control = scan_with(with_shell_control)
+    cases += [
+        (
+            "R15-C4",
+            "a direct path behind a shell keyword executes, so it blocks",
+            [(e["file"], e["line"]) for e in control["blockers"]
+             if e["file"] == "hooks.sh"],
+            [("hooks.sh", 2)],
+        ),
+        (
+            "R15-C4",
+            "a sentence in prose with a separator before a path does not",
+            [(e["file"], e["line"]) for e in control["blockers"]
+             if e["file"] == "NOTES.md"],
+            [],
+        ),
+        (
+            "R15-C4",
+            "and that sentence is still recorded, as an advisory",
+            [(e["file"], e["line"]) for e in control["advisories"]
+             if e["file"] == "NOTES.md"],
+            [("NOTES.md", 1)],
+        ),
+    ]
+
+    # R15-C3: provenance decides ownership, so its bytes are an input.
+    def with_provenance_read(repo):
+        baseline(repo)
+
+    with tempfile.TemporaryDirectory() as raw:
+        repo = _synthetic_consumer(raw, with_provenance_read)
+        honest_prov = module.scan("synthetic", repo, platforms)
+        provenance = repo / ".sd-ai-command-pack/provenance.json"
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        payload["files"] = {}
+        provenance.write_text(json.dumps(payload), encoding="utf-8")
+        rewritten = module.scan("synthetic", repo, platforms)
+
+    cases.append(
+        (
+            "R15-C3",
+            "rewriting provenance changes scannedBytesDigest, because ownership "
+            "reads it",
+            honest_prov["scannedBytesDigest"] != rewritten["scannedBytesDigest"],
+            True,
+        )
+    )
 
     # R14-C5: a managed file that contains a NUL is readable, and readable is
     # not a defect. The previous rule emitted a whole-file pack defect with no

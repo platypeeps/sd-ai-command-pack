@@ -335,10 +335,13 @@ would have shipped a verdict *less* reproducible than the research
 measurement it is derived from.
 
 Two more fields, each from a round that found the previous list still
-incomplete. `platformMarkerDigest` binds *directory occupancy*: an empty
-`.codex/` created after a commit changes the verdict from `clear` to
-`blocked` while every file-oriented binding stays byte-identical, because
-git does not track a directory. `scannedBytesDigest` binds the bytes
+incomplete. `platformMarkerDigest` binds *directory occupancy*: git does not track
+a directory, so adding or emptying `.codex/` moves no file-oriented
+binding at all. R14 then corrected what occupancy *means* — an empty
+`.codex/` is not a marker and does not block; a populated one is and
+does — but the digest records occupancy either way, so the fixture that
+proves the empty case harmless is bound to the verdict just as tightly
+as the populated case that blocks. `scannedBytesDigest` binds the bytes
 themselves — every path the scan read, paired with its content hash.
 R13-C3 built a `.gitattributes` clean filter that maps any worktree
 content to the committed blob: after one `git add` refreshes the stat
@@ -581,6 +584,21 @@ more blocking, not less.
    | asset | no | yes | `blockers` — command position executes whatever the file is named |
    | asset | no | no | `advisories`, tagged `[asset bytes]` |
 
+   **Two prerequisites sit above the matrix, and R15 found the second one
+   missing from it.** First, ownership: a hit in content the pack
+   demonstrably owns is a `packDefect` whatever the matrix would say, and
+   a hit inside a `block_strip` span is `scheduled`. Second, *historical
+   scope*: in a historical file — `.trellis/tasks/archive/`,
+   `.trellis/workspace/`, `.trellis/audit/`, `.trellis/journal/`,
+   `docs/review-learnings.md` — command position does **not** block. An
+   archived plan quoting `bash scripts/<removed>.sh` is a record of what
+   was run, not an instruction, and round 7 measured the unscoped rule
+   putting 28 of `sd-github-review`'s 34 blockers in
+   `.trellis/tasks/archive/**`. Execution-surface *paths* still block
+   there, because a file that runs is a file that runs. Writing the matrix
+   without this prerequisite would let an implementer reintroduce exactly
+   the round-7 false blockers.
+
    Every matched citation lands in exactly one bucket; none is discarded.
    `unreadable pack target` is reserved for a read that actually failed
    (`OSError`) and for a receipt target that is a symlink. A managed file
@@ -635,15 +653,15 @@ including the `block_strip` span. Its output is a summary, not a verdict.
 
 Consumer-authored callers in command position, per consumer:
 `sd-github-review` 15 hits in 11 files, `se-ai-command-pack` 26 in 11,
-`hoa-manager` 39 in 14, `mezmo_benchmark` 47 in 27,
-`rwbp-coordinator` 52 in 11, `loadsmith` 56 in 8, `rwbp-website` 67 in 10,
+`hoa-manager` 36 in 11, `mezmo_benchmark` 47 in 27,
+`rwbp-coordinator` 51 in 10, `loadsmith` 56 in 8, `rwbp-website` 67 in 10,
 `anomaly-metric-creator` 206 in 22. Plus the pack defects above. They are
 CI workflows, `package.json` scripts, repo-owned tests, shell preflights,
 root agent instruction files, and PR-template checklists that invoke or
 assert on vendored pack paths.
 
-**These are the thirteenth measurement, and the twelve before them were each
-wrong in a way worth recording**, because the same failure shape recurred:
+**These are the fourteenth measurement, and the thirteen before them were
+each wrong in a way worth recording**, because the same failure shape recurred:
 a rule that reasoning found sufficient, and measurement did not.
 
 - *Discovery searched for the wrong thing.* The first scanner found

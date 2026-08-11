@@ -76,12 +76,20 @@ revert-and-restore proof.
    that override, invoked deliberately — not assumed.
 3. **Every canary declares `codex` or stops using it, before conversion.**
    Measured 2026-08-10 and true of all three canaries: each has a
-   `.codex/` directory, and each registry row declares only `claude`,
-   `gemini`, `github`, `opencode`. The rule is unqualified — the
-   directory's existence is the marker. R13 removed an exemption for
-   Trellis-authored paths under it, because whoever wrote those files
-   runs Codex in that repository and the conversion deletes `.agents/**`
-   regardless of which tool authored them.
+   **populated** `.codex/` directory, and each registry row declares only
+   `claude`, `gemini`, `github`, `opencode`. R14 corrected the rule a
+   third time: directory *existence* is neither necessary nor sufficient.
+   An empty `.codex/` is not evidence of anything and does not block; a
+   directory holding files is, as is a `$CODEX_HOME` reference, a pi
+   adapter file, or a `codex exec`-family CLI invocation in command
+   position anywhere in the tree. R13 had already removed an exemption
+   for Trellis-authored paths, because whoever wrote those files runs
+   Codex in that repository and the conversion deletes `.agents/**`
+   regardless of which tool authored them. Files the pack itself installed
+   are excluded by proven ownership, not by receipt membership.
+   Globally-configured Codex leaves no repository trace at all, so it
+   needs an operator declaration; an unanswered question is not a `clear`
+   verdict.
    That is a blocker, not a warning, and the reason is not bookkeeping:
    `retainVendoredFor` intersects the consumer's **declared** platforms
    (parent `design.md:187`), so conversion deletes `.agents/**` out from
@@ -130,7 +138,14 @@ revert-and-restore proof.
 5. Each conversion deletes the set enumerated **from that consumer's
    own installed-targets receipt** and classified through the partition
    (parent contract C-B) — measured today at **179 removed targets per
-   consumer**, being 166 machine files plus 13 retired files. The four
+   consumer under the recorded platform choice each canary has now**,
+   being 166 machine files plus 13 retired files. Requirement 3's
+   declaration branch changes that number: declaring `codex` retains 75
+   further machine targets (49 `.agents`, 25 `scripts`, one document),
+   giving 91 deleted plus 13 retired — **104 removals, not 179** —
+   because `retainVendoredFor` is keyed on the shared platform, not on
+   `.agents/**`. Whichever branch a canary takes, its removal set is
+   recomputed from its own receipt under its own recorded platforms. The four
    special cases are not part of that number and must not be added to it:
    three generated bookkeeping files are **kept and rewritten**, and
    `.gitignore` **survives** with one exact marker block removed. Saying

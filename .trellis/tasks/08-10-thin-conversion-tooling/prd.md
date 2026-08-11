@@ -206,12 +206,20 @@ would be a hand-edited deletion of 166 files with no reversal path.
       target by comparison against the pack's own shipped bytes, so a
       pack-identical `.github/PULL_REQUEST_TEMPLATE.md` is a `packDefect`
       while a consumer-edited one is a `blocker`.
-- [ ] The resweep emits `blocked` for each of three separate marker
+- [ ] The resweep emits `blocked` for each of four separate marker
       fixtures whose registry `platforms` omits the platform — a
-      `.codex/` directory, a `$CODEX_HOME` reference, and a pi adapter
-      file — and `clear` for each once the platform is declared. One
-      combined case would pass while two of the three markers were never
-      implemented.
+      **populated** `.codex/` directory, a `$CODEX_HOME` reference, a pi
+      adapter file, and a `codex exec`-family CLI invocation in command
+      position — and `clear` for each once the platform is declared. One
+      combined case would pass while three of the four markers were never
+      implemented. Two negative fixtures accompany them, because R14 and
+      R15 each found this rule wrong in the permissive direction as well:
+      an **empty** `.codex/` must not block, and prose that names the
+      command without invoking it ("this repository does not use `codex
+      exec`") must not block. A marker discovered in content the pack
+      demonstrably owns is a `packDefect`, never an undeclared-platform
+      blocker, and ownership there means a proof — digest, managed-block
+      span, or force-preserved comparison — not receipt membership.
 - [ ] `install.py --check` on the converted fixture computes its
       expected residual as keep-category source targets whose partition
       platform the consumer declares, plus platform-independent
@@ -225,10 +233,14 @@ would be a hand-edited deletion of 166 files with no reversal path.
       Testing only the first passes while the platform predicate is
       missing entirely.
 - [ ] `--thin` on a disposable fat checkout of a real consumer's shape
-      deletes exactly the enumerated set and leaves the `repo-native` +
-      `consumer-config` slices intact, verified by comparing the
-      post-conversion tree against **the pre-conversion installed-targets
-      receipt**, not against the current partition — a partition-only
+      deletes exactly the enumerated set and leaves intact the
+      `repo-native` + `consumer-config` slices **plus every machine
+      target the consumer's recorded platform choice retains** —
+      `retainVendoredFor` is keyed on the shared platform, so a consumer
+      that declares `codex` keeps 75 further targets and the residual is
+      102, not 27 — verified by comparing the post-conversion tree
+      against **the pre-conversion installed-targets receipt**, not
+      against the current partition — a partition-only
       comparison passes even when orphans survive, which is the defect
       this criterion exists to catch.
 - [ ] A fixture consumer whose receipt lists a file that is absent from

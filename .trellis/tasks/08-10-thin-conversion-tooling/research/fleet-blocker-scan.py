@@ -200,13 +200,6 @@ RUNNER = (
 COMMAND_CONTEXT = re.compile(
     rf"""(
         (?-i:\b{RUNNER}\s+(?:-{{1,2}}[\w-]+\s+)*[-\w.$~"'`/]*[./][-\w.$~"'`/]*)
-        # R14-C4, executed: `./scripts/x.sh` is the canonical way to run a
-        # repository script and names no runner word at all. Codex piped
-        # exactly these bytes to bash and got `R14_EXECUTED`. The plain form
-        # was landing in `advisories`, which does not block. Anchored at the
-        # start of a line or after a shell separator, so a `./path` mentioned
-        # mid-sentence in prose is not an invocation.
-      | (?:^|[;&|(]|&&|\|\|)\s*\.{{1,2}}/[-\w.$~/]*
       | \brun:\s | ^\s*run\s*[:=] | \bcommand\s*[:=] | \bentrypoint\s*[:=]
         # Command substitution, but not arithmetic expansion: "$((delay * 2))"
         # quoted inside a review-feedback ledger is not an invocation.
@@ -262,6 +255,42 @@ RUNNABLE_FENCE_LANGS = frozenset(
 )
 
 FENCE = re.compile(r"^\s*(?:```+|~~~+)\s*([\w-]*)")
+
+
+# R14-C4, executed: `./scripts/x.sh` is the canonical way to run a repository
+# script and it names no runner word at all -- Codex piped exactly those bytes
+# to bash and got them executed while the scanner filed the line as advisory.
+#
+# R15-C4 then demonstrated both halves of the boundary. Missed:
+# `if ./scripts/x.sh; then :; fi` executes, and a bare separator rule does not
+# see it, because what precedes the path is a shell keyword rather than a
+# separator. Wrongly blocked: "After setup; ./scripts/x.sh is obsolete prose."
+# is a sentence, and a bare separator rule calls it a command.
+#
+# So there are two forms, and the second is file-aware. A path at the start of a
+# line -- optionally behind shell control words, `sudo`, `env`, or a variable
+# assignment -- is an invocation in any file. A path after a mid-line separator
+# is an invocation only where a sentence cannot be: not in prose. Prose is where
+# the false positive lives and shell is where the true positive lives, and no
+# regex can tell a sentence from a command without knowing which it is reading.
+SHELL_PREFIX = r"(?:(?:if|while|until|then|else|elif|do|time|command|exec|env|nohup|sudo|!)\s+|\w+=\S*\s+)*"
+DIRECT_AT_START = re.compile(rf"^\s*{SHELL_PREFIX}\.{{1,2}}/[-\w.$~/]*")
+DIRECT_AFTER_SEPARATOR = re.compile(
+    rf"(?:[;&|(]|&&|\|\|)\s*{SHELL_PREFIX}\.{{1,2}}/[-\w.$~/]*"
+)
+PROSE_SUFFIXES = frozenset({".md", ".rst", ".txt", ".markdown"})
+
+
+def direct_path_lines(lines: list[str], relative: str) -> set[int]:
+    """Line numbers carrying a direct `./path` invocation."""
+    prose = Path(relative).suffix.lower() in PROSE_SUFFIXES
+    hits = set()
+    for number, line in enumerate(lines, start=1):
+        if DIRECT_AT_START.search(line):
+            hits.add(number)
+        elif not prose and DIRECT_AFTER_SEPARATOR.search(line):
+            hits.add(number)
+    return hits
 
 
 def command_lines(lines: list[str]) -> set[int]:
@@ -551,9 +580,46 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
 # requirement 3), which is the only place the fact exists.
 MARKER_PLATFORMS = ("codex", "pi")
 CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
-# The CLI, in command position. `\bcodex\s+exec\b` alone matches prose about
-# Codex; requiring the subcommand keeps it to an invocation.
-CODEX_CLI = re.compile(r"\bcodex\s+(?:exec|resume|apply|login)\b")
+# The CLI. R15-C2 demonstrated both failure directions in the first attempt.
+# False positive: "This repository does not use codex exec; that command is
+# prohibited" is a sentence *forbidding* the tool, and a whole-file search for
+# four adjacent words called it usage. False negatives: `codex --help` lists
+# `review` as a command and `e` as the alias for `exec`, and global options may
+# precede the subcommand, so `codex -C . exec`, `codex review`, and `codex e`
+# are all real invocations the first pattern missed.
+#
+# So the pattern accepts global options and every subcommand, and the *line* has
+# to be in command position -- the same test the classifier already applies to a
+# citation. A sentence about Codex is not an invocation of it.
+CODEX_CLI = re.compile(
+    r"\bcodex\b(?:\s+-{1,2}[\w-]+(?:[= ]\S+)?)*"
+    r"\s+(?:e|exec|resume|apply|login|review|mcp|completion)\b"
+)
+
+
+# What counts as running the CLI rather than talking about it. Three accepted
+# forms, each already a rule this scanner applies to script citations: the line
+# is command context or a runnable fence; the invocation starts the line, after
+# the prompt, list, and code-span punctuation Markdown wraps commands in; or an
+# imperative names it, which is the same "an agent reads this and does it" rule
+# that makes `Use scripts/x.sh as the gate` a blocker.
+CODEX_LEADER = re.compile(r"^[\s>*\-+#$`|]*")
+# Anchored after the leader, not searched: an imperative *opens* a clause.
+# R15-C2's false positive -- "This repository does not use codex exec" -- has
+# `use` in the middle of a sentence that forbids the tool, and an unanchored
+# search reads a prohibition as an instruction.
+CODEX_IMPERATIVE = re.compile(
+    r"^(?:use|run|invoke|execute|call|launch)\b[^\n]{0,32}?\bcodex\b",
+    re.IGNORECASE,
+)
+
+
+def codex_in_command_position(line: str, number: int, commanded: set[int]) -> bool:
+    if number in commanded or COMMAND_CONTEXT.search(line):
+        return True
+    if CODEX_LEADER.sub("", line).startswith("codex"):
+        return True
+    return bool(CODEX_IMPERATIVE.search(CODEX_LEADER.sub("", line)))
 
 
 def platform_marker_hits(
@@ -561,7 +627,7 @@ def platform_marker_hits(
     files: list[str],
     declared: frozenset[str],
     removed: frozenset[str],
-    managed: frozenset[str] = frozenset(),
+    pack_owned: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Undeclared codex/pi usage, as blocker entries.
 
@@ -640,10 +706,19 @@ def platform_marker_hits(
             # text, not the consumer's -- a fat install carries pack guidance
             # that names `codex exec`, and reading that back as "this consumer
             # uses Codex" would fire on every consumer that installed the pack,
-            # which is all of them. R13: the Trellis-local exclusion that used
+            # which is all of them.
+            #
+            # R15-C1: that third exclusion was keyed on *receipt membership*,
+            # which `prd.md:197` says is not ownership -- the same reason the
+            # classifier has three separate ownership proofs. Codex edited a
+            # receipt-member `.prism/rules.json` to invoke `codex exec`, the
+            # ordinary classifier correctly called the bytes consumer-owned, and
+            # the marker pass hid them anyway. It is now keyed on the ownership
+            # the classifier proved: only content the pack demonstrably owns is
+            # the pack's text. R13: the Trellis-local exclusion that used
             # to sit here is gone for the reason recorded above the marker
             # platforms.
-            if relative in removed or relative in managed:
+            if relative in removed or relative in pack_owned:
                 continue
             if relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES:
                 continue
@@ -656,7 +731,12 @@ def platform_marker_hits(
             body = raw.decode("utf-8", errors="replace")
             if CODEX_HOME.search(body):
                 referencing.append(relative)
-            if CODEX_CLI.search(body):
+            lines = body.splitlines()
+            commanded = command_lines(lines) | direct_path_lines(lines, relative)
+            if any(
+                CODEX_CLI.search(line) and codex_in_command_position(line, number, commanded)
+                for number, line in enumerate(lines, start=1)
+            ):
                 invoking.append(relative)
         if invoking:
             hits.append(
@@ -1077,15 +1157,31 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
     # all twelve bindings byte-identical. Every other binding is a proxy for the
     # bytes; this one is the bytes, digested as they are read.
     read: list[str] = []
+    # R15-C1: the marker pass needs the ownership the classifier proves, not the
+    # receipt membership it used to stand in for.
+    proven_pack_owned: list[str] = []
     unambiguous = unambiguous_basenames(removed, survivors)
     for relative in tracked:
         if relative in removed:
             buckets["scheduled"].append({"file": relative, "line": None})
             continue
         if relative in GENERATED_BOOKKEEPING:
-            buckets["scheduled"].append(
-                {"file": relative, "line": None, "detail": "generated bookkeeping"}
-            )
+            # R15-C3, demonstrated: these are not classified, but `provenance.json`
+            # *decides* classification -- every ownership verdict compares against
+            # its digests. Skipping them left those bytes bound by nothing, and
+            # Codex moved a hit from `blockers` to `packDefects` by feeding
+            # ownership different provenance while every digest stayed identical.
+            # The bytes that decide a classification are inputs to it.
+            try:
+                buckets["scheduled"].append(
+                    {"file": relative, "line": None, "detail": "generated bookkeeping"}
+                )
+                read.append(
+                    f"{relative}\0"
+                    f"{hashlib.sha256((repo / relative).read_bytes()).hexdigest()}"
+                )
+            except OSError:
+                missing.append(relative)
             continue
         full = repo / relative
         if full.is_symlink():
@@ -1200,11 +1296,13 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
                 relative in shipped and shipped[relative] == actual
             )
         unvouchable = relative in managed and vouched is None
+        if pack_owned:
+            proven_pack_owned.append(relative)
         executable = is_executable_surface(repo, relative)
         historical = (
             relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES
         )
-        commanded = command_lines(lines)
+        commanded = command_lines(lines) | direct_path_lines(lines, relative)
 
         for number, line in enumerate(lines, start=1):
             if not any(
@@ -1252,7 +1350,9 @@ def scan(name: str, repo: Path, platforms: frozenset[str]) -> dict:
             else:
                 buckets["advisories"].append(entry)
 
-    marker_hits = platform_marker_hits(repo, tracked, platforms, removed, managed)
+    marker_hits = platform_marker_hits(
+        repo, tracked, platforms, removed, frozenset(proven_pack_owned)
+    )
     buckets["blockers"].extend(marker_hits)
 
     index = git(repo, "ls-files", "-s")

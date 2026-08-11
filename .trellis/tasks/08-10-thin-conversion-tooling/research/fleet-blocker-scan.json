@@ -1,35 +1,35 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "6c4a3911c0ea9cf99248b0d0ec44f31c0c375daa",
-  "packWorktreeDigest": "sha256:dae5750e973b70201bb55aac02f483fa4b2fbf32d5157324c48c2292feab4128",
+  "packHead": "844650bb34cefb38363a2ecb248804ff58d8931c",
+  "packWorktreeDigest": "sha256:5e46f52e00238b5370e38b8248b13db2626eb4161b32b950427fc8b23b0f0e77",
   "packWorktreeClean": false,
   "packIndexFlagsDigest": "sha256:79a5a17998e4d0ac882946e401204089f700b56f893637d337705f44b20e068d",
   "packHiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "scannerDigest": "sha256:694181d2941503f2371cadc46b8d1535316eeec50fb2002c10f9ce1b046347cb",
-  "counterexamplesDigest": "sha256:410606f66c18a20858ae01bac30151ddd6ed5483ec92c624c61f3db410007cd6",
+  "scannerDigest": "sha256:0d749df54aea95d406bc8d233184aa5e2f1d38964709cd78037b7fdd43ab1ec6",
+  "counterexamplesDigest": "sha256:8730264a2d192f9f9d3cd82815cf9fe6a2afe7859262532a3558e28749f7ef23",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
-      "head": "270d5cbf77f3b648533ad672992cc3e38c080637",
-      "indexDigest": "sha256:3faec1c9cbe0241f142bf8097f0cd1b0191a279d0e6a76a6f03b6e4b9a2de856",
+      "head": "2080d9efcb6b45e5464c15b6150b7662c7141fd0",
+      "indexDigest": "sha256:93e1e889c84b31c62f4753b1c9a30908f59f0b70c1cce17618ac1993456aba5e",
       "indexFlagsDigest": "sha256:c3f96221d742e796ec26834211ac350ad0b0035c8be69de8a0a43ede7904684c",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:ed7266d590458d5bd1bebb2394c74a585aa76496d4af9902b2b749c6292563db",
+      "worktreeDigest": "sha256:5a6cf5d2fc630bc60062a691516a3671adfa5c0bfa7c0c52198c498344041150",
       "worktreeClean": false,
       "receiptOccupancyDigest": "sha256:a2c9d964bf92b78e5afcb3ef60a8f578d956e50c6ff4628f4018710afd7dc8eb",
-      "executableBitsDigest": "sha256:cdb8a32c6b2cfed2f230f19710a9f4b6b335f39b0e499aeb13472687f6ff4bd2",
+      "executableBitsDigest": "sha256:c602330aa2597693871131e02d3fcfe175d8fa1f5d65721ea52e0f58e3c4d2db",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:9df101f2699bb43d768d08b8e36b91457227f8a42ca9e0719a75184d63cfe997",
-      "platformMarkerDigest": "sha256:4af779985d902c2cb8c94252161b721513474370ad915b1df1358f2cff575b94",
+      "scannedBytesDigest": "sha256:72fb45cc95e83ba2ae6093b01784ba9a2c9c514ddbdf162a33b24b6bc63475cb",
+      "platformMarkerDigest": "sha256:d5a1bab33ddf769e875b1663c6702fc96362bc6040027a7048873ffa5425e962",
       "binaryFiles": 10,
       "missingFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
-      "trackedFiles": 1413,
+      "trackedFiles": 1415,
       "counts": {
-        "blockers": 52,
+        "blockers": 51,
         "packDefects": 16,
         "scheduled": 182,
         "advisories": 114
@@ -40,7 +40,6 @@
         ".github/workflows/ci.yml",
         ".prism/rules.json",
         ".trellis/spec/web/operations/local-development.md",
-        "codex exec",
         "package.json",
         "scripts/check-full.test.mjs",
         "scripts/check-review-churn.mjs",
@@ -307,11 +306,6 @@
           "file": ".codex",
           "line": null,
           "detail": "undeclared codex usage: .codex/ exists with 30 file(s), e.g. .codex/agents/trellis-check.toml"
-        },
-        {
-          "file": "codex exec",
-          "line": null,
-          "detail": "undeclared codex usage: the codex CLI is invoked in 1 surviving file(s), e.g. docs/integrations.md"
         },
         {
           "file": "$CODEX_HOME",
@@ -1719,7 +1713,7 @@
       "receiptOccupancyDigest": "sha256:9e43f8265eaff89914818c24604b53ab43fb8d5ce0e4bae56e3e6302dca39221",
       "executableBitsDigest": "sha256:239ce94c86823145a109709a74fc5ec4bbf0c0853fca02eb7c60b4e9e7eec631",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:400c9a4c5a3c395006a6a016dbd0cbcf2257890c3f89e059d15f4e6646c61e1b",
+      "scannedBytesDigest": "sha256:e54275cd5a43b483c2d34502bfea91b03d7ceeb1434c3e3d79d28e1b61767529",
       "platformMarkerDigest": "sha256:81667275e87e2ee5bc89a11c1fbb2bb9d2761780040cb04c146038929310e1b4",
       "binaryFiles": 2,
       "missingFiles": [],
@@ -3670,16 +3664,16 @@
     {
       "consumer": "hoa-manager",
       "repo": "/Users/sven/repos/platypeeps/hoa-manager",
-      "head": "a487b283363012ea316f9c88e7b2deb641e02356",
-      "indexDigest": "sha256:75c382c401976a78f5b035a3847c23983cc82ad7a84b8120120f1fd4e28eced0",
+      "head": "91c5508d880eaae42714bf15bc80b3b7a004a79c",
+      "indexDigest": "sha256:b0cdeacc10ea97cfcc89d6841a0e6b1ad39c808db1e503b055feab5a7109a95d",
       "indexFlagsDigest": "sha256:031da61bf3e6242d52522221904f4a2077c069af371b430ef763c4d3cd9d3ee5",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:c6b492e6dc7896c5880b2bfaad12f56fcf1f6dae9ab88ecf636b9fed1fa39c23",
-      "worktreeClean": false,
+      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:bfd28edb38add0e33434e40559100fc42a2f3aa11cabc65051ebc465efb8c01f",
       "executableBitsDigest": "sha256:3bdc411f1570f0af3a430670638b6ff7421a91498667b8797d35a0e4e11618f5",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:ee60e968c59888c0e8c051d73157f4915371edc145fe0682acf7f5facc5bee8b",
+      "scannedBytesDigest": "sha256:98772c77506d55bed81d13aa8e9075e78aba3b19bb8b13e6a543b5b5231a4e17",
       "platformMarkerDigest": "sha256:eac0aec34949db67eeeea5ecfbdc5bd725771fc20a20926cbd573e4af365de74",
       "binaryFiles": 1,
       "missingFiles": [],
@@ -3687,10 +3681,10 @@
       "removedTargets": 179,
       "trackedFiles": 1628,
       "counts": {
-        "blockers": 39,
+        "blockers": 36,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 124
+        "advisories": 127
       },
       "blockerFiles": [
         "$CODEX_HOME",
@@ -3698,9 +3692,6 @@
         ".github/workflows/ci.yml",
         ".trellis/spec/web/testing/verification-commands.md",
         ".trellis/tasks/08-07-task-manifest-context-roots/prd.md",
-        "README.md",
-        "docs/DEVELOPMENT_CYCLE.md",
-        "docs/REFERENCE_STACK.md",
         "docs/REVIEW_PATTERNS.md",
         "package.json",
         "scripts/check-full-prelude.mjs",
@@ -3758,21 +3749,6 @@
           "file": ".trellis/tasks/08-07-task-manifest-context-roots/prd.md",
           "line": 73,
           "detail": "- [ ] AC-1: `node scripts/sd-ai-command-pack-review-preflight.mjs` reports zero"
-        },
-        {
-          "file": "README.md",
-          "line": 29,
-          "detail": "| [docs/SD_AI_COMMAND_PACK.md](./docs/SD_AI_COMMAND_PACK.md) | Installed SD command-pack usage, commands, config, and troubleshooting. |"
-        },
-        {
-          "file": "docs/DEVELOPMENT_CYCLE.md",
-          "line": 72,
-          "detail": "[`docs/SD_AI_COMMAND_PACK.md`](./SD_AI_COMMAND_PACK.md)."
-        },
-        {
-          "file": "docs/REFERENCE_STACK.md",
-          "line": 214,
-          "detail": "The later architecture ([ARCHITECTURE.md](./ARCHITECTURE.md)) is mostly *generalize-and-port*, not *invent*. The precedents in these two repos to build each pri"
         },
         {
           "file": "docs/REVIEW_PATTERNS.md",
@@ -5127,9 +5103,19 @@
           "detail": "- Line-anchored SCOPE_BODY_PATTERN with an optional colon, matching sd-ai-command-pack-review-scope.sh:170 and the docs/SD_AI_COMMAND_PACK.md:750 contract; expo"
         },
         {
+          "file": "README.md",
+          "line": 29,
+          "detail": "| [docs/SD_AI_COMMAND_PACK.md](./docs/SD_AI_COMMAND_PACK.md) | Installed SD command-pack usage, commands, config, and troubleshooting. |"
+        },
+        {
           "file": "docs/ARCHITECTURE.md",
           "line": 10,
           "detail": "The key insight from analyzing the two reference repos (`<reference-root>/rwbp/{rwbp-coordinator,rwbp-website}`) is that **almost every ask already has a preced"
+        },
+        {
+          "file": "docs/DEVELOPMENT_CYCLE.md",
+          "line": 72,
+          "detail": "[`docs/SD_AI_COMMAND_PACK.md`](./SD_AI_COMMAND_PACK.md)."
         },
         {
           "file": "docs/DEVELOPMENT_CYCLE.md",
@@ -5145,6 +5131,11 @@
           "file": "docs/DEVELOPMENT_CYCLE.md",
           "line": 101,
           "detail": "`scripts/sd-ai-command-pack-full-check.sh`. The pack full-check script runs:"
+        },
+        {
+          "file": "docs/REFERENCE_STACK.md",
+          "line": 214,
+          "detail": "The later architecture ([ARCHITECTURE.md](./ARCHITECTURE.md)) is mostly *generalize-and-port*, not *invent*. The precedents in these two repos to build each pri"
         },
         {
           "file": "docs/REVIEW_PATTERNS.md",
@@ -5365,7 +5356,7 @@
       "receiptOccupancyDigest": "sha256:def2fe6f7df8916494c63c827979490bf16bf2b51ba7a9d413f0344f8e002419",
       "executableBitsDigest": "sha256:e1ef3fa999c797022b9ceff88e47a589e7932787158a6f1e489812f7acfd1096",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:5d130051689ab335b0bea0849a88b3d40f928e71bb914473b14251db8cc53eea",
+      "scannedBytesDigest": "sha256:5fcc4d9c85d0458eaa2d02de06c63d874d97ca191dc427c99c7a791196a37830",
       "platformMarkerDigest": "sha256:4716334c490d2e8fc890c25cb98428d7c5a1cc1d7bea0104e85b18fa9307247b",
       "binaryFiles": 19,
       "missingFiles": [],
@@ -7092,8 +7083,8 @@
       "receiptOccupancyDigest": "sha256:d9d117d57b8685fee05a4121d67bdc42c08a906d39193a76cf797c93d2a4bd87",
       "executableBitsDigest": "sha256:fd4f3299acd2ac3037961a2ad098873e21fcc77922758992cdb22edbb3b3671c",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:c17c8e7a93060b2cbb7573d3b71267483817671c5b043803df9f73c670fcfe75",
-      "platformMarkerDigest": "sha256:95e6ae112720e611c5b8f479210ceb40f48dcdc089cd59d755938fdb1f1e30fe",
+      "scannedBytesDigest": "sha256:a6b918b50a1106fb4e171f02f8fa9e57a84b9722abaef32807bb81e6726986f2",
+      "platformMarkerDigest": "sha256:b8da06ae02b16ac0d34eb4c9a9acf03b05ac7fc1b68bcf6109ef12d6b8e90b62",
       "binaryFiles": 1,
       "missingFiles": [],
       "receiptEntries": 210,
@@ -7372,7 +7363,7 @@
         {
           "file": "codex exec",
           "line": null,
-          "detail": "undeclared codex usage: the codex CLI is invoked in 17 surviving file(s), e.g. CHANGELOG.md"
+          "detail": "undeclared codex usage: the codex CLI is invoked in 4 surviving file(s), e.g. README.md"
         },
         {
           "file": "$CODEX_HOME",
@@ -8676,27 +8667,27 @@
     {
       "consumer": "se-ai-command-pack",
       "repo": "/Users/sven/repos/platypeeps/se-ai-command-pack",
-      "head": "e0a3afd67d3730bdc54a2c3dd04eb71d0589ab6e",
-      "indexDigest": "sha256:67655232985e2822e04d1a7b2d18ce518e83430e5be2ec705047a6b5c1b7c5dd",
-      "indexFlagsDigest": "sha256:f42db2e98130749b4a2f44bfe758dd28479b8c34ab0d3bac177790f2965bb285",
+      "head": "80723c73f96c4b00be5b624d20bdf19097feda9b",
+      "indexDigest": "sha256:d65ee0fb4e6998ce3072c066459ffe1e5224df5c5d3636708635d19ac59e8a4f",
+      "indexFlagsDigest": "sha256:0544a84a3747ca190c7efec10c0303e3a8b220ce74ea4f56b18b25ee0402e23d",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "worktreeDigest": "sha256:4133c2eee7954bfa6e0daa6a968bfe46ad937a2773738785a46c4dbe7a208d67",
-      "worktreeClean": false,
+      "worktreeDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "worktreeClean": true,
       "receiptOccupancyDigest": "sha256:5f07fda12898725c43dcc85efe9f587abedfe6aa586b69e369b715f352a64eb0",
-      "executableBitsDigest": "sha256:ac7e84837063f799fb5f5e2fec32eebccf18e601a89464aa294fece7e7f137c0",
+      "executableBitsDigest": "sha256:06651c5b1bf0b38ae7088f310901a6a98bbcc2b3da5c8256aab03b8f044eb5a9",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:3156762f0e47e8ab98d892a5d3e740be80bc2093f478c1a3c4647c6aa6a17612",
+      "scannedBytesDigest": "sha256:c8f304dfabb901e34f337f417d425194009b45d4a08691bbc10fda4a71f4c974",
       "platformMarkerDigest": "sha256:fe933800fde95b9c2aee02d593308a2b023befb2847df9b019bb09ead68abfe0",
       "binaryFiles": 0,
       "missingFiles": [],
       "receiptEntries": 210,
       "removedTargets": 179,
-      "trackedFiles": 1414,
+      "trackedFiles": 1419,
       "counts": {
         "blockers": 26,
         "packDefects": 16,
         "scheduled": 182,
-        "advisories": 823
+        "advisories": 824
       },
       "blockerFiles": [
         "$CODEX_HOME",
@@ -8769,27 +8760,27 @@
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2484,
+          "line": 2498,
           "detail": "\"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2485,
+          "line": 2499,
           "detail": "bash scripts/sd-ai-command-pack-review-full-check.sh"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2486,
+          "line": 2500,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh doctor"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2537,
+          "line": 2551,
           "detail": "\"check:full\": \"bash scripts/sd-ai-command-pack-review-full-check.sh\""
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2549,
+          "line": 2563,
           "detail": "\"check:full\": \"npm run check && bash scripts/sd-ai-command-pack-full-check.sh\""
         },
         {
@@ -10041,88 +10032,43 @@
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 921,
+          "line": 935,
           "detail": "| `scripts/sd-ai-command-pack-review.py` | Registry B, `install: \"always\"` \u2014 vendored |"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 970,
+          "line": 984,
           "detail": "2. File: `scripts/sd-ai-command-pack-status.py`, manifest entry"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 1232,
+          "line": 1246,
           "detail": "shapes are `references/*.md` and `scripts/*.py`; nested directories and other"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 1251,
+          "line": 1265,
           "detail": "| Flat `references/*.md` or `scripts/*.py` file | Validate and fan out to every declared platform. |"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2143,
+          "line": 2157,
           "detail": "Both `scripts/sd-ai-command-pack-status.py` and"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2144,
+          "line": 2158,
           "detail": "`scripts/sd_ai_command_pack_fleet_lib.py` are vendored with"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2158,
+          "line": 2172,
           "detail": "(`sd-ai-command-pack-status.py` at 2631 lines) and were re-located by symbol"
         },
         {
           "file": ".trellis/spec/backend/quality-guidelines.md",
-          "line": 2204,
+          "line": 2218,
           "detail": "(`sd_ai_command_pack_fleet_lib.py`, `:119-131`): `$XDG_CONFIG_HOME`"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 54,
-          "detail": "(`.agents/skills/sd-finish-work/SKILL.md:119-123`)."
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 55,
-          "detail": "3. **No exact-head final-bundle gate.** `.agents/skills/sd-finish-work/SKILL.md`"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 208,
-          "detail": "- The guard reads vendored `.agents/skills/sd-*/SKILL.md` content, so a pack"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 213,
-          "detail": "- `scripts/sd-ai-command-pack-install-audit.py:231` scans `AGENTS.md` for"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 218,
-          "detail": "- `docs/SD_AI_COMMAND_PACK.md:1046` gives `sd-update-spec` a documented-command"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 221,
-          "detail": "- `scripts/sd-ai-command-pack-update-spec-kb.py:1174` treats `AGENTS.md` as a"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/prd.md",
-          "line": 230,
-          "detail": "- Upstream note for the follow-up: `.agents/skills/sd-finish-work/SKILL.md:136`"
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/task.json",
-          "line": 25,
-          "detail": "\".agents/skills/sd-finish-work/SKILL.md\","
-        },
-        {
-          "file": ".trellis/tasks/07-25-audit-workflow-entrypoint-routing/task.json",
-          "line": 26,
-          "detail": "\".gemini/commands/sd/finish-work.toml\""
         },
         {
           "file": ".trellis/tasks/08-04-audit-registry-snapshot-ast-removal/task.json",
@@ -10463,6 +10409,56 @@
           "file": ".trellis/tasks/archive/2026-08/07-25-audit-test-hermeticity/implement.md",
           "line": 179,
           "detail": "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \\"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 55,
+          "detail": "(`.agents/skills/sd-finish-work/SKILL.md:113-114`) and refuses to leave an"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 57,
+          "detail": "3. **No exact-head final-bundle gate.** `.agents/skills/sd-finish-work/SKILL.md:143`"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 187,
+          "detail": "`.agents/skills/sd-finish-work/SKILL.md:136` is recorded as an upstream"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 263,
+          "detail": "- The guard reads vendored `.agents/skills/sd-*/SKILL.md` content, so a pack"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 268,
+          "detail": "- `scripts/sd-ai-command-pack-install-audit.py:232` puts `AGENTS.md` in the scan bases (tuple opens at `:231`) that are searched for"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 273,
+          "detail": "- `docs/SD_AI_COMMAND_PACK.md:1045-1046` gives `sd-update-spec` a documented-command"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 276,
+          "detail": "- `scripts/sd-ai-command-pack-update-spec-kb.py:1174` treats `AGENTS.md` as a"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/prd.md",
+          "line": 285,
+          "detail": "- Upstream note for the follow-up: `.agents/skills/sd-finish-work/SKILL.md:136`"
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/task.json",
+          "line": 25,
+          "detail": "\".agents/skills/sd-finish-work/SKILL.md\","
+        },
+        {
+          "file": ".trellis/tasks/archive/2026-08/07-25-audit-workflow-entrypoint-routing/task.json",
+          "line": 26,
+          "detail": "\".gemini/commands/sd/finish-work.toml\""
         },
         {
           "file": ".trellis/tasks/archive/2026-08/07-25-dispatch-pilot/implement.md",
@@ -13798,7 +13794,7 @@
       "receiptOccupancyDigest": "sha256:a7e3f41c7fa4e146f0a3c811743ed376d6b20a503376e026cfa2359a42396729",
       "executableBitsDigest": "sha256:3513fd16e205ea14116777d7432979d968451d08e4272369b68d53f0ca687013",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:a56f42f8059f322f20be8643d058a40123b673f7adf45155a525816b47b47f88",
+      "scannedBytesDigest": "sha256:a4dc1007e0008d37da2ea505d661e903de735a64e880f8a1a94c942851a0be2b",
       "platformMarkerDigest": "sha256:cc405c7e8e983ca8da0e97fe5b73c955dd388bf2337a5dc1cd5b3310aa1044f5",
       "binaryFiles": 0,
       "missingFiles": [],
@@ -15110,7 +15106,7 @@
       "receiptOccupancyDigest": "sha256:0b68729aab21d49cbd879f1b9831d815f42278347407c0040473e67992a5f8c0",
       "executableBitsDigest": "sha256:fe047a33c8871e5b79a452de75c55d3e18ce487a7f0511b75a7cf8a75b8c82bd",
       "symlinkTargetsDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scannedBytesDigest": "sha256:89fdbb8cf33c3137763c6c204b8cd9c3ead41167f23a2a1855528c004035f1d9",
+      "scannedBytesDigest": "sha256:97228365dfd3296cb04b791dda377e08f4d96c223ee6447b92d0264405fd4b0e",
       "platformMarkerDigest": "sha256:3906ad140ad2dd5f336d99a1e0d05eb8cf693aa892cda3afb324d53f8a52018a",
       "binaryFiles": 0,
       "missingFiles": [],
