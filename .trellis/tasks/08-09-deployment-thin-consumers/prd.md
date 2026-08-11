@@ -8,7 +8,7 @@ this task is not the implementation target.
 
 ## Problem
 
-Today `install.py` vendors the pack payload — 776 manifest files
+Today `install.py` vendors the pack payload — 777 manifest files
 (scripts, skills for `.claude`/`.agents`, rules, review-provider
 configs, docs) — into every consumer repository, committed there.
 The fleet registry (`docs/fleet/consumers.json`, schema 4) lists 8
@@ -42,7 +42,7 @@ fleet status becomes pin inventory instead of tree diffing.
 ## Requirements
 
 1. **Surface partition is explicit and complete.** Every one of the
-   776 payload files is classified into exactly one of FOUR
+   777 payload files is classified into exactly one of FOUR
    categories: machine-scoped Claude (plugin), machine-scoped other
    (machine installer), repo-native (platform surfaces only readable
    from the repository, e.g. GitHub instructions — stay vendored,
@@ -114,8 +114,28 @@ dependency system.
       bumping it is optional bookkeeping.
 - [ ] A migrated consumer's CI passes with no vendored pack payload
       beyond the partition's `repo-native` and `consumer-config`
-      slices, no pack CI steps, and the pin receipt — and CI never
-      executes pack code.
+      slices, the `retainVendoredFor` carve-out below, and the pin
+      receipt — no pack CI steps, and CI never executes pack code.
+- [ ] Codex/pi retention holds: a machine-dispositioned platform whose
+      partition entry carries `retainVendoredFor` keeps its rows
+      vendored in any consumer whose `docs/fleet/consumers.json`
+      `platforms` array intersects that list. `shared` carries
+      `["codex", "pi"]` because Codex resolves `.agents` against the
+      project root and never reads `~/.agents/skills` (its user root is
+      `$CODEX_HOME/skills`, a target family the pack does not ship) and
+      Pi reads the same layer repo-locally — evidence in
+      `08-09-thin-machine-installer/research/platform-verification.md`.
+      The fleet registry is the single authority for "serves a
+      platform"; no consumer declares codex or pi today, so today's
+      conversions delete those rows, and conversion is blocked when a
+      consumer shows codex/pi usage markers it has not declared.
+- [ ] Vendored `scripts/` removal from a consumer happens only where
+      the machine payload's reference rewrite is in effect: non-Claude
+      surfaces execute pack scripts from `~/.agents/bin` and read the
+      relocated contract doc from `~/.agents/docs`, so a consumer whose
+      retained `.agents/**` still points at repo-root `scripts/` is not
+      convertible until that rewrite ships
+      (`08-09-thin-machine-installer`).
 - [ ] `sd-status` fleet mode reports each consumer's pin, the machine
       installation's version, and latest release, without tree
       diffing; skew is visible, not silent.

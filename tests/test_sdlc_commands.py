@@ -412,7 +412,7 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertNotIn("temporary schema-version-1 snapshot", fleet_text)
 
         for pin in (
-            "schema-version-4 manifest",
+            "schema-version-5 manifest",
             "bounded post-canary cohort with concurrency two",
             "one at a time in manifest order",
             "pack blocker stops new starts and holds unsettled merges",

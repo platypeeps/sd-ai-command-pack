@@ -38,6 +38,7 @@ scripts/sd-ai-command-pack-fleet-candidate-check.py 90
 scripts/sd-ai-command-pack-fleet-controller.py 76
 scripts/sd-ai-command-pack-fleet-publish.py 85
 scripts/sd-ai-command-pack-fleet-finding-classify.py 85
+scripts/sd-ai-command-pack-thin-resweep.py 76
 scripts/sd-ai-command-pack-fleet-review-classify.py 80
 scripts/sd-ai-command-pack-fleet-timing.py 88
 scripts/sd-ai-command-pack-fleet-wave-plan.py 85

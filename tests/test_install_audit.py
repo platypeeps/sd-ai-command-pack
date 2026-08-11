@@ -128,6 +128,12 @@ class InstallAuditTests(InstallTestCase):
                 "scripts/sd-ai-command-pack-fleet-controller.py",
                 ".agents/skills/sd-fleet-refresh/references/controller-recovery.md",
                 "scripts/sd_ai_command_pack_fleet_lib.py",
+                # The thin resweep decides whether a consumer may be
+                # converted. It reads the surface partition, the fleet
+                # registry, and the pack's own classification constants, none
+                # of which a consumer checkout has, so it is source-only for
+                # the same reason the fleet helpers are.
+                "scripts/sd-ai-command-pack-thin-resweep.py",
             },
             set(install.SOURCE_ONLY_COMMAND_TARGETS),
         )
@@ -1414,6 +1420,35 @@ class InstallAuditTests(InstallTestCase):
             "sha256:" + "0" * 64,
         )
 
+    def test_a_receipt_conflict_installs_nothing_at_all(self) -> None:
+        # R20-C1. The test above asserts the exit code and the untouched
+        # symlink, and passed the whole time the payload was being written
+        # anyway: the receipts are written after the payload, so their
+        # conflicts were detected after it. Exit 2 read as "nothing happened"
+        # while the tree had already changed underneath it. The thin-conversion
+        # case is the damaging one -- a consumer whose machine surfaces were
+        # deliberately deleted gets them all back -- but the property is
+        # general, so assert it on a plain removed payload file.
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+
+        witness = root / "scripts/sd-ai-command-pack-full-check.sh"
+        self.assertTrue(witness.exists())
+        witness.unlink()
+
+        provenance = root / install.PROVENANCE_FILE
+        elsewhere = root / ".sd-ai-command-pack/moved-provenance.json"
+        provenance.rename(elsewhere)
+        provenance.symlink_to(elsewhere.name)
+
+        result = self.run_install(root)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertFalse(
+            witness.exists(),
+            "install refused with exit 2 and restored the payload anyway",
+        )
+
     def test_install_recovers_from_malformed_provenance(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)
@@ -1779,6 +1814,32 @@ class InstallAuditTests(InstallTestCase):
         self.assertIn("legacy pack reference remains", result.stdout)
         self.assertIn("install audit passed", result.stdout)
 
+    def test_installed_mode_reports_none_for_an_unrecognized_pin(self) -> None:
+        # The docstring promises None for an unrecognized value, and a reader
+        # that trusts it -- `if installed_mode(root):` rather than the one
+        # caller's `== THIN_MODE` -- would otherwise read `thin-corrupt` as a
+        # thin install and skip the completeness check on a damaged pin.
+        module = self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_installed_mode",
+        )
+        root = self.make_repo()
+        provenance = root / ".sd-ai-command-pack/provenance.json"
+        provenance.parent.mkdir(parents=True, exist_ok=True)
+
+        for mode, expected in (
+            ("thin", "thin"),
+            ("thin-corrupt", None),
+            ("fat", None),
+            (5, None),
+        ):
+            with self.subTest(mode=mode):
+                provenance.write_text(
+                    json.dumps({"version": "0.1.0", "mode": mode}) + "\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(module.installed_mode(root), expected)
+
     def test_install_audit_legacy_advisories_cover_all_pack_scripts(self) -> None:
         module = self.load_module_from_path(
             install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
@@ -1795,6 +1856,7 @@ class InstallAuditTests(InstallTestCase):
             "sd-ai-command-pack-check.py",
             # Born after the sd-command-pack -> sd-ai-command-pack rename, so it
             # has no legacy predecessor path to advise consumers about.
+            "sd-ai-command-pack-pack-update.sh",
             "sd-ai-command-pack-recovery-artifacts.py",
             "sd-ai-command-pack-review-full-check.sh",
             "sd-ai-command-pack-review-local.py",

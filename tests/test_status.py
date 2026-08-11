@@ -186,6 +186,116 @@ class StatusTests(InstallTestCase):
             check=False,
         )
 
+    def machine_scratch(self) -> tuple[Path, Path]:
+        """A scratch home and state root for machine-scope reporting.
+
+        Nothing in these tests may read or write the developer's real
+        ``~/.agents`` or state directory, so both are always overridden.
+        """
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-status-machine-")
+        self.addCleanup(tempdir.cleanup)
+        base = Path(tempdir.name)
+        home = base / "home"
+        home.mkdir()
+        return home, base / "state"
+
+    def write_machine_receipt(
+        self,
+        state_home: Path,
+        *,
+        pack_version: str = "9.9.9",
+        raw: str | None = None,
+    ) -> Path:
+        """Write a machine receipt the engine accepts, or arbitrary bytes."""
+        machine_dir = state_home / "machine"
+        machine_dir.mkdir(parents=True, exist_ok=True)
+        receipt = machine_dir / "machine-receipt.json"
+        if raw is not None:
+            receipt.write_text(raw, encoding="utf-8")
+            return receipt
+        digest = "sha256:" + hashlib.sha256(b"machine payload row").hexdigest()
+        receipt.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "packVersion": pack_version,
+                    "payloadDigest": digest,
+                    "installedAt": "2026-08-09T00:00:00Z",
+                    "sourceRoot": "/plugin/machine-payload",
+                    "files": [
+                        {
+                            "family": "agents-skills",
+                            "path": "sd-check/SKILL.md",
+                            "digest": digest,
+                            "executable": False,
+                        }
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return receipt
+
+    def machine_state_env(self, state_home: Path) -> dict[str, str]:
+        return {"SD_AI_COMMAND_PACK_STATE_HOME": str(state_home)}
+
+    def machine_section(self, status, root: Path, home: Path, state_home: Path):
+        """Collect machine scope with every destination root inside the scratch.
+
+        The module under test is the canonical ``templates/scripts/`` copy,
+        which has no sibling ``installer/``; the installed arrangement does, so
+        ``__file__`` points at the mirror the pack actually ships.
+        """
+        installed_status = PACK_ROOT / "scripts/sd-ai-command-pack-status.py"
+        with mock.patch.object(status, "__file__", str(installed_status)):
+            return status.collect_machine_scope(
+                root,
+                home=home,
+                environ={"XDG_CONFIG_HOME": str(home / ".config")},
+                state_home=state_home,
+            )
+
+    def plugin_listing(self, *entries: dict[str, str]) -> str:
+        return json.dumps(list(entries))
+
+    @contextlib.contextmanager
+    def stub_claude(self, status, listing: object, *, returncode: int = 0):
+        """Answer `claude plugin list --json` without a real CLI on PATH."""
+        with (
+            mock.patch.object(
+                status.shutil,
+                "which",
+                side_effect=lambda name: "/usr/bin/claude" if name == "claude" else None,
+            ),
+            mock.patch.object(
+                status,
+                "run_command",
+                return_value=status.CommandResult(
+                    returncode,
+                    listing if isinstance(listing, str) else json.dumps(listing),
+                ),
+            ),
+        ):
+            yield
+
+    def write_stub_claude_cli(self, directory: Path, listing: object) -> Path:
+        """A real executable `claude` for end-to-end subprocess coverage."""
+        directory.mkdir(parents=True, exist_ok=True)
+        script = directory / "claude"
+        payload = listing if isinstance(listing, str) else json.dumps(listing)
+        script.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = plugin ] && [ \"$2\" = list ]; then\n"
+            f"  cat <<'JSON'\n{payload}\nJSON\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return script
+
     def start_loop_state(
         self,
         root: Path,
@@ -2328,6 +2438,858 @@ class StatusTests(InstallTestCase):
         self.assertIsNotNone(by_name["alpha"]["report"])
         self.assertEqual(by_name["omega"]["status"], "available")
         self.assertIsNotNone(by_name["omega"]["report"])
+
+    def fleet_consumer_entry(
+        self,
+        name: str,
+        path: Path,
+        *,
+        priority: int,
+        **extra: object,
+    ) -> dict[str, object]:
+        entry: dict[str, object] = {
+            "name": name,
+            "github": f"example/{name}",
+            "pathHint": str(path),
+            "platforms": ["claude"],
+            "rolloutPriority": priority,
+            "candidateTimeoutSeconds": 60,
+            "candidatePrepare": [],
+            "candidateChecks": [["bash", "check.sh"]],
+        }
+        entry.update(extra)
+        return entry
+
+    def write_fleet_manifest(self, path: Path, entries: list[dict[str, object]]) -> Path:
+        path.write_text(json.dumps(fleet_manifest(entries)) + "\n", encoding="utf-8")
+        return path
+
+    def machine_scope_fixture(
+        self,
+        *,
+        state: str = "installed",
+        pack_version: str | None = "9.9.9",
+        plugin_version: str = "9.9.9",
+        comparison: str = "current",
+    ) -> dict[str, object]:
+        return {
+            "schemaVersion": 1,
+            "state": state,
+            "packVersion": pack_version,
+            "receiptPath": "/scratch/machine-receipt.json",
+            "detail": None,
+            "pluginId": "sd@sd-ai-command-pack",
+            "pluginVersion": plugin_version,
+            "pluginDetail": None,
+            "comparison": comparison,
+        }
+
+    def collect_fleet_with_machine(self, status, manifest: Path, scope: object):
+        """Collect a fleet against a fixed machine inventory.
+
+        The machine probe is stubbed rather than staged on disk so each test
+        states the machine half it is asserting about, and so the once-per-run
+        property can be asserted by call count.
+        """
+        probe = mock.Mock(return_value=scope)
+        with mock.patch.object(status, "collect_machine_scope", probe):
+            report = status.collect_fleet(
+                PACK_ROOT,
+                fleet_path=manifest,
+                network=False,
+                refs_refreshed=False,
+            )
+        return report, probe
+
+    def test_local_machine_scope_regression_reports_both_halves(self) -> None:
+        # PRD requirement 1: local mode reports the plugin and receipt versions,
+        # and labels an absent source `unavailable` rather than empty-healthy.
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        home, state_home = self.machine_scratch()
+        self.write_machine_receipt(state_home, pack_version="9.9.9")
+        with self.stub_claude(
+            status, [{"id": status.MACHINE_PLUGIN_ID, "version": "9.9.9"}]
+        ):
+            installed = self.machine_section(status, root, home, state_home)
+        self.assertEqual(installed["packVersion"], "9.9.9")
+        self.assertEqual(installed["pluginVersion"], "9.9.9")
+        self.assertEqual(installed["comparison"], "current")
+
+        home, state_home = self.machine_scratch()
+        with mock.patch.object(status.shutil, "which", return_value=None):
+            absent = self.machine_section(status, root, home, state_home)
+        self.assertEqual(absent["pluginVersion"], "unavailable")
+        self.assertTrue(absent["pluginDetail"])
+        self.assertIsNone(absent["packVersion"])
+        # An unreadable half must never present as agreement.
+        self.assertEqual(absent["comparison"], "unknown")
+
+    def test_status_pin_path_default_matches_the_fleet_library(self) -> None:
+        # The status fallback exists only for a FleetConsumer that predates
+        # schema 5; a drift between the two constants would silently read a
+        # different file than the registry documents.
+        status = self.load_status_module()
+        fleet = self.load_fleet_lib()
+        self.assertEqual(
+            status.DEFAULT_CONSUMER_PIN_PATH, fleet.DEFAULT_FLEET_PIN_PATH
+        )
+
+    def test_fleet_registry_rejects_bad_mode_and_escaping_pin_path(self) -> None:
+        status = self.load_status_module()
+        fleet = self.load_fleet_lib()
+        root = self.make_status_repo()
+        default = fleet.DEFAULT_FLEET_PIN_PATH
+        cases = (
+            ({"mode": "thick"}, "mode must be one of"),
+            # Wrong types, not just wrong values: JSON can carry a number or a
+            # bool where the registry documents a string.
+            ({"mode": 5}, "mode must be one of"),
+            ({"mode": True}, "mode must be one of"),
+            ({"pinPath": 5}, "pinPath must be a non-empty string"),
+            ({"pinPath": ["a"]}, "pinPath must be a non-empty string"),
+            ({"pinPath": "/etc/passwd"}, "pinPath must be a relative path"),
+            ({"pinPath": "../escape.json"}, "pinPath must be a relative path"),
+            ({"pinPath": "C:\\escape.json"}, "pinPath must be a relative path"),
+            ({"pinPath": "   "}, "pinPath must be a non-empty string"),
+        )
+        for index, (override, expected) in enumerate(cases):
+            with self.subTest(override=override):
+                manifest = self.write_fleet_manifest(
+                    root.parent / f"fleet-bad-{index}.json",
+                    [
+                        self.fleet_consumer_entry(
+                            "alpha", root, priority=10, **override
+                        )
+                    ],
+                )
+                with self.assertRaisesRegex(fleet.FleetConfigError, expected) as caught:
+                    fleet.load_fleet_consumers(manifest)
+                self.assertIn("alpha", str(caught.exception))
+                # The same failure reaches status as a usable configuration error.
+                with self.assertRaisesRegex(ValueError, expected):
+                    status.load_fleet(PACK_ROOT, manifest)
+
+        # Both fields are optional: omitting them reproduces schema-4 behaviour.
+        manifest = self.write_fleet_manifest(
+            root.parent / "fleet-default.json",
+            [self.fleet_consumer_entry("alpha", root, priority=10)],
+        )
+        consumer = fleet.load_fleet_consumers(manifest)[0]
+        self.assertEqual(consumer.mode, "fat")
+        self.assertEqual(consumer.pin_path, fleet.DEFAULT_FLEET_PIN_PATH)
+
+        # Surrounding whitespace is stripped rather than carried into the read:
+        # an unstripped value passes validation and then names a file that does
+        # not exist, reporting a healthy consumer as `absent`.
+        padded = self.write_fleet_manifest(
+            root.parent / "fleet-padded.json",
+            [
+                self.fleet_consumer_entry(
+                    "alpha", root, priority=10, pinPath=f"  {default}\t"
+                )
+            ],
+        )
+        self.assertEqual(fleet.load_fleet_consumers(padded)[0].pin_path, default)
+
+    def test_consumer_pin_reader_classifies_every_state(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        default = status.DEFAULT_CONSUMER_PIN_PATH
+
+        present = status.read_consumer_pin(root, default)
+        self.assertEqual(present["state"], "present")
+        self.assertEqual(present["version"], PACK_VERSION)
+        self.assertEqual(present["source"], default)
+
+        absent = status.read_consumer_pin(root, "nowhere/pin.json")
+        self.assertEqual(absent["state"], "absent")
+        self.assertIsNone(absent["version"])
+        self.assertIn("does not exist", absent["detail"])
+
+        broken = root / "broken-pin.json"
+        broken.write_text("{not json\n", encoding="utf-8")
+        result = status.read_consumer_pin(root, "broken-pin.json")
+        self.assertEqual(result["state"], "unreadable")
+        self.assertIsNone(result["version"])
+
+        versionless = root / "versionless-pin.json"
+        versionless.write_text(json.dumps({"pack": "sd"}) + "\n", encoding="utf-8")
+        result = status.read_consumer_pin(root, "versionless-pin.json")
+        self.assertEqual(result["state"], "unreadable")
+        self.assertIn("no version string", result["detail"])
+
+        # Load-time validation cannot see this: the registry path is relative
+        # and contains no "..", but the symlink leaves the checkout.
+        outside = root.parent / "outside-pin.json"
+        outside.write_text(json.dumps({"version": "6.6.6"}) + "\n", encoding="utf-8")
+        (root / "escaping-pin.json").symlink_to(outside)
+        result = status.read_consumer_pin(root, "escaping-pin.json")
+        self.assertEqual(result["state"], "unreadable")
+        self.assertIsNone(result["version"])
+
+    def test_fleet_all_fat_registry_ignores_machine_state(self) -> None:
+        # AC3 and the fleet-level gate together: with no thin consumer the
+        # machine inventory cannot change a single row, so a schema-5 registry
+        # naming no mode reports exactly as the schema-4 registry it replaces.
+        status = self.load_status_module()
+        current = self.make_status_repo(pack_version=PACK_VERSION)
+        stale = self.make_status_repo(pack_version="0.18.0")
+        manifest = self.write_fleet_manifest(
+            current.parent / "fleet.json",
+            [
+                self.fleet_consumer_entry("current", current, priority=10),
+                self.fleet_consumer_entry("stale", stale, priority=20),
+            ],
+        )
+
+        healthy, _ = self.collect_fleet_with_machine(
+            status, manifest, self.machine_scope_fixture()
+        )
+        broken, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                state="none",
+                pack_version=None,
+                plugin_version="unavailable",
+                comparison="unknown",
+            ),
+        )
+
+        def comparable(report):
+            rows = [
+                {key: value for key, value in row.items() if key not in {"pin", "installMode"}}
+                for row in report["repositories"]
+            ]
+            return rows, report["nextSteps"], report["followUps"]
+
+        self.assertEqual(comparable(healthy), comparable(broken))
+        for row in healthy["repositories"]:
+            self.assertEqual(row["installMode"], "fat")
+            self.assertIsNone(row["pin"])
+        # The inventory itself is still published; only the rows are gated.
+        self.assertIsInstance(healthy["machineScope"], dict)
+        self.assertTrue(
+            any("Refresh stale SD pack installations" in step for step in healthy["nextSteps"])
+        )
+        for step in healthy["nextSteps"]:
+            self.assertNotIn("machine SD install", step)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.render_fleet(healthy)
+        rendered = output.getvalue()
+        self.assertNotIn("Machine scope:", rendered)
+        self.assertIn("stale: clean; main; cached:synchronized; pack 0.18.0", rendered)
+
+    def test_fleet_thin_consumer_reports_pin_and_skew(self) -> None:
+        status = self.load_status_module()
+        fat = self.make_status_repo(pack_version="0.18.0")
+        thin = self.make_status_repo(pack_version="0.30.0")
+        manifest = self.write_fleet_manifest(
+            fat.parent / "fleet.json",
+            [
+                self.fleet_consumer_entry("fatty", fat, priority=10),
+                self.fleet_consumer_entry("thinny", thin, priority=20, mode="thin"),
+            ],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(pack_version="0.31.0", plugin_version="0.31.0"),
+        )
+
+        rows = {row["name"]: row for row in report["repositories"]}
+        self.assertEqual(rows["fatty"]["installMode"], "fat")
+        self.assertIsNone(rows["fatty"]["pin"])
+        self.assertEqual(rows["thinny"]["installMode"], "thin")
+        self.assertEqual(rows["thinny"]["pin"]["state"], "present")
+        self.assertEqual(rows["thinny"]["pin"]["version"], "0.30.0")
+
+        steps = report["nextSteps"]
+        # The thin consumer's pin lags the machine install, and the machine
+        # install lags the target: two distinct skew rows, neither a tree diff.
+        self.assertTrue(any("thinny" in step and "0.31.0" in step for step in steps))
+        self.assertTrue(any("Update the machine SD install (0.31.0)" in step for step in steps))
+        stale_rows = [step for step in steps if "Refresh stale SD pack installations" in step]
+        self.assertEqual(len(stale_rows), 1)
+        self.assertIn("fatty", stale_rows[0])
+        self.assertNotIn("thinny", stale_rows[0])
+        self.assertTrue(
+            any("thinny" in item["summary"] for item in report["followUps"])
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.render_fleet(report)
+        rendered = output.getvalue()
+        self.assertIn("Machine scope: installed 0.31.0", rendered)
+        self.assertIn("thinny: clean; main; cached:synchronized; pin 0.30.0", rendered)
+        self.assertIn("fatty: clean; main; cached:synchronized; pack 0.18.0", rendered)
+        # Both consumers need attention, by two different measures.
+        self.assertIn("2 need attention", rendered)
+
+    def test_fleet_thin_pin_states_and_unavailable_machine(self) -> None:
+        status = self.load_status_module()
+        thin = self.make_status_repo(pack_version=PACK_VERSION)
+        (thin / ".sd-ai-command-pack/provenance.json").unlink()
+        manifest = self.write_fleet_manifest(
+            thin.parent / "fleet.json",
+            [self.fleet_consumer_entry("thinny", thin, priority=10, mode="thin")],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                state="none",
+                pack_version=None,
+                plugin_version="unavailable",
+                comparison="unknown",
+            ),
+        )
+
+        row = report["repositories"][0]
+        self.assertEqual(row["pin"]["state"], "absent")
+        steps = report["nextSteps"]
+        self.assertTrue(any("Repair missing or unreadable thin consumer pins" in s for s in steps))
+        # An unavailable machine inventory is reported as unavailable, never as
+        # agreement with whatever the consumer pinned.
+        self.assertTrue(any("inventory is unavailable" in step for step in steps))
+        self.assertTrue(any("Install or repair the machine SD install" in s for s in steps))
+        summaries = [item["summary"] for item in report["followUps"]]
+        self.assertTrue(any("inventory is unavailable" in summary for summary in summaries))
+
+    def test_fleet_reports_plugin_versus_receipt_divergence(self) -> None:
+        status = self.load_status_module()
+        thin = self.make_status_repo(pack_version=PACK_VERSION)
+        manifest = self.write_fleet_manifest(
+            thin.parent / "fleet.json",
+            [self.fleet_consumer_entry("thinny", thin, priority=10, mode="thin")],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                pack_version=PACK_VERSION,
+                plugin_version="0.1.0",
+                comparison="skew",
+            ),
+        )
+
+        steps = report["nextSteps"]
+        divergence = [step for step in steps if step.startswith("Reconcile the SD plugin")]
+        self.assertEqual(len(divergence), 1)
+        self.assertIn("0.1.0", divergence[0])
+        self.assertIn(PACK_VERSION, divergence[0])
+        # The pin agrees with the machine receipt, so this row is the plugin's
+        # own divergence and not a restatement of pin skew.
+        self.assertFalse(any("Reconcile thin consumer pins" in step for step in steps))
+
+    def test_fleet_skew_rows_survive_human_truncation(self) -> None:
+        status = self.load_status_module()
+        skewed = self.make_status_repo(pack_version="0.1.0")
+        broken = self.make_status_repo(pack_version=PACK_VERSION)
+        (broken / ".sd-ai-command-pack/provenance.json").unlink()
+        dirty = self.make_status_repo(pack_version=PACK_VERSION)
+        (dirty / "README.md").write_text("uncommitted\n", encoding="utf-8")
+        stale = self.make_status_repo(pack_version="0.18.0")
+        manifest = self.write_fleet_manifest(
+            skewed.parent / "fleet.json",
+            [
+                self.fleet_consumer_entry("skewed", skewed, priority=10, mode="thin"),
+                self.fleet_consumer_entry("broken", broken, priority=20, mode="thin"),
+                self.fleet_consumer_entry("dirty", dirty, priority=30),
+                self.fleet_consumer_entry("stale", stale, priority=40),
+                self.fleet_consumer_entry(
+                    "gone", skewed.parent / "gone", priority=50
+                ),
+            ],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status,
+            manifest,
+            self.machine_scope_fixture(
+                pack_version="0.2.0", plugin_version="0.3.0", comparison="skew"
+            ),
+        )
+
+        # Four skew rows and three advisory rows: more than the human list can
+        # hold, which is exactly the case that used to lose a skew row.
+        self.assertEqual(len(report["nextSteps"]), status.HUMAN_ITEM_LIMIT)
+        self.assertEqual(len(report["followUps"]), 7)
+        skew_prefixes = (
+            "Repair missing or unreadable thin consumer pins",
+            "Reconcile thin consumer pins",
+            "Update the machine SD install",
+            "Reconcile the SD plugin",
+        )
+        for prefix in skew_prefixes:
+            with self.subTest(row=prefix):
+                # Every skew row survives truncation in the human list...
+                self.assertTrue(
+                    any(step.startswith(prefix) for step in report["nextSteps"])
+                )
+        # ...because the four of them are ranked ahead of every advisory row.
+        self.assertTrue(
+            all(
+                step.startswith(skew_prefixes)
+                for step in report["nextSteps"][: len(skew_prefixes)]
+            ),
+            report["nextSteps"],
+        )
+        # Follow-ups still carry the advisory rows truncation dropped.
+        summaries = [item["summary"] for item in report["followUps"]]
+        for advisory in (
+            "Resolve uncommitted fleet work",
+            "Refresh stale SD pack installations",
+        ):
+            with self.subTest(row=advisory):
+                self.assertTrue(any(s.startswith(advisory) for s in summaries))
+                self.assertFalse(
+                    any(step.startswith(advisory) for step in report["nextSteps"])
+                )
+
+    def test_fleet_collects_machine_scope_once_per_run(self) -> None:
+        status = self.load_status_module()
+        repos = [self.make_status_repo(pack_version=PACK_VERSION) for _ in range(3)]
+        manifest = self.write_fleet_manifest(
+            repos[0].parent / "fleet.json",
+            [
+                self.fleet_consumer_entry(f"member{index}", repo, priority=10 + index)
+                for index, repo in enumerate(repos)
+            ],
+        )
+
+        report, probe = self.collect_fleet_with_machine(
+            status, manifest, self.machine_scope_fixture()
+        )
+
+        # One machine probe for the whole run, not one per consumer: each
+        # consumer row keeps include_machine_scope=False.
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(len(report["repositories"]), 3)
+        for row in report["repositories"]:
+            self.assertIsNone(row["report"]["machineScope"])
+
+    def test_machine_scope_api_loads_the_engine_beside_the_script(self) -> None:
+        status = self.load_status_module()
+        # The installed arrangement: scripts/ beside installer/. The canonical
+        # templates/scripts/ copy has no sibling package, which is the absence
+        # covered by the next test.
+        installed_status = PACK_ROOT / "scripts/sd-ai-command-pack-status.py"
+        root_path = str(PACK_ROOT.resolve())
+        original_path = [entry for entry in status.sys.path if entry != root_path]
+
+        with (
+            mock.patch.object(status, "__file__", str(installed_status)),
+            mock.patch.object(status.sys, "path", original_path.copy()),
+        ):
+            machinescope = status.machine_scope_api()
+
+            self.assertEqual(status.sys.path, original_path)
+        self.assertTrue(hasattr(machinescope, "receipt_path"))
+        self.assertTrue(hasattr(machinescope, "status"))
+
+    def test_machine_scope_without_the_engine_is_unavailable_not_none(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, state_home = self.machine_scratch()
+        # A vendored consumer repository carries the scripts without the
+        # installer package: the receipt cannot be read at all, which is
+        # neither "no install recorded" nor a corrupt one.
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_status = Path(tmp) / "scripts/sd-ai-command-pack-status.py"
+            fake_status.parent.mkdir(parents=True)
+            with (
+                mock.patch.object(status, "__file__", str(fake_status)),
+                self.stub_claude(status, [{"id": status.MACHINE_PLUGIN_ID, "version": "9.9.9"}]),
+            ):
+                section = status.collect_machine_scope(
+                    root,
+                    home=home,
+                    environ={"XDG_CONFIG_HOME": str(home / ".config")},
+                    state_home=state_home,
+                )
+
+        self.assertEqual(section["state"], "unavailable")
+        self.assertNotEqual(section["state"], "none")
+        self.assertIn("not installed beside this script", section["detail"])
+        # A known plugin version cannot make an unreadable machine "current".
+        self.assertEqual(section["pluginVersion"], "9.9.9")
+        self.assertEqual(section["comparison"], "unknown")
+
+    def test_machine_scope_reports_receipt_states_and_comparisons(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        cases = (
+            # (receipt, plugin version, expected state, expected comparison)
+            (None, "9.9.9", "none", "skew"),
+            ("9.9.9", "9.9.9", "installed", "current"),
+            ("9.9.8", "9.9.9", "installed", "skew"),
+            (None, None, "none", "unknown"),
+            ("9.9.9", None, "installed", "unknown"),
+        )
+        for receipt_version, plugin_version, expected_state, expected_comparison in cases:
+            with self.subTest(receipt=receipt_version, plugin=plugin_version):
+                home, state_home = self.machine_scratch()
+                if receipt_version is not None:
+                    self.write_machine_receipt(state_home, pack_version=receipt_version)
+                listing = (
+                    [{"id": status.MACHINE_PLUGIN_ID, "version": plugin_version}]
+                    if plugin_version
+                    else []
+                )
+                with self.stub_claude(status, listing):
+                    section = self.machine_section(status, root, home, state_home)
+
+                self.assertEqual(section["schemaVersion"], 1)
+                self.assertEqual(section["state"], expected_state)
+                self.assertEqual(section["comparison"], expected_comparison)
+                self.assertEqual(section["packVersion"], receipt_version)
+                self.assertEqual(section["pluginId"], status.MACHINE_PLUGIN_ID)
+                self.assertEqual(
+                    section["pluginVersion"], plugin_version or "unavailable"
+                )
+                self.assertIsNone(section["detail"])
+                self.assertIn("machine-receipt.json", section["receiptPath"])
+
+    def test_malformed_machine_receipt_is_invalid_not_none(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, state_home = self.machine_scratch()
+        self.write_machine_receipt(state_home, raw="{broken\n")
+
+        with self.stub_claude(
+            status, [{"id": status.MACHINE_PLUGIN_ID, "version": "9.9.9"}]
+        ):
+            section = self.machine_section(status, root, home, state_home)
+
+        # A corrupt receipt is an anomaly, not an absent install: reporting
+        # "none" here would invite a silent reinstall over unknown state.
+        self.assertEqual(section["state"], "invalid")
+        self.assertNotEqual(section["state"], "none")
+        self.assertIsNone(section["packVersion"])
+        self.assertIn("receipt is unreadable", section["detail"])
+        self.assertEqual(section["comparison"], "skew")
+
+    def test_receipt_the_engine_refuses_is_invalid(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, state_home = self.machine_scratch()
+        # Well-formed JSON, but an entry naming a family the engine does not
+        # own: the receipt authorizes deletions, so it fails closed as a whole.
+        self.write_machine_receipt(
+            state_home,
+            raw=json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "packVersion": "9.9.9",
+                    "payloadDigest": "sha256:" + "0" * 64,
+                    "installedAt": "2026-08-09T00:00:00Z",
+                    "sourceRoot": "/plugin/machine-payload",
+                    "files": [
+                        {
+                            "family": "somewhere-else",
+                            "path": "sd-check/SKILL.md",
+                            "digest": "sha256:" + "0" * 64,
+                            "executable": False,
+                        }
+                    ],
+                }
+            ),
+        )
+
+        with self.stub_claude(status, []):
+            section = self.machine_section(status, root, home, state_home)
+
+        self.assertEqual(section["state"], "invalid")
+        self.assertIn("unknown family", section["detail"])
+        self.assertEqual(section["comparison"], "unknown")
+
+    def test_every_plugin_discovery_failure_reports_unavailable_and_unknown(
+        self,
+    ) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        plugin_id = status.MACHINE_PLUGIN_ID
+        cases = (
+            ("cli absent", None, 0, "the Claude Code CLI is not on PATH"),
+            ("nonzero exit", "[]", 3, "exited 3"),
+            ("malformed json", "{not json", 0, "output is not JSON"),
+            ("not an array", '{"id": "sd"}', 0, "did not return a plugin array"),
+            ("plugin missing", '[{"id": "other@market", "version": "1"}]', 0, "is not installed"),
+            (
+                "plugin duplicated",
+                json.dumps(
+                    [
+                        {"id": plugin_id, "version": "9.9.9"},
+                        {"id": plugin_id, "version": "9.9.8"},
+                    ]
+                ),
+                0,
+                "more than once",
+            ),
+            (
+                "entry without a version",
+                json.dumps([{"id": plugin_id}]),
+                0,
+                "carries no version",
+            ),
+        )
+        for label, listing, returncode, expected_detail in cases:
+            with self.subTest(failure=label):
+                home, state_home = self.machine_scratch()
+                # An installed, readable receipt: only the plugin half fails,
+                # so nothing but a guess could report "current" here.
+                self.write_machine_receipt(state_home, pack_version="9.9.9")
+                if listing is None:
+                    context = mock.patch.object(
+                        status.shutil, "which", return_value=None
+                    )
+                else:
+                    context = self.stub_claude(status, listing, returncode=returncode)
+                with context:
+                    section = self.machine_section(status, root, home, state_home)
+
+                self.assertEqual(section["state"], "installed")
+                self.assertEqual(section["pluginVersion"], "unavailable")
+                self.assertIn(expected_detail, section["pluginDetail"])
+                self.assertEqual(section["comparison"], "unknown")
+
+    def test_machine_scope_survives_an_engine_that_raises(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        class BrokenEngine:
+            STATUS_SCHEMA_VERSION = 1
+
+            @staticmethod
+            def status(**kwargs: object) -> dict[str, object]:
+                raise RuntimeError("cannot resolve state root")
+
+        with (
+            mock.patch.object(status, "machine_scope_api", return_value=BrokenEngine),
+            self.stub_claude(status, []),
+        ):
+            section = status.collect_machine_scope(root)
+
+        self.assertEqual(section["state"], "unavailable")
+        self.assertIn("cannot resolve state root", section["detail"])
+        self.assertEqual(section["comparison"], "unknown")
+
+    def test_machine_scope_rejects_an_unexpected_engine_schema_or_state(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        class SchemaSkewEngine:
+            STATUS_SCHEMA_VERSION = 1
+
+            @staticmethod
+            def status(**kwargs: object) -> dict[str, object]:
+                return {"schemaVersion": 99, "state": "installed"}
+
+        class UnknownStateEngine:
+            STATUS_SCHEMA_VERSION = 1
+
+            @staticmethod
+            def status(**kwargs: object) -> dict[str, object]:
+                return {"schemaVersion": 1, "state": "probably-fine"}
+
+        for engine, expected in (
+            (SchemaSkewEngine, "unexpected schema version"),
+            (UnknownStateEngine, "unsupported state"),
+        ):
+            with self.subTest(engine=engine.__name__):
+                with (
+                    mock.patch.object(status, "machine_scope_api", return_value=engine),
+                    self.stub_claude(status, []),
+                ):
+                    section = status.collect_machine_scope(root)
+
+                self.assertEqual(section["state"], "unavailable")
+                self.assertIn(expected, section["detail"])
+                self.assertEqual(section["comparison"], "unknown")
+
+    def test_machine_scope_human_line_spells_out_both_halves(self) -> None:
+        status = self.load_status_module()
+
+        self.assertEqual(
+            status.format_machine_scope(
+                {
+                    "state": "installed",
+                    "packVersion": "9.9.9",
+                    "detail": None,
+                    "pluginVersion": "9.9.9",
+                    "pluginDetail": None,
+                    "comparison": "current",
+                }
+            ),
+            "installed 9.9.9; plugin 9.9.9; current",
+        )
+        self.assertEqual(
+            status.format_machine_scope(
+                {
+                    "state": "none",
+                    "packVersion": None,
+                    "detail": None,
+                    "pluginVersion": "unavailable",
+                    "pluginDetail": "the Claude Code CLI is not on PATH",
+                    "comparison": "unknown",
+                }
+            ),
+            "none; plugin unavailable (the Claude Code CLI is not on PATH); unknown",
+        )
+        self.assertEqual(
+            status.format_machine_scope(
+                {
+                    "state": "invalid",
+                    "packVersion": None,
+                    "detail": "receipt is unreadable",
+                    "pluginVersion": "9.9.9",
+                    "pluginDetail": None,
+                    "comparison": "skew",
+                }
+            ),
+            "invalid (receipt is unreadable); plugin 9.9.9; skew",
+        )
+        self.assertEqual(
+            status.format_machine_scope(None),
+            "not collected; plugin unavailable; unknown",
+        )
+
+    def test_only_an_invalid_machine_receipt_becomes_a_status_anomaly(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        def report_for(section: dict) -> dict:
+            with mock.patch.object(
+                status, "collect_machine_scope", return_value=section
+            ):
+                return status.collect_local(
+                    root,
+                    remote="origin",
+                    supplied_default=None,
+                    source_branch=None,
+                    github_repo=None,
+                    network=False,
+                    refs_refreshed=False,
+                    expect_clean=False,
+                    keep_remote_branch=False,
+                    dry_run=False,
+                    prior_anomalies=(),
+                )
+
+        # A corrupt receipt is promoted exactly like an invalid work-loop or
+        # recovery-artifact ledger: it gates --expect-clean and earns a
+        # follow-up. An unreadable one does not, matching those same two.
+        invalid = report_for(
+            {"state": "invalid", "detail": "receipt is unreadable"}
+        )
+        self.assertTrue(
+            any(
+                "machine-scope receipt is invalid" in anomaly
+                and "receipt is unreadable" in anomaly
+                for anomaly in invalid["anomalies"]
+            ),
+            invalid["anomalies"],
+        )
+
+        for state in ("unavailable", "none", "installed"):
+            with self.subTest(state=state):
+                other = report_for({"state": state, "detail": "engine is absent"})
+                self.assertFalse(
+                    [
+                        anomaly
+                        for anomaly in other["anomalies"]
+                        if "machine-scope" in anomaly
+                    ],
+                    other["anomalies"],
+                )
+
+    def test_fleet_consumer_reports_omit_machine_scope(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        report = status.collect_local(
+            root,
+            remote="origin",
+            supplied_default=None,
+            source_branch=None,
+            github_repo=None,
+            network=False,
+            refs_refreshed=False,
+            expect_clean=False,
+            keep_remote_branch=False,
+            dry_run=False,
+            prior_anomalies=(),
+            include_machine_scope=False,
+        )
+
+        # Machine scope describes the machine, so a fleet run must not repeat
+        # one identical answer (and one `claude` invocation) per consumer.
+        self.assertIsNone(report["machineScope"])
+
+    def test_installed_status_reports_machine_scope_end_to_end(self) -> None:
+        # The installed arrangement (scripts/ beside installer/) with a real
+        # `claude` stub on PATH: the only test that exercises the engine seam,
+        # the CLI seam, and the human line together.
+        status_script = PACK_ROOT / "scripts/sd-ai-command-pack-status.py"
+        root = self.make_status_repo()
+        home, state_home = self.machine_scratch()
+        self.write_machine_receipt(state_home, pack_version="9.9.9")
+        stub_bin = home / "stub-bin"
+        self.write_stub_claude_cli(
+            stub_bin,
+            [
+                {
+                    "id": "sd@sd-ai-command-pack",
+                    "version": "9.9.9",
+                    "scope": "user",
+                    "enabled": True,
+                }
+            ],
+        )
+        env = {
+            **os.environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "HOME": str(home),
+            "PATH": f"{stub_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            **self.machine_state_env(state_home),
+        }
+
+        def run(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, str(status_script), "--repo", str(root), "--no-network", *args],
+                cwd=root,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        machine = run("--json")
+        human = run()
+
+        self.assertEqual(machine.returncode, 0, machine.stdout)
+        section = json.loads(machine.stdout)["machineScope"]
+        self.assertEqual(section["schemaVersion"], 1)
+        self.assertEqual(section["state"], "installed")
+        self.assertEqual(section["packVersion"], "9.9.9")
+        self.assertEqual(section["pluginVersion"], "9.9.9")
+        self.assertEqual(section["comparison"], "current")
+        self.assertEqual(section["pluginId"], "sd@sd-ai-command-pack")
+        # Advisory only: machine skew never changes the exit status.
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn(
+            "- machine scope: installed 9.9.9; plugin 9.9.9; current", human.stdout
+        )
 
     def test_fleet_loader_requires_pack_identity(self) -> None:
         status = self.load_status_module()

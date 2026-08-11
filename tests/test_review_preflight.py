@@ -3899,10 +3899,10 @@ assert.deepEqual(
             "`docs/current.md:12:5` and\n"
             "`scripts/sd-ai-command-pack-housekeeping.sh:34-56` for details.\n"
             "Also `scripts/sd-ai-command-pack-install-audit.py:7:3` and\n"
-            "`scripts/sd-ai-command-pack-review-local.sh:10-20:4`.\n"
+            "`scripts/sd-ai-command-pack-review-scope.sh:10-20:4`.\n"
             "Multi-range `scripts/sd-ai-command-pack-full-check.sh:1-2,3-4,5-6`.\n"
             "Approx `scripts/sd-ai-command-pack-install-audit.py:~145` and\n"
-            "`scripts/sd-ai-command-pack-review-local.sh:~315-366`.\n"
+            "`scripts/sd-ai-command-pack-review-scope.sh:~315-366`.\n"
             "Broken: `docs/definitely-missing.md:5`.\n",
             encoding="utf-8",
         )
@@ -3926,10 +3926,10 @@ assert.deepEqual(
         self.assertNotIn("current.md:12:5", result.stdout)
         self.assertNotIn("housekeeping.sh:34-56", result.stdout)
         self.assertNotIn("install-audit.py:7:3", result.stdout)
-        self.assertNotIn("review-local.sh:10-20:4", result.stdout)
+        self.assertNotIn("review-scope.sh:10-20:4", result.stdout)
         self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
         self.assertNotIn("install-audit.py:~145", result.stdout)
-        self.assertNotIn("review-local.sh:~315-366", result.stdout)
+        self.assertNotIn("review-scope.sh:~315-366", result.stdout)
 
     def test_review_preflight_preserves_archived_deleted_path_references(
         self,

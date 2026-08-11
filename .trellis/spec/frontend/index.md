@@ -6,50 +6,29 @@
 
 ## Scope
 
-Use these specs when changing files under `templates/`, especially:
+Use these specs when changing any skill or command adapter under `templates/`.
+Do not work from a list written here: command surfaces are added and retired,
+and a hand-maintained inventory in a spec file goes stale silently. Enumerate
+the live set instead:
 
-- `templates/.agents/skills/sd-review-pr/SKILL.md`
-- `templates/.agents/skills/sd-full-check/SKILL.md`
-- `templates/.agents/skills/sd-housekeeping/SKILL.md`
-- `templates/.agents/skills/sd-work-backlog/SKILL.md`
-- `templates/.agents/skills/sd-start/SKILL.md`
-- `templates/.agents/skills/sd-continue/SKILL.md`
-- `templates/.agents/skills/sd-finish-work/SKILL.md`
-- `templates/.agents/skills/sd-full-check/SKILL.md`
-- `templates/.agents/skills/sd-housekeeping/SKILL.md`
-- `templates/.agents/skills/sd-update-spec/SKILL.md`
-- `templates/.claude/commands/sd/start.md`
-- `templates/.claude/commands/sd/continue.md`
-- `templates/.claude/commands/sd/finish-work.md`
-- `templates/.claude/commands/sd/full-check.md`
-- `templates/.claude/commands/sd/housekeeping.md`
-- `templates/.claude/commands/sd/work-backlog.md`
-- `templates/.claude/commands/sd/review-pr.md`
-- `templates/.claude/commands/sd/update-spec.md`
-- `templates/.commands/sd-start.md`
-- `templates/.commands/sd-continue.md`
-- `templates/.commands/sd-finish-work.md`
-- `templates/.commands/sd-full-check.md`
-- `templates/.commands/sd-housekeeping.md`
-- `templates/.commands/sd-work-backlog.md`
-- `templates/.commands/sd-review-pr.md`
-- `templates/.commands/sd-update-spec.md`
-- `templates/.gemini/commands/sd/start.toml`
-- `templates/.gemini/commands/sd/continue.toml`
-- `templates/.gemini/commands/sd/finish-work.toml`
-- `templates/.gemini/commands/sd/full-check.toml`
-- `templates/.gemini/commands/sd/housekeeping.toml`
-- `templates/.gemini/commands/sd/work-backlog.toml`
-- `templates/.gemini/commands/sd/review-pr.toml`
-- `templates/.gemini/commands/sd/update-spec.toml`
-- `templates/.github/prompts/sd-start.prompt.md`
-- `templates/.github/prompts/sd-continue.prompt.md`
-- `templates/.github/prompts/sd-finish-work.prompt.md`
-- `templates/.github/prompts/sd-full-check.prompt.md`
-- `templates/.github/prompts/sd-housekeeping.prompt.md`
-- `templates/.github/prompts/sd-work-backlog.prompt.md`
-- `templates/.github/prompts/sd-review-pr.prompt.md`
-- `templates/.github/prompts/sd-update-spec.prompt.md`
+```bash
+# every shipped skill
+ls templates/.agents/skills
+# every generated adapter for one surface, across all platforms
+git ls-files 'templates/**/*<surface>*'
+# the authored neutral bodies the generators read
+ls .github/command-sources
+```
+
+`manifest.json` is the authority on what ships; `.github/command-sources/` is
+the authority on what is authored by hand. The generated adapters under
+`templates/.claude/`, `templates/.commands/`, `templates/.gemini/`, and
+`templates/.github/prompts/` derive from those two, so edit the source and run
+`make generate` rather than editing an adapter directly.
+
+The primary surfaces to know are `sd-check` (deterministic verification) and
+`sd-review` (the routed review lifecycle); `sd-ship` composes the
+publish-to-merge chain and `sd-housekeeping` owns the merge gate.
 
 OpenCode command targets install from the generated guarded
 `templates/.commands/` sources. Hand-authored neutral bodies live under

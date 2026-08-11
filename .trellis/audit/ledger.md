@@ -814,7 +814,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   regressions in those lanes are invisible to the owners.
 - fix: Delete the never-instantiated legacy fallbacks and fold the optional lanes into one
   explicitly optional section.
-- notes: tracked -> .trellis/tasks/07-24-remove-retired-review-surfaces R10 (prd updated 2026-07-28): enumerates the PRISM/GITO/full-check env families, deletes the lanes they gate, and removes the Makefile:92 disabling in the same change.
+- notes: owner filed 2026-08-10: `08-09-retire-review-pr-surface`, which deletes `scripts/sd-ai-command-pack-full-check.sh` and recomposes `make check` around `sd-check`. 07-24-remove-retired-review-surfaces was narrowed to the `sd-full-check` and `sd-review-local` command surfaces and left the script in place, so 0.65.0 does not change this finding. If 08-09 keeps any lane of the script alive, that lane inherits this cleanup.
 
 ## A-044 — Pack-repo fleet-refresh command adapters are frozen, so the only surface that can run fleet-refresh lacks the checkout-trust gate
 - status: open
@@ -855,7 +855,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   and the main delivery path runs the predecessor, so successor guarantees never apply.
 - fix: Pick one lifecycle, pre-register `RetiredCommandSurface` rows with a removal version,
   and repoint sd-ship Stage 2 at `sd-review scope=pr`.
-- notes: tracked -> .trellis/tasks/07-28-retire-transitional-review-surfaces (schedule + interim, created 2026-07-28 with explicit user consent via audit.followups); .trellis/tasks/07-24-remove-retired-review-surfaces R8 binds deletion to the pre-registered removed_version; .trellis/tasks/07-24-simplify-review-shipping-composition R7/R8 repoint sd-ship Stage 2 and add the doc decision point. Ownership of the Stage 2 repoint was decided 2026-07-28: R7 owns it solely, and the retirement task dropped its duplicate claim and now depends on R7 landing first. All three prds updated 2026-07-28.
+- notes: tracked -> .trellis/tasks/08-09-retire-review-pr-surface (re-owned 2026-08-09). 0.65.0 removed the `sd-full-check` and `sd-review-local` surfaces; `sd-review-pr` is the remaining predecessor lifecycle and 08-09 owns its retirement. Prior ownership: .trellis/tasks/07-28-retire-transitional-review-surfaces (schedule + interim), 07-24-remove-retired-review-surfaces R8 (binding deletion to the pre-registered removed_version), and 07-24-simplify-review-shipping-composition R7 (sole owner of the sd-ship Stage 2 repoint).
 
 ## A-046 — User-local state-root and private-directory helpers are implemented three to four times with divergent semantics
 - status: open
@@ -1100,7 +1100,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   script that does not exist there.
 - fix: Move the fleet recheck into the source-only sd-fleet-refresh skill and leave a
   one-line pointer.
-- notes: tracked -> .trellis/tasks/07-24-remove-retired-review-surfaces R9 (prd updated 2026-07-28): relocates the fleet recheck into the source-only sd-fleet-refresh skill before deletion, rather than losing it.
+- notes: tracked -> .trellis/tasks/08-09-retire-review-pr-surface (re-owned 2026-08-09). The finding is about the shipped `sd-review-pr` skill, which 07-24 no longer touches after its narrowing; relocating the fleet recheck into the source-only sd-fleet-refresh skill before deletion travels with the sd-review-pr retirement.
 
 ## A-060 — SOURCE_ONLY_ALLOWED_PACK_FILES lists a file that is actually shipped
 - status: open
@@ -1853,7 +1853,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   degrades and then hard-fails at exec.
 - fix: Cap or skip the fallback filter and let `--vs` bound the scope; collapse the pipeline
   and delete the identity function.
-- notes: tracked -> .trellis/tasks/07-24-remove-retired-review-surfaces R11 (prd updated 2026-07-28) records resolution by deletion; interim fix belongs to .trellis/tasks/07-28-retire-transitional-review-surfaces if removal slips past the announced removed_version.
+- notes: owner filed 2026-08-10: `08-09-retire-review-pr-surface`, which deletes `scripts/sd-ai-command-pack-full-check.sh`. 0.65.0 removed the `sd-full-check` command surface but kept the script as the pack-source gate, so the joined `--filter` argv is still live until 08-09 lands. If that task keeps the gito lane in any form, the argv cap moves with it.
 
 ## A-103 — review-local digests changed files with unbounded whole-file reads though a streaming hasher already exists
 - status: open
@@ -2051,7 +2051,7 @@ Findings recorded by sd-audit-repo; managed by sd-audit-repo — humans may edit
   preflight that did not run and drops KB skips the same file requires it to report.
 - fix: Regenerate the step list from `main()`, add the KB lane to the Expected Report, and
   mirror to the template twin.
-- notes: tracked -> .trellis/tasks/07-24-remove-retired-review-surfaces R11 (prd updated 2026-07-28) records resolution by deletion; interim accuracy fix belongs to .trellis/tasks/07-28-retire-transitional-review-surfaces if removal slips past the announced removed_version.
+- notes: resolved by deletion in 0.65.0 (.trellis/tasks/07-24-remove-retired-review-surfaces): the `sd-full-check` skill and every generated copy of it are removed, so the stale "What It Does" section no longer ships. Left open for the next `sd-audit-repo` pass to confirm and close.
 
 ## A-115 — Five shipped scripts are missing from the installed guide inventory and one has no documentation anywhere
 - status: open

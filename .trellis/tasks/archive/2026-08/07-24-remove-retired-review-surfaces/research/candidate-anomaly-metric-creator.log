@@ -1,0 +1,5 @@
+candidate validation failed for 1 consumer(s); ledger was not updated
+sd-ai-command-pack candidate: 0.65.0
+failed  P90 platypeeps/anomaly-metric-creator (6.3s)
+  candidate check 2 failed with exit 1: python3 tools/check_copilot_instruction_contract.py
+/private/var/folders/49/lgq0px596nq4sf2vmcwbl2bh0000gn/T/sd-pack-fleet-candidate-g8cdnz_k/anomaly-metric-creator: missing copied file for SD AI command-pack review local script: scripts/sd-ai-command-pack-review-local.sh

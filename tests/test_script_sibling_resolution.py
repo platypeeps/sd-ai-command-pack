@@ -89,6 +89,7 @@ ALLOWED_LITERALS: dict[str, tuple[str, frozenset[str]]] = {
                 "scripts/sd-ai-command-pack-fleet-wave-plan.py",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
+                "scripts/sd-ai-command-pack-thin-resweep.py",
                 "scripts/sd_ai_command_pack_fleet_lib.py",
                 "scripts/sd_ai_command_pack_lib.py",
             }
@@ -107,7 +108,6 @@ ALLOWED_LITERALS: dict[str, tuple[str, frozenset[str]]] = {
                 "scripts/sd-ai-command-pack-install-audit.py",
                 "scripts/sd-ai-command-pack-pr-body-scope.py",
                 "scripts/sd-ai-command-pack-review-learnings.py",
-                "scripts/sd-ai-command-pack-review-local.sh",
                 "scripts/sd-ai-command-pack-review-scope.sh",
                 "scripts/sd-ai-command-pack-shell-lib.sh",
                 "scripts/sd_ai_command_pack_*.py",

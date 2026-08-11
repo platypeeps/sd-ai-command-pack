@@ -248,9 +248,12 @@ resolution, CI, and the final report.
   attempt that references the prior receipt and is allowed only when backend
   capability and repository policy permit it.
 - R33: Execute the child order explicitly: read-only check, unified review,
-  routed-review operator UX, shipping composition, then retirement. Do not
-  expose a mixed old/new public surface as a completed release between those
-  steps.
+  routed-review operator UX, shipping composition, then retirement. Retirement
+  runs in two children: 07-24-remove-retired-review-surfaces drops the
+  `sd-full-check` and `sd-review-local` surfaces, and
+  08-09-retire-review-pr-surface drops the remaining `sd-review-pr` surface.
+  Do not expose a mixed old/new public surface as a completed release between
+  those steps.
 - R34: The final public experience has one vocabulary and authority model:
   `sd-check` checks, `sd-review` reviews, `sd-create-pr` publishes, `sd-ship`
   composes delivery, and `sd-housekeeping` merges/cleans. No other public or

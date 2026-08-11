@@ -12,6 +12,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from installer.conversion import THIN_MODE
 from installer.fileops import InstallResult, RemoveResult
 from installer.registry import (
     ACTIVE_TRELLIS_PLATFORM_MARKERS,
@@ -239,6 +240,25 @@ def _validate_provenance(
             errors.append(f"vouched target content drifted: {relative}")
 
 
+def _thin_pinned_platforms(payload: dict | None) -> tuple[str, ...]:
+    """Platforms a thin install still serves, read from the provenance pin.
+
+    A thin receipt no longer lists the machine-provided surfaces, so inferring
+    platforms from it would shrink the set to whatever happens to be
+    repo-native -- and every fleet reader comparing installed platforms against
+    the registry would then reject the consumer. The platform selection did not
+    change; only where its surfaces live did.
+    """
+    if not isinstance(payload, dict) or payload.get("mode") != THIN_MODE:
+        return ()
+    platforms = payload.get("platforms")
+    if not isinstance(platforms, list):
+        return ()
+    return tuple(
+        sorted({name for name in platforms if isinstance(name, str) and name})
+    )
+
+
 def inspect_receipts(target: Path) -> ReceiptState:
     """Read and validate installed receipts without mutating the target."""
     occupied = [
@@ -268,6 +288,9 @@ def inspect_receipts(target: Path) -> ReceiptState:
     installed_version, platforms = _manifest_platforms(
         manifest_payload, targets, errors
     )
+    pinned_platforms = _thin_pinned_platforms(provenance_payload)
+    if pinned_platforms:
+        platforms = pinned_platforms
 
     for relative in sorted(targets):
         destination = target / relative

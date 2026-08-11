@@ -19,16 +19,12 @@ Reference files:
 - `templates/.agents/skills/sd-status/SKILL.md`
 - `templates/.commands/sd-status.md`
 - `templates/.agents/skills/sd-review-pr/SKILL.md`
-- `templates/.agents/skills/sd-review-local/SKILL.md`
-- `templates/.agents/skills/sd-full-check/SKILL.md`
 - `templates/.agents/skills/sd-housekeeping/SKILL.md`
 - `templates/.agents/skills/sd-work-backlog/SKILL.md`
 - `templates/.agents/skills/sd-continue/SKILL.md`
 - `templates/.agents/skills/sd-finish-work/SKILL.md`
 - `templates/.agents/skills/sd-update-spec/SKILL.md`
 - `templates/scripts/sd-ai-command-pack-review-full-check.sh`
-- `templates/scripts/sd-ai-command-pack-review-local.sh`
-- `templates/.commands/sd-review-local.md`
 - `templates/.commands/sd-work-backlog.md`
 - `templates/.commands/sd-review-pr.md`
 - `templates/.claude/commands/sd/continue.md`
@@ -1028,8 +1024,7 @@ Correct: consume the typed sd-check result and configure argv-only project rows
 - Non-PR scopes never stage, commit, push, or touch GitHub. PR review fixes use
   one focused commit and re-enter on the new exact head.
 - Keep `sd-review` additive until the separately owned retirement task deletes
-  legacy surfaces. It must not call or alias `sd-review-local` or
-  `sd-review-pr`.
+  the remaining legacy surface. It must not call or alias `sd-review-pr`.
 
 ### 4. Validation & Error Matrix
 
@@ -1303,9 +1298,9 @@ Correct: keep current action rows complete, cluster only historical evidence,
 ```
 
 The `sd-check` shared skill defines the canonical deterministic local
-verification contract. During migration, `sd-full-check` remains an independent
-legacy surface only; callers must not alias, fall back to, or infer it from
-`sd-check`.
+verification contract. It is the only local verification command surface;
+`scripts/sd-ai-command-pack-full-check.sh` is a pack-source release gate with
+no command surface and is not reachable from `sd-check`.
 
 The `sd-create-pr` shared skill should never stop only because the current
 checkout is on the repository default branch. It should create a feature
@@ -1469,70 +1464,14 @@ not shell instructions. Secure temporary creation plus option-safe cleanup are
 part of this contract; `gh pr create --fill` remains valid when no custom body
 is needed.
 
-The `sd-review-local` shared skill should continue to define the interactive
-local review/fix loop while delegating runner-provider execution to
-`scripts/sd-ai-command-pack-review-local.sh`. Its argument selects review
-scope:
-
-- `sd-review-local` reviews local changes first; when no local changes exist,
-  it reviews the current branch diff against the configured base ref.
-- `sd-review-local all` reviews the full checked-out repository and should not
-  infer scope from dirty-state or branch diffs.
-- Both scopes should default to the configured local providers, currently Prism
-  and Gito, and remain open to repo-local custom providers named through
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS`.
-- The generated Claude adapter should add native Codex CLI review as an
-  automatic peer lane only for normal current-diff scope. This host lane is not
-  a runner tool name and must not change `--list-tools`, positional tool
-  selection, or non-Claude adapters.
-- Map local staged, unstaged, or untracked scope to
-  `codex review --uncommitted`; map a clean-tree branch diff to
-  `codex review --base <resolved-ref>` using the same base selected by the
-  shared skill.
-- Check `command -v codex` before capability-checking `codex review --help` for
-  the required target flag and before launching paid work. Start the runner and
-  Codex as separate Claude background Bash tasks before waiting, then collect
-  both terminal results even when one lane fails.
-- A missing executable, failed help probe, or incompatible Codex CLI should not
-  start a Codex task and should visibly fall back to the selected runner stack.
-  This optional-lane skip is not a runner failure. A started Codex failure
-  preserves successful runner findings but prevents a clean combined-review
-  claim.
-- Full-codebase `all` mode should skip Codex visibly rather than run it against
-  a narrower target. Native Codex review has no equivalent repository-wide
-  target.
-- The Claude lane must call the supported Codex CLI directly. Do not inspect,
-  install, patch, or invoke the OpenAI Codex Claude plugin or its managed cache;
-  plugin lifecycle remains independent.
-- Custom provider commands are shell snippets supplied by the target repo or
-  user configuration; run them with `bash -c` from the repo root so profile
-  startup files do not unexpectedly change review behavior.
-- Standard review exclusions must stay aligned across providers. Prism receives
-  exclusions from the runner through `--exclude`; Gito receives distributed
-  defaults through `.gito/config.toml`, with the runner also filtering full
-  codebase path lists to tracked, existing files outside excluded top-level
-  directories.
-- Gito HTTP 429 handling should retry only when recent output contains an
-  explicit error-like 429 or slow-down response. Do not retry because prose,
-  docs, or source examples mention `429`.
-- The runner must register temporary files as they are created and remove them
-  through its cleanup trap, including paths created by Prism chunking, Gito
-  output capture, and review path/filter generation.
-
-Tests should prove that the Claude insertion is generated from a bounded,
-fail-closed anchor; that neutral, Gemini, GitHub, and later-platform adapters do
-not inherit it; that generated content has no plugin/cache coupling; and that
-the shared skill preserves scope parity, joined-result handling, reruns, and
-visible degradation.
-
 ## Scenario: Full-Check Prism Local-First Scope
 
 ### 1. Scope / Trigger
 
 - Trigger: full-check selects Prism targets while committed branch work and
   local staged or unstaged work coexist.
-- Apply only to the full-check Prism lane; `sd-review-local`, Gito, and
-  full-codebase review retain their existing owners and contracts.
+- Apply only to the full-check Prism lane; Gito and full-codebase review
+  retain their existing owners and contracts.
 
 ### 2. Signatures
 
@@ -1596,16 +1535,8 @@ Correct: review every non-empty local layer, then review the committed range on 
 ### 2. Signatures
 
 - Shared helper: `run_command_with_timeout <seconds> <command> [args...]`.
-- Prism timeout: `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS`
-  (default `300`).
-- Gito timeout: `SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS`
-  (default `600`).
 - Full-check Gito timeout:
-  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS`, falling back to the
-  local-review Gito timeout and then `600`.
-- Prism fallback failure budget:
-  `SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES`
-  (default `3`).
+  `SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS` (default `600`).
 
 ### 3. Contracts
 

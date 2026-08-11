@@ -27,16 +27,38 @@ keep a non-executable mode while every other `bin/` entry gets one.
 `.claude/rules/**` is `consumer-config` in the partition and therefore never
 reaches the plugin: consumers keep those files wherever the payload lives.
 
+Three further trees make the plugin the *only* thing a machine needs in order
+to install the non-Claude surfaces as well:
+
+- `installer/**` — the installer modules `installer.machinescope` imports,
+  enumerated from the import graph rather than a hand-kept list;
+- `machine-payload/**` — the machine-scope payload built by
+  `installer.machinestage`, in target-relative layout with its bundled
+  `partition.json`, which is what gates it at install time;
+- `bin/sd-machine-install` — a bootstrap that puts the plugin root on
+  `sys.path` and calls the engine, which is how code inside a plugin root
+  becomes importable without an install step.
+
+`installer/` and `machine-payload/` are siblings at the plugin root because
+that is where the engine looks for its default payload. Neither tree goes
+through this build's rewrite or gates: `installer/**` is code, and the machine
+payload already passed the machine profile's own residue and closure gates,
+which relocate references to `~/.agents/bin` instead of stripping them.
+
 Markdown bodies are rewritten on the way in (the authored templates are
 untouched): a `scripts/`-prefixed pack script reference becomes the bare
 command name, which resolves through `bin/` on the Bash tool PATH. `node
 <name>.mjs` loses its runner prefix, because `node` does not PATH-search a
-script operand while `bash` does. Plugin command copies also gain the YAML
-frontmatter description authored in `.github/command-sources/<name>.md`; the
-Claude adapter drops it because Claude reads the skill, but a plugin command
-without a description fails `claude plugin validate --strict`.
+script operand while `bash` does. The rewrite rules and both gates live in
+`installer/references.py`, shared with the machine payload build, which
+relocates the same references to `~/.agents/bin` instead — one judgement about
+what is and is not a reference, applied to both payloads. Plugin command copies
+also gain the YAML frontmatter description authored in
+`.github/command-sources/<name>.md`; the Claude adapter drops it because Claude
+reads the skill, but a plugin command without a description fails `claude
+plugin validate --strict`.
 
-Six conditions fail the build closed:
+Eight conditions fail the build closed:
 
 1. a slice row whose target has no `manifest.json` source row;
 2. a missing or unreadable template source (including a command's authored
@@ -51,7 +73,13 @@ Six conditions fail the build closed:
 5. a missing or empty `manifest.json` version;
 6. dependency-closure failure: a bare pack command in rewritten Markdown whose
    target is absent from `bin/`, unless the (file, command) pair carries a
-   written justification in `CLOSURE_ALLOWLIST`.
+   written justification in `CLOSURE_ALLOWLIST`;
+7. an installer module the bootstrap imports that has no file, or an
+   `installer` module importing a sibling relatively, which the bundle cannot
+   resolve because it loads the package by absolute name;
+8. any machine payload failure — an unmapped destination family, a
+   dependency-closure violation, or rewrite residue — raised by
+   `installer.machinestage` in its own error model and reported here as one.
 
 The tree is built and validated in full before anything is written, then
 materialized in a temporary directory and swapped into place, so files that
@@ -63,9 +91,9 @@ nonzero on drift, which is how the unittest keeps the committed output fresh.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -74,12 +102,59 @@ from pathlib import Path
 from typing import Sequence
 
 PACK_ROOT = Path(__file__).resolve().parents[2]
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+from installer import machinestage, references  # noqa: E402
 
 MANIFEST_PATH = "manifest.json"
 PARTITION_PATH = "docs/fleet/surface-partition.json"
 PLUGIN_PATH = "plugins/sd"
 COMMAND_SOURCE_DIR = ".github/command-sources"
 PLUGIN_MANIFEST_PATH = ".claude-plugin/plugin.json"
+
+# The bundled installer, the payload it installs by default, and the bootstrap
+# that connects them. `installer.machinescope.default_payload_root()` resolves
+# the payload as a sibling of its own package, so these two prefixes are a
+# contract with the engine, not a layout preference.
+INSTALLER_PACKAGE = "installer"
+INSTALLER_PREFIX = f"{INSTALLER_PACKAGE}/"
+INSTALLER_ENTRY_MODULE = f"{INSTALLER_PACKAGE}.machinescope"
+MACHINE_PAYLOAD_PREFIX = "machine-payload/"
+BOOTSTRAP_PATH = "bin/sd-machine-install"
+
+BOOTSTRAP_SOURCE = '''#!/usr/bin/env python3
+"""Run the pack's machine-scope installer from inside this plugin.
+
+The plugin root carries the `installer` package beside the `machine-payload`
+tree the engine installs by default, so putting that root on `sys.path` is the
+whole bootstrap: no pip install, no pack checkout, no payload argument. The
+root is derived from this file rather than from the caller, and every plugin
+update lands in a new root, so the copy that runs and the payload it installs
+always come from the same version.
+
+Generated by .github/scripts/generate-plugin.py; edit it there.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+
+
+def main() -> int:
+    if str(PLUGIN_ROOT) not in sys.path:
+        sys.path.insert(0, str(PLUGIN_ROOT))
+    from installer.machinescope import main as engine_main
+
+    return engine_main(sys.argv[1:])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
 
 MACHINE_CLAUDE = "machine-claude"
 
@@ -106,146 +181,10 @@ DATA_MODE = 0o644
 # Library modules are imported by their siblings, never invoked as commands.
 LIBRARY_PREFIX = "sd_ai_command_pack_"
 
-_PACK_SCRIPT_NAME = (
-    r"(?:sd-ai-command-pack-[A-Za-z0-9_-]+\.(?:py|sh|mjs)"
-    r"|sd_ai_command_pack_[A-Za-z0-9_]+\.py)"
-)
-# `scripts/<pack script>` in an authored body -> the bare command name.
-INVOCATION_RE = re.compile(rf"scripts/({_PACK_SCRIPT_NAME})")
-# `node <name>.mjs` -> `<name>.mjs`: bash PATH-searches a slash-free operand,
-# node does not, and every bin/ entry carries a shebang plus an executable bit.
-NODE_PREFIX_RE = re.compile(r"\bnode (sd-ai-command-pack-[A-Za-z0-9_-]+\.mjs)")
-# Anything still naming a repository-root pack path after the rewrite.
-RESIDUE_RE = re.compile(r"scripts/sd[-_]ai[-_]command[-_]pack[A-Za-z0-9_.*-]*")
-BARE_COMMAND_RE = re.compile(_PACK_SCRIPT_NAME)
-
-# bin/ file name -> (justification, literals that may appear in it).
-#
-# Every literal is semantic data about some *other* filesystem: a consumer
-# repository being audited, a changed-path set being classified, the pack
-# source repository's own tree, or a comment consumed by a linter. None of them
-# resolves a helper the script then runs — functional sibling resolution is
-# forbidden outright by tests/test_script_sibling_resolution.py, whose
-# justifications these mirror.
-BIN_LITERAL_ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
-    "sd-ai-command-pack-check.py": (
-        "repo-scoped payload discovery: sd-check reports whether the repository "
-        "under --repo carries the vendored helpers, so the paths describe that "
-        "repository's layout, not this script's siblings",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-install-audit.py",
-                "scripts/sd-ai-command-pack-pr-body-scope.py",
-                "scripts/sd-ai-command-pack-review-preflight.mjs",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-                "scripts/sd-ai-command-pack-update-spec-kb.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-full-check.sh": (
-        "pack-source-only release gate: the fleet candidate checker has no "
-        "manifest row and only ever runs inside the pack source repository, "
-        "whose own tree is the correct anchor",
-        frozenset({"scripts/sd-ai-command-pack-fleet-candidate-check.py"}),
-    ),
-    "sd-ai-command-pack-housekeeping.sh": (
-        "shellcheck source= directive: a static-analysis annotation, not a "
-        "runtime path (the runtime load uses $SCRIPT_DIR)",
-        frozenset({"scripts/sd-ai-command-pack-shell-lib.sh"}),
-    ),
-    "sd-ai-command-pack-install-audit.py": (
-        "consumer-layout data: the audit describes where a vendored install "
-        "puts payload files in the repository it inspects",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-",
-                "scripts/sd-ai-command-pack-*",
-                "scripts/sd-ai-command-pack-fleet-candidate-check.py",
-                "scripts/sd-ai-command-pack-fleet-controller.py",
-                "scripts/sd-ai-command-pack-fleet-finding-classify.py",
-                "scripts/sd-ai-command-pack-fleet-preflight.py",
-                "scripts/sd-ai-command-pack-fleet-publish.py",
-                "scripts/sd-ai-command-pack-fleet-review-classify.py",
-                "scripts/sd-ai-command-pack-fleet-timing.py",
-                "scripts/sd-ai-command-pack-fleet-wave-plan.py",
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-housekeeping.sh",
-                "scripts/sd_ai_command_pack_fleet_lib.py",
-                "scripts/sd_ai_command_pack_lib.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-pr-body-scope.py": (
-        "consumer-layout data: region globs classify changed paths in the "
-        "repository whose PR body is being scoped",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-*.mjs",
-                "scripts/sd-ai-command-pack-*.py",
-                "scripts/sd-ai-command-pack-*.sh",
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-housekeeping.sh",
-                "scripts/sd-ai-command-pack-install-audit.py",
-                "scripts/sd-ai-command-pack-pr-body-scope.py",
-                "scripts/sd-ai-command-pack-review-learnings.py",
-                "scripts/sd-ai-command-pack-review-local.sh",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-                "scripts/sd-ai-command-pack-shell-lib.sh",
-                "scripts/sd_ai_command_pack_*.py",
-                "scripts/sd_ai_command_pack_lib.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-review-learnings.py": (
-        "changed-path classification: payload prefixes used to recognize pack "
-        "files in a diff",
-        frozenset({"scripts/sd-ai-command-pack-", "scripts/sd_ai_command_pack_"}),
-    ),
-    "sd-ai-command-pack-review-preflight.mjs": (
-        "changed-path classification: copiedTemplateKind recognizes vendored "
-        "payload paths in a diff",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-surface-check.py": (
-        "pack-source-only validator: every path names the pack source "
-        "repository's own tree, which is always a full checkout",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-fleet-candidate-check.py",
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-surface-check.py",
-            }
-        ),
-    ),
-    "sd-ai-command-pack-toolchain.sh": (
-        "repository-state report: doctor tells the operator whether the "
-        "repository it inspects carries a vendored full-check",
-        frozenset({"scripts/sd-ai-command-pack-full-check.sh"}),
-    ),
-    "sd-ai-command-pack-update-spec-kb.py": (
-        "generated-file provenance: the banner written into generated KB files "
-        "names the generator by its canonical repository path",
-        frozenset({"scripts/sd-ai-command-pack-update-spec-kb.py"}),
-    ),
-}
-
-# (plugin-relative Markdown path, bare command) -> justification for a
-# reference the plugin cannot satisfy from bin/.
-CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {
-    (
-        "skills/sd-review-pr/SKILL.md",
-        "sd-ai-command-pack-fleet-review-classify.py",
-    ): (
-        "fleet-operator path: the fleet scripts have no manifest rows, so this "
-        "reference is already absent from vendored consumer installs today; a "
-        "follow-up task fixes the skill text and retires this entry"
-    ),
-}
+# Re-exported so a test can patch the allowlist this build applies; the shared
+# gates read whichever object is passed in.
+BIN_LITERAL_ALLOWLIST = references.BIN_LITERAL_ALLOWLIST
+CLOSURE_ALLOWLIST = references.PLUGIN_CLOSURE_ALLOWLIST
 
 
 class PluginError(Exception):
@@ -368,8 +307,108 @@ def command_description(root: Path, short: str) -> str:
 def rewrite_markdown(text: str) -> str:
     """Repository-root pack invocations become bare `bin/` commands."""
 
-    rewritten = INVOCATION_RE.sub(r"\1", text)
-    return NODE_PREFIX_RE.sub(r"\1", rewritten)
+    return references.rewrite_text(text, profile=references.PLUGIN_PROFILE)
+
+
+def module_relative_path(module: str) -> str:
+    """Package-relative file for an `installer` module name."""
+
+    if module == INSTALLER_PACKAGE:
+        return f"{INSTALLER_PACKAGE}/__init__.py"
+    return module.replace(".", "/") + ".py"
+
+
+def read_module(root: Path, relative: str, *, importer: str) -> bytes:
+    try:
+        return (root / relative).read_bytes()
+    except OSError as exc:
+        raise PluginError(
+            f"{importer} imports {relative}, which the plugin cannot bundle: {exc}"
+        ) from exc
+
+
+def installer_imports(root: Path, module: str, source: bytes) -> list[str]:
+    """Sibling `installer` modules this module imports.
+
+    A dotted `installer.x` import names a module and must resolve; a
+    `from installer import x` import may name either a submodule or a symbol
+    re-exported by the package, so only the ones backed by a file travel.
+    """
+
+    try:
+        tree = ast.parse(source.decode("utf-8"), filename=module)
+    except (SyntaxError, UnicodeDecodeError) as exc:
+        raise PluginError(f"cannot parse installer module {module}: {exc}") from exc
+    dotted = f"{INSTALLER_PACKAGE}."
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                raise PluginError(
+                    f"{module} imports a sibling relatively; the plugin bundle "
+                    f"loads {INSTALLER_PACKAGE} by absolute name, so keep the "
+                    "import absolute"
+                )
+            if node.module == INSTALLER_PACKAGE:
+                imported.extend(
+                    f"{dotted}{alias.name}"
+                    for alias in node.names
+                    if (root / module_relative_path(f"{dotted}{alias.name}")).is_file()
+                )
+            elif node.module and node.module.startswith(dotted):
+                imported.append(node.module)
+        elif isinstance(node, ast.Import):
+            imported.extend(
+                alias.name for alias in node.names if alias.name.startswith(dotted)
+            )
+    return imported
+
+
+def installer_files(root: Path) -> dict[str, PluginFile]:
+    """The installer modules the bootstrap needs, walked from its entry point.
+
+    Enumerated from the import graph rather than a list kept by hand: a module
+    the engine starts importing travels with it on the next `make generate`,
+    and a module nothing in that graph imports stays out of the plugin.
+    """
+
+    pending = [INSTALLER_ENTRY_MODULE]
+    # The package marker is not imported by name but is what makes the rest a
+    # package; it seeds the set so the walk never has to special-case it.
+    modules: dict[str, bytes] = {
+        INSTALLER_PACKAGE: read_module(
+            root,
+            module_relative_path(INSTALLER_PACKAGE),
+            importer="the plugin bootstrap",
+        )
+    }
+    while pending:
+        module = pending.pop()
+        if module in modules:
+            continue
+        relative = module_relative_path(module)
+        source = read_module(root, relative, importer=module)
+        modules[module] = source
+        pending.extend(installer_imports(root, module, source))
+    return {
+        module_relative_path(module): PluginFile(content=source, executable=False)
+        for module, source in sorted(modules.items())
+    }
+
+
+def machine_payload_files(root: Path) -> dict[str, PluginFile]:
+    """The machine payload, built by the module that also stages it live."""
+
+    try:
+        staged = machinestage.build_payload(root)
+    except (machinestage.MachineStageError, references.ReferenceRewriteError) as exc:
+        raise PluginError(f"machine payload: {exc}") from exc
+    return {
+        f"{MACHINE_PAYLOAD_PREFIX}{target}": PluginFile(
+            content=entry.content, executable=entry.executable
+        )
+        for target, entry in staged.items()
+    }
 
 
 def build_files(root: Path) -> dict[str, PluginFile]:
@@ -408,8 +447,19 @@ def build_files(root: Path) -> dict[str, PluginFile]:
     files[PLUGIN_MANIFEST_PATH] = PluginFile(
         content=render_plugin_manifest(version), executable=False
     )
-    check_residue(files)
-    check_closure(files)
+    files[BOOTSTRAP_PATH] = PluginFile(
+        content=BOOTSTRAP_SOURCE.encode("utf-8"), executable=True
+    )
+    files.update(installer_files(root))
+    try:
+        check_residue(files)
+        check_closure(files)
+    except references.ReferenceRewriteError as exc:
+        # The shared gates report in their own error model; this build has one.
+        raise PluginError(str(exc)) from exc
+    # After the plugin's own gates, so a file that breaks both is reported in
+    # the terms of the payload the reader is looking at.
+    files.update(machine_payload_files(root))
     return dict(sorted(files.items()))
 
 
@@ -423,61 +473,57 @@ def render_plugin_manifest(version: str) -> bytes:
     return (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
 
 
+def plugin_native(path: str) -> bool:
+    """Whether this build's rewrite profile is the one that governs a file.
+
+    The two bundled trees answer to something else: `installer/**` is code,
+    never rewritten, and `machine-payload/**` already passed the machine
+    profile's residue and closure gates, which point references at
+    `~/.agents/bin` rather than stripping the prefix. Running the plugin
+    profile over either would report correct content as a defect.
+    """
+
+    return not path.startswith((INSTALLER_PREFIX, MACHINE_PAYLOAD_PREFIX))
+
+
 def check_residue(files: dict[str, PluginFile]) -> None:
     """Markdown may keep no repo-root pack path; bin/ only allowlisted data."""
 
     for path, entry in sorted(files.items()):
+        if not plugin_native(path):
+            continue
         if path.startswith("bin/"):
-            name = path[len("bin/") :]
-            justification, allowed = BIN_LITERAL_ALLOWLIST.get(name, ("", frozenset()))
-            text = entry.content.decode("utf-8", errors="replace")
-            found = {match.rstrip(".") for match in RESIDUE_RE.findall(text)}
-            unexpected = sorted(found - allowed)
-            if unexpected:
-                raise PluginError(
-                    f"repository-root pack paths in bin/{name}: "
-                    + ", ".join(unexpected)
-                    + "; convert functional sibling resolution to own-location "
-                    "resolution, or add the literal to BIN_LITERAL_ALLOWLIST "
-                    "with a written justification if it is layout data"
-                )
-            if allowed and not justification:
-                raise PluginError(
-                    f"BIN_LITERAL_ALLOWLIST entry for {name} has no justification"
-                )
+            references.check_executable_residue(
+                path,
+                entry.content.decode("utf-8", errors="replace"),
+                allowlist=BIN_LITERAL_ALLOWLIST,
+                name=path[len("bin/") :],
+            )
             continue
         if not path.endswith(".md"):
             continue
-        text = entry.content.decode("utf-8")
-        residue = sorted({match.rstrip(".") for match in RESIDUE_RE.findall(text)})
-        if residue:
-            raise PluginError(
-                f"rewrite residue in {path}: "
-                + ", ".join(residue)
-                + "; the plugin ships no repository-root scripts/ directory, so "
-                "extend the rewrite rules in .github/scripts/generate-plugin.py"
-            )
+        references.check_text_residue(
+            path,
+            entry.content.decode("utf-8"),
+            profile=references.PLUGIN_PROFILE,
+        )
 
 
 def check_closure(files: dict[str, PluginFile]) -> None:
     """Every pack command named in Markdown must ship in bin/."""
 
-    shipped = {path[len("bin/") :] for path in files if path.startswith("bin/")}
+    shipped = frozenset(path[len("bin/") :] for path in files if path.startswith("bin/"))
     for path, entry in sorted(files.items()):
-        if not path.endswith(".md"):
+        if not path.endswith(".md") or not plugin_native(path):
             continue
-        text = entry.content.decode("utf-8")
-        for command in sorted(set(BARE_COMMAND_RE.findall(text))):
-            if command in shipped:
-                continue
-            justification = CLOSURE_ALLOWLIST.get((path, command))
-            if not justification:
-                raise PluginError(
-                    f"{path} references {command}, which the plugin does not "
-                    "ship in bin/; add the script to the manifest, or record "
-                    "the reference in CLOSURE_ALLOWLIST with a written "
-                    "justification"
-                )
+        references.check_closure(
+            path,
+            entry.content.decode("utf-8"),
+            profile=references.PLUGIN_PROFILE,
+            shipped_commands=shipped,
+            shipped_docs=frozenset(),
+            allowlist=CLOSURE_ALLOWLIST,
+        )
 
 
 def materialize(files: dict[str, PluginFile], destination: Path) -> None:

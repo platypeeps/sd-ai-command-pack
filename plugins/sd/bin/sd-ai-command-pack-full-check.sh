@@ -163,19 +163,19 @@ run() {
 }
 
 gito_max_attempts() {
-  positive_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS:-2}}" 2
+  positive_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_MAX_ATTEMPTS:-2}" 2
 }
 
 gito_initial_retry_delay() {
-  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS:-30}}" 30
+  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_DELAY_SECONDS:-30}" 30
 }
 
 gito_max_retry_delay() {
-  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS:-120}}" 120
+  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_RETRY_MAX_DELAY_SECONDS:-120}" 120
 }
 
 gito_command_timeout_seconds() {
-  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS:-${SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS:-600}}" 600
+  nonnegative_int_or_default "${SD_AI_COMMAND_PACK_FULL_CHECK_GITO_TIMEOUT_SECONDS:-600}" 600
 }
 
 package_has_script() {

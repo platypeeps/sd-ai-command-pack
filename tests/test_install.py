@@ -13,7 +13,6 @@ _LOCAL_TEST_MODULES = {
     "test_record_session",
     "test_remove",
     "test_review_learnings",
-    "test_review_local",
     "test_review_preflight",
     "test_review_scope",
     "test_status",
@@ -31,7 +30,6 @@ try:
     from test_record_session import RecordSessionTests
     from test_remove import RemoveTests
     from test_review_learnings import ReviewLearningsTests
-    from test_review_local import ReviewLocalTests
     from test_review_preflight import ReviewPreflightTests
     from test_review_scope import ReviewScopeTests
     from test_status import StatusTests
@@ -49,7 +47,6 @@ except ModuleNotFoundError as exc:
     from .test_record_session import RecordSessionTests
     from .test_remove import RemoveTests
     from .test_review_learnings import ReviewLearningsTests
-    from .test_review_local import ReviewLocalTests
     from .test_review_preflight import ReviewPreflightTests
     from .test_review_scope import ReviewScopeTests
     from .test_status import StatusTests
@@ -60,7 +57,6 @@ class InstallTests(
     InstallCoreTests,
     InstallInspectionTests,
     GeneratedParityTests,
-    ReviewLocalTests,
     FullCheckTests,
     ReviewPreflightTests,
     InstallAuditTests,

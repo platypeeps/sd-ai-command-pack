@@ -23,6 +23,7 @@ from sd_ai_command_pack_lib import CacheSetupError, run_git_cached  # noqa: E402
 INSTALLED_TARGETS_FILE = Path(".sd-ai-command-pack/installed-targets.txt")
 PROVENANCE_FILE = Path(".sd-ai-command-pack/provenance.json")
 PACK_MANIFEST_FILE = Path(".sd-ai-command-pack/manifest.json")
+THIN_MODE = "thin"
 GIT_TIMEOUT_SECONDS = 60
 STABLE_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
@@ -119,6 +120,7 @@ SOURCE_ONLY_ALLOWED_PACK_FILES = {
     "scripts/sd-ai-command-pack-fleet-review-classify.py",
     "scripts/sd-ai-command-pack-fleet-timing.py",
     "scripts/sd-ai-command-pack-fleet-wave-plan.py",
+    "scripts/sd-ai-command-pack-thin-resweep.py",
     "scripts/sd_ai_command_pack_fleet_lib.py",
 }
 
@@ -135,7 +137,7 @@ PROVENANCE_NEVER_VOUCHED_TARGETS = {
 
 LEGACY_PACK_PATHS = {
     ".agents/skills/sd-refresh-specs": "use .agents/skills/sd-update-spec",
-    ".agents/skills/trellis-full-check": "use .agents/skills/sd-full-check",
+    ".agents/skills/trellis-full-check": "use .agents/skills/sd-check",
     ".agents/skills/trellis-housekeeping": "use .agents/skills/sd-housekeeping",
     ".agents/skills/trellis-review-pr": "use .agents/skills/sd-review-pr",
     ".claude/commands/sd/refresh-specs.md": "use .claude/commands/sd/update-spec.md",
@@ -156,10 +158,8 @@ LEGACY_PACK_PATHS = {
             "continue",
             "finish-work",
             "create-pr",
-            "full-check",
             "housekeeping",
             "review-learnings",
-            "review-local",
             "review-local-all",
             "review-pr",
             "update-spec",
@@ -180,7 +180,6 @@ LEGACY_PACK_PATHS = {
             "record-session.py",
             "review.py",
             "review-learnings.py",
-            "review-local.sh",
             "review-preflight.mjs",
             "review-scope.sh",
             "shell-lib.sh",
@@ -193,7 +192,7 @@ LEGACY_PACK_PATHS = {
 LEGACY_PACK_REFERENCES = {
     "scripts/trellis-full-check.sh": "scripts/sd-ai-command-pack-full-check.sh",
     "scripts/trellis-housekeeping.sh": "scripts/sd-ai-command-pack-housekeeping.sh",
-    "trellis-full-check": "sd-full-check",
+    "trellis-full-check": "sd-check",
     "trellis-housekeeping": "sd-housekeeping",
     "trellis-review-pr": "sd-review-pr",
     "sd-refresh-specs": "sd-update-spec",
@@ -213,7 +212,6 @@ LEGACY_PACK_REFERENCES = {
             "record-session.py",
             "review.py",
             "review-learnings.py",
-            "review-local.sh",
             "review-preflight.mjs",
             "review-scope.sh",
             "update-spec-kb.py",
@@ -439,6 +437,35 @@ def expected_targets_from_manifest(
     if ".gitignore" in targets:
         expected.add(".gitignore")
     return expected, selected_platforms, []
+
+
+def installed_mode(root: Path) -> str | None:
+    """Read the install mode pinned in provenance, if any.
+
+    A thin install carries ``mode: "thin"``. Everything else -- absent,
+    unreadable, or an unrecognized value -- is reported as None so the caller
+    keeps the ordinary fat contract rather than relaxing a check on a guess.
+    """
+    provenance_path = root / PROVENANCE_FILE
+    try:
+        if provenance_path.is_symlink() or not provenance_path.is_file():
+            return None
+        payload = json.loads(
+            provenance_path.read_text(encoding="utf-8", errors="strict")
+        )
+    except (OSError, UnicodeError, ValueError):
+        # An unreadable provenance is audit_provenance's failure to report
+        # precisely; reading the mode must never be what raises.
+        return None
+    if not isinstance(payload, dict):
+        return None
+    mode = payload.get("mode")
+    # Narrowed to the one recognized value rather than any string. Today's
+    # single caller compares against "thin" and could not tell the difference,
+    # but the docstring above promises None for an unrecognized value, and a
+    # reader that trusts that promise -- `if installed_mode(root):` -- would
+    # otherwise treat `mode: "thin-corrupt"` as a thin install.
+    return THIN_MODE if mode == THIN_MODE else None
 
 
 def audit_expected_targets(
@@ -984,7 +1011,21 @@ def main() -> int:
     expected_count: int | None = None
     expected_platforms: set[str] = set()
     expected_warnings: list[str] = []
-    if targets and not manifest_failures:
+    thin_install = installed_mode(root) == THIN_MODE
+    if thin_install:
+        # The manifest-derived completeness check asks "does this checkout hold
+        # everything the pack ships for these platforms?" -- the wrong question
+        # for a payload that was deliberately reduced. The receipt stays the
+        # allowlist, every listed target is still required to be present, and
+        # the source checkout's `install.py --check` is what verifies the
+        # receipt itself against the expected residual.
+        expected_warnings = [
+            "installed payload is pinned thin; skipping the manifest-derived "
+            "expected-target completeness check. Receipt-to-disk checks still "
+            "apply; run install.py --check from an sd-ai-command-pack source "
+            "checkout to verify the receipt against the expected residual"
+        ]
+    elif targets and not manifest_failures:
         (
             expected_failures,
             expected_warnings,

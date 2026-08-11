@@ -73,7 +73,7 @@ class FleetWavePlanTests(InstallTestCase):
     def manifest(self):
         names = ("canary-a", "canary-b", "wave-a", "wave-b", "wave-c", "final")
         return {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "rolloutPolicy": {
                 "defaultConcurrency": 2,
                 "cohorts": [
