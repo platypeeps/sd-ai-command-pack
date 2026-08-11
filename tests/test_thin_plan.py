@@ -599,6 +599,24 @@ class InstallAuditModuleTests(unittest.TestCase):
         self.assertTrue(callable(module.audit_structural_state))
         self.assertTrue(callable(module.load_installed_targets))
 
+    def test_the_bytecode_flag_the_audit_sets_does_not_escape(self) -> None:
+        # The audit sets `sys.dont_write_bytecode` at import time, which is a
+        # decision an entrypoint makes about its own process. Executing it here
+        # makes it the installer's, permanently, for every import afterwards.
+        #
+        # Asserted in both directions: restoring must put back what was there
+        # rather than clearing the flag, or a caller that had deliberately set
+        # it loses its own setting to this loader.
+        import sys
+
+        original = sys.dont_write_bytecode
+        self.addCleanup(lambda: setattr(sys, "dont_write_bytecode", original))
+
+        for setting in (False, True):
+            sys.dont_write_bytecode = setting
+            thin.load_install_audit_module(_support.PACK_ROOT)
+            self.assertIs(sys.dont_write_bytecode, setting)
+
     def test_the_scripts_path_entry_is_left_exactly_as_it_was_found(self) -> None:
         # The loader supplies `scripts/` on `sys.path` because the audit
         # imports its sibling library by bare name, and a direct `python
@@ -606,17 +624,26 @@ class InstallAuditModuleTests(unittest.TestCase):
         # inside the installer, so the entry is removed again -- and an entry
         # somebody else already owns is left alone rather than removed out
         # from under them.
+        # Both states are set up explicitly rather than assumed. Whether
+        # `scripts/` is already on `sys.path` is a property of how the suite
+        # was launched -- the shell-coverage lane runs with it present and the
+        # ordinary lane without -- so asserting either as a precondition makes
+        # the test pass or fail on the runner rather than on the loader.
         import sys
 
         scripts = str(_support.PACK_ROOT / "scripts")
-        self.assertNotIn(scripts, sys.path, "precondition: not already present")
+        original = list(sys.path)
+        self.addCleanup(lambda: sys.path.__setitem__(slice(None), original))
+
+        sys.path[:] = [entry for entry in original if entry != scripts]
         thin.load_install_audit_module(_support.PACK_ROOT)
-        self.assertNotIn(scripts, sys.path)
+        self.assertNotIn(scripts, sys.path, "the loader left its own entry behind")
 
         sys.path.insert(0, scripts)
-        self.addCleanup(lambda: scripts in sys.path and sys.path.remove(scripts))
         thin.load_install_audit_module(_support.PACK_ROOT)
-        self.assertEqual(sys.path.count(scripts), 1)
+        self.assertEqual(
+            sys.path.count(scripts), 1, "an entry the loader did not add was disturbed"
+        )
 
 
 class ReceiptAgreementTests(unittest.TestCase):

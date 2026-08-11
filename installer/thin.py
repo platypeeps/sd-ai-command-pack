@@ -594,12 +594,19 @@ def load_install_audit_module(root: Path):
     # that directory on `sys.path[0]`. A spec load gets no such entry, so the
     # import fails partway through `exec_module`. Supplied here and removed
     # again rather than left behind, because this runs inside the installer.
+    # And the audit sets `sys.dont_write_bytecode` at import time, which is an
+    # entrypoint's decision to make about its own process. Executing the module
+    # here makes it ours, permanently, for every import the installer performs
+    # afterwards. Restored for the same reason the path entry is: a loader that
+    # runs inside another program leaves that program as it found it.
     added = str(scripts) not in sys.path
+    bytecode = sys.dont_write_bytecode
     if added:
         sys.path.insert(0, str(scripts))
     try:
         spec.loader.exec_module(module)
     finally:
+        sys.dont_write_bytecode = bytecode
         if added:
             sys.path.remove(str(scripts))
     return module
