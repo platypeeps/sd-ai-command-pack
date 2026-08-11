@@ -192,6 +192,28 @@ repoint the consumer's own PR template, and run the KB refresh. Both are
 invisible in a pack diff that otherwise looks finished, which is why they
 go in writing rather than in someone's memory.
 
+**Done 2026-08-11.** They landed as steps 2b and 2c of requirement 1's
+per-consumer sequence in `08-10-thin-canary-conversion/prd.md`, plus a
+matching acceptance criterion. Child 3 is the only place the sequence is
+written out — children 4 and 5 both defer to it by reference
+(`08-10-thin-post-canary-conversion/prd.md:18`,
+`08-10-thin-final-conversion-gate-retirement/prd.md:17`) — so one edit
+covers all three cohorts.
+
+Why each survives the conversion, measured rather than assumed:
+
+| Surface | Partition row | Conversion disposition | Cleared by |
+|---|---|---|---|
+| `.gitignore` | none | `block_strip` | re-running the KB script |
+| `.github/PULL_REQUEST_TEMPLATE.md` | `repo-native` | `keep` | the rewrite, for matched forms only |
+
+`plan.keep` is what child 2b's install-time rewrite walks, and
+`classify_target` puts a row-less target in `block_strip`
+(`installer/conversion.py:178`), so `.gitignore` is outside the rewrite
+entirely. That is the same fact step 9's acceptance run 2 predicts from
+the other direction — a refreshed but not KB-refreshed consumer still
+reports the `obsidian-kb` hit.
+
 ## Rollback
 
 Every edit is a text change under `templates/` and `.github/`, plus

@@ -61,8 +61,41 @@ revert-and-restore proof.
    # 2. convert, both roots, gated on that exact verdict file
    .venv/bin/python install.py <path> --thin \
      --resweep-verdict /tmp/<consumer>-verdict.json
+   # 2b. regenerate the KB ignore block from the machine-installed script
+   ~/.agents/bin/sd-ai-command-pack-update-spec-kb.py --if-present
+   # 2c. confirm nothing survives in this consumer's own PR template
+   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+     scripts/sd-ai-command-pack-thin-resweep.py --repo <path> \
+     --consumer <consumer> --json
    # 3. consumer PR from <path>, then the pack PR carrying the mode row
    ```
+
+   **Steps 2b and 2c are not optional and not covered by the conversion.**
+   Both are invisible in a conversion diff that otherwise looks finished,
+   which is why they are written here rather than left to memory. Each has
+   a distinct reason, measured 2026-08-11 against
+   `docs/fleet/surface-partition.json` and `installer/conversion.py`:
+
+   - **2b, the KB refresh.** `.gitignore` has **no partition row**, so
+     `classify_target` sends it to `block_strip` rather than `keep`
+     (`installer/conversion.py:178`). Child 2b's install-time rewrite runs
+     only over `plan.keep`, so it never reaches this file. An existing
+     consumer's `.gitignore` therefore keeps the banner written by whatever
+     KB-script version it last ran — and every consumer's names
+     `scripts/sd-ai-command-pack-update-spec-kb.py`, a path the conversion
+     deletes. Nothing in the conversion clears it; only re-running the
+     script does, because only the script rewrites its own block. Skipping
+     this leaves one `packDefect` per consumer and the resweep will say so.
+   - **2c, the consumer's own PR template.**
+     `.github/PULL_REQUEST_TEMPLATE.md` *is* `repo-native`, so conversion
+     does repoint it — but only the citation forms `THIN_PROFILE` matches.
+     Three consumers (`mezmo_benchmark`, `sd-github-review`,
+     `anomaly-metric-creator`) have taken this file over and own their own
+     wording, which is why their baseline is 15 hits in 7 files against the
+     other five consumers' 17 in 8. Consumer-authored phrasing outside the
+     profile's patterns survives the rewrite. The resweep is the check, not
+     a reading of the diff; repoint whatever it still reports, in this same
+     consumer PR.
 
    The verdict is a file rather than a fresh in-process check because the
    two must be the same measurement: `--thin` verifies the verdict's
@@ -221,6 +254,11 @@ revert-and-restore proof.
       already and a hand check would re-measure the old bytes.
 - [ ] Machine scope verified present (plugin + machine receipt) before
       the first canary mutation, with the `sd-status` output recorded.
+- [ ] Requirement 1 steps 2b and 2c executed per canary, evidenced by a
+      post-conversion resweep reporting zero `packDefects` for that
+      consumer. An aggregate "conversion looked clean" does not close this:
+      the KB block and a consumer-owned PR template are precisely the two
+      surfaces a conversion leaves untouched while appearing complete.
 - [ ] The revert proof was executed on a named canary at a named
       commit, CI stayed green, and the only residue was the
       `enabledPlugins` disable marker. Re-conversion ran a **fresh
