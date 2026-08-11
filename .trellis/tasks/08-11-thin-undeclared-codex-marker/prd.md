@@ -71,12 +71,13 @@ never installed codex still carries the file. Whether that should count
 is the question, and it is a real one rather than a bug to be patched
 away.
 
-## Options — option 5 chosen 2026-08-11
+## Options — option 3 chosen 2026-08-11, after option 5 failed the gate
 
 Recorded so the design phase starts from evidence rather than a blank
-page. Each has a named cost. Options 1-4 were enumerated before design
-and are all rejections; option 5 was added during design and is the
-chosen resolution, with `design.md` D2 carrying the rejection reasons.
+page. Each has a named cost. Options 1-4 were enumerated before design;
+option 5 was added during design, chosen, implemented in full, and then
+rejected at the test gate. **Option 3 is what shipped.** `design.md` D2
+carries the pre-implementation rejection reasons and D6 carries option 5's.
 
 1. **Declare `codex` for the eight consumers.** Cheapest edit, worst
    outcome: `retainVendoredFor` carries `["codex", "pi"]`, so declaring
@@ -87,14 +88,24 @@ chosen resolution, with `design.md` D2 carrying the rejection reasons.
    exactly this shape. Needs an argument for why pack docs are different
    that does not also excuse real usage.
 3. **Stop shipping the contract to consumers**, or ship it machine-scope
-   only. Consumers do run the planning flow the contract governs, so this
-   trades a conversion blocker for a capability loss and must show the
-   capability is genuinely not needed repo-locally.
+   only — **chosen 2026-08-11, in the narrowed form option 5's failure
+   left available.** The host contract still ships everywhere; only the
+   Codex lane stops, moving to `docs/planning-adversarial-review-codex.md`
+   with no manifest row and nothing under `templates/`. The original
+   objection stands and is paid rather than answered: the capability is
+   genuinely lost for consumers, with no restore path, and that loss is
+   the accepted one below. What changed is the alternative — option 5 was
+   built and then refused by three tested invariants (`design.md` D6), so
+   the choice is between this loss and weakening a gate.
 4. **Rewrite the contract** so the lane is described without a literal
    invocation. Clears the scan, makes the document worse, and is the
    option most likely to be chosen for the wrong reason.
 5. **Split the document and ship the lane conditionally** — added
-   2026-08-11 during design, and **chosen**. The host-side contract (80
+   2026-08-11 during design, chosen, implemented, then **rejected at the
+   test gate**; see `design.md` D6 for the three invariants that refuse it
+   and why giving `codex` markers reinstates the defect. Its description
+   below is preserved as written before that measurement. The host-side
+   contract (80
    of 129 lines) keeps shipping to every consumer; the Codex lane (lines
    41–89) moves to `templates/.codex/sd-ai-command-pack/`, under a
    manifest row carrying `platform: "codex"`. It is not a sibling of the
@@ -135,10 +146,12 @@ chosen resolution, with `design.md` D2 carrying the rejection reasons.
 
 ## Acceptance criteria
 
-- [ ] The chosen option is recorded with its evidence, and the **four**
+- [x] The chosen option is recorded with its evidence, and the **four**
       rejected options each carry a stated reason. Four, not three: the
-      chosen resolution is option 5, added during design, so all four of
-      the originally enumerated options are rejections.
+      shipped resolution is option 3, so options 1, 2, 4, and 5 are the
+      rejections. Option 5's reason is the strongest of them, because it
+      is the only one measured after implementation rather than before —
+      `design.md` D6.
 - [ ] `packDefects` reports no `codex` row for any of the eight
       consumers, measured with the scanner.
 - [ ] The seven-surface count is unchanged by this task — it neither
@@ -163,18 +176,17 @@ chosen resolution, with `design.md` D2 carrying the rejection reasons.
 > `--all`, nor one whose developers run Codex without declaring it, and
 > both are consumer-specific facts only that consumer's own resweep
 > reports.
-- [ ] Any capability a consumer loses is named in the PRD and in the
-      CHANGELOG entry. Option 5 **does** lose one, and the first draft of
-      this criterion said otherwise: the Codex lane is gated by runtime
-      probes (`command -v codex`, `codex exec --help`), not by
+- [x] Any capability a consumer loses is named in the PRD and in the
+      CHANGELOG entry. The shipped option **does** lose one, and the first
+      draft of this criterion said otherwise: the Codex lane is gated by
+      runtime probes (`command -v codex`, `codex exec --help`), not by
       `docs/fleet/consumers.json`, so every consumer whose developers
-      have the CLI on PATH runs the lane today and stops after the split.
-      Three effects get named: that loss, this repository no longer
-      installing the appendix into its own tree (`design.md` D4), and all
-      eight consumers gaining an `install.py` hint offering
-      `--platform codex`, which installs the appendix without recording a
-      declaration and thereby re-arms the very `packDefect` this task
-      removes (`design.md` D4.1).
+      have the CLI on PATH runs the lane today and stops after this
+      release. Under option 3 that is the whole effect, and it is
+      permanent: with no manifest row there is no `install.py` hint, no
+      `--platform codex` path that re-arms the defect, and no restore
+      path at all. The two further effects the option-5 draft named are
+      gone with it.
 - [x] The lane loss above is **accepted by the operator**, recorded with
       a date, before implementation starts. It is a capability decision,
       not an implementation detail, and requirement 3 makes acceptance
@@ -183,20 +195,18 @@ chosen resolution, with `design.md` D2 carrying the rejection reasons.
       (declaring `codex` fleet-wide, which partly defeats the conversion;
       narrowing the detector, which weakens the gate).
 
-      **The restore path shown with that decision was wrong, and the
-      correction goes back to the operator.** It said the lane returns
-      with `install.py <repo> --platform codex`. Round 2 refuted all
-      three parts: the flag does not declare the platform
-      (`fileops.py:184` filters selection only), does not buy the
-      75-target retention (conversion reads `entry.get("platforms")` from
-      the fleet registry, `install.py:919`), and is refused outright on
-      an already-converted consumer (`install.py:1268-1273`) — which is
-      every one of the eight, once children 3-5 land. The durable
-      restore is a `docs/fleet/consumers.json` declaration; see
-      `design.md` D4.1's corrected table. Either form is recorded there and
-      in the CHANGELOG rather than in the shipped contract, because
-      `--platform codex` carries the `codex` token and would reintroduce
-      the marker into the file the split clears.
+      **The restore path shown with that decision was wrong twice, and
+      the shipped option has none at all.** The first form said the lane
+      returns with `install.py <repo> --platform codex`; round 2 refuted
+      all three parts (`fileops.py:184`, `install.py:919`,
+      `install.py:1268-1273`). The second form — declare `codex` in
+      `docs/fleet/consumers.json` *and* run the flagged refresh — was
+      correct for option 5 but died with it: option 3 ships no manifest
+      row, so there is nothing for a declaration to select. The operator
+      re-confirmed the acceptance on 2026-08-11 knowing the first
+      correction, and chose option 3 on 2026-08-11 knowing the loss is
+      permanent. The alternative on the table was amending three tested
+      invariants, which requirement 4 puts outside this task.
 - [ ] `make check` green; `manifest.json` and CHANGELOG updated if the
       shipped payload changed.
 

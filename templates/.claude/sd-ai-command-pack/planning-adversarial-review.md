@@ -17,14 +17,14 @@ changed, or the differences are only whitespace, formatting, generated
 metadata, or equivalent non-semantic churn. Do not invoke a review after every
 individual file write; review the coherent artifact set once.
 
-## 2. Parallel review lanes
+## 2. Review lanes
 
 The host must perform its own adversarial review of the changed artifact set.
 Challenge requirements, assumptions, design fit, failure modes, security,
 operability, validation, rollout, rollback, and whether `implement.md` closes
 the commitments in `prd.md` and `design.md`. Verify claims against repository
-code, specs, and task context rather than accepting either review lane at face
-value.
+code, specs, and task context rather than accepting any review lane at face
+value, including your own.
 
 Also check the task's artifacts against each other, not only against the
 repository. A measurement, count, size, path, or identifier usually appears in
@@ -38,60 +38,16 @@ instead of reading the artifacts in sequence: the stale copy is the one you did
 not think to open. Widen the search past the task directory only when the value
 is also cited outside it, such as in a spec, report, or ledger.
 
-On Claude Code, capability-check the optional native Codex lane with both
-`command -v codex` and `codex exec --help`. When both succeed, launch one
-review-only `codex exec` command in a separate background Bash task before
-starting the host review. Use:
-
-- `--cd <repo-root>`
-- `--sandbox read-only`
-- `--ephemeral`
-- **`< /dev/null`** — required; see below
-- a focused prompt naming the active task directory and the changed planning
-  artifacts, requiring evidence-backed concerns only and forbidding writes
-
-**Redirect stdin from `/dev/null`.** In a background Bash task stdin is not a
-TTY, so `codex exec` treats it as piped input, prints `Reading additional input
-from stdin...`, and blocks forever waiting for a write that never comes. It
-consumes no CPU while hung — observed at 0:00.07 CPU over 29 minutes — so it
-looks like a slow review rather than a stuck one, and it produces no output at
-all because output is fully buffered until the run ends. Without the redirect
-this lane cannot complete in the background task this section requires, and the
-failure mimics a timeout. With it, a normal review finishes in roughly 5-10
-minutes.
-
-Do not diagnose this as a missing CLI, an auth problem, or an oversized prompt.
-A foreground `codex exec` succeeds under the same configuration, so a working
-foreground probe does not clear the background lane.
-
-Consider `-o <file>` (`--output-last-message`) to capture the final review text
-directly instead of parsing it out of the full transcript.
-
-Retain the task ID and collect the result with `BashOutput` even if the host
-lane finds blockers. The host and Codex reviews should overlap; do not wait for
-Codex before beginning the host review.
-
-This lane uses the installed `codex` CLI directly. Do not inspect, install,
-patch, or invoke the OpenAI Codex Claude plugin, its cache, a companion script,
-or `/codex:adversarial-review`.
-
-If the executable is missing, the help probe is incompatible, authentication
-is unavailable, or execution fails, report `Codex: skipped` or `Codex: failed`
-with the concrete reason. Continue the host review and planning convergence.
-Never describe the skipped or failed lane as approval, and never make the
-plugin a fallback dependency.
-
-Before reporting `Codex: failed` for a run that hung or returned nothing, check
-the stdin redirect above and check the process's accumulated CPU time. A hang at
-near-zero CPU is the stdin trap, not a failed review — rerun it correctly rather
-than degrading the convergence to a single lane. Reporting a lane failed when it
-was never actually invoked correctly is worse than reporting it skipped: it
-records an absent second opinion as an attempted one.
+This contract defines exactly one lane: the host's own. A repository may define
+an additional independent lane of its own, outside this contract, and sections
+3 through 5 keep a place for one; the pack ships none. Assume you are the whole
+review -- hold it to the standard two lanes would have met, because nothing
+else will catch what it misses.
 
 ## 3. Concern disposition
 
-Merge and deduplicate both lanes into one concern ledger. Assign stable IDs
-`C-1`, `C-2`, and so on. For every material concern record:
+Merge and deduplicate every lane that ran into one concern ledger. Assign
+stable IDs `C-1`, `C-2`, and so on. For every material concern record:
 
 - severity and whether it blocks implementation;
 - the repository or artifact evidence used to verify it;
@@ -108,15 +64,20 @@ implementation approval and prevents `task.py start`.
 
 ## 4. Convergence limit
 
-When addressed concerns change a planning artifact, rerun the host review and,
-only if it was available in the initial round, one fresh Codex review against
-the updated artifact set. Reconcile each remediation round through the same
-ledger. Run at most two remediation rounds (three automatic rounds total); do
-not start a fourth automatic round.
+When addressed concerns change a planning artifact, rerun the host review
+against the updated artifact set, plus a fresh run of any additional lane that
+was available in the initial round. Reconcile each remediation round through
+the same ledger. Run at most two remediation rounds
+(three automatic rounds total); do not start a fourth automatic round.
+
+Expect a remediation round to find defects the previous round's own fixes
+introduced. A value corrected in one artifact and left standing in another is
+the common shape, which is why the cross-artifact sweep above belongs to every
+round rather than only the first.
 
 If a substantive concern persists after the permitted remediation rounds, or
-the two lanes remain in material conflict, stop before implementation approval
-or `task.py start` and ask the user for judgment.
+two lanes ran and remain in material conflict, stop before implementation
+approval or `task.py start` and ask the user for judgment.
 
 ## 5. Completion report
 
@@ -124,6 +85,8 @@ Before leaving planning, report:
 
 - changed artifacts and why the trigger applied;
 - host review status;
-- Codex status as completed, skipped, or failed;
+- for each additional lane this repository defines, its status as completed,
+  skipped, or failed -- omitting the line entirely when the repository defines
+  none, since a lane that was never available was not skipped;
 - each `C-*` concern and its final disposition;
 - whether implementation is unblocked.

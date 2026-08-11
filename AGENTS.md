@@ -26,6 +26,13 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
   explicit approval from the user for that specific upstream PR. If
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
   finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
+- At the planning convergence boundary, follow
+  [docs/planning-adversarial-review-codex.md](docs/planning-adversarial-review-codex.md)
+  in addition to the shipped planning contract. It adds a second, independent
+  Codex review lane and amends sections 3 through 5 of that contract. It is
+  deliberately unshipped — no `manifest.json` row, nothing under `templates/` —
+  because a shipped file invoking the `codex` CLI registers as undeclared codex
+  usage in every consumer. The lane applies to this repository only.
 - Treat `templates/**` as the source of truth for shipped pack payloads.
   Root-level installed copies for platform directories present in this source
   checkout are byte-verified mirrors; when changing a shipped script, skill,

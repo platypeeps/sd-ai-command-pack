@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.68.0 - 2026-08-11
+
+- The planning adversarial review contract no longer ships its Codex lane. The
+  contract told every consumer to run `codex exec`, and no consumer declares
+  `codex`, so the thin resweep reported `undeclared codex usage` as a
+  `packDefect` in all eight and no conversion could reach a clear verdict. The
+  129-line document becomes an 80-line host contract at its existing path; the
+  Codex lane moves to `docs/planning-adversarial-review-codex.md` in the pack's
+  own repository, with no `manifest.json` row and nothing under `templates/`.
+  The wording moved rather than changed: rewriting the invocation so it no
+  longer looks like a command would have cleared the scan while leaving every
+  consumer holding the same instruction.
+
+  Shipping the lane conditionally, under a `platform: "codex"` row, was built
+  and rejected. Three tested invariants encode that `codex` is a registered
+  platform which ships no manifest files — it has no Trellis markers and no
+  init flag, and the registry, adapter-declaration, and dogfood gates each
+  assert that shape. Satisfying them by giving `codex` markers would have made
+  it auto-select in every repository where Trellis installed its own Codex
+  adapter, which is all eight consumers, reinstating the very `packDefect`
+  being removed. Not shipping the lane touches no gate.
+
+- **Capability loss, accepted deliberately rather than discovered.** The Codex
+  lane is gated by runtime probes (`command -v codex`, `codex exec --help`),
+  not by `docs/fleet/consumers.json`. Any repository whose developers have the
+  Codex CLI on PATH has been running that lane regardless of what it declares,
+  and after this release no consumer runs it. The host-side contract is
+  unchanged and still runs everywhere; what is lost is the second opinion,
+  including the `< /dev/null` detail that costs half an hour to rediscover.
+
+  There is no per-consumer opt-in to restore it, and that is the shape of the
+  decision rather than an oversight: any mechanism that puts the lane back into
+  a consumer puts the `codex` invocation back into a repository that never
+  declared the platform. The contract shipped to consumers now states that it
+  is the whole review and must be held to the standard two lanes would have
+  met. A consumer that wants a second lane defines its own, outside the pack.
+
 ## 0.67.0 - 2026-08-11
 
 - A converted consumer's repo-native surfaces now name the machine

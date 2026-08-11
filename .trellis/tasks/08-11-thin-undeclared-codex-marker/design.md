@@ -1,4 +1,80 @@
-# Design — split the planning contract so the Codex lane ships only where Codex is asked for
+# Design — split the planning contract and stop shipping the Codex lane
+
+> **D6 supersedes D1 through D4.1.** Everything below D6 was written for the
+> PRD's option 5 — split the document and ship the lane under a
+> `platform: "codex"` manifest row. That option was implemented in full and
+> then abandoned at the test gate: three independent tested invariants encode
+> that `codex` ships no manifest files, and no wording satisfies them. The
+> shipped resolution is the PRD's **option 3**. The split itself survives
+> unchanged; only the appendix's destination moved, from a shipped
+> `.codex/` row to an unshipped `docs/` file. D1 through D4.1 are retained
+> because they are the evidence for the rejection, not because they describe
+> what shipped — read D6 first.
+
+## D6 — What actually shipped, and why option 5 could not
+
+Option 5 reached a complete, passing implementation: host contract split,
+appendix under `templates/.codex/`, manifest row, regenerated partition
+classifying it `repo-native`, eight new and rewritten tests including two
+mutation-confirmed ones. Then `make test` produced six failures, and three of
+them were not fixtures:
+
+1. `tests/test_install_core.py::test_platform_registry_derives_consistent_tables`
+   — *"codex has manifest files but no markers"*. Any platform shipping files
+   must carry Trellis markers and an init flag. Measured: `codex markers: ()`,
+   `codex init_flag: None`. That absence is D1's load-bearing fact 3; the
+   invariant exists precisely to forbid shipping files that no ordinary install
+   can select, which is exactly what option 5 does deliberately.
+2. `tests/test_generated_parity.py::test_manifest_declares_current_trellis_platform_adapters`
+   — a hardcoded set of platforms permitted manifest entries, with `codex`
+   excluded and `self.assertIn("codex", install.PLATFORMS)` asserted on the
+   next line. The exclusion is intentional, not stale.
+3. `tests/test_pack_drift.py::test_tracked_pack_targets_match_templates` — the
+   dogfood gate requires this repo to install every manifest file for any
+   platform whose *directory* exists here. `.codex/` exists; marker-based
+   selection deliberately skips the appendix (D4). Anchor-based dogfooding and
+   marker-based installation disagree for the first time.
+
+The obvious escape is refuted rather than untried: giving `codex` markers
+satisfies all three, and `.codex/agents/trellis-{check,implement,research}.toml`
+exist wherever Trellis installed its own Codex adapter — all eight consumers —
+so the appendix would auto-select there and reinstate the exact `packDefect`
+this task removes.
+
+Making the three pass by amending them is gate weakening, and PRD requirement 4
+says a change to install semantics carries its own review rather than riding
+along. Put to the operator on 2026-08-11 with option 5's cost stated; the
+answer was option 3.
+
+**What shipped:**
+
+| Artifact | Disposition |
+| --- | --- |
+| `templates/.claude/sd-ai-command-pack/planning-adversarial-review.md` | Split, 129 lines to 80. Ships everywhere. Detector fires `[]`. |
+| `docs/planning-adversarial-review-codex.md` | The Codex lane. **No manifest row, outside `templates/`.** Detector fires `[24]`. |
+| `AGENTS.md` | Repo-native pointer to the appendix, inside `documentationRoots` so the link is gate-checked. |
+| `templates/.claude/rules/sd-planning-adversarial-review.md` | Codex-specific sentence generalized to any lane. |
+| `manifest.json` | Version 0.68.0. **No new row** — 724 files, unchanged. |
+
+The shipped contract's section 2 no longer points at any second-lane file. A
+conditional link would have been a dangling instruction: under option 3 the
+appendix can never be present in a consumer, so the contract states that it is
+the whole review and must be held to the standard two lanes would have met.
+Sections 3 through 5 keep a generic slot for an additional lane, which this
+repository fills and no consumer does.
+
+**The capability loss is identical to the one accepted on 2026-08-11**, minus
+its restore path. D4 stands. D4.1 does not: there is no per-consumer opt-in,
+because any mechanism that puts the lane back into a consumer puts the `codex`
+invocation back into a repository that never declared the platform. A consumer
+wanting a second lane defines its own, outside the pack.
+
+**Process note.** This design changed after `task.py start`, so the planning
+adversarial review contract's convergence boundary had already passed. The
+change was not re-run through three fresh rounds: it narrows the shipped
+payload to a strict subset of the reviewed one, the operator made the decision
+on measured evidence, and both `make test` and `make check` are green on the
+result. Recorded here rather than left implicit.
 
 ## D0 — What the detector actually reports
 

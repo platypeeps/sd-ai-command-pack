@@ -1,4 +1,54 @@
-# Implementation plan — split the planning contract, ship the Codex lane conditionally
+# Implementation plan — split the planning contract, stop shipping the Codex lane
+
+> **Executed, then re-cut at the test gate.** Steps 1 through 6 below were run
+> as written for the PRD's option 5 and completed green in isolation; `make
+> test` then refused the manifest row through three tested invariants
+> (`design.md` D6), and the operator chose option 3. Steps 3, 4, and the
+> acceptance runs that depend on a shipped row do not describe what shipped.
+> The record of the executed work is below.
+>
+> **What was actually done, in order:**
+>
+> 1. Steps 1, 2, and 2b unchanged — the split and its six leftover-reference
+>    reconciliations are what shipped.
+> 2. `templates/.codex/sd-ai-command-pack/planning-adversarial-review-codex.md`
+>    moved to `docs/planning-adversarial-review-codex.md`; `templates/.codex/`
+>    removed entirely.
+> 3. Step 3 reverted — the manifest row is gone; version 0.68.0 stays, since
+>    the shipped host contract did change. Step 4's partition row went with it
+>    (`grep -c planning-adversarial-review-codex docs/fleet/surface-partition.json`
+>    → `0`).
+> 4. `AGENTS.md` gained a maintainer-rules pointer to the appendix, inside the
+>    link checker's `documentationRoots`.
+> 5. `templates/.claude/rules/sd-planning-adversarial-review.md`: the
+>    Codex-specific "Do not claim Codex approval" sentence generalized to any
+>    lane, since consumers now have exactly one.
+> 6. Host contract section 2 names no second-lane file at all. A conditional
+>    link would dangle: under option 3 the appendix can never be present in a
+>    consumer.
+> 7. `tests/test_install_core.py` reverted to `main` — with no `codex`
+>    manifest rows, `test_install_prints_platform_note_for_manifest_less_platform`
+>    works unmodified again. `tests/test_claude_planning_review.py` keeps the
+>    host-contract-carries-no-invocation test and replaces the three
+>    install-behavior tests with
+>    `test_appendix_is_absent_from_the_shipped_payload`, which asserts no
+>    manifest row *and* no copy under `templates/`.
+>
+> **Measured after the re-cut:**
+>
+> ```
+> shipped host contract: FIRES []
+> shipped rule:          FIRES []
+> unshipped appendix:    FIRES [24]
+> ```
+>
+> Run through `codex_in_command_position` with the caller's own `commanded`
+> set (`command_lines | direct_path_lines`). The appendix line proves the probe
+> has bite; the two shipped files are clean.
+>
+> `make test` exit 0 (74 `OK` groups). `make check` exit 0, including
+> `release changelog gate: manifest version bump has matching top heading
+> '## 0.68.0 - 2026-08-11'` and `candidate ledger: valid`.
 
 Ordered. Each step names the command that proves it and the result that
 counts as failure. Step 1 is measurement and runs before any edit — a
