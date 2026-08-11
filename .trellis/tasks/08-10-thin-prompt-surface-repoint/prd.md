@@ -211,39 +211,91 @@ through `make sync` and `make generate`.
 
 ## Acceptance criteria
 
-- [ ] All seven surfaces resolve their cited paths in a thin checkout,
+Four of these were authored against D1/D2/D4's mechanism and describe a
+shape D6 replaced. They are restated below rather than quietly ticked:
+a criterion that no longer describes the built thing cannot be satisfied
+by it, and marking it done anyway is the failure mode this list exists to
+prevent. Each restatement says what replaced it and why, inline.
+
+- [x] All seven surfaces resolve their cited paths in a thin checkout,
       proven against the converted fixture from
       `08-10-thin-conversion-tooling`, not by inspection.
-- [ ] All seven still resolve in a fat checkout — the fat path is the one
+      **Measured 2026-08-11**: 0 hits per surface, scored by the shipped
+      resweep classifier rather than a re-implementation of it. Table in
+      `design.md` D6.
+- [x] All seven still resolve in a fat checkout — the fat path is the one
       every consumer is on today, and breaking it to fix thin trades one
       outage for another.
-- [ ] `fleet-blocker-scan.py` (or the resweep, once it exists — released
-      with the pack, source-only, never installed into a consumer)
-      reports **no remaining hit among these seven surfaces**, and a
-      total of exactly one `packDefect` — the `codex` row owned by
-      `08-11-thin-undeclared-codex-marker` — for a consumer refreshed to
-      the new pack version **and** re-run through the KB refresh — five surfaces
-      rewritten by the refresh, the `obsidian-kb` block rewritten by the
-      KB script, and the PR template leaving the bucket by becoming
-      consumer-owned.
-- [ ] A consumer refreshed but **not** KB-refreshed still reports the
+      **Measured 2026-08-11**: 17 fat hits across the seven, unchanged
+      from the step-0 baseline. Unchanged is the pass condition here: a
+      fat checkout is where those paths exist.
+- [x] **Restated for D6.** The pack side reports **no remaining hit among
+      these seven surfaces** in a converted tree, measured against the
+      shipped classifier on the disposable fixture.
+      The original criterion asked for a whole-fleet scan reporting
+      exactly one residual `packDefect` for a consumer *refreshed to the
+      new pack version*. That measurement cannot be taken here: no
+      consumer is on 0.67.0, and putting one there means mutating a
+      repository outside this one — which children 3–5 hold under
+      per-cohort authorization this task does not have. The fleet half
+      therefore moves to those children, where each consumer's
+      pre-conversion resweep already gates on it (child 3's requirement 1,
+      step 1), rather than being asserted from here on a fleet that has
+      not moved. The residual `codex` row is
+      `08-11-thin-undeclared-codex-marker`'s and was never this task's to
+      clear.
+- [x] A consumer refreshed but **not** KB-refreshed still reports the
       `obsidian-kb` hit as a `packDefect`. This is the negative case that
       proves the extra step is load-bearing rather than ceremonial.
-- [ ] A **fresh** install into an empty target writes the corrected PR
-      template. This is the only path on which the template fix reaches a
-      repository, so it is the only path that proves the fix shipped.
-- [ ] A refresh of an existing consumer reports the PR template as
-      `PRESERVED` and its stale line as a `blocker`, for all eight — the
-      task must not claim to have fixed a file the installer refuses to
-      write.
-- [ ] Template edited first, then `make sync` and `make generate`; the
+      **Measured 2026-08-11**, and it holds for a structural reason worth
+      recording: `.gitignore` has no partition row, so `classify_target`
+      sends it to `block_strip` rather than `keep`
+      (`installer/conversion.py:178`), and the install-time rewrite walks
+      `plan.keep` only. A converted fixture carrying the previous banner
+      keeps it, and the classifier still scores
+      `scripts/sd-ai-command-pack-update-spec-kb.py`. Only re-running the
+      KB script rewrites its own block — which is why that step is now
+      written into child 3's per-consumer sequence as step 2b.
+- [x] **Restated for D6.** A fresh **thin** install writes a PR template
+      naming no removed path, and a fresh **fat** install writes the
+      shipped template byte-identical.
+      The original asked whether a fresh install writes "the corrected PR
+      template", on the D4 assumption that the shipped file would be
+      edited. D6 does not edit it: the same text is rewritten or not
+      according to `is_thin`, so there is no corrected variant to ship and
+      no fat churn to check for. **Measured 2026-08-11**: the template's
+      2 fat hits become 0 thin; `payload_source_bytes` is verbatim on the
+      fat path (`tests/test_install_core.py`,
+      `test_a_fat_target_gets_the_template_verbatim`).
+- [x] **Restated for D6.** Force-preservation is unchanged, so a fat
+      refresh still never overwrites a consumer's own PR template; a
+      *conversion* does repoint it, because the file is `repo-native` and
+      therefore in `plan.keep`.
+      The original wanted the stale line confirmed as a `blocker` across
+      all eight, to stop the task claiming it had fixed a file the
+      installer refuses to write. D6 keeps that bound honest by a
+      different route — the fix reaches the file at conversion, not at
+      refresh — and the eight-consumer half has the same
+      no-consumer-is-on-0.67.0 problem as the criterion above. What
+      survives a conversion is consumer-authored wording outside the
+      profile's patterns, which is exactly what child 3's step 2c checks
+      per consumer with the resweep.
+- [x] Template edited first, then `make sync` and `make generate`; the
       mirror gate passes with no manual mirror edits.
-- [ ] `manifest.json` bumped, CHANGELOG entry added, `make check` green.
-- [ ] The Copilot managed block has a thin and a fat variant and the
-      installer picks between them at install time. A fat install emits
-      today's block **byte-identical** — an additive change, not churn
-      for the eight consumers that exist — and a thin install emits the
-      variant that names no repository-owned pack paths.
+      **Verified**: `make sync && make generate` leave the tree clean.
+- [x] `manifest.json` bumped, CHANGELOG entry added, `make check` green.
+      **Verified**: 0.67.0, `MAKE-CHECK-EXIT=0`, `MAKE-TEST-EXIT=0`.
+- [x] **Restated for D6.** One authored block, two emissions chosen at
+      install time. A fat install emits today's block **byte-identical**,
+      and a thin install emits one naming no repository-owned pack paths.
+      The original said "a thin and a fat variant", meaning two authored
+      copies. D6 rewrites the single template through `THIN_PROFILE`
+      instead, which is strictly stronger on the property that mattered:
+      fat is byte-identical *by construction* — `is_thin` false is the
+      untouched code path — rather than because a reviewer compared two
+      hand-maintained files. **Tested** on the real shipped template by
+      `ManagedBlockEmissionTests`; mutation-tested, disabling the rewrite
+      fails 5 subtests.
 
 ## Baseline correction (2026-08-11)
 
