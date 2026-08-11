@@ -582,6 +582,44 @@ def synthetic_cases(module) -> list[tuple[str, str, object, object]]:
         ),
     ]
 
+    # R18-C5: the case above pins the *plan* side of R17-C1 and nothing else.
+    # Round 18 true-reverted the retained-machine-row clause in
+    # `expected_residual_targets` and this harness still reported 122 passed --
+    # the production unit tests caught it, the harness did not, and a harness
+    # that cannot see a rule it claims to protect is worth exactly its
+    # coverage. The inspector side is asserted here against the same partition
+    # the plan uses.
+    partition = module.conversion.load_partition(module.PARTITION)
+    _, source_files = module.load_manifest()
+    source = frozenset(file.target.as_posix() for file in source_files)
+    residual_without = module.conversion.expected_residual_targets(
+        source, partition, platforms, present_managed_blocks=frozenset()
+    )
+    residual_with = module.conversion.expected_residual_targets(
+        source, partition, platforms | {"codex"}, present_managed_blocks=frozenset()
+    )
+    cases += [
+        (
+            "R18-C5",
+            "the inspector expects the retained slice a codex declaration keeps",
+            len(residual_with) > len(residual_without),
+            True,
+        ),
+        (
+            "R18-C5",
+            "and every target it adds is one the plan classifies as keep",
+            sorted(
+                {
+                    module.conversion.classify_target(
+                        target, partition, platforms | {"codex"}
+                    )[0]
+                    for target in residual_with - residual_without
+                }
+            ),
+            ["keep"],
+        ),
+    ]
+
     # R12-C4: a NUL byte does not mean "cannot execute".
     def with_nul_script(repo):
         baseline(repo)

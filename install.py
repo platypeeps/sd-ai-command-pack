@@ -708,6 +708,13 @@ def _residual_files_for_thin(
         partition = conversion.load_partition(ROOT / SURFACE_PARTITION_FILE)
     except (OSError, ValueError, KeyError, TypeError):
         return files, False
+    # R18-C1: an unusable pin must not be allowed to choose the comparison it
+    # is then measured against. Falling back to the full payload reports the
+    # deleted machine surfaces as missing, which is `invalid` -- the same
+    # answer a half-converted consumer gets, and the right one for a pin that
+    # cannot be trusted.
+    if conversion.unusable_thin_pin_reason(receipt, partition) is not None:
+        return files, False
     return conversion.residual_source_files(files, target, partition, receipt), True
 
 

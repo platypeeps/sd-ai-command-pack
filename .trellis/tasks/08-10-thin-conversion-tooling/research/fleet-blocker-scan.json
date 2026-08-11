@@ -1,18 +1,18 @@
 {
   "schemaVersion": 2,
   "kind": "thin-conversion-fleet-blocker-scan",
-  "packHead": "ef9e8fe577504a6e6c7e676183cacf88328699da",
-  "packWorktreeDigest": "sha256:4114e54af0262b696fa8e61bb8546c4dd3db72acfd6f0587489b9205fe42539e",
+  "packHead": "56b60da67d5d3dbd1d7841560e9c8ee466f2267f",
+  "packWorktreeDigest": "sha256:6d63cc5958d44088dcea1eac52102e4347e9a7a9a337f930979b13730d395e34",
   "packWorktreeClean": false,
   "packIndexFlagsDigest": "sha256:79a5a17998e4d0ac882946e401204089f700b56f893637d337705f44b20e068d",
   "packHiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "scannerDigest": "sha256:81a56bc6985c3e097c428198d6e0f83e8cfa6c69bd68055c85ffc6fc29fc61c9",
-  "counterexamplesDigest": "sha256:08c9e7583c7351211a6883739b1510c8d1176cf4fb80388204c7b8717cc4229a",
+  "counterexamplesDigest": "sha256:5f3c710a0f46f895713d4b1eff220f26987dcc53c3a5b7a272f4c984a998b734",
   "consumers": [
     {
       "consumer": "rwbp-coordinator",
       "repo": "/Users/sven/repos/rwbp/rwbp-coordinator",
-      "head": "41915694fa1b74a7ed16cddff4966fc4afcac3dd",
+      "head": "bb3a2d5fd652c44b9f8777e6fffb16babc7f0904",
       "indexDigest": "sha256:1275a2cc1a0d0ebfd1dd5704cd47e0e35eebe52a962e0abd6f1a336632b2dc94",
       "indexFlagsDigest": "sha256:6918385c03f11aac2acdb248817f4fddd0ff3d559acfd0cfc63a716039e54e90",
       "hiddenBytesDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

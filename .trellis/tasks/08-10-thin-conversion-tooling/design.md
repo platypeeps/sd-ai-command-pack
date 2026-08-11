@@ -959,16 +959,34 @@ the two are equal here by coincidence, not by contract. The writer
 therefore derives the locator from the pack source checkout it is already
 running against, and refuses when the derivation is not unambiguous:
 
-- `repo` is `ROOT`'s `origin` remote, normalized to `<owner>/<name>`:
-  `git@github.com:owner/name.git`, `https://github.com/owner/name.git`,
-  and `https://github.com/owner/name` all normalize to `owner/name`. A
-  host other than `github.com`, a missing `origin`, more than two path
-  segments, or an unparseable URL is a **blocker** — never a fallback
-  guess, because a wrong locator points every converted consumer at
-  someone else's marketplace.
-- The derived owner must equal the final path segment of
-  `marketplace.json`'s `owner.url`. A mismatch means the checkout being
-  converted from is a fork or a rename in flight, and blocks.
+- The canonical identity is a declared pack constant,
+  `registry.PACK_REPOSITORY = "platypeeps/sd-ai-command-pack"`. This is the
+  one value that lives in no manifest: `marketplace.json` names the owner
+  and the marketplace, `plugin.json` names the plugin, and neither says
+  which repository serves them. Declaring it is not the hardcoding the
+  rule above forbids — that rule is about names the manifests already own,
+  and a constant nothing can derive is better written down once than
+  guessed at each call site. `classifier_digest` already hashes
+  `installer/registry.py`, so changing it moves the digest and invalidates
+  every outstanding resweep verdict, which is exactly the behavior a
+  marketplace relocation should have.
+- `ROOT`'s `origin` remote is validated **against** that constant, not
+  used as the source of truth. `git@github.com:owner/name.git`,
+  `https://github.com/owner/name.git`, and
+  `https://github.com/owner/name` all normalize to `owner/name`; the
+  normalized value must equal `PACK_REPOSITORY` exactly. A host other
+  than `github.com`, a missing `origin`, more than two path segments, an
+  unparseable URL, **or any other repository — including a fork under the
+  same owner** — is a **blocker**.
+
+  R18-C3 is why the comparison is exact rather than owner-scoped. The
+  round-17 rule derived the locator from `origin` and cross-checked only
+  the owner, so `git@github.com:platypeeps/sd-ai-command-pack-fork.git`
+  passed and would have been written into every converted consumer. An
+  owner check answers "is this our GitHub account", and the question is
+  "is this the repository the marketplace is served from". Deriving a
+  value and then partially validating it is still guessing; the direction
+  had to be inverted.
 - The `extraKnownMarketplaces` key is `marketplace.json`'s `name`; the
   `enabledPlugins` key is `<plugin name>@<marketplace name>`.
 
@@ -995,6 +1013,64 @@ same path as every other pack change: a fleet refresh that rewrites the
 pin. If a future settings schema makes auto-update the default rather
 than an opt-in key, that is a change to this contract and gets written
 down here, not absorbed silently.
+
+**Collisions block; the writer never overwrites a value it did not write
+(R18-C4).** "Preserves every other key and ordering" said what happens to
+unrelated keys and left the interesting cases undefined — and each one
+has a wrong answer that looks reasonable in isolation. The rules, per
+case:
+
+| Existing state | Conversion | Why |
+| --- | --- | --- |
+| Neither key present | writes both, records both | The ordinary path |
+| `extraKnownMarketplaces["sd-ai-command-pack"]` present, byte-identical to what we would write | leaves it, **does not record it** | Already true; recording it would make revert delete a key the conversion did not add |
+| Same key present, any other value | **blocks** | It points somewhere else. Overwriting silently repoints a consumer's marketplace; merging two sources is not a thing the schema supports |
+| `enabledPlugins["sd@sd-ai-command-pack"]` is `true` | leaves it, does not record it | Same reasoning |
+| That key is `false`, or any non-boolean | **blocks** | `false` is a deliberate disable. Flipping it is overriding a decision, and a non-boolean is a file we do not understand |
+| `settings.json` is valid JSON but not an object | **blocks** | There is no object to merge into, and rewriting it destroys whatever it was |
+| Either container key exists and is not an object | **blocks** | Same |
+| `settings.json` absent | creates it with exactly the two containers, records both containers as created | |
+
+A blocker here stops the whole conversion in the plan phase, before the
+first deletion — settings validation is part of the two-root preflight,
+not a step that runs after the payload is gone.
+
+**`settingsAdditions` records what to undo, not what is true.** Its shape
+is therefore the *added* pairs plus the containers the conversion
+created:
+
+```json
+{
+  "extraKnownMarketplaces": { "sd-ai-command-pack": { "source": {"source": "github", "repo": "platypeeps/sd-ai-command-pack"} } },
+  "enabledPlugins": { "sd@sd-ai-command-pack": true },
+  "createdContainers": ["extraKnownMarketplaces", "enabledPlugins"],
+  "createdFile": true
+}
+```
+
+`createdContainers` and `createdFile` exist because "remove what we
+added" is ambiguous at the container boundary: a consumer who already had
+an `enabledPlugins` object with three other plugins must keep it, and one
+whose `enabledPlugins` we created must not be left holding `{}`.
+
+**Revert removes only what still matches (R18-C4).** For each recorded
+pair, `--revert-thin` compares the current value against the recorded
+one and:
+
+- byte-identical → removes the key;
+- **different → leaves it and reports it**, because a consumer who edited
+  the marketplace source after conversion made a decision, and revert is
+  not entitled to discard it;
+- already absent → nothing, and not an error.
+
+Then each recorded created container is removed if and only if it is now
+empty, and the file is removed if and only if `createdFile` is true and
+the resulting object is empty. Reverting a consumer whose settings drifted
+therefore succeeds with a report of what it left behind, rather than
+either failing or silently reverting an edit it did not make. This is the
+same asymmetry `--remove` already has for drifted files, and for the same
+reason: destroying consumer work to reach a clean state is the one
+outcome worse than an incomplete revert.
 
 ### 5. `install.py TARGET --revert-thin` (contract C-D)
 
@@ -1086,9 +1162,50 @@ tested, not left to ordering:
 | `--force` with `--thin` | allowed — overrides delete drift, nothing else |
 | `--force` with `--revert-thin` | error — no drift decision exists to override |
 | `--backup` with either direction | allowed — same semantics as `--remove` |
+| **standalone `--remove` on a `mode: thin` consumer** | **error — names `--revert-thin` first** |
 
 Every row is a test. An unspecified row is how a destructive selector
 gets silently ignored.
+
+**The last row is R18-C2, and it was unspecified in exactly that way.**
+Round 18 simulated a thin conversion, then ran the shipped
+`install.py --remove --skip-diff-check`. It succeeded, deleted
+provenance, and left the plugin enabled with settings untouched:
+
+```text
+pluginStillEnabled=true
+settingsUnchanged=true
+provenanceExists=false
+```
+
+That is the worst reachable state: a repository with no pack files, no
+receipt saying a pack was ever there, and a live plugin serving the pack
+from the marketplace. `--remove` never learns about it, because the
+dispatcher hands standalone removal straight to the existing remover
+(`install.py:858`), which knows about installed targets, managed blocks,
+provenance, and excludes — and knows nothing about settings or the fleet
+registry (`removal.py:333`).
+
+The two candidate fixes are "make `--remove` thin-aware" and "refuse".
+Refusal wins on a structural argument rather than a preference:
+`--remove` takes one root, and undoing a thin conversion needs two —
+the registry row lives in `ROOT`'s `docs/fleet/consumers.json`, which
+`--remove` has no argument for and no reason to have one. A thin-aware
+`--remove` would therefore be a removal that *cannot finish*, leaving
+the registry claiming `thin` for a consumer that no longer has the pack
+at all, and re-introducing the pin-vs-mode skew as a permanent state
+instead of a window between two PRs. So:
+
+- `--remove` on a consumer whose provenance says `mode: thin` exits
+  nonzero, changes nothing, and says: run `--revert-thin` first, then
+  `--remove`.
+- The check reads the same `read_thin_receipt` predicate everything else
+  uses. A fat consumer is unaffected — this row adds no behavior to the
+  path every existing consumer takes.
+- `--revert-thin` followed by `--remove` restores the payload and then
+  deletes it, which is wasteful and correct. Uninstalling is rare, the
+  two commands are each individually reversible, and the alternative is
+  a one-root command silently doing three-quarters of a two-root job.
 
 ### 7. Registry mode flip
 

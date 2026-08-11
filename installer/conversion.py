@@ -323,6 +323,36 @@ def expected_residual_targets(
     return frozenset(expected | set(present_managed_blocks) | set(BOOKKEEPING_TARGETS))
 
 
+def unusable_thin_pin_reason(
+    receipt: "ThinReceipt", partition: Partition
+) -> str | None:
+    """Why this thin pin cannot be trusted to narrow the payload, or None.
+
+    R18-C1: the unknown-platform guard lived only in `build_conversion_plan`,
+    so nothing re-examined the pin after conversion wrote it. A pin naming a
+    platform the partition cannot classify retains nothing, the narrowed slice
+    it produces is intact by construction, and `--check` answered
+    `state: current` -- a corrupt pin certifying itself. Validation belongs
+    wherever the pin is *used*, not only where it is written, because the pin
+    is a file on a consumer's disk that anything can edit between the two.
+
+    An empty platform set is the same failure with no name to report: it
+    narrows to consumer-config, managed blocks, and bookkeeping, and finds
+    them all present.
+    """
+    if not receipt.platforms:
+        return "thin pin declares no platforms"
+    unknown = sorted(
+        platform for platform in receipt.platforms if platform not in partition.platforms
+    )
+    if unknown:
+        return (
+            "thin pin declares platform(s) the surface partition does not "
+            f"classify: {', '.join(unknown)}"
+        )
+    return None
+
+
 def residual_source_files(
     files: list,
     target: Path,
@@ -456,4 +486,5 @@ __all__ = [
     "read_installed_targets_receipt",
     "read_thin_receipt",
     "residual_source_files",
+    "unusable_thin_pin_reason",
 ]

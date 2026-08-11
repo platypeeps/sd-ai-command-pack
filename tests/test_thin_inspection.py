@@ -29,6 +29,7 @@ from installer.conversion import (  # noqa: E402
     load_partition,
     read_thin_receipt,
     residual_source_files,
+    unusable_thin_pin_reason,
 )
 from installer.provenance import (  # noqa: E402
     PIN_KEYS,
@@ -230,6 +231,41 @@ class PinnedPlatformTests(InstallTestCase):
         )
 
 
+class UnusableThinPinTests(InstallTestCase):
+    """R18-C1: the pin is a file on a consumer's disk, not a proof."""
+
+    def setUp(self) -> None:
+        self.partition = load_partition(ROOT / install.SURFACE_PARTITION_FILE)
+
+    def pin(self, platforms) -> ThinReceipt:
+        return ThinReceipt(
+            mode="thin",
+            version="1.2.3",
+            platforms=frozenset(platforms),
+            consumer="demo",
+            settings_additions={},
+            forced=(),
+        )
+
+    def test_a_classifiable_platform_set_is_usable(self) -> None:
+        self.assertIsNone(
+            unusable_thin_pin_reason(self.pin(THIN_PLATFORMS), self.partition)
+        )
+
+    def test_an_empty_platform_set_is_unusable(self) -> None:
+        self.assertEqual(
+            unusable_thin_pin_reason(self.pin([]), self.partition),
+            "thin pin declares no platforms",
+        )
+
+    def test_every_unclassifiable_platform_is_named(self) -> None:
+        reason = unusable_thin_pin_reason(
+            self.pin(["claude", "zeta-platform", "alpha-platform"]), self.partition
+        )
+        self.assertIn("alpha-platform, zeta-platform", reason)
+        self.assertNotIn("claude", reason)
+
+
 class ResidualSelectionTests(InstallTestCase):
     """`_residual_files_for_thin` is the one place the thin branch is entered."""
 
@@ -261,6 +297,27 @@ class ResidualSelectionTests(InstallTestCase):
             row = partition.row(file.target.as_posix())
             self.assertIsNotNone(row, file.target)
             self.assertIn(row.category, {"repo-native", "consumer-config"})
+
+    def test_a_pin_naming_an_unclassifiable_platform_falls_back(self) -> None:
+        # R18-C1. The pin chooses the residual it is then measured against, so
+        # an unusable pin that still narrows would certify itself: the slice it
+        # produces is intact by construction and --check answers `current`.
+        write_provenance(
+            self.target,
+            thin_payload(platforms=[*THIN_PLATFORMS, "not-a-platform"]),
+        )
+        narrowed, is_thin = install._residual_files_for_thin(self.files, self.target)
+        self.assertFalse(is_thin)
+        self.assertIs(narrowed, self.files)
+
+    def test_a_pin_with_no_platforms_falls_back(self) -> None:
+        # The same failure with no name to report: an empty set retains
+        # nothing, narrows to consumer-config plus bookkeeping, and finds all
+        # of it present.
+        write_provenance(self.target, thin_payload(platforms=[]))
+        narrowed, is_thin = install._residual_files_for_thin(self.files, self.target)
+        self.assertFalse(is_thin)
+        self.assertIs(narrowed, self.files)
 
     def test_an_unreadable_partition_falls_back_to_the_full_payload(self) -> None:
         write_provenance(self.target, thin_payload())
@@ -394,6 +451,29 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
         self.convert(root)
         payload = json.loads(self.run_install_inproc(root, "--check", "--json").stdout)
         self.assertEqual(payload["platforms"]["installed"], sorted(THIN_PLATFORMS))
+
+    def test_a_converted_consumer_with_a_corrupt_pin_is_not_current(self) -> None:
+        # R18-C1, end to end and the way round 18 demonstrated it: convert a
+        # real install, then edit the pin to name a platform the partition
+        # cannot classify. Before the guard this reported
+        # `{"state": "current", "changeCount": 0}` -- the corrupt pin picked
+        # the comparison that could not fail.
+        root = self.install_fat()
+        self.convert(root)
+        provenance = root / PROVENANCE_FILE
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        payload["platforms"] = [*sorted(THIN_PLATFORMS), "not-a-platform"]
+        provenance.write_text(json.dumps(payload), encoding="utf-8")
+
+        corrupt = json.loads(self.run_install_inproc(root, "--check", "--json").stdout)
+        self.assertNotEqual(corrupt["state"], "current")
+        # State alone does not discriminate here: editing the pin already
+        # moves this fixture off `current` by one change even without the
+        # guard. What the guard controls is *which comparison runs*, so
+        # measure that. Narrowed by the corrupt pin: 1 change. Full payload,
+        # which is what an untrusted pin must fall back to: 79, one per
+        # machine surface the conversion deleted.
+        self.assertGreater(corrupt["changeCount"], 50, corrupt)
 
     def test_a_half_converted_consumer_is_reported_invalid(self) -> None:
         # Payload deleted, receipts left fat: the thin predicate is false, so

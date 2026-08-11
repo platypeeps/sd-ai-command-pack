@@ -372,9 +372,24 @@ direction, `--force` on revert, `--consumer` alone and with each
 non-conversion mode, and the allowed rows. Land this before the mutators
 so dispatch order can never silently pick a winner.
 
+One row is not about flag pairs and is easy to lose because of that:
+**standalone `--remove` on a `mode: thin` consumer must refuse**
+(R18-C2). It reads the same `read_thin_receipt` predicate `--check`
+uses, exits nonzero without touching anything, and names `--revert-thin`
+as the first step. Land it in this step, with the other matrix rows,
+rather than inside step 7 — it is a guard on an *existing* shipped
+command, and every day it is missing is a day `--remove` can strand an
+enabled plugin in a repository with no receipt.
+
 Check: each rejected row exits nonzero with a message naming both flags;
 each allowed row reaches its handler. A row that merely "does something
-reasonable" is failure — the point is that it is specified.
+reasonable" is failure — the point is that it is specified. For the
+`--remove` row specifically: assert on a converted fixture that the
+command exits nonzero, that `.claude/settings.json` is byte-unchanged,
+and that `.sd-ai-command-pack/provenance.json` still exists — the three
+facts round 18's probe found false (`pluginStillEnabled=true`,
+`settingsUnchanged=true`, `provenanceExists=false`). Assert the fat path
+is untouched by running the existing `--remove` suite unchanged.
 
 ### 5. `--thin` with plan-then-mutate
 
@@ -466,12 +481,15 @@ Merge `extraKnownMarketplaces` and `enabledPlugins` into
 `.claude/settings.json`, reading the marketplace name from
 `.claude-plugin/marketplace.json` and the plugin name from
 `plugins/sd/.claude-plugin/plugin.json` rather than hardcoding either.
-The marketplace **source locator** is in neither manifest: derive
-`{"source": "github", "repo": "<owner>/<name>"}` from `ROOT`'s `origin`
-remote per `design.md` §4, cross-check the owner against
-`marketplace.json`'s `owner.url`, and **block** on a non-GitHub host, a
-missing or unparseable `origin`, or an owner mismatch. Write no
-`autoUpdate` key. For this pack the merged additions are exactly
+The marketplace **source locator** is in neither manifest. Declare
+`PACK_REPOSITORY = "platypeeps/sd-ai-command-pack"` in
+`installer/registry.py` and validate `ROOT`'s `origin` remote **against**
+it per `design.md` §4 — normalize the remote to `<owner>/<name>` and
+require exact equality. **Block** on a non-GitHub host, a missing or
+unparseable `origin`, an owner mismatch, **or a different repository
+under the same owner** (R18-C3: an owner-only check passes
+`platypeeps/sd-ai-command-pack-fork` and writes it into every consumer).
+Write no `autoUpdate` key. For this pack the merged additions are exactly
 `{"extraKnownMarketplaces": {"sd-ai-command-pack": {"source": {"source":
 "github", "repo": "platypeeps/sd-ai-command-pack"}}}, "enabledPlugins":
 {"sd@sd-ai-command-pack": true}}` — assert that literal, not a shape.
@@ -487,9 +505,15 @@ Checks:
 - The written `extraKnownMarketplaces` entry equals the literal above,
   byte for byte after `json.dumps(sort_keys=True)`.
 - A pack checkout whose `origin` is `git@gitlab.com:platypeeps/sd-ai-command-pack.git`
-  blocks; so does one whose `origin` owner is `someone-else`. Neither
-  writes any part of `settings.json` — the locator is validated in the
-  plan phase, before the first consumer deletion.
+  blocks; so does one whose `origin` owner is `someone-else`; **so does
+  `git@github.com:platypeeps/sd-ai-command-pack-fork.git`** — the
+  same-owner wrong repository the owner-only rule accepted. Also cover a
+  missing `origin` and a URL with three path segments. None writes any
+  part of `settings.json` — the locator is validated in the plan phase,
+  before the first consumer deletion.
+- The three URL spellings of the canonical remote (`git@github.com:…`,
+  `https://…/name.git`, `https://…/name`) all normalize equal and all
+  pass.
 - No key named `autoUpdate` appears anywhere in the merged file.
   Asserting `present` alone proves nothing: an untouched fat provenance
   already passes it.
@@ -498,6 +522,19 @@ Checks:
   already-present-value case (idempotent, no duplicate) and byte-compare
   everything outside the additions.
 - Malformed existing `settings.json`: blocks, does not overwrite.
+- Collision matrix (R18-C4), one test per row of `design.md` §4's table,
+  each asserting **both** the exit status and that `settings.json` is
+  byte-unchanged on the blocking rows:
+  - marketplace key present with a *different* source → blocks;
+  - `enabledPlugins["sd@sd-ai-command-pack"]` is `false` → blocks;
+    same key holding a string or object → blocks;
+  - `settings.json` is a valid JSON array or string → blocks;
+  - `extraKnownMarketplaces` present but not an object → blocks;
+  - either key present and already byte-identical → succeeds, writes
+    nothing, and **does not appear in `settingsAdditions`** — the
+    assertion that separates "already true" from "we made it true";
+  - absent file → created, and `createdFile: true` with both containers
+    in `createdContainers`.
 
 ### 7. `--revert-thin`, two-root preflight, consumer identity
 
@@ -513,6 +550,13 @@ Checks:
   asserting something impossible.
 - Only the recorded `settingsAdditions` are removed; an unrelated key
   added after conversion survives.
+- Revert ownership (R18-C4): a recorded key whose value was **edited
+  after conversion** is left in place and named in the report, and the
+  command still exits zero. A recorded key already absent is not an
+  error. A created container is removed only when it ends up empty; a
+  container the consumer already had keeps its other entries. `settings.json`
+  itself is deleted only when `createdFile` is true and the object is
+  empty.
 - Pin version ≠ source manifest version: refuses, naming both. Byte
   restoration is not reconstructible across versions
   (`install.py:803`).
@@ -1465,3 +1509,45 @@ honest limit of this whole review sequence: sixteen rounds have hardened a
 plan and a research scanner, and the three mutators the plan describes
 have no code to review. Round 18 is authorized and runs against this
 commit, again unaimed.
+
+### Round 18 — Codex lane against `56b60da6`, unaimed again
+
+Round 17's unaimed prompt found two blockers in production code on its
+first look, so round 18 repeated the method and pointed harder: the
+`installer/` modules the plan reuses, the shipped behavior of `--remove`
+/ `--check` / `--status`, and the fact that the converter, the settings
+merge, and the revert mutator **do not exist yet** and are therefore
+unverified assertion. It returned four blockers and one harness hole,
+every one of them in the cross-command lifecycle rather than in the
+research scanner sixteen rounds have been polishing.
+
+| ID | Source | Defect | Fix |
+| --- | --- | --- | --- |
+| R18-C1 | Codex | **A corrupt thin pin certified itself as `current`.** The unknown-platform guard R17-C2 added lived only in `build_conversion_plan`, and nothing re-read the pin afterwards. Codex converted a real install, edited its provenance to declare `not-a-platform`, and got `{"audit":"passed","changeCount":0,"state":"current"}`. The pin *chooses* the residual it is then measured against, so an unusable pin narrows to a slice that is intact by construction | `unusable_thin_pin_reason()` in `installer/conversion.py`, consulted by `_residual_files_for_thin`. An unknown platform — or an empty platform set, the same failure with no name to report — falls back to the full payload, which reports every deleted machine surface. Measured: narrowed by the corrupt pin, `changeCount` 1; falling back, 79 |
+| R18-C2 | Codex | **Standalone `--remove` strands an enabled thin plugin.** `install.py --remove --skip-diff-check` on a converted consumer succeeded and deleted provenance while leaving `pluginStillEnabled=true, settingsUnchanged=true, provenanceExists=false` — a repository with no pack files, no receipt that a pack was ever there, and a live plugin serving it from the marketplace. The argument matrix never defined the row | The matrix gains it, and the answer is refusal rather than thin-awareness — on a structural argument, not a preference: `--remove` takes one root and undoing a conversion needs two, so a thin-aware `--remove` would be a removal that cannot finish and would leave the registry claiming `thin` for a consumer that no longer has the pack. Landed in step 4 with the other matrix rows, because it guards an *existing shipped command* |
+| R18-C3 | Codex | **The R17-C3 locator accepted a same-owner wrong repository.** Deriving `owner/name` from `origin` and cross-checking only the owner passes `git@github.com:platypeeps/sd-ai-command-pack-fork.git`, which would then be written into every converted consumer. One guess had been replaced with another | The direction is inverted: `registry.PACK_REPOSITORY` declares the canonical identity once — it is the one value no manifest owns — and `origin` is validated *against* it by exact equality. `classifier_digest` already hashes `installer/registry.py`, so a marketplace relocation moves the digest and invalidates outstanding verdicts |
+| R18-C4 | Codex | **Settings collision and revert ownership were undefined.** "Preserves every other key" said what happens to unrelated keys and left the interesting cases open: marketplace key pointing elsewhere, plugin key already `false`, a container that is not an object, and a converter-owned key edited between conversion and revert | `design.md` §4 gains a collision table where every ambiguous case **blocks** rather than overwrites, and a `settingsAdditions` shape carrying `createdContainers`/`createdFile` so "remove what we added" is answerable at the container boundary. Revert removes only values that still match what was recorded; an edited value is left in place and reported, and the command still exits zero |
+| R18-C5 | Codex | **R17-C1's counterexample did not exercise its own production fix.** Codex true-reverted the retained-machine-row clause in `expected_residual_targets`: two production unit tests failed and the harness still reported 122 passed. The R17-C1 case checks `removedTargets`, which is the *plan* side; it never calls `expected_residual_targets` | Two cases that call it directly, asserting the residual grows when `codex` is declared and that every target it adds is one `classify_target` puts in `keep`. The same revert now fails the harness. Non-blocking, because the production tests caught it — but a harness that cannot see a rule it claims to protect is worth exactly its coverage |
+
+**What round 18 says about the previous seventeen.** Every blocker is in
+a place the review had never looked: two shipped commands, one declared
+constant, one undefined contract. Rounds 13 through 16 each aimed at the
+previous round's fixes and each found defects only there — which read as
+convergence and was actually a description of the prompt. Two unaimed
+rounds in a row have found blockers immediately. The stopping rule this
+task has been using ("a round that finds no new defect classes") is only
+meaningful for a round that was free to look anywhere.
+
+Harness 124 passed, 0 failed, 0 skipped — 28 fleet and 96 unit. Fleet
+measurement unchanged from the sixteenth: no scanner rule moved this
+round, and the scan was regenerated only because it records the harness
+digest. Production suite green, installer coverage 100%.
+
+Codex's verdict: not converged, expecting further defects in cross-command
+thin lifecycle, fail-closed pin validation, settings identity and drift,
+and "write ordering, rollback, and partial-failure behavior in the
+still-unimplemented converter and revert mutators." That last one is not
+something another review round can fix. Three of the four blockers this
+round were in code that exists; the fourth was in a contract for code
+that does not. The remaining review surface is thinning, and what is left
+is mostly a demand for implementation rather than for more planning.
