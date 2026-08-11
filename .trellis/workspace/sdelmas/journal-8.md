@@ -311,3 +311,51 @@ A thin conversion deletes the vendored payload but keeps the repo-native slice, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 358: Stop shipping the Codex review lane to consumers
+
+**Date**: 2026-08-11
+**Task**: Stop shipping the Codex review lane to consumers
+**Branch**: `feat/thin-undeclared-codex-marker`
+
+### Summary
+
+Resolved the undeclared codex usage packDefect blocking all eight consumers' thin conversions. Split the planning adversarial review contract: the 80-line host contract keeps shipping, the Codex lane moves to docs/planning-adversarial-review-codex.md with no manifest row and nothing under templates/. Conditional shipping under a platform codex row was implemented in full, then refused by three tested invariants encoding that a marker-less registered platform ships no files; the operator chose to stop shipping the lane instead of amending three gates.
+
+### Main Changes
+
+- Split templates/.claude/sd-ai-command-pack/planning-adversarial-review.md from 129 to 80 lines, reconciling six leftover lane references; the contract now states it is the whole review and names no second-lane file
+- Moved the Codex lane to docs/planning-adversarial-review-codex.md -- unshipped by construction, pointed at from AGENTS.md so the link checker gates the reference
+- Abandoned PRD option 5 after full implementation: test_platform_registry_derives_consistent_tables, test_manifest_declares_current_trellis_platform_adapters, and test_tracked_pack_targets_match_templates each forbid a manifest row for a platform with no Trellis markers; giving codex markers would auto-select it in all eight consumers and reinstate the defect
+- Fixed docs/SD_AI_COMMAND_PACK.md, which installs always and still described the planning review launching a codex exec peer lane -- found by Copilot as a suppressed comment, missed by my own sweep because it was scoped to edited files rather than every shipped surface naming the lane
+- Recorded the constraint as a forbidden pattern in .trellis/spec/backend/manifest-and-filesystem.md with both correct alternatives
+- Version 0.68.0 with matching CHANGELOG entry; no new manifest row, 724 files unchanged
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `caf010c0` | docs(trellis): converge planning for 08-11-thin-undeclared-codex-marker |
+| `70eb2017` | feat: stop shipping the Codex review lane to consumers |
+| `d72737e9` | docs: record the marker-less-platform manifest constraint in spec |
+| `792775fe` | fix: address Copilot review on the contract split |
+| `a281da84` | fix: stop the shipped guide describing the planning Codex lane |
+| `16547f3d` | docs(trellis): close acceptance criteria against measured evidence |
+
+### Testing
+
+- [OK] make test exit 0, 74 OK groups
+- [OK] make check exit 0, release changelog gate and candidate ledger both valid
+- [OK] resweep detector: three shipped surfaces FIRE [], unshipped appendix FIRES [24] -- the probe has bite
+- [OK] tests/test_claude_planning_review.py 6/6, including test_appendix_is_absent_from_the_shipped_payload asserting no manifest row and no templates/ copy
+- [OK] Copilot rounds 1-3: three findings verified and fixed, one suppressed finding acted on, 0 unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1098,6 +1098,55 @@ Reference files:
 - `tests/test_generated_parity.py`,
   `test_installs_shared_skill_and_existing_platform_adapters`
 
+### Don't: give a marker-less registered platform a manifest row
+
+**Problem.** `codex` is in `install.PLATFORMS` and has a `.codex` directory,
+so a manifest row for it looks routine. It is not:
+
+```json
+{ "platform": "codex", "kind": "doc",
+  "source": "templates/.codex/...", "target": ".codex/...", "anchor": ".codex" }
+```
+
+Measured: `PLATFORM_REGISTRY["codex"].markers == ()` and `.init_flag is None`,
+where every peer carries three markers and a flag.
+`ACTIVE_TRELLIS_PLATFORM_MARKERS` has no `codex` entry, so
+`has_active_trellis_platform(target, "codex")` iterates an empty tuple and
+returns `False` even in a repository with a fully populated `.codex/`.
+
+**Why it's bad.** Three independent tests encode "a registered platform with
+no markers ships no files", and one row breaks all three at once:
+
+- `tests/test_install_core.py::test_platform_registry_derives_consistent_tables`
+  — *"codex has manifest files but no markers"*. A platform that ships files
+  must be selectable by an ordinary install.
+- `tests/test_generated_parity.py::test_manifest_declares_current_trellis_platform_adapters`
+  — a hardcoded set of platforms permitted manifest entries, with `codex`
+  excluded and `assertIn("codex", install.PLATFORMS)` on the next line. The
+  exclusion is deliberate.
+- `tests/test_pack_drift.py::test_tracked_pack_targets_match_templates` — the
+  dogfood gate selects platforms by *directory* existence while installation
+  selects by *marker*. The two agree for every other platform and disagree
+  here.
+
+**Instead.** Decide which of the two the payload actually needs:
+
+- *It must reach repositories.* Give the platform real markers and an init
+  flag, as a change to install semantics carrying its own review. Check what
+  the markers select before adding them: `.codex/agents/trellis-*.toml` exist
+  wherever Trellis installed its own Codex adapter, so marking on those files
+  auto-selects `codex` in essentially every consumer.
+- *It is a practice of this repository.* Ship nothing. Put the file outside
+  `templates/`, give it no manifest row, and point at it from `AGENTS.md` —
+  inside the link checker's `documentationRoots`, so the reference is gated.
+  `docs/planning-adversarial-review-codex.md` is the worked example.
+
+The second is not a lesser form of the first. A pack-shipped file that names
+a platform's CLI registers as undeclared usage in every consumer that never
+declared it, which is what the thin resweep's `packDefect` reports; not
+shipping is sometimes the only answer that neither weakens the detector nor
+degrades the document.
+
 ## Receipt Stability Across Checkouts
 
 The installed-targets receipt is declared installed state and can be
