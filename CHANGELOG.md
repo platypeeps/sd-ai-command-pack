@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.66.1 - 2026-08-10
+
+- `install.py --status` / `--check` now understand a thin install. When the
+  provenance receipt pins `mode: "thin"`, the inspection compares the checkout
+  against the residual payload a conversion leaves behind instead of the full
+  source payload, so a converted consumer reports `state: current` rather than
+  `refresh-required` forever. The pack's `.gitignore` block is not reinstalled
+  on that path, and the receipt's pinned `platforms` are reported as the
+  installed platforms — a thin receipt no longer lists the machine-provided
+  surfaces, so inferring platforms from it would shrink the set and make every
+  fleet reader reject the consumer against the registry. A fat install takes
+  the unchanged path: `mode: "thin"` is the only discriminator, and provenance
+  written without a pin is byte-identical to before.
+- `sd-ai-command-pack-install-audit.py` skips only its manifest-derived
+  expected-target completeness check for a thin install, whose payload was
+  deliberately reduced. Every receipt-to-disk check still applies: the receipt
+  remains the allowlist, and every listed target must still be present.
+  Verifying the receipt itself against the expected residual belongs to
+  `install.py --check` run from a source checkout, which is where the surface
+  partition lives.
+- `install.py TARGET --thin` converts an installed consumer to a thin install:
+  it deletes the machine-provided surfaces the surface partition classifies as
+  such, strips the pack's `.gitignore` block, adds the marketplace and plugin
+  entries to `.claude/settings.json`, rewrites all three
+  `.sd-ai-command-pack/` bookkeeping files to the residual payload, and flips
+  the consumer's `docs/fleet/consumers.json` row to `mode: thin`. It plans
+  before it mutates and fails closed: a drifted file, a resweep verdict that
+  does not bind this consumer *and* the current classifier digest, or an
+  unwritable root all refuse before anything is deleted. `--dry-run` announces
+  all six categories — deletes, retires, block strips, the three receipt
+  rewrites, the settings additions, and the registry flip — because a
+  delete-only printout passes a "the tree was unchanged" comparison while most
+  of what makes the command irreversible goes unannounced.
+- `install.py TARGET --revert-thin` restores what the pack can still produce
+  and names what it cannot. The pinned version's payload comes back, the
+  settings entries the conversion added are removed (and only those), and the
+  registry row returns to `fat`. Files the conversion deleted that the pack no
+  longer ships are recorded in the thin receipt's `retired` list and reported
+  as `not-restored` rather than silently counted as restored. The platform set
+  comes from the pin, never from re-detection: detection answers "what is
+  active now", and revert's question is "what was taken away".
+- An ordinary `install.py TARGET` now refreshes a thin consumer instead of
+  refusing it. `sd-fleet-refresh` runs exactly that command, so a converted
+  consumer that could not be refreshed was a consumer that could not receive a
+  security fix. The refresh updates the version and nothing else: the machine
+  payload is not re-created, the `.gitignore` block is not reinstalled, and the
+  pin — including `retired` — is carried forward unchanged. Every way of asking
+  it to also change *what* is installed is rejected: `--platform` and `--all`
+  (the pin owns the platform set), `--local-only`, and `--remove`, which has no
+  thin form.
+- `sd-ai-command-pack-fleet-preflight.py` no longer skips a converted consumer
+  on version equality alone. For a thin install the receipt is the allowlist,
+  so the install audit skips its manifest-derived completeness check and a
+  residual file that went missing is indistinguishable from a machine surface
+  the conversion removed on purpose; preflight is the only place that can tell
+  them apart. A thin consumer at the target version whose recorded targets are
+  not all on disk now reports the new `residual-damaged` status, which flows
+  through `--fail-on-refresh-needed` and the rollout runbook like any other
+  non-`at-target` row. Fat consumers are judged on version as before. The
+  printed repair command for a thin consumer omits `--platform`, which a
+  thin-aware refresh rejects outright, and the text and JSON rows report the
+  install mode and the *pinned* platform set rather than the registry's.
+
 ## 0.66.0 - 2026-08-10
 
 - Fleet registry schema 5: each `docs/fleet/consumers.json` consumer may now

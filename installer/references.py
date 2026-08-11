@@ -136,6 +136,7 @@ BIN_LITERAL_ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
                 "scripts/sd-ai-command-pack-fleet-wave-plan.py",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-housekeeping.sh",
+                "scripts/sd-ai-command-pack-thin-resweep.py",
                 "scripts/sd_ai_command_pack_fleet_lib.py",
                 "scripts/sd_ai_command_pack_lib.py",
             }

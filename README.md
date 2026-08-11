@@ -547,7 +547,32 @@ python3 install.py /path/to/repo --platform cursor --platform gemini
 python3 install.py /path/to/repo --force
 python3 install.py /path/to/repo --force --backup
 python3 install.py /path/to/repo --remove
+python3 install.py /path/to/repo --thin --resweep-verdict VERDICT.json --consumer NAME
+python3 install.py /path/to/repo --revert-thin
 ```
+
+`--thin` converts an installed consumer to a *thin* install: the surfaces a
+machine-scope plugin serves are deleted, the pack's `.gitignore` block is
+stripped, the marketplace and plugin entries are added to
+`.claude/settings.json`, all three `.sd-ai-command-pack/` bookkeeping files are
+rewritten to the residual payload, and the consumer's `docs/fleet/consumers.json`
+row flips to `mode: thin`. It plans before it mutates and refuses outright on a
+drifted file, an unwritable root, or a resweep verdict that does not bind both
+this consumer and the current classifier digest — a half-converted consumer is
+neither fat nor thin. Add `--dry-run` to print all six categories it would
+change without touching anything.
+
+`--revert-thin` puts the payload back and returns the row to `fat`. It restores
+what the pinned version still ships and *names* what it cannot: a file the
+conversion deleted that the pack no longer ships is reported `not-restored`,
+because provenance keeps hashes rather than bytes. The platform set comes from
+the pin, never from re-detection.
+
+An ordinary `python3 install.py /path/to/repo` against a converted consumer is a
+thin-aware refresh: it updates the version and nothing else, so a fleet sweep can
+still deliver a fix. It rejects every flag that would also change *what* is
+installed — `--platform` and `--all` (the pin owns the platform set),
+`--local-only`, and `--remove`, which has no thin form.
 
 `--status` is a read-only informational comparison against the current pack
 checkout. Add `--audit` for the structural installed-footprint audit. `--check`
@@ -809,8 +834,17 @@ python3 scripts/sd-ai-command-pack-fleet-preflight.py
 ```
 
 Repos reported as `at-target` should be skipped, which prevents duplicate
-empty refresh PRs. For repos that need a refresh, the preflight prints the
-exact `install.py --force --platform ...` and install-audit commands. The audit
+empty refresh PRs. A converted consumer is skipped only when its recorded
+targets are all still on disk: version equality is the fat contract's evidence
+of health, and a thin consumer whose residual lost a file reports
+`residual-damaged` instead, because for a thin install the receipt is the
+allowlist and nothing else in the sweep can tell a missing residual file from a
+machine surface the conversion removed on purpose. For repos that need a
+refresh or repair, the preflight prints the exact `install.py` and
+install-audit commands — always run the printed command rather than
+reconstructing it, since a thin consumer's carries no `--platform` (its
+platform set is owned by its pin, and a thin-aware refresh rejects the flag).
+The audit
 command passes each explicit platform through `--expected-platform`, so missing
 selected-platform files are caught even if a faulty install also omitted them
 from receipts and provenance. See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md)
