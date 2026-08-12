@@ -123,7 +123,7 @@ implementation:
   make that discovery correct or its scope documented and tested.
 - **08-09-codex-home-skills-family** — investigated whether Codex needs
   its own machine destination family. Completed 2026-08-12 and archived
-  at `archive/2026-08/08-09-codex-home-skills-family/`; the probe
+  at `.trellis/tasks/archive/2026-08/08-09-codex-home-skills-family/`; the probe
   falsified the premise and the outcome was retiring `codex` from
   `retainVendoredFor` (see the retention criterion below).
 
@@ -159,7 +159,7 @@ dependency system.
       with `$HOME/.agents/skills`, which the machine installer already
       writes, so the carve-out retained 77 rows per declaring consumer
       for nothing. Retired in 0.71.2 — evidence in
-      `archive/2026-08/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`.
+      `.trellis/tasks/archive/2026-08/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`.
       An undeclared-codex marker is now an advisory, not a blocker,
       because the declaration it asks for changes no conversion plan.
 - [ ] Vendored `scripts/` removal from a consumer happens only where

@@ -110,7 +110,7 @@ unshippable. Fix the state, the mechanism, or both, and decide which.
       `retainVendoredFor` returns hits only in these classes: the
       archive, the CHANGELOG's historical entries, journal history,
       **the annotated dated snapshot at
-      `08-09-thin-migration/design.md:26`**, which deliberately keeps
+      `.trellis/tasks/08-09-thin-migration/design.md:26`**, which deliberately keeps
       the superseded literal because that section is a measurement at
       `d7913054`, and **this task's own artifacts**, which quote the
       wrong text in order to name it. A criterion demanding zero live
