@@ -18,7 +18,10 @@ does not begin until the canary PR has been reviewed.
       report.
 - [x] A5. Verify: `.prism/rules.json` digest unchanged from A2; the report
       shows `refreshed .gito/config.toml`; the install mode is still fat;
-      `grep -c '".trellis/\*\*"' <path>/.gito/config.toml` is 0.
+      `grep -cF '".trellis/**"' <path>/.gito/config.toml` is 0. Use `-F`: as a
+      regex the leading `.` matches any character, so the unescaped form can
+      count lines that are not the exclusion. The conversion script used the
+      equivalent escaped regex `'\.trellis/\*\*'`.
 - [x] A6. Commit exactly the installer's paths, push, open the PR against that
       consumer's default branch with the measurement in its body.
 - [x] A7. Stop. Report the PR and wait for review.
@@ -29,7 +32,7 @@ Validation for Phase A:
 python3 install.py <path> --status --audit --json
 git -C <path> status --porcelain
 shasum -a 256 <path>/.prism/rules.json
-grep -c '"\.trellis/\*\*"' <path>/.gito/config.toml
+grep -cF '".trellis/**"' <path>/.gito/config.toml
 ```
 
 ## Phase B — the remaining seven

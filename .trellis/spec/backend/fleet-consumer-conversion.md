@@ -11,8 +11,10 @@
 
 Trigger: any run that invokes `install.py` with a target outside this
 repository — a fleet consumer refresh, a provider-config conversion, a version
-rollout. Not triggered by installing into this repository itself (`make sync`),
-which writes only the local `.sd-ai-command-pack` payload.
+rollout. Not triggered by the self-install, `make sync`, which is
+`install.py . --force` (Makefile) and writes the same full payload — the
+distinction is the target, this repository rather than somebody else's, not the
+size of the write.
 
 Consumer mutation needs explicit per-cohort user authorization. That
 authorization is granted for a *stated* cohort, and the sections below exist
