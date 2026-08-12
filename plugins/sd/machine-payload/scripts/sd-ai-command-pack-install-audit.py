@@ -72,6 +72,7 @@ PACK_FILE_PATTERNS = [
     ".prism/rules.schema.json",
     ".sd-ai-command-pack/*",
     "docs/SD_AI_COMMAND_PACK.md",
+    "docs/sd-ai-command-pack-provider-config-history.json",
     "scripts/sd-ai-command-pack-*",
     "scripts/sd_ai_command_pack_lib.py",
     "scripts/sd_ai_command_pack_fleet_lib.py",
@@ -908,6 +909,105 @@ def audit_migration_advisories(root: Path, targets: set[str]) -> list[str]:
     return sorted(set(warnings))
 
 
+PROVIDER_CONFIG_HISTORY = Path("docs/sd-ai-command-pack-provider-config-history.json")
+
+
+def _provider_config_history(root: Path) -> tuple[dict, str | None]:
+    """Read the shipped digest record, or the reason it cannot be read."""
+    path = root / PROVIDER_CONFIG_HISTORY
+    try:
+        if path.is_symlink():
+            return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is a symlink"
+        if not path.exists():
+            return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is not present"
+        if not path.is_file():
+            return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is not a regular file"
+        payload = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+    except (OSError, UnicodeError, ValueError) as error:
+        return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is unreadable: {error}"
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 1:
+        return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} has an unsupported shape"
+    sources = payload.get("sources")
+    if not isinstance(sources, dict):
+        return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} has no sources"
+    return sources, None
+
+
+def audit_provider_config_drift(root: Path, manifest: object) -> list[str]:
+    """Report which `if-not-exists` configs are behind or locally owned.
+
+    The installer refreshes a config whose bytes it recognizes as one of its
+    own past defaults and leaves every other one alone. That is the right
+    behavior and a silent one: a consumer holding a config nobody will ever
+    update again looks identical to a consumer holding a current one. This is
+    what makes the difference visible in the consumer's own CI.
+
+    Advisory throughout. A locally owned config is a decision, not a defect,
+    and an unreadable record is this check's problem rather than the
+    repository's.
+    """
+    if not isinstance(manifest, dict):
+        # No pack manifest to read the install policy from. `audit_provenance`
+        # already reports why; this check simply has nothing to say.
+        return []
+    records, failures = manifest_file_records(manifest)
+    if failures:
+        return []
+    targets = [
+        record["target"]
+        for record in records
+        if record["install"] == "if-not-exists"
+        and path_exists(root, Path(record["target"]))
+    ]
+    if not targets:
+        return []
+
+    sources, unavailable = _provider_config_history(root)
+    if unavailable is not None:
+        return [
+            "cannot check provider config currency for "
+            f"{len(targets)} target(s): {unavailable}"
+        ]
+
+    by_target = {
+        entry.get("target"): entry
+        for entry in sources.values()
+        if isinstance(entry, dict)
+    }
+    warnings: list[str] = []
+    for target in sorted(targets):
+        entry = by_target.get(target)
+        if not isinstance(entry, dict):
+            continue
+        current = entry.get("current")
+        digests = entry.get("digests")
+        if not isinstance(current, str) or not isinstance(digests, list):
+            warnings.append(
+                f"cannot check provider config currency for {target}: "
+                "its history entry is malformed"
+            )
+            continue
+        try:
+            digest = hashlib.sha256((root / target).read_bytes()).hexdigest()
+        except OSError as error:
+            warnings.append(f"cannot read {target}: {error}")
+            continue
+        if digest == current:
+            continue
+        if digest in digests:
+            warnings.append(
+                f"{target} is a superseded shipped default; run install.py "
+                "from an sd-ai-command-pack source checkout to update it"
+            )
+        else:
+            warnings.append(
+                f"{target} matches no template this pack has shipped, so it "
+                "is treated as locally owned and will never be updated "
+                "automatically; merge shipped changes by hand"
+            )
+    return warnings
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Audit the installed sd-ai-command-pack footprint."
@@ -1044,6 +1144,7 @@ def main() -> int:
         *structural_warnings,
         *expected_warnings,
         *audit_migration_advisories(root, targets),
+        *audit_provider_config_drift(root, pack_manifest),
     ]
 
     # Advisory warnings print even when the audit fails: the operator

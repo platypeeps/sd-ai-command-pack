@@ -1992,5 +1992,201 @@ class InstallAuditTests(InstallTestCase):
         )
 
 
+class ProviderConfigDriftTests(InstallTestCase):
+    """The consumer-side view of `if-not-exists` configs the installer skips.
+
+    Advisory by construction: a locally owned config is a decision, and an
+    unreadable record is this check's own problem. Every path below therefore
+    either names a target or names the reason it cannot speak about one --
+    silence is reserved for a config that is genuinely current.
+    """
+
+    TARGET = ".gito/config.toml"
+    SOURCE = "templates/.gito/config.toml"
+
+    def audit_module(self):
+        return self.load_module_from_path(
+            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            "sd_install_audit_provider_config",
+        )
+
+    def manifest(self, install_mode: str = "if-not-exists") -> dict:
+        return {
+            "files": [
+                {
+                    "platform": "shared",
+                    "kind": "config",
+                    "source": self.SOURCE,
+                    "target": self.TARGET,
+                    "install": install_mode,
+                }
+            ]
+        }
+
+    def make_consumer(self, content: bytes = b"shipped\n") -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        target = root / self.TARGET
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        return root
+
+    def write_history(self, root: Path, payload: object) -> None:
+        audit = self.audit_module()
+        path = root / audit.PROVIDER_CONFIG_HISTORY
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(payload, bytes):
+            path.write_bytes(payload)
+            return
+        path.write_text(
+            payload if isinstance(payload, str) else json.dumps(payload),
+            encoding="utf-8",
+        )
+
+    def entry(self, current: str, digests: list) -> dict:
+        return {
+            "schemaVersion": 1,
+            "sources": {
+                self.SOURCE: {
+                    "target": self.TARGET,
+                    "current": current,
+                    "digests": digests,
+                }
+            },
+        }
+
+    def test_an_unreadable_record_reports_itself_rather_than_the_repository(
+        self,
+    ) -> None:
+        shapes = {
+            "absent": None,
+            "not json": "{not json",
+            "invalid utf-8": b"\xff\xfe",
+            "not an object": [],
+            "no sources": {"schemaVersion": 1, "sources": []},
+            "unsupported version": {"schemaVersion": 99, "sources": {}},
+        }
+        audit = self.audit_module()
+        for label, payload in shapes.items():
+            with self.subTest(shape=label):
+                root = self.make_consumer()
+                if payload is not None:
+                    self.write_history(root, payload)
+                warnings = audit.audit_provider_config_drift(root, self.manifest())
+                self.assertEqual(len(warnings), 1, warnings)
+                self.assertIn(
+                    "cannot check provider config currency for 1 target(s)",
+                    warnings[0],
+                )
+
+    def test_a_non_regular_record_says_which_kind_it_is(self) -> None:
+        # "is not present" for a symlink sends whoever reads the warning
+        # looking for a missing file that is right there.
+        audit = self.audit_module()
+        root = self.make_consumer()
+        path = root / audit.PROVIDER_CONFIG_HISTORY
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        path.symlink_to(root / "nowhere.json")
+        warnings = audit.audit_provider_config_drift(root, self.manifest())
+        self.assertIn("is a symlink", warnings[0])
+
+        path.unlink()
+        path.mkdir()
+        warnings = audit.audit_provider_config_drift(root, self.manifest())
+        self.assertIn("is not a regular file", warnings[0])
+
+    def test_a_manifest_this_check_cannot_read_yields_no_claim(self) -> None:
+        audit = self.audit_module()
+        root = self.make_consumer()
+        # `audit_provenance` already reports a malformed manifest; repeating it
+        # here would be noise, and guessing at the install policy would be
+        # worse than saying nothing.
+        self.assertEqual(
+            audit.audit_provider_config_drift(root, {"files": [{"platform": ""}]}),
+            [],
+        )
+        self.assertEqual(audit.audit_provider_config_drift(root, None), [])
+
+    def test_a_target_outside_the_policy_is_not_this_check_s_business(self) -> None:
+        audit = self.audit_module()
+        root = self.make_consumer()
+        self.assertEqual(
+            audit.audit_provider_config_drift(root, self.manifest("always")), []
+        )
+
+    def test_a_target_the_record_never_mentions_stays_silent(self) -> None:
+        audit = self.audit_module()
+        root = self.make_consumer()
+        self.write_history(
+            root,
+            {
+                "schemaVersion": 1,
+                "sources": {
+                    "templates/.prism/rules.json": {
+                        "target": ".prism/rules.json",
+                        "current": "a" * 64,
+                        "digests": ["a" * 64],
+                    }
+                },
+            },
+        )
+        self.assertEqual(
+            audit.audit_provider_config_drift(root, self.manifest()), []
+        )
+
+    def test_a_malformed_history_entry_names_the_target_it_cannot_judge(self) -> None:
+        audit = self.audit_module()
+        root = self.make_consumer()
+        self.write_history(root, self.entry(current=1, digests=None))
+        warnings = audit.audit_provider_config_drift(root, self.manifest())
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("its history entry is malformed", warnings[0])
+        self.assertIn(self.TARGET, warnings[0])
+
+    def test_an_unreadable_target_is_reported_not_classified(self) -> None:
+        audit = self.audit_module()
+        root = self.make_consumer()
+        target = root / self.TARGET
+        target.unlink()
+        target.mkdir()
+        self.write_history(root, self.entry(current="a" * 64, digests=["a" * 64]))
+        warnings = audit.audit_provider_config_drift(root, self.manifest())
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn(f"cannot read {self.TARGET}", warnings[0])
+
+    def test_the_three_states_a_readable_config_can_be_in(self) -> None:
+        audit = self.audit_module()
+        current_digest = hashlib.sha256(b"current\n").hexdigest()
+        old_digest = hashlib.sha256(b"old\n").hexdigest()
+
+        with self.subTest(state="current"):
+            root = self.make_consumer(b"current\n")
+            self.write_history(
+                root, self.entry(current_digest, [old_digest, current_digest])
+            )
+            self.assertEqual(
+                audit.audit_provider_config_drift(root, self.manifest()), []
+            )
+
+        with self.subTest(state="superseded"):
+            root = self.make_consumer(b"old\n")
+            self.write_history(
+                root, self.entry(current_digest, [old_digest, current_digest])
+            )
+            warnings = audit.audit_provider_config_drift(root, self.manifest())
+            self.assertEqual(len(warnings), 1, warnings)
+            self.assertIn("superseded shipped default", warnings[0])
+
+        with self.subTest(state="locally owned"):
+            root = self.make_consumer(b"mine\n")
+            self.write_history(
+                root, self.entry(current_digest, [old_digest, current_digest])
+            )
+            warnings = audit.audit_provider_config_drift(root, self.manifest())
+            self.assertEqual(len(warnings), 1, warnings)
+            self.assertIn("matches no template this pack has shipped", warnings[0])
+
+
 if __name__ == "__main__":
     unittest.main()

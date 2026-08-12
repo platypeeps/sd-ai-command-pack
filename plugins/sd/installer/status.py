@@ -18,6 +18,11 @@ class InstallStatus(StringStatus):
     UNCHANGED = "unchanged"
     OVERWRITTEN = "overwritten"
     PRESERVED = "preserved"
+    # An `if-not-exists` target whose bytes were a previously shipped default,
+    # replaced with the current one. Distinct from UPDATED (an `always` file)
+    # and OVERWRITTEN (a forced conflict) so a reader can still tell whether
+    # any local decision was discarded -- here, by construction, none was.
+    REFRESHED = "refreshed"
     CONFLICT = "conflict"
     SYMLINK_CONFLICT = "symlink-conflict"
 
@@ -61,6 +66,7 @@ VOUCHABLE_STATUSES = frozenset(
         InstallStatus.UPDATED,
         InstallStatus.UNCHANGED,
         InstallStatus.OVERWRITTEN,
+        InstallStatus.REFRESHED,
     }
 )
 WRITTEN_REMOVE_STATUSES = frozenset(

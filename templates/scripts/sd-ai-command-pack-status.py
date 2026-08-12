@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import errno
+import hashlib
 import importlib.util
 import json
 import os
@@ -2927,6 +2928,80 @@ def machine_install_version(machine_scope: Mapping[str, Any] | None) -> str | No
     return version if isinstance(version, str) and version else None
 
 
+PROVIDER_CONFIG_HISTORY_SOURCE = Path(
+    "templates/docs/sd-ai-command-pack-provider-config-history.json"
+)
+
+
+def provider_config_states(pack_root: Path, consumer_root: Path) -> list[dict[str, Any]]:
+    """Classify a consumer's `if-not-exists` configs against shipped digests.
+
+    Read entirely from the pack checkout: the record is the pack's, and the
+    consumer files are read directly. That is what lets this answer "who is
+    behind on a provider config" *before* anything is installed anywhere --
+    the consumer's own audit cannot, because the record only reaches it by
+    install, and by then the install has already refreshed the file.
+
+    Read-only, and every unreadable input degrades to `unknown` rather than a
+    clean row.
+    """
+    try:
+        payload = json.loads(
+            (pack_root / PROVIDER_CONFIG_HISTORY_SOURCE).read_text(encoding="utf-8")
+        )
+        sources = payload["sources"]
+        if payload.get("schemaVersion") != 1 or not isinstance(sources, dict):
+            raise ValueError("unsupported provider config history")
+    except (OSError, ValueError, KeyError, TypeError):
+        # The record is what enumerates the targets, so an unreadable one
+        # leaves nothing to classify. Returning `[]` would render as a row
+        # with no provider configs -- indistinguishable from a clean one --
+        # so name the artifact that could not be read instead.
+        return [
+            {"target": PROVIDER_CONFIG_HISTORY_SOURCE.as_posix(), "state": "unknown"}
+        ]
+
+    states: list[dict[str, Any]] = []
+    for source, entry in sources.items():
+        # A malformed entry is reported, never skipped: dropping it would
+        # shrink the list toward the same clean-looking row an unreadable
+        # record used to produce.
+        label = source if isinstance(source, str) else repr(source)
+        if not isinstance(entry, Mapping):
+            states.append({"target": label, "state": "unknown"})
+            continue
+        target = entry.get("target")
+        current = entry.get("current")
+        digests = entry.get("digests")
+        if not isinstance(target, str) or not isinstance(current, str):
+            states.append({"target": label, "state": "unknown"})
+            continue
+        if not isinstance(digests, list):
+            digests = []
+        path = consumer_root / target
+        try:
+            if path.is_symlink():
+                # A symlink is a deliberate local choice and the installer
+                # preserves it, so it belongs with the locally owned files.
+                # Calling it `absent` would say the opposite of what it is.
+                state = "local"
+            elif not path.is_file():
+                state = "absent"
+            else:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                if digest == current:
+                    state = "current"
+                elif digest in digests:
+                    state = "superseded"
+                else:
+                    state = "local"
+        except OSError:
+            state = "unknown"
+        states.append({"target": target, "state": state})
+    states.sort(key=lambda item: item["target"])
+    return states
+
+
 def fleet_step_records(
     reports: Sequence[Mapping[str, Any]],
     target: str,
@@ -3039,6 +3114,56 @@ def fleet_step_records(
             "Refresh stale SD pack installations: " + ", ".join(stale) + ".",
             FLEET_STEP_RANK_ADVISORY,
         )
+    superseded_configs = [
+        item["name"]
+        for item in reports
+        if any(
+            state.get("state") == "superseded"
+            for state in item.get("providerConfigs") or ()
+        )
+    ]
+    if superseded_configs:
+        add(
+            "Update superseded provider configs by running install.py against: "
+            + ", ".join(superseded_configs)
+            + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
+    local_configs = [
+        item["name"]
+        for item in reports
+        if any(
+            state.get("state") == "local"
+            for state in item.get("providerConfigs") or ()
+        )
+    ]
+    if local_configs:
+        # Not skew: a locally owned config is a decision the installer will
+        # keep honoring. It is listed so a shipped correction that will never
+        # reach it is visible to a human who can merge it.
+        add(
+            "Merge shipped provider config changes by hand where the consumer "
+            "owns the file: " + ", ".join(local_configs) + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
+    unknown_configs = [
+        item["name"]
+        for item in reports
+        if any(
+            state.get("state") == "unknown"
+            for state in item.get("providerConfigs") or ()
+        )
+    ]
+    if unknown_configs:
+        # An unreadable record or file is this report's own gap, and saying so
+        # is the point: a consumer whose currency could not be determined must
+        # not read as one that was checked and found clean.
+        add(
+            "Provider config currency could not be determined for: "
+            + ", ".join(unknown_configs)
+            + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
     if not records:
         add(FLEET_READY_STEP, FLEET_STEP_RANK_ADVISORY)
     records.sort(key=lambda record: record["rank"])
@@ -3104,6 +3229,7 @@ def collect_fleet(
                 "status": "missing",
                 "installMode": install_mode,
                 "pin": None,
+                "providerConfigs": [],
                 "report": None,
             }
         try:
@@ -3141,6 +3267,7 @@ def collect_fleet(
                 if report and install_mode == "thin"
                 else None
             ),
+            "providerConfigs": provider_config_states(pack_root, path),
             "report": report,
         }
 

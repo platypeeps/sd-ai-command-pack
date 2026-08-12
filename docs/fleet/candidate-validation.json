@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-12T01:31:24Z",
-  "packVersion": "0.70.0",
-  "payloadDigest": "sha256:7db1278733d7c7a80d36aa4e7ef0248d8da988ff64dc5311e180d3d35736854d",
+  "validatedAt": "2026-08-12T04:25:20Z",
+  "packVersion": "0.71.0",
+  "payloadDigest": "sha256:fe5637747c96987063d835293a69cf6e65000ea14ab1313b50cf93119e870b67",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [

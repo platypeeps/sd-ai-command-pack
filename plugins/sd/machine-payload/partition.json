@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "0.70.0",
+  "manifestVersion": "0.71.0",
   "platforms": {
     "antigravity": {
       "scope": "repo-native",
@@ -81,7 +81,7 @@
   },
   "counts": {
     "machine-claude": 79,
-    "machine-other": 88,
+    "machine-other": 89,
     "repo-native": 551,
     "consumer-config": 6
   },
@@ -4270,6 +4270,12 @@
     },
     {
       "target": "docs/SD_AI_COMMAND_PACK.md",
+      "platform": "shared",
+      "category": "machine-other",
+      "sharedRuntime": false
+    },
+    {
+      "target": "docs/sd-ai-command-pack-provider-config-history.json",
       "platform": "shared",
       "category": "machine-other",
       "sharedRuntime": false

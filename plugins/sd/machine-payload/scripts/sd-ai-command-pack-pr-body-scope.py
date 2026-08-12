@@ -246,6 +246,7 @@ DEFAULT_RULES = (
             ".zcode/commands/trellis/**",
             "docs/SD_AI_COMMAND_PACK.md",
             "docs/repomix-map.md",
+            "docs/sd-ai-command-pack-provider-config-history.json",
             "scripts/sd-ai-command-pack-*.sh",
             "scripts/sd-ai-command-pack-*.py",
             "scripts/sd-ai-command-pack-*.mjs",

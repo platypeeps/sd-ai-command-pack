@@ -102,6 +102,10 @@ class ReleasePrepTests(unittest.TestCase):
                 ["/venv/python", ".github/scripts/generate-command-surfaces.py"],
                 ["/venv/python", ".github/scripts/partition-surfaces.py"],
                 ["/venv/python", ".github/scripts/generate-plugin.py"],
+                [
+                    "/venv/python",
+                    ".github/scripts/generate-provider-config-history.py",
+                ],
                 ["/venv/python", "install.py", ".", "--force"],
                 ["/venv/python", "scripts/sd-ai-command-pack-update-spec-kb.py"],
                 ["/venv/python", release_prep.SURFACE_CHECK, "--json"],
@@ -124,6 +128,10 @@ class ReleasePrepTests(unittest.TestCase):
                 ["/venv/python", ".github/scripts/generate-command-surfaces.py"],
                 ["/venv/python", ".github/scripts/partition-surfaces.py"],
                 ["/venv/python", ".github/scripts/generate-plugin.py"],
+                [
+                    "/venv/python",
+                    ".github/scripts/generate-provider-config-history.py",
+                ],
                 ["/venv/python", "install.py", ".", "--force"],
                 ["/venv/python", "scripts/sd-ai-command-pack-update-spec-kb.py"],
                 ["/venv/python", release_prep.SURFACE_CHECK, "--json"],

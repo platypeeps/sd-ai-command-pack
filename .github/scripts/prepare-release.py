@@ -321,6 +321,13 @@ def prepare_release(root: Path = ROOT, python: str = sys.executable) -> None:
         label="generate Claude Code plugin",
     )
     _validate_plugin_version(root)
+    # Before the self-sync install, so a template edit in this release is
+    # recorded as a shipped digest and the install writes the root copy.
+    _run_visible(
+        root,
+        [python, ".github/scripts/generate-provider-config-history.py"],
+        label="record provider config digests",
+    )
     _run_visible(
         root,
         [python, "install.py", ".", "--force"],
