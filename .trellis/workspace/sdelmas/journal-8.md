@@ -495,3 +495,50 @@ Recorded the follow-up task from the 08-11-thin-candidate-loop-shape iteration's
 ### Next Steps
 
 - None - task complete
+
+
+## Session 362: Give shipped if-not-exists defaults a delivery path
+
+**Date**: 2026-08-11
+**Task**: Give shipped if-not-exists defaults a delivery path
+**Branch**: `feat/provider-config-digest-history`
+
+### Summary
+
+Shipped a release-generated digest history so install.py can tell a stale shipped default from a customized file, refreshed the former, and made the population visible from both the consumer audit and sd-status fleet.
+
+### Main Changes
+
+- Added .github/scripts/generate-provider-config-history.py: seeds each if-not-exists source from the git log's own raw blob ids (rename-proof), refuses on a shallow clone, only ever appends, and runs before the self-sync install so the root docs/ copy comes from the install.
+- Added installer/providerhistory.py and installer/fileops.is_previously_shipped_default, gating a new InstallStatus.REFRESHED that is vouched like any written file and is not gated on --force; every unreadable history resolves to preserved with a named reason.
+- Taught the install audit and sd-status fleet to classify each consumer's if-not-exists configs as current, superseded, locally owned, or unknown, with a fleet step for the unknown case.
+- Corrected design.md and implement.md where implementation refuted them: FORCE_PRESERVED_TARGETS is not a second population (excluding it made the feature inert), the artifact gained an explicit current field, and the symlink path stays PRESERVED deliberately.
+- Filed 08-11-convert-fleet-provider-configs for the consumer conversion, which needs per-cohort authorization the autonomous loop does not hold.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62176532` | feat(installer): give shipped if-not-exists defaults a delivery path |
+| `9a324fd8` | fix: keep every unreadable provider-config input visible |
+| `34c12e38` | fix: stop three provider-config paths from misnaming what they saw |
+| `450c0a95` | fix: refuse malformed provider-config entries instead of dropping them |
+| `140fd8ee` | chore(task): record branch for 08-06-fleet-provider-config-propagation |
+| `21570ac5` | docs(task): record acceptance evidence and file the conversion follow-up |
+
+### Testing
+
+- [OK] make check exit 0 and make release-prep exit 0 at pack version 0.71.0
+- [OK] Scratch consumer: both configs refreshed to byte-identical from the oldest recorded blob; both preserved byte-unchanged once customized
+- [OK] Consumer-side audit reproduced both states: superseded shipped default, and matches no template this pack has shipped
+- [OK] sd-status fleet --no-network across eight consumers: .gito 8/8 superseded; .prism one current, one superseded, six locally owned
+- [OK] tests/test_provider_config_history.py 22 tests OK; three Copilot review rounds, all findings addressed and threads resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
