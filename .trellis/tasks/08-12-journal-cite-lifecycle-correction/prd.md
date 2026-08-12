@@ -22,7 +22,7 @@ for (const taskDir of validatePlanningBundle(
 ```
 
 That baseline is then required to be a valid planning task
-(`:2322-2324`):
+(`scripts/sd-ai-command-pack-review-preflight.mjs:2322-2324`):
 
 ```js
 const baseline = loadBookkeepingJsonAtRef(baseOid, `${taskDir}/task.json`, add, baselineOptions);

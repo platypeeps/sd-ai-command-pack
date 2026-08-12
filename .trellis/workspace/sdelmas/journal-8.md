@@ -761,7 +761,7 @@ The 08-09-deployment-thin-consumers parent was started in 6e66f38a and stayed in
 
 ### Summary
 
-Filed 08-12-journal-cite-lifecycle-correction after shipping PR #438 hit the defect: journal-only-recovery validates each cited commit's parent, so a commit correcting a task's lifecycle status can never be cited by any journal session. Traced to review-preflight.mjs:2711-2716 handing parentFields[1] to validatePlanningBundle as the baseline ref, and :2322-2324 requiring that baseline to be a valid planning task. Verified against shipped history: correction commit 3e2991ea holds planning, its parent f0f12837 holds in_progress. PRD-only; three mechanism candidates left open, with planning-to-in_progress ruled out as the direction the check exists to defend.
+Filed 08-12-journal-cite-lifecycle-correction after shipping PR #438 hit the defect: journal-only-recovery validates each cited commit's parent, so a commit correcting a task's lifecycle status can never be cited by any journal session. Traced to scripts/sd-ai-command-pack-review-preflight.mjs:2711-2716 handing parentFields[1] to validatePlanningBundle as the baseline ref, and scripts/sd-ai-command-pack-review-preflight.mjs:2322-2324 requiring that baseline to be a valid planning task. Verified against shipped history: correction commit 3e2991ea holds planning, its parent f0f12837 holds in_progress. PRD-only; three mechanism candidates left open, with planning-to-in_progress ruled out as the direction the check exists to defend.
 
 ### Main Changes
 
@@ -779,7 +779,7 @@ Filed 08-12-journal-cite-lifecycle-correction after shipping PR #438 hit the def
 
 - [OK] make full-check: Review preflight: 0 failure(s), 0 warning(s)
 - [OK] task.py validate .trellis/tasks/08-12-journal-cite-lifecycle-correction: All validations passed
-- [OK] git show 3e2991ea^:.../task.json reports in_progress; git show 3e2991ea:.../task.json reports planning
+- [OK] git show 3e2991ea^:.trellis/tasks/08-09-deployment-thin-consumers/task.json reports in_progress; git show 3e2991ea:.trellis/tasks/08-09-deployment-thin-consumers/task.json reports planning
 
 ### Status
 
