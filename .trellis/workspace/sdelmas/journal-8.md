@@ -709,3 +709,45 @@ An executed codex debug prompt-input probe falsified the claim that Codex never 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 367: Return the thin-consumers parent to planning and unblock its subtree
+
+**Date**: 2026-08-12
+**Task**: Return the thin-consumers parent to planning and unblock its subtree
+**Branch**: `fix/thin-parent-status-finalization`
+
+### Summary
+
+The 08-09-deployment-thin-consumers parent was started in 6e66f38a and stayed in_progress with a null branch, which made its whole subtree unfinalizable: a branch touching the parent failed planning mode on the baseline, and a branch touching any child failed with planning_active_task_outside_closure. Enumerating every active parent from task.json showed four of five already planning with branch null, including 08-09-thin-migration with eight children and four shipped, so the state was the outlier rather than the rule. Returned it to planning, left validatePlanningClosureActiveTasks alone, and landed the parent's blocked codex-retention corrections recovered from d3b34c8b. The status-flip commit 3e2991ea is deliberately not cited below: journal-only-recovery validates each cited commit's parent, and a lifecycle-correction commit's parent necessarily still holds the pre-correction status, so no session can ever cite it. Filed as a follow-up finding rather than worked around silently.
+
+### Main Changes
+
+- 08-09-deployment-thin-consumers/task.json: status in_progress -> planning in 3e2991ea, a one-field diff with completedAt and branch asserted already null
+- 08-09-deployment-thin-consumers/prd.md and design.md: the four codex-retention correction sites recovered from d3b34c8b, with both archived-research citations qualified from the repo root
+- 08-09-deployment-thin-consumers/prd.md: recurrence note recording that the task stays planning for the program's duration
+- 08-12-thin-parent-status-blocks-finalization: design.md and implement.md added; prd.md acceptance criterion 3 corrected after adversarial review found it unsatisfiable against the annotated snapshot #436 merged
+- implement.md step 4 rewritten after execution: replaying #435's range returns bundle_head_not_checked_out, so a replay cannot observe this fix and the child-direction proof is constructed instead
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0f12837` | docs(task): converge parent-status finalization planning |
+| `b8653750` | docs(task): retire the codex retention claims from the parent |
+
+### Testing
+
+- [OK] make full-check: Review preflight 0 failure(s), 1 warning(s)
+- [OK] task.py validate on the parent: All validations passed
+- [OK] Four correction sites checked by grep; the archived research path resolved from the filesystem and the active path confirmed absent
+- [NOTE] PR #436 merged with no journal session; finalization could not run for it. This session does not retroactively cover that work, which is PRD requirement 4's recorded gap.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

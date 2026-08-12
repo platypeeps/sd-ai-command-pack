@@ -181,18 +181,24 @@ per consumer repo (thin)
   re-greps workflows, git hooks, Make targets, and docs for pack
   references before deleting anything. The resweep additionally greps
   for **codex/pi usage markers** (`.codex/` directories, `$CODEX_HOME`
-  references, pi adapter files); usage found in a consumer that does
-  not declare the platform in its `docs/fleet/consumers.json`
-  `platforms` array **blocks conversion** until the consumer either
-  declares the platform (turning retention on) or removes the usage.
+  references, pi adapter files). Which of those markers blocks is
+  derived from `retainVendoredFor`, not restated in the scanner: an
+  undeclared marker for a retained platform **blocks conversion** until
+  the consumer declares the platform (turning retention on) or removes
+  the usage, while an undeclared marker for a platform carrying no
+  retention is an advisory, because the declaration it would ask for
+  changes no conversion plan. Since 0.71.2 that makes pi blocking and
+  codex advisory.
   One PR then: deletes the vendored payload (minus the `repo-native` +
   `consumer-config` slices, **and minus any platform's rows whose
   partition entry carries `retainVendoredFor` intersecting this
   consumer's declared `platforms`** — `shared` carries
-  `["codex", "pi"]`, so a consumer serving either keeps its
-  `.agents/**` rows vendored; the fleet registry is the single
+  `["pi"]`, so a consumer serving pi keeps its `.agents/**` rows
+  vendored; `codex` was in that list until 0.71.2 retired it on probe
+  evidence that Codex reads `$HOME/.agents/skills`, which the machine
+  installer already writes; the fleet registry is the single
   authority, never repo sniffing; evidence in
-  `08-09-thin-machine-installer/research/platform-verification.md`),
+  `.trellis/tasks/archive/2026-08/08-09-thin-machine-installer/research/platform-verification.md`),
   deletes all pack CI steps (lints +
   the anomaly-metric-creator advisory call per D2), **deletes consumer-
   side sync automation** (anomaly-metric-creator's
@@ -204,7 +210,8 @@ per consumer repo (thin)
   repo-relatively, so it is only safe once the machine payload's
   reference rewrite (`~/.agents/bin`, `~/.agents/docs`) ships in
   `08-09-thin-machine-installer`. A consumer retaining `.agents/**`
-  for codex/pi keeps whatever those rewritten references name.
+  for a retained platform (pi today) keeps whatever those rewritten
+  references name.
 - Revert is a single command that actually reverses conversion
   (working name `install.py TARGET --revert-thin`): restores the fat
   payload, removes the thin artifacts it added (marketplace/enable

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 366
+- **Total Sessions**: 367
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~699 | Active |
+| `journal-8.md` | ~742 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 367 | 2026-08-12 | Return the thin-consumers parent to planning and unblock its subtree | `f0f12837`, `b8653750` | `fix/thin-parent-status-finalization` |
 | 366 | 2026-08-12 | Retire the codex vendored-retention carve-out on probe evidence | `9bc8ae9094c00489829790a770fd89037249ab15` | `feat/retire-codex-vendored-retention` |
 | 365 | 2026-08-12 | Convert the eight fleet consumers off superseded provider configs | `a078b9b0`, `fc99c798`, `023a3bb7`, `fbc9c187`, `ce29ff5a`, `1f2d83b5` | `chore/convert-fleet-provider-configs` |
 | 364 | 2026-08-12 | Recompute the review coordinator's deterministic check on every invocation | `da8a857e`, `60e5d7f4`, `124efc13`, `c6a5544c`, `56487c3f` | `fix/review-check-recompute-contract` |
