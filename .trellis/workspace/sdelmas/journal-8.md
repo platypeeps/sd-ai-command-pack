@@ -709,3 +709,43 @@ An executed codex debug prompt-input probe falsified the claim that Codex never 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 367: Retire codex retention claims from the thin-conversion planning tasks
+
+**Date**: 2026-08-12
+**Task**: Retire codex retention claims from the thin-conversion planning tasks
+**Branch**: `docs/retire-codex-retention-planning-tasks`
+
+### Summary
+
+Swept the task artifacts still asserting the pre-0.71.2 codex vendored-retention carve-out and corrected the two that belong to planning tasks. The canary conversion PRD's requirement 3 was reframed around machine provisioning, requirement 5 lost its second removal branch, and two acceptance criteria conditioned on a canary declaring codex were replaced with observable advisory-bucket evidence. 08-09-thin-migration/design.md was annotated rather than rewritten because that section is a measurement at a named commit. The parent task's own prd.md and design.md carry the same claims but were split out: that task is in_progress, and neither finalization mode accepts a branch touching its directory.
+
+### Main Changes
+
+- 08-10-thin-canary-conversion/prd.md: requirement 3 reframed around machine provisioning rather than a declare-or-remove branch, since conversion transfers the Codex job to the machine copy rather than removing it
+- 08-10-thin-canary-conversion/prd.md: requirement 5 drops the 104-removal second branch (179 holds either way) and the two acceptance criteria conditioned on declaring codex now cite resweep advisory-bucket evidence
+- 08-09-thin-migration/design.md: annotated as superseded rather than rewritten, because the section is measured against main at d7913054; its one live blocking claim corrected in place
+- Probe citation qualified to .trellis/tasks/archive/2026-08/... after Copilot flagged it as rootless
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cc034eb2` | docs(trellis): retire codex retention claims in the two planning tasks |
+| `8d67ff71` | docs(trellis): make the probe citation repo-root-relative |
+
+### Testing
+
+- [OK] make full-check: Review preflight 0 failure(s), 1 warning(s)
+- [OK] PR #435 CI: all 9 checks SUCCESS or SKIPPED, CI Result SUCCESS
+- [OK] Copilot review: one finding, verified and complied with; zero outstanding
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
