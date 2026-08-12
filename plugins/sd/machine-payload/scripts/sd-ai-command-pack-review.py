@@ -1916,19 +1916,33 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 limitations=(f"router-{cap_state}",),
             )
 
-    if state.get("check") is None:
-        check = _run_check(repo)
-        # Only a pass is completed work. A registered check may read an input
-        # the attempt key does not cover — `pack.review-scope` reads the pull
-        # request body — so a persisted failure survives the operator editing
-        # that input, which is the correct remediation, and replays forever.
-        _record_stage(
-            state_path,
-            state,
-            "check",
-            resumable=isinstance(check, dict) and check.get("status") == "passed",
-            check=check,
-        )
+    # The deterministic check is recomputed on every invocation rather than
+    # served from the attempt state. A registered check may read an input the
+    # attempt key does not cover — `pack.review-scope` reads the pull-request
+    # body — so a stored verdict of *either* sign can disagree with what a
+    # direct `sd-check` run reports on the same tree at the same moment.
+    # Declining to persist a failure fixed only the direction that false-blocks;
+    # a stored pass false-allows, and it is the worse half: the gate reports
+    # `ready` for a body whose scope heading was removed after the pass. The
+    # check is one cheap idempotent subprocess, so recomputing it costs the run
+    # nothing it is not already paying, and the expensive local and remote
+    # stages — whose inputs the key does cover — keep replaying from state.
+    stored = state.get("check") is not None
+    check = _run_check(repo)
+    # A recompute is not a stage completing for the first time, so it must not
+    # rewind `phase`, which names where a resume re-enters; passing the current
+    # phase back is the same idiom the local refresh below uses. `stored` is the
+    # only thing the persisted check is still consulted for — whether this is a
+    # recompute or a first computation — and never the gate. A failing recompute
+    # therefore stays out of the state file exactly as before, and whatever
+    # verdict is left on disk cannot decide a later run.
+    _record_stage(
+        state_path,
+        state,
+        str(state.get("phase", "resolve")) if stored else "check",
+        resumable=isinstance(check, dict) and check.get("status") == "passed",
+        check=check,
+    )
     check = state["check"]
     if not isinstance(check, dict) or check.get("status") != "passed":
         return 1, _report(

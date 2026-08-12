@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.71.1 - 2026-08-12
+
+### Fixed
+
+- `sd-review` now recomputes the deterministic `sd-check` on every invocation
+  instead of gating on the verdict stored in the attempt state. One registered
+  check reads an input the attempt key does not capture — `pack.review-scope`
+  reads the live pull-request body — so a stored verdict of either sign could
+  disagree with what a direct `sd-check` run reports on the same tree. `0.66.2`
+  stopped persisting a *failure*, which fixed the direction that false-blocks a
+  remediated run; a stored *pass* false-allows, and was the worse half: a body
+  that lost its scope heading after the check passed was reviewed as though the
+  gate had held. The expensive local and remote stages, whose inputs the attempt
+  key does cover, still replay from state, and a recompute no longer names
+  `check` as the resume phase, so it cannot rewind an attempt that already
+  completed later stages.
+
 ## 0.71.0 - 2026-08-11
 
 ### Added
