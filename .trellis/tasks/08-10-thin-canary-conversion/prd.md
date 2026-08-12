@@ -2,7 +2,47 @@
 
 Child 3 of `08-09-thin-migration`.
 
-**BLOCKED — requires explicit user authorization.** This task mutates
+## Authorization and operator answers
+
+**2026-08-12 — cohort authorized.** The user authorized the canary cohort
+rollout (`platypeeps/rwbp-coordinator`, `platypeeps/loadsmith`,
+`platypeeps/hoa-manager`) in session, after being told the conversion
+mutates those three repositories. This closes the first acceptance
+criterion. It does not extend to post-canary, per the paragraph below.
+
+**2026-08-12 — fleet refresh scope widened, separately.** The canaries all
+hold stale payloads, so requirement 1 step 0 cannot be satisfied without a
+refresh first. Asked whether to refresh only the cohort or the whole fleet,
+the user authorized refreshing **all eight consumers** to 0.71.2. That is a
+deliberate widening beyond this cohort and covers the *refresh only*;
+conversion stays scoped to the three canaries named above.
+
+**2026-08-12 — requirement 3, operator answers.** Asked: sven.delmas
+(the operator working in these repositories).
+
+- `rwbp-coordinator` — **runs codex**
+- `loadsmith` — **runs codex**
+- `hoa-manager` — **runs codex**
+
+The user answered that they run Codex in some or all three; absent a
+per-consumer split, all three are recorded as `runs codex`, which is the
+conservative reading — it demands more of the plan, not less. Per
+requirement 3 this is not a blocker but a precondition: each of these
+consumers requires **confirmed machine provisioning before conversion**,
+recorded on this line when confirmed.
+
+Machine provisioning is **not yet confirmed**. Measured 2026-08-12 from
+`sd-status fleet --json`: `machineScope.state: installed` but
+`machineScope.packVersion: 0.71.1` against `targetPackVersion: 0.71.2`.
+The machine install must reach 0.71.2 before the first canary mutation.
+
+Recorded alongside it, as a suspected reporting defect rather than
+something this task fixes: the same payload reports
+`machineScope.comparison: "current"` while a release behind the target.
+Adjacent to `.trellis/tasks/08-09-machine-status-copy-unavailable`.
+
+**Superseded by the authorization above, retained for provenance.** This
+task mutates
 repositories outside `sd-ai-command-pack`: `platypeeps/rwbp-coordinator`,
 `platypeeps/loadsmith`, `platypeeps/hoa-manager`. The coordinator's GitHub
 owner is `platypeeps` (`docs/fleet/consumers.json:28`, and its `origin` is
