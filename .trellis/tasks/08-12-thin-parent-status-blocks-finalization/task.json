@@ -2,7 +2,7 @@
   "id": "thin-parent-status-blocks-finalization",
   "name": "thin-parent-status-blocks-finalization",
   "title": "Parent task in_progress blocks bookkeeping finalization for its whole child tree",
-  "description": "A coordination parent left in_progress makes its own artifacts and its children's unshippable through bookkeeping finalization; decide the correct lifecycle state, apply it, and land the parent's blocked codex-retention corrections.",
+  "description": "A coordination parent left in_progress makes its own artifacts and its children's artifacts unshippable through bookkeeping finalization; decide the correct lifecycle state, apply it, and land the parent's blocked codex-retention corrections.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
