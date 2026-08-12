@@ -542,3 +542,37 @@ Shipped a release-generated digest history so install.py can tell a stale shippe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 363: Record the conversion follow-up description fix
+
+**Date**: 2026-08-12
+**Task**: Record the conversion follow-up description fix
+**Branch**: `feat/provider-config-digest-history`
+
+### Summary
+
+Finalize the post-archive task-description correction for 08-11-convert-fleet-provider-configs so the branch's bookkeeping covers every commit on it.
+
+### Main Changes
+
+- Gave .trellis/tasks/08-11-convert-fleet-provider-configs/task.json a non-empty description, which the review preflight requires and task.py create leaves blank.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d8f975ceefe0d11028b87356880b1339b4f1cafc` | fix(task): give the conversion follow-up a description |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir .trellis/tasks/08-11-convert-fleet-provider-configs --json reports 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
