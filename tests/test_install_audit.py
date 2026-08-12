@@ -2035,6 +2035,9 @@ class ProviderConfigDriftTests(InstallTestCase):
         audit = self.audit_module()
         path = root / audit.PROVIDER_CONFIG_HISTORY
         path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(payload, bytes):
+            path.write_bytes(payload)
+            return
         path.write_text(
             payload if isinstance(payload, str) else json.dumps(payload),
             encoding="utf-8",
@@ -2058,6 +2061,7 @@ class ProviderConfigDriftTests(InstallTestCase):
         shapes = {
             "absent": None,
             "not json": "{not json",
+            "invalid utf-8": b"\xff\xfe",
             "not an object": [],
             "no sources": {"schemaVersion": 1, "sources": []},
             "unsupported version": {"schemaVersion": 99, "sources": {}},
@@ -2074,6 +2078,23 @@ class ProviderConfigDriftTests(InstallTestCase):
                     "cannot check provider config currency for 1 target(s)",
                     warnings[0],
                 )
+
+    def test_a_non_regular_record_says_which_kind_it_is(self) -> None:
+        # "is not present" for a symlink sends whoever reads the warning
+        # looking for a missing file that is right there.
+        audit = self.audit_module()
+        root = self.make_consumer()
+        path = root / audit.PROVIDER_CONFIG_HISTORY
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        path.symlink_to(root / "nowhere.json")
+        warnings = audit.audit_provider_config_drift(root, self.manifest())
+        self.assertIn("is a symlink", warnings[0])
+
+        path.unlink()
+        path.mkdir()
+        warnings = audit.audit_provider_config_drift(root, self.manifest())
+        self.assertIn("is not a regular file", warnings[0])
 
     def test_a_manifest_this_check_cannot_read_yields_no_claim(self) -> None:
         audit = self.audit_module()

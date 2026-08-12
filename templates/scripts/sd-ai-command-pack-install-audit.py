@@ -916,8 +916,12 @@ def _provider_config_history(root: Path) -> tuple[dict, str | None]:
     """Read the shipped digest record, or the reason it cannot be read."""
     path = root / PROVIDER_CONFIG_HISTORY
     try:
-        if path.is_symlink() or not path.is_file():
+        if path.is_symlink():
+            return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is a symlink"
+        if not path.exists():
             return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is not present"
+        if not path.is_file():
+            return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is not a regular file"
         payload = json.loads(path.read_text(encoding="utf-8", errors="strict"))
     except (OSError, UnicodeError, ValueError) as error:
         return {}, f"{PROVIDER_CONFIG_HISTORY.as_posix()} is unreadable: {error}"

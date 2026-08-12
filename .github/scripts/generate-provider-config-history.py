@@ -75,28 +75,36 @@ def historical_digests(source: str) -> list[str]:
 
     digests: list[str] = []
     seen: set[str] = set()
-    commits = _git("log", "--follow", "--format=%H", "--reverse", "--", source).split()
-    for commit in commits:
-        blob = subprocess.run(
-            ["git", "rev-parse", f"{commit}:{source}"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if blob.returncode != 0:
-            # The path did not exist at this commit -- `--follow` reports
-            # renames, so the pre-rename commits address the file under its
-            # old name and simply have nothing at this one.
+    # Blob ids come from the log's own raw output rather than
+    # `git rev-parse <commit>:<source>`. Under `--follow` the pre-rename
+    # commits address the file under its *old* path, so resolving the current
+    # path against them fails -- and skipping those commits would silently
+    # drop every digest shipped before the rename, misclassifying the
+    # consumers still holding those bytes as customized.
+    log = _git(
+        "log", "--follow", "--format=%H", "--raw", "--no-abbrev", "--reverse",
+        "--", source,
+    )
+    for line in log.splitlines():
+        if not line.startswith(":"):
+            continue
+        fields = line.split()
+        if len(fields) < 5:
+            raise GenerateError(
+                f"cannot parse git log raw entry for {source!r}: {line!r}"
+            )
+        blob_id = fields[3]
+        if set(blob_id) == {"0"}:
+            # The file was deleted at this commit; there is no content to hash.
             continue
         content = subprocess.run(
-            ["git", "cat-file", "blob", blob.stdout.strip()],
+            ["git", "cat-file", "blob", blob_id],
             cwd=ROOT,
             capture_output=True,
             check=False,
         )
         if content.returncode != 0:
-            raise GenerateError(f"cannot read blob for {source!r} at {commit}")
+            raise GenerateError(f"cannot read blob {blob_id} for {source!r}")
         digest = source_digest(content.stdout)
         if digest not in seen:
             seen.add(digest)

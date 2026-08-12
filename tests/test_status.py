@@ -3587,6 +3587,16 @@ class StatusTests(InstallTestCase):
             [{"target": ".gito/config.toml", "state": "absent"}],
         )
 
+        # A symlink is a local decision the installer preserves, not a missing
+        # file; reporting it `absent` would say the opposite of what it is.
+        elsewhere = consumer / "elsewhere.toml"
+        elsewhere.write_bytes(b"current\n")
+        target.symlink_to(elsewhere)
+        self.assertEqual(
+            status.provider_config_states(pack_root, consumer),
+            [{"target": ".gito/config.toml", "state": "local"}],
+        )
+
     def test_an_unreadable_record_reports_unknown_rather_than_nothing(self) -> None:
         # An empty list renders as a consumer with no provider configs, which
         # is indistinguishable from a clean one. The gap has to stay visible.

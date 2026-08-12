@@ -2974,7 +2974,12 @@ def provider_config_states(pack_root: Path, consumer_root: Path) -> list[dict[st
             digests = []
         path = consumer_root / target
         try:
-            if path.is_symlink() or not path.is_file():
+            if path.is_symlink():
+                # A symlink is a deliberate local choice and the installer
+                # preserves it, so it belongs with the locally owned files.
+                # Calling it `absent` would say the opposite of what it is.
+                state = "local"
+            elif not path.is_file():
                 state = "absent"
             else:
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
