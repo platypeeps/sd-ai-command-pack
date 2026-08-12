@@ -115,68 +115,72 @@ revert-and-restore proof.
    progression only through successful canaries absent an explicit
    parked-canary override. Continuing past a blocked canary would need
    that override, invoked deliberately — not assumed.
-3. **Every canary declares `codex` or stops using it, before conversion.**
-   Measured 2026-08-10 and true of all three canaries: each has a
-   **populated** `.codex/` directory, and each registry row declares only
-   `claude`, `gemini`, `github`, `opencode`. R14 corrected the rule a
-   third time: directory *existence* is neither necessary nor sufficient.
-   An empty `.codex/` is not evidence of anything and does not block; a
-   directory holding files is, as is a `$CODEX_HOME` reference, a pi
-   adapter file, or a `codex exec`-family CLI invocation in command
-   position anywhere in the tree. R13 had already removed an exemption
-   for Trellis-authored paths, because whoever wrote those files runs
-   Codex in that repository and the conversion deletes `.agents/**`
-   regardless of which tool authored them. Files the pack itself installed
+3. **Every canary's Codex users are served by the machine install before
+   conversion.** *Rewritten 2026-08-12 (pack 0.71.2). The requirement
+   it replaced demanded a per-consumer declare-or-remove choice; that
+   choice no longer exists, and the paragraphs below record why, because
+   the reasoning is what changed and not merely the numbers.*
+
+   Marker detection is unchanged. Measured 2026-08-10 and true of all
+   three canaries: each has a **populated** `.codex/` directory, and each
+   registry row declares only `claude`, `gemini`, `github`, `opencode`.
+   R14 corrected the rule a third time: directory *existence* is neither
+   necessary nor sufficient. An empty `.codex/` is not evidence of
+   anything; a directory holding files is, as is a `$CODEX_HOME`
+   reference, a pi adapter file, or a `codex exec`-family CLI invocation
+   in command position anywhere in the tree. R13 had already removed an
+   exemption for Trellis-authored paths. Files the pack itself installed
    are excluded by proven ownership, not by receipt membership.
-   Globally-configured Codex leaves no repository trace at all, so it
-   needs an operator declaration; an unanswered question is not a `clear`
-   verdict.
-   That is a blocker, not a warning, and the reason is not bookkeeping:
-   `retainVendoredFor` intersects the consumer's **declared** platforms
-   (parent `design.md:187`), so conversion deletes `.agents/**` out from
-   under a Codex user — and Codex cannot consume the machine-installed
-   plugin at all, so nothing replaces it. Per consumer, choose one and
-   record which: add `codex` to that consumer's `platforms` (turning
-   `retainVendoredFor` retention on, and making this the first real
-   exercise of a path the parent design calls untested), or remove the
-   Codex usage. `rwbp-coordinator`, `loadsmith`, and `hoa-manager` also
-   reference `$CODEX_HOME` in surviving files, and the first two invoke the
-   `codex` CLI in their own surviving guidance — two further markers that
-   clear the same two ways.
+   `rwbp-coordinator`, `loadsmith`, and `hoa-manager` also reference
+   `$CODEX_HOME` in surviving files, and the first two invoke the `codex`
+   CLI in their own surviving guidance.
 
-   **Declaring `codex` is not the cheap branch, and the residual figures
-   change if it is taken.** `retainVendoredFor` is keyed on the *shared*
-   platform's disposition, not on `.agents/**`, so declaring Codex retains
-   the whole shared machine slice. Measured against all three canaries,
-   identically: the plan moves from 166 delete / 13 retire / 27 keep to
-   **91 delete / 13 retire / 102 keep** — 75 additional retained targets,
-   being 49 `.agents/**` files, 25 `scripts/**`, and
-   `docs/SD_AI_COMMAND_PACK.md`. The removal total for that consumer is
-   then 104, not 179, and the "no vendored payload beyond `repo-native` +
-   `consumer-config`" criterion below does not describe it. Whichever
-   branch a consumer takes, its acceptance compares the executed tree
-   against **its own receipt under its recorded platform choice**, and the
-   choice is recorded in this file before the conversion runs.
+   **Those markers are advisories now, not blockers.** The blocker's
+   stated reason was that `retainVendoredFor` intersects the consumer's
+   *declared* platforms, so conversion deletes `.agents/**` out from
+   under a Codex user with nothing to replace it — Codex being unable to
+   consume the machine-installed plugin. The second half is true and
+   irrelevant: the `.agents` families belong to the machine *installer*,
+   not to the Claude plugin. An executed probe
+   (`.trellis/tasks/archive/2026-08/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`)
+   shows Codex merges project-root `.agents/skills` with
+   `$HOME/.agents/skills`, which the machine installer writes. Codex left
+   `retainVendoredFor` in 0.71.2, so declaring it retains nothing and the
+   demand was for a declaration that changes no plan.
 
-   **What no scan can see.** A consumer whose Codex use is entirely
-   global — `~/.codex/`, a CLI flag, a CI environment variable — leaves no
-   repository-visible marker. The resweep cannot close that and does not
-   claim to. Before converting each canary, ask whoever works in that
-   repository whether they run Codex against it, and record the answer
-   here alongside the marker evidence. An unanswered question is not a
-   `clear` verdict.
+   **The residual figures are the same on every branch.** Declaring
+   `codex` no longer moves the plan: it stays 166 delete / 13 retire / 27
+   keep for all three canaries, **179 removals**, and the "no vendored
+   payload beyond `repo-native` + `consumer-config`" criterion describes
+   every canary without exception. The superseded text put the declared
+   branch at 91 delete / 102 keep and 104 removals, a 75-target
+   difference that no longer exists. Acceptance still compares the
+   executed tree against **that consumer's own receipt**, which is now
+   the only branch there is.
+
+   **What the operator question is now for.** A consumer whose Codex use
+   is entirely global — `~/.codex/`, a CLI flag, a CI environment
+   variable — still leaves no repository-visible marker, and the resweep
+   still cannot close that. What changed is what the answer decides.
+   Conversion no longer removes a surface Codex needs; it **transfers**
+   that surface from the vendored copy to `$HOME/.agents/skills`. So the
+   question is no longer "will this break a Codex user" but "has the
+   machine install actually run for whoever works here". The parent
+   contract already requires machine provisioning before conversion; for
+   a Codex user that precondition is load-bearing rather than a
+   formality, because the vendored copy it replaces is the one Codex is
+   reading today.
 
    **This is an acceptance gate, not advice (R17).** Requirement 1's
    sequence advanced on a `clear` resweep alone, so a careful implementer
-   could execute the whole plan without the answer ever existing —
-   exactly the outcome this paragraph was written to prevent. The gate:
-   for each canary, a dated line in this file naming the consumer, who
-   was asked, and one of `runs codex`, `does not run codex`, or
-   `unanswered`. `unanswered` blocks that consumer. `runs codex` is not a
-   blocker — it selects the declared branch (`codex` in the registry
-   `platforms`, 104 removals, 102 retained) rather than the Claude-only
-   one, and the acceptance criteria compare against that branch. Only
-   `does not run codex` permits the 179-removal branch.
+   could execute the whole plan without the answer ever existing. The
+   gate: for each canary, a dated line in this file naming the consumer,
+   who was asked, and one of `runs codex`, `does not run codex`, or
+   `unanswered`. `runs codex` no longer selects a branch — it requires
+   confirmed machine provisioning for that consumer's Codex users before
+   conversion, recorded on the same line. `unanswered` blocks that
+   consumer, because an unverified machine install plus a live Codex user
+   is the one configuration that loses a working surface.
 4. One consumer-authored blocker is already measured and belongs to this
    task rather than to child 2b: `rwbp-coordinator/.prism/rules.json:55`
    is a live Prism **required** rule naming three removed paths. Its text
@@ -192,13 +196,14 @@ revert-and-restore proof.
    own installed-targets receipt** and classified through the partition
    (parent contract C-B) — measured today at **179 removed targets per
    consumer under the recorded platform choice each canary has now**,
-   being 166 machine files plus 13 retired files. Requirement 3's
-   declaration branch changes that number: declaring `codex` retains 75
-   further machine targets (49 `.agents`, 25 `scripts`, one document),
-   giving 91 deleted plus 13 retired — **104 removals, not 179** —
-   because `retainVendoredFor` is keyed on the shared platform, not on
-   `.agents/**`. Whichever branch a canary takes, its removal set is
-   recomputed from its own receipt under its own recorded platforms. The four
+   being 166 machine files plus 13 retired files. That number no longer
+   has a second branch: 0.71.2 removed `codex` from `retainVendoredFor`,
+   so declaring it retains nothing and 179 holds either way. The
+   superseded text put the declaration branch at 91 deleted plus 13
+   retired — 104 removals, from 75 further retained machine targets (49
+   `.agents`, 25 `scripts`, one document) — which does not reproduce.
+   A canary's removal set is still recomputed from its own receipt under
+   its own recorded platforms rather than assumed. The four
    special cases are not part of that number and must not be added to it:
    three generated bookkeeping files are **kept and rewritten**, and
    `.gitignore` **survives** with one exact marker block removed. Saying
@@ -236,18 +241,21 @@ revert-and-restore proof.
 - [ ] No vendored payload remains in any canary beyond what that
       consumer's **recorded platform choice** retains — the `repo-native` +
       `consumer-config` slices, plus the whole shared machine slice for a
-      consumer that declared `codex` (75 further targets, measured) —
+      consumer that declares a platform still carried in
+      `retainVendoredFor` (today only `pi`; no canary declares it) —
       verified per consumer by comparing its post-conversion tree against
       **its own pre-conversion installed-targets receipt** and the plan
       derived under that choice. A comparison against the current
       partition alone would pass while orphan files from an older pin
       survive.
-- [ ] Each canary's undeclared-codex marker is cleared by a recorded
-      choice — `codex` added to its `platforms`, or the Codex usage
-      removed — and the resweep confirms it rather than a hand check. If
-      any canary declares `codex`, `retainVendoredFor` retention runs
-      against a real consumer for the first time, so its residual is
-      compared against that consumer's own receipt, not assumed.
+- [ ] Each canary's Codex advisory is recorded rather than cleared: since
+      0.71.2 the marker forces no per-consumer choice, because declaring
+      `codex` retains nothing. Evidence is the post-conversion resweep
+      reporting the marker under `advisories` with an empty `blockers`
+      bucket for that consumer, plus the operator answer requirement 3
+      requires — confirmed machine provisioning for any canary that runs
+      Codex. A canary that still shows a marker under `blockers` is a
+      partition or scanner defect, not a declaration decision.
 - [ ] `rwbp-coordinator/.prism/rules.json` names no removed path at the
       converted HEAD, verified by the resweep returning `clear` for that
       consumer rather than by reading the file — the rule text moved once
