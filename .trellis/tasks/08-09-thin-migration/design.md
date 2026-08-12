@@ -27,7 +27,7 @@ memory:
 
   > Superseded after this snapshot, and left standing because the
   > section is a measurement at a named commit rather than a current
-  > claim: 0.71.2 removed `codex` from that list on executed probe
+  > claim: 0.71.2 removed `codex` from that list based on executed probe
   > evidence that Codex reads `$HOME/.agents/skills`, which the machine
   > installer already writes. `shared` now carries `["pi"]`. Re-measure
   > before relying on any figure here; the row count has also moved.

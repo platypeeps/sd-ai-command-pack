@@ -117,7 +117,7 @@ revert-and-restore proof.
    that override, invoked deliberately — not assumed.
 3. **Every canary's Codex users are served by the machine install before
    conversion.** *Rewritten 2026-08-12 (pack 0.71.2). The requirement
-   this replaced demanded a per-consumer declare-or-remove choice; that
+   it replaced demanded a per-consumer declare-or-remove choice; that
    choice no longer exists, and the paragraphs below record why, because
    the reasoning is what changed and not merely the numbers.*
 
