@@ -115,7 +115,104 @@ pack dropped after 0.64.3, across every installed adapter. They are a
 consequence of the version gap, not of the provider-config cohort — worth
 naming because seven more consumers will show the same 13.
 
-Phase B waits here, by the delivery decision above.
+Copilot reviewed #74 with zero findings and zero inline threads, and the
+repository's own `test` check passed in 18s. Phase B was authorized on that
+evidence.
+
+### Phase B result, 2026-08-12
+
+All seven remaining consumers converted on branch
+`chore/sd-ai-command-pack-0.71.1`, each from its own default branch, each
+through `install.py <path> --force` from this checkout. Every one is an open
+pull request in its own repository; none was merged here.
+
+| consumer | from | pull request | M/D/A | `.gito` | `.prism/rules.json` |
+|---|---|---|---|---|---|
+| sd-github-review | 0.64.3 | platypeeps/sd-github-review#74 | 82/13/2 | refreshed | `current`, byte-unchanged |
+| rwbp-coordinator | 0.64.4 | platypeeps/rwbp-coordinator#220 | 81/13/2 | refreshed | preserved, byte-unchanged |
+| hoa-manager | 0.64.3 | platypeeps/hoa-manager#245 | 82/13/2 | refreshed | preserved, byte-unchanged |
+| rwbp-website | 0.64.3 | platypeeps/rwbp-website#225 | 82/13/2 | refreshed | preserved, byte-unchanged |
+| se-ai-command-pack | 0.64.33 | platypeeps/se-ai-command-pack#213 | 54/13/2 | refreshed | preserved, byte-unchanged |
+| loadsmith | 0.64.27 | platypeeps/loadsmith#216 | 73/13/2 | refreshed | **refreshed** — it was `superseded`, not locally owned |
+| anomaly-metric-creator | 0.64.3 | platypeeps/anomaly-metric-creator#368 | 83/13/2 | refreshed | preserved, byte-unchanged |
+| mezmo_benchmark | 0.64.3 | answerbook/mezmo_benchmark#485 | 82/13/2 | refreshed | preserved, byte-unchanged |
+
+Every branch reports `".trellis/**"` count 0, version 0.71.1, and an install
+audit of `passed`; the conversion script aborted before committing on any
+failure of those three, and none aborted. Copilot review was requested on all
+eight.
+
+`loadsmith`'s `.prism/rules.json` moving from
+`6a06e3668fd89e0427ae0fe8879b27a8815144ba05381375a3fb1ed210fea4b7` to the
+shipped `cea5089e…14c0` is R1 doing its job, not an R2 violation: the detector
+classified that file `superseded`, so it was never one of the six locally owned
+decisions R2 protects.
+
+#### Stashes taken, and their fate
+
+Three consumers had dirty trees. Each stash was created with the message
+`sd-ai-command-pack provider config conversion 2026-08-12`, recorded here, and
+popped on the branch it was taken from after the push.
+
+| consumer | original branch | stash ref | restored |
+|---|---|---|---|
+| loadsmith | `main` | `da1d4914ddf03057a970339a91023f6afcf5e564` | yes, on `main`, no conflict |
+| anomaly-metric-creator | `main` | `dc917cb5bd92ac98233c5c5fba9c23140f099e82` | yes, on `main`, no conflict |
+| mezmo_benchmark | `cr/triage-grading-channel` | `55ad78cc47a7e7e51e16ad51ddeb771a7a5e96eb` | yes, on `cr/triage-grading-channel`, no conflict |
+
+All three stashes held the same two paths, `.claude/agents/trellis-implement.md`
+and `.claude/agents/trellis-research.md`, and all three checkouts ended with
+exactly those two modified again and an empty stash list. The conversion
+branches never carried them: the stash was taken on the original branch, the
+install ran on a branch cut from the default, and the pop happened after
+switching back.
+
+#### Closing measurement, and why it reads 5/3
+
+`sd-status fleet --json --no-network` after Phase B:
+
+| `.gito/config.toml` | count |
+|---|---|
+| `current` | 5 |
+| `superseded` | 3 |
+
+This is expected and is not a partial conversion. The detector reads each
+consumer's **checked-out working tree**, and the three consumers that were
+stashed were switched back to their original branch so their own uncommitted
+work could be restored where it belonged — `loadsmith` and
+`anomaly-metric-creator` to `main`, `mezmo_benchmark` to
+`cr/triage-grading-channel`. Their conversions live on
+`chore/sd-ai-command-pack-0.71.1`, pushed, with open pull requests. The other
+five are still sitting on the conversion branch, which is why they read
+`current`.
+
+Put plainly: eight of eight are converted on a branch and in review; five
+happen to have that branch checked out. The registry-level count reaches 8
+when the consumers merge, which is the post-archive handoff below.
+
+#### What the six locally owned `.prism/rules.json` files are missing
+
+Compared against the shipped `templates/.prism/rules.json` (8 `focus` entries,
+4 `required` entries, 8 `severityOverrides` keys):
+
+| consumer | missing `focus` | missing `required` | differing `severityOverrides` |
+|---|---|---|---|
+| rwbp-coordinator | `bug`, `performance`, `style` | none | `bug`, `maintainability`, `performance` |
+| hoa-manager | `bug`, `performance`, `style` | `review-recurrence-prevention`, `trellis-task-scope` | `bug`, `maintainability`, `performance` |
+| rwbp-website | `bug`, `performance`, `style` | none | `bug`, `maintainability`, `performance` |
+| anomaly-metric-creator | `bug`, `performance`, `style` | none | `bug`, `maintainability`, `performance` |
+| mezmo_benchmark | `bug`, `performance`, `style` | all four: `installer-safety`, `review-recurrence-prevention`, `secret-hygiene`, `trellis-task-scope` | `bug`, `maintainability`, `performance` |
+| se-ai-command-pack | none | none | none — its `focus`, `required`, and overrides already match shipped; the file differs only in prose fields |
+
+All six carry more `required` rules by count than the shipped four (5 to 12) —
+these are tightenings their owners chose, which is why R2 leaves them alone.
+Two of them nonetheless omit shipped ids: `hoa-manager` is missing two, and
+`mezmo_benchmark`'s six `required` rules share no id with the shipped four at
+all. The common
+gap is the same in five repositories: the shipped `focus` list gained `bug`,
+`performance`, and `style`, and the shipped severities for `bug`,
+`maintainability`, and `performance` moved. That is the delta each owner should
+consider merging by hand.
 
 ## Requirements
 
@@ -137,18 +234,20 @@ Phase B waits here, by the delivery decision above.
       repository is modified.
 - [x] The blast radius of the prescribed mechanism is measured and the scope it
       implies is settled with the user before the first consumer is mutated.
-- [ ] The canary consumer's pull request is opened and reviewed before any
-      other consumer is touched. (Opened as sd-github-review#74 on 2026-08-12;
-      review outstanding, which is what Phase B waits on.)
-- [ ] Every stash this task creates in a consumer repository is recorded here
+- [x] The canary consumer's pull request is opened and reviewed before any
+      other consumer is touched. (sd-github-review#74: Copilot zero findings,
+      `test` pass; Phase B authorized on that evidence.)
+- [x] Every stash this task creates in a consumer repository is recorded here
       with its message and ref, and is restored or explicitly reported as
-      unrestored.
-- [ ] Every consumer the detector reports as `superseded` has an open pull
+      unrestored. (Three stashes, all popped without conflict on their original
+      branches; every stash list ends empty.)
+- [x] Every consumer the detector reports as `superseded` has an open pull
       request in its own repository carrying the refreshed `.gito/config.toml`,
-      or a recorded reason it has none.
-- [ ] On each conversion branch, the count of `".trellis/**"` in that
-      consumer's `.gito/config.toml` is zero.
-- [ ] The six locally owned `.prism/rules.json` files are byte-unchanged
+      or a recorded reason it has none. (Eight of eight.)
+- [x] On each conversion branch, the count of `".trellis/**"` in that
+      consumer's `.gito/config.toml` is zero. (Asserted by the conversion
+      script before each commit; no consumer aborted.)
+- [x] The six locally owned `.prism/rules.json` files are byte-unchanged
       against digests recorded before that consumer's install, and the shipped
       delta each one is missing is written down for its owner.
 

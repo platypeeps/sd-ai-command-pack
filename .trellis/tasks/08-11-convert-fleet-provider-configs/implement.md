@@ -7,21 +7,21 @@ does not begin until the canary PR has been reviewed.
 
 ## Phase A — canary: `sd-github-review`
 
-- [ ] A1. Re-measure: `sd-status fleet --json --no-network`; confirm
+- [x] A1. Re-measure: `sd-status fleet --json --no-network`; confirm
       `sd-github-review` is `available`, `clean`, `synchronized`, and its
       `.gito/config.toml` still `superseded`.
-- [ ] A2. Record the pre-conversion digest of its `.prism/rules.json`
+- [x] A2. Record the pre-conversion digest of its `.prism/rules.json`
       (`shasum -a 256`) in `prd.md`.
-- [ ] A3. Branch from its default branch:
+- [x] A3. Branch from its default branch:
       `git -C <path> switch -c chore/sd-ai-command-pack-0.71.1`.
-- [ ] A4. `python3 install.py <path> --force` from this checkout. Retain the
+- [x] A4. `python3 install.py <path> --force` from this checkout. Retain the
       report.
-- [ ] A5. Verify: `.prism/rules.json` digest unchanged from A2; the report
+- [x] A5. Verify: `.prism/rules.json` digest unchanged from A2; the report
       shows `refreshed .gito/config.toml`; the install mode is still fat;
       `grep -c '".trellis/\*\*"' <path>/.gito/config.toml` is 0.
-- [ ] A6. Commit exactly the installer's paths, push, open the PR against that
+- [x] A6. Commit exactly the installer's paths, push, open the PR against that
       consumer's default branch with the measurement in its body.
-- [ ] A7. Stop. Report the PR and wait for review.
+- [x] A7. Stop. Report the PR and wait for review.
 
 Validation for Phase A:
 
@@ -46,28 +46,28 @@ never taken from.
 
 Additions per consumer:
 
-- [ ] B1. `rwbp-coordinator` — clean; no stash step.
-- [ ] B2. `hoa-manager` — clean; no stash step.
-- [ ] B3. `rwbp-website` — clean; no stash step.
-- [ ] B4. `se-ai-command-pack` — clean; no stash step.
-- [ ] B5. `loadsmith` — dirty. Stash first, record the ref in `prd.md`, restore
+- [x] B1. `rwbp-coordinator` — clean; no stash step.
+- [x] B2. `hoa-manager` — clean; no stash step.
+- [x] B3. `rwbp-website` — clean; no stash step.
+- [x] B4. `se-ai-command-pack` — clean; no stash step.
+- [x] B5. `loadsmith` — dirty. Stash first, record the ref in `prd.md`, restore
       after the push. Its `.prism/rules.json` is `superseded`, not local, so it
       is expected to show a second `refreshed` line; that is inside R1, not a
       violation of R2.
-- [ ] B6. `anomaly-metric-creator` — dirty. Stash, record, restore.
-- [ ] B7. `mezmo_benchmark` — dirty and on `cr/triage-grading-channel` with no
+- [x] B6. `anomaly-metric-creator` — dirty. Stash, record, restore.
+- [x] B7. `mezmo_benchmark` — dirty and on `cr/triage-grading-channel` with no
       upstream. Stash, record, resolve its default branch from the consumer
       itself, branch from that, restore after the push.
 
 ## Closing
 
-- [ ] C1. Re-run `sd-status fleet --json --no-network`; record the resulting
+- [x] C1. Re-run `sd-status fleet --json --no-network`; record the resulting
       provider-config table in `prd.md`.
-- [ ] C2. Enumerate every stash created, with ref and restore outcome.
-- [ ] C3. Byte-compare the six locally owned `.prism/rules.json` files against
+- [x] C2. Enumerate every stash created, with ref and restore outcome.
+- [x] C3. Byte-compare the six locally owned `.prism/rules.json` files against
       their A2-style pre-digests and write down, for each owner, the shipped
       delta it is missing.
-- [ ] C4. Note in `prd.md` that the eight consumer PRs are the gate: this task
+- [x] C4. Note in `prd.md` that the eight consumer PRs are the gate: this task
       does not merge them, so `superseded` stays non-zero in the registry until
       the consumers merge on their own schedule.
 
