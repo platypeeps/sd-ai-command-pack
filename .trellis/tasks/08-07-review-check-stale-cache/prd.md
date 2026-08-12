@@ -219,7 +219,7 @@ criteria are kept as regression guards rather than deleted: they describe
 behaviour `v0.66.2` shipped, and a recompute contract that broke them would be
 a regression, not a simplification.
 
-- [ ] **The live defect.** A stored passing check at an unchanged head is
+- [x] **The live defect.** A stored passing check at an unchanged head is
       recomputed, and a run whose live input has since broken is blocked.
       Two pieces of evidence, because one cannot live where the other does:
       a repository test that stubs `_run_check` and pins the recompute
@@ -229,35 +229,87 @@ a regression, not a simplification.
       that the live input is what moved; the measurement cannot live in a suite
       that must run without network or a pull request. Neither alone satisfies
       this criterion.
-- [ ] **Regression guard, already shipped.** A failing check at an unchanged
+- [x] **Regression guard, already shipped.** A failing check at an unchanged
       head is still recomputed, and a run that fixed the live input still
       proceeds. `test_failed_check_is_recomputed_on_the_next_invocation` must
       still pass unmodified.
-- [ ] The coordinator's gate verdict equals a direct `sd-check` run's verdict on
+- [x] The coordinator's gate verdict equals a direct `sd-check` run's verdict on
       the same tree, for both a pass and a fail, with the coordinator's state
       pre-seeded to the opposite verdict in each case. Exercise the real
       subprocess, not a stubbed `_run_check`, since a stub cannot show the two
       agreeing.
-- [ ] The attempt phase does not regress when a resumed run recomputes the
+- [x] The attempt phase does not regress when a resumed run recomputes the
       check. `_record_stage(resumable=True)` delegates to `_advance`, which
       assigns `state["phase"]` unconditionally, so a resume that already
       reached `capability` or `local` would be rewound to `check` by a naive
       unconditional recompute. Assert the phase of a resumed run explicitly.
-- [ ] Local and remote stage results are still served from state on a resume,
+- [x] Local and remote stage results are still served from state on a resume,
       verified by asserting they are not recomputed. The existing
       `test_unchanged_passing_stages_still_replay_from_the_cache` must be split
       so its local/remote assertions survive and its
       `run_check.call_count == 1` assertion is replaced by the recompute
       contract.
-- [ ] At least one new test is shown to fail against the pre-change code and
+- [x] At least one new test is shown to fail against the pre-change code and
       pass after it. Demonstrated, not asserted. The stale-pass test is the one
       that must be shown failing.
-- [ ] The change states whether `platypeeps/se-ai-command-pack`'s `_resolve_check`
+- [x] The change states whether `platypeeps/se-ai-command-pack`'s `_resolve_check`
       fork is now redundant, verified by running that fork's `ResolveCheckTest`
       suite against the shipped file in a throwaway clone. Converting the
       consumer itself is out of scope: mutating a repository outside this one
       needs explicit per-cohort authorization, so a gap found here is filed as a
       follow-up, not fixed by this task.
+
+### Verification, measured 2026-08-12 at pack version 0.71.1
+
+The live measurement, taken against this task's own pull request (#430) at
+head `60e5d7f4` under one attempt id `review-aa43432067b5966f9f46b38c`. No
+commit was made between the runs; only the GitHub pull-request body changed,
+which is the point — the remediated artifact does not live in the working tree
+at all.
+
+| Run | Pull-request body | Exit | Status | `check` |
+|---|---|---|---|---|
+| 1 | scope section present | 0 | `ready` | `passed` |
+| 2 | scope section removed | 1 | `blocked` | `failed`, row `pack.review-scope` |
+| 3 | scope section restored | 0 | `ready` | `passed` |
+
+Run 2 is the criterion: before this change the stored pass was served and the
+gate reported `ready` for a body it had never seen. Run 3 costs no numbered
+attempt — the attempt id is unchanged across all three.
+
+Repository tests, `tests/test_review_controller.py`, 43 tests OK:
+
+- `test_stored_passing_check_is_recomputed_and_can_still_block` — the
+  stale-pass direction, stubbed.
+- `test_the_gate_agrees_with_a_direct_check_run_in_both_directions` — the real
+  subprocess, via `CHECK_SCRIPT` pointed at a fixture helper whose verdict
+  turns on a file outside the attempt key, with the state pre-seeded to the
+  opposite verdict in each direction.
+- `test_recomputing_the_check_does_not_rewind_the_attempt_phase` — the phase
+  assertion.
+- `test_unchanged_passing_stages_still_replay_except_the_check` — the split;
+  `run_check.call_count == 2` while `run_local.call_count == 1`.
+- `test_failed_check_is_recomputed_on_the_next_invocation` — unmodified, still
+  passing.
+
+Run against the pre-change source with the new tests in place: 3 of the 4
+failed, including both directions of the real-subprocess test. The fourth
+(phase) passed pre-change, because code that never recomputed could not rewind
+anything — it guards the new path rather than reproducing the old defect.
+
+`make check` and `make release-prep` both exit 0.
+
+**The consumer fork is gone, so redundancy is moot.** Measured in a throwaway
+clone of `platypeeps/se-ai-command-pack` at `b6d19a0`: `_resolve_check` is
+absent from its tree and its installed pack is **0.64.33**, not the `0.64.3`
+this PRD recorded. It dropped the fork and refreshed forward on its own. Its
+`ResolveCheckTest` suite could therefore not be run against the shipped file —
+the suite no longer exists there, and that is the answer to the question the
+criterion asked rather than a gap in the evidence. What remains for that
+consumer is an ordinary version gap: its installed coordinator still carries
+`if state.get("check") is None:` and has no `_record_stage`, so it holds
+neither the `v0.66.2` fix nor this one until it refreshes past the release
+carrying them. Nothing here changes that repository.
 
 Dropped on 2026-08-12, with reasons:
 
