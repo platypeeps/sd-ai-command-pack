@@ -31,15 +31,28 @@ requirement 3 this is not a blocker but a precondition: each of these
 consumers requires **confirmed machine provisioning before conversion**,
 recorded on this line when confirmed.
 
-Machine provisioning is **not yet confirmed**. Measured 2026-08-12 from
-`sd-status fleet --json`: `machineScope.state: installed` but
-`machineScope.packVersion: 0.71.1` against `targetPackVersion: 0.71.2`.
-The machine install must reach 0.71.2 before the first canary mutation.
+**Machine provisioning confirmed 2026-08-12**, which is the precondition
+`runs codex` attaches to all three lines above. It was not satisfied when
+the answers were recorded and was brought up in two steps:
 
-Recorded alongside it, as a suspected reporting defect rather than
-something this task fixes: the same payload reports
-`machineScope.comparison: "current"` while a release behind the target.
-Adjacent to `.trellis/tasks/08-09-machine-status-copy-unavailable`.
+- `install.py --machine` — 115 files (114 owned-current, 1 owned-stale);
+  receipt moved 0.71.1 to 0.71.2, payload
+  `sha256:25367a0070eebb3a8db618803a82f3987d6c7f4d503a03ddeeb5d1caa44758ae`.
+- `claude plugin marketplace update sd-ai-command-pack` then
+  `claude plugin update sd@sd-ai-command-pack` — 0.71.1 to 0.71.2. The
+  marketplace refresh alone does not move an installed plugin, and
+  `plugin install` reports "already installed" rather than upgrading.
+
+Verified after both: `machineScope.state: installed`,
+`packVersion: 0.71.2`, `pluginVersion: 0.71.2`, `comparison: "current"`,
+against `targetPackVersion: 0.71.2`.
+
+*Correcting a claim recorded earlier in this session:* the intermediate
+reading `comparison: "current"` at 0.71.1 was **not** a reporting defect.
+`comparison` relates the plugin to the machine payload, not to
+`targetPackVersion`; at 0.71.1/0.71.1 it was correct, and it moved to
+`skew` the moment the machine reached 0.71.2 alone. Nothing here belongs
+to `.trellis/tasks/08-09-machine-status-copy-unavailable`.
 
 **Superseded by the authorization above, retained for provenance.** This
 task mutates
