@@ -1,16 +1,16 @@
 {
-  "schemaVersion": 3,
-  "validatedAt": "2026-08-11T22:37:59Z",
-  "packVersion": "0.69.0",
-  "payloadDigest": "sha256:0e29ad50a9c56f950696e281345aa6ec92975887f6ea4c96ad2f8ed31ad57372",
+  "schemaVersion": 4,
+  "validatedAt": "2026-08-12T01:31:24Z",
+  "packVersion": "0.70.0",
+  "payloadDigest": "sha256:7db1278733d7c7a80d36aa4e7ef0248d8da988ff64dc5311e180d3d35736854d",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
-  "validatorDigest": "sha256:16be194dd69e58a20b780adc424130b18dca8e0a61cda8cdf919534365e65e81",
+  "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
       "baseCommit": "bb3a2d5fd652c44b9f8777e6fffb16babc7f0904",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "bash",
@@ -22,13 +22,16 @@
           "node",
           "scripts/check-review-churn.mjs"
         ]
+      ],
+      "reasons": [
+        "52 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
       "baseCommit": "b770d1743429f899445e8bc13530245959041004",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "bash",
@@ -42,13 +45,16 @@
           "--all",
           "--skip-build"
         ]
+      ],
+      "reasons": [
+        "52 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
       "baseCommit": "91c5508d880eaae42714bf15bc80b3b7a004a79c",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "bash",
@@ -60,13 +66,16 @@
           "node",
           "scripts/check-review-preflight.mjs"
         ]
+      ],
+      "reasons": [
+        "34 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
       "baseCommit": "4b4f3d46e70686ddba5c59ddab66bc83891652bd",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "bash",
@@ -82,13 +91,16 @@
           "node",
           "scripts/ops-check.mjs"
         ]
+      ],
+      "reasons": [
+        "64 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
       "baseCommit": "25a0c34f16c66c4f9e522383ab6f395d51ecda88",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "bash",
@@ -103,13 +115,16 @@
           "HEAD",
           "--include-working-tree"
         ]
+      ],
+      "reasons": [
+        "46 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
       "baseCommit": "b6d19a084e167628b46bf55ce5064b047f70e31b",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [],
       "checks": [
         [
@@ -117,13 +132,16 @@
           "scripts/sd-ai-command-pack-housekeeping.sh",
           "--self-test"
         ]
+      ],
+      "reasons": [
+        "27 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
       "baseCommit": "8a5493b4002f1988f18c35952f6e9f28b8b6972f",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "npm",
@@ -145,13 +163,16 @@
           "run",
           "validate:metadata"
         ]
+      ],
+      "reasons": [
+        "16 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
       "baseCommit": "82ad2f5ea881d79ba35873268671a0330607ac92",
-      "status": "passed",
+      "status": "blocked",
       "prepares": [
         [
           "bash",
@@ -167,6 +188,9 @@
           "python3",
           "tools/check_copilot_instruction_contract.py"
         ]
+      ],
+      "reasons": [
+        "200 consumer-authored reference(s) to removed paths"
       ]
     }
   ]

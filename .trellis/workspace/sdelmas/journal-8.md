@@ -406,3 +406,56 @@ make release-prep skipped fleet validation whenever the candidate ledger read as
 ### Next Steps
 
 - None - task complete
+
+
+## Session 360: Rescope the candidate validator loop to the thin shape
+
+**Date**: 2026-08-11
+**Task**: Rescope the candidate validator loop to the thin shape
+**Branch**: `feat/thin-candidate-loop-shape`
+
+### Summary
+
+Rescoped the full-fleet candidate validator to exercise the thin install shape: a run-once pack-side artifact lane, per-consumer lane selection driven by the clone's recorded pin state, and a three-value candidate status whose blocked rows must carry reasons. Two design defects were found and corrected during implementation, and a Copilot review finding was fixed before merge.
+
+### Main Changes
+
+- Added a run-once thin artifact lane (plugin build and drift check, plugin manifest validation, machine install into a scratch prefix) whose failure is pack-owned and blamed on no consumer
+- Selected the per-consumer lane from the clone's recorded pin state rather than the registry's declared mode, so the documented conversion skew is a note rather than an error
+- Redirected HOME to the artifact lane's scratch machine install for the thin lane only, so a thin consumer's ~/.agents lookups resolve to the candidate under test instead of whatever pack the runner has installed
+- Introduced three-value consumer status (passed / failed / blocked) where blocked requires non-empty reasons, and bumped the candidate ledger schema to v4
+- C-11: corrected packDefects, which was a pre-rewrite count the resweep never rewrote; residue surviving check_text_residue after the conversion's own rewrite is the only real evidence of a pack-owned defect
+- C-12: moved the resweep after the install and onto a committed clone; against a pristine clone it measured the previous release rather than the candidate
+- Fixed the Copilot review finding: main() now skips consumer validation entirely when the artifact lane fails, instead of paying a clone and install per consumer to produce failed rows caused by the missing machine_home
+- Captured the durable contract in .trellis/spec/backend/manifest-and-filesystem.md and released the change as 0.70.0
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `686d077e` | docs(trellis): plan the thin candidate loop rescope |
+| `da292873` | feat(fleet): validate the thin shape in the candidate loop |
+| `0e86e0a8` | fix(fleet): measure pack defects after the rewrite, and resweep the installed clone |
+| `3f45751f` | test(fleet): cover the thin candidate lane and its three-value status |
+| `e7c90d23` | feat(fleet): release the thin candidate loop shape as 0.70.0 |
+| `c71ac33b` | fix(fleet): skip consumer validation when the artifact lane fails |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_fleet_candidate — 24 tests, OK, exit 0
+- [OK] Four mutations, each caught by the test guarding its rule, each reverted with the tree verified clean
+- [OK] make check — exit 0
+- [OK] make release-prep — exit 0, manifest version 0.69.0 -> 0.70.0 with a matching changelog heading
+- [OK] Full-fleet validator at HEAD — exit 0; 3 passed artifact steps, all 8 consumers blocked
+- [OK] git diff --exit-code docs/fleet/consumers.json — clean, proving registry byte-identity across both lanes
+- [OK] Gate 3: a broken build_files makes the validator exit 1 and make release-prep exit 2; reverted, generate-plugin.py --check exit 0
+- [OK] sd-review scope=pr attempts 1 and 2 — status ready, 8 deterministic checks passed, local provider clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -27,7 +27,13 @@ DEFAULT_FLEET_CONSUMER_MODE = "fat"
 DEFAULT_FLEET_PIN_PATH = ".sd-ai-command-pack/provenance.json"
 # Schema 3 adds `validatorDigest`. See CANDIDATE_VALIDATOR_SOURCES below for
 # what it covers and why.
-CANDIDATE_LEDGER_SCHEMA_VERSION = 3
+#
+# Schema 4 adds the `blocked` consumer status and its required `reasons`
+# array. A consumer-owned precondition -- references the pack does not own, a
+# dirty worktree -- must neither fail the pack's release nor be recorded as a
+# pass, because both answers are lies in opposite directions. `blocked` is the
+# third answer, and `reasons` is what keeps it from becoming a silent skip.
+CANDIDATE_LEDGER_SCHEMA_VERSION = 4
 
 # The candidate validator source the payload digest cannot see.
 #
@@ -899,10 +905,28 @@ def validate_candidate_ledger(
             continue
         if result.get("github") != consumer.github:
             errors.append(f"candidate ledger {consumer.name} github does not match fleet")
-        if result.get("status") != "passed":
+        status = result.get("status")
+        if status == "blocked":
+            # A blocked consumer is recorded, never certified. The reasons are
+            # the whole point: a ledger row that says `blocked` and not why is
+            # a skipped consumer wearing a status, which is the same defect as
+            # a gate reporting success for a validation it never ran.
+            reasons = result.get("reasons")
+            if not isinstance(reasons, list) or not reasons:
+                errors.append(
+                    f"candidate ledger {consumer.name} is blocked with no reasons"
+                )
+            elif not all(
+                isinstance(reason, str) and reason for reason in reasons
+            ):
+                errors.append(
+                    f"candidate ledger {consumer.name} has an empty or "
+                    "non-string blocked reason"
+                )
+        elif status != "passed":
             errors.append(
-                f"candidate ledger {consumer.name} status is {result.get('status')!r}; "
-                "expected 'passed'"
+                f"candidate ledger {consumer.name} status is {status!r}; "
+                "expected 'passed' or 'blocked'"
             )
         base_commit = result.get("baseCommit")
         if not isinstance(base_commit, str) or not SHA_RE.fullmatch(base_commit):

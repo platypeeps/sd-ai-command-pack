@@ -7,13 +7,14 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,37 @@ INSTALL_AUDIT = ROOT / "scripts/sd-ai-command-pack-install-audit.py"
 COMMAND_OUTPUT_LINES = 30
 INFRASTRUCTURE_TIMEOUT_SECONDS = 600
 
+#: Where the thin artifact lane's machine install lands inside the run's
+#: temporary directory, and where the thin per-consumer lane then points `HOME`.
+#: These are one decision, not two: the install is only evidence that a thin
+#: consumer's `~/.agents` lookups resolve to *this* candidate if the checks that
+#: make those lookups actually read it.
+MACHINE_HOME_DIRNAME = "home"
+MACHINE_STATE_DIRNAME = "state"
+
+#: The generated Claude plugin, relative to the pack root.
+PLUGIN_DIRECTORY = "plugins/sd"
+
+#: The three thin artifact steps, in the order a failure is most cheaply found.
+#: Requirement 1 named a fourth -- a `claude --plugin-dir` load smoke -- which
+#: is not implementable: it exits 0 against a directory that does not exist, so
+#: it has no failure channel at all, and its only non-interactive form requires
+#: a model call. `generate-plugin.py --check` covers what the smoke was reaching
+#: for (does the built plugin match the committed one) deterministically and
+#: offline. See the task's design.md D5.
+ARTIFACT_STEP_PLUGIN_BUILD = "plugin build and drift check"
+ARTIFACT_STEP_PLUGIN_VALIDATE = "plugin manifest validation"
+ARTIFACT_STEP_MACHINE_INSTALL = "machine install into a scratch prefix"
+
+#: A step that could not run because `claude` is not resolvable. It is not
+#: `passed` and it is not a skip: requirement 5 makes an unrunnable validation
+#: a failure, because the alternative is a release gate that reports success on
+#: a machine where it never executed.
+STATUS_UNAVAILABLE = "unavailable"
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_BLOCKED = "blocked"
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -62,13 +94,72 @@ class CandidateResult:
     base_commit: str | None
     detail: str
     duration_seconds: float
+    #: Why this consumer is `blocked`, and empty for every other status. A
+    #: `blocked` row with no reasons is rejected by the ledger validator: an
+    #: unexplained skip is the failure mode the status exists to prevent.
+    reasons: tuple[str, ...] = ()
+    #: Recorded when the clone's pin and the registry's declared mode disagree.
+    #: Not an error -- that is the documented window between a consumer's
+    #: conversion PR merging and the registry flip landing.
+    notes: tuple[str, ...] = ()
 
 
-def command_environment(python_executable: Path, work_root: Path) -> dict[str, str]:
+@dataclass(frozen=True)
+class ArtifactStep:
+    name: str
+    status: str
+    detail: str
+    duration_seconds: float
+
+
+@dataclass(frozen=True)
+class ArtifactLaneResult:
+    """The pack-side thin artifacts, validated once per run.
+
+    Once, not once per consumer: the plugin and the machine payload do not vary
+    by consumer, so running them eight times would multiply the cost of the
+    slowest steps for no additional evidence. Its failure is likewise not
+    attributed to a consumer -- nothing about a consumer caused it.
+    """
+
+    steps: tuple[ArtifactStep, ...]
+    machine_home: Path | None
+    machine_state: Path | None
+
+    @property
+    def ok(self) -> bool:
+        return all(step.status == STATUS_PASSED for step in self.steps)
+
+    @property
+    def failures(self) -> tuple[ArtifactStep, ...]:
+        return tuple(step for step in self.steps if step.status != STATUS_PASSED)
+
+
+def command_environment(
+    python_executable: Path,
+    work_root: Path,
+    *,
+    machine_home: Path | None = None,
+) -> dict[str, str]:
+    """The environment every candidate subprocess runs under.
+
+    `machine_home` is the thin lane's, and only the thin lane's. A fat
+    consumer's registered checks are all repository-relative, so overriding
+    `HOME` for them would perturb tool caches to no purpose. A *thin*
+    consumer's pack helpers resolve through `~/.agents/bin`, and with the
+    invoking `HOME` inherited those lookups reach whatever pack the developer
+    or CI runner happens to have installed -- so the run would certify someone
+    else's release rather than this candidate. Pointing `HOME` at the scratch
+    prefix the artifact lane's machine install wrote is what makes the thin
+    lane test the thing under test.
+    """
+
     inherited = os.environ.copy()
     for variable in CACHE_ENV_KEYS:
         inherited.pop(variable, None)
     inherited[CACHE_ROOT_ENV] = str(work_root.resolve())
+    if machine_home is not None:
+        inherited["HOME"] = str(machine_home.resolve())
     try:
         env, _, _ = build_tool_environment(repo=ROOT, environ=inherited)
     except CacheSetupError as error:
@@ -136,12 +227,272 @@ def concise_failure(label: str, command: Sequence[str], result: CommandResult) -
     return f"{detail}\n{tail}" if tail else detail
 
 
+def _installer_modules(pack_root: Path):
+    """The conversion predicate and the resweep, loaded from the pack root.
+
+    Imported rather than reimplemented. `thin_pin_state` is the same predicate
+    `install.py` itself branches on, and the resweep script's bytes feed its own
+    `classifierDigest` -- a second implementation of either would be a second
+    thing to keep in step with a rule that already binds itself.
+    """
+
+    if str(pack_root) not in sys.path:
+        sys.path.insert(0, str(pack_root))
+    from installer import conversion, references, thin  # noqa: PLC0415
+
+    return conversion, references, thin.load_resweep_module(pack_root)
+
+
+def surviving_pack_defects(verdict: dict, *, clone: Path, references) -> list[str]:
+    """The pack defects a conversion would not repoint on its way through.
+
+    The resweep's `packDefects` bucket is a *pre-rewrite* measurement: it counts
+    pack-owned content citing a path the conversion removes, and says so before
+    the conversion has had its turn. But a conversion rewrites every kept text
+    file through `THIN_PROFILE` first, and that rewrite exists precisely to
+    repoint `scripts/sd-ai-command-pack-*` at `~/.agents/bin` and the manual at
+    `~/.agents/docs`. Treating the raw count as a release blocker fails the pack
+    for references the pack already handles -- measured at 15-17 per consumer
+    across all eight, every one of which the rewrite repoints.
+
+    So each entry is put through the conversion's own residue gate, which is the
+    authoritative answer to "would this reference still be broken afterwards?".
+    Only residue is a defect. An entry whose subject is not a readable file in
+    the clone -- a synthetic marker like undeclared `codex` usage, or a
+    surviving platform directory -- cannot be cleared by a text rewrite at all,
+    so it stays a defect by default rather than being cleared by inspection that
+    does not apply to it.
+    """
+
+    failures: list[str] = []
+    seen: set[str] = set()
+    for entry in verdict.get("packDefects") or ():
+        subject = entry.get("file")
+        if not isinstance(subject, str) or subject in seen:
+            continue
+        seen.add(subject)
+        path = clone / subject
+        if not path.is_file() or path.is_symlink():
+            failures.append(f"{subject}: {entry.get('detail')}")
+            continue
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            failures.append(f"{subject}: unreadable pack target")
+            continue
+        rewritten = references.rewrite_text(
+            text, profile=references.THIN_PROFILE, key=subject
+        )
+        try:
+            references.check_text_residue(
+                subject, rewritten, profile=references.THIN_PROFILE
+            )
+        except references.ReferenceRewriteError as error:
+            failures.append(str(error))
+    return failures
+
+
+def resweep_reasons(verdict: dict) -> tuple[list[str], list[str]]:
+    """Split one resweep verdict into what fails the pack and what blocks it.
+
+    This is the policy answer, and it is the distinction `decide()` already
+    draws: "the tree was dirty" and "the pack ships a broken reference" call
+    for opposite responses. Pack-owned defects are handled by
+    `surviving_pack_defects` above, which is stricter about what counts as one.
+    Consumer-owned references, missing files, and a dirty worktree are
+    conditions in repositories the pack does not own and cannot fix; failing on
+    them would make every pack release hostage to eight consumer backlogs.
+    """
+
+    counts = verdict.get("counts") or {}
+    failing: list[str] = []
+    blocking: list[str] = []
+
+    blockers = counts.get("blockers") or 0
+    if blockers:
+        blocking.append(
+            f"{blockers} consumer-authored reference(s) to removed paths"
+        )
+    missing = len(verdict.get("missingFiles") or ())
+    if missing:
+        blocking.append(f"{missing} manifest file(s) missing from the checkout")
+    if not verdict.get("worktreeClean", True):
+        blocking.append("the checkout has uncommitted changes")
+
+    return failing, blocking
+
+
+def unresolvable_thin_checks(
+    commands: Sequence[Sequence[str]],
+    *,
+    clone: Path,
+    manifest_targets: frozenset[str],
+) -> list[str]:
+    """Registered commands a thin checkout cannot run, and why.
+
+    A converted consumer keeps its own scripts but not the pack's: those move
+    to `~/.agents/bin`. So a registry row that still invokes
+    `scripts/sd-ai-command-pack-*.py` by repository-relative path names a file
+    the conversion deleted. That is not a pack failure -- the pack built
+    correctly and the install succeeded -- it is a registry record still
+    describing the consumer's fat shape, and the fix belongs to that consumer's
+    conversion PR. A missing path the pack does *not* own is a different thing
+    entirely: the consumer's own check is broken, and that stays a failure.
+    """
+
+    reasons: list[str] = []
+    for command in commands:
+        for argument in command:
+            if "/" not in argument and not argument.startswith("."):
+                # A bare program name resolves through PATH, not the clone.
+                continue
+            candidate = (clone / argument).resolve()
+            try:
+                inside = candidate.is_relative_to(clone.resolve())
+            except ValueError:  # pragma: no cover - defensive
+                inside = False
+            if not inside or candidate.exists():
+                continue
+            if argument not in manifest_targets:
+                continue
+            name = PurePosixPath(argument).name
+            reasons.append(
+                f"registered command {shlex.join(command)!r} names "
+                f"{argument!r}, which a thin conversion relocates to "
+                f"~/.agents/bin/{name}; the consumer's registry record still "
+                "describes its fat shape"
+            )
+    return reasons
+
+
+def run_thin_artifact_lane(
+    *,
+    pack_root: Path,
+    work_root: Path,
+    python_executable: Path,
+    env: dict[str, str],
+) -> ArtifactLaneResult:
+    """Validate the pack-side artifacts a thin consumer resolves against.
+
+    Three steps. The first builds the plugin from the surface partition and
+    compares it against the committed tree, which catches both a generator
+    failure and drift without writing anything -- `--check` is why this lane
+    needs no scratch copy of the checkout, and a validator that rewrote its own
+    input would be the same category of error as converting a consumer inside
+    the loop. The second asks Claude Code itself whether the manifest is valid
+    under `--strict`. The third installs the machine payload into a scratch
+    prefix and hands that prefix back for the thin per-consumer lane.
+    """
+
+    steps: list[ArtifactStep] = []
+
+    def record(name: str, command: Sequence[str], result: CommandResult) -> bool:
+        passed = result.returncode == 0
+        steps.append(
+            ArtifactStep(
+                name=name,
+                status=STATUS_PASSED if passed else STATUS_FAILED,
+                detail=(
+                    shlex.join(command)
+                    if passed
+                    else concise_failure(name, command, result)
+                ),
+                duration_seconds=result.duration_seconds,
+            )
+        )
+        return passed
+
+    build_command = [
+        str(python_executable),
+        str(pack_root / ".github/scripts/generate-plugin.py"),
+        "--check",
+        "--root",
+        str(pack_root),
+    ]
+    record(
+        ARTIFACT_STEP_PLUGIN_BUILD,
+        build_command,
+        run_command(
+            build_command,
+            cwd=pack_root,
+            timeout_seconds=INFRASTRUCTURE_TIMEOUT_SECONDS,
+            env=env,
+        ),
+    )
+
+    claude_executable = shutil.which("claude", path=env.get("PATH"))
+    if claude_executable is None:
+        steps.append(
+            ArtifactStep(
+                name=ARTIFACT_STEP_PLUGIN_VALIDATE,
+                status=STATUS_UNAVAILABLE,
+                detail=(
+                    "the `claude` executable is not resolvable on PATH, so the "
+                    "plugin manifest was never validated. This is a failure, "
+                    "not a skip: a release gate that reports success where it "
+                    "did not run is the defect the gate exists to prevent. "
+                    "Install Claude Code on the machine that runs release-prep."
+                ),
+                duration_seconds=0.0,
+            )
+        )
+    else:
+        validate_command = [
+            claude_executable,
+            "plugin",
+            "validate",
+            str(pack_root / PLUGIN_DIRECTORY),
+            "--strict",
+        ]
+        record(
+            ARTIFACT_STEP_PLUGIN_VALIDATE,
+            validate_command,
+            run_command(
+                validate_command,
+                cwd=pack_root,
+                timeout_seconds=INFRASTRUCTURE_TIMEOUT_SECONDS,
+                env=env,
+            ),
+        )
+
+    machine_home = work_root / MACHINE_HOME_DIRNAME
+    machine_state = work_root / MACHINE_STATE_DIRNAME
+    machine_home.mkdir(parents=True, exist_ok=True)
+    machine_state.mkdir(parents=True, exist_ok=True)
+    machine_command = [
+        str(python_executable),
+        str(pack_root / "install.py"),
+        "--machine",
+        "--home",
+        str(machine_home),
+        "--state-home",
+        str(machine_state),
+    ]
+    installed = record(
+        ARTIFACT_STEP_MACHINE_INSTALL,
+        machine_command,
+        run_command(
+            machine_command,
+            cwd=pack_root,
+            timeout_seconds=INFRASTRUCTURE_TIMEOUT_SECONDS,
+            env=env,
+        ),
+    )
+
+    return ArtifactLaneResult(
+        steps=tuple(steps),
+        machine_home=machine_home if installed else None,
+        machine_state=machine_state if installed else None,
+    )
+
+
 def validate_consumer(
     consumer: FleetConsumer,
     *,
     pack_root: Path,
     work_root: Path,
     python_executable: Path,
+    machine_home: Path | None = None,
 ) -> CandidateResult:
     started = time.monotonic()
     source_checkout = Path(consumer.path_hint).expanduser()
@@ -224,14 +575,67 @@ def validate_consumer(
             duration_seconds=time.monotonic() - started,
         )
 
-    install_command = [
-        str(python_executable),
-        str(pack_root / "install.py"),
-        str(checkout),
-        "--force",
-    ]
-    for platform in consumer.platforms:
-        install_command.extend(["--platform", platform])
+    conversion, references, resweep = _installer_modules(pack_root)
+    notes: list[str] = []
+    reasons: list[str] = []
+
+    # Branch on the clone's own pin, never on the registry's declared mode.
+    # The registry records what the pack believes; the pin records what the
+    # checkout is, and they disagree by design during the window between a
+    # consumer's conversion PR merging and the registry flip landing. Branching
+    # on the registry would aim a `--platform` install at a genuinely thin
+    # checkout during precisely the skew the system is built to tolerate.
+    pin_state = conversion.thin_pin_state(checkout)
+    if pin_state == conversion.PIN_STATE_MALFORMED:
+        return CandidateResult(
+            consumer=consumer,
+            status="failed",
+            base_commit=base_commit,
+            detail=(
+                "the clone's provenance pin carries thin evidence that cannot "
+                "be read as a pin (pin state: malformed); refusing to guess a "
+                "shape, exactly as install.py refuses in both directions"
+            ),
+            duration_seconds=time.monotonic() - started,
+        )
+    is_thin = pin_state == conversion.PIN_STATE_THIN
+    if is_thin != (consumer.mode == "thin"):
+        notes.append(
+            f"clone pin is {pin_state!r} while the registry declares "
+            f"{consumer.mode!r}; this is the documented conversion skew, not "
+            "an error"
+        )
+
+    if is_thin:
+        if machine_home is None:
+            return CandidateResult(
+                consumer=consumer,
+                status="failed",
+                base_commit=base_commit,
+                detail=(
+                    "the clone is thin, but the run has no machine install to "
+                    "resolve ~/.agents against; the thin artifact lane did not "
+                    "complete"
+                ),
+                duration_seconds=time.monotonic() - started,
+            )
+        # A thin consumer's platform set is owned by its pin, so `--platform`
+        # is rejected outright by the thin-refresh branch of install.py.
+        install_command = [
+            str(python_executable),
+            str(pack_root / "install.py"),
+            str(checkout),
+            "--force",
+        ]
+    else:
+        install_command = [
+            str(python_executable),
+            str(pack_root / "install.py"),
+            str(checkout),
+            "--force",
+        ]
+        for platform in consumer.platforms:
+            install_command.extend(["--platform", platform])
     install_result = run_command(
         install_command,
         cwd=pack_root,
@@ -253,8 +657,27 @@ def validate_consumer(
         "--repo",
         str(checkout),
     ]
-    for platform in consumer.platforms:
-        audit_command.extend(["--expected-platform", platform])
+    if not is_thin:
+        for platform in consumer.platforms:
+            audit_command.extend(["--expected-platform", platform])
+    else:
+        # `--expected-platform` requires that platform's manifest targets to be
+        # installed *in the repository*, which is precisely what a thin
+        # consumer does not have -- its surfaces resolve from the machine
+        # install. Passing the registry's platform list here would demand the
+        # vendored footprint the conversion removed and fail every thin clone.
+        #
+        # The audit still runs, against whatever the clone's own receipt
+        # implies. D3 called for a thin-aware audit taking platforms from the
+        # pin; `install-audit.py` has no such mode today, and inventing one
+        # belongs to whichever task adds it rather than to this loop. Recorded
+        # as a note so the gap is visible in the ledger rather than implied by
+        # a shorter command line.
+        notes.append(
+            "audited against the clone's own receipt; --expected-platform is "
+            "omitted for a thin checkout because it requires the vendored "
+            "footprint a conversion removes"
+        )
     audit_result = run_command(
         audit_command,
         cwd=pack_root,
@@ -269,6 +692,98 @@ def validate_consumer(
             detail=concise_failure("install audit", audit_command, audit_result),
             duration_seconds=time.monotonic() - started,
         )
+
+    # Resweep *after* the install, not before. The obvious ordering is the
+    # wrong one: a pristine clone carries whatever pack version that consumer
+    # last installed, so a resweep run there measures the previous release and
+    # not the candidate. Measured, that is not theoretical -- sd-github-review's
+    # vendored copy of the planning-adversarial-review contract still invoked
+    # the `codex` CLI, a defect this pack had already fixed, and the candidate
+    # was failed for it.
+    #
+    # Installing dirties the worktree, and a dirty worktree is a resweep
+    # blocker, so the install is committed in the disposable clone first. That
+    # is free and honest here: the clone exists to be thrown away, and
+    # committing is what makes "the tree contains the candidate" a fact the
+    # resweep can read rather than noise it must be told to ignore.
+    for stage_command in (
+        ["git", "add", "--all"],
+        ["git", "-c", "user.name=candidate", "-c", "user.email=candidate@invalid",
+         "commit", "--quiet", "--allow-empty", "-m", "candidate install"],
+    ):
+        stage_result = run_command(
+            stage_command, cwd=checkout, timeout_seconds=120, env=env
+        )
+        if stage_result.returncode != 0:
+            return CandidateResult(
+                consumer=consumer,
+                status="failed",
+                base_commit=base_commit,
+                detail=concise_failure(
+                    "staging the candidate install", stage_command, stage_result
+                ),
+                duration_seconds=time.monotonic() - started,
+            )
+
+    try:
+        verdict = resweep.resweep_consumer(consumer.name, checkout)
+    except Exception as error:  # noqa: BLE001 - a resweep failure is a failure
+        return CandidateResult(
+            consumer=consumer,
+            status="failed",
+            base_commit=base_commit,
+            detail=f"resweep failed: {error}",
+            duration_seconds=time.monotonic() - started,
+        )
+    _unused, blocking = resweep_reasons(verdict)
+    reasons.extend(blocking)
+    failing = surviving_pack_defects(verdict, clone=checkout, references=references)
+    raw_pack_defects = (verdict.get("counts") or {}).get("packDefects") or 0
+    if raw_pack_defects and not failing:
+        notes.append(
+            f"the resweep counted {raw_pack_defects} pack-owned citation(s) of "
+            "removed paths; every one is repointed by the conversion's own "
+            "rewrite, so none is a release defect"
+        )
+    if failing:
+        return CandidateResult(
+            consumer=consumer,
+            status="failed",
+            base_commit=base_commit,
+            detail="; ".join(failing),
+            duration_seconds=time.monotonic() - started,
+        )
+
+    if is_thin:
+        # From here on the consumer's own commands run, and a thin consumer's
+        # pack helpers resolve through `~/.agents/bin`. Point HOME at the
+        # scratch prefix the artifact lane installed into, or the checks would
+        # silently exercise whatever pack this machine already has.
+        env = command_environment(python_executable, work_root, machine_home=machine_home)
+        manifest_targets = frozenset(
+            str(row.get("target"))
+            for row in (load_json_object(pack_root / "manifest.json", "pack manifest").get("files") or ())
+            if isinstance(row, dict) and row.get("target")
+        )
+        unresolvable = unresolvable_thin_checks(
+            [*consumer.candidate_prepare, *consumer.candidate_checks],
+            clone=checkout,
+            manifest_targets=manifest_targets,
+        )
+        if unresolvable:
+            reasons.extend(unresolvable)
+            return CandidateResult(
+                consumer=consumer,
+                status=STATUS_BLOCKED,
+                base_commit=base_commit,
+                detail=(
+                    f"{len(unresolvable)} registered command(s) name pack-owned "
+                    "paths a thin conversion removes"
+                ),
+                duration_seconds=time.monotonic() - started,
+                reasons=tuple(reasons),
+                notes=tuple(notes),
+            )
 
     for prepare_index, command in enumerate(consumer.candidate_prepare, start=1):
         prepare_result = run_command(
@@ -308,16 +823,34 @@ def validate_consumer(
                 duration_seconds=time.monotonic() - started,
             )
 
+    shape = "thin" if is_thin else "fat"
+    detail = (
+        f"{shape} install, audit, "
+        f"{len(consumer.candidate_prepare)} preparation(s), and "
+        f"{len(consumer.candidate_checks)} check(s) passed"
+    )
+    if reasons:
+        # Every step above ran and succeeded, but the resweep found a
+        # consumer-owned condition that would block this consumer's conversion.
+        # Recording that as `passed` is the one answer that is certainly wrong:
+        # it would put a row in the ledger claiming a thin validation that the
+        # consumer's own repository cannot yet support.
+        return CandidateResult(
+            consumer=consumer,
+            status=STATUS_BLOCKED,
+            base_commit=base_commit,
+            detail=detail,
+            duration_seconds=time.monotonic() - started,
+            reasons=tuple(reasons),
+            notes=tuple(notes),
+        )
     return CandidateResult(
         consumer=consumer,
-        status="passed",
+        status=STATUS_PASSED,
         base_commit=base_commit,
-        detail=(
-            "install, audit, "
-            f"{len(consumer.candidate_prepare)} preparation(s), and "
-            f"{len(consumer.candidate_checks)} check(s) passed"
-        ),
+        detail=detail,
         duration_seconds=time.monotonic() - started,
+        notes=tuple(notes),
     )
 
 
@@ -376,6 +909,11 @@ def ledger_content(
                     list(command) for command in result.consumer.candidate_prepare
                 ],
                 "checks": [list(command) for command in result.consumer.candidate_checks],
+                # Present for every row, empty for every non-blocked one. The
+                # ledger validator rejects a `blocked` row whose reasons are
+                # absent or empty, which is what keeps the status from becoming
+                # a silent skip.
+                "reasons": list(result.reasons),
             }
             for result in results
         ],
@@ -478,46 +1016,112 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             consumers = [consumer for consumer in consumers if consumer.name in selected]
 
+        pack_root = args.manifest.resolve().parent
         with tempfile.TemporaryDirectory(prefix="sd-pack-fleet-candidate-") as tempdir:
             work_root = Path(tempdir)
-            results = [
-                validate_consumer(
-                    consumer,
-                    pack_root=args.manifest.resolve().parent,
-                    work_root=work_root,
-                    python_executable=Path(sys.executable),
-                )
-                for consumer in consumers
-            ]
+            artifacts = run_thin_artifact_lane(
+                pack_root=pack_root,
+                work_root=work_root,
+                python_executable=Path(sys.executable),
+                env=command_environment(Path(sys.executable), work_root),
+            )
+            # A failed artifact lane makes every consumer row meaningless
+            # before it is computed. The lane's install step is what produces
+            # `machine_home`, so a thin clone would have nothing to resolve
+            # `~/.agents` against and would come back `failed` for a
+            # pack-side reason, with the consumer's name on it. Skip the
+            # clone/install/check loop entirely rather than pay for one per
+            # consumer to manufacture that blame.
+            results = (
+                [
+                    validate_consumer(
+                        consumer,
+                        pack_root=pack_root,
+                        work_root=work_root,
+                        python_executable=Path(sys.executable),
+                        machine_home=artifacts.machine_home,
+                    )
+                    for consumer in consumers
+                ]
+                if artifacts.ok
+                else []
+            )
 
         if args.json:
             print(
                 json.dumps(
-                    [
-                        {
-                            "name": result.consumer.name,
-                            "github": result.consumer.github,
-                            "rolloutPriority": result.consumer.rollout_priority,
-                            "status": result.status,
-                            "baseCommit": result.base_commit,
-                            "durationSeconds": round(result.duration_seconds, 2),
-                            "detail": result.detail,
-                        }
-                        for result in results
-                    ],
+                    {
+                        "thinArtifacts": [
+                            {
+                                "name": step.name,
+                                "status": step.status,
+                                "durationSeconds": round(step.duration_seconds, 2),
+                                "detail": step.detail,
+                            }
+                            for step in artifacts.steps
+                        ],
+                        "consumers": [
+                            {
+                                "name": result.consumer.name,
+                                "github": result.consumer.github,
+                                "rolloutPriority": result.consumer.rollout_priority,
+                                "status": result.status,
+                                "baseCommit": result.base_commit,
+                                "durationSeconds": round(result.duration_seconds, 2),
+                                "detail": result.detail,
+                                "reasons": list(result.reasons),
+                                "notes": list(result.notes),
+                            }
+                            for result in results
+                        ],
+                    },
                     indent=2,
                 )
             )
         else:
             print(f"sd-ai-command-pack candidate: {version}")
+            for step in artifacts.steps:
+                print(f"{step.status:11} thin artifact: {step.name} ({step.duration_seconds:.1f}s)")
+                print(f"  {step.detail}")
             for result in results:
                 print(
-                    f"{result.status:7} P{result.consumer.rollout_priority:02d} "
+                    f"{result.status:11} P{result.consumer.rollout_priority:02d} "
                     f"{result.consumer.github} ({result.duration_seconds:.1f}s)"
                 )
                 print(f"  {result.detail}")
+                for reason in result.reasons:
+                    print(f"  blocked: {reason}")
+                for note in result.notes:
+                    print(f"  note: {note}")
 
-        failures = [result for result in results if result.status != "passed"]
+        # The artifact lane is pack-owned and consumer-independent, so its
+        # failure is reported once and blamed on nobody. It also suppresses the
+        # ledger on its own: a ledger written while the plugin does not validate
+        # would certify consumer results against artifacts that were never good.
+        if not artifacts.ok:
+            for step in artifacts.failures:
+                print(
+                    f"thin artifact step {step.name!r} is {step.status}",
+                    file=sys.stderr,
+                )
+            print(
+                f"thin artifact validation failed for {len(artifacts.failures)} "
+                f"step(s); {len(consumers)} consumer(s) were not validated and "
+                "the ledger was not updated",
+                file=sys.stderr,
+            )
+            return 1
+
+        # `blocked` is deliberately not a failure. It records a consumer-owned
+        # precondition the pack cannot fix -- references the pack does not own,
+        # a dirty worktree -- and failing on it would make every pack release
+        # hostage to eight consumer backlogs. The ledger still records the row,
+        # with its reasons, so nothing is certified that was not run.
+        failures = [
+            result
+            for result in results
+            if result.status not in (STATUS_PASSED, STATUS_BLOCKED)
+        ]
         if failures:
             print(
                 f"candidate validation failed for {len(failures)} consumer(s); "

@@ -162,8 +162,12 @@ class CandidateValidatorDigestTests(InstallTestCase):
         self.assertIn("candidate validator source", str(raised.exception))
 
     def ledger(self, **overrides):
+        # Read the constant rather than re-typing it: this fixture is about
+        # the four digest fields, and pinning a literal here turns every
+        # legitimate schema bump into an unrelated failure in this file.
+        fleet = self.load_fleet()
         payload = {
-            "schemaVersion": 3,
+            "schemaVersion": fleet.CANDIDATE_LEDGER_SCHEMA_VERSION,
             "validatedAt": "2026-08-11T00:00:00Z",
             "packVersion": "1.0.0",
             "payloadDigest": "sha256:payload",
@@ -192,12 +196,16 @@ class CandidateValidatorDigestTests(InstallTestCase):
 
     def test_previous_schema_version_is_stale(self) -> None:
         fleet = self.load_fleet()
-        ledger = self.ledger(schemaVersion=2)
+        current = fleet.CANDIDATE_LEDGER_SCHEMA_VERSION
+        ledger = self.ledger(schemaVersion=current - 1)
         ledger.pop("validatorDigest")
 
         errors = self.validate(fleet, ledger)
 
-        self.assertTrue(any("schemaVersion must be 3" in error for error in errors), errors)
+        self.assertTrue(
+            any(f"schemaVersion must be {current}" in error for error in errors),
+            errors,
+        )
 
     def test_absent_validator_digest_is_stale(self) -> None:
         fleet = self.load_fleet()

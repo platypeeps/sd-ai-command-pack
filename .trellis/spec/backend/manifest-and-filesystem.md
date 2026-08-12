@@ -614,10 +614,112 @@ release verdict.
    - Schema version 5 also requires `rolloutPolicy`: a bounded default
      concurrency, a first sequential `canary` cohort, and ordered cohorts that
      include every consumer exactly once in rollout-priority order.
-   - `docs/fleet/candidate-validation.json` schema version 3 records
+   - `docs/fleet/candidate-validation.json` schema version 4 records
      `packVersion`, `payloadDigest`, `fleetManifestDigest`, `validatorDigest`,
-     and one passing row per consumer with its checked base commit plus exact
-     preparation and check command arrays.
+     and one row per consumer with its checked base commit, exact preparation
+     and check command arrays, and a `reasons` array.
+   - **Consumer status is a three-value enum: `passed`, `failed`, `blocked`**
+     (schema 4). A consumer-owned precondition — references the pack does not
+     own, a dirty worktree, a manifest file missing from the checkout — must
+     neither fail the pack's release nor be recorded as a pass, because both
+     answers are lies in opposite directions. Failing on them makes every pack
+     release hostage to eight consumer backlogs (207 such references in
+     `anomaly-metric-creator` alone), and the first thing anyone does with a
+     release gate that cannot be satisfied is turn it off. Recording them as
+     `passed` puts a row in the ledger certifying a thin validation the
+     consumer's own repository cannot yet support.
+     - `passed` — every step ran and succeeded. Release-prep continues.
+     - `failed` — a step ran and failed, or the pack itself is defective.
+       Release-prep exits nonzero.
+     - `blocked` — a consumer-owned precondition stopped the lane; nothing was
+       falsely certified. Release-prep continues, with the reasons recorded.
+     - `blocked` **requires a non-empty `reasons` array of non-empty strings**.
+       `validate_candidate_ledger` rejects a `blocked` row with an absent,
+       empty, or non-string-bearing `reasons`. An unexplained skip is the exact
+       failure mode the third value exists to prevent, so a `blocked` row that
+       does not say why is a validation error rather than a lenient pass.
+   - **The lane branches on the clone's pin, never on the registry's `mode`.**
+     `conversion.thin_pin_state(clone)` is the same predicate `install.py`
+     itself branches on. The registry records what the pack *believes*; the pin
+     records what the checkout *is*, and they disagree by design during the
+     window between a consumer's conversion PR merging and the registry flip
+     landing — a skew `flip_registry_mode` documents as accepted. Branching on
+     the registry would aim a `--platform` install at a genuinely thin checkout
+     during precisely that window, and `install.py`'s thin-refresh branch
+     rejects `--platform` outright. A `malformed` pin fails rather than
+     guessing a shape, matching `install.py`, which refuses in both directions
+     for that state. A pin/registry disagreement is recorded as a note.
+   - **A pack defect is measured after the conversion's rewrite, not before.**
+     The resweep's `packDefects` bucket is a *pre-rewrite* count: it records
+     pack-owned content that cites a removed path and never calls
+     `rewrite_text`. The conversion does — every kept text file passes through
+     `rewrite_text(text, profile=THIN_PROFILE, key=entry)`, which repoints
+     `scripts/sd-ai-command-pack-<name>` to `~/.agents/bin/<name>` and the pack
+     docs to `~/.agents/docs`. So the raw count is not evidence of a release
+     defect. The gate rewrites each flagged file under `THIN_PROFILE` and fails
+     only on what `check_text_residue` still rejects; the raw count is recorded
+     as a note so it stays visible without being a verdict. Measured on the
+     real fleet: 14-16 pre-rewrite citations per consumer, **zero** surviving.
+     A glob such as `scripts/sd-ai-command-pack-*.py` is not a path the rewrite
+     can repoint and does still fail — which is why the check is residue rather
+     than "no citations at all".
+   - **The resweep runs after the install, on a committed clone.** A pristine
+     clone carries whatever pack version that consumer last installed, so a
+     resweep there measures the previous release and attributes its defects to
+     the candidate. Installing dirties the worktree and a dirty worktree is a
+     blocker, so the disposable clone is committed first (`git add --all`, then
+     a `--allow-empty` commit under an explicit non-user identity). The clone
+     exists to be thrown away; committing is what makes "this tree contains the
+     candidate" a fact the resweep can read rather than noise it must ignore.
+   - **The thin artifact lane runs once per candidate run, before the
+     per-consumer loop.** Three steps, all against the pack rather than any
+     consumer: `generate-plugin.py --check --root <pack>`, which builds the
+     plugin and compares it against the committed tree offline and writes
+     nothing — catching both a generator failure and drift, and the reason the
+     lane needs no scratch copy of the checkout; `claude plugin validate
+     <pack>/plugins/sd --strict`; and `install.py --machine` into
+     `<work_root>/home` with `--state-home <work_root>/state`. Once, not once
+     per consumer: the plugin and the machine payload do not vary by consumer.
+     Its failure is likewise not attributed to a consumer, because nothing
+     about a consumer caused it.
+     - An unresolvable `claude` is reported as `unavailable` and **fails**. A
+       release gate that reports success where it did not run is the defect the
+       gate exists to prevent, so there is no skip flag and no degrade-to-fat.
+     - `claude --plugin-dir` is not a substitute for any of this. Measured,
+       `claude --plugin-dir /nonexistent/plugin/path -p "say ok"` answers
+       normally and exits 0, so it has no failure channel at all, and its only
+       non-interactive form requires a billable, credentialed model call.
+     - A failed machine install hands back no prefix. Reporting one would point
+       the thin lane's `HOME` at an empty directory, where every lookup
+       resolves nothing.
+   - **A thin clone's registered commands run with `HOME` set to the run's
+     scratch prefix; a fat clone's run with the inherited `HOME` unchanged.**
+     A converted consumer's pack helpers resolve through `~/.agents/bin`, so
+     without the redirect its checks would silently exercise whatever pack the
+     invoking machine already has installed and the run would certify someone
+     else's release. `Path.home()` honors `HOME`, which is what makes the
+     redirect work without a raw environment read in the resolver. The
+     override belongs to the thin lane alone — a shared builder that set `HOME`
+     for both lanes would pass any test written against outcomes, so the
+     contract is asserted on the child environment.
+   - **A thin clone whose registered check names a manifest-declared path the
+     conversion removes is `blocked`, not `failed`.** The `agents-bin` family
+     relocates `scripts/` targets to `<home>/.agents/bin`, so a registry row
+     still invoking `scripts/sd-ai-command-pack-<name>` by repository-relative
+     path names a file the conversion deleted. The pack built correctly and the
+     install succeeded; what is stale is that consumer's registry record, and
+     the fix belongs to its conversion PR. A missing path the pack does *not*
+     own is a different thing entirely — the consumer's own check is broken,
+     and that stays a failure.
+   - **The loop never converts a consumer and never writes this pack's
+     registry.** `install.py --thin --consumer <name>` calls
+     `flip_registry_mode` on success, which would mutate
+     `docs/fleet/consumers.json` in the source checkout. A validator that
+     mutates the source is not a validator. No install the loop issues carries
+     `--consumer`, and the property is checked as **byte-identity** of
+     `docs/fleet/consumers.json` across a full run: no record carries a `mode`
+     key, so a parsed comparison would compare eight reader-supplied defaults
+     and pass whatever the run did to the file.
    - `validatorDigest` (added in schema 3) exists because ledger currency
      decides whether `make release-prep` runs the fleet validation at all
      (`prepare-release.py:338` returns before `CANDIDATE_CHECK`), and the other
