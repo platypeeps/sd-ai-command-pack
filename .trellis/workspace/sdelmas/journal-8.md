@@ -751,3 +751,40 @@ The 08-09-deployment-thin-consumers parent was started in 6e66f38a and stayed in
 ### Next Steps
 
 - None - task complete
+
+
+## Session 368: File the journal-cite lifecycle-correction defect
+
+**Date**: 2026-08-12
+**Task**: File the journal-cite lifecycle-correction defect
+**Branch**: `task/journal-cite-lifecycle-correction`
+
+### Summary
+
+Filed 08-12-journal-cite-lifecycle-correction after shipping PR #438 hit the defect: journal-only-recovery validates each cited commit's parent, so a commit correcting a task's lifecycle status can never be cited by any journal session. Traced to review-preflight.mjs:2711-2716 handing parentFields[1] to validatePlanningBundle as the baseline ref, and :2322-2324 requiring that baseline to be a valid planning task. Verified against shipped history: correction commit 3e2991ea holds planning, its parent f0f12837 holds in_progress. PRD-only; three mechanism candidates left open, with planning-to-in_progress ruled out as the direction the check exists to defend.
+
+### Main Changes
+
+- Filed .trellis/tasks/08-12-journal-cite-lifecycle-correction as a PRD-only defect task, with the validator line citations verified against the file rather than quoted from memory
+- Recorded the secondary misdiagnosis on the same path: lifecycleOnly mode emits the generic planning_baseline_invalid saying 'at the bundle base' when the ref actually read is the cited commit's parent, naming neither the commit nor the real ref
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9bdbea47` | docs(task): file the journal-cite lifecycle-correction defect |
+
+### Testing
+
+- [OK] make full-check: Review preflight: 0 failure(s), 0 warning(s)
+- [OK] task.py validate .trellis/tasks/08-12-journal-cite-lifecycle-correction: All validations passed
+- [OK] git show 3e2991ea^:.../task.json reports in_progress; git show 3e2991ea:.../task.json reports planning
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
