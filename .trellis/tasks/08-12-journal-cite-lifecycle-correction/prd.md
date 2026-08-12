@@ -122,6 +122,19 @@ a cited commit must not smuggle in an unrelated task-state change.
       reconciled or explicitly left as historical, with the reason recorded.
       Its session omits `3e2991ea` solely because of this defect.
 
+      Established while filing this task: reconciling it in place is not
+      available. A committed journal session is append-only —
+      `validateTrellisJournalSessions`' history gate rejects a baseline
+      session whose content changed — and CI reaches the same conclusion
+      from the other side, because `bookkeeping_ci_scope.py:240-241`
+      classifies any push delta touching `.trellis/workspace/` as a
+      planning bundle and then requires a new completed session and its
+      sibling index. Both the edit and its revert fail. So this criterion
+      is satisfiable only by the "explicitly left as historical" branch,
+      unless the fix chosen for requirement 2 also supplies a migration
+      path — which is `.trellis/tasks/08-09-force-backup-journal` and
+      issue #401's territory, not assumed here.
+
 ## Out of scope
 
 - `validatePlanningClosureActiveTasks`. `08-12`'s D2 rejected widening it and
