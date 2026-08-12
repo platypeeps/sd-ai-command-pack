@@ -576,3 +576,48 @@ Finalize the post-archive task-description correction for 08-11-convert-fleet-pr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 364: Recompute the review coordinator's deterministic check on every invocation
+
+**Date**: 2026-08-12
+**Task**: Recompute the review coordinator's deterministic check on every invocation
+**Branch**: `fix/review-check-recompute-contract`
+
+### Summary
+
+Fixed the stale-pass half of the review coordinator's memoized sd-check gate, added a tooling spec for what its per-attempt state may memoize, and shipped it as pack 0.71.1.
+
+### Main Changes
+
+- Recomputed the deterministic sd-check on every coordinator invocation instead of serving the verdict stored in the per-attempt state, whose key does not cover the live pull-request body that pack.review-scope reads
+- Passed the current phase back to _record_stage on a recompute so a resume that already reached a later stage is not rewound to check
+- Added four tests covering both verdict directions, the expensive stages still replaying, the phase not rewinding, and the gate agreeing with a direct sd-check run through a real subprocess
+- Added .trellis/spec/tooling/review-attempt-state.md recording which stage results may be memoized and why, linked from the tooling spec index
+- Bumped manifest.json and CHANGELOG.md to 0.71.1 and regenerated the shipped surfaces
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da8a857e` | fix(review): recompute the deterministic check on every invocation |
+| `60e5d7f4` | docs(spec): record what the review attempt state may memoize |
+| `124efc13` | docs(task): record the live-PR measurement and check the criteria |
+| `c6a5544c` | fix(review): say precisely what the recompute stops reading |
+| `56487c3f` | chore(task): record branch for review-check-stale-cache |
+
+### Testing
+
+- [OK] python3 -m unittest tests.test_review_controller — 43 tests, OK
+- [OK] make check — all 8 rows passed
+- [OK] make release-prep — exit 0
+- [OK] sd-review scope=pr on PR #430 — ready, check passed, local clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
