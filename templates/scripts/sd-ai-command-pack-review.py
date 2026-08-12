@@ -1931,10 +1931,11 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     check = _run_check(repo)
     # A recompute is not a stage completing for the first time, so it must not
     # rewind `phase`, which names where a resume re-enters; passing the current
-    # phase back is the same idiom the local refresh below uses. A failing
-    # recompute stays out of the state file exactly as before: what is left on
-    # disk is never read as a verdict again, because this stage no longer reads
-    # the state file at all.
+    # phase back is the same idiom the local refresh below uses. `stored` is the
+    # only thing the persisted check is still consulted for — whether this is a
+    # recompute or a first computation — and never the gate. A failing recompute
+    # therefore stays out of the state file exactly as before, and whatever
+    # verdict is left on disk cannot decide a later run.
     _record_stage(
         state_path,
         state,
