@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-11",
   "completedAt": null,
-  "branch": null,
+  "branch": "chore/convert-fleet-provider-configs",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
