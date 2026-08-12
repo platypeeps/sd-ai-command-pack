@@ -83,13 +83,13 @@ a release that changes a template cannot ship without recording it.
   "sources": {
     "templates/.gito/config.toml": {
       "target": ".gito/config.toml",
-      "current": "sha256:...",
-      "digests": ["sha256:...", "sha256:..."]
+      "current": "8caa6fb1...",
+      "digests": ["e3b0c442...", "8caa6fb1..."]
     },
     "templates/.prism/rules.json": {
       "target": ".prism/rules.json",
-      "current": "sha256:...",
-      "digests": ["sha256:..."]
+      "current": "8caa6fb1...",
+      "digests": ["cea5089e..."]
     }
   }
 }

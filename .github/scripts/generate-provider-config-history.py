@@ -137,6 +137,15 @@ def load_artifact() -> dict:
     return artifact
 
 
+def _entry_is_well_formed(entry: object) -> bool:
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("target"), str)
+        and isinstance(entry.get("digests"), list)
+        and all(isinstance(digest, str) for digest in entry["digests"])
+    )
+
+
 def if_not_exists_records() -> list[dict]:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     return [
@@ -164,6 +173,16 @@ def generate() -> bool:
         current = source_digest(template.read_bytes())
 
         entry = sources.get(source)
+        if entry is not None and not _entry_is_well_formed(entry):
+            # Valid JSON with a malformed entry is the one case where writing
+            # anything is worse than stopping: the record is unusable as it
+            # stands, and repairing it here would mean deciding on a consumer's
+            # behalf which digests it used to claim.
+            raise GenerateError(
+                f"{ARTIFACT} has a malformed entry for {source!r}; repair it "
+                "deliberately rather than letting this generator overwrite a "
+                "record consumers are matched against"
+            )
         if entry is None:
             entry = {
                 "target": record["target"],

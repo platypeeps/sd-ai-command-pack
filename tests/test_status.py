@@ -3597,6 +3597,42 @@ class StatusTests(InstallTestCase):
             [{"target": ".gito/config.toml", "state": "local"}],
         )
 
+    def test_a_malformed_entry_is_reported_rather_than_skipped(self) -> None:
+        # Skipping it shrinks the list toward the same clean-looking row an
+        # unreadable record used to produce.
+        status = self.load_status_module()
+        pack_root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, pack_root, ignore_errors=True)
+        consumer = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, consumer, ignore_errors=True)
+        record = pack_root / status.PROVIDER_CONFIG_HISTORY_SOURCE
+        record.parent.mkdir(parents=True, exist_ok=True)
+
+        for label, entry in (
+            ("not an object", 5),
+            ("no target", {"current": "a" * 64, "digests": []}),
+            ("no current", {"target": ".gito/config.toml", "digests": []}),
+        ):
+            with self.subTest(shape=label):
+                record.write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "sources": {"templates/.gito/config.toml": entry},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertEqual(
+                    status.provider_config_states(pack_root, consumer),
+                    [
+                        {
+                            "target": "templates/.gito/config.toml",
+                            "state": "unknown",
+                        }
+                    ],
+                )
+
     def test_an_unreadable_record_reports_unknown_rather_than_nothing(self) -> None:
         # An empty list renders as a consumer with no provider configs, which
         # is indistinguishable from a clean one. The gap has to stay visible.

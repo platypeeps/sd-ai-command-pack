@@ -2962,13 +2962,19 @@ def provider_config_states(pack_root: Path, consumer_root: Path) -> list[dict[st
         ]
 
     states: list[dict[str, Any]] = []
-    for entry in sources.values():
+    for source, entry in sources.items():
+        # A malformed entry is reported, never skipped: dropping it would
+        # shrink the list toward the same clean-looking row an unreadable
+        # record used to produce.
+        label = source if isinstance(source, str) else repr(source)
         if not isinstance(entry, Mapping):
+            states.append({"target": label, "state": "unknown"})
             continue
         target = entry.get("target")
         current = entry.get("current")
         digests = entry.get("digests")
         if not isinstance(target, str) or not isinstance(current, str):
+            states.append({"target": label, "state": "unknown"})
             continue
         if not isinstance(digests, list):
             digests = []

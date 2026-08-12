@@ -356,6 +356,21 @@ class GeneratorTests(InstallTestCase):
             check=False,
         )
 
+    def load_generator(self):
+        return self.load_module_from_path(self.GENERATOR, "sd_provider_history_gen")
+
+    def test_a_malformed_existing_entry_stops_instead_of_overwriting(self) -> None:
+        # Valid JSON with a broken entry is the one case where writing is worse
+        # than stopping: repairing it would mean deciding on a consumer's
+        # behalf which digests it used to claim.
+        generator = self.load_generator()
+        for entry in (5, {"digests": []}, {"target": ".x", "digests": [1]}):
+            with self.subTest(entry=entry):
+                self.assertFalse(generator._entry_is_well_formed(entry))
+        self.assertTrue(
+            generator._entry_is_well_formed({"target": ".x", "digests": ["a"]})
+        )
+
     def test_running_it_on_a_current_tree_changes_nothing(self) -> None:
         before = (PACK_ROOT / providerhistory.HISTORY_SOURCE).read_bytes()
         result = self.run_generator()
