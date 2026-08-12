@@ -459,3 +459,39 @@ Rescoped the full-fleet candidate validator to exercise the thin install shape: 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 361: File the layout-aware guard task from the fleet sizing
+
+**Date**: 2026-08-11
+**Task**: File the layout-aware guard task from the fleet sizing
+**Branch**: `docs/layout-aware-guard-task-v2`
+
+### Summary
+
+Recorded the follow-up task from the 08-11-thin-candidate-loop-shape iteration's fleet sizing: five consumers each reimplemented the same pack-layout guard, and those scripts plus the tests pinning them carry 330 of the fleet's 510 thin-conversion blockers. The task ships one pack-owned replacement so each of those five ports becomes a delete.
+
+### Main Changes
+
+- Filed 08-11-pack-layout-aware-guard with the per-consumer and per-category blocker tables, the five named bespoke guards, and acceptance criteria that require reading all five before designing the replacement surface
+- Curated both spec manifests with real entries instead of the generated _example scaffold, so the task dispatches with spec context
+- Kept the task standalone: a declared parent, or an exact ID citation in the PRD, links the in_progress thin-deployment umbrella into the branch's planning closure, which the finalization gate refuses in both directions
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f8ee61c` | docs(task): file the layout-aware guard task from the fleet sizing |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs — 0 failures, 0 warnings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
