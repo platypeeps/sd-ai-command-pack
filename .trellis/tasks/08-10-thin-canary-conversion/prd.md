@@ -142,7 +142,7 @@ revert-and-restore proof.
    consume the machine-installed plugin. The second half is true and
    irrelevant: the `.agents` families belong to the machine *installer*,
    not to the Claude plugin. An executed probe
-   (`archive/2026-08/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`)
+   (`.trellis/tasks/archive/2026-08/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`)
    shows Codex merges project-root `.agents/skills` with
    `$HOME/.agents/skills`, which the machine installer writes. Codex left
    `retainVendoredFor` in 0.71.2, so declaring it retains nothing and the
