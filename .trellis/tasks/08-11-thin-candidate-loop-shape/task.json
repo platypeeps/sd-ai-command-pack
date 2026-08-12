@@ -3,7 +3,7 @@
   "name": "thin-candidate-loop-shape",
   "title": "Rescope the candidate validator loop to the thin shape",
   "description": "Rescope the full-fleet candidate gate to validate the thin install shape, so it stops certifying a shape no converted consumer runs. Split out of 08-10-thin-candidate-loop-rescope after three planning review rounds found four blocking concerns: the conversion mutates this repository's own fleet registry, the clean-tree precondition defeats the install-then-resweep ordering, already-thin checkouts reject --platform, and a blocked consumer has no representation in the ledger contract. Carries the deferred release-gate policy question. Depends on 08-10 for observability.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

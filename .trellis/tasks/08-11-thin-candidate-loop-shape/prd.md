@@ -61,9 +61,10 @@ speculation, and a design that does not answer all four is not ready.
 
 4. **C-4 — `blocked` has no representation in the current gate, and needs a
    policy decision.** A non-`clear` resweep verdict is a real outcome, but
-   `fleet-candidate-check.py:502` fails validation for every consumer whose
-   status is not `passed` and suppresses the ledger, and `fleet_lib.py:829`
-   rejects a non-`passed` consumer during ledger validation. **The policy
+   `fleet-candidate-check.py:520` fails validation for every consumer whose
+   status is not `passed` and suppresses the ledger, and `fleet_lib.py:902-906`
+   rejects a non-`passed` consumer during ledger validation. (Both citations
+   re-derived from the file after 0.69.0 moved them from `:502` and `:829`.) **The policy
    question — does a consumer the pack cannot convert fail `make release-prep`?
    — is deferred to this task and is not answered.** Treating a blocked lane as
    top-level `passed` would make the ledger certify a thin validation that
@@ -72,15 +73,33 @@ speculation, and a design that does not answer all four is not ready.
 ## Requirements
 
 1. `validate_consumer` exercises the thin shape: build the plugin,
-   `claude plugin validate --strict`, load it with `claude --plugin-dir` in
-   smoke mode, and run the machine installer into a scratch prefix.
+   `claude plugin validate --strict`, check the built plugin against the
+   committed one with `generate-plugin.py --check`, and run the machine
+   installer into a scratch prefix.
+
+   *Amended after planning review.* This requirement originally named a
+   `claude --plugin-dir` load smoke as the third step. It is not implementable:
+   `claude --plugin-dir /nonexistent/plugin/path -p "say ok"` answers normally
+   and exits 0, so the step has no failure channel, and its only
+   non-interactive form requires a billable, credentialed model call inside
+   `make release-prep` — which requirement 5's no-skip rule would then make
+   mandatory everywhere. `--strict` already covers manifest validity; the
+   remaining gap was drift between the committed plugin and what the generator
+   produces, which `--check` answers offline with a real nonzero exit. See
+   `design.md` D5.
 2. Each consumer's repo-owned `candidatePrepare` / `candidateChecks` still run,
    against a checkout in the shape that consumer will actually be in.
 3. **The thin shape is exercised regardless of declared modes.** A
-   shadow-thin run against disposable checkouts happens even while all eight
-   entries are `fat`, so the gate is real before the first conversion. Once
-   modes diverge, the loop additionally exercises each consumer in its declared
-   mode and silently skips neither kind.
+   shadow-thin run against disposable checkouts happens even while no consumer
+   has been converted, so the gate is real before the first conversion. Once
+   shapes diverge, the loop additionally exercises each consumer in the shape
+   its own checkout is pinned to and silently skips neither kind.
+
+   *Amended after planning review.* "its declared mode" is replaced by the
+   clone's pin. The registry records what the pack believes; the pin records
+   what the checkout is, and they disagree by design during the window between
+   a consumer's conversion PR merging and the registry flip landing. See
+   `design.md` D3.
 4. The gate still blocks: a failing thin-shape step fails `make release-prep`,
    proven by a deliberate break rather than asserted.
 5. If `claude` is unavailable, the loop reports the step as unavailable and
@@ -92,18 +111,40 @@ speculation, and a design that does not answer all four is not ready.
 
 - [ ] `make release-prep` exercises the thin shape end to end and passes on a
       clean tree, with evidence in its output that the validator actually ran.
-- [ ] The shadow-thin run happens with all eight registry entries still `fat`,
-      proven by the loop's output naming the thin steps it executed, **and** by
-      the registry still reading eight `fat` entries afterward — the C-1 check.
+- [ ] The shadow-thin run happens with no consumer converted, proven by the
+      loop's output naming the thin steps it executed, **and** by
+      `git diff --exit-code docs/fleet/consumers.json` being clean afterward —
+      the C-1 check.
+
+      *Amended after planning review.* This criterion originally required "the
+      registry still reading eight `fat` entries afterward". No record in
+      `docs/fleet/consumers.json` carries a `mode` key — the schema-5 file has
+      never written one, and every reader takes `DEFAULT_FLEET_CONSUMER_MODE`.
+      A parsed check would therefore compare eight reader-supplied defaults and
+      pass whatever the loop did to the file. Byte-identity is the only form
+      that tests the property the criterion is about.
 - [ ] A deliberately broken plugin build makes `make release-prep` exit
       nonzero; the break is reverted afterward and the revert verified.
-- [ ] A registry with one `fat` and one `thin` consumer exercises both, proven
-      by the loop's own output naming each consumer and the mode it ran.
+- [ ] A fleet with one `fat`-pinned and one `thin`-pinned clone exercises both
+      lanes, proven by the loop's own output naming each consumer and the shape
+      it ran, and by the argv of each install call. (Amended from "a registry
+      with one `fat` and one `thin` consumer" for the D3 reason above: the pin
+      selects the lane, so a registry-only fixture would not exercise it.)
 - [ ] An absent `claude` binary produces an explicit unavailable diagnostic and
       a nonzero exit, never a silent pass.
 - [ ] A consumer whose resweep verdict is not `clear` produces the behavior
       C-4's answer specifies, and the ledger contract agrees with it — proven
       by a test, not by reading the code.
+- [ ] A thin-pinned clone whose registered check names a manifest-declared path
+      the conversion removed is `blocked` with that command in its reason, while
+      one naming a non-manifest missing path is `failed` — proven by a test
+      holding both cases. (Added after planning review; `se-ai-command-pack` and
+      `rwbp-website` are already in the first state on paper. See `design.md`
+      D6.)
+- [ ] A thin-pinned clone's `candidatePrepare` / `candidateChecks` run with
+      `HOME` set to the run's scratch prefix, and a fat-pinned clone's run with
+      the inherited `HOME` unchanged — proven by asserting the child environment,
+      not the outcome. (Added after planning review. See `design.md` D7.)
 - [ ] `make check` passes.
 
 ## Non-goals
