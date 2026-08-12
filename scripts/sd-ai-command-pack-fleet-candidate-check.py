@@ -238,9 +238,58 @@ def _installer_modules(pack_root: Path):
 
     if str(pack_root) not in sys.path:
         sys.path.insert(0, str(pack_root))
-    from installer import conversion, thin  # noqa: PLC0415
+    from installer import conversion, references, thin  # noqa: PLC0415
 
-    return conversion, thin.load_resweep_module(pack_root)
+    return conversion, references, thin.load_resweep_module(pack_root)
+
+
+def surviving_pack_defects(verdict: dict, *, clone: Path, references) -> list[str]:
+    """The pack defects a conversion would not repoint on its way through.
+
+    The resweep's `packDefects` bucket is a *pre-rewrite* measurement: it counts
+    pack-owned content citing a path the conversion removes, and says so before
+    the conversion has had its turn. But a conversion rewrites every kept text
+    file through `THIN_PROFILE` first, and that rewrite exists precisely to
+    repoint `scripts/sd-ai-command-pack-*` at `~/.agents/bin` and the manual at
+    `~/.agents/docs`. Treating the raw count as a release blocker fails the pack
+    for references the pack already handles -- measured at 15-17 per consumer
+    across all eight, every one of which the rewrite repoints.
+
+    So each entry is put through the conversion's own residue gate, which is the
+    authoritative answer to "would this reference still be broken afterwards?".
+    Only residue is a defect. An entry whose subject is not a readable file in
+    the clone -- a synthetic marker like undeclared `codex` usage, or a
+    surviving platform directory -- cannot be cleared by a text rewrite at all,
+    so it stays a defect by default rather than being cleared by inspection that
+    does not apply to it.
+    """
+
+    failures: list[str] = []
+    seen: set[str] = set()
+    for entry in verdict.get("packDefects") or ():
+        subject = entry.get("file")
+        if not isinstance(subject, str) or subject in seen:
+            continue
+        seen.add(subject)
+        path = clone / subject
+        if not path.is_file() or path.is_symlink():
+            failures.append(f"{subject}: {entry.get('detail')}")
+            continue
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            failures.append(f"{subject}: unreadable pack target")
+            continue
+        rewritten = references.rewrite_text(
+            text, profile=references.THIN_PROFILE, key=subject
+        )
+        try:
+            references.check_text_residue(
+                subject, rewritten, profile=references.THIN_PROFILE
+            )
+        except references.ReferenceRewriteError as error:
+            failures.append(str(error))
+    return failures
 
 
 def resweep_reasons(verdict: dict) -> tuple[list[str], list[str]]:
@@ -248,23 +297,16 @@ def resweep_reasons(verdict: dict) -> tuple[list[str], list[str]]:
 
     This is the policy answer, and it is the distinction `decide()` already
     draws: "the tree was dirty" and "the pack ships a broken reference" call
-    for opposite responses. A pack-owned reference to a path the conversion
-    removes is a defect in the artifact being released, found by the gate that
-    exists to find it, and the pack can fix it before shipping. Consumer-owned
-    references, missing files, and a dirty worktree are conditions in
-    repositories the pack does not own and cannot fix.
+    for opposite responses. Pack-owned defects are handled by
+    `surviving_pack_defects` above, which is stricter about what counts as one.
+    Consumer-owned references, missing files, and a dirty worktree are
+    conditions in repositories the pack does not own and cannot fix; failing on
+    them would make every pack release hostage to eight consumer backlogs.
     """
 
     counts = verdict.get("counts") or {}
     failing: list[str] = []
     blocking: list[str] = []
-
-    pack_defects = counts.get("packDefects") or 0
-    if pack_defects:
-        failing.append(
-            f"{pack_defects} pack-owned reference(s) to paths a thin conversion "
-            "removes; the pack owns these and must repoint them before release"
-        )
 
     blockers = counts.get("blockers") or 0
     if blockers:
@@ -533,32 +575,9 @@ def validate_consumer(
             duration_seconds=time.monotonic() - started,
         )
 
-    # Resweep the pristine clone, before any install. Cleanliness is a fact
-    # here rather than an obstacle: installing dirties the clone, and a resweep
-    # run afterwards would report the loop's own writes as a consumer blocker.
-    conversion, resweep = _installer_modules(pack_root)
+    conversion, references, resweep = _installer_modules(pack_root)
     notes: list[str] = []
     reasons: list[str] = []
-    try:
-        verdict = resweep.resweep_consumer(consumer.name, checkout)
-    except Exception as error:  # noqa: BLE001 - a resweep failure is a failure
-        return CandidateResult(
-            consumer=consumer,
-            status="failed",
-            base_commit=base_commit,
-            detail=f"resweep failed: {error}",
-            duration_seconds=time.monotonic() - started,
-        )
-    failing, blocking = resweep_reasons(verdict)
-    reasons.extend(blocking)
-    if failing:
-        return CandidateResult(
-            consumer=consumer,
-            status="failed",
-            base_commit=base_commit,
-            detail="; ".join(failing),
-            duration_seconds=time.monotonic() - started,
-        )
 
     # Branch on the clone's own pin, never on the registry's declared mode.
     # The registry records what the pack believes; the pin records what the
@@ -671,6 +690,67 @@ def validate_consumer(
             status="failed",
             base_commit=base_commit,
             detail=concise_failure("install audit", audit_command, audit_result),
+            duration_seconds=time.monotonic() - started,
+        )
+
+    # Resweep *after* the install, not before. The obvious ordering is the
+    # wrong one: a pristine clone carries whatever pack version that consumer
+    # last installed, so a resweep run there measures the previous release and
+    # not the candidate. Measured, that is not theoretical -- sd-github-review's
+    # vendored copy of the planning-adversarial-review contract still invoked
+    # the `codex` CLI, a defect this pack had already fixed, and the candidate
+    # was failed for it.
+    #
+    # Installing dirties the worktree, and a dirty worktree is a resweep
+    # blocker, so the install is committed in the disposable clone first. That
+    # is free and honest here: the clone exists to be thrown away, and
+    # committing is what makes "the tree contains the candidate" a fact the
+    # resweep can read rather than noise it must be told to ignore.
+    for stage_command in (
+        ["git", "add", "--all"],
+        ["git", "-c", "user.name=candidate", "-c", "user.email=candidate@invalid",
+         "commit", "--quiet", "--allow-empty", "-m", "candidate install"],
+    ):
+        stage_result = run_command(
+            stage_command, cwd=checkout, timeout_seconds=120, env=env
+        )
+        if stage_result.returncode != 0:
+            return CandidateResult(
+                consumer=consumer,
+                status="failed",
+                base_commit=base_commit,
+                detail=concise_failure(
+                    "staging the candidate install", stage_command, stage_result
+                ),
+                duration_seconds=time.monotonic() - started,
+            )
+
+    try:
+        verdict = resweep.resweep_consumer(consumer.name, checkout)
+    except Exception as error:  # noqa: BLE001 - a resweep failure is a failure
+        return CandidateResult(
+            consumer=consumer,
+            status="failed",
+            base_commit=base_commit,
+            detail=f"resweep failed: {error}",
+            duration_seconds=time.monotonic() - started,
+        )
+    _unused, blocking = resweep_reasons(verdict)
+    reasons.extend(blocking)
+    failing = surviving_pack_defects(verdict, clone=checkout, references=references)
+    raw_pack_defects = (verdict.get("counts") or {}).get("packDefects") or 0
+    if raw_pack_defects and not failing:
+        notes.append(
+            f"the resweep counted {raw_pack_defects} pack-owned citation(s) of "
+            "removed paths; every one is repointed by the conversion's own "
+            "rewrite, so none is a release defect"
+        )
+    if failing:
+        return CandidateResult(
+            consumer=consumer,
+            status="failed",
+            base_commit=base_commit,
+            detail="; ".join(failing),
             duration_seconds=time.monotonic() - started,
         )
 
