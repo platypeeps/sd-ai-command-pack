@@ -24,6 +24,13 @@ memory:
   `machine`; the other 14 registry platforms are `repo-native`. No
   platform carries `provisional: true`. Only `shared` carries
   `retainVendoredFor: ["codex", "pi"]`.
+
+  > Superseded after this snapshot, and left standing because the
+  > section is a measurement at a named commit rather than a current
+  > claim: 0.71.2 removed `codex` from that list on executed probe
+  > evidence that Codex reads `$HOME/.agents/skills`, which the machine
+  > installer already writes. `shared` now carries `["pi"]`. Re-measure
+  > before relying on any figure here; the row count has also moved.
 - `docs/fleet/consumers.json` schema 5: 8 consumers, cohorts
   `canary` (rwbp-coordinator, loadsmith, hoa-manager, sequential),
   `post-canary` (rwbp-website, mezmo_benchmark, se-ai-command-pack,
@@ -55,9 +62,11 @@ memory:
   artifact, never either number.
 - `retainVendoredFor` is **inert today**: no consumer declares `codex`
   or `pi`, so zero `.agents/**` rows are retained anywhere. The resweep
-  gate below still exists, because a consumer using codex/pi without
-  declaring it is exactly the case that must block rather than silently
-  delete.
+  gate below still exists, because a consumer using a retained platform
+  without declaring it is exactly the case that must block rather than
+  silently delete. Superseded for codex by the note above: with `codex`
+  out of `retainVendoredFor`, its undeclared marker is an advisory and
+  only pi still blocks.
 - `install.py` today has `--machine`, `--remove`, `--force`, `--backup`,
   `--dry-run`, `--status/--check --json`, `--configure-fleet`. It has
   **no** `--thin` and **no** `--revert-thin`. Nothing in the repository
