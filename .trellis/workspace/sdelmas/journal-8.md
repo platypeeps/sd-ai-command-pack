@@ -621,3 +621,49 @@ Fixed the stale-pass half of the review coordinator's memoized sd-check gate, ad
 ### Next Steps
 
 - None - task complete
+
+
+## Session 365: Convert the eight fleet consumers off superseded provider configs
+
+**Date**: 2026-08-12
+**Task**: Convert the eight fleet consumers off superseded provider configs
+**Branch**: `chore/convert-fleet-provider-configs`
+
+### Summary
+
+Planned, canaried, and executed the provider-config conversion across all eight registered fleet consumers, opened a pull request in each, rebutted 35 copied-payload code-scanning findings, filed the one fair finding as task 08-12, and wrote the conversion contract down as a backend spec.
+
+### Main Changes
+
+- Converted all 8 consumers to pack 0.71.1 with the provider-config refresh, one PR per repository, canary (sd-github-review #74) reviewed before the other seven
+- Measured that install.py --force carries the whole payload, not the named cohort: 56-84 written paths plus 13 retirements per consumer at 0.64.x
+- Protected six locally owned .prism/rules.json files with pre-install digests; all six byte-unchanged, loadsmith's superseded copy legitimately refreshed
+- Stashed, converted, and restored three dirty consumers on their own branches; all three stashes popped without conflict
+- Added .trellis/spec/backend/fleet-consumer-conversion.md and linked it from the backend spec index
+- Filed follow-up task 08-12-comment-atomic-write-fsync for the uncommented best-effort directory fsync handler
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a078b9b0` | docs(task): plan and canary the fleet provider-config conversion |
+| `fc99c798` | docs(task): record the Phase B fleet provider-config conversion |
+| `023a3bb7` | docs(spec): record the fleet consumer conversion contract |
+| `fbc9c187` | fix(review): correct the grep form and the make sync description |
+| `ce29ff5a` | fix(task): replace the scaffold manifests with real spec references |
+| `1f2d83b5` | chore(task): record branch metadata for 08-11-convert-fleet-provider-configs |
+
+### Testing
+
+- [OK] pre-archive gate: status valid, pre_archive_valid
+- [OK] sd-review scope=pr attempt 3: ready, check passed, local clean
+- [OK] per-consumer conversion guards: prism digest unchanged, zero '".trellis/**"' matches, installed version 0.71.1
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

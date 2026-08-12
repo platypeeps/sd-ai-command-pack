@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 364
+- **Total Sessions**: 365
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~612 | Active |
+| `journal-8.md` | ~659 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 365 | 2026-08-12 | Convert the eight fleet consumers off superseded provider configs | `a078b9b0`, `fc99c798`, `023a3bb7`, `fbc9c187`, `ce29ff5a`, `1f2d83b5` | `chore/convert-fleet-provider-configs` |
 | 364 | 2026-08-12 | Recompute the review coordinator's deterministic check on every invocation | `da8a857e`, `60e5d7f4`, `124efc13`, `c6a5544c`, `56487c3f` | `fix/review-check-recompute-contract` |
 | 363 | 2026-08-12 | Record the conversion follow-up description fix | `d8f975ceefe0d11028b87356880b1339b4f1cafc` | `feat/provider-config-digest-history` |
 | 362 | 2026-08-11 | Give shipped if-not-exists defaults a delivery path | `62176532`, `9a324fd8`, `34c12e38`, `450c0a95`, `140fd8ee`, `21570ac5` | `feat/provider-config-digest-history` |
