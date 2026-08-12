@@ -1,7 +1,19 @@
 # Ship a layout-aware review guard so consumers stop reimplementing one
 
-Child of `08-09-thin-migration`. Pack-side only: this task changes nothing
-outside `sd-ai-command-pack`.
+Standalone, pack-side only: this task changes nothing outside
+`sd-ai-command-pack`.
+
+It belongs to the thin-migration program (`08-09-thin-migration`, under
+`08-09-deployment-thin-consumers`) by subject, and is deliberately not
+linked as a child of either. Both are ordinary planning tasks except the
+umbrella, which is `in_progress`; declaring the link would drag an active
+task into the planning closure of every branch that files this one, which
+the finalization gate correctly refuses. The relationship is recorded here
+in prose instead, where it costs nothing and misleads no tool.
+
+Ordered before the conversion cohorts without gating them: converting
+without this guard is possible, only five times more hand work with five
+copies left to drift again.
 
 ## Why
 

@@ -97,14 +97,6 @@ for the gate between them):
    current ledger contract. Carries the release-gate policy question.
    Ordered after child 2 for observability — until the digest binding lands,
    an edited validator is not reached by release-prep at all.
-2e. `08-11-pack-layout-aware-guard` — pack-internal, filed 2026-08-11 from
-   child 2d's fleet sizing. Five consumers each reimplemented the same
-   pack-layout guard, and those scripts plus the tests pinning them carry
-   330 of the fleet's 510 conversion blockers. Shipping one pack-owned,
-   layout-aware guard turns each of those five ports into a delete, so it
-   is ordered before children 3–5 without gating them: converting without
-   it is possible, only five times more hand work and five copies left to
-   drift again.
 3. `08-10-thin-canary-conversion` — mutates consumer repositories
 4. `08-10-thin-post-canary-conversion` — mutates consumer repositories
 5. `08-10-thin-final-conversion-gate-retirement` — mutates a consumer
