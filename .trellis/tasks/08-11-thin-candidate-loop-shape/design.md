@@ -162,8 +162,31 @@ dirties the clone exactly as it does today, and nothing downstream of it reads
 worktree cleanliness.
 
 The resweep does not disappear from the design — see D4 — but it is run for
-*reporting*, on the pristine clone before any install, where cleanliness is a
-fact rather than an obstacle.
+*reporting*, not as a conversion precondition.
+
+**Amended during implementation.** This section originally ran that resweep on
+the pristine clone "before any install, where cleanliness is a fact rather than
+an obstacle". That ordering is wrong, and measurably so. A pristine clone
+carries whatever pack version the consumer last installed, so a resweep there
+measures the **previous release** and attributes its defects to the candidate.
+Measured: `sd-github-review`'s vendored
+`.claude/sd-ai-command-pack/planning-adversarial-review.md` still invoked the
+`codex` CLI at lines 42, 43, 56, and 58 — a defect this pack had already
+removed — and the candidate was failed for it.
+
+The resweep therefore runs **after** the install. Cleanliness stops being free
+and becomes something the lane must produce: the install is committed in the
+disposable clone first, with
+`git add --all` and a `git -c user.name=candidate … commit --allow-empty`. That
+is honest here rather than a workaround — the clone exists to be thrown away,
+and committing is what makes "this tree contains the candidate" a fact the
+resweep can read rather than noise it has to be told to ignore.
+
+The ordering fix is visible in the numbers: installing the candidate *lowered*
+blocker counts against the pre-install baseline on five consumers
+(anomaly-metric-creator 207→200, rwbp-website 68→64, hoa-manager 37→34,
+loadsmith 56→52, mezmo_benchmark 47→46), because the candidate fixes references
+the previously installed release still carried.
 
 ## D3 — C-3: branch on the checkout's own pin, with the predicate install.py uses
 
@@ -213,13 +236,38 @@ already gives (`thin-resweep.py:1704-1709`):
 
 Applied to the release gate:
 
-- **`packDefects > 0` fails release-prep.** A pack-owned reference to a path the
-  conversion removes is a defect in the artifact being released, found by the
-  gate that exists to find it. The pack can fix it before shipping, and
+- **A pack-owned defect that survives the conversion's own rewrite fails
+  release-prep.** A pack-owned reference to a path the conversion removes is a
+  defect in the artifact being released, found by the gate that exists to find
+  it. The pack can fix it before shipping, and
   `08-10-thin-prompt-surface-repoint` and `08-11-thin-undeclared-codex-marker`
   are two already-shipped proofs that this is ordinary pack work.
 
-  A pack-owned defect is nonetheless attributed **per consumer**, not once per
+  **Amended during implementation — the raw count is the wrong measurement.**
+  This section originally said `packDefects > 0` fails release-prep. It does
+  not, and the difference is not a tuning choice. The resweep's `packDefects`
+  bucket (`thin-resweep.py:1592-1598`) is a **pre-rewrite** count: it records
+  pack-owned content that *cites* a removed path, and the resweep never calls
+  `rewrite_text`. But every kept text file passes through
+  `rewrite_text(text, profile=THIN_PROFILE, key=entry)` at `thin.py:651` during
+  the conversion, and `THIN_PROFILE` repoints exactly these citations —
+  `scripts/sd-ai-command-pack-review.py` becomes
+  `~/.agents/bin/sd-ai-command-pack-review.py`. A file in that bucket is
+  therefore evidence of nothing until the rewrite has been applied to it.
+
+  Measured: `check_text_residue` over all seven flagged files in this
+  repository, and over the same files in the real `sd-github-review` checkout,
+  reports **0 files with residue**. Acting on the raw count would have meant
+  hardcoding `~/.agents/bin` into prose that fat consumers read.
+
+  The gate is therefore residue **after** the rewrite, computed by
+  `surviving_pack_defects`: rewrite the flagged file under `THIN_PROFILE`, then
+  run `check_text_residue` on the result. What survives is real — a glob like
+  `scripts/sd-ai-command-pack-*.py` is not a path the rewrite can repoint, and
+  it still fails. What does not survive is recorded as a note, so the count
+  stays visible without being a verdict.
+
+  A surviving defect is nonetheless attributed **per consumer**, not once per
   run, and that is deliberate. The resweep does not audit the pack in the
   abstract: it scans *that consumer's tree* for citations of paths the
   conversion removes, so the count varies with which pack surfaces that
@@ -431,7 +479,8 @@ stated prerequisite, not a fallback to design around.
 | `generate-plugin.py --check` reports drift | run `failed`, release-prep nonzero |
 | machine install to scratch prefix nonzero | run `failed`, release-prep nonzero |
 | `claude` not resolvable | run `failed`, diagnostic names it `unavailable` |
-| consumer resweep `packDefects > 0` | consumer `failed`, release-prep nonzero |
+| consumer resweep pack defect that still names a root pack resource after the `THIN_PROFILE` rewrite | consumer `failed`, release-prep nonzero |
+| consumer resweep pack defect the rewrite repoints | note recorded, not a verdict |
 | consumer resweep `blockers`/`missingFiles`/dirty only | consumer `blocked`, reasons recorded, release-prep continues |
 | clone pin `malformed` | consumer `failed`, pin state named |
 | clone pin `thin`, install with `--platform` | must not happen — D3; a test pins it |
@@ -451,9 +500,10 @@ stated prerequisite, not a fallback to design around.
 - **Base** — today's real fleet: artifact lane green, every consumer `blocked`
   on consumer-authored references with reasons recorded. Release-prep continues
   and the ledger truthfully says no consumer was thin-certified.
-- **Bad** — the pack ships a reference to a path conversion removes: one or
-  more consumers `failed` on `packDefects`, release-prep exits nonzero, and the
-  fix is a pack-side PR.
+- **Bad** — the pack ships a reference the conversion's rewrite cannot repoint,
+  such as the glob `scripts/sd-ai-command-pack-*.py`: one or more consumers
+  `failed` on surviving residue, release-prep exits nonzero, and the fix is a
+  pack-side PR.
 
 ## Compatibility and rollback
 
@@ -470,4 +520,6 @@ Rollback is `git revert` of the commit. No rollback-only code.
 - Converting any consumer. Children 3-5 own that, blocked on explicit per-cohort
   user authorization.
 - Re-measuring the fleet. The stale `packDefects` column is re-measured by a
-  resweep run, not by this design.
+  resweep run, not by this design. (It since was: a full-fleet run at this
+  branch's HEAD recorded 14-16 pre-rewrite citations per consumer and **zero**
+  surviving after the rewrite.)

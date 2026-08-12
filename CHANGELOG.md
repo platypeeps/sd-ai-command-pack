@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.70.0 - 2026-08-11
+
+### Changed
+
+- The full-fleet candidate validator now exercises the thin install shape. A
+  pack-side artifact lane runs once per candidate run — `generate-plugin.py
+  --check`, `claude plugin validate --strict`, and a machine install into a
+  scratch prefix — and each consumer's lane branches on its clone's own
+  provenance pin rather than the registry's declared mode, so the two disagree
+  safely during a conversion window. An unresolvable `claude` is reported as
+  `unavailable` and fails; it is never degraded into a pass.
+- `docs/fleet/candidate-validation.json` is schema version 4. Consumer status
+  is now `passed`, `failed`, or `blocked`, and a `blocked` row requires a
+  non-empty `reasons` array. A consumer-owned precondition — references the
+  pack does not own, a dirty worktree — no longer has to be recorded as either
+  a pack failure or a pass, because both answers are wrong in opposite
+  directions.
+- A pack-owned defect is measured **after** the conversion's own rewrite. The
+  resweep's `packDefects` bucket is a pre-rewrite count of content that cites a
+  removed path, and `THIN_PROFILE` repoints exactly those citations, so the raw
+  count was never evidence of a release defect. The gate now fails only on
+  residue that survives `rewrite_text`, and records the raw count as a note.
+- Each consumer's resweep runs after the candidate install rather than on the
+  pristine clone. A pristine clone carries whatever pack that consumer last
+  installed, so the previous ordering measured the previous release and blamed
+  the candidate for it.
+
 ## 0.69.0 - 2026-08-11
 
 - `make release-prep` can now see a changed candidate validator. It skips fleet

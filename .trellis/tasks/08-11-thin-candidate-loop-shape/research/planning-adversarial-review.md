@@ -39,3 +39,18 @@ None for the artifacts under review. One **precondition** carries forward: the
 Step 0 `prd.md` amendment (C-6, C-9, and criterion 2) must land before
 `task.py start`, because two acceptance criteria as currently written cannot be
 satisfied by any correct implementation.
+
+## Post-start corrections (implementation phase)
+
+Recorded here for continuity, not as a fourth review round. Both were found by
+measurement after `task.py start`, so they are implementation findings against
+the shipped design rather than planning concerns against an unapproved batch.
+`design.md` and `implement.md` are amended in place, each amendment labelled.
+
+| ID | Finding | Verdict | Disposition |
+| --- | --- | --- | --- |
+| C-11 | D4's `packDefects > 0` rule measured the wrong thing | **confirmed defect** | `packDefects` is a *pre-rewrite* count and `THIN_PROFILE` repoints exactly those citations at conversion time. Measured: `check_text_residue` over every flagged file, here and in the real `sd-github-review` checkout, reports 0 with residue. The rule is now residue **after** `rewrite_text`, implemented as `surviving_pack_defects`. Acting on the raw count would have hardcoded `~/.agents/bin` into prose fat consumers read. Step 2b, added on the wrong reading, was withdrawn before any file was edited. |
+| C-12 | D2's "resweep the pristine clone before any install" measured the previous release | **confirmed defect** | A pristine clone carries whatever pack that consumer last installed. Measured: `sd-github-review`'s vendored `planning-adversarial-review.md` still invoked the `codex` CLI, a defect this pack had already removed, and the candidate was failed for it. The resweep now runs after the install, on a clone where the install has been committed. Blocker counts fell on five consumers once the ordering was fixed. |
+
+C-12 was found *because* C-11 forced a re-reading of the same code path; the
+second defect was invisible while the first was believed.

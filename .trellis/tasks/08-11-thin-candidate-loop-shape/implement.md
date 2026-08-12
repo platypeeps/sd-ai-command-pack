@@ -8,7 +8,7 @@ decision rather than worked around, so an implementation that reintroduces
 
 ## Step 0 — before editing
 
-- [ ] `trellis-before-dev`: `.trellis/spec/backend/index.md`, the
+- [x] `trellis-before-dev`: `.trellis/spec/backend/index.md`, the
       manifest-and-filesystem spec (the candidate-ledger and surface-partition
       sections), and the tooling spec index.
 - [x] **Baseline captured before the first code edit** — measured on
@@ -57,13 +57,14 @@ decision rather than worked around, so an implementation that reintroduces
       reference(s) to removed paths`. `head 8a5493b4`, `classifierDigest
       sha256:c6ce23fe`.
 
-      Two things this settles. The `packDefects` column is **not** stale after
-      all for this consumer — `08-10-thin-prompt-surface-repoint` and
-      `08-11-thin-undeclared-codex-marker` did not reduce it, so `design.md`'s
-      "must be re-measured, not carried" was right to demand the measurement
-      and wrong to predict its result. And 15 pack-owned defects means D4's
-      `packDefects > 0` rule would fail release-prep for this consumer **today**
-      — see Step 2b, added for that reason.
+      The `packDefects` column is **not** stale after all for this consumer —
+      `08-10-thin-prompt-surface-repoint` and `08-11-thin-undeclared-codex-marker`
+      did not reduce it, so `design.md`'s "must be re-measured, not carried" was
+      right to demand the measurement and wrong to predict its result.
+
+      This baseline was then read as meaning D4 would fail release-prep on 15
+      pack defects, which produced Step 2b below. That reading was wrong; see
+      Step 2b for the correction and what it cost.
 
 ## Step 2b — clear the pack-owned defects the policy would fail on
 
@@ -100,31 +101,33 @@ distinct sentences repeated at shifting line numbers:
 | `codex` | 8 | undeclared codex usage in a surviving pack file |
 | `.github/PULL_REQUEST_TEMPLATE.md` | 5 | `docs/SD_AI_COMMAND_PACK.md`, `bash scripts/...-full-check.sh` |
 
-**Decision (user, this run): fix them here.** The alternative — ship the policy
-and file a follow-up — leaves `main` unable to cut a release in between, which
-is worse than a bounded scope increase. This is the same class of work as the
-already-shipped `08-10-thin-prompt-surface-repoint`, applied to the `.github/`
-surface that task did not reach.
+**A decision was taken to fix those eight files here, and it was withdrawn
+before any of them was edited. The premise was wrong.**
 
-- [ ] Repoint each citation to the form a thin consumer can satisfy, following
-      `THIN_PROFILE`'s existing rules (`~/.agents/bin/<name>`,
-      `~/.agents/docs`). Edit the **template** under `templates/`, never the
-      generated copy.
-- [ ] Two prompts already carry a newer "resolvable, either as a bare command
-      on `PATH` or ..." phrasing in one consumer out of eight, and it is
-      **still** a defect — the sentence continues to name
-      `scripts/sd-ai-command-pack-*.py`. Do not treat that phrasing as the
-      target state; it is a partial fix that did not clear the rule.
-- [ ] The `codex` defect is a different shape: "undeclared codex usage: the
-      codex CLI is invoked in 1 surviving file(s), e.g.
-      `.claude/sd-ai-command-pack/planning-adversarial-review.md`". Its sibling
-      task `08-11-thin-undeclared-codex-marker` is archived, so establish
-      whether this is residue that task missed or a deliberate invocation that
-      needs an allowlist entry with a written reason. Do not silence it either
-      way without deciding which.
-- [ ] Re-resweep all eight afterward. The gate is `packDefects == 0` on every
-      consumer; anything left must be an explicit allowlist entry, not a
-      remainder.
+`packDefects` is a **pre-rewrite** count. The resweep records pack-owned
+content that *cites* a removed path (`thin-resweep.py:1592-1598`) and never
+calls `rewrite_text`. The conversion does: `thin.py:651` runs
+`rewrite_text(text, profile=THIN_PROFILE, key=entry)` over every kept text
+file, and `THIN_PROFILE` repoints exactly these citations. So a file in that
+bucket says nothing about the release until the rewrite has been applied to it.
+
+Measured, after the reading was questioned: `check_text_residue` over all seven
+flagged files in this repository, and over the same files in the real
+`sd-github-review` checkout, reports **0 files with residue**. Every one of the
+130 is repointed by machinery that already exists.
+
+Editing those eight files would have hardcoded `~/.agents/bin` into prose that
+fat consumers read — a real regression, shipped to fix an imagined one.
+
+**The fix belongs to the policy, not the files.** `surviving_pack_defects`
+(Step 3) rewrites each flagged file under `THIN_PROFILE` and fails only on what
+`check_text_residue` still rejects. A glob such as
+`scripts/sd-ai-command-pack-*.py` is not a path the rewrite can repoint and
+still fails; a plain citation does not. The raw count is recorded as a note so
+it stays visible without being a verdict.
+
+- [x] Step 2b is void. No pack file was edited under it. `design.md` D4 is
+      amended to the residue rule, and Step 4 holds tests for both halves.
 - [x] **Amend `prd.md` before `task.py start`** — done during the planning
       adversarial review; `research/planning-adversarial-review.md` records why.
       Requirement 1's third step, requirement 3's pin-not-mode wording, the two
@@ -150,12 +153,12 @@ Edit **`templates/scripts/sd_ai_command_pack_fleet_lib.py`**, the authoritative
 source. Not `scripts/sd_ai_command_pack_fleet_lib.py`, which `make sync`
 regenerates from it.
 
-- [ ] Bump `CANDIDATE_LEDGER_SCHEMA_VERSION` 3 → 4 (D4).
-- [ ] Widen `validate_candidate_ledger`'s consumer-status check to accept
+- [x] Bump `CANDIDATE_LEDGER_SCHEMA_VERSION` 3 → 4 (D4).
+- [x] Widen `validate_candidate_ledger`'s consumer-status check to accept
       `blocked` **only** with a non-empty `reasons` array, keep rejecting
       `failed` and unknown statuses, and keep rejecting missing/unknown
       consumers. The Wrong/Correct pair is in D4; copy its shape.
-- [ ] Do not touch `validatorDigest`, `payload_digest`, or
+- [x] Do not touch `validatorDigest`, `payload_digest`, or
       `candidate_validator_digest`. They shipped in 0.69.0 and this task has no
       quarrel with them.
 
@@ -164,39 +167,54 @@ regenerates from it.
 Edit `scripts/sd-ai-command-pack-fleet-candidate-check.py` (no template; edited
 in place).
 
-- [ ] Add the lane from D5, run **once** per candidate run before the
+- [x] Add the lane from D5, run **once** per candidate run before the
       per-consumer loop, inside the existing `work_root` temporary directory
-      (`:480`). Four steps: build into `<work_root>/pack`, `plugin validate
-      --strict`, `generate-plugin.py --check` against the checkout, `install.py
-      --machine` into `<work_root>/home` with `--state-home <work_root>/state`.
-- [ ] Do **not** add a `claude --plugin-dir` step. Measured, it exits 0 against
+      (`:480`). **Three** steps, not four: `generate-plugin.py --check --root`
+      already builds and compares in one offline invocation, so a separate
+      build-into-`<work_root>/pack` step would build the same plugin twice and
+      is why the lane needs no scratch copy of the checkout at all. Then
+      `claude plugin validate --strict`, then `install.py --machine` into
+      `<work_root>/home` with `--state-home <work_root>/state`.
+- [x] Do **not** add a `claude --plugin-dir` step. Measured, it exits 0 against
       a nonexistent plugin directory, so it cannot fail; it also needs a
       billable model call, which requirement 5's no-skip rule would then make
       mandatory for every `make release-prep`. D5 records the deviation and
       Step 0 amends the PRD.
-- [ ] Retain `<work_root>/home` and `<work_root>/state` for Step 3. The machine
+- [x] Retain `<work_root>/home` and `<work_root>/state` for Step 3. The machine
       install is the thin lane's `HOME`, not a discarded artifact check.
-- [ ] Build into the scratch copy, never the checkout. `generate-plugin.py
-      --root` is the seam. A validator that rewrites its own input repeats D1's
+- [x] Never write to the checkout. `generate-plugin.py --check --root` is
+      the seam: it builds in memory and compares against the committed tree,
+      writing nothing. A validator that rewrote its own input would repeat D1's
       error one directory over.
-- [ ] Resolve `claude` once; if it is unresolvable, report the steps as
+- [x] Resolve `claude` once; if it is unresolvable, report the steps as
       `unavailable` and exit nonzero (requirement 5). No skip flag, no
       environment escape, no degrade-to-fat.
 
 ## Step 3 — the per-consumer lane
 
-- [ ] Resweep the **pristine clone** before any install
+- [x] Resweep the clone **after** the install, not before
       (`resweep_consumer(name, clone)` — it takes an explicit repo, so it reads
       the clone rather than the registered `pathHint`). Classify per D4:
-      `packDefects` → `failed`; `blockers` / `missingFiles` / dirty → `blocked`
-      with reasons.
-- [ ] Branch the install on `conversion.thin_pin_state(clone)`, never on the
+      residue surviving the `THIN_PROFILE` rewrite → `failed`; `blockers` /
+      `missingFiles` / dirty → `blocked` with reasons.
+
+      **Corrected from "the pristine clone before any install".** A pristine
+      clone carries whatever pack the consumer last installed, so a resweep
+      there measures the previous release. Measured: `sd-github-review`'s
+      vendored `planning-adversarial-review.md` still invoked the `codex` CLI,
+      a defect this pack had already removed, and the candidate was failed for
+      it. Installing dirties the tree and a dirty tree is a blocker, so the
+      install is committed in the disposable clone first (`git add --all`, then
+      a `--allow-empty` commit with an explicit identity). Blocker counts fell
+      on five consumers once the ordering was fixed — direct evidence the
+      pristine reading was measuring the wrong tree.
+- [x] Branch the install on `conversion.thin_pin_state(clone)`, never on the
       registry's declared `mode` (D3). `fat` keeps today's
       `--force --platform ...`; `thin` drops `--platform` entirely; `malformed`
       fails with the pin state named.
-- [ ] Record a note when the clone's pin and the registry's `mode` disagree.
+- [x] Record a note when the clone's pin and the registry's `mode` disagree.
       It is the documented conversion skew, not an error.
-- [ ] **D6 — unresolvable thin checks.** Before running a thin clone's
+- [x] **D6 — unresolvable thin checks.** Before running a thin clone's
       `candidateChecks`, resolve each command's program argument against the
       clone. Absent **and** manifest-declared is `blocked`, with a reason naming
       the command and the `~/.agents/bin/<name>` form the record should use.
@@ -206,42 +224,51 @@ in place).
       `rwbp-website` runs `node scripts/sd-ai-command-pack-review-preflight.mjs`,
       both manifest-declared. Do not rewrite the registry to fix them; that is
       the consumer's conversion PR.
-- [ ] **D7 — the thin lane's `HOME`.** Run a thin clone's `candidatePrepare` and
+- [x] **D7 — the thin lane's `HOME`.** Run a thin clone's `candidatePrepare` and
       `candidateChecks` with `HOME=<work_root>/home` and the state home from the
       artifact lane. Leave the fat lane's environment exactly as it is —
       `command_environment` (`:67-84`) must not start overriding `HOME` for
       everyone. Without this, a thin consumer's `~/.agents/bin` lookups resolve
       to whatever pack the invoking machine has installed, and the run certifies
       someone else's release.
-- [ ] Carry `reasons` into `CandidateResult` and into the ledger row.
-- [ ] Narrow the `:520` failure gate to "not `passed` **and** not `blocked`", so
+- [x] Carry `reasons` into `CandidateResult` and into the ledger row.
+- [x] Narrow the `:520` failure gate to "not `passed` **and** not `blocked`", so
       a fleet of blocked consumers still writes a truthful ledger.
 
 ## Step 4 — tests
 
-- [ ] Thin artifact lane: each of the four steps failing makes the run
+- [x] Thin artifact lane: each of the three steps failing makes the run
       nonzero; a missing `claude` produces `unavailable` and nonzero, never a
-      pass.
-- [ ] D6: a thin clone whose check names a manifest-declared missing path is
+      pass; a failed machine install hands no scratch prefix to the thin lane.
+- [x] D6: a thin clone whose check names a manifest-declared missing path is
       `blocked` with the command in its reason; one whose check names a
       *non*-manifest missing path is `failed`. Both cases in one test file, so
       the distinction cannot be lost to a later simplification.
-- [ ] D7: assert the environment, not the outcome. A thin consumer's checks see
+- [x] D7: assert the environment, not the outcome. A thin consumer's checks see
       `HOME == <work_root>/home`; a fat consumer's see the inherited `HOME`
       unchanged. A shared builder that started overriding `HOME` for both would
       pass an outcome-only test.
-- [ ] `thin_pin_state` branching: a fat clone gets `--platform`, a thin clone
+- [x] `thin_pin_state` branching: a fat clone gets `--platform`, a thin clone
       does not, a malformed pin fails. Assert on the argv, not on the outcome —
       C-3 is an argument-construction defect and only argv proves it.
-- [ ] Ledger matrix from D4: `passed`, `blocked` with reasons, `blocked`
+- [x] Ledger matrix from D4: `passed`, `blocked` with reasons, `blocked`
       without reasons, `failed`, unknown status, missing consumer.
-- [ ] Registry immutability (acceptance criterion 2): `docs/fleet/consumers.json`
+- [x] Registry immutability (acceptance criterion 2): `docs/fleet/consumers.json`
       byte-identical before and after a full run. Compare bytes, not parsed
       `mode` values — no record has that key, so a value comparison passes on a
       reader-supplied default and proves nothing.
-- [ ] Mixed registry (`fat` + `thin`) exercises both lanes, proven by the
+
+      Proven at two levels. The criterion's own form is
+      `git diff --exit-code docs/fleet/consumers.json` after a real full-fleet
+      run — clean. A unit test cannot run the real fleet, so it guards the
+      mechanism instead: `install.py --thin --consumer <name>` is what calls
+      `flip_registry_mode`, and
+      `test_pin_selects_the_lane_and_the_thin_lane_redirects_home` asserts on
+      the argv that **neither** lane ever passes `--consumer`. Byte-identity is
+      the outcome; the absent flag is the reason it holds.
+- [x] Mixed registry (`fat` + `thin`) exercises both lanes, proven by the
       loop's own output naming each consumer and the mode it ran.
-- [ ] Re-enumerate call sites from the filesystem before declaring Step 1 done:
+- [x] Re-enumerate call sites from the filesystem before declaring Step 1 done:
       `grep -rn 'validate_candidate_ledger(' --include='*.py' .` — the sibling
       task found a fourth `current_evidence` consumer that planning missed.
 
@@ -258,6 +285,15 @@ The mutation run is not optional: a status check that accepts `blocked` without
 reasons certifies a validation that never ran, which is the defect this task's
 sibling exists to prevent at a different layer.
 
+**Result — `tests.test_fleet_candidate` 23 tests, `OK`, exit 0.** Three
+mutations run, each reverted and the tree verified clean afterward:
+
+| mutation | caught by |
+| --- | --- |
+| thin lane drops `machine_home=` from `command_environment` | `test_pin_selects_the_lane_and_the_thin_lane_redirects_home` |
+| ledger collapses the three-value status back to `!= "passed"` | `test_ledger_requires_reasons_for_every_blocked_consumer`, 5 of 8 subtests |
+| D6 stops distinguishing manifest targets | `test_thin_clone_blocks_on_a_relocated_check_but_fails_on_its_own` and `test_unresolvable_thin_checks_only_covers_manifest_targets` |
+
 **Validation gate 2 — acceptance criteria 1 and 2, end to end:**
 
 ```bash
@@ -265,29 +301,75 @@ make release-prep
 git diff --exit-code docs/fleet/consumers.json   # C-1: must be clean
 ```
 
-Expected: output naming the four thin steps it executed, and a byte-identical
+Expected: output naming the three thin artifact steps it executed, and a byte-identical
 registry afterward. `git diff --exit-code` is the whole check — do not
 substitute a parsed comparison of `mode` values, which no record carries.
+
+**Result — `make release-prep` exit 0**, and a full-fleet validator run at the
+same HEAD exit 0:
+
+```text
+passed      thin artifact: plugin build and drift check (0.2s)
+passed      thin artifact: plugin manifest validation (0.2s)
+passed      thin artifact: machine install into a scratch prefix (0.2s)
+blocked     P10 platypeeps/rwbp-coordinator … blocked     P90 platypeeps/anomaly-metric-creator
+```
+
+All eight `blocked`, each with reasons, zero surviving pack defects.
+`git diff --exit-code docs/fleet/consumers.json` clean afterward — criterion 2.
+
+Note on reading gate 2: release-prep skips fleet validation when the ledger is
+already current, which is the 0.69.0 behavior and the Step 0 baseline line. The
+full-fleet run above is the evidence the validator actually ran; the release-prep
+exit is the evidence it does not block a clean tree.
 
 **Validation gate 3 — the gate still blocks (criterion 3):** break the plugin
 build deliberately, confirm `make release-prep` exits nonzero, revert, and
 verify the revert.
 
+**Result — blocked at both levels.** With `build_files` raising:
+
+- the candidate lane's own step fails and refuses the ledger —
+  `thin artifact validation failed for 1 step(s); ledger was not updated`,
+  validator exit 1, and the two later steps still ran and reported;
+- `make release-prep` exits 2.
+
+Reverted from a pre-break copy; `git diff --exit-code
+.github/scripts/generate-plugin.py` is clean and `generate-plugin.py --check`
+exits 0 afterward.
+
+**Measured nuance worth keeping.** `make release-prep` fails at its *own*
+generate step, which runs before the candidate lane, so its nonzero exit is not
+by itself proof the lane blocks — the validator run above is. And a
+hand-edited committed plugin never reaches the lane during release-prep at all:
+release-prep regenerates `plugins/sd` (204 files) first, repairing the drift
+before anything reads it. Measured — a deliberate edit to
+`plugins/sd/.claude-plugin/plugin.json` left `make release-prep` at exit 0 while
+`generate-plugin.py --check` on the same tree exited 1. The drift half of
+`--check` is therefore load-bearing at `make check` and in CI, where nothing
+regenerates first; inside release-prep the step's value is catching a generator
+that fails outright.
+
 ## Step 5 — close
 
-- [ ] Regenerate by running `prepare-release.py` rather than sequencing
+- [x] Regenerate by running `prepare-release.py` rather than sequencing
       `make sync` / `make generate` / candidate-check by hand. They are mutually
       recursive and no hand order converges; the sibling task established this
       the expensive way.
-- [ ] A shipped-payload change requires a `manifest.json` version bump against
-      `origin/main`, with a CHANGELOG entry.
-- [ ] Update `.trellis/spec/backend/manifest-and-filesystem.md`: the schema 4
+- [x] A shipped-payload change requires a `manifest.json` version bump against
+      `origin/main`, with a CHANGELOG entry. 0.69.0 → 0.70.0; release-prep
+      confirmed both gates:
+      `release version gate: shipped payload changed; manifest version 0.69.0 -> 0.70.0`
+      and
+      `release changelog gate: manifest version bump has matching top heading '## 0.70.0 - 2026-08-11'`.
+- [x] Update `.trellis/spec/backend/manifest-and-filesystem.md`: the schema 4
       row, the three-value status contract, the `reasons` requirement, the
       `thin_pin_state`-not-registry-mode rule, and D4's policy answer with its
       reasoning.
-- [ ] `make check` exits 0.
-- [ ] Tick every `prd.md` acceptance criterion against measured evidence before
-      `task.py archive`.
+- [x] `make check` exits 0. Measured: exit 0.
+- [x] Tick every `prd.md` acceptance criterion against measured evidence before
+      `task.py archive`. All nine ticked, each with the command or test that
+      proves it.
 
 ## Rollback
 
