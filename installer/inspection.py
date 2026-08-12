@@ -34,6 +34,7 @@ _CHANGE_INSTALL_STATUSES = frozenset(
         InstallStatus.CREATED,
         InstallStatus.UPDATED,
         InstallStatus.OVERWRITTEN,
+        InstallStatus.REFRESHED,
         InstallStatus.CONFLICT,
         InstallStatus.SYMLINK_CONFLICT,
     }

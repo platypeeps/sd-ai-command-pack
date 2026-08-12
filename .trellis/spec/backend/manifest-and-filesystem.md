@@ -2347,6 +2347,122 @@ Reference files:
 - `docs/FLEET_ROLLOUT.md`
 - `tests/test_fleet_controller.py`
 
+## Scenario: Refreshing A Superseded `if-not-exists` Default
+
+### 1. Scope / Trigger
+
+Use this contract when changing any `install: if-not-exists` template, the
+installer's preserve path, or the provider-config history artifact.
+`if-not-exists` writes once and never again, so before this contract a
+correction to a broken shipped default reached nobody: `install.py --force`
+reported `preserved` for an untouched stale default and a hand-customized file
+alike. Separating those two needs one fact the installer cannot otherwise
+learn — whether the bytes on disk are something this pack shipped.
+
+### 2. Signatures
+
+- `docs/sd-ai-command-pack-provider-config-history.json`, schema version 1:
+  `{"schemaVersion": 1, "sources": {<manifest source>: {"target": str,
+  "current": str, "digests": [str, ...]}}}`. Generated at
+  `templates/docs/...`; the root copy comes from the self-sync install.
+- `.github/scripts/generate-provider-config-history.py` — release-prep
+  generator, ordered strictly **before** `install.py . --force`.
+- `installer/providerhistory.load_provider_config_history(root=ROOT) ->
+  ProviderConfigHistory(digests_by_target, unavailable_reason)`, with
+  `.shipped(target: Path, digest: str) -> bool`. `lru_cache`d per root.
+- `installer/fileops.is_previously_shipped_default(file, current, *, source,
+  installed_content) -> bool`.
+- `InstallStatus.REFRESHED = "refreshed"`, a member of `VOUCHABLE_STATUSES`
+  and of the audit's change statuses.
+
+### 3. Contracts
+
+- The predicate keys on `file.install == IF_NOT_EXISTS` **alone**.
+  `FORCE_PRESERVED_TARGETS` is not an additional exclusion: both shipped
+  `if-not-exists` configs are also members of that set, so excluding it makes
+  the feature inert for its entire population.
+- The comparison uses mode-correct payload bytes — what *this* install mode
+  would have written — not the raw template.
+- The refresh is not gated on `--force`. A missing, unreadable, malformed,
+  empty, or newer-schema history yields `preserved` with a named reason;
+  every failure resolves toward preserving consumer content.
+- `current` is stated, never inferred from the tail of `digests`: a template
+  that reverts to bytes it shipped before adds no new digest.
+- `digests` is append-only. Removing one silently re-arms the trap for
+  whoever still holds those bytes; a source dropped from the manifest keeps
+  its entry for the same reason.
+- Seeding a source derives its digests from `git log --follow` and refuses on
+  a shallow clone rather than seeding a partial list, which would report the
+  holders of missing versions as customized.
+- The symlink branch stays `PRESERVED`: provenance vouches regular files only.
+- Two readers, one file — `install.py` reads it from the pack source tree;
+  the vendored install audit reads it from the consumer, which is why it is a
+  `shared` / `doc` / `always` manifest record.
+- `installer/providerhistory.py` must import siblings absolutely
+  (`from installer.registry import ROOT`); the plugin bundler rejects relative
+  sibling imports.
+
+### 4. Validation & Error Matrix
+
+- installed bytes equal current payload -> `unchanged`, no write.
+- bytes match a recorded shipped digest -> write payload, `refreshed`, vouched.
+- bytes match no recorded digest -> `preserved`, reported as locally owned.
+- history missing/malformed/empty/unknown schema -> `preserved` plus reason;
+  the audit says `cannot check provider config currency for N target(s)`.
+- manifest unreadable, or no installed `if-not-exists` target -> the audit
+  returns no claim rather than a guess.
+- shallow clone during seeding -> release-stopping `GenerateError`.
+
+### 5. Good / Base / Bad Cases
+
+- Good: consumer holds an older shipped `.gito/config.toml`; install reports
+  `refreshed` and the file is byte-identical to the template; a second run
+  reports `unchanged`.
+- Base: consumer's `.prism/rules.json` carries its own rules; install reports
+  `preserved` and the local rules survive; `sd-status fleet` classifies it
+  `local`.
+- Bad: gating the refresh on `--force`, excluding `FORCE_PRESERVED_TARGETS`,
+  treating an unreadable history as "nothing shipped", or converting the
+  target to `install: always`.
+
+### 6. Tests Required
+
+- Predicate: shipped digest, unmatched digest, unavailable history,
+  non-`if-not-exists` target, `FORCE_PRESERVED_TARGETS` membership (named
+  regression), and the thin-payload rewrite comparison.
+- End-to-end install: refresh, preserve, idempotence, and vouchability.
+- Artifact reader: every malformed shape yields a reason and an empty map.
+- Generator: seeds once from history, appends, never removes, idempotent.
+- Release prep: the generator precedes the self-sync install in the chain.
+- Audit: superseded, locally owned, malformed entry, unreadable target, and
+  unreadable record.
+
+### 7. Wrong vs Correct
+
+```python
+# Wrong -- --force now discards local customization
+if file.install == IF_NOT_EXISTS and force:
+    write(new_content)
+
+# Correct -- provenance, not a flag: replace only what this pack put there
+if file.install == IF_NOT_EXISTS:
+    if is_previously_shipped_default(file, current, source=source,
+                                     installed_content=new_content):
+        write(new_content)
+        return InstallResult(file, InstallStatus.REFRESHED, ...)
+    return InstallResult(file, InstallStatus.PRESERVED, ...)
+```
+
+Reference files:
+
+- `.github/scripts/generate-provider-config-history.py`
+- `installer/providerhistory.py`
+- `installer/fileops.py`
+- `templates/docs/sd-ai-command-pack-provider-config-history.json`
+- `templates/scripts/sd-ai-command-pack-install-audit.py`
+- `templates/scripts/sd-ai-command-pack-status.py`
+- `tests/test_provider_config_history.py`
+
 ## Read-Only Status And Housekeeping Delegation
 
 `templates/scripts/sd-ai-command-pack-status.py` is the canonical collector for

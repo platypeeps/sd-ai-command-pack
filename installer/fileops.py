@@ -19,6 +19,7 @@ from installer.manifest import (
     target_destination,
     validate_resolved_target_path,
 )
+from installer.providerhistory import load_provider_config_history
 from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     ACTIVE_TRELLIS_PLATFORM_MARKERS,
@@ -291,6 +292,48 @@ def payload_source_bytes(file: PackFile, source: Path, *, is_thin: bool) -> byte
     return rewritten.encode("utf-8")
 
 
+def is_previously_shipped_default(
+    file: PackFile,
+    current: bytes,
+    *,
+    source: Path,
+    installed_content: bytes,
+) -> bool:
+    """Whether `current` is a default this pack shipped and nobody edited.
+
+    Every branch that cannot *prove* the pack shipped these bytes answers
+    False, because the alternative to a wrong False is overwriting work
+    somebody did.
+    """
+
+    if file.install != IF_NOT_EXISTS:
+        # `FORCE_PRESERVED_TARGETS` is deliberately *not* an additional
+        # exclusion. Both configs are in it, and for them it says the same
+        # thing their install policy already says -- `--force` must not
+        # discard a consumer's provider tuning -- so excluding them would
+        # make this inert for its entire population. It says nothing about
+        # bytes the pack itself shipped, which are not tuning.
+        #
+        # `.github/PULL_REQUEST_TEMPLATE.md` is the set's third member and
+        # carries no install policy, so this test leaves it preserved on
+        # every path, exactly as before.
+        return False
+
+    if installed_content != source.read_bytes():
+        # The payload rewrite changed this file's bytes for the current mode,
+        # so what a past release actually installed is not what the history
+        # recorded -- it stores template digests, and a rewritten digest
+        # cannot be derived from one. Neither config is rewritten today; if
+        # one gains a rewritable reference, this preserves rather than
+        # silently comparing against the wrong bytes.
+        return False
+
+    history = load_provider_config_history()
+    if history.unavailable_reason is not None:
+        return False
+    return history.shipped(file.target, source_digest(current))
+
+
 def install_file(
     file: PackFile,
     target: Path,
@@ -401,6 +444,28 @@ def install_file(
                 source_executable=executable,
             )
         if file.install == IF_NOT_EXISTS or file.target in FORCE_PRESERVED_TARGETS:
+            if is_previously_shipped_default(
+                file,
+                current,
+                source=source,
+                installed_content=new_content,
+            ):
+                # These exact bytes are something this pack published, so
+                # they record no decision the consumer made -- writing the
+                # current template restores the pack's intent rather than
+                # discarding theirs. Deliberately not gated on `force`: a
+                # correction that only reaches operators who already know
+                # they need it reaches nobody who does.
+                if not dry_run:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write_bytes(destination, new_content, executable=executable)
+                return InstallResult(
+                    file,
+                    InstallStatus.REFRESHED,
+                    source_digest=digest,
+                    source_content=new_content,
+                    source_executable=executable,
+                )
             return InstallResult(
                 file,
                 InstallStatus.PRESERVED,
@@ -891,6 +956,7 @@ __all__ = [
     "install_file",
     "install_managed_block",
     "install_trellis_gitignore",
+    "is_previously_shipped_default",
     "marker_pair_indexes",
     "merge_managed_block",
     "merge_trellis_gitignore_block",

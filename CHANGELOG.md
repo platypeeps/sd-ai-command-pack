@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.71.0 - 2026-08-11
+
+### Added
+
+- The pack now ships a digest history of every `if-not-exists` template it has
+  ever released, at `docs/sd-ai-command-pack-provider-config-history.json`. It
+  is generated during release prep from git history the first time a source is
+  seen and appended to thereafter; a digest is never removed, because a removed
+  digest silently re-arms the trap for whoever is still holding those bytes.
+- `install.py` uses that history to tell a stale shipped default apart from a
+  customized one. A file whose bytes match something this pack published under
+  its own name is refreshed to the current template and reported with a new
+  `refreshed` status; a file matching nothing the pack ever shipped is still
+  `preserved`. Before this, a correction to a broken shipped default reached
+  nobody — `--force` reported `preserved` for both cases alike. The refresh is
+  not gated on `--force`, and a missing or malformed history preserves.
+- The install audit reports, from inside a consumer's own CI, which of its
+  `if-not-exists` configs are superseded shipped defaults and which are locally
+  owned. `sd-status fleet` reports the same classification across the fleet
+  without installing anything, which is what makes the population visible
+  before any consumer changes.
+
+### Changed
+
+- Measured across the eight registered consumers on 2026-08-11: all eight carry
+  the same superseded `.gito/config.toml`, while `.prism/rules.json` splits into
+  one current, one superseded, and six genuinely customized. Converting those
+  consumers is deliberately out of scope here; this release ships the mechanism
+  and the measurement.
+
 ## 0.70.0 - 2026-08-11
 
 ### Changed
