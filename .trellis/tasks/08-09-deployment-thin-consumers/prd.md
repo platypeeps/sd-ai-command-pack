@@ -136,7 +136,7 @@ dependency system.
       vendored in any consumer whose `docs/fleet/consumers.json`
       `platforms` array intersects that list. `shared` carries `["pi"]`
       because Pi reads the `.agents` layer repo-locally — evidence in
-      `08-09-thin-machine-installer/research/platform-verification.md`.
+      `archive/2026-08/08-09-thin-machine-installer/research/platform-verification.md`.
       The fleet registry is the single authority for "serves a
       platform"; no consumer declares pi today, so today's conversions
       delete those rows, and conversion is blocked when a consumer shows

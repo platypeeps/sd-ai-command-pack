@@ -62,9 +62,11 @@ memory:
   artifact, never either number.
 - `retainVendoredFor` is **inert today**: no consumer declares `codex`
   or `pi`, so zero `.agents/**` rows are retained anywhere. The resweep
-  gate below still exists, because a consumer using codex/pi without
-  declaring it is exactly the case that must block rather than silently
-  delete.
+  gate below still exists, because a consumer using a retained platform
+  without declaring it is exactly the case that must block rather than
+  silently delete. Superseded for codex by the note above: with `codex`
+  out of `retainVendoredFor`, its undeclared marker is an advisory and
+  only pi still blocks.
 - `install.py` today has `--machine`, `--remove`, `--force`, `--backup`,
   `--dry-run`, `--status/--check --json`, `--configure-fleet`. It has
   **no** `--thin` and **no** `--revert-thin`. Nothing in the repository
