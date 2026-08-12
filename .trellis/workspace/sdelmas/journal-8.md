@@ -459,3 +459,42 @@ Rescoped the full-fleet candidate validator to exercise the thin install shape: 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 361: File the layout-aware guard task from the fleet sizing
+
+**Date**: 2026-08-11
+**Task**: File the layout-aware guard task from the fleet sizing
+**Branch**: `docs/pack-layout-aware-guard-task`
+
+### Summary
+
+Recorded the follow-up task from the 08-11-thin-candidate-loop-shape iteration's fleet sizing: five consumers each reimplemented the same pack-layout guard, and those scripts plus the tests pinning them carry 330 of the fleet's 510 thin-conversion blockers. The task ships one pack-owned replacement so each of those five ports becomes a delete.
+
+### Main Changes
+
+- Filed 08-11-pack-layout-aware-guard as a child of 08-09-thin-migration, with the per-consumer and per-category blocker tables and acceptance criteria that require reading all five bespoke guards before designing the replacement
+- Added the matching ordered-child entry to the parent PRD, which the preflight requires for a declared child
+- Curated both spec manifests with real entries instead of the generated _example scaffold, so the task dispatches with spec context
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be1d22f7` | docs(task): file the layout-aware guard task from the fleet sizing |
+| `0ae4899c` | docs(task): curate the layout-aware guard task's spec manifests |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs — 0 failures
+- [OK] sd-review scope=pr attempt 2 — status ready, local provider clean
+- [OK] Copilot reviewed 6 of 6 changed files and generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
