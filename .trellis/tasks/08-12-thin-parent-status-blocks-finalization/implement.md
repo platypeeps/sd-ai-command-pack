@@ -127,47 +127,57 @@ do not delete the archive/journal commits.
 
 PRD acceptance requires a parent-only branch **and** a child-only branch
 each to validate — #435 proved that fixing one does not fix the other.
-Step 3 covers the parent-only direction. For the child direction, run
-the validator read-only against the merged child-only range that already
-exists rather than manufacturing a branch:
+Step 3 covers the parent-only direction.
+
+**Replaying #435's range does not work, and the reason matters.** The
+plan originally called for re-running the recorded failure directly:
 
 ```bash
 node scripts/sd-ai-command-pack-review-preflight.mjs \
-  final-bundle --mode planning \
-  --base 8d67ff71 --head 3de90a2b --json
+  final-bundle --mode planning --base 8d67ff71 --head 3de90a2b --json
 ```
 
-That is #435's exact failing range — two children changed, journal
-recorded. Before this task it returned
-`planning_active_task_outside_closure`; after step 1 the same command
-must return `planning_bundle_valid`. The check is falsifiable in the
-strongest available sense: it is the recorded failure being re-run, not
-a new fixture built to succeed. **Run it before step 1 as well**, to
-confirm it still fails for the stated reason; a check that only ever
-passes proves nothing.
+Executed 2026-08-12 against the pre-fix tree, that returns
+`indeterminate` / `bundle_head_not_checked_out`. The validator requires
+the bundle head to be the checked-out commit, and it reads the changed
+task record and closure neighbours from the **working tree** rather than
+from the head ref. So satisfying it means checking out `3de90a2b` —
+which restores the pre-fix `task.json` along with everything else, and
+the check would fail for the original reason no matter how thoroughly
+the fix works. A replay cannot observe this fix. Do not spend time
+pinning `3de90a2b` for it.
 
-Why re-running a historical range works, since it is not obvious:
-`validatePlanningFinalization` reads the changed task record and the
-closure neighbours from the **working tree**, and only the baseline from
-the bundle base ref. So the range supplies the delta while step 1's flip
-supplies the status the closure check reads. The neighbour it objected
-to is `08-09-deployment-thin-consumers/task.json` as it exists on disk.
+The pre-fix evidence therefore stays historical, and it is already
+recorded rather than needing reproduction: #435's own run produced
+`planning_active_task_outside_closure` naming
+`.trellis/tasks/08-09-deployment-thin-consumers/task.json`, and CI's
+`CI scope` job failed on the same validator, which is what left that PR
+`BLOCKED`. Both are cited in `prd.md`.
 
-**Pin the commits first.** `8d67ff71` is an ancestor of `main` (#436
-merged it) and is safe. `3de90a2b` is not — it was #435's head, its
-branch is deleted, and it is unreferenced locally, so garbage collection
-can take it and silently remove this check. GitHub keeps it: verified
-2026-08-12, `git ls-remote origin 'refs/pull/435/*'` returns
-`3de90a2b26258a40d998e8ad909c67485a56944c refs/pull/435/head`.
+The child direction is therefore **constructed** on top of the fix, on a
+throwaway branch off this one, and the report says so plainly rather
+than claiming a replay:
 
 ```bash
-git cat-file -e 8d67ff71 && git cat-file -e 3de90a2b   # if the second fails:
-git fetch origin refs/pull/435/head
+git checkout -b tmp/child-direction-proof
+# touch exactly one child of the parent, e.g. append a line to
+# .trellis/tasks/08-09-thin-migration/design.md
+git commit -- .trellis/tasks/08-09-thin-migration/design.md
+CHILD_BASE=$(git rev-parse HEAD)
+# record a journal session citing it, commit journal + index
+node scripts/sd-ai-command-pack-review-preflight.mjs \
+  final-bundle --mode planning \
+  --base "$CHILD_BASE" --head "$(git rev-parse HEAD)" --json
 ```
 
-If both routes fail, substitute a throwaway branch changing only
-`08-09-thin-migration/design.md` plus a journal commit, and say in the
-report that the check was reconstructed rather than replayed.
+Require `status: valid` and `reasonCodes == ["planning_bundle_valid"]`.
+This is weaker than a replay — it is a fixture built after the fix — so
+its value comes entirely from being the same *shape* as #435: a bundle
+whose changed task is a child of the parent, with the parent outside the
+changed closure. That is the exact condition the closure rule rejected.
+
+Then delete the branch and its journal entry; it is a probe, not work to
+ship. Confirm `main`'s journal file is untouched afterwards.
 
 ### 5. Roll out
 
