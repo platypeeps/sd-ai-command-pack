@@ -24,6 +24,7 @@ checks, and manifest handling.
 | [Directory Structure](./directory-structure.md) | Adding, moving, or organizing installer, manifest, template, or test files |
 | [Manifest And Filesystem](./manifest-and-filesystem.md) | Changing pack metadata, platform selection, target validation, conflict behavior, or file writes |
 | [Error Handling](./error-handling.md) | Changing CLI validation, conflict reporting, subprocess handling, or exit codes |
+| [Fleet Consumer Conversion](./fleet-consumer-conversion.md) | Running `install.py` against a registered fleet consumer rather than this repository. Documents that `--force` refreshes the whole payload rather than the cohort you named, the pre-install digest rule that protects locally owned files, the stash-and-branch ordering, and why the post-conversion fleet count reads incomplete |
 | [Logging Guidelines](./logging-guidelines.md) | Changing command output, warnings, or status summaries |
 | [Quality Guidelines](./quality-guidelines.md) | Changing installer behavior, tests, compatibility, or review expectations |
 
