@@ -20,7 +20,7 @@ requests, each failing a different way:
      `.trellis/tasks/08-09-deployment-thin-consumers/task.json`
      ("existing task was not a valid planning task at the bundle base").
    - `final-bundle --mode completion` with base equal to head, the
-     `active-task-review-successor` recovery → 
+     `active-task-review-successor` recovery →
      `completion_successor_history_non_linear`: the bounded search over
      that task's own bookkeeping history reaches merge commits
      (`72791065`, `d7913054`, …), which is a documented fail-closed path.
