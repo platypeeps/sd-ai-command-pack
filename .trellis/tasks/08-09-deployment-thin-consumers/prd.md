@@ -102,6 +102,21 @@ Created 2026-08-09 and linked in task.json:
 - **08-09-thin-migration** — requirements 3, 5, and 6: thin-mode
   install, migration, consumer CI cleanup, gate retirement.
 
+Added after the initial map, as defects and questions surfaced during
+implementation:
+
+- **08-09-plugin-closure-size** — requirement 2 follow-up: shrink the
+  generated plugin's `installer/**` import closure so machine bootstrap
+  ships only what the machine engine needs.
+- **08-09-machine-status-copy-unavailable** — requirement 4 follow-up:
+  the machine-payload status copy reports plugin version `unavailable`;
+  make that discovery correct or its scope documented and tested.
+- **08-09-codex-home-skills-family** — investigated whether Codex needs
+  its own machine destination family. Completed 2026-08-12 and archived
+  at `archive/2026-08/08-09-codex-home-skills-family/`; the probe
+  falsified the premise and the outcome was retiring `codex` from
+  `retainVendoredFor` (see the retention criterion below).
+
 Ordering constraints live in each child's PRD; this map is not a
 dependency system.
 
@@ -116,19 +131,27 @@ dependency system.
       beyond the partition's `repo-native` and `consumer-config`
       slices, the `retainVendoredFor` carve-out below, and the pin
       receipt — no pack CI steps, and CI never executes pack code.
-- [ ] Codex/pi retention holds: a machine-dispositioned platform whose
+- [ ] Pi retention holds: a machine-dispositioned platform whose
       partition entry carries `retainVendoredFor` keeps its rows
       vendored in any consumer whose `docs/fleet/consumers.json`
-      `platforms` array intersects that list. `shared` carries
-      `["codex", "pi"]` because Codex resolves `.agents` against the
-      project root and never reads `~/.agents/skills` (its user root is
-      `$CODEX_HOME/skills`, a target family the pack does not ship) and
-      Pi reads the same layer repo-locally — evidence in
+      `platforms` array intersects that list. `shared` carries `["pi"]`
+      because Pi reads the `.agents` layer repo-locally — evidence in
       `08-09-thin-machine-installer/research/platform-verification.md`.
       The fleet registry is the single authority for "serves a
-      platform"; no consumer declares codex or pi today, so today's
-      conversions delete those rows, and conversion is blocked when a
-      consumer shows codex/pi usage markers it has not declared.
+      platform"; no consumer declares pi today, so today's conversions
+      delete those rows, and conversion is blocked when a consumer shows
+      pi usage markers it has not declared.
+
+      `codex` was carried in that list on the claim that Codex resolves
+      `.agents` against the project root and never reads
+      `~/.agents/skills`, its user root being `$CODEX_HOME/skills`. An
+      executed probe falsified it: Codex merges the project-root layer
+      with `$HOME/.agents/skills`, which the machine installer already
+      writes, so the carve-out retained 77 rows per declaring consumer
+      for nothing. Retired in 0.71.2 — evidence in
+      `archive/2026-08/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`.
+      An undeclared-codex marker is now an advisory, not a blocker,
+      because the declaration it asks for changes no conversion plan.
 - [ ] Vendored `scripts/` removal from a consumer happens only where
       the machine payload's reference rewrite is in effect: non-Claude
       surfaces execute pack scripts from `~/.agents/bin` and read the

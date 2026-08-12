@@ -24,6 +24,13 @@ memory:
   `machine`; the other 14 registry platforms are `repo-native`. No
   platform carries `provisional: true`. Only `shared` carries
   `retainVendoredFor: ["codex", "pi"]`.
+
+  > Superseded after this snapshot, and left standing because the
+  > section is a measurement at a named commit rather than a current
+  > claim: 0.71.2 removed `codex` from that list on executed probe
+  > evidence that Codex reads `$HOME/.agents/skills`, which the machine
+  > installer already writes. `shared` now carries `["pi"]`. Re-measure
+  > before relying on any figure here; the row count has also moved.
 - `docs/fleet/consumers.json` schema 5: 8 consumers, cohorts
   `canary` (rwbp-coordinator, loadsmith, hoa-manager, sequential),
   `post-canary` (rwbp-website, mezmo_benchmark, se-ai-command-pack,
