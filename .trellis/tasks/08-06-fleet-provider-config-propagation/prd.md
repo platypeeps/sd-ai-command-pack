@@ -140,16 +140,16 @@ All five are resolved in `design.md`, in order: D1, D2 + D3, D4, D5, D8.
 
 ## Acceptance Criteria
 
-- [ ] A consumer checkout whose `.gito/config.toml` is byte-identical to an
+- [x] A consumer checkout whose `.gito/config.toml` is byte-identical to an
       earlier shipped template — specifically the blob all eight consumers hold
       today — receives the current template through the chosen mechanism,
       verified by `diff` against `templates/.gito/config.toml`.
-- [ ] A consumer checkout whose `.gito/config.toml` has one added exclusion line
+- [x] A consumer checkout whose `.gito/config.toml` has one added exclusion line
       is left byte-unchanged by the same run.
-- [ ] That preserved-but-outdated consumer appears in the run's report naming
+- [x] That preserved-but-outdated consumer appears in the run's report naming
       the config and that it is behind.
-- [ ] The same three cases pass for `.prism/rules.json`.
-- [ ] The mechanism and its detector are shipped and validated against
+- [x] The same three cases pass for `.prism/rules.json`.
+- [x] The mechanism and its detector are shipped and validated against
       throwaway checkouts, not against the fleet. Converting the eight real
       consumers is **out of scope for this task**: it mutates repositories
       outside this one, which needs explicit per-cohort user authorization the
@@ -158,9 +158,29 @@ All five are resolved in `design.md`, in order: D1, D2 + D3, D4, D5, D8.
       eight consumer configs. Landing the detector first is also the safer order —
       the conversion then runs against measured state rather than the
       2026-08-06 table above. See `design.md` D7.
-- [ ] A consumer left on the old config is visible in `sd-status fleet` or the
+- [x] A consumer left on the old config is visible in `sd-status fleet` or the
       install audit before the change lands, so the gap is detectable and not
       only fixable.
+
+Verification, measured 2026-08-12 at pack version 0.71.0:
+
+- Criteria 1 and 4a: a scratch consumer seeded with the oldest recorded blob of
+  each config was `refreshed` by `install.py --force`, and `diff -q` against
+  `templates/.gito/config.toml` and `templates/.prism/rules.json` reported no
+  difference.
+- Criteria 2 and 4b: the same checkout with one added `exclude` line in
+  `.gito/config.toml` and one added rule in `.prism/rules.json` reported
+  `preserved` for both, byte-unchanged by `diff -q` against the pre-run copies.
+- Criteria 3 and 4c: the consumer's own audit reported
+  `.gito/config.toml is a superseded shipped default` on the stale checkout and
+  `matches no template this pack has shipped ... locally owned` on the
+  customized one, for both configs.
+- Criterion 5: mechanism and detector are shipped; the conversion is filed as
+  `08-11-convert-fleet-provider-configs`.
+- Criterion 6: `sd-status fleet --json --no-network` classified all eight
+  consumers with no consumer change and no install — `.gito/config.toml`
+  superseded 8/8, `.prism/rules.json` one current, one superseded, six locally
+  owned.
 
 ## Notes
 
