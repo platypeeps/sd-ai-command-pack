@@ -2,8 +2,8 @@
   "id": "convert-fleet-provider-configs",
   "name": "convert-fleet-provider-configs",
   "title": "Convert the eight fleet consumers off superseded provider configs",
-  "description": "08-06 shipped the mechanism that can carry a corrected if-not-exists default to a consumer and the detector that says who needs it, and deliberately converted nobody. Measured read-only at 0.71.0 on 2026-08-12, all eight registered consumers hold a superseded .gito/config.toml, and .prism/rules.json splits one current, one superseded, six locally owned. Refresh the superseded population by running install.py from a pack source checkout, leave every locally owned file untouched, and obtain per-cohort authorization first: this mutates repositories outside the pack, which the autonomous work loop cannot authorize.",
-  "status": "planning",
+  "description": "08-06 shipped the mechanism that can carry a corrected if-not-exists default to a consumer and the detector that says who needs it, and deliberately converted nobody. Re-measured read-only at pack 0.71.1 on 2026-08-12: all eight registered consumers hold a superseded .gito/config.toml, and .prism/rules.json splits one current, one superseded, six locally owned. Per-cohort authorization for all eight was granted on 2026-08-12. The prescribed mechanism, install.py --force, is also a 0.64.x to 0.71.1 pack upgrade writing 56 to 84 paths and retiring 13 per consumer, so delivery is canary-first: sd-github-review alone, its PR reviewed before the other seven. Every conversion travels its own consumer's review path; this task never merges there.",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "2026-08-12: three consumers are not clean — loadsmith and anomaly-metric-creator have dirty trees and mezmo_benchmark sits on cr/triage-grading-channel with no upstream. The user chose stash, convert, restore for those three over skipping them; every stash ref and its original branch is recorded in prd.md.",
   "meta": {}
 }
