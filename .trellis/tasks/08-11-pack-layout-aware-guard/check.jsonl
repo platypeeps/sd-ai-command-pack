@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Baseline quality bar for a new pack-shipped script and its tests."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "The guard is a gate: how it fails, and what it reports when it cannot resolve the layout, decides whether a consumer can trust it in place of the script it deleted."}
+{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Replacing five consumer-owned surfaces with one pack-owned surface is a retirement; this spec owns the documentation gates that retirement has to satisfy."}

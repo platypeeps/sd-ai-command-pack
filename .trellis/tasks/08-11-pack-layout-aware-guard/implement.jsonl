@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Owns the thin/fat layout contract the guard must resolve at runtime instead of hardcoding, including how a thin consumer's paths resolve against the machine install."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where a new pack-shipped script and its installed copies belong, so the guard reaches consumers through the existing install path rather than a new integration."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "This task exists because five consumers wrote the same script five times; the reuse checklist is the direct guard against shipping a sixth variant."}
