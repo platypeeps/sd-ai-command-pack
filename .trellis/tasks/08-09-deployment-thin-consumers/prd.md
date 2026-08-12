@@ -105,6 +105,16 @@ Created 2026-08-09 and linked in task.json:
 Ordering constraints live in each child's PRD; this map is not a
 dependency system.
 
+Filed later, under `08-09-thin-migration`:
+
+- **08-11-pack-layout-aware-guard** (2026-08-11) — requirement 3's cost,
+  measured rather than assumed. The fleet sizing found 510 thin-conversion
+  blockers, of which 330 are five consumers' independent reimplementations
+  of the same pack-layout guard plus the tests pinning them. One
+  pack-owned, layout-resolving guard turns each of those five ports into a
+  delete; without it, requirement 3 pays for the same script five times and
+  leaves five copies to drift again.
+
 ## Cross-child acceptance criteria
 
 - [ ] A pack release reaches every migrated consumer with zero
