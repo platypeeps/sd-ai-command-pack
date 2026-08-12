@@ -273,6 +273,18 @@ class HistoryArtifactTests(InstallTestCase):
         self.assertIsNotNone(history.unavailable_reason)
         self.assertIn("schemaVersion", history.unavailable_reason)
 
+    def test_invalid_utf8_is_refused_rather_than_raised(self) -> None:
+        # `JSONDecodeError` does not cover this: the decode fails before the
+        # parser runs, and an uncaught error here would abort the install
+        # instead of preserving.
+        root = self.make_repo()
+        path = root / providerhistory.HISTORY_SOURCE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'{"schemaVersion": 1, "sources": {"\xff": {}}}')
+        history = self.load(root)
+        self.assertIsNotNone(history.unavailable_reason)
+        self.assertIn("unreadable", history.unavailable_reason)
+
     def test_malformed_json_is_refused(self) -> None:
         root = self.make_repo()
         self.write_history(root, "{not json")

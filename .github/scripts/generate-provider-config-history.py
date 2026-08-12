@@ -109,6 +109,12 @@ def load_artifact() -> dict:
         return {"schemaVersion": SCHEMA_VERSION, "sources": {}}
     try:
         artifact = json.loads(ARTIFACT.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError) as error:
+        # Unreadable is not the same as absent: an absent artifact is seeded
+        # from history, while one that exists but cannot be read must stop the
+        # release rather than be silently replaced with a fresh record that
+        # drops whatever digests it held.
+        raise GenerateError(f"{ARTIFACT} is unreadable: {error}") from error
     except json.JSONDecodeError as error:
         raise GenerateError(f"{ARTIFACT} is not valid JSON: {error}") from error
     version = artifact.get("schemaVersion")

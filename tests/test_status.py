@@ -3540,6 +3540,96 @@ class StatusTests(InstallTestCase):
         self.assertIn("pack manifest not found", stale.stdout)
         self.assertNotIn("Traceback", stale.stdout)
 
+    def test_provider_config_states_classify_against_shipped_digests(self) -> None:
+        status = self.load_status_module()
+        pack_root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, pack_root, ignore_errors=True)
+        consumer = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, consumer, ignore_errors=True)
+
+        current = hashlib.sha256(b"current\n").hexdigest()
+        old = hashlib.sha256(b"old\n").hexdigest()
+        record = pack_root / status.PROVIDER_CONFIG_HISTORY_SOURCE
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "sources": {
+                        "templates/.gito/config.toml": {
+                            "target": ".gito/config.toml",
+                            "current": current,
+                            "digests": [old, current],
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        target = consumer / ".gito/config.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        for content, expected in (
+            (b"current\n", "current"),
+            (b"old\n", "superseded"),
+            (b"mine\n", "local"),
+        ):
+            with self.subTest(state=expected):
+                target.write_bytes(content)
+                self.assertEqual(
+                    status.provider_config_states(pack_root, consumer),
+                    [{"target": ".gito/config.toml", "state": expected}],
+                )
+
+        target.unlink()
+        self.assertEqual(
+            status.provider_config_states(pack_root, consumer),
+            [{"target": ".gito/config.toml", "state": "absent"}],
+        )
+
+    def test_an_unreadable_record_reports_unknown_rather_than_nothing(self) -> None:
+        # An empty list renders as a consumer with no provider configs, which
+        # is indistinguishable from a clean one. The gap has to stay visible.
+        status = self.load_status_module()
+        pack_root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, pack_root, ignore_errors=True)
+        consumer = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, consumer, ignore_errors=True)
+        record = pack_root / status.PROVIDER_CONFIG_HISTORY_SOURCE
+        record.parent.mkdir(parents=True, exist_ok=True)
+
+        for label, payload in (
+            ("missing", None),
+            ("not json", b"{not json"),
+            ("invalid utf-8", b'{"schemaVersion": 1, "sources": {"\xff": {}}}'),
+            ("unsupported version", b'{"schemaVersion": 99, "sources": {}}'),
+        ):
+            with self.subTest(shape=label):
+                if payload is None:
+                    record.unlink(missing_ok=True)
+                else:
+                    record.write_bytes(payload)
+                states = status.provider_config_states(pack_root, consumer)
+                self.assertEqual(
+                    states,
+                    [
+                        {
+                            "target": status.PROVIDER_CONFIG_HISTORY_SOURCE.as_posix(),
+                            "state": "unknown",
+                        }
+                    ],
+                )
+
+        step = [
+            record["summary"]
+            for record in status.fleet_step_records(
+                [{"name": "consumer-a", "providerConfigs": states}], "0.0.0"
+            )
+            if "could not be determined" in record["summary"]
+        ]
+        self.assertEqual(len(step), 1, step)
+        self.assertIn("consumer-a", step[0])
+
 
 if __name__ == "__main__":
     unittest.main()

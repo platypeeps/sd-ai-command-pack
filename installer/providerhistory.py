@@ -96,7 +96,11 @@ def load_provider_config_history(root: Path = ROOT) -> ProviderConfigHistory:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return _unavailable(f"{HISTORY_SOURCE.as_posix()} is missing")
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        # `UnicodeError` is listed because `JSONDecodeError` does not cover it:
+        # invalid UTF-8 fails in `read_text` before the parser ever runs, and
+        # an uncaught decode error here would abort the install rather than
+        # preserve.
         return _unavailable(f"{HISTORY_SOURCE.as_posix()} is unreadable: {error}")
     return _parse(raw, HISTORY_SOURCE)
 

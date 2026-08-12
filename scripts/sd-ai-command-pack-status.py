@@ -2953,7 +2953,13 @@ def provider_config_states(pack_root: Path, consumer_root: Path) -> list[dict[st
         if payload.get("schemaVersion") != 1 or not isinstance(sources, dict):
             raise ValueError("unsupported provider config history")
     except (OSError, ValueError, KeyError, TypeError):
-        return []
+        # The record is what enumerates the targets, so an unreadable one
+        # leaves nothing to classify. Returning `[]` would render as a row
+        # with no provider configs -- indistinguishable from a clean one --
+        # so name the artifact that could not be read instead.
+        return [
+            {"target": PROVIDER_CONFIG_HISTORY_SOURCE.as_posix(), "state": "unknown"}
+        ]
 
     states: list[dict[str, Any]] = []
     for entry in sources.values():
@@ -3127,6 +3133,24 @@ def fleet_step_records(
         add(
             "Merge shipped provider config changes by hand where the consumer "
             "owns the file: " + ", ".join(local_configs) + ".",
+            FLEET_STEP_RANK_ADVISORY,
+        )
+    unknown_configs = [
+        item["name"]
+        for item in reports
+        if any(
+            state.get("state") == "unknown"
+            for state in item.get("providerConfigs") or ()
+        )
+    ]
+    if unknown_configs:
+        # An unreadable record or file is this report's own gap, and saying so
+        # is the point: a consumer whose currency could not be determined must
+        # not read as one that was checked and found clean.
+        add(
+            "Provider config currency could not be determined for: "
+            + ", ".join(unknown_configs)
+            + ".",
             FLEET_STEP_RANK_ADVISORY,
         )
     if not records:
