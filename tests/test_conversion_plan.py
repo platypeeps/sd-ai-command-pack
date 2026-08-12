@@ -104,7 +104,7 @@ def simple_partition(tmp: Path):
                 "shared": {
                     "scope": "machine",
                     "provisional": False,
-                    "retainVendoredFor": ["codex", "pi"],
+                    "retainVendoredFor": ["pi"],
                 },
                 "github": {"scope": "repo-native", "provisional": False},
                 # gemini and opencode carry no rows in this fixture but the
@@ -177,11 +177,11 @@ class ClassifyTargetTests(InstallTestCase):
         self,
     ) -> None:
         shared = ".agents/skills/sd-check/SKILL.md"
-        # No codex/pi declared: the shared row is machine scope, so it goes.
+        # No pi declared: the shared row is machine scope, so it goes.
         self.assertEqual(self.classify(shared), ("delete", None))
-        # codex declared: retainVendoredFor keeps it vendored.
+        # pi declared: retainVendoredFor keeps it vendored.
         self.assertEqual(
-            self.classify(shared, frozenset({"claude", "codex"})), ("keep", None)
+            self.classify(shared, frozenset({"claude", "pi"})), ("keep", None)
         )
 
     def test_provisional_platforms_stay_vendored(self) -> None:
@@ -428,11 +428,11 @@ class ExpectedResidualTests(InstallTestCase):
 
     def test_a_vendor_retained_machine_row_is_expected(self) -> None:
         # R17-C1. `.agents/skills/sd-check/SKILL.md` is machine-other on the
-        # shared platform, which declares retainVendoredFor ["codex", "pi"].
-        # classify_target keeps it for a consumer that declares codex, so the
+        # shared platform, which declares retainVendoredFor ["pi"].
+        # classify_target keeps it for a consumer that declares pi, so the
         # expected residual has to hold it too or --check reports a permanent
         # drift against a file conversion deliberately left in place.
-        platforms = frozenset(CONSUMER_PLATFORMS | {"codex"})
+        platforms = frozenset(CONSUMER_PLATFORMS | {"pi"})
         self.assertIn(".agents/skills/sd-check/SKILL.md", self.residual(platforms=platforms))
 
     def test_the_same_row_is_absent_without_the_vendor_platform(self) -> None:
@@ -445,7 +445,7 @@ class ExpectedResidualTests(InstallTestCase):
         # is changed alone.
         target = ".agents/skills/sd-check/SKILL.md"
         for platforms, bucket, expected in (
-            (frozenset(CONSUMER_PLATFORMS | {"codex"}), "keep", True),
+            (frozenset(CONSUMER_PLATFORMS | {"pi"}), "keep", True),
             (CONSUMER_PLATFORMS, "delete", False),
         ):
             with self.subTest(platforms=sorted(platforms)):

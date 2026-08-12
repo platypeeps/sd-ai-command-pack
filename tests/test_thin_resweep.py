@@ -104,12 +104,29 @@ class ResweepFixture(unittest.TestCase):
         self.platforms = platforms
         return repo
 
-    def scan(self, repo: Path, platforms: frozenset[str] | None = None) -> dict:
+    def write_partition(self, data: dict) -> Path:
+        """A partition file of this fixture's own, for disposition variants."""
+        import tempfile
+
+        directory = Path(tempfile.mkdtemp(prefix="sd-resweep-partition-")).resolve()
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(directory, ignore_errors=True)
+        )
+        path = directory / "surface-partition.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def scan(
+        self,
+        repo: Path,
+        platforms: frozenset[str] | None = None,
+        partition: Path | None = None,
+    ) -> dict:
         return resweep.scan(
             "fixture",
             repo,
             self.platforms if platforms is None else platforms,
-            PARTITION,
+            PARTITION if partition is None else partition,
         )
 
     def buckets_for(self, result: dict, relative: str) -> dict[str, list[dict]]:
@@ -370,10 +387,15 @@ class ShippingBoundaryTests(unittest.TestCase):
 class PlatformMarkerTests(ResweepFixture):
     """Four markers, each asserted separately (step 3, prd.md:19)."""
 
-    def test_a_populated_codex_directory_blocks_when_undeclared(self) -> None:
+    def test_a_populated_codex_directory_advises_when_undeclared(self) -> None:
+        # Detected, recorded, and no longer blocking. `codex` left the
+        # partition's `retainVendoredFor` on executed probe evidence, so
+        # declaring it retains nothing and the blocker would be demanding a
+        # declaration that changes nothing -- the same R14-C1 standard that
+        # already exempts an empty directory, now reaching every codex marker.
         repo = self.make_consumer({".codex/prompts/x.md": "do a thing\n"})
         result = self.scan(repo)
-        self.assertEqual(self.only_bucket(result, ".codex"), "blockers")
+        self.assertEqual(self.only_bucket(result, ".codex"), "advisories")
 
     def test_an_empty_codex_directory_is_not_usage(self) -> None:
         # R14-C1: Git cannot track an empty directory, and an empty one is not
@@ -387,9 +409,73 @@ class PlatformMarkerTests(ResweepFixture):
                           "advisories": []})
 
     def test_declaring_the_platform_clears_the_same_directory(self) -> None:
+        # Every bucket, not just `blockers`: with the marker demoted to an
+        # advisory, asserting only the empty blockers list would pass on a
+        # build that never suppressed a declared platform's marker at all.
         repo = self.make_consumer({".codex/prompts/x.md": "do a thing\n"})
         result = self.scan(repo, platforms=CONSUMER_PLATFORMS | {"codex"})
-        self.assertEqual(self.buckets_for(result, ".codex")["blockers"], [])
+        self.assertEqual(self.buckets_for(result, ".codex"),
+                         {"blockers": [], "packDefects": [], "scheduled": [],
+                          "advisories": []})
+
+    def test_a_pack_owned_codex_directory_is_still_a_pack_defect(self) -> None:
+        # The demotion is scoped to the consumer's own usage. A `.codex/` the
+        # pack installed for a platform the registry omits is a defect in the
+        # pack whatever codex retains, so `marker_bucket` must leave the
+        # non-consumer dispositions alone.
+        import hashlib
+
+        body = "do a thing\n"
+        digest = "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+        repo = self.make_consumer(
+            {
+                ".codex/prompts/x.md": body,
+                # Ownership is receipt membership plus a matching recorded
+                # digest, so the fixture has to supply both to be pack-owned.
+                ".sd-ai-command-pack/provenance.json": json.dumps(
+                    {
+                        "pack": "sd-ai-command-pack",
+                        "version": "0.0.0",
+                        "files": {".codex/prompts/x.md": digest},
+                    }
+                )
+                + "\n",
+            },
+            receipt=[REMOVED, KEPT, ".codex/prompts/x.md"],
+        )
+        result = self.scan(repo)
+        self.assertEqual(self.only_bucket(result, ".codex"), "packDefects")
+
+    def test_an_undeclared_pi_marker_still_blocks_beside_the_codex_advisory(
+        self,
+    ) -> None:
+        # The two platforms in one scan. Separately each could pass on a build
+        # that routed every consumer marker to one bucket; together they pin
+        # the split to the platform, which is the whole change.
+        repo = self.make_consumer(
+            {
+                ".codex/prompts/x.md": "do a thing\n",
+                ".pi/skills/sd-check/SKILL.md": "do a thing\n",
+            }
+        )
+        result = self.scan(repo)
+        self.assertEqual(self.only_bucket(result, ".codex"), "advisories")
+        self.assertEqual(self.only_bucket(result, ".pi"), "blockers")
+
+    def test_the_blocking_set_is_read_from_the_partition(self) -> None:
+        # The demotion is a consequence of `retainVendoredFor`, not a codex
+        # special case: hand the scanner a partition that retains for codex and
+        # the same marker blocks again. A hard-coded advisory list would pass
+        # every other test here and fail this one.
+        repo = self.make_consumer({".codex/prompts/x.md": "do a thing\n"})
+        partition = json.loads(PARTITION.read_text(encoding="utf-8"))
+        retained = partition["platforms"]["shared"]["retainVendoredFor"]
+        self.assertNotIn("codex", retained, "the real partition already retains codex")
+        partition["platforms"]["shared"]["retainVendoredFor"] = sorted(
+            [*retained, "codex"]
+        )
+        result = self.scan(repo, partition=self.write_partition(partition))
+        self.assertEqual(self.only_bucket(result, ".codex"), "blockers")
 
     def test_a_pi_adapter_file_blocks_when_undeclared(self) -> None:
         # The fourth marker, and the one a combined case would have hidden:
@@ -420,21 +506,22 @@ class PlatformMarkerTests(ResweepFixture):
         result = self.scan(repo)
         self.assertEqual(self.buckets_for(result, ".pi")["blockers"], [])
 
-    def test_a_codex_home_reference_blocks_when_undeclared(self) -> None:
+    def test_a_codex_home_reference_advises_when_undeclared(self) -> None:
         repo = self.make_consumer({"scripts/setup.sh": 'echo "$CODEX_HOME"\n'})
         result = self.scan(repo)
         # The marker's subject is the platform, not the citing file: one
         # undeclared platform is one finding however many files evidence it.
         # The file survives in `detail`, which is what a reader acts on.
-        marker = self.buckets_for(result, "$CODEX_HOME")["blockers"]
-        self.assertEqual(len(marker), 1, result["blockers"])
+        # Recorded, not blocking: `codex` retains nothing.
+        marker = self.buckets_for(result, "$CODEX_HOME")["advisories"]
+        self.assertEqual(len(marker), 1, result["advisories"])
         self.assertIn("scripts/setup.sh", marker[0]["detail"])
 
-    def test_the_codex_cli_in_command_position_blocks_when_undeclared(self) -> None:
+    def test_the_codex_cli_in_command_position_advises_when_undeclared(self) -> None:
         repo = self.make_consumer({"scripts/run.sh": "#!/bin/sh\ncodex exec --help\n"})
         result = self.scan(repo)
-        marker = self.buckets_for(result, "codex")["blockers"]
-        self.assertEqual(len(marker), 1, result["blockers"])
+        marker = self.buckets_for(result, "codex")["advisories"]
+        self.assertEqual(len(marker), 1, result["advisories"])
         self.assertIn("scripts/run.sh", marker[0]["detail"])
 
     def test_prose_naming_the_codex_command_does_not_block(self) -> None:

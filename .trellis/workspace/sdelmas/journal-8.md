@@ -667,3 +667,45 @@ Planned, canaried, and executed the provider-config conversion across all eight 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 366: Retire the codex vendored-retention carve-out on probe evidence
+
+**Date**: 2026-08-12
+**Task**: Retire the codex vendored-retention carve-out on probe evidence
+**Branch**: `feat/retire-codex-vendored-retention`
+
+### Summary
+
+An executed codex debug prompt-input probe falsified the claim that Codex never reads ~/.agents/skills, so the shared platform's retainVendoredFor no longer lists codex and the thin resweep's undeclared-codex marker is an advisory whose blocking set is derived from the partition.
+
+### Main Changes
+
+- Dropped codex from PLATFORM_RETAIN_VENDORED_FOR['shared']; a declaring consumer no longer retains 77 machine rows (49 .agents/, 26 scripts/, 2 docs/) the conversion would otherwise delete.
+- Replaced the two falsified rationale comments in partition-surfaces.py, the retainVendoredFor spec section, and conversion.py's R17-C1 comment, whose 102-against-27 figures describe the retired configuration.
+- Added retained_platforms() and marker_bucket() to the thin resweep: consumer-owned markers for a platform nothing retains land in advisories, and the blocking set is read from the partition rather than restated.
+- Retargeted the fixture-based retention tests to pi rather than deleting them, and added five tests including plan-set equality across a codex declaration and a fixture partition that makes the marker block again.
+- Regenerated the partition artifacts at 0.71.2: exactly one line removed each, all 725 files rows byte-identical.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9bc8ae9094c00489829790a770fd89037249ab15` | feat(partition): retire the codex vendored-retention carve-out |
+
+### Testing
+
+- [OK] make test: install.py 100%, installer/conversion.py 100%, TOTAL 100% against --fail-under=100
+- [OK] make lint: ruff All checks passed!; mypy Success: no issues found in 50 source files
+- [OK] make full-check: Review preflight: 0 failure(s)
+- [OK] CI on PR #433: unittest matrix (3 jobs), shell coverage, lint, security, release payload gate all SUCCESS
+- [OK] Copilot review: 25 of 25 files reviewed, no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

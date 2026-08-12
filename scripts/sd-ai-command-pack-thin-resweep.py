@@ -659,10 +659,27 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
 # implemented it: a codex or pi usage marker in a consumer whose registry
 # `platforms` omits that platform is a **blocker**. The reason is not
 # bookkeeping. `retainVendoredFor` intersects the consumer's *declared*
-# platforms (parent `design.md:187`), so an undeclared codex user has their
-# `.agents/**` deleted -- and `.agents/skills/` is how Codex reads a skill,
-# because Codex cannot consume the machine-installed plugin at all. Silently
-# deleting it is exactly the failure the gate exists to prevent.
+# platforms (parent `design.md:187`), so an undeclared user of a retained
+# platform has their `.agents/**` deleted, and `.agents/skills/` is how that
+# platform reads a skill. Silently deleting it is exactly the failure the gate
+# exists to prevent.
+#
+# Which platforms that covers is derived, not written here. The blocker is
+# justified only while a declaration would change the plan, so the set is read
+# from the partition's `retainVendoredFor` lists -- the same artifact the
+# conversion classifier reads -- and a consumer-owned marker for a platform
+# outside it is recorded as an `advisories` entry instead. Detection is
+# unchanged either way; only the bucket moves, and `packDefects` is unaffected.
+#
+# `codex` was in that set until an executed probe removed it. The clause above
+# used to end "because Codex cannot consume the machine-installed plugin at
+# all", which is true and irrelevant: the `.agents` families are the machine
+# *installer's*, not the Claude plugin's, and Codex merges project-root
+# `.agents/skills` with `$HOME/.agents/skills`. The machine install therefore
+# serves it, declaring `codex` retains nothing, and blocking on it asks for a
+# declaration that changes nothing -- exactly the R14-C1 disqualifier below,
+# generalized from the empty-directory case to every codex marker. Evidence:
+# `.trellis/tasks/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`.
 #
 # R12 excluded Trellis-local paths, reasoning that a `.codex/` holding nothing
 # but `trellis-*.toml` agents was a Trellis repository rather than an undeclared
@@ -703,14 +720,47 @@ def hidden_bytes_digest(repo: Path, index_flags: str) -> str:
 # canary task carries it as an operator declaration instead (child 3,
 # requirement 3), which is the only place the fact exists.
 MARKER_PLATFORMS = ("codex", "pi")
-# The three dispositions a marker can have, named the same way the classifier
-# names them: the pack's own text is a pack defect, text inside a block the
-# conversion strips leaves with it, and everything else is the consumer's.
+
+
+def retained_platforms(partition: conversion.Partition) -> frozenset[str]:
+    """Platforms some machine platform still keeps vendored rows for.
+
+    Read from the partition rather than restated as a constant: the marker
+    blocks *because* a declaration changes the conversion plan, and that is
+    exactly what `retainVendoredFor` decides. Deriving it means the two cannot
+    drift, and retiring a platform's retention retires its blocker in the same
+    edit.
+    """
+    found: set[str] = set()
+    for body in partition.platforms.values():
+        found.update(body.get("retainVendoredFor") or ())
+    return frozenset(found)
+
+
+# The dispositions a marker can have, named the same way the classifier names
+# them: the pack's own text is a pack defect, text inside a block the conversion
+# strips leaves with it, and everything else is the consumer's. The consumer
+# case is the only one that depends on the platform -- see `retained_platforms`.
 BUCKET_FOR_OWNERSHIP = {
     "pack": "packDefects",
     "stripped": "scheduled",
     "consumer": "blockers",
 }
+
+
+def marker_bucket(ownership_kind: str, platform: str, retained: frozenset[str]) -> str:
+    """Bucket for one marker, given who owns the text and which platform it is.
+
+    Pack-owned and stripped text keep their fixed buckets: a pack defect is a
+    pack defect whether or not anything is retained for the platform. Only the
+    consumer's own usage is conditional, because only it was ever a statement
+    about what the consumer would lose.
+    """
+    if ownership_kind != "consumer":
+        return BUCKET_FOR_OWNERSHIP[ownership_kind]
+    return "blockers" if platform in retained else "advisories"
+
+
 CODEX_HOME = re.compile(r"\$(?:\{)?CODEX_HOME\b")
 # The CLI. R15-C2 demonstrated both failure directions in the first attempt.
 # False positive: "This repository does not use codex exec; that command is
@@ -790,10 +840,11 @@ def platform_marker_hits(
     files: list[str],
     declared: frozenset[str],
     removed: frozenset[str],
+    retained: frozenset[str],
     owned_at=None,
     preread: dict[str, bytes] | None = None,
 ) -> dict[str, list[dict]]:
-    """Undeclared codex/pi usage, as blocker entries.
+    """Undeclared codex/pi usage, bucketed by ownership and retention.
 
     Four markers, each with its own fixture, for the reason `prd.md` gives:
     one combined case would pass while the others were never implemented. A
@@ -810,8 +861,17 @@ def platform_marker_hits(
     the registry does not say so" -- and `mezmo_benchmark` alone names
     `$CODEX_HOME` in 49 files. Forty-nine copies of one fact is noise that
     hides the other blockers.
+
+    ``retained`` is the set from `retained_platforms`. A consumer-owned marker
+    for a platform in it blocks; one for a platform outside it is an advisory,
+    because the declaration it asks for would not change the conversion plan.
     """
-    hits: dict[str, list[dict]] = {"blockers": [], "packDefects": [], "scheduled": []}
+    hits: dict[str, list[dict]] = {
+        "blockers": [],
+        "packDefects": [],
+        "scheduled": [],
+        "advisories": [],
+    }
 
     def ownership(relative: str, number: int | None) -> str:
         # R16-C1: ownership is per content, not per path. A managed block is a
@@ -857,7 +917,9 @@ def platform_marker_hits(
             ]
             evidence = consumer_present or present
             record(
-                "blockers" if consumer_present else "packDefects",
+                marker_bucket("consumer", platform, retained)
+                if consumer_present
+                else "packDefects",
                 {
                     "file": info.directory,
                     "line": None,
@@ -881,7 +943,9 @@ def platform_marker_hits(
             ]
             evidence = consumer_adapters or adapters
             record(
-                "blockers" if consumer_adapters else "packDefects",
+                marker_bucket("consumer", platform, retained)
+                if consumer_adapters
+                else "packDefects",
                 {
                     "file": evidence[0],
                     "line": None,
@@ -896,6 +960,7 @@ def platform_marker_hits(
             "blockers": [],
             "packDefects": [],
             "scheduled": [],
+            "advisories": [],
         }
         referencing: dict[str, list[str]] = {key: [] for key in empty}
         invoking: dict[str, list[str]] = {key: [] for key in empty}
@@ -933,7 +998,7 @@ def platform_marker_hits(
             structured = structured_command_lines(lines, relative, body)
             commanded = command_lines(lines) | direct_path_lines(lines, relative, body)
             for number, line in enumerate(lines, start=1):
-                bucket = BUCKET_FOR_OWNERSHIP[ownership(relative, number)]
+                bucket = marker_bucket(ownership(relative, number), "codex", retained)
                 if CODEX_HOME.search(line) and relative not in referencing[bucket]:
                     referencing[bucket].append(relative)
                 if (
@@ -1626,7 +1691,13 @@ def scan(
         return "consumer"
 
     marker_hits = platform_marker_hits(
-        repo, tracked, platforms, removed, owned_at, bookkeeping
+        repo,
+        tracked,
+        platforms,
+        removed,
+        retained_platforms(partition),
+        owned_at,
+        bookkeeping,
     )
     for bucket, entries in marker_hits.items():
         buckets[bucket].extend(entries)

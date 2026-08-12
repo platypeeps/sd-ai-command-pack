@@ -310,10 +310,16 @@ def expected_residual_targets(
         # R17-C1: a machine row the consumer's platform choice retains is part
         # of the residual, and this function used to compute the residual from
         # keep categories alone. `classify_target` puts a retained machine row
-        # in `keep`, so a consumer declaring codex converts to 102 residual
-        # targets while this said 27 -- and `--check` measured the wrong tree.
-        # The two must ask `_retained_for_consumer` the same way or the
-        # converter and the inspector disagree by construction.
+        # in `keep`, so a consumer declaring a retained platform -- `pi`, the
+        # only one left -- converts to a residual larger by the whole retained
+        # `shared` slice while this said the bare keep count, and `--check`
+        # measured the wrong tree. The two must ask `_retained_for_consumer` the
+        # same way or the converter and the inspector disagree by construction.
+        #
+        # The original bug was found against `codex`, which carried the same
+        # carve-out until an executed probe retired it; the figures in that
+        # round's ledger (102 against 27) describe that configuration and no
+        # longer reproduce.
         if row.category in MACHINE_CATEGORIES and _retained_for_consumer(
             partition, row, consumer_platforms
         ):

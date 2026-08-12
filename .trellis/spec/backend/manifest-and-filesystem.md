@@ -126,23 +126,38 @@ the machine installer payload, and migration tooling):
   in schema version 1) names the platforms that still read this platform's
   rows **repo-locally**, even though the platform itself installs
   machine-scope. Migration tooling must keep those rows vendored in any
-  consumer that serves a listed platform. `shared` carries
-  `["codex", "pi"]`: OpenCode autoloads `~/.agents/skills`, but Codex
-  resolves `.agents` against the project root (its user root is
-  `$CODEX_HOME/skills`, a target family the pack does not ship) and Pi reads
-  the same layer repo-locally.
+  consumer that serves a listed platform. `shared` carries `["pi"]`: OpenCode
+  autoloads `~/.agents/skills` and Pi reads the same layer repo-locally.
+
+  `codex` was carried here until an executed probe retired it. The entry rested
+  on the claim that Codex reads `.agents` only against the project root; Codex
+  in fact merges the project-root layer with `$HOME/.agents/skills` and
+  `$CODEX_HOME/skills`, so the machine install already serves it and the
+  carve-out retained 77 rows per declaring consumer for nothing. Codex remains
+  `repo-native` — the pack ships no `.codex/**` rows at all — but that is a
+  statement about its own adapter surface, not about the `shared` rows it
+  reads. `pi` is unprobed and stays.
 
 The detection rule for `retainVendoredFor` is executable, not a judgement
 call: a consumer **still serves** a listed platform iff its
 `docs/fleet/consumers.json` `platforms` array intersects the list. The fleet
 registry is the single authority — no heuristic sniffing of consumer
-repositories decides retention. Because no consumer declares `codex` or `pi`
-today, current conversions delete the `shared` vendored rows; a consumer that
-starts serving either platform changes its registry row first, and that edit
-is what turns retention on. Conversion-time resweeps additionally grep the
-consumer for codex/pi usage markers and block conversion when usage exists
-without a matching registry declaration, so undeclared usage cannot be
-silently deleted.
+repositories decides retention. Because no consumer declares `pi` today,
+current conversions delete the `shared` vendored rows; a consumer that starts
+serving it changes its registry row first, and that edit is what turns
+retention on.
+
+Conversion-time resweeps additionally grep the consumer for codex/pi usage
+markers. **Which of those markers blocks is derived from `retainVendoredFor`,
+not restated in the scanner.** Undeclared usage of a *retained* platform is a
+blocker, because the missing declaration is what deletes a surface that
+platform reads; undeclared usage of a platform nothing retains is recorded as
+an advisory, because the declaration it demands would change no plan. Deriving
+the set means retiring a platform's retention retires its blocker in the same
+edit, and the scanner cannot disagree with the classifier about what a
+declaration is worth. Ownership is unaffected: a pack-owned `.codex/`
+directory is a pack defect either way, and a marker inside a stripped managed
+block stays scheduled.
 
 The field is optional and absent everywhere else, so consumers reading only
 `scope` and `provisional` keep working unchanged. The generator fails closed
