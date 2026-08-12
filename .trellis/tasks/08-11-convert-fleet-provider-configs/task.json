@@ -2,7 +2,7 @@
   "id": "convert-fleet-provider-configs",
   "name": "convert-fleet-provider-configs",
   "title": "Convert the eight fleet consumers off superseded provider configs",
-  "description": "",
+  "description": "08-06 shipped the mechanism that can carry a corrected if-not-exists default to a consumer and the detector that says who needs it, and deliberately converted nobody. Measured read-only at 0.71.0 on 2026-08-12, all eight registered consumers hold a superseded .gito/config.toml, and .prism/rules.json splits one current, one superseded, six locally owned. Refresh the superseded population by running install.py from a pack source checkout, leave every locally owned file untouched, and obtain per-cohort authorization first: this mutates repositories outside the pack, which the autonomous work loop cannot authorize.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
