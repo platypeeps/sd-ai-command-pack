@@ -1025,16 +1025,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 python_executable=Path(sys.executable),
                 env=command_environment(Path(sys.executable), work_root),
             )
-            results = [
-                validate_consumer(
-                    consumer,
-                    pack_root=pack_root,
-                    work_root=work_root,
-                    python_executable=Path(sys.executable),
-                    machine_home=artifacts.machine_home,
-                )
-                for consumer in consumers
-            ]
+            # A failed artifact lane makes every consumer row meaningless
+            # before it is computed. The lane's install step is what produces
+            # `machine_home`, so a thin clone would have nothing to resolve
+            # `~/.agents` against and would come back `failed` for a
+            # pack-side reason, with the consumer's name on it. Skip the
+            # clone/install/check loop entirely rather than pay for one per
+            # consumer to manufacture that blame.
+            results = (
+                [
+                    validate_consumer(
+                        consumer,
+                        pack_root=pack_root,
+                        work_root=work_root,
+                        python_executable=Path(sys.executable),
+                        machine_home=artifacts.machine_home,
+                    )
+                    for consumer in consumers
+                ]
+                if artifacts.ok
+                else []
+            )
 
         if args.json:
             print(
@@ -1095,7 +1106,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             print(
                 f"thin artifact validation failed for {len(artifacts.failures)} "
-                "step(s); ledger was not updated",
+                f"step(s); {len(consumers)} consumer(s) were not validated and "
+                "the ledger was not updated",
                 file=sys.stderr,
             )
             return 1

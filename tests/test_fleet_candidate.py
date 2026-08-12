@@ -905,6 +905,53 @@ class FleetCandidateTests(InstallTestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(ledger.read_text(encoding="utf-8"), "previous evidence\n")
 
+    def test_a_failed_artifact_lane_skips_consumer_validation(self) -> None:
+        # The lane's install step is what produces `machine_home`, so once the
+        # lane fails every thin consumer would come back `failed` for a
+        # pack-side reason with the consumer's name on it -- eight clone and
+        # install cycles spent manufacturing misdirected blame.
+        candidate = self.load_candidate_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-artifact-skip-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        consumer = self.consumer(candidate, root)
+        ledger = root / "candidate-validation.json"
+        ledger.write_text("previous evidence\n", encoding="utf-8")
+        stderr = io.StringIO()
+
+        with (
+            mock.patch.object(
+                candidate,
+                "current_evidence",
+                return_value=(
+                    "1.2.3",
+                    "sha256:payload",
+                    "sha256:fleet",
+                    "sha256:validator",
+                    [consumer],
+                ),
+            ),
+            mock.patch.object(candidate, "validate_consumer") as validate,
+            self.stub_artifact_lane(candidate, ok=False),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = candidate.main(
+                [
+                    "--manifest",
+                    str(root / "manifest.json"),
+                    "--fleet",
+                    str(root / "fleet.json"),
+                    "--ledger",
+                    str(ledger),
+                ]
+            )
+
+        self.assertEqual(exit_code, 1)
+        validate.assert_not_called()
+        self.assertIn("1 consumer(s) were not validated", stderr.getvalue())
+        self.assertEqual(ledger.read_text(encoding="utf-8"), "previous evidence\n")
+
     def test_main_check_mode_and_full_json_write(self) -> None:
         candidate = self.load_candidate_module()
         tempdir = tempfile.TemporaryDirectory(prefix="sd-fleet-main-test-")
