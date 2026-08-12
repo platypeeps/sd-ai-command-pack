@@ -11,6 +11,9 @@ Use these specs when changing:
 
 - `scripts/sd-ai-command-pack-review-preflight.mjs` (+ `templates/scripts/` mirror)
 - `scripts/sd-ai-command-pack-pr-eligibility.py`
+- `scripts/sd-ai-command-pack-review.py` (+ `templates/scripts/` mirror), for
+  its per-attempt state and stage memoization only — the review workflow
+  itself is owned by the `sd-review` skill
 - `tests/test_bookkeeping_validator.py`, `tests/test_pr_eligibility.py`
 - `.agents/skills/sd-finish-work/SKILL.md` (+ template mirror) where it
   documents this validator's contract
@@ -26,6 +29,7 @@ adapter.
 | Guide | Use When |
 |-------|----------|
 | [Bookkeeping Validator Notes](./bookkeeping-validator.md) | Adding a bundle shape, recovery subtype, or historical-proof mechanism to `review-preflight.mjs`; adding a top-level `const`/`let` to that file; touching the root-task `base_branch` rule or its default-branch resolver; touching a git-failure `*_unavailable` finding or the `lastBookkeepingGitFailure` diagnostics slot |
+| [Review Attempt State](./review-attempt-state.md) | Changing what the review coordinator stores in, or serves from, its per-attempt state file — which stage results a resume replays and which recompute. Documents the attempt key's blind spots (live PR body, gitignored paths, provider reachability, per-invocation argv) and the phase-rewind trap |
 | [Runtime Coverage Lanes](./runtime-coverage-lanes.md) | Changing how shipped Python/Node/shell coverage is measured in CI — the `kcov-bash-shim.sh`, `summarize_shell_coverage.py`, `report-shell-coverage.sh`, or the `shell-coverage` job. Documents the kcov target-the-script gotcha and the summarizer exit contract |
 | [Surface Retirement Doc Gates](./surface-retirement-doc-gates.md) | Deleting a shipped script, a command surface, or any file a Trellis `prd.md`/`research/*.md` cites by path. Documents the public/internal classification contract in `check-shipped-script-docs.sh` and the documentation path-reference exemptions in `review-preflight.mjs` — both fail in files the deletion never touched |
 | [Vendored Trellis Compatibility](./vendored-trellis-compatibility.md) | Writing or changing a wrapper that shells out to `.trellis/scripts/task.py` or `add_session.py`; upgrading the vendored Trellis version. Documents the `current --json` fallback contract, omit-empty journal sections, and the validated `trellis update` gate procedure |
