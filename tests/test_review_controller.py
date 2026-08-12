@@ -1522,9 +1522,13 @@ class ReviewControllerTests(InstallTestCase):
         state = json.loads(state_files[0].read_text(encoding="utf-8"))
         self.assertEqual(state["check"], {"schemaVersion": 1, "status": "passed"})
 
-    def test_unchanged_passing_stages_still_replay_from_the_cache(self) -> None:
+    def test_unchanged_passing_stages_still_replay_except_the_check(self) -> None:
         # The idempotency guarantee the recompute must not cost: a plain
-        # re-invocation after an interruption resumes past completed work.
+        # re-invocation after an interruption resumes past completed work. The
+        # deterministic check is the one stage deliberately outside that
+        # guarantee — it is cheap, idempotent, and reads inputs the attempt key
+        # does not cover — so it recomputes while the expensive local stage,
+        # whose inputs the key does cover, still replays from state.
         controller = self.load_controller()
         root = self.make_repo()
         artifacts = self.artifact_root(root)
@@ -1548,8 +1552,125 @@ class ReviewControllerTests(InstallTestCase):
 
         self.assertEqual((first[0], first[1]["status"]), (0, "ready"))
         self.assertEqual((second[0], second[1]["status"]), (0, "ready"))
-        self.assertEqual(run_check.call_count, 1)
+        self.assertEqual(run_check.call_count, 2)
         self.assertEqual(run_local.call_count, 1)
+
+    def test_stored_passing_check_is_recomputed_and_can_still_block(self) -> None:
+        # The stale-pass direction, and the worse half of this defect: a stored
+        # pass makes the gate report `ready` for a tree whose live input has
+        # since broken. `pack.review-scope` reads the pull-request body, so the
+        # break needs no commit and leaves the head — and therefore the attempt
+        # key — untouched.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            side_effect=[
+                {"schemaVersion": 1, "status": "passed"},
+                {"schemaVersion": 1, "status": "failed"},
+            ],
+        ) as run_check, mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(
+                controller,
+                {"head": self.git_output(root, "rev-parse", "HEAD")},
+            ),
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            first = controller.run(self.branch_review_args(controller, root, artifacts))
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        self.assertEqual((first[0], first[1]["status"]), (0, "ready"))
+        self.assertEqual((second[0], second[1]["status"]), (1, "blocked"))
+        self.assertEqual(second[1]["limitations"], ["deterministic-check-not-passed"])
+        self.assertEqual(run_check.call_count, 2)
+        # The blocked report carries the row this run computed, not the stored
+        # one it replaced.
+        self.assertEqual(second[1]["check"], {"schemaVersion": 1, "status": "failed"})
+
+    def test_recomputing_the_check_does_not_rewind_the_attempt_phase(self) -> None:
+        # `_record_stage(resumable=True)` delegates to `_advance`, which assigns
+        # `phase` unconditionally. Naming `check` on every invocation would move
+        # the phase backwards on a resume that already completed later stages,
+        # and `phase` is where a resume re-enters.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(
+                controller,
+                {"head": self.git_output(root, "rev-parse", "HEAD")},
+            ),
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            controller.run(self.branch_review_args(controller, root, artifacts))
+            state_files = list(artifacts.glob("review-*.json"))
+            self.assertEqual(len(state_files), 1)
+            after_first = json.loads(state_files[0].read_text(encoding="utf-8"))
+            second = controller.run(self.branch_review_args(controller, root, artifacts))
+
+        after_second = json.loads(state_files[0].read_text(encoding="utf-8"))
+        self.assertNotEqual(after_first["phase"], "check")
+        self.assertEqual(after_second["phase"], after_first["phase"])
+        self.assertEqual(second[1]["phase"], after_first["phase"])
+
+    def test_the_gate_agrees_with_a_direct_check_run_in_both_directions(self) -> None:
+        # A stub cannot show the coordinator and the CLI agreeing, because it
+        # replaces the one thing under test. This runs the real subprocess
+        # through `_run_check` against a check helper whose verdict turns on a
+        # file outside the attempt key — the fixture's stand-in for the live
+        # pull-request body — and pre-seeds the state with the opposite verdict
+        # in each direction.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        live_input = root.parent / "live-input"
+        helper = root.parent / "sd-ai-command-pack-check.py"
+        helper.write_text(
+            "import json, pathlib, sys\n"
+            f"marker = pathlib.Path({str(live_input)!r})\n"
+            "status = 'passed' if marker.is_file() else 'failed'\n"
+            "print(json.dumps({'schemaVersion': 1, 'status': status}))\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+
+        def gate_verdict() -> tuple[int, str]:
+            outcome = controller.run(
+                self.branch_review_args(controller, root, artifacts)
+            )
+            return outcome[0], outcome[1]["status"]
+
+        with mock.patch.object(controller, "CHECK_SCRIPT", helper), mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(
+                controller,
+                {"head": self.git_output(root, "rev-parse", "HEAD")},
+            ),
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            # Direction one: seed a stored pass, then break the live input.
+            live_input.write_text("present\n", encoding="utf-8")
+            self.assertEqual(gate_verdict(), (0, "ready"))
+            live_input.unlink()
+            self.assertEqual(controller._run_check(root)["status"], "failed")
+            self.assertEqual(gate_verdict(), (1, "blocked"))
+
+            # Direction two: the stored verdict is now a failure the state file
+            # never kept; remedying the live input clears the gate at the same
+            # head, with no new attempt id.
+            live_input.write_text("present\n", encoding="utf-8")
+            self.assertEqual(controller._run_check(root)["status"], "passed")
+            self.assertEqual(gate_verdict(), (0, "ready"))
 
     def test_rejected_disposition_neither_replays_nor_evicts_the_report(self) -> None:
         # An `invalid` local report rejects the caller's `--local-disposition`

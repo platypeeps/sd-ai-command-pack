@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review standard for the change: test depth, assertion points, and what counts as demonstrated rather than asserted."}
+{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "The coordinator is covered by a runtime coverage lane with a per-file floor, so new branches must land with tests or the lane fails."}

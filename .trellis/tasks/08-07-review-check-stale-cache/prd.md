@@ -10,6 +10,67 @@ The memoization of the expensive stages is correct and stays. Only the
 deterministic check is wrong to cache, and only because a constituent check reads
 an input the state identity deliberately does not capture.
 
+## Current state, measured 2026-08-12 at pack 0.71.0
+
+Half of this task shipped while it sat in the backlog, and the half that
+shipped is the half the Problem section below is written about. Read that
+section as the historical diagnosis it is; read this one for what is still
+broken.
+
+`47d5dfbb`, `fix(review): stop caching terminal-failure verdicts in attempt
+state`, first tagged `v0.66.2`, introduced `_record_stage` and stopped
+persisting a **failing** check. The gate now reads
+(`run`, `templates/scripts/sd-ai-command-pack-review.py:1919-1932` — the file
+is 2212 lines at this version, so every `v0.64.27` line number below is stale
+and must be re-located by symbol):
+
+```python
+if state.get("check") is None:
+    check = _run_check(repo)
+    _record_stage(
+        state_path, state, "check",
+        resumable=isinstance(check, dict) and check.get("status") == "passed",
+        check=check,
+    )
+```
+
+So the shipped remedy is exactly the alternative this PRD records as
+**rejected** below: reuse a cached check only when it passed. It fixes the
+stale-failure direction and leaves the stale-pass direction untouched, which
+is what the consolidation note already ruled on — "recompute wins, correctness
+over reuse. Do not resurrect the reuse AC."
+
+Measured, not inferred. Two invocations at one unchanged head, with
+`_run_check` stubbed to return `passed` then `failed`:
+
+| Invocation | Exit | Status | `_run_check` calls |
+|---|---|---|---|
+| first | 0 | `ready` | 1 |
+| second | 0 | `ready` | 1 (not called again) |
+
+The second run served the stored pass and proceeded, though the check it
+claims to gate on would have failed. That is the live defect, and it is the
+same shape as the original in reverse: `pack.review-scope` reads the live pull
+request body, so a body that **loses** its scope heading after a passing check
+— an operator editing the PR, a template regeneration, any edit at an
+unchanged head — is reviewed as though the gate had passed.
+
+What is already guarded, and must stay guarded:
+
+- `test_failed_check_is_recomputed_on_the_next_invocation`
+  (`tests/test_review_controller.py:1483`) pins the stale-failure fix.
+- `test_unchanged_passing_stages_still_replay_from_the_cache` (same file,
+  `:1524`) asserts `run_check.call_count == 1`. That assertion **is** the
+  reuse contract this task supersedes, so the test must be split rather than
+  deleted: the local and remote replay assertions it also makes are the
+  memoization guarantee that has to survive.
+
+The consumer evidence below is unchanged in substance but not in cost: since
+`v0.66.2` a stale *failure* no longer replays, so the round-budget
+exhaustion described under "Second consumer" is fixed. The two consumers
+pinned at `0.64.3` are pinned by the whole 0.64→0.71 gap now, not by this
+defect alone.
+
 ## Problem
 
 > Citations are pinned to `v0.64.27`:
@@ -153,33 +214,64 @@ holding a consumer back from every other fix in those 23 releases.
 
 ## Acceptance Criteria
 
-- [ ] A cached failing check at an unchanged head is recomputed, and a run that
-      fixed the live input proceeds. Demonstrated against `pack.review-scope` with
-      a real PR body edited between two runs at one head — not with a stubbed
-      report. This is the criterion that proves the defect, so it must use the one
-      check that actually blocks.
-- [ ] The same, demonstrated against `knowledge.obsidian-kb` under an in-repo
-      symlink or tracked `.obsidian-kb` directory. State explicitly that an
-      external-symlinked KB cannot satisfy this criterion because `7865666c`
-      downgrades its failure to `skipped`, and do not substitute a stub to make it
-      appear to pass.
-- [ ] A cached passing check at an unchanged head is recomputed, and a run whose
-      live input has since broken is blocked. The stale-pass direction is tested,
-      not only the stale-failure direction.
-- [ ] The attempt phase does not regress when a resumed run recomputes the check.
-- [ ] Local and remote stage results are still served from state on a resume,
-      verified by asserting they are not recomputed.
+Renumbered 2026-08-12 against the measured current state. The stale-failure
+criteria are kept as regression guards rather than deleted: they describe
+behaviour `v0.66.2` shipped, and a recompute contract that broke them would be
+a regression, not a simplification.
+
+- [ ] **The live defect.** A stored passing check at an unchanged head is
+      recomputed, and a run whose live input has since broken is blocked.
+      Two pieces of evidence, because one cannot live where the other does:
+      a repository test that stubs `_run_check` and pins the recompute
+      contract, **and** a measurement recorded in this task against
+      `pack.review-scope` with a real pull-request body that loses its scope
+      heading between two coordinator runs at one head. The stub cannot show
+      that the live input is what moved; the measurement cannot live in a suite
+      that must run without network or a pull request. Neither alone satisfies
+      this criterion.
+- [ ] **Regression guard, already shipped.** A failing check at an unchanged
+      head is still recomputed, and a run that fixed the live input still
+      proceeds. `test_failed_check_is_recomputed_on_the_next_invocation` must
+      still pass unmodified.
 - [ ] The coordinator's gate verdict equals a direct `sd-check` run's verdict on
       the same tree, for both a pass and a fail, with the coordinator's state
       pre-seeded to the opposite verdict in each case. Exercise the real
       subprocess, not a stubbed `_run_check`, since a stub cannot show the two
       agreeing.
-- [ ] At least one new test is shown to fail against the pre-change code and pass
-      after it. Demonstrated, not asserted.
-- [ ] `platypeeps/se-ai-command-pack` can refresh past `0.64.27` with its fork
-      removed and its `ResolveCheckTest` suite passing against the shipped file.
-      This is the criterion that closes the consumer's blocker; verify it rather
-      than inferring it.
+- [ ] The attempt phase does not regress when a resumed run recomputes the
+      check. `_record_stage(resumable=True)` delegates to `_advance`, which
+      assigns `state["phase"]` unconditionally, so a resume that already
+      reached `capability` or `local` would be rewound to `check` by a naive
+      unconditional recompute. Assert the phase of a resumed run explicitly.
+- [ ] Local and remote stage results are still served from state on a resume,
+      verified by asserting they are not recomputed. The existing
+      `test_unchanged_passing_stages_still_replay_from_the_cache` must be split
+      so its local/remote assertions survive and its
+      `run_check.call_count == 1` assertion is replaced by the recompute
+      contract.
+- [ ] At least one new test is shown to fail against the pre-change code and
+      pass after it. Demonstrated, not asserted. The stale-pass test is the one
+      that must be shown failing.
+- [ ] The change states whether `platypeeps/se-ai-command-pack`'s `_resolve_check`
+      fork is now redundant, verified by running that fork's `ResolveCheckTest`
+      suite against the shipped file in a throwaway clone. Converting the
+      consumer itself is out of scope: mutating a repository outside this one
+      needs explicit per-cohort authorization, so a gap found here is filed as a
+      follow-up, not fixed by this task.
+
+Dropped on 2026-08-12, with reasons:
+
+- The `knowledge.obsidian-kb` criterion. It asked for the stale-**failure**
+  direction under an in-repo symlink or tracked `.obsidian-kb`; `v0.66.2`
+  already fixed that direction for every check, and the repository's own KB is
+  an external symlink whose failure `7865666c` downgrades to `skipped`.
+  Constructing a tracked-KB topology to re-demonstrate a shipped fix buys
+  nothing the first regression-guard criterion does not already cover. The
+  stale-**pass** direction is covered by the criterion above it, against the
+  check that actually blocks.
+- The consumer-refresh criterion, as written ("can refresh past `0.64.27` with
+  its fork removed"), asserted an outcome in another repository. It is
+  restated above as a verification this repository can actually perform.
 
 ## Out of scope
 
