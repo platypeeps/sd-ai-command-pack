@@ -127,8 +127,13 @@ class PartitionSurfacesTests(InstallTestCase):
                     committed["platforms"][platform],
                     {"scope": "machine", "provisional": False},
                 )
-        # Codex resolves `.agents` against the project root and never reads
-        # `~/.agents/skills`, so it is re-dispositioned rather than force-fit.
+        # Codex is repo-native because the pack ships no `.codex/**` rows at
+        # all, not because of where it reads skills from: an executed probe
+        # (`08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`)
+        # shows it merges project-root `.agents/skills`, `$HOME/.agents/skills`,
+        # and `$CODEX_HOME/skills`. That is why it is absent from the retention
+        # list below while still being repo-native here -- the two say different
+        # things, and an earlier revision conflated them.
         self.assertEqual(
             committed["platforms"]["codex"],
             {"scope": "repo-native", "provisional": False},
@@ -138,7 +143,7 @@ class PartitionSurfacesTests(InstallTestCase):
             {
                 "scope": "machine",
                 "provisional": False,
-                "retainVendoredFor": ["codex", "pi"],
+                "retainVendoredFor": ["pi"],
             },
         )
 
@@ -170,8 +175,10 @@ class PartitionSurfacesTests(InstallTestCase):
     def test_no_consumer_currently_serves_a_retained_platform(self) -> None:
         # The executable detection rule migration tooling applies: a consumer
         # keeps the vendored rows iff its registry `platforms` array
-        # intersects `retainVendoredFor`. Pinning it here means a consumer
-        # that starts declaring codex or pi surfaces as a deliberate change.
+        # intersects `retainVendoredFor`. Pinning it here means a consumer that
+        # starts declaring a retained platform surfaces as a deliberate change.
+        # It reads the list rather than naming its members, so retiring one --
+        # as `codex` was, on probe evidence -- does not silently weaken it.
         committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
         fleet = json.loads(
             (PACK_ROOT / "docs/fleet/consumers.json").read_text(encoding="utf-8")

@@ -285,18 +285,23 @@ class DriftPreflightTests(ConversionFixture):
 class RetentionFixtureTests(ConversionFixture):
     """`retainVendoredFor` across the whole shared platform, not one row of it.
 
-    The disposition is declared per *platform* -- `shared` retains for `codex`
-    and `pi` -- so a fixture that checks one `.agents/` file proves nothing
-    about `scripts/`, and a retention bug that spared one directory and not
-    the other would pass it. This asserts the whole platform and requires
-    both directories to be represented.
+    The disposition is declared per *platform* -- `shared` retains for `pi` --
+    so a fixture that checks one `.agents/` file proves nothing about
+    `scripts/`, and a retention bug that spared one directory and not the
+    other would pass it. This asserts the whole platform and requires both
+    directories to be represented.
+
+    `pi` is the retaining platform because it is the only one left: `codex`
+    named itself here until an executed probe showed it reads
+    `$HOME/.agents/skills`, so the vendored copy it was retaining had a
+    machine-installed equivalent all along.
 
     **No live consumer exercises this path.** The fleet registry declares no
-    `codex` or `pi` consumer today, so this coverage is synthetic and must not
-    be reported as fleet-proven.
+    `pi` consumer today, so this coverage is synthetic and must not be
+    reported as fleet-proven.
     """
 
-    VENDOR_PLATFORMS = frozenset({"claude", "codex"})
+    VENDOR_PLATFORMS = frozenset({"claude", "pi"})
 
     def shared_machine_rows(self, root: Path) -> frozenset[str]:
         partition = conversion.load_partition(
@@ -311,7 +316,7 @@ class RetentionFixtureTests(ConversionFixture):
             and row.category in conversion.MACHINE_CATEGORIES
         )
 
-    def plan_with_codex(self, root: Path):
+    def plan_for_platforms(self, root: Path, platforms: frozenset[str]):
         receipt = conversion.read_installed_targets_receipt(root)
         partition = conversion.load_partition(
             _support.PACK_ROOT / install.SURFACE_PARTITION_FILE
@@ -319,11 +324,40 @@ class RetentionFixtureTests(ConversionFixture):
         return conversion.build_conversion_plan(
             receipt,
             partition,
-            self.VENDOR_PLATFORMS,
+            platforms,
             occupied=conversion.occupied_receipt_targets(root, receipt),
         )
 
-    def test_every_shared_machine_row_is_kept_for_a_codex_consumer(self) -> None:
+    def plan_with_pi(self, root: Path):
+        return self.plan_for_platforms(root, self.VENDOR_PLATFORMS)
+
+    def test_declaring_codex_changes_no_plan(self) -> None:
+        # The claim the retirement rests on. Codex reads
+        # `$HOME/.agents/skills`, which the machine install populates, so
+        # declaring codex must retain nothing -- the two plans have to agree
+        # target for target, not merely in size, because a swap of one kept
+        # row for one deleted row leaves every count intact.
+        root = self.installed_consumer()
+        without = self.plan_for_platforms(root, frozenset({"claude"}))
+        with_codex = self.plan_for_platforms(root, frozenset({"claude", "codex"}))
+        self.assertEqual(frozenset(with_codex.keep), frozenset(without.keep))
+        self.assertEqual(frozenset(with_codex.delete), frozenset(without.delete))
+        # And not vacuously: the fixture has rows in both buckets to compare.
+        self.assertTrue(without.keep)
+        self.assertTrue(without.delete)
+
+    def test_pi_still_retains_a_non_empty_slice(self) -> None:
+        # The control for the test above. Retention broken outright would make
+        # every declaration a no-op and pass it; pi's slice must stay non-empty
+        # and must be exactly what codex's declaration no longer produces.
+        root = self.installed_consumer()
+        without = self.plan_for_platforms(root, frozenset({"claude"}))
+        with_pi = self.plan_for_platforms(root, self.VENDOR_PLATFORMS)
+        extra = frozenset(with_pi.keep) - frozenset(without.keep)
+        self.assertTrue(extra, "pi declared nothing extra; retention is inert")
+        self.assertEqual(extra, self.shared_machine_rows(root))
+
+    def test_every_shared_machine_row_is_kept_for_a_pi_consumer(self) -> None:
         root = self.installed_consumer()
         retained = self.shared_machine_rows(root)
         self.assertTrue(retained, "the fixture installed no shared machine rows")
@@ -332,7 +366,7 @@ class RetentionFixtureTests(ConversionFixture):
         self.assertTrue(any(entry.startswith(".agents/") for entry in retained))
         self.assertTrue(any(entry.startswith("scripts/") for entry in retained))
 
-        plan = self.plan_with_codex(root)
+        plan = self.plan_with_pi(root)
         self.assertEqual(retained - frozenset(plan.keep), frozenset())
         self.assertEqual(retained & frozenset(plan.delete), frozenset())
 
@@ -351,7 +385,7 @@ class RetentionFixtureTests(ConversionFixture):
         root = self.installed_consumer()
         retained = self.shared_machine_rows(root)
         manifest_data, files = install.load_manifest()
-        plan = self.plan_with_codex(root)
+        plan = self.plan_with_pi(root)
         settings, _ = thin.plan_settings_merge(
             root / thin.CLAUDE_SETTINGS_FILE, "sd-ai-command-pack", "sd"
         )

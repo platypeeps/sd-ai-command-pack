@@ -1,15 +1,15 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-12T11:07:27Z",
-  "packVersion": "0.71.1",
-  "payloadDigest": "sha256:d0be6a133b6356584f6c28a1eac613d4228ba910f31254bc0bc360da95f69e7a",
+  "validatedAt": "2026-08-12T20:03:02Z",
+  "packVersion": "0.71.2",
+  "payloadDigest": "sha256:9770ef5c125068381c7d60f0137aa11a7c879dbcb020f110201712a42575e9aa",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "bb3a2d5fd652c44b9f8777e6fffb16babc7f0904",
+      "baseCommit": "e4f72e7ff90fe0fccab27355917dce30e7b915fe",
       "status": "blocked",
       "prepares": [
         [
@@ -24,13 +24,13 @@
         ]
       ],
       "reasons": [
-        "52 consumer-authored reference(s) to removed paths"
+        "49 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "b770d1743429f899445e8bc13530245959041004",
+      "baseCommit": "cfb3cc87fa8be556ae168fa417166b94c82d20ad",
       "status": "blocked",
       "prepares": [
         [
@@ -47,13 +47,13 @@
         ]
       ],
       "reasons": [
-        "52 consumer-authored reference(s) to removed paths"
+        "50 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "91c5508d880eaae42714bf15bc80b3b7a004a79c",
+      "baseCommit": "cde3995442925e09b7c3144f05f73eabca5fa02b",
       "status": "blocked",
       "prepares": [
         [
@@ -74,7 +74,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "4b4f3d46e70686ddba5c59ddab66bc83891652bd",
+      "baseCommit": "1fb11633c362791bb3192c0aac9f850873499eaa",
       "status": "blocked",
       "prepares": [
         [
@@ -93,13 +93,13 @@
         ]
       ],
       "reasons": [
-        "64 consumer-authored reference(s) to removed paths"
+        "66 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "25a0c34f16c66c4f9e522383ab6f395d51ecda88",
+      "baseCommit": "1a10d640468780003529aed45551cc76f897e860",
       "status": "blocked",
       "prepares": [
         [
@@ -117,13 +117,13 @@
         ]
       ],
       "reasons": [
-        "46 consumer-authored reference(s) to removed paths"
+        "44 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "b6d19a084e167628b46bf55ce5064b047f70e31b",
+      "baseCommit": "6e0d657b34cfae00f8d524a81fbdbe8efc352fff",
       "status": "blocked",
       "prepares": [],
       "checks": [
@@ -134,13 +134,13 @@
         ]
       ],
       "reasons": [
-        "27 consumer-authored reference(s) to removed paths"
+        "24 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "8a5493b4002f1988f18c35952f6e9f28b8b6972f",
+      "baseCommit": "fd11dd3ed5b82f7f89c62509e9b15cfcee002104",
       "status": "blocked",
       "prepares": [
         [
@@ -165,13 +165,13 @@
         ]
       ],
       "reasons": [
-        "16 consumer-authored reference(s) to removed paths"
+        "14 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "82ad2f5ea881d79ba35873268671a0330607ac92",
+      "baseCommit": "f2972c5d4994231776e40d14b393eba9c0962c84",
       "status": "blocked",
       "prepares": [
         [
@@ -190,7 +190,7 @@
         ]
       ],
       "reasons": [
-        "200 consumer-authored reference(s) to removed paths"
+        "175 consumer-authored reference(s) to removed paths"
       ]
     }
   ]

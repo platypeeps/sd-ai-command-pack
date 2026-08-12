@@ -137,9 +137,18 @@ PLATFORM_DISPOSITIONS: dict[str, tuple[str, bool]] = {
     "shared": (MACHINE, False),
     "gemini": (MACHINE, False),
     "opencode": (MACHINE, False),
-    # Repo-native, not provisional: the Codex binary resolves `.agents`
-    # against the project root and never reads `~/.agents/skills`; its user
-    # root is `$CODEX_HOME/skills`, a target family the pack does not ship.
+    # Repo-native, not provisional, for a reason that has nothing to do with
+    # where Codex reads skills from: the pack ships *zero* `.codex/**` rows,
+    # and the ones a consumer has are Trellis's. Were codex ever dispositioned
+    # `machine`, its rows would route to `machine-other` and hit
+    # `family_for_target` -> None, which `machinepayload.py` fails closed on by
+    # design. Codex's whole pack surface is the `shared` platform's `.agents/**`.
+    #
+    # An earlier revision justified this with "never reads `~/.agents/skills`".
+    # That was false and the retention carve-out below rested on it; an executed
+    # probe (`08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`)
+    # shows Codex merges project-root `.agents/skills`, `$HOME/.agents/skills`,
+    # and `$CODEX_HOME/skills`.
     "codex": (REPO_NATIVE, False),
     # Repo-native by construction: GitHub reads workflows and prompts from
     # the consumer repository itself.
@@ -161,14 +170,21 @@ PLATFORM_DISPOSITIONS: dict[str, tuple[str, bool]] = {
 
 
 # Machine platforms whose rows another platform still reads repo-locally.
-# `shared` ships `.agents/**`, which OpenCode autoloads from the user scope
-# but Codex and Pi resolve against the project root, so those two keep
-# needing a vendored copy. Migration tooling reads this list; the executable
-# detection rule is documented in the spec and in the emitted artifact's
-# consumers: a consumer still serves a listed platform iff its
-# `docs/fleet/consumers.json` `platforms` array intersects the list.
+# `shared` ships `.agents/**`, which OpenCode autoloads from the user scope and
+# Pi reads repo-locally, so Pi keeps needing a vendored copy. Migration tooling
+# reads this list; the executable detection rule is documented in the spec and
+# in the emitted artifact's consumers: a consumer still serves a listed platform
+# iff its `docs/fleet/consumers.json` `platforms` array intersects the list.
+#
+# `codex` was here until an executed probe removed it. It was listed because the
+# disposition above claimed Codex never reads `~/.agents/skills`; Codex in fact
+# merges that root with the project-root one, so the machine install already
+# serves it and retaining 77 rows (49 `.agents` + 26 `scripts` + 2 `docs`) per
+# declaring consumer bought nothing. Evidence:
+# `.trellis/tasks/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`.
+# `pi` is unprobed, so it stays: no claim either way has been demonstrated.
 PLATFORM_RETAIN_VENDORED_FOR: dict[str, tuple[str, ...]] = {
-    "shared": ("codex", "pi"),
+    "shared": ("pi",),
 }
 
 

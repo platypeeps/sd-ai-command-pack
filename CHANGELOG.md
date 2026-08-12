@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.71.2 - 2026-08-12
+
+### Changed
+
+- `codex` is no longer in the `shared` platform's `retainVendoredFor` list, so
+  a consumer that declares it no longer keeps 77 vendored rows (49 `.agents/`,
+  26 `scripts/`, 2 `docs/`) that the thin conversion would otherwise delete.
+  The entry rested on a claim recorded in `0.64.35` — that Codex resolves
+  skills against the project root and never reads `~/.agents/skills` — and an
+  executed probe falsified it: Codex merges project-root `.agents/skills`,
+  `$HOME/.agents/skills`, and `$CODEX_HOME/skills`. The machine installer's
+  `agents-skills` family already writes the second of those, so the retained
+  copy was a duplicate of a surface Codex reads either way. Evidence:
+  `.trellis/tasks/08-09-codex-home-skills-family/research/codex-skills-resolution-probe.md`.
+  `pi` is unprobed and keeps its retention. Codex's disposition is unchanged:
+  still `repo-native`, still non-provisional.
+- The thin resweep records undeclared Codex usage as an advisory rather than a
+  blocker. The blocker existed because a missing declaration meant a retained
+  surface got deleted; with nothing retained for `codex`, it was demanding a
+  declaration that changes no plan. The blocking set is now read from the
+  partition's `retainVendoredFor` lists rather than restated in the scanner, so
+  retiring a platform's retention retires its blocker in the same edit.
+  Detection, evidence, and the `packDefects` bucket for pack-owned `.codex/`
+  occupancy are unchanged.
+
 ## 0.71.1 - 2026-08-12
 
 ### Fixed
