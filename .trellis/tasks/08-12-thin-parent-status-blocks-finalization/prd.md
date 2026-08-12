@@ -107,8 +107,15 @@ unshippable. Fix the state, the mechanism, or both, and decide which.
       child case.
 - [ ] The four correction sites in requirement 3 are landed, and a
       repo-wide grep for `"codex", "pi"` and for `codex` beside
-      `retainVendoredFor` returns hits only in the archive, the
-      CHANGELOG's historical entries, and journal history.
+      `retainVendoredFor` returns hits only in these classes: the
+      archive, the CHANGELOG's historical entries, journal history,
+      **the annotated dated snapshot at
+      `08-09-thin-migration/design.md:26`**, which deliberately keeps
+      the superseded literal because that section is a measurement at
+      `d7913054`, and **this task's own artifacts**, which quote the
+      wrong text in order to name it. A criterion demanding zero live
+      hits would be unsatisfiable, and #436 already merged the
+      annotation that makes the snapshot correct.
 - [ ] `.trellis/tasks/08-09-thin-machine-installer/` is confirmed
       absent and every surviving citation of it resolves under
       `.trellis/tasks/archive/2026-08/`, checked by resolving each path
