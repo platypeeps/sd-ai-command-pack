@@ -168,21 +168,21 @@ point of the entry below.
 
 ## Acceptance Criteria
 
-- [ ] Following `SKILL.md`'s `checkout-validation` text literally yields a task
+- [x] Following `SKILL.md`'s `checkout-validation` text literally yields a task
       whose `base_branch` is the consumer's default branch, on a checkout whose
       `task_store.py` lacks `resolve_default_branch` as well as one that has it.
-- [ ] A task with an empty description fails `checkout-validation` with a
+- [x] A task with an empty description fails `checkout-validation` with a
       message naming the field and the repair.
-- [ ] A `prd.md` retaining `- TBD` requirements, or a `.jsonl` retaining an
+- [x] A `prd.md` retaining `- TBD` requirements, or a `.jsonl` retaining an
       `_example` row, fails `checkout-validation`.
-- [ ] A correctly seeded task advances without new friction.
-- [ ] The stage check and the review preflight cannot disagree, because the
+- [x] A correctly seeded task advances without new friction.
+- [x] The stage check and the review preflight cannot disagree, because the
       stage check invokes or shares the preflight's rule rather than restating
       it.
-- [ ] A `.jsonl` citing a path under its own task directory fails
+- [x] A `.jsonl` citing a path under its own task directory fails
       `checkout-validation`, and the message names a citation the seeded task
       can actually use instead.
-- [ ] A `.jsonl` citing `.trellis/spec/**`, or a *sibling* task's
+- [x] A `.jsonl` citing `.trellis/spec/**`, or a *sibling* task's
       `research/**`, still passes — the narrowing rejects self-reference only,
       and deliberately leaves the sibling-archives-later case alone.
 

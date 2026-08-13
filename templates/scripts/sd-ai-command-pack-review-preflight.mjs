@@ -3566,7 +3566,16 @@ export function validateTrellisBookkeepingMetadata(record, taskDir, archived) {
   const issues = validateTrellisTaskMetadata(record, taskDir, archived);
   for (const field of ['title', 'description']) {
     if (typeof record[field] !== 'string' || record[field].trim().length === 0) {
-      issues.push(`${field} must be a non-empty string`);
+      // Name the repair, not just the constraint: at seeding time this is the
+      // most common finding and the operator is holding the command that
+      // produced it. Deliberately not `set-meta` -- that subcommand is absent
+      // from the older vendored task.py, i.e. exactly the consumers that hit
+      // this. `task.py create` carries both of these in every revision, with
+      // the title positional and the description behind a flag.
+      const repair = field === 'description'
+        ? 're-create the task passing a real --description'
+        : 're-create the task with a real title argument';
+      issues.push(`${field} must be a non-empty string; ${repair}`);
     }
   }
   if (!isTrellisTimestamp(record.createdAt)) {

@@ -379,8 +379,8 @@ assert.deepEqual(validateTrellisBookkeepingMetadata({
   branch: null,
   base_branch: 'main',
 }, '.trellis/tasks/07-17-demo', false), [
-  'title must be a non-empty string',
-  'description must be a non-empty string',
+  'title must be a non-empty string; re-create the task with a real title argument',
+  'description must be a non-empty string; re-create the task passing a real --description',
   'createdAt must be a valid date or timestamp',
 ]);
 assert.deepEqual(validateTrellisTaskMetadata({
@@ -539,13 +539,13 @@ assert.deepEqual(validateTrellisRootTaskBaseBranch({
 assert.equal(
   validateTrellisBookkeepingMetadata({
     description: '\\uFEFF',
-  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  }, '.trellis/tasks/07-17-demo', false).some((issue) => issue.startsWith('description must be a non-empty string')),
   true,
 );
 assert.equal(
   validateTrellisBookkeepingMetadata({
     description: '\\u0085',
-  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  }, '.trellis/tasks/07-17-demo', false).some((issue) => issue.startsWith('description must be a non-empty string')),
   false,
 );
 assert.deepEqual(findMissingTrellisChildReferences(
