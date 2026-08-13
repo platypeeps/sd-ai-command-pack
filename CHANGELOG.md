@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.71.3 - 2026-08-13
+
+### Added
+
+- `review-preflight` gains a `seeded-task` subcommand that validates the Trellis
+  task a fleet-refresh lane seeds in a consumer, before that lane installs
+  anything. It reuses the existing bookkeeping task rules at a new lifecycle
+  point (`completionReady: false`, `seedReady: true`), so there is one rule
+  source rather than a second implementation that agrees on one sample.
+  `seedReady` un-exempts the lone `_example` scaffold row that merge time
+  deliberately tolerates — which is exactly the shape `task.py create` emits, so
+  the fleet lane's real output was the one case nothing covered. Two reason codes
+  are new, `task_prd_placeholder` and `task_base_branch_invalid`; an unresolvable
+  default branch is `indeterminate`, not `invalid`, and an unreadable task
+  directory or malformed `task.json` fails closed with exit `1`. The receipt
+  records `evidence.defaultBranch` and `evidence.defaultBranchSource`, because
+  under `--repo` the pack's default-branch override environment variable
+  outranks the consumer's own `origin/HEAD` and would otherwise silently decide
+  the rule it is being asked to enforce.
+- A merge-time check rejects a Trellis task context row citing a path under its
+  **own** task directory. `task.py archive` moves that directory, so the pointer
+  dangles in the merged tree of the same bundle that publishes it. The finding
+  names the three alternatives: repoint at `.trellis/spec/**` and move the
+  substance into `reason`, cite a sibling task's `research/**`, or move the facts
+  into the pack's own task. Four such rows in
+  `08-09-deployment-thin-consumers` were repaired before the rule landed.
+- A merge-time check rejects generated `TBD` placeholders left in a changed
+  `prd.md` — the three shapes `task.py create` writes (`TBD.`, `- TBD`, and
+  `- [ ] TBD`), whole-line only, so prose that discusses TBD still passes. A
+  sweep of 384 PRDs found one pre-existing instance, in
+  `08-10-rename-review-local-receipt-identifiers`.
+
+### Changed
+
+- `sd-fleet-refresh`'s `checkout-validation` stage now sets the seeded task's
+  `base_branch` with `task.py set-base-branch` and validates the result with the
+  new gate, replacing a prose assertion that could be — and was — skipped. It
+  must not use `task.py create --base-branch`: that flag ships with the same
+  vendored `task_store.py` revision that fixes the underlying defect, so on
+  exactly the consumers that need it, `create` fails with
+  `unrecognized arguments`. Every reachable consumer checkout — five of the
+  eight in the fleet manifest; the other three are not cloned locally — still
+  carries the older revision, which stamps `base_branch` as the checked-out
+  branch unconditionally, on this stage the refresh branch. The gate runs from the pack source
+  checkout with `--repo`, because `checkout-validation` precedes
+  `install-update` and the consumer still carries the previous release.
+
 ## 0.71.2 - 2026-08-12
 
 ### Changed
