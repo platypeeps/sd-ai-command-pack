@@ -788,3 +788,51 @@ Filed 08-12-journal-cite-lifecycle-correction after shipping PR #438 hit the def
 ### Next Steps
 
 - None - task complete
+
+
+## Session 369: Regenerate the managed ignore block before the fleet publish work commit
+
+**Date**: 2026-08-13
+**Task**: Regenerate the managed ignore block before the fleet publish work commit
+**Branch**: `fix/fleet-publish-ignore-block-ordering`
+
+### Summary
+
+sd-ai-command-pack-fleet-publish.py built the work commit before anything regenerated the pack-managed .obsidian-kb block in a consumer's .gitignore, so a release that changes that block dirtied the tree only at the merge gate, after the completion bundle was already published and could no longer absorb it. Move the regeneration ahead of work_commit(), allowlist .gitignore, and decide the reported state from the file rather than the helper's exit code.
+
+### Main Changes
+
+- refresh_managed_ignore_block() runs after check_preconditions() and before work_commit(), and ahead of the repomix step so the map indexes the final ignore state
+- .gitignore added to DEFAULT_ALLOWED_PREFIXES, for the operator who already ran housekeeping; allowlisting alone is not the fix, because an untouched tree is still clean at publish time
+- A missing updater reports absent and a failing one is advisory; neither aborts a pack refresh, since the KB folder is regenerable and ignored
+- The returned state is decided by comparing .gitignore before and after, not by the exit code: update-spec-kb.py writes the block before it copies anything, then exits 3 on KB-copy conflicts alone
+- New spec .trellis/spec/tooling/fleet-publish-generated-content.md generalizes the rule to all pack-managed generated content, with the --if-present and cwd traps recorded
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d15a47cc` | fix(fleet): regenerate the managed ignore block before the work commit |
+| `3c4106d4` | docs(task): record the live verification of the ignore-block ordering fix |
+| `13ad9dbd` | test(fleet): pin the ignore-block ordering through publish() |
+| `e22663d6` | fix(fleet): decide the ignore-block state from the file, not the exit code |
+| `c3cc80d1` | docs(fleet): correct the ignore-block warning's two false implications |
+| `8d89ec79` | chore(task): record the completion branch for fleet-publish-ignore-block-ordering |
+| `05e78523` | chore(task): archive 08-12-fleet-publish-ignore-block-ordering |
+
+### Testing
+
+- [OK] python3 -m unittest tests.test_fleet_publish -- Ran 23 tests, OK
+- [OK] Ordering guard falsified deliberately: with refresh_managed_ignore_block() moved after work_commit(), only test_publish_captures_a_stale_ignore_block_in_the_work_commit fails (23 run, 1 failure); restored, OK
+- [OK] scripts/sd-ai-command-pack-check.py --json -- passed, 7 passed / 1 skipped
+- [OK] Live on four consumer refreshes to 0.71.2: stale block on mezmo_benchmark (fae338bc) and hoa-manager (54170bb5) folded .gitignore into H1; current block on rwbp-website (bb8309e7) added no .gitignore entry
+- [OK] GitHub Copilot review on PR #440 converged over 4 rounds to no new comments, 0 unresolved threads, 11 checks / 0 failing
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
