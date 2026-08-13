@@ -275,12 +275,12 @@ class BookkeepingValidatorTests(InstallTestCase):
         base_branch: str = "main",
         prd: str = "# Fixture\n\nA real goal.\n",
         # A real row by default. The previous default wrote an empty file, which
-        # is itself the defect this stage is supposed to reject, so every accept
-        # -path fixture was quietly asserting the gap was acceptable.
+        # is itself the defect this stage is supposed to reject, so every
+        # accept-path fixture was quietly asserting the gap was acceptable.
         implement: str = '{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
         check: str = '{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
-        # None means "do not create the file at all" -- the inline-platform
-        # consumer, where task.py create never seeds manifests.
+        # False leaves the task with no manifests on disk at all -- the
+        # inline-platform consumer, where task.py create never seeds them.
         write_manifests: bool = True,
     ) -> None:
         record = self.task_record(
@@ -297,8 +297,9 @@ class BookkeepingValidatorTests(InstallTestCase):
             (root / task_dir / "implement.jsonl").write_text(implement, encoding="utf-8")
             (root / task_dir / "check.jsonl").write_text(check, encoding="utf-8")
         else:
-            # write_task creates both manifests unconditionally, so the inline
-            # -platform shape has to remove them rather than decline to write.
+            # write_task creates both manifests unconditionally, so the
+            # inline-platform shape has to remove them rather than decline to
+            # write.
             # missing_ok keeps the intent -- these files must be absent -- rather
             # than coupling the fixture to write_task always having made them.
             (root / task_dir / "implement.jsonl").unlink(missing_ok=True)
@@ -347,15 +348,15 @@ class BookkeepingValidatorTests(InstallTestCase):
         blank lines, so no row-level rule ever sees this file.
 
         Bare newlines specifically: a variant padded with spaces or tabs is
-        already rejected by validateBookkeepingTextWhitespace's trailing
-        -whitespace rule, which is why that shape is not the hole."""
+        already rejected by validateBookkeepingTextWhitespace's
+        trailing-whitespace rule, which is why that shape is not the hole."""
         self.assert_seeded_task_rejects_unfilled(
             ".trellis/tasks/08-13-blank-lines", check="\n\n\n"
         )
 
     def test_trailing_whitespace_rule_already_covers_the_padded_variant(self) -> None:
-        """Guard for the sentence above. If this ever stops rejecting, the blank
-        -line test is no longer testing the shape it claims to."""
+        """Guard for the sentence above. If this ever stops rejecting, the
+        blank-line test is no longer testing the shape it claims to."""
         root = self.make_validator_repo()
         task_dir = ".trellis/tasks/08-13-padded-blank"
         self.seed_task(root, task_dir, check="\n   \n\t\n")
@@ -393,8 +394,8 @@ class BookkeepingValidatorTests(InstallTestCase):
 
     def test_seeded_task_accepts_a_consumer_with_no_manifests_at_all(self) -> None:
         """The case the rule must not break. task.py create seeds the manifests
-        only when _has_subagent_platform finds an anchor, so on an inline
-        -platform consumer their absence is correct, not a defect."""
+        only when _has_subagent_platform finds an anchor, so on an
+        inline-platform consumer their absence is correct, not a defect."""
         root = self.make_validator_repo()
         task_dir = ".trellis/tasks/08-13-inline-platform"
         self.seed_task(root, task_dir, write_manifests=False)
