@@ -96,6 +96,7 @@ import {
   findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
   findMissingTrellisChildReferences,
+  findTrellisPlanningPlaceholders,
   findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
@@ -110,6 +111,7 @@ import {
   reviewRiskCategories,
   reviewRiskMatrix,
   shouldCheckDocumentationPathReference,
+  trellisTaskContextOwnerDirectory,
   trellisTaskDirectory,
   thrownValueMessage,
   unsupportedNodeVersionMessage,
@@ -377,8 +379,8 @@ assert.deepEqual(validateTrellisBookkeepingMetadata({
   branch: null,
   base_branch: 'main',
 }, '.trellis/tasks/07-17-demo', false), [
-  'title must be a non-empty string',
-  'description must be a non-empty string',
+  'title must be a non-empty string; re-create the task with a real title argument',
+  'description must be a non-empty string; re-create the task passing a real --description',
   'createdAt must be a valid date or timestamp',
 ]);
 assert.deepEqual(validateTrellisTaskMetadata({
@@ -537,13 +539,13 @@ assert.deepEqual(validateTrellisRootTaskBaseBranch({
 assert.equal(
   validateTrellisBookkeepingMetadata({
     description: '\\uFEFF',
-  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  }, '.trellis/tasks/07-17-demo', false).some((issue) => issue.startsWith('description must be a non-empty string')),
   true,
 );
 assert.equal(
   validateTrellisBookkeepingMetadata({
     description: '\\u0085',
-  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  }, '.trellis/tasks/07-17-demo', false).some((issue) => issue.startsWith('description must be a non-empty string')),
   false,
 );
 assert.deepEqual(findMissingTrellisChildReferences(
@@ -603,6 +605,67 @@ assert.deepEqual(findTrellisTaskContextIssues('implement.jsonl', [
   { file: 'implement.jsonl', line: 3, kind: 'seed' },
   { file: 'implement.jsonl', line: 4, kind: 'malformed' },
 ]);
+assert.equal(trellisTaskContextOwnerDirectory('.trellis/tasks/07-22-demo/check.jsonl'), '.trellis/tasks/07-22-demo');
+assert.equal(trellisTaskContextOwnerDirectory('./.trellis/tasks/07-22-demo/check.jsonl'), '.trellis/tasks/07-22-demo');
+assert.equal(
+  trellisTaskContextOwnerDirectory('.trellis/tasks/archive/2026-07/07-22-demo/check.jsonl'),
+  '.trellis/tasks/archive/2026-07/07-22-demo',
+);
+assert.equal(trellisTaskContextOwnerDirectory('.trellis/spec/backend/index.md'), '');
+assert.equal(trellisTaskContextOwnerDirectory(42), '');
+// A task citing its own research passes the allowed-root test -- that is exactly
+// how the defect reached main -- so the narrowing has to compare directories.
+assert.deepEqual(findTrellisTaskContextIssues('.trellis/tasks/07-22-demo/check.jsonl', [
+  '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"own"}',
+  '{"file":"./.trellis/tasks/07-22-demo/research/notes.md","reason":"own, ./ prefixed"}',
+  '{"file":".trellis/tasks/07-23-other/research/notes.md","reason":"sibling stays allowed"}',
+  '{"file":".trellis/spec/backend/index.md","reason":"spec stays allowed"}',
+].join('\\n')), [
+  { file: '.trellis/tasks/07-22-demo/check.jsonl', line: 1, kind: 'self_reference' },
+  { file: '.trellis/tasks/07-22-demo/check.jsonl', line: 2, kind: 'self_reference' },
+]);
+// The archive form is allowed because the move already happened, but an archived
+// task citing its OWN archived research is still self-reference.
+assert.deepEqual(findTrellisTaskContextIssues('.trellis/tasks/archive/2026-07/07-22-demo/implement.jsonl', [
+  '{"file":".trellis/tasks/archive/2026-07/07-22-demo/research/notes.md","reason":"own"}',
+  '{"file":".trellis/tasks/archive/2026-07/07-23-other/research/notes.md","reason":"sibling"}',
+].join('\\n')), [
+  { file: '.trellis/tasks/archive/2026-07/07-22-demo/implement.jsonl', line: 1, kind: 'self_reference' },
+]);
+// A citing file outside a task directory has no owner and must not self-match.
+assert.deepEqual(
+  findTrellisTaskContextIssues('implement.jsonl', '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"r"}'),
+  [],
+);
+// All three shapes task.py create seeds, including the Goal body -- the one that
+// does not look like a list item and so survives a hand edit most often.
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', [
+  '# Title',
+  '',
+  '## Goal',
+  '',
+  'TBD.',
+  '',
+  '## Requirements',
+  '',
+  '- TBD',
+  '',
+  '## Acceptance Criteria',
+  '',
+  '- [ ] TBD',
+].join('\\n')), [
+  { file: 'prd.md', line: 5, text: 'TBD.' },
+  { file: 'prd.md', line: 9, text: '- TBD' },
+  { file: 'prd.md', line: 13, text: '- [ ] TBD' },
+]);
+// A PRD may DISCUSS the placeholder; the rule matches whole lines, not substrings.
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', [
+  'The generator seeds requirements with - TBD and criteria with - [ ] TBD.',
+  '- A prd.md retaining `- TBD` requirements fails checkout-validation.',
+  '- [ ] Planning artifacts are free of TBD placeholders.',
+  'TBD requirements are rejected.',
+].join('\\n')), []);
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', 42), []);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);
@@ -2997,7 +3060,9 @@ assert.deepEqual(
             encoding="utf-8",
         )
         (task / "check.jsonl").write_text(
-            '{"file":".trellis/tasks/07-22-context-boundary/research/cases.md","reason":"research evidence"}\n',
+            # A sibling task's research/**, not this task's own: the own-directory
+            # form is rejected separately by the self-reference rule.
+            '{"file":".trellis/tasks/07-21-context-sibling/research/cases.md","reason":"research evidence"}\n',
             encoding="utf-8",
         )
         result = self.run_review_preflight(node, root)

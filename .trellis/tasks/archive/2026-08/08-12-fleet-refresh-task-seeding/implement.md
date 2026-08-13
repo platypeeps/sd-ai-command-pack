@@ -1,0 +1,301 @@
+# Implementation plan
+
+Ordered so that the shared rule lands and is proven before anything depends on
+it, and so the pre-existing debt the narrowing exposes is cleared *before* the
+narrowing can fail a green repo.
+
+## Step 0 — clear the debt the narrowing will expose
+
+Four rows in one active task self-cite today:
+
+```
+.trellis/tasks/08-09-deployment-thin-consumers/implement.jsonl:1,2
+.trellis/tasks/08-09-deployment-thin-consumers/check.jsonl:1,2
+```
+
+Both point at that task's own `research/consumer-ci-usage.md` and
+`research/claude-code-plugin-capabilities.md`.
+
+Do this first, not last. The narrowing fires on any *changed* task context file,
+so leaving these until after step 2 means the first unrelated edit to that task
+fails a check the author did not touch.
+
+Repair per the design's own guidance: repoint at a real `.trellis/spec/**` path
+and move the substance into `reason`. Do not delete the research files, and do
+not simply drop the `file` key — the ready gate requires each manifest to keep at
+least one real `{"file", "reason"}` entry (`.trellis/workflow.md:424`), so a
+rationale-only row trades a dangling citation for an unready task.
+
+**Done.** All four rows now point at `.trellis/spec/backend/fleet-consumer-conversion.md`
+and `.trellis/spec/backend/manifest-and-filesystem.md` — the contracts the thin
+model replaces — with the 2026-08-09 fleet-sweep and plugin-capability findings
+inlined into each `reason`.
+
+This edits **another active task's** manifests, which is normally out of scope.
+It is in scope here because this task's rule change is what breaks them: shipping
+a rule that fails a task nobody touched, and leaving the repair to whoever next
+edits it, moves the cost onto someone with no context for it. Keep the edit to
+those four rows — no other change to that task.
+
+Enumerate, do not hand-count — the same script that finds them is the acceptance
+check for this step:
+
+```bash
+python3 - <<'PY'
+import json, pathlib, re
+own = re.compile(r'^(\.trellis/tasks/(?:archive/\d{4}-\d{2}/)?[^/]+)/')
+hits = []
+for f in pathlib.Path('.trellis/tasks').rglob('*.jsonl'):
+    m = own.match(f.as_posix())
+    if not m:
+        continue
+    for i, line in enumerate(f.read_text().splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ref = json.loads(line).get('file')
+        except Exception:
+            continue
+        if isinstance(ref, str) and (m2 := own.match(ref)) and m2.group(1) == m.group(1):
+            hits.append(f'{f}:{i} -> {ref}')
+print(len(hits))
+for h in hits:
+    print(' ', h)
+PY
+```
+
+**Gate:** prints `0`. Expect `4` before the repair.
+
+## Step 1 — narrow the shared context rule
+
+`scripts/sd-ai-command-pack-review-preflight.mjs`,
+`findTrellisTaskContextIssues`:
+
+- derive the citing file's own task directory from the `file` argument with
+  `/^(\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+)\//`;
+- after the existing allowed-root test passes, emit `kind: 'self_reference'`
+  when the reference's own task directory equals the citing file's. Snake_case
+  is load-bearing: the bookkeeping reason code is interpolated as
+  `task_context_${issue.kind}`;
+- add the branch to **both** reporters — the bookkeeping ternary in `validateBookkeepingTaskContexts`
+  and the merge-time loop in `checkTrellisTaskContextReferences`, whose `else` otherwise labels the new
+  kind with the allowed-roots message and names the wrong rule. Use the
+  two-option repair message from the design, not a bare refusal.
+
+Tests in `tests/` alongside the existing `findTrellisTaskContextIssues`
+coverage. Four cases, and the third and fourth are the ones that matter:
+
+1. own `research/foo.md` → rejected;
+2. sibling task's `research/foo.md` → **accepted** (deliberate, requirement 5);
+3. archived task citing its own archived `research/**` → rejected — proves the
+   `owner` pattern captures the `archive/YYYY-MM/` prefix rather than treating
+   the archive form as automatically stable;
+4. `.trellis/spec/**` → accepted.
+
+**Gate:** new tests pass; `node scripts/sd-ai-command-pack-review-preflight.mjs`
+reports 0 failures on this repo — which, after step 0, it will.
+
+**Falsification:** revert only the `self_reference` branch and confirm case 1
+fails while 2-4 still pass. A test that passes with the rule removed is testing
+nothing. (This is the exact check that caught the ordering test on PR #440.)
+
+## Step 2 — the `TBD` placeholder rule
+
+New exported function beside the others — `findTrellisPlanningPlaceholders(file, text)`
+— matching the **three** shapes `_default_prd_content` writes, not two: the Goal
+body `TBD.` (`task_store.py:199`), the `- TBD` requirement bullet (`:209`), and
+the `- [ ] TBD` acceptance criterion (`:213`). The Goal line is the one an
+earlier draft of this plan missed, and it is the one a hand-edited PRD most
+often leaves behind, because it does not look like a list item.
+
+Adopt it in **both** entry points, merge-time and `seeded-task`. A rule that only
+the fleet lane runs is a second rule engine with one caller.
+
+Anchor on the line shape, not a bare substring: a PRD is allowed to discuss the
+string `TBD` in prose, and this task's own PRD does.
+
+**Gate:** a fixture PRD with a seeded `- TBD` bullet fails; this repo's real
+PRDs — including this one, which mentions `TBD` in prose — still pass.
+
+**Result:** 384 PRDs scanned, **2 placeholder lines in 1 file** —
+`08-10-rename-review-local-receipt-identifiers/prd.md:9,13`, a P3 planning task
+whose Goal is written but whose Requirements and Acceptance Criteria are still
+the generated stubs.
+
+**Not repaired here, deliberately.** Step 0's repair was mechanical: repoint a
+citation, no judgment required. Filling this PRD means deciding a receipt-schema
+version and consumer compatibility handling for the
+`sd-review-local-stage` / `-policy` rename — that is planning work for that task,
+and doing it from here would be guessing on someone else's behalf.
+
+Leaving it is safe, and the reason is worth stating rather than assuming: the
+merge-time check only inspects a **changed** `prd.md`, and the bookkeeping
+validator only blocks on a PRD inside the bundle delta. So nothing fails until
+that task is next edited — at which point the author is already in the file. It
+is recorded here so it is a known deferral, not a surprise.
+
+## Step 3 — the `seeded-task` subcommand
+
+- extend the subcommand dispatch and the usage text;
+- accept `--task-dir` and `--repo`, both already parsed by the CLI;
+- call `validateBookkeepingTaskDirectory(taskDir, {add, archived: false,
+  completionReady: false, seedReady: true})` — **one** call, not a
+  hand-composition of its parts. It already runs the metadata, PRD, and context
+  rules from disk;
+- add the `seedReady` flag to `validateBookkeepingTaskContexts` so it skips the
+  lone-`_example` exemption. Default `false`, so merge-time behavior
+  is byte-identical;
+- call `validateTrellisRootTaskBaseBranch` explicitly — the
+  bookkeeping validator does **not** wire it up; its only call site today is the
+  merge-time preflight's root-task check;
+- resolve the default branch with the existing `trellisRootDefaultBranchName()`;
+  do not add a second resolver. Record the resolved name **and whether it came
+  from the pack's default-branch override environment variable or
+  `origin/HEAD`** in `evidence`;
+- emit the design's envelope, reusing the existing `task_*` reason codes and
+  adding only `task_prd_placeholder` and `task_base_branch_invalid`.
+
+**Gate:** run against this repo's own seeded task from a *different* cwd with
+`--repo`, and confirm the result is identical to the same run with cwd inside
+the repo. `--repo` correctness is the whole cross-checkout premise; a gate that
+silently reads the wrong repository is worse than no gate (the trap
+`sd-ai-command-pack-update-spec-kb.py` already documents). Include a git-backed
+assertion, not just a filesystem one: run with `--repo` pointed at a checkout
+whose default branch differs from this one and confirm the *consumer's* branch
+name lands in `evidence`, proving `runGit`'s `cwd: rootDir` followed.
+
+**Env-leak check:** with `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` exported to a value
+that is wrong for the consumer, the run must not silently pass. This is the one
+way a green `base_branch` result can be meaningless.
+
+**Un-exemption check:** a manifest whose only row is the untouched `_example`
+scaffold must fail under `seeded-task` and still **pass** the merge-time
+preflight. Both halves matter — the second is the regression the exemption's
+comment above `validateBookkeepingTaskContexts` was written to prevent.
+
+**Fail-closed check:** point `--task-dir` at a missing directory and at a
+`task.json` containing `{`. Both must exit `1` and never report `valid`. Assert
+the status the shared path actually produces — `invalid`, because `add()`
+defaults to `disposition: 'invalid'` — not `indeterminate`. Reserve
+`indeterminate` for an unresolvable default branch, and assert that case
+separately.
+
+## Step 4 — SKILL.md `checkout-validation` — **Done**
+
+`.agents/skills/sd-fleet-refresh/SKILL.md:152-165`:
+
+1. after `task.py create`, `task.py set-base-branch <task-dir> <default-branch>`,
+   with the explicit note that `create --base-branch` must not be used;
+2. replace the prose description assertion with the `seeded-task` invocation,
+   run from the pack source checkout with `--repo <consumer>`;
+3. keep the "belt-and-suspenders" sentence as rationale only.
+
+**Gate:** `node scripts/sd-ai-command-pack-review-preflight.mjs` and
+`scripts/sd-ai-command-pack-check.py --json` both clean — the doc path-reference
+gate is what catches a wrong script name or a moved path here.
+
+**Result.** The edit belongs in `templates/.agents/skills/sd-fleet-refresh/SKILL.md`;
+`.agents/…` is the dogfood install `make sync` regenerates. The only sanctioned
+drift between the two is the template's `model: sonnet` front-matter line, which
+install strips — after `make sync` the diff is that one line and nothing else.
+
+`make sync` does **not** regenerate `.agents/skills/sd-fleet-refresh/SKILL.md`
+— that skill is source-only and installs nowhere, so both copies are hand-edited
+and must be kept in step. The step-4 gate as written (`review-preflight` +
+`sd-check`) does not catch a one-sided edit; the full unit suite does, which is
+the reason to run it before the commit rather than after.
+
+Two suite failures, both caused by this step:
+
+- `test_sdlc_commands.test_skills_declare_no_environment_variables` — the repo
+  forbids the literal `SD_AI_COMMAND_PACK_` prefix anywhere in a SKILL.md. The
+  env-leak warning now names the variable by description, not by identifier.
+- `test_review_preflight.test_review_preflight_rejects_changed_non_spec_context_paths`
+  — its accept-path fixture cited *its own* task's `research/cases.md`, exactly
+  the shape step 1 now rejects. Repointed at a sibling task; the own-directory
+  case stays covered by the step-1 tests. This is the rule finding a real
+  instance in the repo's own fixtures, not a false positive.
+
+Preflight: `0 failure(s), 3 warning(s)` — the three are the pre-existing
+boundary-risk, two-task-directory, and tooling/generated-scope advisories, all
+dispositioned below. `sd-check`: `passed {'failed': 0, …, 'passed': 8}` only
+after `.github/scripts/generate-plugin.py` and
+`scripts/sd-ai-command-pack-fleet-candidate-check.py`; `make sync` alone leaves
+`pack.shipped-surface-closure` failing on a stale `payloadDigest`.
+
+## Step 5 — acceptance criteria, against a scratch consumer
+
+The PRD's criteria are checkable without a live campaign. Seed each defect
+deliberately in a throwaway checkout and run the stage gate:
+
+| Criterion | Fixture |
+| --- | --- |
+| `base_branch` correct on both vendored revisions | one consumer checkout (old `task_store.py`) + this repo (new). Pick by grepping `task_store.py` for `resolve_default_branch`, **never by pack version** — loadsmith is at 0.71.2 and still carries the old one |
+| empty description fails | `task.py create` with `--description ""` |
+| `TBD` / `_example` fails | untouched `task.py create` output |
+| correct task advances | this repo's own seeded task |
+| one rule source | read both call sites; confirm a single function. Not "two implementations agreed on one sample" |
+| self-citation fails, with a usable alternative named | a row citing the fixture's own `research/**` |
+| spec + sibling research still pass | rows citing `.trellis/spec/**` and another task's `research/**` |
+
+**Results.** Two throwaway clones, each with its own bare origin and `.claude/`
+present so `_has_subagent_platform` seeds the manifests — without that anchor
+`task.py create` writes no JSONL at all and the `_example` rule never fires,
+which is why the first fixture pass looked cleaner than a real lane. A single
+shared origin also silently gives both clones the *same* vendored revision;
+they must not share one.
+
+Revision boundary, read-only from the consumers: all five reachable checkouts
+(loadsmith, hoa-manager, se-ai-command-pack, sd-github-review,
+anomaly-metric-creator) carry the old `task_store.py` — `resolve_default_branch`
+occurs 0 times there and 2 times here. Note the symbol is *called* in
+`task_store.py` and *defined* in `common/git.py`, so grep for the bare name, not
+for `def`.
+
+| Claim | Evidence |
+| --- | --- |
+| old revision stamps the refresh branch | `base_branch=chore/refresh-0-71-3` after `create` on that branch |
+| new revision resolves the default branch | `base_branch=main`, same command, same branch |
+| `create --base-branch` is unusable on old | `task.py: error: unrecognized arguments: --base-branch main` |
+| `set-base-branch` exists on both | old `task.py:441`, new `task.py:529`; `✓ Base branch set to: main` on old |
+| the remedy clears the finding | codes drop from `task_base_branch_invalid, task_context_seed, task_prd_placeholder` to `task_context_seed, task_prd_placeholder` |
+| untouched `create` output fails | `task_prd_placeholder` ×2 (`- TBD`, `- [ ] TBD`) + `task_context_seed` ×2, on both revisions |
+| a correct task advances | `valid ['seeded_task_valid']` |
+| self-citation fails | `invalid ['task_context_self_reference']` |
+| spec + sibling research pass | same `valid` run: `implement.jsonl` cites `.trellis/spec/**`, `check.jsonl` cites a sibling task's `research/**` |
+
+Empty description is covered by the step-3 fixture run (`task_metadata_invalid`);
+`task.py create --description ""` is rejected upstream by `create` itself on the
+new revision, so the gate's own guard is the thing under test, not `create`.
+
+One defect found here, not in review: the self-reference finding carried only
+`line N cites a path under its own task directory`, while SKILL.md told the
+operator each finding names its repair. The validator now emits the same
+`TRELLIS_TASK_CONTEXT_SELF_REFERENCE_REPAIR` string the merge-time check prints,
+so the receipt names the three alternatives; and the SKILL.md sentence is
+corrected to what the other findings actually provide — file, line, and what
+must change.
+
+## Review gates
+
+- Adversarial planning review before `task.py start` (already run for this
+  batch).
+- `sd-review-pr` loop on the PR; treat every Copilot finding as a claim to
+  verify against source before acting, and rebut with evidence when it is wrong.
+- Finalization: this task is `planning` today, so if it starts, its receipt
+  becomes `--mode completion`, not the `--mode planning` the PRD-only rounds used.
+
+## Rollback points
+
+Each step is independently revertible and ordered so nothing later depends on
+an unproven earlier step:
+
+- step 0 is a content fix with no rule behind it yet — safe to keep on revert;
+- step 1 reverts to the pre-narrowing branch; step 0 stays valid regardless;
+- steps 2-3 revert as a unit if the subcommand is abandoned, but step 2's rule
+  can stand alone in the merge-time preflight;
+- step 4 is documentation and reverts independently of all of it.
+
+No step writes persistent state, changes a receipt schema, or touches a
+consumer checkout.

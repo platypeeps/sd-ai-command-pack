@@ -48,10 +48,28 @@ point of the entry below.
    with `field description must be a non-empty string`.
 3. **Placeholder planning artifacts.** `task.py create` seeds `prd.md` with
    `- TBD` requirements and empty acceptance criteria, and seeds
-   `implement.jsonl` / `check.jsonl` with a single `_example` scaffold row. The
-   ready gate in `.trellis/workflow.md` rejects both; the review preflight
-   independently rejects a changed context file that "still contains a generated
-   `_example` scaffold row", but says nothing about a `TBD` PRD.
+   `implement.jsonl` / `check.jsonl` with a single `_example` scaffold row.
+
+   The two halves are not equally covered, and an earlier draft of this entry
+   said they were. The ready gate at `.trellis/workflow.md:424` is scoped to the
+   manifests only — "both `implement.jsonl` and `check.jsonl` must contain at
+   least one real entry before `task.py start`" — and it is prose, with nothing
+   executing it.
+
+   The review preflight's `_example` rule covers less than it appears to. It
+   rejects a scaffold row **mixed with real rows**, but exempts a manifest whose
+   *only* row is the untouched scaffold — `isPristineTrellisTaskContextScaffold`
+   in `scripts/sd-ai-command-pack-review-preflight.mjs`, consulted by
+   `validateBookkeepingTaskContexts` —
+   deliberately, because at merge time that shape is indistinguishable from an
+   unfilled manifest, and failing it produced a late completion-time failure. A
+   freshly seeded consumer task is exactly the exempt shape, so for the case
+   this task is about, the rule does not fire.
+
+   Nothing anywhere rejects a `TBD` PRD: `TBD` occurs
+   in exactly one file under `scripts/**` and `.trellis/scripts/**`, and that
+   occurrence is `task_store.py:199-213` *writing* the placeholder. So the PRD
+   half has no owner at all — not a prose gate, not a mechanical one.
 4. **Context entries citing the task's own directory.** Filling `implement.jsonl`
    / `check.jsonl` with real entries — defect 3's remedy — invites citing the
    facts the lane just collected, which live under the task being seeded. Those
@@ -81,8 +99,16 @@ point of the entry below.
 2. The seeded-task properties must be checked mechanically at
    `checkout-validation`, not left to prose: non-empty `task.json` description,
    `base_branch` equal to the consumer's default branch, planning artifacts
-   free of `TBD` placeholders and `_example` scaffold rows, and the citation
-   rule in requirement 5.
+   free of `TBD` placeholders and `_example` scaffold rows — including the
+   lone-scaffold shape the merge-time rule deliberately exempts — and the
+   citation rule in requirement 5.
+
+   That list is a floor, not a ceiling. Requirement 4 makes the stage invoke the
+   preflight's existing task-record validation rather than a filtered copy of
+   it, so a seeded task with a malformed `createdAt` or a mismatched `name` also
+   fails here. Filtering the shared result down to the fields named above would
+   be restating the rule by omission, and those defects fail at
+   `focused-candidate` anyway.
 3. A seeded-task defect must fail `checkout-validation` with an actionable
    message naming the offending field and its repair, rather than advancing and
    surfacing later as a review-preflight failure.
@@ -95,11 +121,11 @@ point of the entry below.
    task completes — in the same bundle that publishes it.
 
    The review preflight's existing rule does not catch this. It restricts
-   context references to `.trellis/spec/**` or `.trellis/tasks/**/research/**`
-   (`scripts/sd-ai-command-pack-review-preflight.mjs:3839-3840`), and its
-   allowed-root test is
-   `/^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/`
-   (`scripts/sd-ai-command-pack-review-preflight.mjs:3977`) — a shape test that never compares the cited task against the
+   context references to `.trellis/spec/**` or `.trellis/tasks/**/research/**`,
+   and its allowed-root test — `isTrellisTaskContextReference` in
+   `scripts/sd-ai-command-pack-review-preflight.mjs` — is
+   `/^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/`,
+   a shape test that never compares the cited task against the
    citing one, and that accepts the archive form too. Passing that rule is
    exactly how the defect gets published.
 
@@ -126,27 +152,37 @@ point of the entry below.
   appears zero times in a consumer's `.sd-ai-command-pack/installed-targets.txt`.
   No fleet refresh will ever replace the old `task_store.py`, so the stage must
   work with it rather than wait for it.
-- The check runs inside the consumer, so it may only rely on what an installed
-  consumer has, and must behave identically on both vendored `task_store.py`
-  revisions.
+- The check must not depend on the consumer's *installed* pack revision.
+  `checkout-validation` is the first lane stage and `install-update` is the
+  second (`scripts/sd-ai-command-pack-fleet-controller.py:44-56`), so at the
+  moment the seeded task is validated the consumer still carries the previous
+  release. A gate implemented as a new subcommand and invoked from the
+  consumer's own copy would exit `2` with `unknown review-preflight command` on
+  exactly the consumers that have not been refreshed yet — the same
+  ships-with-the-fix trap as requirement 1's `--base-branch`. The gate is
+  therefore run from the pack source checkout against the consumer's task
+  directory, the way `sd-ai-command-pack-fleet-review-classify.py` is already
+  invoked.
+- It must still behave identically on both vendored `task_store.py` revisions,
+  since it reads a `task.json` either of them may have written.
 
 ## Acceptance Criteria
 
-- [ ] Following `SKILL.md`'s `checkout-validation` text literally yields a task
+- [x] Following `SKILL.md`'s `checkout-validation` text literally yields a task
       whose `base_branch` is the consumer's default branch, on a checkout whose
       `task_store.py` lacks `resolve_default_branch` as well as one that has it.
-- [ ] A task with an empty description fails `checkout-validation` with a
+- [x] A task with an empty description fails `checkout-validation` with a
       message naming the field and the repair.
-- [ ] A `prd.md` retaining `- TBD` requirements, or a `.jsonl` retaining an
+- [x] A `prd.md` retaining `- TBD` requirements, or a `.jsonl` retaining an
       `_example` row, fails `checkout-validation`.
-- [ ] A correctly seeded task advances without new friction.
-- [ ] The stage check and the review preflight cannot disagree, because the
+- [x] A correctly seeded task advances without new friction.
+- [x] The stage check and the review preflight cannot disagree, because the
       stage check invokes or shares the preflight's rule rather than restating
       it.
-- [ ] A `.jsonl` citing a path under its own task directory fails
+- [x] A `.jsonl` citing a path under its own task directory fails
       `checkout-validation`, and the message names a citation the seeded task
       can actually use instead.
-- [ ] A `.jsonl` citing `.trellis/spec/**`, or a *sibling* task's
+- [x] A `.jsonl` citing `.trellis/spec/**`, or a *sibling* task's
       `research/**`, still passes — the narrowing rejects self-reference only,
       and deliberately leaves the sibling-archives-later case alone.
 

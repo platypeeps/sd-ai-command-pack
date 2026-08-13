@@ -877,3 +877,59 @@ Documented a fourth recurring fleet-refresh seeding defect -- context entries ci
 ### Next Steps
 
 - None - task complete
+
+
+## Session 371: Seed fleet-refresh consumer tasks with real PRD and context entries
+
+**Date**: 2026-08-13
+**Task**: Seed fleet-refresh consumer tasks with real PRD and context entries
+**Branch**: `task/fleet-refresh-task-seeding`
+
+### Summary
+
+Added a seeded-task gate to the review preflight and wired it into the fleet-refresh checkout-validation stage, so the four defects that recurred across consumer lanes fail where the task is created instead of at focused-candidate or after the completion bundle is published.
+
+### Main Changes
+
+- New review-preflight subcommand seeded-task validates a freshly created consumer task: non-empty description, base_branch equal to the consumer default branch, no TBD PRD placeholders, and no _example scaffold rows -- including the lone-scaffold shape merge time deliberately exempts.
+- New rule rejecting context rows that cite a path under their own task directory, which resolves while the task is active and dangles the instant task.py archive moves the directory.
+- SKILL.md checkout-validation now sets base_branch with task.py set-base-branch, never task.py create --base-branch, which the older vendored task_store.py rejects as an unrecognized argument.
+- Findings name the repair, not just the constraint: the empty-metadata finding cites task.py create flags that exist in both vendored revisions, and the seeded base_branch finding recommends only set-base-branch instead of embedding the shared rule's meta.base_branch_exemption escape hatch.
+- Fixed the human-readable receipt, which printed 'null bundle undefined..undefined' for seeded-task because printBookkeepingResult special-cased only pre-archive.
+- Bumped the pack to 0.71.3 for the shipped payload change.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af21e01b` | docs(task): add design and implementation plan for seeded-task validation |
+| `0b700b32` | chore(task): activate seeded-task validation and bind it to its branch |
+| `7d3d2150` | fix(task): repoint self-citing context rows at specs before the rule lands |
+| `95aea12a` | feat(preflight): reject task context rows citing their own task directory |
+| `5f9a7857` | feat(preflight): reject generated TBD placeholders in a changed Trellis PRD |
+| `bbdc3a20` | chore: propagate the preflight rules to every shipped copy |
+| `152e97e0` | feat(preflight): add a seeded-task gate and wire it into checkout-validation |
+| `687556f2` | fix(preflight): carry the self-reference repair into the seeded-task receipt |
+| `cda25be6` | chore(release): bump the pack to 0.71.3 for the seeded-task payload change |
+| `8c78aff7` | docs: replace stale line anchors with symbol references after review |
+| `b2a3abcc` | fix(preflight): name the repair in the empty task-metadata finding |
+| `642712ed` | fix(preflight): stop the seeded base_branch finding from advising an exemption |
+| `fe4a4ae7` | fix(preflight): print a task count, not a bundle range, for seeded-task |
+
+### Testing
+
+- [OK] sd-check: status=passed, all 8 rows passed
+- [OK] tests/test_bookkeeping_validator.py: Ran 97 tests, OK
+- [OK] tests/test_review_preflight.py: Ran 70 tests, OK
+- [OK] release payload gate: release version gate: shipped payload changed; manifest version 0.71.2 -> 0.71.3
+- [OK] pre-archive gate: status=valid, reasonCodes=['pre_archive_valid']
+- [OK] PR 442 CI settled: 9 pass, 2 skipping, 0 fails; Copilot round 5 clean; 3 threads, 0 unresolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
