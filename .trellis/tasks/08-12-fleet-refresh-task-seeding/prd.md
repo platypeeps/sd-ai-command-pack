@@ -32,6 +32,10 @@ Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
    `focused-candidate` under its root-task rule, `root task base_branch must
    equal the repository default branch`. Repaired by hand on rwbp-coordinator;
    avoided on the two later lanes only because the operator already knew.
+
+   Confirmed live on mezmo_benchmark, 2026-08-13: `task.py create` run on the
+   refresh branch stamped `base_branch: chore/sd-ai-command-pack-0.71.2`, and
+   that same checkout rejected `--base-branch` with `unrecognized arguments`.
 2. **Empty `task.json` description.** `SKILL.md` already requires asserting a
    non-empty description before advancing the stage, and calls it "a
    belt-and-suspenders guard against an upstream `task.py create` that tolerates
@@ -48,12 +52,18 @@ Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
 ## Requirements
 
 1. `SKILL.md`'s `checkout-validation` stage must make `base_branch` explicit
-   rather than inherited, by passing the consumer's resolved default branch to
-   `task.py create --base-branch` (or setting it immediately after). Reordering
-   creation before the branch switch is not sufficient: it produces the right
-   answer only by accident of which branch happens to be checked out, and the
-   stage must be correct on both vendored `task_store.py` revisions without
-   knowing which one the consumer carries.
+   rather than inherited, by running `task.py set-base-branch <task-dir>
+   <default-branch>` immediately after `create`.
+
+   It must **not** instruct `task.py create --base-branch`. That flag ships with
+   the same revision that fixes the defect, so on exactly the consumers that
+   need it, `create` fails with `unrecognized arguments: --base-branch`
+   (observed on mezmo_benchmark, 2026-08-13). `set-base-branch` is present in
+   both revisions and is the only universally available remedy.
+
+   Reordering creation before the branch switch is also insufficient: it
+   produces the right answer only by accident of which branch happens to be
+   checked out.
 2. The three seeded-task properties must be checked mechanically at
    `checkout-validation`, not left to prose: non-empty `task.json` description,
    `base_branch` equal to the consumer's default branch, and planning artifacts
