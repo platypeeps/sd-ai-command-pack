@@ -933,3 +933,51 @@ Added a seeded-task gate to the review preflight and wired it into the fleet-ref
 ### Next Steps
 
 - None - task complete
+
+
+## Session 372: Corrective release 0.71.4: seeded-task gate rejects an unfilled context manifest
+
+**Date**: 2026-08-13
+**Task**: Corrective release 0.71.4: seeded-task gate rejects an unfilled context manifest
+**Branch**: `task/seeded-task-unfilled-manifest`
+
+### Summary
+
+The 0.71.3 fleet campaign blocked itself when the canary consumer's review found that seeded-task accepted a context manifest that existed but carried no usable rows -- the shape a fleet lane most plausibly produces, and the one the pack's own documentation told operators to produce. Fixed the rule, corrected the documentation that had made the defect an approved path, and shipped it as 0.71.4.
+
+### Main Changes
+
+- seeded-task now reports task_context_unfilled when a present manifest yields zero rows carrying a file key, guarded so it never masks a more specific finding
+- Corrected the doc passage telling operators the scaffold must be 'replaced or emptied', which was true for the two diff-scoped lanes and exactly wrong for seeded-task; added the seeded-task reference section the pack never had
+- Extracted bookkeepingResultSubject, which throws on an unrecognized command instead of printing an undefined subject
+- Copilot round 1 found a real ordering defect: the whitespace sweep ran after the unfilled decision and did not count toward its guard, so a padded blank manifest double-reported
+- Swept the changed files for the comment defect Copilot surfaced twice and found three more instances of the same line-split
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3155aa8` | fix(review-preflight): reject an unfilled seeded-task context manifest |
+| `17283561` | fix(review-preflight): stop task_context_unfilled double-reporting whitespace |
+| `a5d6fa3e` | chore(fleet): refresh candidate ledger for the corrected payload |
+| `e40a2a1b` | test: decouple the no-manifests fixture from write_task's behavior |
+| `e237498e` | docs(tests): reflow split hyphenated terms and correct a stale parameter comment |
+| `6ae71f5f` | docs(task): record the verified acceptance criteria |
+
+### Testing
+
+- [OK] full suite: Ran 2448 tests, OK
+- [OK] bookkeeping validator: Ran 103 tests, OK
+- [OK] review preflight: Ran 70 tests, OK
+- [OK] sd-check: 8 passed, 0 failed
+- [OK] release version gate: manifest version 0.71.3 -> 0.71.4
+- [OK] pre-archive gate: pre_archive_valid
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
