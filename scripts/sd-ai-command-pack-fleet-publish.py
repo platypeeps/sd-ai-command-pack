@@ -278,22 +278,39 @@ def refresh_managed_ignore_block(repo: Path, python_bin: str) -> str:
 
     The KB folder is regenerable and ignored, so a helper failure is advisory:
     report it and let the refresh proceed exactly as it does today.
+
+    A nonzero exit does not mean the block went unwritten. The helper calls
+    ensure_gitignore() before it copies anything, then exits 3 when only the
+    KB copies hit conflicts and 2 on a hard OSError partway through. So the
+    returned state is decided by whether .gitignore actually changed, not by
+    the exit code -- reporting "failed" on an exit 3 would tell an operator the
+    block is stale when it is in fact refreshed and already inside H1.
     """
 
     helper = repo / "scripts" / "sd-ai-command-pack-update-spec-kb.py"
     if not helper.is_file():
         return "absent"
+    gitignore = repo / ".gitignore"
+    before = gitignore.read_bytes() if gitignore.is_file() else None
     completed = run([python_bin, str(helper)], cwd=repo, check=False)
-    if completed.returncode != 0:
-        detail = ((completed.stdout or "").strip().splitlines()[-1:] or [""])[0]
-        print(
-            f"warning: managed ignore-block refresh exited {completed.returncode}"
-            + (f": {detail}" if detail else "")
-            + "; publishing without it (housekeeping will report any drift)",
-            file=sys.stderr,
-        )
-        return "failed"
-    return "refreshed"
+    if completed.returncode == 0:
+        return "refreshed"
+    after = gitignore.read_bytes() if gitignore.is_file() else None
+    block_written = after != before
+    detail = ((completed.stdout or "").strip().splitlines()[-1:] or [""])[0]
+    tail = (
+        "; the managed ignore block was still rewritten and is captured by the"
+        " work commit"
+        if block_written
+        else "; publishing without it (housekeeping will report any drift)"
+    )
+    print(
+        f"warning: managed ignore-block refresh exited {completed.returncode}"
+        + (f": {detail}" if detail else "")
+        + tail,
+        file=sys.stderr,
+    )
+    return "refreshed" if block_written else "failed"
 
 
 def work_commit(repo: Path, message_file: Path) -> str:

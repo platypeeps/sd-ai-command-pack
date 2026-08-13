@@ -61,12 +61,23 @@ not a reason to fail a pack refresh. Report the condition and continue — see
 `refresh_managed_ignore_block()`, which returns `refreshed` / `absent` /
 `failed` into the publish result rather than raising.
 
+Decide that state from the file, not from the exit code. A generator can fail
+after it has already written the content publish cares about:
+`sd-ai-command-pack-update-spec-kb.py` calls `ensure_gitignore()` before it
+copies anything, then exits `3` when only the KB copies conflict and `2` on a
+hard `OSError` partway through. Reporting `failed` on an exit `3` would tell an
+operator the block is stale when it is refreshed and already inside H1.
+
 ## Ordering among generators
 
 Run content generators before the repomix map. A block can newly ignore a path,
 and repomix must index the final ignore state or housekeeping's later run
 rewrites the map — reintroducing the same dirty-tree failure one step removed.
 
-Tests: `tests/test_fleet_publish.py`,
-`test_ignore_block_refresh_writes_before_the_work_commit` and
-`test_gitignore_is_in_the_default_allowlist`.
+Tests: `tests/test_fleet_publish.py`. The ordering rule is pinned by
+`test_publish_captures_a_stale_ignore_block_in_the_work_commit`, which runs
+`publish()` end to end and asserts `.gitignore` is in H1 — a test that only
+calls the generator cannot catch the regression. Also
+`test_gitignore_is_in_the_default_allowlist` for the allowlist half, and
+`test_ignore_block_refresh_reports_refreshed_when_a_failing_helper_still_wrote_it`
+for the exit-code-versus-file rule above.
