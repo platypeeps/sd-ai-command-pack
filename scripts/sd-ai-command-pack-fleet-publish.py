@@ -299,10 +299,13 @@ def refresh_managed_ignore_block(repo: Path, python_bin: str) -> str:
     block_written = after != before
     detail = ((completed.stdout or "").strip().splitlines()[-1:] or [""])[0]
     tail = (
-        "; the managed ignore block was still rewritten and is captured by the"
-        " work commit"
+        "; the managed ignore block was still rewritten and will be included in"
+        " the work commit"
         if block_written
-        else "; publishing without it (housekeeping will report any drift)"
+        # Unchanged means not regenerated this run -- it may already be current.
+        # Do not word this as though the block were absent.
+        else "; continuing without regenerating it (housekeeping will report any"
+        " drift)"
     )
     print(
         f"warning: managed ignore-block refresh exited {completed.returncode}"
