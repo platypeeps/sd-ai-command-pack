@@ -93,9 +93,10 @@ Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
 
    The review preflight's existing rule does not catch this. It restricts
    context references to `.trellis/spec/**` or `.trellis/tasks/**/research/**`
-   (`review-preflight.mjs:3839-3840`), and its allowed-root test is
+   (`scripts/sd-ai-command-pack-review-preflight.mjs:3839-3840`), and its
+   allowed-root test is
    `/^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/`
-   (`:3977`) — a shape test that never compares the cited task against the
+   (`scripts/sd-ai-command-pack-review-preflight.mjs:3977`) — a shape test that never compares the cited task against the
    citing one, and that accepts the archive form too. Passing that rule is
    exactly how the defect gets published.
 
