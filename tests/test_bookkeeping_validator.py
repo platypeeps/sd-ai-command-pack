@@ -184,13 +184,14 @@ class BookkeepingValidatorTests(InstallTestCase):
         root: Path,
         *args: str,
         extra_env: dict[str, str] | None = None,
+        json_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 self.node,
                 "scripts/sd-ai-command-pack-review-preflight.mjs",
                 *args,
-                "--json",
+                *(["--json"] if json_output else []),
             ],
             cwd=root,
             text=True,
@@ -288,6 +289,32 @@ class BookkeepingValidatorTests(InstallTestCase):
         (root / task_dir / "prd.md").write_text(prd, encoding="utf-8")
         (root / task_dir / "implement.jsonl").write_text(implement, encoding="utf-8")
         (root / task_dir / "check.jsonl").write_text(check, encoding="utf-8")
+
+    def test_seeded_task_text_receipt_names_the_task_count(self) -> None:
+        """The human-readable PASS line, which the fleet operator sees when the
+        stage is run without --json. seeded-task validates task directories and
+        has no commit range, so naming one would print the bundle placeholders."""
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-text-receipt"
+        self.seed_task(
+            root,
+            task_dir,
+            check='{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
+        )
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+            json_output=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("PASS seeded-task bookkeeping validation: 1 task(s).", result.stdout)
+        self.assertNotIn("bundle", result.stdout)
+        self.assertNotIn("undefined", result.stdout)
 
     def test_seeded_task_accepts_a_correctly_seeded_task(self) -> None:
         root = self.make_validator_repo()

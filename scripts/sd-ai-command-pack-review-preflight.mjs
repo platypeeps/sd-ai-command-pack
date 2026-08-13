@@ -768,9 +768,13 @@ function boundedBookkeepingText(value, limit) {
 
 function printBookkeepingResult(result) {
   if (result.status === 'valid') {
-    const subject = result.command === 'pre-archive'
-      ? `${result.evidence.taskDirectories.length} task(s)`
-      : `${result.mode} bundle ${result.evidence.baseOid?.slice(0, 12)}..${result.evidence.headOid?.slice(0, 12)}`;
+    // final-bundle is the only command with a commit range to name; the
+    // task-directory validators report their subject count instead. Keyed off
+    // final-bundle rather than a list of the others so a new task-directory
+    // command cannot fall through to `null bundle undefined..undefined`.
+    const subject = result.command === 'final-bundle'
+      ? `${result.mode} bundle ${result.evidence.baseOid?.slice(0, 12)}..${result.evidence.headOid?.slice(0, 12)}`
+      : `${result.evidence.taskDirectories.length} task(s)`;
     console.log(`PASS ${result.command} bookkeeping validation: ${subject}.`);
   } else {
     for (const finding of result.findings) {
