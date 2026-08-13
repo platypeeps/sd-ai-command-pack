@@ -766,16 +766,29 @@ function boundedBookkeepingText(value, limit) {
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 3))}...`;
 }
 
+// Exported so the unknown-command branch is reachable from a test: the printer
+// itself writes to the console and argv cannot produce an unrecognized command
+// with a valid status. An earlier revision composed this by excluding
+// final-bundle, which printed `null bundle undefined..undefined` for the then
+// -new seeded-task; the next command added would have inherited a task count it
+// never computed. Enumerating every command and throwing on the rest turns that
+// silent wrong answer into a failure in whatever test first exercises it.
+export function bookkeepingResultSubject(result) {
+  if (result.command === 'final-bundle') {
+    return `${result.mode} bundle ${result.evidence.baseOid?.slice(0, 12)}..${result.evidence.headOid?.slice(0, 12)}`;
+  }
+  if (result.command === 'pre-archive' || result.command === 'seeded-task') {
+    return `${result.evidence.taskDirectories.length} task(s)`;
+  }
+  throw new Error(
+    `bookkeeping result subject is undefined for command ${JSON.stringify(result.command)}; `
+      + 'add it to bookkeepingResultSubject when adding the command',
+  );
+}
+
 function printBookkeepingResult(result) {
   if (result.status === 'valid') {
-    // final-bundle is the only command with a commit range to name; the
-    // task-directory validators report their subject count instead. Keyed off
-    // final-bundle rather than a list of the others so a new task-directory
-    // command cannot fall through to `null bundle undefined..undefined`.
-    const subject = result.command === 'final-bundle'
-      ? `${result.mode} bundle ${result.evidence.baseOid?.slice(0, 12)}..${result.evidence.headOid?.slice(0, 12)}`
-      : `${result.evidence.taskDirectories.length} task(s)`;
-    console.log(`PASS ${result.command} bookkeeping validation: ${subject}.`);
+    console.log(`PASS ${result.command} bookkeeping validation: ${bookkeepingResultSubject(result)}.`);
   } else {
     for (const finding of result.findings) {
       const location = finding.path ? ` ${finding.path}:` : '';
@@ -981,8 +994,10 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add, seedRea
     // that justifies it does not exist: the stage's whole purpose is to assert
     // the manifests were filled, so an unfilled manifest IS the defect.
     const exemptScaffold = !seedReady && isPristineTrellisTaskContextScaffold(loaded.text);
+    let emittedForFile = 0;
     for (const issue of findTrellisTaskContextIssues(file, loaded.text)) {
       if (issue.kind === 'seed' && exemptScaffold) continue;
+      emittedForFile += 1;
       const message = issue.kind === 'seed'
         ? `line ${issue.line} contains a generated _example scaffold row`
         : issue.kind === 'malformed'
@@ -994,7 +1009,33 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add, seedRea
             : `line ${issue.line} contains a reference outside the allowed spec/research roots`;
       add(`task_context_${issue.kind}`, file, message);
     }
-    validateBookkeepingTextWhitespace(file, loaded.text, add);
+    // Only at seeding time, and only when nothing else already named a defect
+    // in this file. At merge time an unfilled manifest is indistinguishable
+    // from one that was never curated -- the same ambiguity that justifies the
+    // scaffold exemption above -- and failing it produced a late,
+    // completion-time failure. At checkout-validation the stage's whole purpose
+    // is to assert the manifests were filled, so unfilled IS the defect.
+    //
+    // The emittedForFile guard keeps the receipt precise: a lone scaffold, a
+    // malformed line, and a self-citation each already say exactly what to fix,
+    // and stacking a vaguer "no rows" finding on top would make it worse.
+    //
+    // The whitespace sweep runs BEFORE that decision and counts toward the same
+    // guard. A manifest emptied to blank lines padded with spaces or tabs has
+    // zero usable rows AND trailing whitespace, so ordering it after would
+    // double-report exactly the shape most likely to occur.
+    validateBookkeepingTextWhitespace(file, loaded.text, (reasonCode, path, message) => {
+      emittedForFile += 1;
+      add(reasonCode, path, message);
+    });
+    if (seedReady && emittedForFile === 0 && countTrellisTaskContextRows(loaded.text) === 0) {
+      add(
+        'task_context_unfilled',
+        file,
+        'contains no context rows; add at least one '
+          + '{"file": "<spec-or-research-path>", "reason": "<why>"} row',
+      );
+    }
   }
 }
 
@@ -4120,6 +4161,34 @@ export function isPristineTrellisTaskContextScaffold(text) {
     Object.keys(record).length === 1 &&
     Object.prototype.hasOwnProperty.call(record, '_example')
   );
+}
+
+// "This manifest carries no usable row" is a property of the file, not of any
+// row, so findTrellisTaskContextIssues cannot express it: that function reaches
+// a row only when the line is non-blank, and reports what is wrong with rows it
+// finds. A file with none is invisible to it. Both walk the same split with the
+// same blank-line skip so they cannot disagree about what counts as a row.
+//
+// A row counts here when it carries a `file` key, even when that reference is
+// rejected: a manifest citing a forbidden path is filled-but-wrong, and the
+// reference or self_reference finding already names that defect precisely.
+export function countTrellisTaskContextRows(text) {
+  let usable = 0;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (isPlainObject(record) && Object.prototype.hasOwnProperty.call(record, 'file')) {
+      usable += 1;
+    }
+  }
+  return usable;
 }
 
 export function findTrellisTaskContextSeedRows(file, text) {

@@ -91,7 +91,9 @@ class ReviewPreflightTests(InstallTestCase):
                 """
 import assert from 'node:assert/strict';
 import {
+  bookkeepingResultSubject,
   copiedTemplateKind,
+  countTrellisTaskContextRows,
   extractDocumentationPathReferences,
   findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
@@ -578,6 +580,44 @@ assert.equal(isPristineTrellisTaskContextScaffold('{"nested":{"_example":"x"}}\\
 assert.equal(isPristineTrellisTaskContextScaffold('malformed\\n'), false);
 assert.equal(isPristineTrellisTaskContextScaffold('["_example"]\\n'), false);
 assert.equal(isPristineTrellisTaskContextScaffold('null\\n'), false);
+
+// countTrellisTaskContextRows answers a file-level question the per-row issue
+// walk cannot: how many rows are usable at all.
+assert.equal(countTrellisTaskContextRows(''), 0);
+assert.equal(countTrellisTaskContextRows('\\n\\n\\n'), 0);
+assert.equal(countTrellisTaskContextRows('{}\\n{"note":"later"}\\n'), 0);
+assert.equal(countTrellisTaskContextRows('malformed\\n'), 0);
+assert.equal(countTrellisTaskContextRows('{"_example":"replace me"}\\n'), 0);
+// A rejected reference still counts as a row: the manifest is filled-but-wrong,
+// and the reference/self_reference finding names that defect precisely.
+assert.equal(countTrellisTaskContextRows('{"file":"src/a.py","reason":"x"}\\n'), 1);
+assert.equal(countTrellisTaskContextRows([
+  '{"file":".trellis/spec/backend/index.md","reason":"real"}',
+  '{"file":".trellis/spec/frontend/index.md","reason":"real"}',
+].join('\\n')), 2);
+
+// Every command that can reach a valid result names its own subject; anything
+// else throws rather than printing a plausible-looking wrong one.
+assert.equal(
+  bookkeepingResultSubject({command: 'seeded-task', evidence: {taskDirectories: ['a']}}),
+  '1 task(s)',
+);
+assert.equal(
+  bookkeepingResultSubject({command: 'pre-archive', evidence: {taskDirectories: ['a', 'b']}}),
+  '2 task(s)',
+);
+assert.equal(
+  bookkeepingResultSubject({
+    command: 'final-bundle',
+    mode: 'completion',
+    evidence: {baseOid: 'a'.repeat(40), headOid: 'b'.repeat(40)},
+  }),
+  `completion bundle ${'a'.repeat(12)}..${'b'.repeat(12)}`,
+);
+assert.throws(
+  () => bookkeepingResultSubject({command: 'future-command', evidence: {}}),
+  /subject is undefined for command "future-command"/,
+);
 assert.equal(isPristineTrellisTaskContextScaffold('"_example"\\n'), false);
 assert.equal(isPristineTrellisTaskContextScaffold('{}\\n'), false);
 assert.equal(isTrellisTaskContextReference('.trellis/spec'), true);
