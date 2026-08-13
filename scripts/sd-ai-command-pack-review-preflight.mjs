@@ -50,6 +50,16 @@ const ACCEPTANCE_LIST_ITEM_RE = /^[ \t]*[-*][ \t]+(.*)$/;
 const ACCEPTANCE_CHECKBOX_RE = /^\[([ xX])\](.*)$/;
 const POST_ARCHIVE_CHECKBOX_RE = /^[ \t]*[-*][ \t]+\[[ xX]\]/;
 const CODE_FENCE_RE = /^[ \t]{0,3}(`{3,}|~{3,})/;
+// One repair string for both reporters. "Cite a spec instead" is not actionable
+// on its own -- a consumer's specs are often all product-domain -- and dropping
+// the `file` key is not an option either, because the ready gate still requires
+// one real {file, reason} row, so a rationale-only manifest is unready rather
+// than fixed.
+const TRELLIS_TASK_CONTEXT_SELF_REFERENCE_REPAIR =
+  'cites a path under its own task directory; task.py archive moves that directory, ' +
+  'so the pointer dangles in the merged tree of the same bundle that publishes it. ' +
+  'Repoint at a .trellis/spec/** path and move the substance into "reason", cite a ' +
+  "sibling task's research/**, or move the facts into the pack's own task.";
 const TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review', 'completed']);
 const ACTIVE_TRELLIS_TASK_STATUSES = new Set(['planning', 'in_progress', 'review']);
 const TRELLIS_TASK_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
@@ -872,7 +882,9 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add) {
         ? `line ${issue.line} contains a generated _example scaffold row`
         : issue.kind === 'malformed'
           ? `line ${issue.line} is not valid JSONL`
-          : `line ${issue.line} contains a reference outside the allowed spec/research roots`;
+          : issue.kind === 'self_reference'
+            ? `line ${issue.line} cites a path under its own task directory`
+            : `line ${issue.line} contains a reference outside the allowed spec/research roots`;
       add(`task_context_${issue.kind}`, file, message);
     }
     validateBookkeepingTextWhitespace(file, loaded.text, add);
@@ -3835,6 +3847,10 @@ function checkTrellisTaskContextManifests() {
         );
         continue;
       }
+      if (issue.kind === 'self_reference') {
+        fail(`${issue.file}:${issue.line} ${TRELLIS_TASK_CONTEXT_SELF_REFERENCE_REPAIR}`);
+        continue;
+      }
       fail(
         `${issue.file}:${issue.line} contains a task context reference outside the allowed spec/research roots; ` +
           'use .trellis/spec/** or .trellis/tasks/**/research/** only, never code or test paths.',
@@ -3978,8 +3994,28 @@ export function isTrellisTaskContextReference(value) {
   );
 }
 
+// A task's own `research/**` is inside the allowed roots, so the root test above
+// accepts it for the whole life of the task -- and `task.py archive` then moves
+// the directory out from under the pointer, in the same completion bundle that
+// publishes it. Comparing the cited task directory against the citing file's own
+// is the only part of that failure that is decidable here: a SIBLING task's
+// research is equally doomed when that sibling archives later, but nothing in
+// the current tree distinguishes it from a citation that will stay valid.
+export function trellisTaskContextOwnerDirectory(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return '';
+  }
+
+  // Normalize exactly as isTrellisTaskContextReference does, or a `./`-prefixed
+  // or backslash-separated self-citation walks past the comparison.
+  const normalized = normalizePathSeparators(value).replace(/^\.\//, '');
+  const match = /^(\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+)\//.exec(normalized);
+  return match ? match[1] : '';
+}
+
 export function findTrellisTaskContextIssues(file, text) {
   const issues = [];
+  const owner = trellisTaskContextOwnerDirectory(file);
 
   for (const [index, line] of text.split(/\r?\n/).entries()) {
     if (!line.trim()) {
@@ -3998,12 +4034,12 @@ export function findTrellisTaskContextIssues(file, text) {
       issues.push({ file, line: index + 1, kind: 'seed' });
       continue;
     }
-    if (
-      isPlainObject(record) &&
-      Object.prototype.hasOwnProperty.call(record, 'file') &&
-      !isTrellisTaskContextReference(record.file)
-    ) {
-      issues.push({ file, line: index + 1, kind: 'reference' });
+    if (isPlainObject(record) && Object.prototype.hasOwnProperty.call(record, 'file')) {
+      if (!isTrellisTaskContextReference(record.file)) {
+        issues.push({ file, line: index + 1, kind: 'reference' });
+      } else if (owner && trellisTaskContextOwnerDirectory(record.file) === owner) {
+        issues.push({ file, line: index + 1, kind: 'self_reference' });
+      }
     }
   }
 

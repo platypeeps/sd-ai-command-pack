@@ -110,6 +110,7 @@ import {
   reviewRiskCategories,
   reviewRiskMatrix,
   shouldCheckDocumentationPathReference,
+  trellisTaskContextOwnerDirectory,
   trellisTaskDirectory,
   thrownValueMessage,
   unsupportedNodeVersionMessage,
@@ -603,6 +604,38 @@ assert.deepEqual(findTrellisTaskContextIssues('implement.jsonl', [
   { file: 'implement.jsonl', line: 3, kind: 'seed' },
   { file: 'implement.jsonl', line: 4, kind: 'malformed' },
 ]);
+assert.equal(trellisTaskContextOwnerDirectory('.trellis/tasks/07-22-demo/check.jsonl'), '.trellis/tasks/07-22-demo');
+assert.equal(trellisTaskContextOwnerDirectory('./.trellis/tasks/07-22-demo/check.jsonl'), '.trellis/tasks/07-22-demo');
+assert.equal(
+  trellisTaskContextOwnerDirectory('.trellis/tasks/archive/2026-07/07-22-demo/check.jsonl'),
+  '.trellis/tasks/archive/2026-07/07-22-demo',
+);
+assert.equal(trellisTaskContextOwnerDirectory('.trellis/spec/backend/index.md'), '');
+assert.equal(trellisTaskContextOwnerDirectory(42), '');
+// A task citing its own research passes the allowed-root test -- that is exactly
+// how the defect reached main -- so the narrowing has to compare directories.
+assert.deepEqual(findTrellisTaskContextIssues('.trellis/tasks/07-22-demo/check.jsonl', [
+  '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"own"}',
+  '{"file":"./.trellis/tasks/07-22-demo/research/notes.md","reason":"own, ./ prefixed"}',
+  '{"file":".trellis/tasks/07-23-other/research/notes.md","reason":"sibling stays allowed"}',
+  '{"file":".trellis/spec/backend/index.md","reason":"spec stays allowed"}',
+].join('\\n')), [
+  { file: '.trellis/tasks/07-22-demo/check.jsonl', line: 1, kind: 'self_reference' },
+  { file: '.trellis/tasks/07-22-demo/check.jsonl', line: 2, kind: 'self_reference' },
+]);
+// The archive form is allowed because the move already happened, but an archived
+// task citing its OWN archived research is still self-reference.
+assert.deepEqual(findTrellisTaskContextIssues('.trellis/tasks/archive/2026-07/07-22-demo/implement.jsonl', [
+  '{"file":".trellis/tasks/archive/2026-07/07-22-demo/research/notes.md","reason":"own"}',
+  '{"file":".trellis/tasks/archive/2026-07/07-23-other/research/notes.md","reason":"sibling"}',
+].join('\\n')), [
+  { file: '.trellis/tasks/archive/2026-07/07-22-demo/implement.jsonl', line: 1, kind: 'self_reference' },
+]);
+// A citing file outside a task directory has no owner and must not self-match.
+assert.deepEqual(
+  findTrellisTaskContextIssues('implement.jsonl', '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"r"}'),
+  [],
+);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);
