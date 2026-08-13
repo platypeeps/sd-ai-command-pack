@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.71.4 - 2026-08-13
+
+### Fixed
+
+- `review-preflight seeded-task` accepted a context manifest that existed but
+  carried no usable rows — an emptied file, a blank-line-only file, or rows that
+  parse but have no `file` key. The gate that exists to prove a fleet-seeded task
+  is grounded before a lane installs anything therefore passed the one shape a
+  lane most plausibly produces. It now reports `task_context_unfilled` when a
+  present manifest yields zero rows carrying a `file` key and the file emitted no
+  other finding, so the more specific defect is never masked by the generic one.
+  The 0.71.3 canary lane found this in the gate shipped an hour earlier.
+- The pack's own documentation made this worse than a missed case: it told
+  operators the generated scaffold "must be replaced or emptied before the task
+  leaves planning", which is true for the two diff-scoped lanes and exactly wrong
+  for `seeded-task`. That passage now states both rules where an operator reads
+  it, and `seeded-task` gains the reference section it never had, including the
+  `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` precedence over a consumer's `origin/HEAD`.
+- A consumer on an inline platform seeds no manifests at all, and that still
+  passes; the new rule fires only on a manifest that is present and unfilled.
+  This is covered by a test rather than an argument, because it is the criterion
+  a careless fix breaks.
+- `printBookkeepingResult` silently produced an `undefined` subject for any
+  command not in its inlined chain. The composition moved to an exported
+  `bookkeepingResultSubject`, which throws on an unrecognized command, so a
+  future subcommand fails loudly at its first print instead of shipping a
+  malformed receipt line. Argv cannot reach this state today; the throw exists so
+  the next command cannot reach it either.
+
 ## 0.71.3 - 2026-08-13
 
 ### Added

@@ -274,8 +274,14 @@ class BookkeepingValidatorTests(InstallTestCase):
         description: str = "A seeded refresh task.",
         base_branch: str = "main",
         prd: str = "# Fixture\n\nA real goal.\n",
-        implement: str = "",
-        check: str = "",
+        # A real row by default. The previous default wrote an empty file, which
+        # is itself the defect this stage is supposed to reject, so every accept
+        # -path fixture was quietly asserting the gap was acceptable.
+        implement: str = '{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
+        check: str = '{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
+        # None means "do not create the file at all" -- the inline-platform
+        # consumer, where task.py create never seeds manifests.
+        write_manifests: bool = True,
     ) -> None:
         record = self.task_record(
             task_dir.rsplit("/", 1)[-1][6:],
@@ -287,8 +293,140 @@ class BookkeepingValidatorTests(InstallTestCase):
         record["base_branch"] = base_branch
         self.write_task(root, task_dir, record)
         (root / task_dir / "prd.md").write_text(prd, encoding="utf-8")
-        (root / task_dir / "implement.jsonl").write_text(implement, encoding="utf-8")
-        (root / task_dir / "check.jsonl").write_text(check, encoding="utf-8")
+        if write_manifests:
+            (root / task_dir / "implement.jsonl").write_text(implement, encoding="utf-8")
+            (root / task_dir / "check.jsonl").write_text(check, encoding="utf-8")
+        else:
+            # write_task creates both manifests unconditionally, so the inline
+            # -platform shape has to remove them rather than decline to write.
+            (root / task_dir / "implement.jsonl").unlink()
+            (root / task_dir / "check.jsonl").unlink()
+
+    def assert_seeded_task_rejects_unfilled(self, task_dir: str, **seed: object) -> None:
+        """Shared body for the three unfilled shapes. Each one reaches the stage
+        with a manifest that exists and carries no usable context row."""
+        root = self.make_validator_repo()
+        self.seed_task(root, task_dir, **seed)  # type: ignore[arg-type]
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn("task_context_unfilled", payload["reasonCodes"], result.stdout)
+        finding = next(
+            item
+            for item in payload["findings"]
+            if item["reasonCode"] == "task_context_unfilled"
+        )
+        self.assertEqual(finding["path"], f"{task_dir}/check.jsonl")
+        # Name the repair, like every other seeding finding. Deliberately not
+        # "or delete the file": deletion also passes, and advertising it would
+        # document the way around the gate.
+        self.assertIn("contains no context rows", finding["message"])
+        self.assertIn('{"file"', finding["message"])
+        self.assertNotIn("delete", finding["message"])
+
+    def test_seeded_task_rejects_an_emptied_manifest(self) -> None:
+        """Shape 1: the operator deletes the scaffold row instead of replacing
+        it. Until 0.71.4 the pack's own documentation told them to."""
+        self.assert_seeded_task_rejects_unfilled(
+            ".trellis/tasks/08-13-emptied", check=""
+        )
+
+    def test_seeded_task_rejects_a_blank_line_only_manifest(self) -> None:
+        """Shape 2: blank lines left behind. findTrellisTaskContextIssues skips
+        blank lines, so no row-level rule ever sees this file.
+
+        Bare newlines specifically: a variant padded with spaces or tabs is
+        already rejected by validateBookkeepingTextWhitespace's trailing
+        -whitespace rule, which is why that shape is not the hole."""
+        self.assert_seeded_task_rejects_unfilled(
+            ".trellis/tasks/08-13-blank-lines", check="\n\n\n"
+        )
+
+    def test_trailing_whitespace_rule_already_covers_the_padded_variant(self) -> None:
+        """Guard for the sentence above. If this ever stops rejecting, the blank
+        -line test is no longer testing the shape it claims to."""
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-padded-blank"
+        self.seed_task(root, task_dir, check="\n   \n\t\n")
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+        )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        self.assertIn(
+            "bookkeeping_whitespace_invalid", payload["reasonCodes"], result.stdout
+        )
+
+    def test_seeded_task_rejects_rows_that_carry_no_file_key(self) -> None:
+        """Shape 3, absent from the original report: rows that parse as JSON but
+        match neither the _example branch nor the file branch, so they produce
+        no finding while looking filled."""
+        self.assert_seeded_task_rejects_unfilled(
+            ".trellis/tasks/08-13-no-file-key",
+            check='{}\n{"note": "fill this in later"}\n',
+        )
+
+    def test_seeded_task_accepts_a_consumer_with_no_manifests_at_all(self) -> None:
+        """The case the rule must not break. task.py create seeds the manifests
+        only when _has_subagent_platform finds an anchor, so on an inline
+        -platform consumer their absence is correct, not a defect."""
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-inline-platform"
+        self.seed_task(root, task_dir, write_manifests=False)
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["reasonCodes"], ["seeded_task_valid"])
+
+    def test_seeded_task_reports_the_row_defect_not_the_unfilled_one(self) -> None:
+        """No double-reporting. A lone _example scaffold, a malformed line, and a
+        self-citation each already name the real defect; stacking a vaguer
+        "unfilled" finding on top would make the receipt worse, not better."""
+        for label, check_text, expected in (
+            ("scaffold", '{"_example": "fill me"}\n', "task_context_seed"),
+            ("malformed", "{not json\n", "task_context_malformed"),
+        ):
+            with self.subTest(shape=label):
+                root = self.make_validator_repo()
+                task_dir = f".trellis/tasks/08-13-{label}-only"
+                self.seed_task(root, task_dir, check=check_text)
+
+                result = self.run_validator(
+                    root,
+                    "seeded-task",
+                    "--task-dir",
+                    task_dir,
+                    extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+                )
+
+                payload = json.loads(result.stdout)
+                self.assertIn(expected, payload["reasonCodes"], result.stdout)
+                self.assertNotIn(
+                    "task_context_unfilled", payload["reasonCodes"], result.stdout
+                )
 
     def test_seeded_task_text_receipt_names_the_task_count(self) -> None:
         """The human-readable PASS line, which the fleet operator sees when the
