@@ -176,9 +176,10 @@ different gates, from the same mechanic.
 - In this repository, `.trellis/spec/tooling/fleet-publish-generated-content.md`
   cited the active path of the task that established it, and the finalization
   that published the spec archived that task in the same push. That one was a
-  hard CI failure, in a file the archive commit never touched
-  (`FAIL ... references missing path .trellis/tasks/08-12-fleet-publish-ignore-block-ordering`),
-  fixed by `67ae00c4`.
+  hard CI failure, in a file the archive commit never touched — the preflight's
+  `references missing path` check, naming the spec's own line and the
+  now-moved task directory — fixed by `67ae00c4`, which repointed the citation
+  at `.trellis/tasks/archive/2026-08/08-12-fleet-publish-ignore-block-ordering`.
 
 A third instance surfaced while this very requirement was being written: the
 bullet above originally quoted the hoa-manager pointer as a literal
