@@ -86,6 +86,10 @@ DEFAULT_ALLOWED_PREFIXES = (
     ".qoder/",
     ".sd-ai-command-pack/",
     "docs/repomix-map.md",
+    # Carries the pack-managed .obsidian-kb block. refresh_managed_ignore_block()
+    # rewrites it before the work commit, and an operator who already ran
+    # housekeeping arrives here with it dirty.
+    ".gitignore",
 )
 
 
@@ -256,6 +260,42 @@ def regenerate_repomix_post_archive(
         )
 
 
+def refresh_managed_ignore_block(repo: Path, python_bin: str) -> str:
+    """Regenerate the pack-managed .obsidian-kb ignore block BEFORE the work commit.
+
+    Housekeeping runs this same helper at the merge gate. When a release changes
+    the managed block, letting housekeeping be the first to write it dirties the
+    tree only after the completion bundle is published -- and that is
+    unrecoverable in place: a receipt whose span contains .gitignore is
+    `bundle_scope_invalid`, and a second bundle is `completion_archive_move_missing`
+    because the archive move happens once. Running it here puts the change in H1,
+    where it belongs.
+
+    Argument form must stay identical to sd-ai-command-pack-housekeeping.sh's:
+    no --if-present, which returns early when .obsidian-kb is absent and would
+    skip the very block housekeeping still writes. The helper resolves its own
+    root from the working directory, so cwd must be the consumer.
+
+    The KB folder is regenerable and ignored, so a helper failure is advisory:
+    report it and let the refresh proceed exactly as it does today.
+    """
+
+    helper = repo / "scripts" / "sd-ai-command-pack-update-spec-kb.py"
+    if not helper.is_file():
+        return "absent"
+    completed = run([python_bin, str(helper)], cwd=repo, check=False)
+    if completed.returncode != 0:
+        detail = ((completed.stdout or "").strip().splitlines()[-1:] or [""])[0]
+        print(
+            f"warning: managed ignore-block refresh exited {completed.returncode}"
+            + (f": {detail}" if detail else "")
+            + "; publishing without it (housekeeping will report any drift)",
+            file=sys.stderr,
+        )
+        return "failed"
+    return "refreshed"
+
+
 def work_commit(repo: Path, message_file: Path) -> str:
     git_run(["add", "-A"], cwd=repo)
     git_run(["commit", "-q", "-F", str(message_file)], cwd=repo)
@@ -372,6 +412,10 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
     check_preconditions(repo, args.slug, prefixes)
     base = git_out(["rev-parse", "HEAD"], cwd=repo)
 
+    # Before the map: the block can newly ignore .obsidian-kb, and repomix must
+    # index the final ignore state or housekeeping's later run rewrites the map.
+    ignore_block = refresh_managed_ignore_block(repo, args.python)
+
     indexed = (repo / args.repomix_script).exists() and (
         repo / args.repomix_output
     ).exists()
@@ -414,6 +458,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         "h3": h3,
         "receipt": status,
         "repomixIndexed": indexed,
+        "ignoreBlock": ignore_block,
         "pushed": pushed,
         "receiptPath": str(receipt_out),
     }

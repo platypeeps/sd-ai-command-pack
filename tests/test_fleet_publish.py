@@ -388,6 +388,76 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
             "the real active task must be untouched by an unrelated failed archive",
         )
 
+    # ------------------------------------------------- managed ignore block ordering
+
+    def _make_kb_helper(self, body: str) -> Path:
+        """Install a stub spec-KB updater at the path the consumer would ship."""
+
+        scripts = self.repo / "scripts"
+        scripts.mkdir(exist_ok=True)
+        helper = scripts / "sd-ai-command-pack-update-spec-kb.py"
+        helper.write_text("import sys\n" + body, encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "add kb helper")
+        return helper
+
+    def test_gitignore_is_in_the_default_allowlist(self) -> None:
+        # An operator who already ran housekeeping arrives with .gitignore dirty.
+        self.assertIn(".gitignore", publish.DEFAULT_ALLOWED_PREFIXES)
+        (self.repo / ".gitignore").write_text("/.obsidian-kb\n", encoding="utf-8")
+        publish.check_preconditions(
+            self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
+        )
+
+    def test_ignore_block_refresh_writes_before_the_work_commit(self) -> None:
+        self._make_kb_helper(
+            "from pathlib import Path\n"
+            "Path('.gitignore').write_text('# sd-ai-command-pack obsidian-kb start\\n')\n"
+        )
+        state = publish.refresh_managed_ignore_block(self.repo, sys.executable)
+        self.assertEqual(state, "refreshed")
+        self.assertIn(
+            "obsidian-kb start",
+            (self.repo / ".gitignore").read_text(encoding="utf-8"),
+        )
+
+    def test_ignore_block_refresh_is_invoked_with_the_consumer_as_cwd(self) -> None:
+        # The real helper resolves its own root from the working directory, so a
+        # wrong cwd would rewrite the source checkout's .gitignore instead.
+        self._make_kb_helper(
+            "import os\n"
+            "from pathlib import Path\n"
+            "Path('cwd.txt').write_text(os.getcwd())\n"
+        )
+        publish.refresh_managed_ignore_block(self.repo, sys.executable)
+        self.assertEqual(
+            Path((self.repo / "cwd.txt").read_text(encoding="utf-8")).resolve(),
+            self.repo,
+        )
+
+    def test_ignore_block_refresh_passes_no_if_present(self) -> None:
+        # Housekeeping omits --if-present; matching it is what keeps the two
+        # writers producing identical .gitignore content.
+        self._make_kb_helper(
+            "from pathlib import Path\n"
+            "Path('argv.txt').write_text(repr(sys.argv[1:]))\n"
+        )
+        publish.refresh_managed_ignore_block(self.repo, sys.executable)
+        self.assertEqual((self.repo / "argv.txt").read_text(encoding="utf-8"), "[]")
+
+    def test_ignore_block_refresh_reports_absent_helper_without_failing(self) -> None:
+        self.assertEqual(
+            publish.refresh_managed_ignore_block(self.repo, sys.executable), "absent"
+        )
+
+    def test_ignore_block_refresh_failure_is_advisory(self) -> None:
+        # The KB folder is regenerable and ignored, so a failing refresh must not
+        # abort a pack refresh that is otherwise sound.
+        self._make_kb_helper("sys.stderr.write('read-only target\\n')\nsys.exit(2)\n")
+        self.assertEqual(
+            publish.refresh_managed_ignore_block(self.repo, sys.executable), "failed"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
