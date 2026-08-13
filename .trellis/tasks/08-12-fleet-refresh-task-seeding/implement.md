@@ -181,7 +181,7 @@ defaults to `disposition: 'invalid'` (`:629`) — not `indeterminate`. Reserve
 `indeterminate` for an unresolvable default branch, and assert that case
 separately.
 
-## Step 4 — SKILL.md `checkout-validation`
+## Step 4 — SKILL.md `checkout-validation` — **Done**
 
 `.agents/skills/sd-fleet-refresh/SKILL.md:152-165`:
 
@@ -194,6 +194,35 @@ separately.
 **Gate:** `node scripts/sd-ai-command-pack-review-preflight.mjs` and
 `scripts/sd-ai-command-pack-check.py --json` both clean — the doc path-reference
 gate is what catches a wrong script name or a moved path here.
+
+**Result.** The edit belongs in `templates/.agents/skills/sd-fleet-refresh/SKILL.md`;
+`.agents/…` is the dogfood install `make sync` regenerates. The only sanctioned
+drift between the two is the template's `model: sonnet` front-matter line, which
+install strips — after `make sync` the diff is that one line and nothing else.
+
+`make sync` does **not** regenerate `.agents/skills/sd-fleet-refresh/SKILL.md`
+— that skill is source-only and installs nowhere, so both copies are hand-edited
+and must be kept in step. The step-4 gate as written (`review-preflight` +
+`sd-check`) does not catch a one-sided edit; the full unit suite does, which is
+the reason to run it before the commit rather than after.
+
+Two suite failures, both caused by this step:
+
+- `test_sdlc_commands.test_skills_declare_no_environment_variables` — the repo
+  forbids the literal `SD_AI_COMMAND_PACK_` prefix anywhere in a SKILL.md. The
+  env-leak warning now names the variable by description, not by identifier.
+- `test_review_preflight.test_review_preflight_rejects_changed_non_spec_context_paths`
+  — its accept-path fixture cited *its own* task's `research/cases.md`, exactly
+  the shape step 1 now rejects. Repointed at a sibling task; the own-directory
+  case stays covered by the step-1 tests. This is the rule finding a real
+  instance in the repo's own fixtures, not a false positive.
+
+Preflight: `0 failure(s), 3 warning(s)` — the three are the pre-existing
+boundary-risk, two-task-directory, and tooling/generated-scope advisories, all
+dispositioned below. `sd-check`: `passed {'failed': 0, …, 'passed': 8}` only
+after `.github/scripts/generate-plugin.py` and
+`scripts/sd-ai-command-pack-fleet-candidate-check.py`; `make sync` alone leaves
+`pack.shipped-surface-closure` failing on a stale `payloadDigest`.
 
 ## Step 5 — acceptance criteria, against a scratch consumer
 

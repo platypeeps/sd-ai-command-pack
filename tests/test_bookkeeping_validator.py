@@ -253,6 +253,199 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.assertIn("[--repo <repo-root>]", result.stdout)
 
+    SEED_SCAFFOLD = json.dumps(
+        {
+            "_example": (
+                'Fill with {"file": "<path>", "reason": "<why>"}. '
+                "Put spec/research files only — no code paths. "
+                "Run `python3 .trellis/scripts/get_context.py --mode packages` "
+                "to list available specs. "
+                "Delete this line once real entries are added."
+            )
+        }
+    )
+
+    def seed_task(
+        self,
+        root: Path,
+        task_dir: str,
+        *,
+        description: str = "A seeded refresh task.",
+        base_branch: str = "main",
+        prd: str = "# Fixture\n\nA real goal.\n",
+        implement: str = "",
+        check: str = "",
+    ) -> None:
+        record = self.task_record(
+            task_dir.rsplit("/", 1)[-1][6:],
+            status="in_progress",
+            branch=None,
+            completed_at=None,
+            description=description,
+        )
+        record["base_branch"] = base_branch
+        self.write_task(root, task_dir, record)
+        (root / task_dir / "prd.md").write_text(prd, encoding="utf-8")
+        (root / task_dir / "implement.jsonl").write_text(implement, encoding="utf-8")
+        (root / task_dir / "check.jsonl").write_text(check, encoding="utf-8")
+
+    def test_seeded_task_accepts_a_correctly_seeded_task(self) -> None:
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-good-seed"
+        self.seed_task(
+            root,
+            task_dir,
+            check='{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
+        )
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(payload["reasonCodes"], ["seeded_task_valid"])
+        # The receipt has to show where the branch name came from: under --repo
+        # the environment variable outranks the consumer's own origin/HEAD.
+        self.assertEqual(payload["evidence"]["defaultBranch"], "main")
+        self.assertEqual(
+            payload["evidence"]["defaultBranchSource"],
+            "SD_AI_COMMAND_PACK_DEFAULT_BRANCH",
+        )
+
+    def test_seeded_task_reports_every_seeding_defect_at_once(self) -> None:
+        """One run, all five classes. A gate that stops at the first defect costs
+        the operator one round trip per defect on a stage that has four."""
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-bad-seed"
+        self.seed_task(
+            root,
+            task_dir,
+            description=" ",
+            base_branch="chore/sd-ai-command-pack-0.71.2",
+            prd="# Fixture\n\n## Goal\n\nTBD.\n\n## Requirements\n\n- TBD\n",
+            implement=self.SEED_SCAFFOLD + "\n",
+            check=f'{{"file": "{task_dir}/research/notes.md", "reason": "self"}}\n',
+        )
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "invalid")
+        for code in (
+            "task_metadata_invalid",
+            "task_prd_placeholder",
+            "task_context_seed",
+            "task_context_self_reference",
+            "task_base_branch_invalid",
+        ):
+            self.assertIn(code, payload["reasonCodes"], result.stdout)
+        # Requirement 3: name the repair, not just the defect. The shared rule's
+        # own message offers set-meta base_branch_exemption -- the escape hatch --
+        # which is the wrong advice at this stage.
+        self.assertIn(f"set-base-branch {task_dir} main", result.stdout)
+        self.assertNotIn("_example", payload["reasonCodes"])
+
+    def test_seeded_task_rejects_the_lone_scaffold_that_merge_time_exempts(self) -> None:
+        """Both halves of the un-exemption. A freshly created task's manifests are
+        exactly the shape merge time treats as unfilled-and-advisory, so without
+        the flag the stage would pass the defect it exists to catch -- and with the
+        flag applied globally, the late completion-time failure its comment
+        documents would come back."""
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-lone-scaffold"
+        self.seed_task(
+            root,
+            task_dir,
+            implement=self.SEED_SCAFFOLD + "\n",
+            check='{"file": ".trellis/spec/backend/index.md", "reason": "real"}\n',
+        )
+
+        seeded = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"},
+        )
+        self.assertEqual(seeded.returncode, 1, seeded.stdout)
+        self.assertIn("task_context_seed", json.loads(seeded.stdout)["reasonCodes"])
+
+        # Same tree, same file, pre-archive: still exempt.
+        record_path = root / task_dir / "task.json"
+        record = json.loads(record_path.read_text())
+        record["branch"] = "codex/lone-scaffold"
+        record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        archive_ready = self.run_validator(root, "pre-archive", "--task-dir", task_dir)
+        self.assertNotIn(
+            "task_context_seed",
+            json.loads(archive_ready.stdout)["reasonCodes"],
+            archive_ready.stdout,
+        )
+
+    def test_seeded_task_is_indeterminate_when_no_default_branch_resolves(self) -> None:
+        """Fails closed on 'cannot tell', and says so rather than reporting the
+        base_branch rule as satisfied."""
+        root = self.make_validator_repo()
+        task_dir = ".trellis/tasks/08-13-no-default"
+        self.seed_task(root, task_dir, base_branch="anything")
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            task_dir,
+            extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": ""},
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn("task_base_branch_indeterminate", payload["reasonCodes"])
+        self.assertIsNone(payload["evidence"]["defaultBranchSource"])
+        self.assertNotIn("task_base_branch_invalid", payload["reasonCodes"])
+
+    def test_seeded_task_requires_exactly_one_task_dir(self) -> None:
+        root = self.make_validator_repo()
+
+        for args in (
+            ("seeded-task",),
+            (
+                "seeded-task",
+                "--task-dir",
+                ".trellis/tasks/08-13-a",
+                "--task-dir",
+                ".trellis/tasks/08-13-b",
+            ),
+        ):
+            result = self.run_validator(root, *args)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("seeded-task requires exactly one --task-dir", result.stdout)
+
+        result = self.run_validator(
+            root,
+            "seeded-task",
+            "--task-dir",
+            ".trellis/tasks/08-13-a",
+            "--mode",
+            "planning",
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(
+            "seeded-task does not accept --mode, --base, or --head", result.stdout
+        )
+
     def test_validator_honors_configured_artifact_limit(self) -> None:
         root = self.make_validator_repo()
         config = root / ".sd-ai-command-pack/review-preflight.json"

@@ -155,14 +155,59 @@ but defines no ordering or transition policy:
   dedicated lightweight Trellis task for this consumer and target release when
   no current task exists. Give its PRD the immutable release identity, managed
   scope, preparation/check commands, and finish-work expectation; bind it to
-  the refresh branch. After activation, assert the task's `task.json`
-  `description` is present and non-empty before advancing this stage; an empty
-  or missing description is a checkout-validation failure with an actionable
-  message (re-create the task with a real `--description`), not a silent
-  advance — a belt-and-suspenders guard against an upstream `task.py create`
-  that tolerates an empty description. An unrelated current task, dirty Trellis
-  state, or externally owned checkout means `ownership-skip`; never repurpose
-  another task, stash, reset, clean, or install.
+  the refresh branch.
+
+  Immediately after `task.py create`, set the PR target explicitly:
+
+  ```bash
+  python3 ./.trellis/scripts/task.py set-base-branch <task-dir> <default-branch>
+  ```
+
+  Do **not** use `task.py create --base-branch`. That flag ships with the same
+  vendored `task_store.py` revision that fixes the defect, so on exactly the
+  consumers that need it `create` fails with `unrecognized arguments`. The older
+  revision writes `base_branch` as the currently checked-out branch
+  unconditionally, which on this stage is the refresh branch — and the review
+  preflight then rejects the lane at `focused-candidate` under its root-task
+  rule. `set-base-branch` exists in both revisions. Reordering creation before
+  the branch switch is not a substitute: it produces the right answer only by
+  accident of which branch happens to be checked out.
+
+  Then validate the seeded task mechanically before advancing, from **this
+  source checkout** against the consumer:
+
+  ```bash
+  node scripts/sd-ai-command-pack-review-preflight.mjs seeded-task \
+    --repo <absolute consumer checkout> --task-dir <consumer-relative task dir> --json
+  ```
+
+  Require schema version 1 and `status: valid` with `seeded_task_valid`. Any
+  other status is a checkout-validation failure: report the findings verbatim —
+  each names the offending file and its repair — and do not advance. It rejects
+  an empty `description`, a `base_branch` that is not the consumer's default
+  branch, `TBD` placeholders left in `prd.md`, `_example` scaffold rows still in
+  `implement.jsonl` / `check.jsonl`, and a context row citing a path under the
+  seeded task's **own** directory, which `task.py archive` would dangle inside
+  the same completion bundle that publishes it.
+
+  Run it from the source checkout, never the consumer's installed copy: this
+  stage runs *before* `install-update`, so the consumer still carries the
+  previous release, whose preflight exits `2` with
+  `unknown review-preflight command`. Leave the pack's default-branch override
+  environment variable unset for the whole lane — under `--repo` it outranks the
+  consumer's own `origin/HEAD` and would decide the very rule this gate
+  enforces. The receipt's `evidence.defaultBranchSource` records which one
+  answered.
+
+  This replaces the prose description assertion that used to live here. The
+  guard was always meant to be belt-and-suspenders against an upstream
+  `task.py create` that tolerates an empty description; as prose it could be and
+  was skipped, and consumers reached `focused-candidate` with
+  `field description must be a non-empty string`.
+
+  An unrelated current task, dirty Trellis state, or externally owned checkout
+  means `ownership-skip`; never repurpose another task, stash, reset, clean, or
+  install.
 - `install-update` and `install-audit`: run only the commands printed by
   preflight. The installer, provenance, and audit remain authoritative.
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the

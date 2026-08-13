@@ -3060,7 +3060,9 @@ assert.deepEqual(
             encoding="utf-8",
         )
         (task / "check.jsonl").write_text(
-            '{"file":".trellis/tasks/07-22-context-boundary/research/cases.md","reason":"research evidence"}\n',
+            # A sibling task's research/**, not this task's own: the own-directory
+            # form is rejected separately by the self-reference rule.
+            '{"file":".trellis/tasks/07-21-context-sibling/research/cases.md","reason":"research evidence"}\n',
             encoding="utf-8",
         )
         result = self.run_review_preflight(node, root)

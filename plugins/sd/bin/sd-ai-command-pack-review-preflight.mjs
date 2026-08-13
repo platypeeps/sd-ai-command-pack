@@ -508,7 +508,7 @@ if (isMainModule()) {
     process.exit(2);
   }
 
-  if (process.argv[2] === 'pre-archive' || process.argv[2] === 'final-bundle') {
+  if (['pre-archive', 'final-bundle', 'seeded-task'].includes(process.argv[2])) {
     const cli = parseBookkeepingCli(process.argv.slice(2));
     if (cli.error) {
       console.error(`error: ${cli.error}`);
@@ -555,6 +555,7 @@ function bookkeepingUsage() {
     '  sd-ai-command-pack-review-preflight.mjs',
     '  sd-ai-command-pack-review-preflight.mjs pre-archive --task-dir <active-task-dir> [--task-dir ...] [--repo <repo-root>] [--json]',
     '  sd-ai-command-pack-review-preflight.mjs final-bundle --mode <completion|planning> --base <commit> --head <commit> [--repo <repo-root>] [--json]',
+    '  sd-ai-command-pack-review-preflight.mjs seeded-task --task-dir <active-task-dir> [--repo <repo-root>] [--json]',
   ].join('\n');
 }
 
@@ -608,6 +609,16 @@ function parseBookkeepingCli(args) {
     }
     if (options.mode || options.base || options.head) {
       return { error: 'pre-archive does not accept --mode, --base, or --head' };
+    }
+  } else if (command === 'seeded-task') {
+    // Exactly one: the stage validates the one task it just created, and a
+    // multi-task invocation would report a pass/fail an operator cannot map back
+    // to a single consumer lane.
+    if (options.taskDirs.length !== 1) {
+      return { error: 'seeded-task requires exactly one --task-dir' };
+    }
+    if (options.mode || options.base || options.head) {
+      return { error: 'seeded-task does not accept --mode, --base, or --head' };
     }
   } else if (command === 'final-bundle') {
     if (!['completion', 'planning'].includes(options.mode)) {
@@ -673,10 +684,29 @@ export function runBookkeepingValidator(options = {}) {
           completionReady: true,
         });
       }
+    } else if (options.command === 'seeded-task') {
+      evidence.taskDirectories = [...new Set(options.taskDirs || [])].sort();
+      for (const taskDir of evidence.taskDirectories) {
+        // completionReady: false -- a task at checkout-validation legitimately
+        // has no feature branch and is not yet in_progress/review.
+        // seedReady: true -- and here the lone `_example` scaffold IS the defect;
+        // see validateBookkeepingTaskContexts for why merge time exempts it.
+        const record = validateBookkeepingTaskDirectory(taskDir, {
+          add,
+          archived: false,
+          completionReady: false,
+          seedReady: true,
+        });
+        validateSeededTaskBaseBranch(taskDir, record, evidence, add);
+      }
     } else if (options.command === 'final-bundle') {
       validateBookkeepingFinalBundle(options, evidence, add, {}, addAdvisory);
     } else {
-      add('validator_command_invalid', '', 'command must be pre-archive or final-bundle');
+      add(
+        'validator_command_invalid',
+        '',
+        'command must be pre-archive, seeded-task, or final-bundle',
+      );
     }
   } catch (error) {
     add(
@@ -698,7 +728,9 @@ export function runBookkeepingValidator(options = {}) {
       : 'valid';
   const validCode = options.command === 'pre-archive'
     ? 'pre_archive_valid'
-    : `${options.mode || 'unknown'}_bundle_valid`;
+    : options.command === 'seeded-task'
+      ? 'seeded_task_valid'
+      : `${options.mode || 'unknown'}_bundle_valid`;
   return {
     schemaVersion: BOOKKEEPING_SCHEMA_VERSION,
     kind: 'trellis-bookkeeping-validation',
@@ -758,8 +790,60 @@ function printBookkeepingResult(result) {
   console.log(`\nBookkeeping validator: ${result.status} (${result.findings.length} finding(s)${advisorySuffix}).`);
 }
 
+// The bookkeeping validator does not wire up the root-task base_branch rule --
+// its only other call site is the merge-time preflight -- so seeded-task calls
+// it directly rather than waiting for focused-candidate to reject the lane.
+function validateSeededTaskBaseBranch(taskDir, record, evidence, add) {
+  if (!isPlainObject(record)) {
+    return;
+  }
+
+  const configured = (process.env.SD_AI_COMMAND_PACK_DEFAULT_BRANCH || '').trim();
+  const defaultBranch = trellisRootDefaultBranchName();
+  // Record the source, not just the value. Under --repo the environment
+  // variable outranks the consumer's own origin/HEAD, so a wrong answer here
+  // decides the one rule this gate exists to enforce; the receipt has to show
+  // where the name came from.
+  evidence.defaultBranch = defaultBranch || null;
+  evidence.defaultBranchSource = configured
+    ? 'SD_AI_COMMAND_PACK_DEFAULT_BRANCH'
+    : defaultBranch
+      ? 'origin/HEAD'
+      : null;
+
+  const taskFile = `${taskDir}/task.json`;
+  if (!defaultBranch) {
+    // Cannot tell, rather than wrong: neither the environment nor origin/HEAD
+    // named a default branch, so the comparison is unavailable.
+    add(
+      'task_base_branch_indeterminate',
+      taskFile,
+      'repository default branch could not be resolved from SD_AI_COMMAND_PACK_DEFAULT_BRANCH '
+        + 'or refs/remotes/origin/HEAD, so base_branch cannot be validated',
+      'indeterminate',
+    );
+    return;
+  }
+
+  for (const issue of validateTrellisRootTaskBaseBranch(record, defaultBranch)) {
+    // The shared message's repair verb is set-meta base_branch_exemption -- the
+    // escape hatch. Handed to a fleet operator verbatim it advises stamping an
+    // exemption over the exact defect this stage exists to catch, so the repair
+    // leads and the shared text follows.
+    add(
+      'task_base_branch_invalid',
+      taskFile,
+      `field ${issue}. At checkout-validation the repair is `
+        + `python3 ./.trellis/scripts/task.py set-base-branch ${taskDir} ${defaultBranch} `
+        + '-- run it immediately after task.py create, and do not use '
+        + 'task.py create --base-branch, which the older vendored task_store.py '
+        + 'rejects as an unrecognized argument',
+    );
+  }
+}
+
 function validateBookkeepingTaskDirectory(taskDir, options) {
-  const { add, archived, completionReady = false, addAdvisory = null, deltaPaths = null } = options;
+  const { add, archived, completionReady = false, seedReady = false, addAdvisory = null, deltaPaths = null } = options;
   // Delta scoping: a defect anchored to a file inside the bundle delta blocks;
   // one anchored to an untouched file demotes to an advisory. Without a delta
   // set (pre-archive) or an advisory sink (historical replay), everything
@@ -860,12 +944,12 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
   if (taskLoaded.status === 'loaded') {
     validateBookkeepingTextWhitespace(taskFile, taskLoaded.text, addScoped);
   }
-  validateBookkeepingTaskContexts(taskDir, record, archived, addScoped);
+  validateBookkeepingTaskContexts(taskDir, record, archived, addScoped, seedReady);
   validateBookkeepingTopology(taskFile, taskDir, record, addScoped);
   return recordAvailable ? record : null;
 }
 
-function validateBookkeepingTaskContexts(taskDir, record, archived, add) {
+function validateBookkeepingTaskContexts(taskDir, record, archived, add, seedReady = false) {
   // Context files are validated even when task.json is broken or missing —
   // their defects stand on their own. A manifest whose ONLY row is the untouched
   // generated `_example`-only scaffold `task.py create` writes is treated as
@@ -886,7 +970,10 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add) {
       add('task_context_invalid', file, loaded.message);
       continue;
     }
-    const exemptScaffold = isPristineTrellisTaskContextScaffold(loaded.text);
+    // seedReady flips the exemption off. At checkout-validation the ambiguity
+    // that justifies it does not exist: the stage's whole purpose is to assert
+    // the manifests were filled, so an unfilled manifest IS the defect.
+    const exemptScaffold = !seedReady && isPristineTrellisTaskContextScaffold(loaded.text);
     for (const issue of findTrellisTaskContextIssues(file, loaded.text)) {
       if (issue.kind === 'seed' && exemptScaffold) continue;
       const message = issue.kind === 'seed'
