@@ -239,6 +239,44 @@ deliberately in a throwaway checkout and run the stage gate:
 | self-citation fails, with a usable alternative named | a row citing the fixture's own `research/**` |
 | spec + sibling research still pass | rows citing `.trellis/spec/**` and another task's `research/**` |
 
+**Results.** Two throwaway clones, each with its own bare origin and `.claude/`
+present so `_has_subagent_platform` seeds the manifests — without that anchor
+`task.py create` writes no JSONL at all and the `_example` rule never fires,
+which is why the first fixture pass looked cleaner than a real lane. A single
+shared origin also silently gives both clones the *same* vendored revision;
+they must not share one.
+
+Revision boundary, read-only from the consumers: all five reachable checkouts
+(loadsmith, hoa-manager, se-ai-command-pack, sd-github-review,
+anomaly-metric-creator) carry the old `task_store.py` — `resolve_default_branch`
+occurs 0 times there and 2 times here. Note the symbol is *called* in
+`task_store.py` and *defined* in `common/git.py`, so grep for the bare name, not
+for `def`.
+
+| Claim | Evidence |
+| --- | --- |
+| old revision stamps the refresh branch | `base_branch=chore/refresh-0-71-3` after `create` on that branch |
+| new revision resolves the default branch | `base_branch=main`, same command, same branch |
+| `create --base-branch` is unusable on old | `task.py: error: unrecognized arguments: --base-branch main` |
+| `set-base-branch` exists on both | old `task.py:441`, new `task.py:529`; `✓ Base branch set to: main` on old |
+| the remedy clears the finding | codes drop from `task_base_branch_invalid, task_context_seed, task_prd_placeholder` to `task_context_seed, task_prd_placeholder` |
+| untouched `create` output fails | `task_prd_placeholder` ×2 (`- TBD`, `- [ ] TBD`) + `task_context_seed` ×2, on both revisions |
+| a correct task advances | `valid ['seeded_task_valid']` |
+| self-citation fails | `invalid ['task_context_self_reference']` |
+| spec + sibling research pass | same `valid` run: `implement.jsonl` cites `.trellis/spec/**`, `check.jsonl` cites a sibling task's `research/**` |
+
+Empty description is covered by the step-3 fixture run (`task_metadata_invalid`);
+`task.py create --description ""` is rejected upstream by `create` itself on the
+new revision, so the gate's own guard is the thing under test, not `create`.
+
+One defect found here, not in review: the self-reference finding carried only
+`line N cites a path under its own task directory`, while SKILL.md told the
+operator each finding names its repair. The validator now emits the same
+`TRELLIS_TASK_CONTEXT_SELF_REFERENCE_REPAIR` string the merge-time check prints,
+so the receipt names the three alternatives; and the SKILL.md sentence is
+corrected to what the other findings actually provide — file, line, and what
+must change.
+
 ## Review gates
 
 - Adversarial planning review before `task.py start` (already run for this

@@ -357,6 +357,17 @@ class BookkeepingValidatorTests(InstallTestCase):
         # which is the wrong advice at this stage.
         self.assertIn(f"set-base-branch {task_dir} main", result.stdout)
         self.assertNotIn("_example", payload["reasonCodes"])
+        # Same requirement for the self-citation: the operator reading only the
+        # receipt has to learn what to cite instead. The merge-time check prints
+        # these alternatives; the receipt must carry the same string.
+        self_reference = next(
+            finding
+            for finding in payload["findings"]
+            if finding["reasonCode"] == "task_context_self_reference"
+        )
+        self.assertIn("task.py archive moves that directory", self_reference["message"])
+        self.assertIn(".trellis/spec/**", self_reference["message"])
+        self.assertIn("sibling task's research/**", self_reference["message"])
 
     def test_seeded_task_rejects_the_lone_scaffold_that_merge_time_exempts(self) -> None:
         """Both halves of the un-exemption. A freshly created task's manifests are

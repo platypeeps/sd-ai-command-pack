@@ -981,7 +981,9 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add, seedRea
         : issue.kind === 'malformed'
           ? `line ${issue.line} is not valid JSONL`
           : issue.kind === 'self_reference'
-            ? `line ${issue.line} cites a path under its own task directory`
+            // Same repair string the merge-time check prints, so a seeding
+            // operator reading only the receipt still gets the alternatives.
+            ? `line ${issue.line} ${TRELLIS_TASK_CONTEXT_SELF_REFERENCE_REPAIR}`
             : `line ${issue.line} contains a reference outside the allowed spec/research roots`;
       add(`task_context_${issue.kind}`, file, message);
     }
