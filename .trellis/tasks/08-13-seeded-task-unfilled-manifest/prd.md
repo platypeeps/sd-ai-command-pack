@@ -116,22 +116,22 @@ about one that was legitimately never seeded.
 
 ## Acceptance Criteria
 
-- [ ] A seeded task whose `check.jsonl` is emptied fails `seeded-task` with a
+- [x] A seeded task whose `check.jsonl` is emptied fails `seeded-task` with a
       finding naming the file and the repair.
-- [ ] The same holds for a whitespace-only manifest and for a manifest whose
+- [x] The same holds for a whitespace-only manifest and for a manifest whose
       only rows carry no `file` key.
-- [ ] A seeded task with no manifests at all still reports `seeded_task_valid`,
+- [x] A seeded task with no manifests at all still reports `seeded_task_valid`,
       proving the inline-platform consumer was not broken.
-- [ ] The lone-`_example` scaffold still passes merge-time validation and still
+- [x] The lone-`_example` scaffold still passes merge-time validation and still
       fails `seeded-task`, unchanged from 0.71.3.
-- [ ] An unrecognized bookkeeping command fails loudly; a test pins it.
-- [ ] Each documentation surface in requirement 3 states the rule, and the
+- [x] An unrecognized bookkeeping command fails loudly; a test pins it.
+- [x] Each documentation surface in requirement 3 states the rule, and the
       template mirror and its generated copies agree byte-for-byte.
-- [ ] The scaffold passage no longer offers "emptied" as an unqualified
+- [x] The scaffold passage no longer offers "emptied" as an unqualified
       approved disposition, and names the seeded-task lane's opposite rule.
-- [ ] `manifest.json` reads 0.71.4, CHANGELOG carries its heading, and the
+- [x] `manifest.json` reads 0.71.4, CHANGELOG carries its heading, and the
       release payload gate reports the version transition.
-- [ ] `sd-check` passes and the full-fleet candidate ledger is regenerated
+- [x] `sd-check` passes and the full-fleet candidate ledger is regenerated
       without a consumer filter.
 
 ## Out of scope
