@@ -248,6 +248,7 @@ export function runReviewPreflight(options = {}) {
   runCheck('changed Trellis task topology semantics', checkChangedTrellisTaskTopologySemantics);
   runCheck('completed Trellis task location', checkCompletedTrellisTaskLocation);
   runCheck('Trellis task context manifests', checkTrellisTaskContextManifests);
+  runCheck('Trellis planning placeholders', checkTrellisPlanningPlaceholders);
   runCheck('Trellis journal records', checkTrellisJournalRecords);
   runCheck('first-review risk sweep', checkReviewRiskSweep);
   runCheck('diff size warning', checkDiffSize);
@@ -842,6 +843,16 @@ function validateBookkeepingTaskDirectory(taskDir, options) {
       addScoped('task_prd_empty', prdFile, 'task PRD must contain substantive content');
     }
     validateBookkeepingTextWhitespace(prdFile, prdLoaded.text, addScoped);
+    for (const placeholder of findTrellisPlanningPlaceholders(prdFile, prdLoaded.text)) {
+      // addScoped, not add: on a historical replay the same defect in an
+      // untouched PRD demotes to an advisory instead of blocking a bundle whose
+      // delta never went near it.
+      addScoped(
+        'task_prd_placeholder',
+        prdFile,
+        `line ${placeholder.line} still contains the generated placeholder ${JSON.stringify(placeholder.text)}`,
+      );
+    }
     if (completionReady && prdLoaded.text.trim().length > 0) {
       validateBookkeepingAcceptanceReadiness(prdFile, prdLoaded.text, add);
     }
@@ -3875,6 +3886,47 @@ function checkTrellisTaskContextManifests() {
   }
 }
 
+function checkTrellisPlanningPlaceholders() {
+  const failureStart = failures.length;
+  const diff = currentChangedPaths();
+
+  if (diff === null) {
+    warn('could not inspect the current diff for Trellis planning placeholders.');
+    return;
+  }
+
+  let inspectedFiles = 0;
+  for (const path of diff.paths) {
+    const normalized = normalizePathSeparators(path).replace(/^\.\//, '');
+    if (!normalized.startsWith('.trellis/tasks/') || !normalized.endsWith('/prd.md')) {
+      continue;
+    }
+    if (!isRegularFile(normalized)) {
+      continue;
+    }
+
+    inspectedFiles += 1;
+    for (const placeholder of findTrellisPlanningPlaceholders(normalized, readText(normalized))) {
+      fail(
+        `${placeholder.file}:${placeholder.line} still contains the generated placeholder ` +
+          `${JSON.stringify(placeholder.text)}; replace it with a real requirement, ` +
+          'acceptance criterion, or goal before the task advances.',
+      );
+    }
+  }
+
+  if (inspectedFiles === 0) {
+    if (failures.length === failureStart) {
+      pass('no changed Trellis PRD requires placeholder validation.');
+    }
+    return;
+  }
+
+  if (failures.length === failureStart) {
+    pass(`checked ${inspectedFiles} changed Trellis PRD(s) for generated TBD placeholders.`);
+  }
+}
+
 function checkCompletedTrellisTaskLocation() {
   const failureStart = failures.length;
   const taskRoot = resolve(rootDir, '.trellis', 'tasks');
@@ -4011,6 +4063,36 @@ export function trellisTaskContextOwnerDirectory(value) {
   const normalized = normalizePathSeparators(value).replace(/^\.\//, '');
   const match = /^(\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+)\//.exec(normalized);
   return match ? match[1] : '';
+}
+
+// `task.py create` seeds prd.md from `_default_prd_content`, which writes three
+// placeholders: the Goal body `TBD.` when no description was supplied, a `- TBD`
+// requirement bullet, and a `- [ ] TBD` acceptance criterion
+// (.trellis/scripts/common/task_store.py:196-213). Nothing anywhere rejects
+// them: the ready gate in .trellis/workflow.md is scoped to the two manifests,
+// and the merge-time preflight had no rule of its own.
+//
+// Match the whole line, not a bare substring -- a PRD is allowed to DISCUSS the
+// string TBD in prose, and the PRD for the task that added this rule does.
+export function findTrellisPlanningPlaceholders(file, text) {
+  if (typeof text !== 'string') {
+    return [];
+  }
+
+  const placeholders = [];
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    const trimmed = line.trim();
+    if (
+      trimmed === 'TBD.'
+      || trimmed === 'TBD'
+      || /^[-*]\s+TBD\.?$/.test(trimmed)
+      || /^[-*]\s+\[[ xX]\]\s+TBD\.?$/.test(trimmed)
+    ) {
+      placeholders.push({ file, line: index + 1, text: trimmed });
+    }
+  }
+
+  return placeholders;
 }
 
 export function findTrellisTaskContextIssues(file, text) {

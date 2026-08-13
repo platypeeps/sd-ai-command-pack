@@ -96,6 +96,7 @@ import {
   findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
   findMissingTrellisChildReferences,
+  findTrellisPlanningPlaceholders,
   findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
@@ -636,6 +637,35 @@ assert.deepEqual(
   findTrellisTaskContextIssues('implement.jsonl', '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"r"}'),
   [],
 );
+// All three shapes task.py create seeds, including the Goal body -- the one that
+// does not look like a list item and so survives a hand edit most often.
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', [
+  '# Title',
+  '',
+  '## Goal',
+  '',
+  'TBD.',
+  '',
+  '## Requirements',
+  '',
+  '- TBD',
+  '',
+  '## Acceptance Criteria',
+  '',
+  '- [ ] TBD',
+].join('\\n')), [
+  { file: 'prd.md', line: 5, text: 'TBD.' },
+  { file: 'prd.md', line: 9, text: '- TBD' },
+  { file: 'prd.md', line: 13, text: '- [ ] TBD' },
+]);
+// A PRD may DISCUSS the placeholder; the rule matches whole lines, not substrings.
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', [
+  'The generator seeds requirements with - TBD and criteria with - [ ] TBD.',
+  '- A prd.md retaining `- TBD` requirements fails checkout-validation.',
+  '- [ ] Planning artifacts are free of TBD placeholders.',
+  'TBD requirements are rejected.',
+].join('\\n')), []);
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', 42), []);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);

@@ -118,6 +118,23 @@ string `TBD` in prose, and this task's own PRD does.
 **Gate:** a fixture PRD with a seeded `- TBD` bullet fails; this repo's real
 PRDs — including this one, which mentions `TBD` in prose — still pass.
 
+**Result:** 384 PRDs scanned, **2 placeholder lines in 1 file** —
+`08-10-rename-review-local-receipt-identifiers/prd.md:9,13`, a P3 planning task
+whose Goal is written but whose Requirements and Acceptance Criteria are still
+the generated stubs.
+
+**Not repaired here, deliberately.** Step 0's repair was mechanical: repoint a
+citation, no judgment required. Filling this PRD means deciding a receipt-schema
+version and consumer compatibility handling for the
+`sd-review-local-stage` / `-policy` rename — that is planning work for that task,
+and doing it from here would be guessing on someone else's behalf.
+
+Leaving it is safe, and the reason is worth stating rather than assuming: the
+merge-time check only inspects a **changed** `prd.md`, and the bookkeeping
+validator only blocks on a PRD inside the bundle delta. So nothing fails until
+that task is next edited — at which point the author is already in the file. It
+is recorded here so it is a known deferral, not a surprise.
+
 ## Step 3 — the `seeded-task` subcommand
 
 - extend the dispatch at `:500` and the usage text at `:544-547`;
