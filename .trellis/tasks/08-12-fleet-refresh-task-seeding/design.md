@@ -181,16 +181,35 @@ stage-specific.
 ### The self-reference message must name an alternative
 
 Requirement 5's last paragraph: "cite a spec instead" is not actionable when the
-consumer's specs are all product-domain. The finding names the two forms that
-actually work for a refresh lane:
+consumer's specs are all product-domain.
 
-1. move the facts into the *pack's* task and cite nothing consumer-local; or
-2. inline the fact into the `reason` string, which is what the field is for — a
-   manifest row is a pointer plus a rationale, and a rationale that needs no
-   pointer is complete on its own.
+**A row cannot simply drop its `file`.** The ready gate requires each manifest to
+hold at least one real `{"file": "...", "reason": "..."}` entry
+(`.trellis/workflow.md:424`), so "keep the rationale, delete the pointer" would
+trade a dangling citation for an unready task. The preflight would accept it and
+the lifecycle would not. Step 0 of the implementation plan found this the hard
+way, by trying it.
 
-Option 2 is what `08-13-sd-ai-command-pack-0-71-2` should have done on
-hoa-manager.
+So the message names the repair that actually holds, in order:
+
+1. **Repoint at a real `.trellis/spec/**` path and move the substance into
+   `reason`.** The pointer becomes something that does not move on archival, and
+   the fact survives inside the row instead of behind it. This works even when
+   the nearest spec is only adjacent to the task: the row's job is to give a
+   sub-agent the contract plus why it matters, and a `reason` carrying the
+   evidence does that better than a pointer at a file that will move.
+2. **Cite a *sibling* task's `research/**`** — allowed, and the residual this
+   task deliberately leaves open. Weaker than option 1 because it dangles when
+   that sibling archives.
+3. **Move the facts into the pack's own task** when they are about the pack
+   rather than the consumer.
+
+Option 1 is what `08-13-sd-ai-command-pack-0-71-2` should have done on
+hoa-manager, and it is what step 0 applied to
+`08-09-deployment-thin-consumers`: four self-citing rows became four rows
+pointing at `fleet-consumer-conversion.md` and `manifest-and-filesystem.md`,
+with the fleet-sweep and plugin-capability findings inlined. The research files
+stay on disk; they are simply no longer load-bearing for the manifest.
 
 ## SKILL.md changes
 

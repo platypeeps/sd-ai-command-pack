@@ -20,9 +20,16 @@ Do this first, not last. The narrowing fires on any *changed* task context file,
 so leaving these until after step 2 means the first unrelated edit to that task
 fails a check the author did not touch.
 
-Repair per the design's own guidance: fold each pointer's substance into the
-row's `reason`, or repoint at a `.trellis/spec/**` path if one already covers it.
-Do not delete the research files.
+Repair per the design's own guidance: repoint at a real `.trellis/spec/**` path
+and move the substance into `reason`. Do not delete the research files, and do
+not simply drop the `file` key — the ready gate requires each manifest to keep at
+least one real `{"file", "reason"}` entry (`.trellis/workflow.md:424`), so a
+rationale-only row trades a dangling citation for an unready task.
+
+**Done.** All four rows now point at `.trellis/spec/backend/fleet-consumer-conversion.md`
+and `.trellis/spec/backend/manifest-and-filesystem.md` — the contracts the thin
+model replaces — with the 2026-08-09 fleet-sweep and plugin-capability findings
+inlined into each `reason`.
 
 This edits **another active task's** manifests, which is normally out of scope.
 It is in scope here because this task's rule change is what breaks them: shipping
