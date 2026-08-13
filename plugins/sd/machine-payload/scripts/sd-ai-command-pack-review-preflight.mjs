@@ -825,16 +825,19 @@ function validateSeededTaskBaseBranch(taskDir, record, evidence, add) {
     return;
   }
 
-  for (const issue of validateTrellisRootTaskBaseBranch(record, defaultBranch)) {
-    // The shared message's repair verb is set-meta base_branch_exemption -- the
-    // escape hatch. Handed to a fleet operator verbatim it advises stamping an
-    // exemption over the exact defect this stage exists to catch, so the repair
-    // leads and the shared text follows.
+  // The shared rule stays the single source of truth for *whether* this is a
+  // defect; only the wording is stage-specific. Its own message offers
+  // set-meta base_branch_exemption as the repair -- the escape hatch. Embedding
+  // it here would put an exemption for the exact defect this stage exists to
+  // catch ahead of the real fix, so the seeded-task finding states the mismatch
+  // itself and recommends only set-base-branch.
+  if (validateTrellisRootTaskBaseBranch(record, defaultBranch).length > 0) {
     add(
       'task_base_branch_invalid',
       taskFile,
-      `field ${issue}. At checkout-validation the repair is `
-        + `python3 ./.trellis/scripts/task.py set-base-branch ${taskDir} ${defaultBranch} `
+      `field base_branch ${JSON.stringify(record.base_branch.trim())} must equal the repository `
+        + `default branch ${JSON.stringify(defaultBranch.trim())}; repair with `
+        + `python3 ./.trellis/scripts/task.py set-base-branch ${taskDir} ${defaultBranch.trim()} `
         + '-- run it immediately after task.py create, and do not use '
         + 'task.py create --base-branch, which the older vendored task_store.py '
         + 'rejects as an unrecognized argument',

@@ -355,7 +355,15 @@ class BookkeepingValidatorTests(InstallTestCase):
         # Requirement 3: name the repair, not just the defect. The shared rule's
         # own message offers set-meta base_branch_exemption -- the escape hatch --
         # which is the wrong advice at this stage.
-        self.assertIn(f"set-base-branch {task_dir} main", result.stdout)
+        base_branch = next(
+            finding
+            for finding in payload["findings"]
+            if finding["reasonCode"] == "task_base_branch_invalid"
+        )
+        self.assertIn(f"set-base-branch {task_dir} main", base_branch["message"])
+        # The escape hatch must not appear at all here: an operator who reads it
+        # can satisfy the stage by exempting the defect instead of fixing it.
+        self.assertNotIn("base_branch_exemption", base_branch["message"])
         self.assertNotIn("_example", payload["reasonCodes"])
         # Same requirement for the self-citation: the operator reading only the
         # receipt has to learn what to cite instead. The merge-time check prints
