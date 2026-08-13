@@ -371,6 +371,14 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertIn(
             "bookkeeping_whitespace_invalid", payload["reasonCodes"], result.stdout
         )
+        # The padded shape has zero usable rows AND trailing whitespace, so it is
+        # the one case where the two rules can both claim the same file. The
+        # whitespace finding names the exact line to fix; stacking a vaguer "no
+        # rows" finding on top of it makes the receipt worse, so the
+        # emittedForFile guard must already have been spent here.
+        self.assertNotIn(
+            "task_context_unfilled", payload["reasonCodes"], result.stdout
+        )
 
     def test_seeded_task_rejects_rows_that_carry_no_file_key(self) -> None:
         """Shape 3, absent from the original report: rows that parse as JSON but

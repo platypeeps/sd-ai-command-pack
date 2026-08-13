@@ -1019,6 +1019,15 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add, seedRea
     // The emittedForFile guard keeps the receipt precise: a lone scaffold, a
     // malformed line, and a self-citation each already say exactly what to fix,
     // and stacking a vaguer "no rows" finding on top would make it worse.
+    //
+    // The whitespace sweep runs BEFORE that decision and counts toward the same
+    // guard. A manifest emptied to blank lines padded with spaces or tabs has
+    // zero usable rows AND trailing whitespace, so ordering it after would
+    // double-report exactly the shape most likely to occur.
+    validateBookkeepingTextWhitespace(file, loaded.text, (reasonCode, path, message) => {
+      emittedForFile += 1;
+      add(reasonCode, path, message);
+    });
     if (seedReady && emittedForFile === 0 && countTrellisTaskContextRows(loaded.text) === 0) {
       add(
         'task_context_unfilled',
@@ -1027,7 +1036,6 @@ function validateBookkeepingTaskContexts(taskDir, record, archived, add, seedRea
           + '{"file": "<spec-or-research-path>", "reason": "<why>"} row',
       );
     }
-    validateBookkeepingTextWhitespace(file, loaded.text, add);
   }
 }
 
