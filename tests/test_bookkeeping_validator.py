@@ -299,8 +299,10 @@ class BookkeepingValidatorTests(InstallTestCase):
         else:
             # write_task creates both manifests unconditionally, so the inline
             # -platform shape has to remove them rather than decline to write.
-            (root / task_dir / "implement.jsonl").unlink()
-            (root / task_dir / "check.jsonl").unlink()
+            # missing_ok keeps the intent -- these files must be absent -- rather
+            # than coupling the fixture to write_task always having made them.
+            (root / task_dir / "implement.jsonl").unlink(missing_ok=True)
+            (root / task_dir / "check.jsonl").unlink(missing_ok=True)
 
     def assert_seeded_task_rejects_unfilled(self, task_dir: str, **seed: object) -> None:
         """Shared body for the three unfilled shapes. Each one reaches the stage
