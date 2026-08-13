@@ -9,10 +9,13 @@ or, for the fourth, only after the task is archived -- rather than at
 `checkout-validation` where the task is created. Each costs a
 diagnose-and-repair round inside an otherwise green lane.
 
-Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
+Defects 1-3 were observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
 `refresh-0.71.2-20260813T002259Z`) and again on `platypeeps/loadsmith` and
 `platypeeps/anomaly-metric-creator` (campaign
-`refresh-0.71.2-20260813T014138Z-c3`).
+`refresh-0.71.2-20260813T014138Z-c3`). Defect 4 is not part of that set: it was
+first observed on `platypeeps/hoa-manager` PR 247, later the same day, and only
+after that PR's completion bundle had already been published — which is the
+point of the entry below.
 
 ## The four defects
 
