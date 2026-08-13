@@ -58,8 +58,9 @@ point of the entry below.
 
    The review preflight's `_example` rule covers less than it appears to. It
    rejects a scaffold row **mixed with real rows**, but exempts a manifest whose
-   *only* row is the untouched scaffold (`isPristineTrellisTaskContextScaffold`,
-   `scripts/sd-ai-command-pack-review-preflight.mjs:3932`, skipped at `:870`) —
+   *only* row is the untouched scaffold — `isPristineTrellisTaskContextScaffold`
+   in `scripts/sd-ai-command-pack-review-preflight.mjs`, consulted by
+   `validateBookkeepingTaskContexts` —
    deliberately, because at merge time that shape is indistinguishable from an
    unfilled manifest, and failing it produced a late completion-time failure. A
    freshly seeded consumer task is exactly the exempt shape, so for the case
@@ -120,11 +121,11 @@ point of the entry below.
    task completes — in the same bundle that publishes it.
 
    The review preflight's existing rule does not catch this. It restricts
-   context references to `.trellis/spec/**` or `.trellis/tasks/**/research/**`
-   (`scripts/sd-ai-command-pack-review-preflight.mjs:3839-3840`), and its
-   allowed-root test is
-   `/^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/`
-   (`scripts/sd-ai-command-pack-review-preflight.mjs:3977`) — a shape test that never compares the cited task against the
+   context references to `.trellis/spec/**` or `.trellis/tasks/**/research/**`,
+   and its allowed-root test — `isTrellisTaskContextReference` in
+   `scripts/sd-ai-command-pack-review-preflight.mjs` — is
+   `/^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/`,
+   a shape test that never compares the cited task against the
    citing one, and that accepts the archive form too. Passing that rule is
    exactly how the defect gets published.
 

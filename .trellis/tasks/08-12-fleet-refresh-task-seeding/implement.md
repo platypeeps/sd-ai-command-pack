@@ -70,16 +70,16 @@ PY
 ## Step 1 — narrow the shared context rule
 
 `scripts/sd-ai-command-pack-review-preflight.mjs`,
-`findTrellisTaskContextIssues` (`:3981`):
+`findTrellisTaskContextIssues`:
 
 - derive the citing file's own task directory from the `file` argument with
   `/^(\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+)\//`;
 - after the existing allowed-root test passes, emit `kind: 'self_reference'`
   when the reference's own task directory equals the citing file's. Snake_case
   is load-bearing: the bookkeeping reason code is interpolated as
-  `task_context_${issue.kind}` (`:876`);
-- add the branch to **both** reporters — the bookkeeping ternary at `:871-875`
-  and the merge-time loop at `:3820-3843`, whose `else` otherwise labels the new
+  `task_context_${issue.kind}`;
+- add the branch to **both** reporters — the bookkeeping ternary in `validateBookkeepingTaskContexts`
+  and the merge-time loop in `checkTrellisTaskContextReferences`, whose `else` otherwise labels the new
   kind with the allowed-roots message and names the wrong rule. Use the
   two-option repair message from the design, not a bare refusal.
 
@@ -137,22 +137,22 @@ is recorded here so it is a known deferral, not a surprise.
 
 ## Step 3 — the `seeded-task` subcommand
 
-- extend the dispatch at `:500` and the usage text at `:544-547`;
-- accept `--task-dir` and `--repo`, already parsed at `:566`/`:591`;
+- extend the subcommand dispatch and the usage text;
+- accept `--task-dir` and `--repo`, both already parsed by the CLI;
 - call `validateBookkeepingTaskDirectory(taskDir, {add, archived: false,
   completionReady: false, seedReady: true})` — **one** call, not a
   hand-composition of its parts. It already runs the metadata, PRD, and context
   rules from disk;
 - add the `seedReady` flag to `validateBookkeepingTaskContexts` so it skips the
-  lone-`_example` exemption at `:870`. Default `false`, so merge-time behavior
+  lone-`_example` exemption. Default `false`, so merge-time behavior
   is byte-identical;
-- call `validateTrellisRootTaskBaseBranch` (`:3331`) explicitly — the
+- call `validateTrellisRootTaskBaseBranch` explicitly — the
   bookkeeping validator does **not** wire it up; its only call site today is the
-  merge-time preflight at `:3186`;
+  merge-time preflight's root-task check;
 - resolve the default branch with the existing `trellisRootDefaultBranchName()`;
   do not add a second resolver. Record the resolved name **and whether it came
-  from `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` or `origin/HEAD`** in `evidence`
-  (`:4738-4744`);
+  from the pack's default-branch override environment variable or
+  `origin/HEAD`** in `evidence`;
 - emit the design's envelope, reusing the existing `task_*` reason codes and
   adding only `task_prd_placeholder` and `task_base_branch_invalid`.
 
@@ -172,12 +172,12 @@ way a green `base_branch` result can be meaningless.
 **Un-exemption check:** a manifest whose only row is the untouched `_example`
 scaffold must fail under `seeded-task` and still **pass** the merge-time
 preflight. Both halves matter — the second is the regression the exemption's
-comment at `:850-857` was written to prevent.
+comment above `validateBookkeepingTaskContexts` was written to prevent.
 
 **Fail-closed check:** point `--task-dir` at a missing directory and at a
 `task.json` containing `{`. Both must exit `1` and never report `valid`. Assert
 the status the shared path actually produces — `invalid`, because `add()`
-defaults to `disposition: 'invalid'` (`:629`) — not `indeterminate`. Reserve
+defaults to `disposition: 'invalid'` — not `indeterminate`. Reserve
 `indeterminate` for an unresolvable default branch, and assert that case
 separately.
 

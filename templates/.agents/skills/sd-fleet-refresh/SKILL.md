@@ -184,8 +184,9 @@ but defines no ordering or transition policy:
 
   Require schema version 1 and `status: valid` with `seeded_task_valid`. Any
   other status is a checkout-validation failure: report the findings verbatim —
-  each names the offending file, the line, and what must change — and do not
-  advance. It rejects
+  each names the offending file and what must change, with a line number when
+  the finding is line-scoped (the `base_branch` and `description` findings are
+  field-level and have none) — and do not advance. It rejects
   an empty `description`, a `base_branch` that is not the consumer's default
   branch, `TBD` placeholders left in `prd.md`, `_example` scaffold rows still in
   `implement.jsonl` / `check.jsonl`, and a context row citing a path under the
