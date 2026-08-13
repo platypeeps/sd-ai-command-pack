@@ -3,17 +3,21 @@
 ## Goal
 
 Every fleet-refresh lane creates a dedicated Trellis task in the consumer, by
-hand, following prose in `.agents/skills/sd-fleet-refresh/SKILL.md`. Three
-defects recur across lanes, each surfacing at `focused-candidate` or later
-rather than at `checkout-validation` where the task is created. Each costs a
+hand, following prose in `.agents/skills/sd-fleet-refresh/SKILL.md`. Four
+defects recur across lanes, each surfacing at `focused-candidate` or later --
+or, for the fourth, only after the task is archived -- rather than at
+`checkout-validation` where the task is created. Each costs a
 diagnose-and-repair round inside an otherwise green lane.
 
-Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
+Defects 1-3 were observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
 `refresh-0.71.2-20260813T002259Z`) and again on `platypeeps/loadsmith` and
 `platypeeps/anomaly-metric-creator` (campaign
-`refresh-0.71.2-20260813T014138Z-c3`).
+`refresh-0.71.2-20260813T014138Z-c3`). Defect 4 is not part of that set: it was
+first observed on `platypeeps/hoa-manager` PR 247, later the same day, and only
+after that PR's completion bundle had already been published — which is the
+point of the entry below.
 
-## The three defects
+## The four defects
 
 1. **`base_branch` records the refresh branch**, because of vendored-Trellis
    version skew. Every consumer checked carries a `task_store.py` whose
@@ -48,6 +52,16 @@ Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
    ready gate in `.trellis/workflow.md` rejects both; the review preflight
    independently rejects a changed context file that "still contains a generated
    `_example` scaffold row", but says nothing about a `TBD` PRD.
+4. **Context entries citing the task's own directory.** Filling `implement.jsonl`
+   / `check.jsonl` with real entries — defect 3's remedy — invites citing the
+   facts the lane just collected, which live under the task being seeded. Those
+   paths resolve for the whole life of the task and dangle the instant
+   `task.py archive` moves the directory.
+
+   This one does not surface at `focused-candidate` at all. It surfaces after
+   the completion bundle is published, which is the worst possible time: the
+   bundle's span is fixed, so the pointer cannot be corrected without a commit
+   past the journal tail or a rewrite of a pushed branch.
 
 ## Requirements
 
@@ -64,16 +78,46 @@ Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
    Reordering creation before the branch switch is also insufficient: it
    produces the right answer only by accident of which branch happens to be
    checked out.
-2. The three seeded-task properties must be checked mechanically at
+2. The seeded-task properties must be checked mechanically at
    `checkout-validation`, not left to prose: non-empty `task.json` description,
-   `base_branch` equal to the consumer's default branch, and planning artifacts
-   free of `TBD` placeholders and `_example` scaffold rows.
+   `base_branch` equal to the consumer's default branch, planning artifacts
+   free of `TBD` placeholders and `_example` scaffold rows, and the citation
+   rule in requirement 5.
 3. A seeded-task defect must fail `checkout-validation` with an actionable
    message naming the offending field and its repair, rather than advancing and
    surfacing later as a review-preflight failure.
 4. The check must not duplicate the review preflight's own rules. Where the
    preflight already defines a rule, the stage check should invoke or share it
    so the two cannot drift apart.
+5. A seeded task's `implement.jsonl` / `check.jsonl` must not cite a path under
+   its **own** task directory. `task.py archive` moves the whole directory, so
+   such a citation resolves while the task is active and dangles the moment the
+   task completes — in the same bundle that publishes it.
+
+   The review preflight's existing rule does not catch this. It restricts
+   context references to `.trellis/spec/**` or `.trellis/tasks/**/research/**`
+   (`scripts/sd-ai-command-pack-review-preflight.mjs:3839-3840`), and its
+   allowed-root test is
+   `/^\.trellis\/tasks\/(?:archive\/\d{4}-\d{2}\/)?[^/]+\/research(?:\/.+)?$/`
+   (`scripts/sd-ai-command-pack-review-preflight.mjs:3977`) — a shape test that never compares the cited task against the
+   citing one, and that accepts the archive form too. Passing that rule is
+   exactly how the defect gets published.
+
+   The remedy is a narrowing, not a new root: reject a citation whose task
+   directory is the citing file's own. `.trellis/spec/**` is unaffected,
+   because specs do not move on archival.
+
+   This narrowing is not total, and the requirement should not claim it is. A
+   *sibling* task's `research/**` can dangle later, when that sibling archives.
+   What the narrowing removes is the deterministic case — the one that fails on
+   every seeded task, in the same bundle that publishes it — not every archival
+   hazard. The residual is a citation that outlives the run that wrote it, which
+   is ordinary cross-task reference rot and not this task's to solve.
+
+   Where a seeded task's context genuinely is task-local — the managed-scope
+   facts a refresh lane collects — the check must name the alternative rather
+   than only refuse, since "cite a spec instead" is not actionable when the
+   consumer's specs are all product-domain.
 
 ## Constraints
 
@@ -99,6 +143,12 @@ Observed on `platypeeps/rwbp-coordinator` PR 222 (campaign
 - [ ] The stage check and the review preflight cannot disagree, because the
       stage check invokes or shares the preflight's rule rather than restating
       it.
+- [ ] A `.jsonl` citing a path under its own task directory fails
+      `checkout-validation`, and the message names a citation the seeded task
+      can actually use instead.
+- [ ] A `.jsonl` citing `.trellis/spec/**`, or a *sibling* task's
+      `research/**`, still passes — the narrowing rejects self-reference only,
+      and deliberately leaves the sibling-archives-later case alone.
 
 ## Verification
 
@@ -114,6 +164,43 @@ it — so pick the fixture by grepping `task_store.py` for
 The last criterion is verified by reading both call sites and confirming a
 single rule source, not by observing that two independent implementations happen
 to agree on one sample.
+
+Defect 4 is not hypothetical; it was observed twice on 2026-08-13, in two
+different gates, from the same mechanic.
+
+- On `platypeeps/hoa-manager` PR 247, the seeded task's `implement.jsonl` and
+  `check.jsonl` each cited that same task's own `research/refresh-scope.md`
+  (task directory `08-13-sd-ai-command-pack-0-71-2`, under that consumer's
+  Trellis task root).
+  The review preflight passed on the pre-archive head; GitHub Copilot flagged
+  both pointers as dangling in the merged tree, where the file is under
+  `.trellis/tasks/archive/2026-08/`. It could not be repaired on that branch:
+  the completion bundle was already published, so the fix would have needed a
+  commit past the journal tail or a rewrite of a pushed bundle.
+- In this repository, `.trellis/spec/tooling/fleet-publish-generated-content.md`
+  cited the active path of the task that established it, and the finalization
+  that published the spec archived that task in the same push. That one was a
+  hard CI failure, in a file the archive commit never touched — the preflight's
+  `references missing path` check, naming the spec's own line and the
+  now-moved task directory — fixed by `67ae00c4`, which repointed the citation
+  at `.trellis/tasks/archive/2026-08/08-12-fleet-publish-ignore-block-ordering`.
+
+A third instance surfaced while this very requirement was being written: the
+bullet above originally quoted the hoa-manager pointer as a literal
+repo-rooted path, and the pack's own documentation path-reference gate failed
+on it — `prd.md:169 references missing path`, because that path belongs to
+another repository. Rewritten to name the task directory without a repo-rooted
+literal.
+
+Three instances in one day, in three different files, caught by three different
+gates and only one of them before publication. That is the argument for checking
+this at `checkout-validation` rather than trusting authors to remember it.
+
+The second and third instances are a different gate and outside this task's
+scope — the pack's documentation path-reference check already enforces those.
+They are recorded because they establish that the failure is the archive move
+and cross-context path assumption itself, rather than anything specific to
+`.jsonl`.
 
 ## Notes
 

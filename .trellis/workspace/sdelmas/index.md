@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 369
+- **Total Sessions**: 370
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~826 | Active |
+| `journal-8.md` | ~869 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 370 | 2026-08-13 | Seed-task self-citation requirement for 08-12-fleet-refresh-task-seeding | `d299ebf7`, `88c742f2`, `35e92709`, `17c62079` | `task/seeding-research-citation-requirement` |
 | 369 | 2026-08-13 | Regenerate the managed ignore block before the fleet publish work commit | `d15a47cc`, `3c4106d4`, `13ad9dbd`, `e22663d6`, `c3cc80d1`, `8d89ec79`, `05e78523` | `fix/fleet-publish-ignore-block-ordering` |
 | 368 | 2026-08-12 | File the journal-cite lifecycle-correction defect | `9bdbea47` | `task/journal-cite-lifecycle-correction` |
 | 367 | 2026-08-12 | Return the thin-consumers parent to planning and unblock its subtree | `f0f12837`, `b8653750` | `fix/thin-parent-status-finalization` |

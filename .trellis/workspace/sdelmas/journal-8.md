@@ -836,3 +836,44 @@ sd-ai-command-pack-fleet-publish.py built the work commit before anything regene
 ### Next Steps
 
 - None - task complete
+
+
+## Session 370: Seed-task self-citation requirement for 08-12-fleet-refresh-task-seeding
+
+**Date**: 2026-08-13
+**Task**: Seed-task self-citation requirement for 08-12-fleet-refresh-task-seeding
+**Branch**: `task/seeding-research-citation-requirement`
+
+### Summary
+
+Documented a fourth recurring fleet-refresh seeding defect -- context entries citing the seeded task's own directory -- and added requirement 5 banning self-referential jsonl citations. Converged a four-round Copilot review on PR #441.
+
+### Main Changes
+
+- prd.md: fourth defect entry, requirement 5 quoting the preflight allowed-root regex at scripts/sd-ai-command-pack-review-preflight.mjs:3977 verbatim, two acceptance criteria, and a Verification section recording three same-day instances
+- prd.md/task.json: corrected the defect count from three to four across every artifact that asserted it, and scoped the PR 222 observation paragraph to defects 1-3 (defect 4 first appeared on hoa-manager PR 247)
+- prd.md/implement.jsonl: cite the preflight by its real path, scripts/sd-ai-command-pack-review-preflight.mjs, and replaced a dead pre-archive task-path literal with its archive location
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d299ebf7` | docs(task): require seeded tasks to stop citing their own directory |
+| `88c742f2` | docs(task): correct the defect-count prose and drop a dead active-path literal |
+| `35e92709` | docs(task): cite the review preflight by its real path |
+| `17c62079` | docs(task): scope the observation paragraph to defects 1-3 |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs -- 0 failures, 0 warnings
+- [OK] scripts/sd-ai-command-pack-check.py --json -- status passed, 7 passed / 1 skipped
+- [OK] Copilot review rounds 1-4 on PR #441; round 4 generated no comments and no suppressed comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
