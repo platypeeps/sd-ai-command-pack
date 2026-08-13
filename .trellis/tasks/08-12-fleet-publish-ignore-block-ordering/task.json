@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-12",
   "completedAt": null,
-  "branch": null,
+  "branch": "fix/fleet-publish-ignore-block-ordering",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
