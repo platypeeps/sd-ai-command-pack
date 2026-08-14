@@ -31,16 +31,18 @@ Validation: `python3 -m unittest tests.test_update_spec_kb -v`.
 
 - [x] Add `KB_IGNORE_WRITE=0` to the run-scoped state; in
       `refresh_obsidian_kb`, set it to 1 when the captured output matches
-      `^gitignore: (added|updated|local-exclude (added|updated))$`.
+      `^gitignore: (added|updated)$`.
 - [x] Add `dirty_path_summary()` returning at most 10 porcelain paths plus
       `and N more`; fail closed (empty summary) if `git status` fails.
 - [x] Both `working_tree_dirty` anomalies (dependency-PR merge, merged-branch
       cleanup) append the summary, and when `KB_IGNORE_WRITE=1` also append
-      that this run's Obsidian KB refresh wrote the ignore file and that
-      committing the managed block clears the block-the-merge state.
-- [x] Match the states the helper actually prints — `added`, `updated`,
-      `local-exclude added`, `local-exclude updated` (`ignore_change_state`);
-      a symlink conflict is not a write and must not set the flag.
+      that this run's Obsidian KB refresh wrote `.gitignore` and that
+      committing its managed block clears the block-the-merge state if no
+      other listed path is dirty.
+- [x] Match only the states that write the tracked file — `added` and
+      `updated` (`ignore_change_state`). `local-exclude added`/`updated` write
+      `.git/info/exclude`, which `git status` never reports, and a symlink
+      conflict is not a write; neither may set the flag.
 - [x] Leave the refresh call site and its position untouched.
 
 Validation: `python3 -m unittest tests.test_housekeeping -v`.

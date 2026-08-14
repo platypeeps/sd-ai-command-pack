@@ -728,7 +728,7 @@ class HousekeepingTests(InstallTestCase):
             self.assertEqual(result.returncode, 0, result.stdout)
             return result.stdout
 
-        kb_note = "this run's Obsidian KB refresh wrote the ignore file"
+        kb_note = "this run's Obsidian KB refresh wrote .gitignore"
 
         two_paths = probe(
             status_lines=[" M .gitignore", "?? notes.md"],
@@ -815,18 +815,17 @@ class HousekeepingTests(InstallTestCase):
                 self.assertEqual(completed.returncode, 0, completed.stdout)
                 return completed.stdout.strip()
 
-            for state in (
-                "gitignore: added",
-                "gitignore: updated",
-                "gitignore: local-exclude added",
-                "gitignore: local-exclude updated",
-            ):
+            for state in ("gitignore: added", "gitignore: updated"):
                 self.assertEqual(flag_for(state), "kb_ignore_write=1", state)
 
-            # No write happened in any of these: `present` is the semantically
-            # idempotent no-op, a symlink conflict wrote nothing, and a
-            # `--dry-run` report only describes a hypothetical write.
+            # None of these can dirty the working tree. The `local-exclude`
+            # states write `.git/info/exclude`, which lives inside the git
+            # directory and never appears in `git status`; `present` is the
+            # semantically idempotent no-op; a symlink conflict wrote nothing;
+            # and a `--dry-run` report only describes a hypothetical write.
             for state in (
+                "gitignore: local-exclude added",
+                "gitignore: local-exclude updated",
                 "gitignore: present",
                 "gitignore: local-exclude present",
                 "gitignore: conflict: .gitignore is a symlink",

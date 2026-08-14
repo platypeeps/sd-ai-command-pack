@@ -293,7 +293,10 @@ dirty_path_summary() {
 
 kb_ignore_write_note() {
   [ "$KB_IGNORE_WRITE" -eq 1 ] || return 0
-  printf '%s' "; this run's Obsidian KB refresh wrote the ignore file, so committing the managed block clears this state"
+  # Deliberately conditional: the refresh wrote .gitignore, but the listed
+  # paths may include dirt from another writer, so committing the managed
+  # block is only sufficient when nothing else is dirty.
+  printf '%s' "; this run's Obsidian KB refresh wrote .gitignore, so committing its managed block clears this state if no other path above is dirty"
 }
 
 working_tree_dirty_detail() {
@@ -354,12 +357,14 @@ refresh_obsidian_kb() {
   if [ -n "$refresh_output" ]; then
     printf '%s\n' "$refresh_output"
   fi
-  # Only the states the helper prints for an actual write count. `present`
-  # wrote nothing, a symlink `conflict` wrote nothing, and a `--dry-run`
-  # report is prefixed with `would be`, so none of them match. Read the state
-  # regardless of exit status: a refresh that ends at exit 3 (stale entries it
-  # could not bring current) may still have written the ignore file.
-  if grep -Eq '^gitignore: (added|updated|local-exclude (added|updated))$' <<<"$refresh_output"; then
+  # Only a write to the *tracked* ignore file can dirty the working tree, so
+  # only `added` and `updated` count. The `local-exclude` states write
+  # `.git/info/exclude`, which lives inside the git directory and never
+  # appears in `git status`. `present` wrote nothing, a symlink `conflict`
+  # wrote nothing, and a `--dry-run` report is prefixed with `would be`. Read
+  # the state regardless of exit status: a refresh that ends at exit 3 (stale
+  # entries it could not bring current) may still have written .gitignore.
+  if grep -Eq '^gitignore: (added|updated)$' <<<"$refresh_output"; then
     KB_IGNORE_WRITE=1
   fi
   if [ "$refresh_status" -eq 0 ]; then

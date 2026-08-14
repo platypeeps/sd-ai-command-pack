@@ -83,12 +83,16 @@ processes.
 
 Requirement 2 stands even after the write disappears, because a first-ever
 install still legitimately adds the block. `refresh_obsidian_kb` parses the
-helper's `gitignore: <state>` line and sets a run-scoped flag on any state that
-means a write happened — `added`, `updated`, `local-exclude added`, or
-`local-exclude updated` (`ignore_change_state`). A symlink conflict wrote
-nothing and must not set it. Both `working_tree_dirty` anomalies then report the dirty
-paths (bounded list) and, when the flag is set, that this run's KB refresh wrote
-the ignore file.
+helper's `gitignore: <state>` line and sets a run-scoped flag on the states
+that write the **tracked** ignore file — `added` and `updated`
+(`ignore_change_state`). The `local-exclude` states write `.git/info/exclude`,
+which lives inside the git directory and can never appear in `git status`, so
+they must not set the flag; nor must a symlink conflict, which wrote nothing.
+Both `working_tree_dirty` anomalies then report the dirty paths (bounded list)
+and, when the flag is set, that this run's KB refresh wrote `.gitignore`. That
+note stays conditional — the listed paths may include dirt from another
+writer — so it says committing the managed block clears the state only if no
+other listed path is dirty.
 
 Bounding: at most 10 paths, then `and N more`, so the anomaly stays a diagnostic
 rather than a diff dump.

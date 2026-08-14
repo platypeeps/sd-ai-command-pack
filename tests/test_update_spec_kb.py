@@ -1729,6 +1729,9 @@ class UpdateSpecKbTests(InstallTestCase):
         """The #432 reproduction, end to end: commit, refresh, status is empty."""
 
         root = self.make_repo_with_stale_ignore_banner()
+        # CI runners carry no global git identity.
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
         self.run_git(root, "add", ".gitignore")
         self.run_git(root, "commit", "-m", "chore: stale managed ignore block")
 
