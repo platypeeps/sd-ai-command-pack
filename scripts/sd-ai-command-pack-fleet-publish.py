@@ -290,7 +290,8 @@ def check_preconditions(
             "working tree is dirty outside the managed allowlist: "
             + ", ".join(sorted(disallowed))
             + f" (allowlist: {len(prefixes)} prefix(es) and {len(exact)} exact "
-            f"path(s) derived from {PACK_MANIFEST_RELATIVE}; commit or stash "
+            f"path(s), combining {PACK_MANIFEST_RELATIVE}, the built-in "
+            "residue, and any --allow-path-prefix override; commit or stash "
             "unrelated work, or extend --allow-path-prefix)",
             code=3,
         )
