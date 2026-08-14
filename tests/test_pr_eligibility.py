@@ -61,15 +61,49 @@ def check_run(
     *,
     status: str = "COMPLETED",
     name: str = "ci",
+    workflow: str = "CI",
+    started_at: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "__typename": "CheckRun",
         "name": name,
-        "workflowName": "CI",
+        "workflowName": workflow,
         "status": status,
         "conclusion": conclusion,
         "detailsUrl": "https://example.test/check",
     }
+    # Omitted rather than nulled when unset, so every pre-existing caller keeps
+    # producing the exact fixture it produced before supersession existed.
+    if started_at is not None:
+        row["startedAt"] = started_at
+    return row
+
+
+# The PR #360 rollup shape (platypeeps/anomaly-metric-creator, 2026-08-07):
+# marking the PR ready triggered a run whose concurrency group cancelled the
+# in-flight run, and both stayed attached to the head.
+SUPERSEDED_AT = "2026-08-07T18:10:00Z"
+REPLACEMENT_AT = "2026-08-07T18:22:41Z"
+PR_360_NAMES = (
+    ("CI Result", "SUCCESS"),
+    ("test", "SUCCESS"),
+    ("quick test", "SKIPPED"),
+    ("socket", "SUCCESS"),
+    ("Windows collection (advisory)", "SUCCESS"),
+)
+
+
+def pr_360_rollup(*, include_replacements: bool = True) -> list[dict[str, Any]]:
+    rows = [
+        check_run("CANCELLED", name=name, started_at=SUPERSEDED_AT)
+        for name, _ in PR_360_NAMES
+    ]
+    if include_replacements:
+        rows.extend(
+            check_run(conclusion, name=name, started_at=REPLACEMENT_AT)
+            for name, conclusion in PR_360_NAMES
+        )
+    return rows
 
 
 def thread_page(
@@ -781,6 +815,197 @@ class PrEligibilityTests(unittest.TestCase):
                 result = self.evaluate(request, runner)
                 self.assertEqual(result["status"], status)
                 self.assertEqual(result["reasonCodes"], [reason])
+
+    def test_superseded_cancelled_runs_do_not_block_the_merge(self) -> None:
+        """Issue #414: a cancelled run replaced by a later one must not block.
+
+        A concurrency group that cancels superseded in-progress runs leaves both
+        the cancelled run and its replacement attached to the head. Branch
+        protection reads the latest result per context and reported PR #360
+        CLEAN/MERGEABLE while this probe reported it blocked.
+        """
+
+        # Baseline: an ordinary eligible probe with a single green check.
+        baseline_runner = FixtureRunner(self.repo)
+        self.evaluate(self.local_request(), baseline_runner)
+        baseline_gh = [c for c in baseline_runner.calls if c[:1] == ("gh",)]
+
+        runner = FixtureRunner(self.repo)
+        runner.pr_payload["statusCheckRollup"] = pr_360_rollup()
+
+        result = self.evaluate(self.local_request(), runner)
+
+        self.assertEqual(result["status"], "eligible")
+        self.assertEqual(result["reasonCodes"], [])
+        self.assertEqual(result["checks"]["blockingCount"], 0)
+        # Only the replacements count as green; the cancelled rows count as
+        # nothing at all.
+        self.assertEqual(result["checks"]["successfulCount"], 4)
+        # R5: the rule is a second pass over a list already in memory, so the
+        # eligible path costs exactly what it cost before.
+        gh_calls = [call for call in runner.calls if call[:1] == ("gh",)]
+        self.assertEqual(len(gh_calls), len(baseline_gh), runner.calls)
+        rollup_calls = [
+            call
+            for call in gh_calls
+            if call[:3] == ("gh", "pr", "view") and "statusCheckRollup" in call[-1]
+        ]
+        self.assertEqual(len(rollup_calls), 1, runner.calls)
+
+        # Negative half of the same check: strip the replacements and the same
+        # rollup must block again. If it does not, the rule has become a
+        # blanket CANCELLED allow-list, which R2 forbids.
+        stripped = FixtureRunner(self.repo)
+        stripped.pr_payload["statusCheckRollup"] = pr_360_rollup(
+            include_replacements=False
+        )
+        self.assertEqual(
+            self.evaluate(self.local_request(), stripped)["reasonCodes"],
+            ["checks_no_success"],
+        )
+        self.assertEqual(
+            self.evaluate(
+                self.local_request(),
+                self._runner_with_rollup(
+                    pr_360_rollup(include_replacements=False)
+                    + [check_run("SUCCESS", name="unrelated")]
+                ),
+            )["reasonCodes"],
+            ["checks_blocking"],
+        )
+
+    def _runner_with_rollup(self, rollup: list[dict[str, Any]]) -> FixtureRunner:
+        runner = FixtureRunner(self.repo)
+        runner.pr_payload["statusCheckRollup"] = rollup
+        return runner
+
+    def test_cancelled_run_without_a_replacement_still_blocks(self) -> None:
+        """R2: cancellation is not evidence of success."""
+
+        runner = FixtureRunner(self.repo)
+        runner.pr_payload["statusCheckRollup"] = [
+            check_run("SUCCESS", name="other", started_at=REPLACEMENT_AT),
+            check_run("CANCELLED", name="ci", started_at=SUPERSEDED_AT),
+        ]
+        result = self.evaluate(self.local_request(), runner)
+        self.assertEqual(result["reasonCodes"], ["checks_blocking"])
+
+    def test_rollup_of_only_superseded_rows_is_refused_explicitly(self) -> None:
+        """R3: dropping every blocking row must not manufacture eligibility."""
+
+        runner = FixtureRunner(self.repo)
+        runner.pr_payload["statusCheckRollup"] = [
+            check_run("CANCELLED", name="ci", started_at=SUPERSEDED_AT),
+            check_run("CANCELLED", name="ci", started_at=REPLACEMENT_AT),
+        ]
+        result = self.evaluate(self.local_request(), runner)
+        # checks_no_success is evaluated before checks_blocking, so the refusal
+        # names the real problem: nothing on this head ever passed.
+        self.assertEqual(result["reasonCodes"], ["checks_no_success"])
+        self.assertEqual(result["checks"]["successfulCount"], 0)
+        # The later cancellation is unexplained and is still counted blocking.
+        self.assertEqual(result["checks"]["blockingCount"], 1)
+
+    def test_supersession_rule_identity_ordering_and_evidence(self) -> None:
+        # R4: the evidence names which row replaced the discounted one. A
+        # StatusContext sits ahead of the pair so an off-by-one between the
+        # input index and the items position fails here.
+        checks, blocking, successful = eligibility.parse_checks(
+            [
+                {"__typename": "StatusContext", "context": "legacy", "state": "SUCCESS"},
+                check_run("CANCELLED", name="ci", started_at=SUPERSEDED_AT),
+                check_run("SUCCESS", name="ci", started_at=REPLACEMENT_AT),
+            ]
+        )
+        self.assertEqual((blocking, successful), (0, 2))
+        self.assertTrue(checks[1]["superseded"])
+        self.assertEqual(checks[1]["supersededBy"]["index"], 3)
+        self.assertEqual(checks[1]["supersededBy"]["startedAt"], REPLACEMENT_AT)
+        self.assertEqual(checks[2].get("name"), "ci")
+        self.assertNotIn("superseded", checks[2])
+        self.assertNotIn("superseded", checks[0])
+
+        # Equal timestamps are no evidence of ordering.
+        _, tied_blocking, _ = eligibility.parse_checks(
+            [
+                check_run("CANCELLED", name="ci", started_at=SUPERSEDED_AT),
+                check_run("SUCCESS", name="ci", started_at=SUPERSEDED_AT),
+            ]
+        )
+        self.assertEqual(tied_blocking, 1)
+
+        # Matrix template and expansion are different names, so different
+        # identities; a later expansion never discounts the template's row.
+        _, matrix_blocking, _ = eligibility.parse_checks(
+            [
+                check_run(
+                    "CANCELLED",
+                    name="test heavy (py${{ matrix.python-version }})",
+                    started_at=SUPERSEDED_AT,
+                ),
+                check_run(
+                    "SUCCESS", name="test heavy (py3.14)", started_at=REPLACEMENT_AT
+                ),
+            ]
+        )
+        self.assertEqual(matrix_blocking, 1)
+
+        # Same name under two workflows is two identities.
+        _, workflow_blocking, _ = eligibility.parse_checks(
+            [
+                check_run(
+                    "CANCELLED", name="build", workflow="A", started_at=SUPERSEDED_AT
+                ),
+                check_run(
+                    "SUCCESS", name="build", workflow="B", started_at=REPLACEMENT_AT
+                ),
+            ]
+        )
+        self.assertEqual(workflow_blocking, 1)
+
+        # Nameless rows never bucket together: the "unnamed" display
+        # placeholder is not an identity.
+        nameless_cancelled = check_run("CANCELLED", started_at=SUPERSEDED_AT)
+        nameless_cancelled.pop("name")
+        nameless_later = check_run("SUCCESS", started_at=REPLACEMENT_AT)
+        nameless_later.pop("name")
+        _, nameless_blocking, _ = eligibility.parse_checks(
+            [nameless_cancelled, nameless_later]
+        )
+        self.assertEqual(nameless_blocking, 1)
+
+    def test_started_at_absent_blocks_and_malformed_fails_closed(self) -> None:
+        # Absent: no evidence of ordering, so the row is not superseded. This
+        # can only keep a block, never create eligibility.
+        _, blocking, _ = eligibility.parse_checks(
+            [
+                check_run("CANCELLED", name="ci"),
+                check_run("SUCCESS", name="ci", started_at=REPLACEMENT_AT),
+            ]
+        )
+        self.assertEqual(blocking, 1)
+
+        # Present but unusable: malformed input, refused like a non-string
+        # status is.
+        for bad in ("not-a-timestamp", 17):
+            with self.subTest(started_at=bad):
+                with self.assertRaises(eligibility.EligibilityInputError):
+                    eligibility.parse_checks(
+                        [
+                            check_run("CANCELLED", name="ci", started_at=SUPERSEDED_AT),
+                            {
+                                **check_run("SUCCESS", name="ci"),
+                                "startedAt": bad,
+                            },
+                        ]
+                    )
+
+        # A rollup with no cancelled row never reads the field, so a malformed
+        # timestamp there cannot start failing a probe that used to pass.
+        _, untouched_blocking, untouched_successful = eligibility.parse_checks(
+            [{**check_run("SUCCESS", name="ci"), "startedAt": "not-a-timestamp"}]
+        )
+        self.assertEqual((untouched_blocking, untouched_successful), (0, 1))
 
     def test_local_branch_requires_a_successful_executed_check(self) -> None:
         runner = FixtureRunner(self.repo)

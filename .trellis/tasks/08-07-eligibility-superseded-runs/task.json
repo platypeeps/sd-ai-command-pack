@@ -3,7 +3,7 @@
   "name": "eligibility-superseded-runs",
   "title": "Merge eligibility counts superseded workflow runs as blocking",
   "description": "parse_checks counts every statusCheckRollup row, so concurrency-cancelled runs from a superseded workflow block a PR GitHub itself reports mergeable",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

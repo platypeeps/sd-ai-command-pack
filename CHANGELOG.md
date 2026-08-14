@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.71.8 - 2026-08-14
+
+### Fixed
+
+- The merge-eligibility probe blocked on check runs belonging to a workflow run
+  GitHub had already superseded, contradicting GitHub's own `mergeStateStatus`
+  (issue #414). A repository whose CI cancels superseded in-progress runs on the
+  same ref leaves both the cancelled run and its replacement attached to the
+  head, and `parse_checks` classified every rollup row independently, so the
+  cancelled copy decided the verdict. Observed on `anomaly-metric-creator`
+  PR #360: `gh pr view` reported `CLEAN`/`MERGEABLE` while the probe reported
+  `blocked ['checks_blocking']`, and the only escape was re-running the
+  superseded workflow. `sd-ship` Stage 3, `sd-housekeeping` eligibility, and
+  `sd-fleet-refresh` `merge-eligibility` all inherited the false block.
+
+  A row is now discounted when it is `CANCELLED` **and** a later-started row
+  shares its `(workflowName, name)` identity. Both halves matter: restricting to
+  `CANCELLED` keeps a genuine `FAILURE` from an older run blocking, and
+  requiring a later sibling keeps an operator's cancellation of the only run
+  blocking. Ties do not supersede, nameless rows never share an identity, and a
+  discounted row is never counted successful — so a head whose every row is
+  superseded is still refused, by `checks_no_success`. The receipt marks each
+  discounted row with `superseded` and a `supersededBy` citation of the row that
+  replaced it. Ordering comes from `startedAt`, which the existing single query
+  already returns, so the probe still makes one GitHub call.
+
 ## 0.71.7 - 2026-08-14
 
 ### Fixed
