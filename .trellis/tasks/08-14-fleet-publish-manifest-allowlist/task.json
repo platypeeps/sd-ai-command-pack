@@ -3,7 +3,7 @@
   "name": "fleet-publish-manifest-allowlist",
   "title": "Derive the fleet-publish allowlist from manifest.json",
   "description": "Derive the fleet-publish managed-path allowlist from manifest.json instead of a hand-maintained list, so installer payload changes cannot silently drift the publish helper's dirty-tree gate.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

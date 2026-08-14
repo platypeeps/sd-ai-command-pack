@@ -15,7 +15,7 @@ task is archived — in the same finalization that publishes the spec.
 
 `scripts/sd-ai-command-pack-fleet-publish.py` must regenerate every piece of
 pack-managed generated content **before** `work_commit()`, and every such path
-must appear in `DEFAULT_ALLOWED_PREFIXES`.
+must be allowed by the publish gate.
 
 Both halves are required and neither is sufficient alone:
 
@@ -23,6 +23,21 @@ Both halves are required and neither is sufficient alone:
   the tree is then dirty before publish starts and the allowlist refuses it.
 - Allowlisting alone fails on an untouched tree, because the file is still clean
   at publish time and there is nothing to allow.
+
+The allowlist has two sources, and generated content usually needs the first:
+
+- `DEFAULT_ALLOWED_PREFIXES` — residue the installer does not own, kept in the
+  script with an ownership comment per entry. `docs/repomix-map.md` and
+  `.gitignore` live here because no payload target names them.
+- `derive_allowed_paths()` — read at runtime from the consumer's
+  `.sd-ai-command-pack/manifest.json`, so every installed payload target is
+  allowed without a code edit.
+
+Generated content is written by a script rather than installed, so it is
+normally absent from the manifest and must be added to the residue constant.
+Add it there only after confirming no payload target already names it;
+duplicating a manifest-derived path in the constant is harmless but hides who
+owns the file.
 
 ## Why the ordering is not negotiable
 
