@@ -895,6 +895,72 @@ class InstallCoreTests(InstallTestCase):
                     destination.read_text(encoding="utf-8"), "local edit\n"
                 )
 
+    def test_vouched_digest_never_adopts_a_symlinked_destination(self) -> None:
+        # path-filesystem boundary: provenance vouches content, and a symlink
+        # is a node, not content. Following one would let a link decide where
+        # the payload lands, and the audit vouches regular files only, so the
+        # symlink branch must stay ahead of the digest comparison.
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("new release\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        previous = b"previous release\n"
+        linked = root / "elsewhere.md"
+        linked.write_bytes(previous)
+        destination = root / "docs/example.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.symlink_to(linked)
+
+        result = install.install_file(
+            file,
+            root,
+            force=False,
+            dry_run=False,
+            backup=False,
+            provenance_files={
+                "docs/example.md": "sha256:" + hashlib.sha256(previous).hexdigest()
+            },
+        )
+
+        self.assertEqual(result.status, "symlink-conflict")
+        self.assertTrue(destination.is_symlink())
+        self.assertEqual(linked.read_bytes(), previous)
+
+    def test_vouched_comparison_requires_canonical_recorded_evidence(self) -> None:
+        # normalization-evidence boundary: the recorded digest is compared as
+        # the one canonical form provenance writes. A record that is upper
+        # case, unprefixed, padded, or empty is not that form, and guessing
+        # which of them "means" the same digest would be the way an edited
+        # provenance file talks the installer into a write.
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("new release\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        destination = root / "docs/example.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        previous = b"previous release\n"
+        canonical = hashlib.sha256(previous).hexdigest()
+
+        for label, recorded in (
+            ("uppercase hex", "sha256:" + canonical.upper()),
+            ("missing algorithm prefix", canonical),
+            ("padded", " sha256:" + canonical + " "),
+            ("empty", ""),
+            ("wrong algorithm", "sha1:" + canonical),
+        ):
+            with self.subTest(case=label):
+                destination.write_bytes(previous)
+                result = install.install_file(
+                    file,
+                    root,
+                    force=False,
+                    dry_run=False,
+                    backup=False,
+                    provenance_files={"docs/example.md": recorded},
+                )
+                self.assertEqual(result.status, "conflict")
+                self.assertEqual(destination.read_bytes(), previous)
+
     def test_vouched_upgrade_never_preempts_a_preserved_target(self) -> None:
         # `if-not-exists` returns before the new branch, so a vouched digest
         # cannot turn a consumer-tunable file into a silent overwrite.
