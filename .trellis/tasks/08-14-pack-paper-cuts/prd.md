@@ -7,12 +7,18 @@ grows past that, split it out rather than stretching this task.
 ## 1. Trellis write_json trailing newline (issue #413)
 
 `.trellis/scripts/common/io.py` `write_json` omits the trailing newline that
-`active_task.py` appends, so the same `task.json` has two byte
+`active_task.py:524` appends, so the same `task.json` has two byte
 representations depending on the last writer, and hand-corrections revert
-within a day. Fix: append `"\n"` in `write_json`, matching
-`active_task.py`. This is vendored Trellis code — apply in the pack's
-vendored copy and relay upstream per the vendored-artifact route; no bulk
-rewrite of existing files.
+within a day (verified in this checkout: `io.py` dumps without `+ "\n"`).
+
+Ownership caveat: `.trellis/scripts/` is Trellis-vendored tooling, not pack
+payload — the pack cannot ship this fix to consumers, and a local edit would
+be overwritten by the next Trellis update. The deliverable here is the
+upstream relay: open the one-character fix against `mindfold-ai/Trellis`
+(append `"\n"` in `write_json`, matching `active_task.py`; the
+`mkstemp`/`os.replace` sequence, error handling, and return contract stay
+untouched), link it from issue #413, and close #413 as relayed. No bulk
+rewrite of existing files; no local vendored edit.
 
 ## 2. set-meta diagnostic states no Trellis version floor (issue #410)
 
@@ -35,10 +41,12 @@ fail loudly.
 
 ## Acceptance Criteria
 
-- [ ] `write_json` output ends with a newline; a test covers one mutating
-      `task.py` command round-trip.
+- [ ] The `write_json` newline fix is relayed upstream to
+      `mindfold-ai/Trellis` with a linked PR or issue; the regression test
+      belongs to that upstream change, not to this repo.
 - [ ] The base-branch exemption diagnostic states the v0.6.9 floor; a test
       asserts the message content.
 - [ ] Both shell consumers reject a cache-env pair whose name is outside the
       emitted key set, proven by a test injecting a foreign name.
-- [ ] Issues #413, #410, and #398 are closed by the shipping PR.
+- [ ] Issues #410 and #398 are closed by the shipping PR; #413 closes when
+      its upstream relay is filed and linked.
