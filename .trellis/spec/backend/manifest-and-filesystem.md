@@ -1663,6 +1663,25 @@ target conflicts, report every conflict and exit `2` without partially applying
 the refresh. Local-only Trellis bootstrap is outside this boundary because it
 invokes the external Trellis installer before pack files exist.
 
+An `install: always` target whose bytes differ from the new payload is not a
+conflict when `provenance.json` records those exact bytes for that target. The
+recorded digest proves the previous release wrote them and nobody edited them
+since, so installing the new release displaces no decision anyone made: the
+target reports `updated` and is written without `--force` and without a
+backup, since the displaced content is a published release recoverable from
+the pack. This is the repository-scope counterpart of machine-scope
+`owned-stale`, and it is decided from the same evidence `remove` already
+accepts as authority to delete a pack file. Anything else still conflicts:
+bytes provenance does not record, a target absent from provenance, and a
+provenance file that is missing, symlinked, or malformed — its reader
+normalizes all three to no evidence, and absent evidence fails closed. A run
+interrupted before its provenance rewrite therefore conflicts rather than
+upgrading. The `if-not-exists` and force-preserved branch is decided ahead of
+this one, so a vouched digest can never silently overwrite a consumer-tunable
+file. Read provenance once per run and thread it into every classification, so
+the preflight and the apply pass cannot disagree; `--check` and `--status`
+report the same `updated` classification and still require a refresh.
+
 When that preflight succeeds, thread the preflight `InstallResult`s into the
 apply pass for unchanged, created, and preserved source-backed files. The apply
 pass should reuse the planned source bytes, executable bit, and digest instead

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Owns the plan-before-apply install boundary and the machine-scope owned-stale classification this change mirrors; the spec section must be updated with the new status."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Defines the installer exit codes and the created/unchanged/conflict/overwritten status vocabulary that the new updated status joins."}

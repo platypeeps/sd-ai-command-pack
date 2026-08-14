@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Sets the conflict-and-force handling test expectations the new branch must satisfy without weakening drift detection."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Governs the per-file status lines and conflict summaries the installer prints, which this change adds a new status to."}

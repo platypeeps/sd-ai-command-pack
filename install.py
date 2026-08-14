@@ -627,6 +627,12 @@ def _install_payload(
 ) -> tuple[list[InstallResult], list[Path]]:
     results: list[InstallResult] = []
     generated_targets: list[Path] = []
+    # Read once per run and thread it, the way removal.py already threads the
+    # same file. Every pass that reaches here -- the preflight, the apply, and
+    # the --check/--status dry run -- runs before the receipts are rewritten,
+    # so one read describes the previous release for all of them, and the
+    # preflight cannot classify a target differently from the apply.
+    provenance_files = read_existing_provenance_files(target)
     # A thin checkout stripped the pack's .gitignore block on purpose: the
     # entries it carries ignore machine surfaces that no longer live in the
     # repository. Reinstalling it would make every thin inspection report a
@@ -651,6 +657,7 @@ def _install_payload(
                 planned_result=(
                     planned_results.get(file.target) if planned_results else None
                 ),
+                provenance_files=provenance_files,
             )
         results.append(result)
 
