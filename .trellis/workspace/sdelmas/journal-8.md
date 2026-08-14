@@ -1099,3 +1099,45 @@ Reviewed the 12 open GitHub issues, the 73 open Trellis tasks, PR #444, and the 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 376: Housekeeping KB refresh must not block its own merge
+
+**Date**: 2026-08-14
+**Task**: Housekeeping KB refresh must not block its own merge
+**Branch**: `task/housekeeping-kb-selfblock`
+
+### Summary
+
+Made the Obsidian KB ignore-block writer semantically idempotent so a cosmetic banner change in a new pack release stops dirtying a tracked .gitignore across the fleet and blocking the merge that ships it (issue #432).
+
+### Main Changes
+
+- merge_kb_ignore_block rewrites the managed block only when it is functionally deficient (markers absent, no active entry ignoring the KB directory, or an unmanaged KB entry outside the span); a functional block is left byte-identical and reported as 'gitignore: present'
+- Added --rewrite-ignore-block to force the byte-exact rebuild, threaded through ensure_gitignore, planned_gitignore_state, and both preview modes so --dry-run and --check cannot promise a write the real run would not perform
+- sd-housekeeping working_tree_dirty anomalies now name up to ten dirty paths (then 'and N more') and say when this run's own KB refresh wrote .gitignore; only the tracked-file states set that flag, since .git/info/exclude never appears in git status
+- Recorded the managed-block ownership rule in the KB reference and the writer's docstring, with a paste-ready note for consumer provenance guidance that hashes .gitignore whole
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `71c78345c127769077e55c2d6a7c4f1e99c696b2` | docs(task): tick the acceptance criteria for housekeeping-kb-selfblock |
+| `28274c7676795fa9c7592979086cad03f8fc335e` | chore(task): record the branch for housekeeping-kb-selfblock |
+| `87bf72541135f50c04686b638068b18a4bd42153` | fix(housekeeping): scope the KB write note to the tracked ignore file |
+| `8eab6fd595b08a5bd8472be96417e8ff61800636` | fix(update-spec-kb): make the managed ignore block semantically idempotent |
+
+### Testing
+
+- [OK] python3 -m unittest discover tests -- Ran 2468 tests, OK
+- [OK] sd-ai-command-pack-check.py --json -- status passed, 8 passed / 0 failed
+- [OK] Issue #432 reproduction: a committed stale-banner block survives a refresh and git status --porcelain prints nothing
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
