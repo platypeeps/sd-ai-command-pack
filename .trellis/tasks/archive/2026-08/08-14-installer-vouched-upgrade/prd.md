@@ -88,20 +88,20 @@ installer has the same evidence available and no equivalent classification.
 
 ## Acceptance Criteria
 
-- [ ] A vouched changed target reports the new status and is rewritten without
+- [x] A vouched changed target reports the new status and is rewritten without
       `--force`.
-- [ ] A locally edited target still reports `conflict` and is left untouched
+- [x] A locally edited target still reports `conflict` and is left untouched
       without `--force`.
-- [ ] A changed target with no provenance entry still reports `conflict`.
-- [ ] A changed target whose provenance is missing, symlinked, or malformed
+- [x] A changed target with no provenance entry still reports `conflict`.
+- [x] A changed target whose provenance is missing, symlinked, or malformed
       still reports `conflict`.
-- [ ] `--force` behaviour, `--backup` behaviour, and every `preserved` target
+- [x] `--force` behaviour, `--backup` behaviour, and every `preserved` target
       are byte-for-byte unchanged.
-- [ ] The 0.71.1 -> 0.71.4 repro upgrades all four files with no conflict and
+- [x] The 0.71.1 -> 0.71.4 repro upgrades all four files with no conflict and
       no `--force`, and the install audit passes afterwards.
-- [ ] The full `unittest discover -s tests` suite passes under the toolchain
+- [x] The full `unittest discover -s tests` suite passes under the toolchain
       interpreter, including the updated
       `test_audit_clean_source_changed_target_requires_refresh`, which today
       asserts the defective behaviour.
-- [ ] `.trellis/spec/backend/manifest-and-filesystem.md` and the installer
+- [x] `.trellis/spec/backend/manifest-and-filesystem.md` and the installer
       documentation describe the new classification.
