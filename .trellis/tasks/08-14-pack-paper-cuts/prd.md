@@ -7,12 +7,21 @@ grows past that, split it out rather than stretching this task.
 ## 1. Trellis write_json trailing newline (issue #413)
 
 `.trellis/scripts/common/io.py` `write_json` omits the trailing newline that
-`active_task.py` appends, so the same `task.json` has two byte
+`active_task.py:524` appends, so the same `task.json` has two byte
 representations depending on the last writer, and hand-corrections revert
-within a day. Fix: append `"\n"` in `write_json`, matching
-`active_task.py`. This is vendored Trellis code — apply in the pack's
-vendored copy and relay upstream per the vendored-artifact route; no bulk
-rewrite of existing files.
+within a day (verified in this checkout: `io.py` dumps without `+ "\n"`).
+
+Ownership caveat: `.trellis/scripts/` is Trellis-vendored tooling, not pack
+payload — the pack cannot ship this fix to consumers, and a local edit would
+be overwritten by the next Trellis update. The deliverable here is the
+upstream handoff, prepared under the maintainer rule (`AGENTS.md`: no
+upstream Trellis PR without explicit user approval for that specific PR):
+write the paste-ready handoff for the one-character fix (append `"\n"` in
+`write_json`, matching `active_task.py`; the `mkstemp`/`os.replace`
+sequence, error handling, and return contract stay untouched), link it from
+issue #413, and ask the user whether to open the upstream PR. Open it only
+on that explicit approval; otherwise the handoff itself completes this item.
+No bulk rewrite of existing files; no local vendored edit.
 
 ## 2. set-meta diagnostic states no Trellis version floor (issue #410)
 
@@ -35,10 +44,14 @@ fail loudly.
 
 ## Acceptance Criteria
 
-- [ ] `write_json` output ends with a newline; a test covers one mutating
-      `task.py` command round-trip.
+- [ ] The `write_json` newline fix has a paste-ready upstream handoff linked
+      from issue #413, and the upstream PR is opened only on explicit per-PR
+      user approval per `AGENTS.md`; the regression test belongs to that
+      upstream change, not to this repo.
 - [ ] The base-branch exemption diagnostic states the v0.6.9 floor; a test
       asserts the message content.
 - [ ] Both shell consumers reject a cache-env pair whose name is outside the
       emitted key set, proven by a test injecting a foreign name.
-- [ ] Issues #413, #410, and #398 are closed by the shipping PR.
+- [ ] Issues #410 and #398 are closed by the shipping PR; #413 closes when
+      its handoff is linked and its upstream disposition (approved PR or
+      documented handoff-only) is recorded.
