@@ -17,8 +17,9 @@ the user authorized refreshing **all eight consumers** to 0.71.2. That is a
 deliberate widening beyond this cohort and covers the *refresh only*;
 conversion stays scoped to the three canaries named above.
 
-**2026-08-12 — requirement 3, operator answers.** Asked: sven.delmas
-(the operator working in these repositories).
+**2026-08-12 — requirement 3, operator answers.** `sven.delmas`, the
+operator working in these repositories, was asked which of the three
+consumers run Codex. Their answers:
 
 - `rwbp-coordinator` — **runs codex**
 - `loadsmith` — **runs codex**
@@ -36,10 +37,10 @@ recorded on this line when confirmed.
 the answers were recorded and was brought up in two steps:
 
 - `install.py --machine` — 115 files (114 owned-current, 1 owned-stale);
-  receipt moved 0.71.1 to 0.71.2, payload
+  receipt moved from 0.71.1 to 0.71.2, payload
   `sha256:25367a0070eebb3a8db618803a82f3987d6c7f4d503a03ddeeb5d1caa44758ae`.
 - `claude plugin marketplace update sd-ai-command-pack` then
-  `claude plugin update sd@sd-ai-command-pack` — 0.71.1 to 0.71.2. The
+  `claude plugin update sd@sd-ai-command-pack` — from 0.71.1 to 0.71.2. The
   marketplace refresh alone does not move an installed plugin, and
   `plugin install` reports "already installed" rather than upgrading.
 
