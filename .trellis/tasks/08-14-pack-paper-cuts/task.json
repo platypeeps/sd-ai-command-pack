@@ -1,8 +1,8 @@
 {
   "id": "pack-paper-cuts",
   "name": "pack-paper-cuts",
-  "title": "Pack paper cuts: write_json newline, set-meta floor, cache-env allowlist",
-  "description": "Batch of three small fixes: Trellis write_json trailing newline relay, set-meta diagnostic Trellis version floor, cache-env allowlist derivation from CACHE_ENV_KEYS (issues #413, #410, #398).",
+  "title": "Pack paper cuts: write_json newline, set-meta floor, cache-env allowlist, PR-body closing keywords",
+  "description": "Batch of four small fixes: Trellis write_json trailing newline relay, set-meta diagnostic Trellis version floor, cache-env allowlist derivation from CACHE_ENV_KEYS, and an sd-create-pr safety rule against closing keywords in PR bodies (issues #413, #410, #398, #455).",
   "status": "planning",
   "dev_type": null,
   "scope": null,
