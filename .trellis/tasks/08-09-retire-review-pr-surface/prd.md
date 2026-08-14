@@ -1,5 +1,13 @@
 # Retire sd-review-pr: port the fleet integration-only review profile into sd-review
 
+> Upstream record: issue #399 documents the user-facing half of this: the
+> superseded commands carry no supersession signal at the command choice
+> point, and the catalog's "transitional until 0.62.0" horizon expired 30+
+> releases ago. Completing this removal is that issue's resolution shape 2;
+> close #399 with this task's shipping PR. #399 also lists adjacent
+> unmarked-transition instances (`sd-full-check`, `sd-create-pr` naming,
+> finish-work/housekeeping seam) — disposition them here or record why not.
+
 ## Goal
 
 Delete the `sd-review-pr` command surface and everything that survives only for
