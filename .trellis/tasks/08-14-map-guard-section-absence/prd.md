@@ -41,7 +41,7 @@ A configured map file that exists but yields no parseable
 Found by Copilot review on `platypeeps/sd-github-review` PR #79 during the
 same rollout, in the same function.
 
-The parser skips a fence line only when it matches `/^\s*`{3,}\s*$/` — bare
+The parser skips a fence line only when it matches ``/^\s*`{3,}\s*$/`` — bare
 backticks and nothing else. Repomix currently opens the listing with a bare
 four-backtick fence, so no map is misparsed today. If the generator ever emits
 ```` ```text ```` or a tilde fence, the fence line is taken as a tree entry and
