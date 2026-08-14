@@ -96,7 +96,14 @@ into `prefixes` with unchanged behavior; derived non-dotted targets go into
 
 ## D4 — Residue, and why each entry stays
 
-Kept explicit, each with an ownership comment, because none is installer-owned:
+Kept explicit, each with an ownership comment, because none is installer-owned.
+The residue splits the same way derived targets do (D3a): `.trellis/` and
+`.sd-ai-command-pack/` are directories and stay in `DEFAULT_ALLOWED_PREFIXES`;
+`docs/repomix-map.md` and `.gitignore` are files and belong in
+`DEFAULT_ALLOWED_EXACT`. Leaving a residue file in the prefix tuple reopens the
+D3a hole one layer up — `startswith` would sanction `.gitignore.bak` and
+`docs/repomix-map.md.orig`. Pinned by
+`test_residue_file_entries_are_exact_not_string_prefixes`.
 
 | Entry | Owner |
 | --- | --- |

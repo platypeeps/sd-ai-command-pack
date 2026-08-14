@@ -78,6 +78,11 @@ PACK_MANIFEST_RELATIVE = ".sd-ai-command-pack/manifest.json"
 # gained a new target directory. Anything dirty outside the union of this
 # residue and the derived set means unrelated work would be swept into the
 # publication commit, so the helper fails closed.
+#
+# Split the same way derived targets are: a directory here is prefix-matched, a
+# file is exact-matched. A residue *file* left in the prefix tuple would sanction
+# `.gitignore.bak` and `docs/repomix-map.md.orig` for the same startswith reason
+# a derived `scripts/a.py` would sanction `scripts/a.py.orig`.
 DEFAULT_ALLOWED_PREFIXES = (
     # Trellis owns this: the active task and the journal workspace are dirty
     # by design at the moment this helper runs.
@@ -86,6 +91,8 @@ DEFAULT_ALLOWED_PREFIXES = (
     # rewritten by the install that precedes publication. Not payload targets,
     # so the manifest never names them.
     ".sd-ai-command-pack/",
+)
+DEFAULT_ALLOWED_EXACT = (
     # The map generator's output, regenerated after the archive move.
     "docs/repomix-map.md",
     # Carries the pack-managed .obsidian-kb block. refresh_managed_ignore_block()
@@ -238,7 +245,7 @@ def derive_allowed_paths(repo: Path) -> tuple[tuple[str, ...], frozenset[str]]:
             code=3,
         )
     prefixes = tuple(sorted(set(DEFAULT_ALLOWED_PREFIXES) | derived_prefixes))
-    return prefixes, frozenset(derived_exact)
+    return prefixes, frozenset(set(DEFAULT_ALLOWED_EXACT) | derived_exact)
 
 
 def resolve_task_dir(repo: Path, slug: str) -> Path:

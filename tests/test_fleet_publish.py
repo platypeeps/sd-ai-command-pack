@@ -533,9 +533,18 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         # An operator who already ran housekeeping arrives with .gitignore dirty.
         # .gitignore is residue: housekeeping owns it, no payload target names
         # it, so it must survive derivation from the manifest.
-        self.assertIn(".gitignore", publish.DEFAULT_ALLOWED_PREFIXES)
+        self.assertIn(".gitignore", publish.DEFAULT_ALLOWED_EXACT)
         (self.repo / ".gitignore").write_text("/.obsidian-kb\n", encoding="utf-8")
         self._gate()
+
+    def test_residue_file_entries_are_exact_not_string_prefixes(self) -> None:
+        # The same hole the derived set closes, applied to the residue: a
+        # residue *file* left in the prefix tuple would sanction an editor
+        # backup beside it, which is what this gate exists to stop.
+        (self.repo / ".gitignore.bak").write_text("/.obsidian-kb\n", encoding="utf-8")
+        with self.assertRaises(publish.PublishError) as ctx:
+            self._gate()
+        self.assertIn(".gitignore.bak", str(ctx.exception))
 
     def test_ignore_block_refresh_rewrites_the_managed_block(self) -> None:
         # Helper contract only. This says nothing about *when* publish() calls it;

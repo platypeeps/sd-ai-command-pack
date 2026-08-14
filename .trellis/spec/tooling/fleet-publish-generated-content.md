@@ -26,18 +26,25 @@ Both halves are required and neither is sufficient alone:
 
 The allowlist has two sources, and generated content usually needs the first:
 
-- `DEFAULT_ALLOWED_PREFIXES` — residue the installer does not own, kept in the
-  script with an ownership comment per entry. `docs/repomix-map.md` and
-  `.gitignore` live here because no payload target names them.
+- the residue constants — paths the installer does not own, kept in the script
+  with an ownership comment per entry. `DEFAULT_ALLOWED_PREFIXES` holds
+  directories, `DEFAULT_ALLOWED_EXACT` holds files. `docs/repomix-map.md` and
+  `.gitignore` are in the exact one because no payload target names them.
 - `derive_allowed_paths()` — read at runtime from the consumer's
   `.sd-ai-command-pack/manifest.json`, so every installed payload target is
   allowed without a code edit.
 
 Generated content is written by a script rather than installed, so it is
-normally absent from the manifest and must be added to the residue constant.
+normally absent from the manifest and must be added to a residue constant.
 Add it there only after confirming no payload target already names it;
 duplicating a manifest-derived path in the constant is harmless but hides who
 owns the file.
+
+Put a file in `DEFAULT_ALLOWED_EXACT`, never in the prefix tuple. Prefix
+entries are matched with `startswith`, so a generated file listed as a prefix
+also sanctions any editor backup whose name extends it — a `.bak` or `.orig`
+suffix on the same path — which then rides into the publication commit. That is
+the leakage this gate exists to stop.
 
 ## Why the ordering is not negotiable
 
