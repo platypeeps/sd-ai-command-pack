@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-07",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/eligibility-superseded-runs",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
