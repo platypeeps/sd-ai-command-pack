@@ -263,11 +263,20 @@ the refresh reinstalls its residual):
    adapter to the pack receipt or provenance; it stays outside the pack-vouched
    set.
 4. Run each printed `candidatePrepare` command from the consumer checkout, then
-   run the consumer's deterministic full-check and commit only the refresh.
-5. Run the source-side fleet review classifier against the exact base and
-   refresh head. Use integration-only review when it qualifies; otherwise use
-   the normal configured remote-review loop.
-6. Push, open the PR, inspect existing feedback, and classify every verified
+   run the consumer's deterministic full-check and stage only the refresh.
+5. Commit and push through `scripts/sd-ai-command-pack-fleet-publish.py`, which
+   folds the work commit, the post-archive structural-map regeneration, the
+   real `task.py archive`, and the recorded journal into the single head it
+   pushes. The publication order is stated once, in the `pr-publication` stage
+   of `.agents/skills/sd-fleet-refresh/SKILL.md`; follow it there rather than
+   reconstructing it here. A repo the helper refuses (see **Publish helper is
+   consumer-only**) self-releases through `sd-finish-work` under the same
+   ordering constraint: regenerate the map after the archive move and before
+   the push, never in a commit appended to a pushed head.
+6. Run the source-side fleet review classifier against the exact base and the
+   pushed head, using integration-only review when it qualifies and the normal
+   configured remote-review loop otherwise. Open the PR, inspect existing
+   feedback, and classify every verified
    finding with the source finding-severity gate before watch or merge. In the
    PR body's verification summary, attribute each ownership class to the check
    that validates it: the install audit and `provenance.json` for pack-owned

@@ -834,6 +834,160 @@ class InstallCoreTests(InstallTestCase):
         self.assertEqual(destination.read_text(encoding="utf-8"), "pack template\n")
         self.assertEqual(overwritten.backup.read_text(encoding="utf-8"), "local edit\n")
 
+    def test_install_file_upgrades_only_provenance_vouched_content(self) -> None:
+        # The branch sits between "unchanged" and "conflict": bytes provenance
+        # recorded are the previous release and upgrade silently; anything
+        # else is somebody's edit and still refuses without --force.
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("new release\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        destination = root / "docs/example.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        previous = b"previous release\n"
+        vouched = {
+            "docs/example.md": "sha256:" + hashlib.sha256(previous).hexdigest()
+        }
+
+        destination.write_bytes(previous)
+        dry = install.install_file(
+            file,
+            root,
+            force=False,
+            dry_run=True,
+            backup=False,
+            provenance_files=vouched,
+        )
+        self.assertEqual(dry.status, "updated")
+        self.assertEqual(destination.read_bytes(), previous)
+
+        updated = install.install_file(
+            file,
+            root,
+            force=False,
+            dry_run=False,
+            backup=True,
+            provenance_files=vouched,
+        )
+        self.assertEqual(updated.status, "updated")
+        self.assertEqual(destination.read_text(encoding="utf-8"), "new release\n")
+        self.assertIsNone(updated.backup)
+        self.assertFalse(destination.with_name("example.md.bak").exists())
+
+        for label, mapping in (
+            ("edited", vouched),
+            ("target absent from provenance", {"docs/other.md": "sha256:0"}),
+            ("empty provenance", {}),
+            ("no provenance", None),
+        ):
+            with self.subTest(case=label):
+                destination.write_bytes(b"local edit\n")
+                conflict = install.install_file(
+                    file,
+                    root,
+                    force=False,
+                    dry_run=False,
+                    backup=False,
+                    provenance_files=mapping,
+                )
+                self.assertEqual(conflict.status, "conflict")
+                self.assertEqual(
+                    destination.read_text(encoding="utf-8"), "local edit\n"
+                )
+
+    def test_vouched_digest_never_adopts_a_symlinked_destination(self) -> None:
+        # path-filesystem boundary: provenance vouches content, and a symlink
+        # is a node, not content. Following one would let a link decide where
+        # the payload lands, and the audit vouches regular files only, so the
+        # symlink branch must stay ahead of the digest comparison.
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("new release\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        previous = b"previous release\n"
+        linked = root / "elsewhere.md"
+        linked.write_bytes(previous)
+        destination = root / "docs/example.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.symlink_to(linked)
+
+        result = install.install_file(
+            file,
+            root,
+            force=False,
+            dry_run=False,
+            backup=False,
+            provenance_files={
+                "docs/example.md": "sha256:" + hashlib.sha256(previous).hexdigest()
+            },
+        )
+
+        self.assertEqual(result.status, "symlink-conflict")
+        self.assertTrue(destination.is_symlink())
+        self.assertEqual(linked.read_bytes(), previous)
+
+    def test_vouched_comparison_requires_canonical_recorded_evidence(self) -> None:
+        # normalization-evidence boundary: the recorded digest is compared as
+        # the one canonical form provenance writes. A record that is upper
+        # case, unprefixed, padded, or empty is not that form, and guessing
+        # which of them "means" the same digest would be the way an edited
+        # provenance file talks the installer into a write.
+        root = self.make_repo()
+        source = root / "source.md"
+        source.write_text("new release\n", encoding="utf-8")
+        file = self.valid_pack_file(source=source, target=Path("docs/example.md"))
+        destination = root / "docs/example.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        previous = b"previous release\n"
+        canonical = hashlib.sha256(previous).hexdigest()
+
+        for label, recorded in (
+            ("uppercase hex", "sha256:" + canonical.upper()),
+            ("missing algorithm prefix", canonical),
+            ("padded", " sha256:" + canonical + " "),
+            ("empty", ""),
+            ("wrong algorithm", "sha1:" + canonical),
+        ):
+            with self.subTest(case=label):
+                destination.write_bytes(previous)
+                result = install.install_file(
+                    file,
+                    root,
+                    force=False,
+                    dry_run=False,
+                    backup=False,
+                    provenance_files={"docs/example.md": recorded},
+                )
+                self.assertEqual(result.status, "conflict")
+                self.assertEqual(destination.read_bytes(), previous)
+
+    def test_vouched_upgrade_never_preempts_a_preserved_target(self) -> None:
+        # `if-not-exists` returns before the new branch, so a vouched digest
+        # cannot turn a consumer-tunable file into a silent overwrite.
+        root = self.make_repo()
+        source = root / "rules.json"
+        source.write_text("{\"pack\": \"new\"}\n", encoding="utf-8")
+        target = sorted(install.FORCE_PRESERVED_TARGETS)[0]
+        file = self.valid_pack_file(source=source, target=target)
+        destination = root / target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tuned = b"{\"local\": true}\n"
+        destination.write_bytes(tuned)
+
+        result = install.install_file(
+            file,
+            root,
+            force=False,
+            dry_run=False,
+            backup=False,
+            provenance_files={
+                target.as_posix(): "sha256:" + hashlib.sha256(tuned).hexdigest()
+            },
+        )
+
+        self.assertEqual(result.status, "preserved")
+        self.assertEqual(destination.read_bytes(), tuned)
+
     def test_generated_pack_files_have_no_template_source(self) -> None:
         generated = install.fileops.generated_pack_file(
             "generated-test", Path(".sd-ai-command-pack/generated.txt")

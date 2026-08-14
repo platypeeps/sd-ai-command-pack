@@ -29,7 +29,9 @@ expressed through process exit codes and concise terminal output.
 - Validate prerequisites before writing files. `require_trellis_repo()` runs
   before selecting and installing templates.
 - Represent non-fatal install outcomes with status strings such as
-  `unchanged`, `created`, `conflict`, and `overwritten`.
+  `unchanged`, `created`, `updated`, `conflict`, and `overwritten`. `updated`
+  is a write that needed no `--force`, so it never contributes to the
+  conflict exit `2`.
 - Use `subprocess.run(..., check=False)` when a command result is part of the
   installer contract, such as `git diff --check`.
 - Catch `FileNotFoundError` only for optional tooling. `run_diff_check()` warns

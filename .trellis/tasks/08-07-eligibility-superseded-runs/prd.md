@@ -1,5 +1,15 @@
 # Merge eligibility counts superseded workflow runs as blocking
 
+> Upstream record: issue #414 (filed 2026-08-10 from `platypeeps/rwbp-website`
+> evidence, pack 0.64.3) documents this same defect with a verified
+> reproduction, the `parse_checks` line numbers, and a proposed same-name
+> dedupe fix — and records why `CANCELLED` must NOT simply join the
+> `{SKIPPED, NEUTRAL}` allow-set. Treat #414 as the evidence annex; close it
+> with this task's shipping PR. Per #414's own note, this is distinct from
+> issue #412 (watch outcome vocabulary; task
+> `08-14-watch-settled-blocked-classification`) and from
+> `08-08-pr-eligibility-stale-blocked-review` (mergeStateStatus staleness).
+
 ## Goal
 
 Stop the merge-eligibility probe from blocking on check runs that belong to a
