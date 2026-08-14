@@ -1,4 +1,4 @@
-# Fail the map guard when the directory-structure section is absent
+# Stop the map guard passing silently when the structure section is absent
 
 Found by Copilot review on `platypeeps/rwbp-coordinator` PR #225 during the
 0.71.6 fleet rollout — a genuine hole in the guard shipped by 0.71.6 itself.

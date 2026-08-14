@@ -1,7 +1,7 @@
 {
   "id": "map-guard-section-absence",
   "name": "map-guard-section-absence",
-  "title": "Fail the map guard when the directory-structure section is absent",
+  "title": "Stop the map guard passing silently when the structure section is absent",
   "description": "The generated-map guard treats a docs/repomix-map.md with no # Directory Structure section as a pass, so a repomix output-format change would silently disable the check instead of failing loudly. Found by Copilot on rwbp-coordinator PR #225 during the 0.71.6 fleet rollout.",
   "status": "planning",
   "dev_type": null,
