@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 375
+- **Total Sessions**: 376
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1092 | Active |
+| `journal-8.md` | ~1133 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 376 | 2026-08-14 | Housekeeping KB refresh must not block its own merge | `71c78345c127769077e55c2d6a7c4f1e99c696b2`, `28274c7676795fa9c7592979086cad03f8fc335e`, `87bf72541135f50c04686b638068b18a4bd42153`, `8eab6fd595b08a5bd8472be96417e8ff61800636` | `task/housekeeping-kb-selfblock` |
 | 375 | 2026-08-14 | Backlog consolidation: open issues and follow-ups into planning tasks | `8ea2aa8c` | `task/backlog-consolidation-0814` |
 | 374 | 2026-08-14 | Guard committed structural maps against pre-archive .trellis paths | `308d3bb3` | `fix/generated-map-ordering-guard` |
 | 373 | 2026-08-14 | Installer upgrades provenance-vouched pack files without --force | `06d56f68`, `638e3c34` | `fix/installer-vouched-upgrade` |
