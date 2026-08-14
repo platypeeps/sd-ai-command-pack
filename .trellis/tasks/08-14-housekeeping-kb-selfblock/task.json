@@ -3,7 +3,7 @@
   "name": "housekeeping-kb-selfblock",
   "title": "Housekeeping KB refresh must not block its own merge",
   "description": "Stop sd-housekeeping from dirtying .gitignore via the pre-merge KB refresh and then refusing its own merge on the clean-tree gate (issue #432).",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

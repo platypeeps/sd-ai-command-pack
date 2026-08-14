@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.71.7 - 2026-08-14
+
+### Fixed
+
+- `sd-housekeeping` could block the merge it was cleaning up after (issue
+  #432). It refreshes the Obsidian KB before its merge and branch-cleanup
+  gates, and `sd-ai-command-pack-update-spec-kb.py` rewrote the managed
+  `.gitignore` block whenever the rebuilt text differed byte for byte. A
+  reworded comment line in a new pack release therefore dirtied a tracked file
+  in every consumer at once, and three failed-closed cleanliness gates
+  (dependency-PR merge, merged-branch cleanup, and the separate
+  `pr-eligibility.py` probe) all read that as `working_tree_dirty`. The writer
+  is now semantically idempotent: it rewrites the block only when the block is
+  functionally deficient — markers absent, no active entry ignoring the KB
+  directory, or an unmanaged KB entry outside the span — and leaves a
+  functional block byte-identical, reporting `gitignore: present`. The pack
+  owns the bytes between the `obsidian-kb start` and `obsidian-kb end`
+  markers; a provenance mismatch confined to that span is reconciled by
+  rehashing the ignore file, never by reverting it. `--rewrite-ignore-block`
+  forces the old byte-exact rebuild for a caller that intends to commit the
+  result, and combines with `--dry-run` and `--check`. Behaviour change:
+  `--check` no longer reports `ignore entry is not current` for cosmetic block
+  drift, so that drift no longer surfaces as a `knowledge.obsidian-kb` finding
+  in `sd-check`.
+- A `working_tree_dirty` anomaly from `sd-housekeeping` now names up to ten
+  dirty paths (then `and N more`), and says so explicitly when this run's own
+  Obsidian KB refresh wrote the ignore file — the case that still legitimately
+  writes, such as a first-ever install creating the block.
+
 ## 0.71.6 - 2026-08-14
 
 ### Fixed

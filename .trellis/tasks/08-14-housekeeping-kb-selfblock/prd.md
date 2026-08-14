@@ -39,12 +39,21 @@ during the thin rollout unless fixed first.
 
 ## Acceptance Criteria
 
-- [ ] A housekeeping run whose KB refresh changes only the managed
-      `.gitignore` block still performs an otherwise-eligible merge.
+- [ ] A housekeeping run whose KB refresh finds an existing functional managed
+      block leaves `.gitignore` byte-identical and performs an
+      otherwise-eligible merge, whatever the block's comment text says.
+- [ ] A run that must create or repair the block still leaves a tracked delta
+      and still blocks; its anomaly names `.gitignore`, names the KB refresh as
+      the writer, and says committing the block clears it. This is the one
+      remaining self-block, it is once per repository rather than fleet-wide,
+      and it is explicit rather than mysterious.
 - [ ] A dirty tree from any other writer still blocks, and the anomaly names
       the dirty paths and (when housekeeping wrote them) the writing step.
-- [ ] The managed-block ownership rule is written down where both the KB
-      writer and the provenance guidance point at it.
-- [ ] A regression test reproduces the issue #432 sequence (refresh rewrites
-      banner -> merge still proceeds).
+- [ ] The managed-block ownership rule is written down in the pack: the KB
+      writer's own documentation states it, and the pack carries a paste-ready
+      note for consumer provenance guidance, which is consumer-owned and cannot
+      be edited from here (`AGENTS.md`).
+- [ ] A regression test reproduces the issue #432 sequence: a block carrying
+      the pre-0.71.1 banner survives a refresh untouched, so the tree that used
+      to go dirty stays clean.
 - [ ] Issue #432 is closed by the shipping PR.
