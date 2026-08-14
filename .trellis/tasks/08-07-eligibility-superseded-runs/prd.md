@@ -183,20 +183,25 @@ the pack drives end to end.
 
 ## Acceptance Criteria
 
-- [ ] A rollup containing a `CANCELLED` row and a later `SUCCESS` row for the
+- [x] A rollup containing a `CANCELLED` row and a later `SUCCESS` row for the
       same check name yields `blocking == 0` and an `eligible` verdict, with the
       PR #360 rollup shape used verbatim as the fixture.
-- [ ] A rollup whose only row for a check name is `CANCELLED` still yields a
+- [x] A rollup whose only row for a check name is `CANCELLED` still yields a
       `checks_blocking` verdict.
-- [ ] A rollup whose every row is superseded does not become eligible: it is
+- [x] A rollup whose every row is superseded does not become eligible: it is
       refused by `checks_no_success` or an equivalent explicit reason, never by
       an empty blocking count alone.
-- [ ] The probe's observed-checks evidence marks each discounted row, and a
+- [x] The probe's observed-checks evidence marks each discounted row, and a
       reader can tell which row superseded it.
-- [ ] Probe count per invocation is unchanged: one GitHub query, asserted in
+- [x] Probe count per invocation is unchanged: one GitHub query, asserted in
       test.
-- [ ] `parse_checks` still raises `EligibilityInputError` for a row missing any
-      field the new rule reads.
+- [x] `parse_checks` still fails closed on the timestamp the new rule reads,
+      split by kind as `design.md` records: a `startedAt` that is present but
+      unusable raises `EligibilityInputError`; an absent one is no evidence of
+      ordering, so the row is not superseded and stays blocking. Raising on an
+      absent value was rejected during review — it can only turn probes that
+      pass today into hard errors, while the chosen split can only keep a
+      block.
 
 ## Notes
 
