@@ -525,7 +525,8 @@ def superseded_check_indexes(value: Sequence[Any]) -> dict[int, dict[str, Any]]:
             own = started[index]
             if own is None:
                 continue
-            latest_index = None
+            latest_index: int | None = None
+            latest_started: datetime | None = None
             for other in indexes:
                 if other == index:
                     continue
@@ -533,8 +534,9 @@ def superseded_check_indexes(value: Sequence[Any]) -> dict[int, dict[str, Any]]:
                 # Strictly later: equal timestamps are no evidence of ordering.
                 if other_started is None or other_started <= own:
                     continue
-                if latest_index is None or other_started > started[latest_index]:
+                if latest_started is None or other_started > latest_started:
                     latest_index = other
+                    latest_started = other_started
             if latest_index is None:
                 continue
             superseded[index] = {
@@ -574,7 +576,7 @@ def parse_checks(value: object) -> tuple[list[dict[str, Any]], int, int]:
                 "NEUTRAL",
             }:
                 blocking += 1
-            item = {
+            item: dict[str, Any] = {
                 "type": "CheckRun",
                 "name": safe_text(raw.get("name") or "unnamed", limit=160),
                 "workflow": safe_text(raw.get("workflowName") or "", limit=160),
