@@ -18,8 +18,11 @@
   files a clean clone does not carry. A map with no such section, a repository
   with no map, and a map whose indentation cannot be parsed are all
   non-failures — the last warns, because an unparseable map is a different
-  defect and reporting it as drift would name the wrong remedy. Configurable
-  through `generatedStructuralMaps`, which unions with the default.
+  defect and reporting it as drift would name the wrong remedy. An entry whose
+  reconstructed path leaves the repository root warns for the same reason and
+  is never resolved, so the existence probe cannot stat outside the tree.
+  Configurable through `generatedStructuralMaps`, which unions with the
+  default.
 
 ### Changed
 

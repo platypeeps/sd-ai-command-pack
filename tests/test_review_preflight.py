@@ -4416,6 +4416,31 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("src/gone.py", result.stdout)
 
+    def test_generated_map_guard_refuses_to_probe_outside_the_repo(self) -> None:
+        # A listed `..` component would make the existence probe stat outside
+        # the repository; no generator emits one, so it is a malformed map.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "  ../",
+                "    ../",
+                "      etc/",
+                "        passwd",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("does not stay inside the repository", result.stdout)
+        self.assertNotIn("which does not exist", result.stdout)
+
     def test_generated_map_guard_warns_on_malformed_indentation(self) -> None:
         # An unparseable map is a different defect; reporting it as drift would
         # name the wrong remedy, so the guard warns instead of failing.

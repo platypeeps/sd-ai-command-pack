@@ -3242,6 +3242,18 @@ function checkGeneratedStructuralMapPaths() {
         continue;
       }
 
+      // A `..` component in a listed name would make the existence probe stat
+      // outside the repository. A generator never emits one, so treat it as a
+      // malformed map rather than as drift, and never resolve it.
+      const contained = normalizePathSeparators(relative(rootDir, resolve(rootDir, entry.path)));
+      if (contained !== entry.path) {
+        warn(
+          `${file}:${entry.line} lists ${entry.path}, which does not stay inside the ` +
+            'repository; the map is malformed and was not checked for stale paths.',
+        );
+        continue;
+      }
+
       checked += 1;
       if (!pathEntryExists(entry.path)) {
         missing.push({ file, line: entry.line, path: entry.path });
