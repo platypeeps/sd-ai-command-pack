@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 374
+- **Total Sessions**: 375
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1054 | Active |
+| `journal-8.md` | ~1092 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 375 | 2026-08-14 | Backlog consolidation: open issues and follow-ups into planning tasks | `8ea2aa8c` | `task/backlog-consolidation-0814` |
 | 374 | 2026-08-14 | Guard committed structural maps against pre-archive .trellis paths | `308d3bb3` | `fix/generated-map-ordering-guard` |
 | 373 | 2026-08-14 | Installer upgrades provenance-vouched pack files without --force | `06d56f68`, `638e3c34` | `fix/installer-vouched-upgrade` |
 | 372 | 2026-08-13 | Corrective release 0.71.4: seeded-task gate rejects an unfilled context manifest | `f3155aa8`, `17283561`, `a5d6fa3e`, `e40a2a1b`, `e237498e`, `6ae71f5f` | `task/seeded-task-unfilled-manifest` |
