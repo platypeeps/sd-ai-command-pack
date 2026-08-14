@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-14",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/housekeeping-kb-selfblock",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
