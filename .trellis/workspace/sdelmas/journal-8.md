@@ -981,3 +981,44 @@ The 0.71.3 fleet campaign blocked itself when the canary consumer's review found
 ### Next Steps
 
 - None - task complete
+
+
+## Session 373: Installer upgrades provenance-vouched pack files without --force
+
+**Date**: 2026-08-14
+**Task**: Installer upgrades provenance-vouched pack files without --force
+**Branch**: `fix/installer-vouched-upgrade`
+
+### Summary
+
+Diagnosed and fixed the installer defect that made every consumer refresh in the 0.71.4 fleet campaign report an identical four-file conflict set: install_file never read provenance, so any pack file whose template changed since the installed release was a conflict only --force could clear.
+
+### Main Changes
+
+- Classified a target whose bytes provenance vouches as updated: written without --force and without a backup, while unvouched content, missing entries, and unreadable provenance still conflict
+- Threaded the provenance map once per run through _install_payload so the preflight, the apply pass, and --check cannot disagree
+- Updated test_audit_clean_source_changed_target_requires_refresh, which built the vouched-stale shape and asserted the defective conflict
+- Documented the classification in the manifest-and-filesystem spec, error-handling spec, README, and the installed pack documentation
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06d56f68` | fix(installer): upgrade provenance-vouched pack files without --force |
+| `638e3c34` | test(installer): cover the vouched-upgrade filesystem and evidence boundaries |
+
+### Testing
+
+- [OK] unittest discover -s tests: Ran 2452 tests, OK
+- [OK] repro replay: 0.71.1 target upgraded to current with 4 updated lines, exit 0, audit passed, 0 .bak files
+- [OK] negative control: a hand-edited target still reported conflict and exit 2
+- [OK] sd-check: 7 passed, 1 skipped (obsidian-kb advisory), 0 failed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

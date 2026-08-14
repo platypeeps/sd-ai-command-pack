@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.71.5 - 2026-08-14
+
+### Fixed
+
+- A tracked install refused every pack file whose template had changed since the
+  installed release, reporting it as a `conflict` that only `--force` could
+  clear — in a checkout nobody had touched. `install_file` compared the
+  destination against the new payload and nothing else, so it never read the
+  per-target digest in `.sd-ai-command-pack/provenance.json` that proves the
+  previous release wrote those exact bytes. Taking a release therefore required
+  the one flag that also discards real local edits, and made using it routine.
+  A vouched target now classifies `updated` and is written without `--force` and
+  without a backup; the displaced bytes are a published release, recoverable
+  from the pack. Content provenance does not vouch, a target missing from
+  provenance, and a provenance file that is absent, symlinked, or malformed all
+  still conflict, so genuine drift is unaffected and absent evidence fails
+  closed. This is the repository-scope counterpart of the machine-scope
+  `owned-stale` classification, decided from the same evidence `remove` already
+  accepts as authority to delete a pack file. Every consumer in the 0.71.4 fleet
+  campaign hit this as an identical four-file conflict set and was investigated
+  as local drift before being forced.
+
 ## 0.71.4 - 2026-08-13
 
 ### Fixed
