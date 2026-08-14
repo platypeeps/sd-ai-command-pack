@@ -215,20 +215,38 @@ but defines no ordering or transition policy:
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
   manifest-ordered preparation/check commands and the consumer's documented
   full local gate.
-- `pr-publication`: commit only the dedicated consumer task artifacts,
-  installer-managed output, receipts/provenance, and deterministic preparation
-  output. Classify the exact base/head with
-  `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
-  PR. Record the published head and PR number. Fold finish-work into the
-  reviewed head with `sd-ai-command-pack-fleet-publish.py`: it makes the work
-  commit (pack + active task + a pre-computed post-archive `repomix-map` on
-  repomix-indexed consumers), then archives the task and records the journal via
-  the shipped `record-session` wrapper so the pushed head already carries all
-  bookkeeping. It refuses to run on a tree dirty outside the managed allowlist,
-  transactionally restores the task on any error, asserts the completion delta
-  is `.trellis`-only, and never pushes on an invalid receipt — so the merge
-  stage sees zero head-advance and no successor to reclassify. When a prior
-  merge action
+- `pr-publication`: this stage has one order, and it is the order below. Every
+  step that generates content runs before the push, so the pushed head is the
+  reviewed head and nothing is appended to it afterwards.
+
+  1. Stage only the dedicated consumer task artifacts, installer-managed
+     output, receipts/provenance, and deterministic preparation output.
+  2. Fold finish-work into that head with
+     `sd-ai-command-pack-fleet-publish.py`. It makes the work commit (pack +
+     active task + a `repomix-map` pre-computed against the post-archive
+     layout on repomix-indexed consumers), then archives the task and records
+     the journal via the shipped `record-session` wrapper, takes the
+     completion receipt, asserts the delta, and pushes — so the pushed head
+     already carries all bookkeeping. It refuses to run on a tree dirty
+     outside the managed allowlist, transactionally restores the task on any
+     error, asserts the completion delta is `.trellis`-only, and never pushes
+     on an invalid receipt — so the merge stage sees zero head-advance and no
+     successor to reclassify.
+  3. Classify the exact base and pushed head with
+     `sd-ai-command-pack-fleet-review-classify.py`.
+  4. Create or reuse one PR, and record the published head and PR number.
+
+  On a consumer the helper refuses — one carrying
+  `.github/scripts/bookkeeping_ci_scope.py`, including this pack itself — the
+  repo self-releases through `sd-finish-work`. The same ordering constraint
+  still holds: regenerate any committed structural map after `task.py archive`
+  and before the finish-work push, never as a commit appended to a pushed
+  head. A map committed ahead of the archive move names task paths the
+  published head no longer has, and
+  `sd-ai-command-pack-review-preflight.mjs` fails that head on the
+  `generated structural map paths` check.
+
+  When a prior merge action
   returned here because `sd-finish-work` advanced the PR, do not create another
   commit or push: verify the retained finish-work receipt names the current
   local and remote PR head, reclassify that exact successor, reuse the existing

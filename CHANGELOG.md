@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.71.6 - 2026-08-14
+
+### Fixed
+
+- A committed `docs/repomix-map.md` could name `.trellis/tasks/<slug>/` paths
+  that the published head no longer had. The map is generated while the task is
+  still active, and `task.py archive` then moves that directory, so a map
+  committed ahead of the archive describes a tree that no longer exists. Four
+  consumer PRs in the 0.71.5 fleet campaign published such a map and needed a
+  post-push commit to repair it. `sd-ai-command-pack-review-preflight.mjs` now
+  runs a `generated structural map paths` check: it parses the map's
+  `# Directory Structure` listing and fails any `.trellis/`-prefixed entry that
+  does not exist, naming the map file, the line, and the path. Only `.trellis/`
+  is checked, because that tree is fully tracked and therefore reproducible in
+  a fresh checkout of the same commit; broader trees can legitimately list
+  files a clean clone does not carry. A map with no such section, a repository
+  with no map, and a map whose indentation cannot be parsed are all
+  non-failures — the last warns, because an unparseable map is a different
+  defect and reporting it as drift would name the wrong remedy. An entry whose
+  reconstructed path leaves the repository root warns for the same reason and
+  is never resolved, so the existence probe cannot stat outside the tree.
+  Configurable through `generatedStructuralMaps`, which unions with the
+  default.
+
+### Changed
+
+- The `pr-publication` stage of `sd-fleet-refresh` states its order as an
+  explicit four-step sequence — stage, fold finish-work through
+  `sd-ai-command-pack-fleet-publish.py`, classify the pushed head, then open or
+  reuse the PR. The previous prose put "push, and create or reuse one PR"
+  before the sentence introducing the fold, which reads as publishing first and
+  archiving afterwards. Repos the publish helper refuses now carry the same
+  constraint in writing: regenerate the map after `task.py archive` and before
+  the finish-work push. `docs/FLEET_ROLLOUT.md` defers to the skill as the
+  single statement of that sequence instead of restating it.
+
 ## 0.71.5 - 2026-08-14
 
 ### Fixed

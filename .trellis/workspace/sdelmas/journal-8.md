@@ -1022,3 +1022,44 @@ Diagnosed and fixed the installer defect that made every consumer refresh in the
 ### Next Steps
 
 - None - task complete
+
+
+## Session 374: Guard committed structural maps against pre-archive .trellis paths
+
+**Date**: 2026-08-14
+**Task**: Guard committed structural maps against pre-archive .trellis paths
+**Branch**: `fix/generated-map-ordering-guard`
+
+### Summary
+
+Fixed the fleet publication ordering defect that made four 0.71.5 consumer PRs need a post-push repomix-map commit: sd-fleet-refresh now states pr-publication as an explicit four-step sequence with sd-ai-command-pack-fleet-publish.py before the push, and review-preflight gained a generated structural map paths check that fails any committed map naming a .trellis/ path absent from the tree.
+
+### Main Changes
+
+- review-preflight: new parseGeneratedStructuralMapEntries plus checkGeneratedStructuralMapPaths, bounded to .trellis/ entries, fence-aware, warn-not-fail on unparseable indentation, capped at 20 reported failures
+- config: generatedStructuralMaps defaults to docs/repomix-map.md and joins the loadConfig array-merge key list
+- sd-fleet-refresh SKILL.md: pr-publication rewritten as stage, fold via fleet-publish.py, classify pushed head, open or reuse PR, plus the non-helper fallback ordering constraint
+- docs/FLEET_ROLLOUT.md: refresh steps 4-6 realigned and pointed at the skill as the single statement of the sequence
+- manifest 0.71.6 + CHANGELOG section for the shipped payload change
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `308d3bb3` | fix(preflight): fail committed structural maps that name missing .trellis paths |
+
+### Testing
+
+- [OK] make test: full suite, exit 0, no skips, install coverage gate held
+- [OK] sd-check --json: status passed, 7 passed / 1 skipped / 0 failed
+- [OK] tests.test_review_preflight: 76 tests OK, including 6 new generated-map cases
+- [OK] negative reproduction on the real anomaly-metric-creator tree: pre-archive map path reports 2 missing, the shipped post-archive map reports 0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
