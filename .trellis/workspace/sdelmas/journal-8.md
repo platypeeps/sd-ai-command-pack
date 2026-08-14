@@ -1141,3 +1141,44 @@ Made the Obsidian KB ignore-block writer semantically idempotent so a cosmetic b
 ### Next Steps
 
 - None - task complete
+
+
+## Session 377: Merge eligibility counts superseded workflow runs as blocking
+
+**Date**: 2026-08-14
+**Task**: Merge eligibility counts superseded workflow runs as blocking
+**Branch**: `task/eligibility-superseded-runs`
+
+### Summary
+
+Narrowed the merge-eligibility probe's blocking population so a check run cancelled by a concurrency group and replaced by a later run no longer contradicts GitHub's own mergeStateStatus (issue #414).
+
+### Main Changes
+
+- parse_checks discounts a CANCELLED row when a later-started row shares its (workflowName, name) identity; the blocking predicate at both merge sites is untouched
+- Restricted to CANCELLED so a genuine FAILURE from an older run still blocks, and required a later sibling so an operator's cancellation of the only run still blocks
+- Ordering comes from startedAt in the existing single query; timestamps are read only for identities carrying a cancelled row, so no existing caller starts failing on a field the old code never touched
+- Receipt marks each discounted row with superseded and a supersededBy citation of the row that replaced it
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66c02eb4580fdf36fe496fa6e9dc1e5a234ccc9a` | docs(task): tick the acceptance criteria for eligibility-superseded-runs |
+| `99678da9f2759d1a359bbb7b0256e7aa04ed390d` | chore(task): record the branch for eligibility-superseded-runs |
+| `419bf17c9db409d4783c6c976621ba6a5f5f26e6` | fix(pr-eligibility): satisfy mypy in the supersession pass |
+
+### Testing
+
+- [OK] python3 -m unittest discover tests -- Ran 2473 tests, OK
+- [OK] sd-ai-command-pack-check.py --json -- status passed, 8 passed / 0 failed
+- [OK] PR #360 rollup shape yields eligible with reasonCodes []; stripping the replacements from the same fixture blocks again
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
