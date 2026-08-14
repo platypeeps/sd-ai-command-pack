@@ -1063,3 +1063,39 @@ Fixed the fleet publication ordering defect that made four 0.71.5 consumer PRs n
 ### Next Steps
 
 - None - task complete
+
+
+## Session 375: Backlog consolidation: open issues and follow-ups into planning tasks
+
+**Date**: 2026-08-14
+**Task**: Backlog consolidation: open issues and follow-ups into planning tasks
+**Branch**: `task/backlog-consolidation-0814`
+
+### Summary
+
+Reviewed the 12 open GitHub issues, the 73 open Trellis tasks, PR #444, and the fleet-campaign follow-ups. Created six planning tasks covering every previously untracked issue and the fleet-publish allowlist follow-up, and recorded consolidation citations: #414 into 08-07-eligibility-superseded-runs, #399 into 08-09-retire-review-pr-surface, #404 absorbed by 08-09-work-loop-pr-supersession, and the AMC 175-stale-references thin-conversion blocker in the 08-09-deployment-thin-consumers umbrella.
+
+### Main Changes
+
+- new planning tasks: 08-14-housekeeping-kb-selfblock (#432), 08-14-watch-settled-blocked-classification (#412), 08-14-review-local-robustness (#409+#405), 08-14-ship-planning-refinalization-exit (#408), 08-14-pack-paper-cuts (#413+#410+#398), 08-14-fleet-publish-manifest-allowlist
+- consolidation citations added to four existing PRDs so every open issue maps to exactly one owning task
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8ea2aa8c` | docs(tasks): consolidate open issues and follow-ups into the backlog |
+
+### Testing
+
+- [OK] sd-check --json: status passed, 7 passed / 1 skipped / 0 failed
+- [OK] review-preflight: no failures; multi-task-scope warning dispositioned as one backlog-consolidation batch
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
