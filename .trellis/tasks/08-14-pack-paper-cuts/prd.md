@@ -84,10 +84,11 @@ task's size bar. Leave it recorded on the issue.
       mechanism behind it, and the rule is present in the generated
       `.agents/`, `.claude/`, and plugin payload copies after `make sync` —
       verified by grepping the shipped surfaces, not just `templates/`.
-- [ ] Item 1's upstream disposition is recorded on this task: either the
-      per-PR user approval and the opened upstream PR, or an explicit
-      handoff-only decision. This is the part of #413 that is not a code
-      change here, and it is what makes item 1 finishable.
+- [ ] The upstream disposition for section "## 1. Trellis write_json trailing
+      newline (issue #413)" is recorded on this task: either the per-PR user
+      approval and the opened upstream PR, or an explicit handoff-only
+      decision. This is the part of #413 that is not a code change in this
+      repository, and it is what makes that section finishable.
 
 ### On issue closure
 
