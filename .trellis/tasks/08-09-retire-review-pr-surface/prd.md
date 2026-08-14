@@ -3,10 +3,16 @@
 > Upstream record: issue #399 documents the user-facing half of this: the
 > superseded commands carry no supersession signal at the command choice
 > point, and the catalog's "transitional until 0.62.0" horizon expired 30+
-> releases ago. Completing this removal is that issue's resolution shape 2;
-> close #399 with this task's shipping PR. #399 also lists adjacent
-> unmarked-transition instances (`sd-full-check`, `sd-create-pr` naming,
-> finish-work/housekeeping seam) — disposition them here or record why not.
+> releases ago. Completing this removal is that issue's resolution shape 2.
+> #399 also lists adjacent unmarked-transition instances (`sd-full-check`,
+> `sd-create-pr` naming, finish-work/housekeeping seam) — disposition them
+> here or record why not.
+>
+> Closure note (2026-08-14): #399 was closed as `not planned` when tracking
+> moved to the Trellis task tree. The defect is unchanged and this task still
+> owns it, so closing it is no longer part of shipping. Reference it as a
+> bare `#399` in the shipping PR — never with a closing keyword, per
+> `08-14-pack-paper-cuts` item 4.
 
 ## Goal
 

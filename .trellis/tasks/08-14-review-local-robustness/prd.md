@@ -44,4 +44,14 @@ outcome as re-runnable. Either way, no hand-deletion recovery remains.
       limitation entry, and never a silently rule-less clean pass.
 - [ ] A stale disposition id no longer requires manual state deletion: the
       retry path succeeds without hand-editing, proven by a test.
-- [ ] Issues #409 and #405 are closed by the shipping PR.
+### On issue closure
+
+Issue closure is deliberately not an acceptance criterion. #409 and #405
+were closed as `not planned` on 2026-08-14, when tracking for this work moved
+to the Trellis task tree; the defects are unchanged and this task still owns
+them. A criterion promising to close them would already be satisfied and
+would prove nothing.
+
+The shipping PR should reference them for provenance as bare `#409` and
+`#405`, never with a closing keyword — see `08-14-pack-paper-cuts` item 4 for
+why a PR body's closing keyword reaches the merge commit message.

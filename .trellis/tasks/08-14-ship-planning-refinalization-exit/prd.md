@@ -43,4 +43,13 @@ single-pass behaviour, and no history rewriting.
 - [ ] Completion-mode behaviour is unchanged.
 - [ ] The invariants listed above each have a test or an explicit recorded
       rationale for why a test cannot hold them.
-- [ ] Issue #408 is closed by the shipping PR.
+### On issue closure
+
+Issue closure is deliberately not an acceptance criterion. #408 was closed as
+`not planned` on 2026-08-14, when tracking for this work moved to the Trellis
+task tree; the defect is unchanged and this task still owns it. A criterion
+promising to close it would already be satisfied and would prove nothing.
+
+The shipping PR should reference it for provenance as a bare `#408`, never
+with a closing keyword — see `08-14-pack-paper-cuts` item 4 for why a PR
+body's closing keyword reaches the merge commit message.

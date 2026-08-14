@@ -84,12 +84,22 @@ task's size bar. Leave it recorded on the issue.
       mechanism behind it, and the rule is present in the generated
       `.agents/`, `.claude/`, and plugin payload copies after `make sync` —
       verified by grepping the shipped surfaces, not just `templates/`.
-- [ ] Issues #410, #398, and #455 are closed by the shipping PR; #413 closes
-      when its handoff is linked and its upstream disposition (approved PR or
-      documented handoff-only) is recorded.
+- [ ] The upstream disposition for section "## 1. Trellis write_json trailing
+      newline (issue #413)" is recorded on this task: either the per-PR user
+      approval and the opened upstream PR, or an explicit handoff-only
+      decision. This is the part of #413 that is not a code change in this
+      repository, and it is what makes that section finishable.
 
-      Note for the shipping PR's author: item 4 is the reason this line
-      names the issues rather than writing "closes #410, #398, #455" in the
-      PR body. That PR does fix them, so the keyword would be correct there —
-      but it must be a deliberate choice, not prose that happens to close
-      whatever it names.
+### On issue closure
+
+Issue closure is deliberately **not** an acceptance criterion. #413, #410,
+#398, and #455 were closed as `not planned` on 2026-08-14, when tracking for
+this work moved to the Trellis task tree; the defects are unchanged and this
+task still owns them. A criterion promising to close them would already be
+satisfied and would prove nothing.
+
+The shipping PR should still reference them for provenance — as bare `#413`,
+`#410`, `#398`, `#455`, never with a closing keyword. Item 4 is the reason:
+that PR does fix them, so the keyword would be defensible, but a reopened
+issue would then be silently re-closed by prose. Reopen deliberately if the
+issue tracker needs to show the work again.

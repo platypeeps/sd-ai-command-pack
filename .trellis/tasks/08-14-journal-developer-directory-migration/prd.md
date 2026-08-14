@@ -1,6 +1,13 @@
 # Give the append-only journal gate a workspace developer directory migration path
 
-Closes platypeeps/sd-ai-command-pack#401.
+Owns issue #401.
+
+Closure note (2026-08-14): #401 was closed as `not planned` when tracking
+moved to the Trellis task tree. The defect is unchanged and this task still
+owns it. Reference it as a bare `#401` in the shipping PR — never with a
+closing keyword, per `08-14-pack-paper-cuts` item 4. The original line here
+read "Closes platypeeps/sd-ai-command-pack#401", which is the phrasing that
+caused the accidental close that item 4 exists to prevent.
 
 ## Problem
 

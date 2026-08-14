@@ -8,8 +8,13 @@
 > and let a green reconciliation clear earlier red reasons; (2) no sanctioned
 > pre-mutation skip from `selected` — add `selected -> inventory` guarded by
 > "no branch/head/PR evidence recorded". Same component, same ledger, same
-> test harness: fix together with the superseded-PR gap below, and close
-> #404 with this task's shipping PR.
+> test harness: fix together with the superseded-PR gap below.
+>
+> Closure note (2026-08-14): #404 was closed as `not planned` when tracking
+> moved to the Trellis task tree. The defect is unchanged and this task still
+> owns it, so closing it is no longer part of shipping. Reference it as a
+> bare `#404` in the shipping PR — never with a closing keyword, per
+> `08-14-pack-paper-cuts` item 4.
 
 ## Goal
 
