@@ -4307,6 +4307,136 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("tests/test_missing.py", result.stdout)
 
+    def make_generated_map_repo(self, map_lines: list[str] | None = None) -> Path:
+        # The generated-map guard reads a committed structural map, so the
+        # fixture only needs the preflight script plus the map itself.
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        if map_lines is not None:
+            docs = root / "docs"
+            docs.mkdir(exist_ok=True)
+            (docs / "repomix-map.md").write_text(
+                "\n".join(map_lines) + "\n", encoding="utf-8"
+            )
+        return root
+
+    def test_generated_map_guard_fails_on_missing_trellis_path(self) -> None:
+        # Regression: the fleet flow committed a map generated before the task
+        # archive move, so it named a .trellis path the published head lacked.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "  tasks/",
+                "    08-14-refresh/",
+                "      prd.md",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "docs/repomix-map.md:7 lists .trellis/tasks/08-14-refresh/prd.md",
+            result.stdout,
+        )
+
+    def test_generated_map_guard_passes_when_trellis_paths_exist(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "  config.yaml",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("generated structural map", result.stdout)
+
+    def test_generated_map_guard_passes_without_a_map(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo()
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("no generated structural map", result.stdout)
+
+    def test_generated_map_guard_passes_without_a_structure_section(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Repository Map",
+                "",
+                "No directory listing was generated.",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_generated_map_guard_ignores_missing_paths_outside_trellis(self) -> None:
+        # A clean checkout legitimately lacks untracked or ignored files, so
+        # only the fully tracked .trellis tree is checked for existence.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                "src/",
+                "  gone.py",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("src/gone.py", result.stdout)
+
+    def test_generated_map_guard_warns_on_malformed_indentation(self) -> None:
+        # An unparseable map is a different defect; reporting it as drift would
+        # name the wrong remedy, so the guard warns instead of failing.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "   tasks/",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("could not be parsed", result.stdout)
+
     def test_main_push_scope_allows_only_trellis_chore_paths(self) -> None:
         script = PACK_ROOT / ".github/scripts/check-main-push-scope.sh"
         root = self.make_git_repo_without_trellis()
