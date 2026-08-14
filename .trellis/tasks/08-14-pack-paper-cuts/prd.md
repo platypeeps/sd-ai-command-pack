@@ -1,8 +1,9 @@
-# Pack paper cuts: write_json newline, set-meta floor, cache-env allowlist
+# Pack paper cuts: write_json newline, set-meta floor, cache-env allowlist, PR-body closing keywords
 
-Batch task for three small, independent fixes relayed from consumer evidence.
-Each is under an hour; batching avoids three lifecycle rounds. If any one
-grows past that, split it out rather than stretching this task.
+Batch task for four small, independent fixes. The first three are relayed
+from consumer evidence; the fourth was observed in this repository. Each is
+under an hour; batching avoids four lifecycle rounds. If any one grows past
+that, split it out rather than stretching this task.
 
 ## 1. Trellis write_json trailing newline (issue #413)
 
@@ -42,6 +43,33 @@ consumers obtain the current key set from the library at runtime (a
 it. Adding a cache variable still requires no shell edit; unexpected names
 fail loudly.
 
+## 4. PR bodies may close issues the PR does not fix (issue #455)
+
+`sd-create-pr`'s Safety Rules
+(`templates/.agents/skills/sd-create-pr/SKILL.md:75-79`) constrain how a body
+reaches `gh` — `--body-file`, never `--body`, because Markdown carries
+backticks and command substitution — but say nothing about what the body may
+contain. `gh pr merge` uses the PR title and body as the merge or squash
+commit message unless `--subject`/`--body` override them, and the pack's
+auto-merge does not override them
+(`templates/scripts/sd-ai-command-pack-housekeeping.sh:762`, with
+`$strategy_flag` set at `:741-755`). So a closing keyword anywhere in a
+pack-authored body closes the referenced issue on the pack's own merge path.
+
+Observed 2026-08-14 on PR #453, which filed a planning task to *own* issue
+#401 and shipped no fix. Its body read "(P2, `planning`, closes #401)";
+GitHub closed #401 as `COMPLETED` at the same second as the merge. Reopened
+manually. Planning-artifact PRs are the exposed case, because naming the
+issue a task owns is exactly their job.
+
+Fix (the issue's item 1, smallest): add a Safety Rule stating that a closing
+keyword followed by an issue reference is used only when the PR resolves that
+issue, that a bare `#N` or `re: #N` mentions without closing, and why — the
+body becomes the commit message. The issue's item 2, a preflight warning on a
+closing keyword for an unowned issue, is deliberately **not** taken here; it
+is a new check with its own false-positive surface and does not fit this
+task's size bar. Leave it recorded on the issue.
+
 ## Acceptance Criteria
 
 - [ ] The `write_json` newline fix has a paste-ready upstream handoff linked
@@ -52,6 +80,16 @@ fail loudly.
       asserts the message content.
 - [ ] Both shell consumers reject a cache-env pair whose name is outside the
       emitted key set, proven by a test injecting a foreign name.
-- [ ] Issues #410 and #398 are closed by the shipping PR; #413 closes when
-      its handoff is linked and its upstream disposition (approved PR or
+- [ ] `sd-create-pr`'s Safety Rules state the closing-keyword rule and the
+      mechanism behind it, and the rule is present in the generated
+      `.agents/`, `.claude/`, and plugin payload copies after `make sync` —
+      verified by grepping the shipped surfaces, not just `templates/`.
+- [ ] Issues #410, #398, and #455 are closed by the shipping PR; #413 closes
+      when its handoff is linked and its upstream disposition (approved PR or
       documented handoff-only) is recorded.
+
+      Note for the shipping PR's author: item 4 is the reason this line
+      names the issues rather than writing "closes #410, #398, #455" in the
+      PR body. That PR does fix them, so the keyword would be correct there —
+      but it must be a deliberate choice, not prose that happens to close
+      whatever it names.
