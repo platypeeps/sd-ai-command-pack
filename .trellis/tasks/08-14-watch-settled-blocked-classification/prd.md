@@ -45,4 +45,13 @@ opposite responses:
 - [ ] Ambiguous evidence yields an explicit `unclassified` value, still
       blocking.
 - [ ] Merge eligibility behaviour is byte-identical before and after.
-- [ ] Issue #412 is closed by the shipping PR.
+### On issue closure
+
+Issue closure is deliberately not an acceptance criterion. #412 was closed as
+`not planned` on 2026-08-14, when tracking for this work moved to the Trellis
+task tree; the defect is unchanged and this task still owns it. A criterion
+promising to close it would already be satisfied and would prove nothing.
+
+The shipping PR should reference it for provenance as a bare `#412`, never
+with a closing keyword — see `08-14-pack-paper-cuts` item 4 for why a PR
+body's closing keyword reaches the merge commit message.
