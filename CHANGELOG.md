@@ -1,5 +1,194 @@
 # Changelog
 
+## 0.71.8 - 2026-08-14
+
+### Fixed
+
+- The merge-eligibility probe blocked on check runs belonging to a workflow run
+  GitHub had already superseded, contradicting GitHub's own `mergeStateStatus`
+  (issue #414). A repository whose CI cancels superseded in-progress runs on the
+  same ref leaves both the cancelled run and its replacement attached to the
+  head, and `parse_checks` classified every rollup row independently, so the
+  cancelled copy decided the verdict. Observed on `anomaly-metric-creator`
+  PR #360: `gh pr view` reported `CLEAN`/`MERGEABLE` while the probe reported
+  `blocked ['checks_blocking']`, and the only escape was re-running the
+  superseded workflow. `sd-ship` Stage 3, `sd-housekeeping` eligibility, and
+  `sd-fleet-refresh` `merge-eligibility` all inherited the false block.
+
+  A row is now discounted when it is `CANCELLED` **and** a later-started row
+  shares its `(workflowName, name)` identity. Both halves matter: restricting to
+  `CANCELLED` keeps a genuine `FAILURE` from an older run blocking, and
+  requiring a later sibling keeps an operator's cancellation of the only run
+  blocking. Ties do not supersede, nameless rows never share an identity, and a
+  discounted row is never counted successful — so a head whose every row is
+  superseded is still refused, by `checks_no_success`. The receipt marks each
+  discounted row with `superseded` and a `supersededBy` citation of the row that
+  replaced it. Ordering comes from `startedAt`, which the existing single query
+  already returns, so the probe still makes one GitHub call.
+
+## 0.71.7 - 2026-08-14
+
+### Fixed
+
+- `sd-housekeeping` could block the merge it was cleaning up after (issue
+  #432). It refreshes the Obsidian KB before its merge and branch-cleanup
+  gates, and `sd-ai-command-pack-update-spec-kb.py` rewrote the managed
+  `.gitignore` block whenever the rebuilt text differed byte for byte. A
+  reworded comment line in a new pack release therefore dirtied a tracked file
+  in every consumer at once, and three failed-closed cleanliness gates
+  (dependency-PR merge, merged-branch cleanup, and the separate
+  `pr-eligibility.py` probe) all read that as `working_tree_dirty`. The writer
+  is now semantically idempotent: it rewrites the block only when the block is
+  functionally deficient — markers absent, no active entry ignoring the KB
+  directory, or an unmanaged KB entry outside the span — and leaves a
+  functional block byte-identical, reporting `gitignore: present`. The pack
+  owns the bytes between the `obsidian-kb start` and `obsidian-kb end`
+  markers; a provenance mismatch confined to that span is reconciled by
+  rehashing the ignore file, never by reverting it. `--rewrite-ignore-block`
+  forces the old byte-exact rebuild for a caller that intends to commit the
+  result, and combines with `--dry-run` and `--check`. Behaviour change:
+  `--check` no longer reports `ignore entry is not current` for cosmetic block
+  drift, so that drift no longer surfaces as a `knowledge.obsidian-kb` finding
+  in `sd-check`.
+- A `working_tree_dirty` anomaly from `sd-housekeeping` now names up to ten
+  dirty paths (then `and N more`), and says so explicitly when this run's own
+  Obsidian KB refresh wrote the ignore file — the case that still legitimately
+  writes, such as a first-ever install creating the block.
+
+## 0.71.6 - 2026-08-14
+
+### Fixed
+
+- A committed `docs/repomix-map.md` could name `.trellis/tasks/<slug>/` paths
+  that the published head no longer had. The map is generated while the task is
+  still active, and `task.py archive` then moves that directory, so a map
+  committed ahead of the archive describes a tree that no longer exists. Four
+  consumer PRs in the 0.71.5 fleet campaign published such a map and needed a
+  post-push commit to repair it. `sd-ai-command-pack-review-preflight.mjs` now
+  runs a `generated structural map paths` check: it parses the map's
+  `# Directory Structure` listing and fails any `.trellis/`-prefixed entry that
+  does not exist, naming the map file, the line, and the path. Only `.trellis/`
+  is checked, because that tree is fully tracked and therefore reproducible in
+  a fresh checkout of the same commit; broader trees can legitimately list
+  files a clean clone does not carry. A map with no such section, a repository
+  with no map, and a map whose indentation cannot be parsed are all
+  non-failures — the last warns, because an unparseable map is a different
+  defect and reporting it as drift would name the wrong remedy. An entry whose
+  reconstructed path leaves the repository root warns for the same reason and
+  is never resolved, so the existence probe cannot stat outside the tree.
+  Configurable through `generatedStructuralMaps`, which unions with the
+  default.
+
+### Changed
+
+- The `pr-publication` stage of `sd-fleet-refresh` states its order as an
+  explicit four-step sequence — stage, fold finish-work through
+  `sd-ai-command-pack-fleet-publish.py`, classify the pushed head, then open or
+  reuse the PR. The previous prose put "push, and create or reuse one PR"
+  before the sentence introducing the fold, which reads as publishing first and
+  archiving afterwards. Repos the publish helper refuses now carry the same
+  constraint in writing: regenerate the map after `task.py archive` and before
+  the finish-work push. `docs/FLEET_ROLLOUT.md` defers to the skill as the
+  single statement of that sequence instead of restating it.
+
+## 0.71.5 - 2026-08-14
+
+### Fixed
+
+- A tracked install refused every pack file whose template had changed since the
+  installed release, reporting it as a `conflict` that only `--force` could
+  clear — in a checkout nobody had touched. `install_file` compared the
+  destination against the new payload and nothing else, so it never read the
+  per-target digest in `.sd-ai-command-pack/provenance.json` that proves the
+  previous release wrote those exact bytes. Taking a release therefore required
+  the one flag that also discards real local edits, and made using it routine.
+  A vouched target now classifies `updated` and is written without `--force` and
+  without a backup; the displaced bytes are a published release, recoverable
+  from the pack. Content provenance does not vouch, a target missing from
+  provenance, and a provenance file that is absent, symlinked, or malformed all
+  still conflict, so genuine drift is unaffected and absent evidence fails
+  closed. This is the repository-scope counterpart of the machine-scope
+  `owned-stale` classification, decided from the same evidence `remove` already
+  accepts as authority to delete a pack file. Every consumer in the 0.71.4 fleet
+  campaign hit this as an identical four-file conflict set and was investigated
+  as local drift before being forced.
+
+## 0.71.4 - 2026-08-13
+
+### Fixed
+
+- `review-preflight seeded-task` accepted a context manifest that existed but
+  carried no usable rows — an emptied file, a blank-line-only file, or rows that
+  parse but have no `file` key. The gate that exists to prove a fleet-seeded task
+  is grounded before a lane installs anything therefore passed the one shape a
+  lane most plausibly produces. It now reports `task_context_unfilled` when a
+  present manifest yields zero rows carrying a `file` key and the file emitted no
+  other finding, so the more specific defect is never masked by the generic one.
+  The 0.71.3 canary lane found this in the gate shipped an hour earlier.
+- The pack's own documentation made this worse than a missed case: it told
+  operators the generated scaffold "must be replaced or emptied before the task
+  leaves planning", which is true for the two diff-scoped lanes and exactly wrong
+  for `seeded-task`. That passage now states both rules where an operator reads
+  it, and `seeded-task` gains the reference section it never had, including the
+  `SD_AI_COMMAND_PACK_DEFAULT_BRANCH` precedence over a consumer's `origin/HEAD`.
+- A consumer on an inline platform seeds no manifests at all, and that still
+  passes; the new rule fires only on a manifest that is present and unfilled.
+  This is covered by a test rather than an argument, because it is the criterion
+  a careless fix breaks.
+- `printBookkeepingResult` silently produced an `undefined` subject for any
+  command not in its inlined chain. The composition moved to an exported
+  `bookkeepingResultSubject`, which throws on an unrecognized command, so a
+  future subcommand fails loudly at its first print instead of shipping a
+  malformed receipt line. Argv cannot reach this state today; the throw exists so
+  the next command cannot reach it either.
+
+## 0.71.3 - 2026-08-13
+
+### Added
+
+- `review-preflight` gains a `seeded-task` subcommand that validates the Trellis
+  task a fleet-refresh lane seeds in a consumer, before that lane installs
+  anything. It reuses the existing bookkeeping task rules at a new lifecycle
+  point (`completionReady: false`, `seedReady: true`), so there is one rule
+  source rather than a second implementation that agrees on one sample.
+  `seedReady` un-exempts the lone `_example` scaffold row that merge time
+  deliberately tolerates — which is exactly the shape `task.py create` emits, so
+  the fleet lane's real output was the one case nothing covered. Two reason codes
+  are new, `task_prd_placeholder` and `task_base_branch_invalid`; an unresolvable
+  default branch is `indeterminate`, not `invalid`, and an unreadable task
+  directory or malformed `task.json` fails closed with exit `1`. The receipt
+  records `evidence.defaultBranch` and `evidence.defaultBranchSource`, because
+  under `--repo` the pack's default-branch override environment variable
+  outranks the consumer's own `origin/HEAD` and would otherwise silently decide
+  the rule it is being asked to enforce.
+- A merge-time check rejects a Trellis task context row citing a path under its
+  **own** task directory. `task.py archive` moves that directory, so the pointer
+  dangles in the merged tree of the same bundle that publishes it. The finding
+  names the three alternatives: repoint at `.trellis/spec/**` and move the
+  substance into `reason`, cite a sibling task's `research/**`, or move the facts
+  into the pack's own task. Four such rows in
+  `08-09-deployment-thin-consumers` were repaired before the rule landed.
+- A merge-time check rejects generated `TBD` placeholders left in a changed
+  `prd.md` — the three shapes `task.py create` writes (`TBD.`, `- TBD`, and
+  `- [ ] TBD`), whole-line only, so prose that discusses TBD still passes. A
+  sweep of 384 PRDs found one pre-existing instance, in
+  `08-10-rename-review-local-receipt-identifiers`.
+
+### Changed
+
+- `sd-fleet-refresh`'s `checkout-validation` stage now sets the seeded task's
+  `base_branch` with `task.py set-base-branch` and validates the result with the
+  new gate, replacing a prose assertion that could be — and was — skipped. It
+  must not use `task.py create --base-branch`: that flag ships with the same
+  vendored `task_store.py` revision that fixes the underlying defect, so on
+  exactly the consumers that need it, `create` fails with
+  `unrecognized arguments`. Every reachable consumer checkout — five of the
+  eight in the fleet manifest; the other three are not cloned locally — still
+  carries the older revision, which stamps `base_branch` as the checked-out
+  branch unconditionally, on this stage the refresh branch. The gate runs from the pack source
+  checkout with `--repo`, because `checkout-validation` precedes
+  `install-update` and the consumer still carries the previous release.
+
 ## 0.71.2 - 2026-08-12
 
 ### Changed

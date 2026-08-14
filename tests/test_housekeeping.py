@@ -684,6 +684,161 @@ class HousekeepingTests(InstallTestCase):
             self.assertIn("Obsidian KB refresh failed", other.stdout)
             self.assertNotIn("kb_refresh_skipped", other.stdout)
 
+    def test_housekeeping_dirty_anomaly_names_bounded_paths_and_kb_writer(
+        self,
+    ) -> None:
+        """A blocked merge must say what dirtied the tree, and who wrote it.
+
+        Issue #432: the KB refresh runs before the merge gate, so its own
+        write could block the merge while the anomaly said only "working tree
+        has uncommitted changes". The paths are bounded so the anomaly stays a
+        diagnostic rather than a diff dump.
+        """
+
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        )
+        function_source = "".join(
+            f"eval \"$(awk '/^{name}\\(\\)/,/^}}/' {script})\";"
+            for name in (
+                "dirty_path_summary",
+                "kb_ignore_write_note",
+                "working_tree_dirty_detail",
+            )
+        )
+
+        def probe(*, status_lines: list[str], status_rc: int, kb_write: int) -> str:
+            status_body = "".join(f'printf "%s\\n" {line!r};' for line in status_lines)
+            result = subprocess.run(
+                [
+                    self._bash_path,
+                    "-c",
+                    f"KB_IGNORE_WRITE={kb_write};"
+                    f"working_tree_status() {{ {status_body} return {status_rc}; }};"
+                    f"{function_source}"
+                    'printf "detail=[%s]\\n" "$(working_tree_dirty_detail)"',
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            return result.stdout
+
+        kb_note = "this run's Obsidian KB refresh wrote .gitignore"
+
+        two_paths = probe(
+            status_lines=[" M .gitignore", "?? notes.md"],
+            status_rc=0,
+            kb_write=1,
+        )
+        self.assertIn("dirty paths: .gitignore, notes.md", two_paths)
+        self.assertIn(kb_note, two_paths)
+
+        without_flag = probe(
+            status_lines=[" M .gitignore"],
+            status_rc=0,
+            kb_write=0,
+        )
+        self.assertIn("dirty paths: .gitignore", without_flag)
+        self.assertNotIn(kb_note, without_flag)
+
+        bounded = probe(
+            status_lines=[f" M file{index:02d}.txt" for index in range(14)],
+            status_rc=0,
+            kb_write=0,
+        )
+        self.assertIn("file00.txt", bounded)
+        self.assertIn("file09.txt", bounded)
+        self.assertNotIn("file10.txt", bounded)
+        self.assertIn("and 4 more", bounded)
+
+        # Fail closed exactly like working_tree_is_clean: an unusable
+        # `git status` yields no summary rather than a misleading empty list.
+        failed_status = probe(status_lines=[], status_rc=1, kb_write=0)
+        self.assertIn("detail=[]", failed_status)
+
+    def test_housekeeping_kb_ignore_write_flag_tracks_helper_write_states(
+        self,
+    ) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        )
+        function_source = (
+            f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            toolchain = scripts_dir / "sd-ai-command-pack-toolchain.sh"
+            helper = scripts_dir / "sd-ai-command-pack-update-spec-kb.py"
+            helper.write_text("# fixture\n", encoding="utf-8")
+            toolchain.write_text(
+                "#!/usr/bin/env bash\n"
+                'printf "%s\\n" "${KB_OUTPUT:-}"\n'
+                'exit "${KB_RESULT:-0}"\n',
+                encoding="utf-8",
+            )
+            (root / ".obsidian-kb").mkdir()
+
+            probe = (
+                "ACTIONS=(); ANOMALIES=(); DRY_RUN=0; KB_IGNORE_WRITE=0;"
+                f"SCRIPT_DIR={str(scripts_dir)!r};"
+                'add_action() { ACTIONS+=("$*"); };'
+                'add_anomaly() { ANOMALIES+=("$*"); };'
+                f"{function_source}"
+                "refresh_obsidian_kb >/dev/null 2>&1; "
+                'printf "kb_ignore_write=%s\\n" "$KB_IGNORE_WRITE"'
+            )
+
+            def flag_for(state_line: str, *, result: str = "0") -> str:
+                completed = subprocess.run(
+                    [self._bash_path, "-c", probe],
+                    cwd=root,
+                    env={
+                        **os.environ,
+                        "KB_OUTPUT": state_line,
+                        "KB_RESULT": result,
+                    },
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stdout)
+                return completed.stdout.strip()
+
+            for state in ("gitignore: added", "gitignore: updated"):
+                self.assertEqual(flag_for(state), "kb_ignore_write=1", state)
+
+            # None of these can dirty the working tree. The `local-exclude`
+            # states write `.git/info/exclude`, which lives inside the git
+            # directory and never appears in `git status`; `present` is the
+            # semantically idempotent no-op; a symlink conflict wrote nothing;
+            # and a `--dry-run` report only describes a hypothetical write.
+            for state in (
+                "gitignore: local-exclude added",
+                "gitignore: local-exclude updated",
+                "gitignore: present",
+                "gitignore: local-exclude present",
+                "gitignore: conflict: .gitignore is a symlink",
+                "gitignore: would be updated",
+            ):
+                self.assertEqual(flag_for(state), "kb_ignore_write=0", state)
+
+            # Exit 3 (refresh completed, some entries left stale) may still
+            # have written the ignore file, so the flag must survive it.
+            self.assertEqual(
+                flag_for("gitignore: updated", result="3"), "kb_ignore_write=1"
+            )
+
     def test_housekeeping_dry_run_previews_branch_cleanup_without_final_state_anomaly(
         self,
     ) -> None:

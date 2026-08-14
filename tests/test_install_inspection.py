@@ -241,7 +241,63 @@ class InstallInspectionTests(InstallTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["state"], "refresh-required")
         self.assertEqual(payload["audit"]["status"], "passed")
-        self.assertGreater(payload["counts"]["conflict"], 0)
+        # Provenance vouches the bytes on disk, so this target is the previous
+        # release rather than someone's edit: a pending update, never a
+        # conflict. It still counts as a change, so the state and exit code
+        # are the same ones a conflict used to produce here.
+        self.assertGreater(payload["counts"]["updated"], 0)
+        self.assertNotIn("conflict", payload["counts"])
+
+    def test_vouched_stale_target_upgrades_without_force(self) -> None:
+        # The fleet regression: a consumer whose files are exactly what the
+        # previous release installed refused every changed target as a
+        # conflict, so taking a release required --force -- the same flag that
+        # discards real local edits. A unit test cannot catch it; it only
+        # appears when a prior release's bytes meet a changed template.
+        root = self.install_current_fixture()
+        provenance_path = root / install.PROVENANCE_FILE
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        relative = sorted(provenance["files"])[0]
+        destination = root / relative
+        template = destination.read_bytes()
+        previous_release = b"bytes the previous release installed\n"
+        destination.write_bytes(previous_release)
+        provenance["files"][relative] = (
+            "sha256:" + hashlib.sha256(previous_release).hexdigest()
+        )
+        provenance_path.write_text(
+            json.dumps(provenance, indent=2) + "\n", encoding="utf-8"
+        )
+
+        result = self.run_install_inproc(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"updated     {relative}", result.stdout)
+        self.assertNotIn("conflict", result.stdout)
+        self.assertEqual(destination.read_bytes(), template)
+        self.assertFalse(destination.with_name(f"{destination.name}.bak").exists())
+
+        audited = self.run_inspection(root, "--check", "--audit", "--json")
+
+        self.assertEqual(audited.returncode, 0, audited.stdout)
+        self.assertEqual(json.loads(audited.stdout)["audit"]["status"], "passed")
+
+    def test_unvouched_changed_target_still_conflicts(self) -> None:
+        # The other half of the contract: byte content that provenance does
+        # not vouch is a local edit, and it must still refuse without --force.
+        root = self.install_current_fixture()
+        provenance_path = root / install.PROVENANCE_FILE
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        relative = sorted(provenance["files"])[0]
+        destination = root / relative
+        edited = b"a local edit nobody recorded\n"
+        destination.write_bytes(edited)
+
+        result = self.run_install_inproc(root)
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(f"conflict    {relative}", result.stdout)
+        self.assertEqual(destination.read_bytes(), edited)
 
     def test_vouched_content_drift_is_invalid_with_or_without_audit(self) -> None:
         root = self.install_current_fixture()

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality bar the new check and its tests are reviewed against."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Entry point for the tooling specs covering the review-preflight surface this task extends."}

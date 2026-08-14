@@ -1,5 +1,16 @@
 # Work-loop ledger cannot record a superseded PR replacement
 
+> Consolidated scope (2026-08-14): issue #404 relays two further work-loop
+> terminal-evidence gaps from `platypeeps/se-ai-command-pack` with observed
+> runs and a working two-call workaround: (1) one-shot merge-boundary
+> evidence fails after housekeeping deletes the merged branch — accept the
+> boundary via the merge commit's second parent instead of the deleted ref,
+> and let a green reconciliation clear earlier red reasons; (2) no sanctioned
+> pre-mutation skip from `selected` — add `selected -> inventory` guarded by
+> "no branch/head/PR evidence recorded". Same component, same ledger, same
+> test harness: fix together with the superseded-PR gap below, and close
+> #404 with this task's shipping PR.
+
 ## Goal
 
 Let an active work-loop iteration record that its PR was closed as

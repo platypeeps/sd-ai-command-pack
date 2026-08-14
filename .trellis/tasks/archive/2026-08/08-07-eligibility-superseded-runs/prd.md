@@ -1,5 +1,15 @@
 # Merge eligibility counts superseded workflow runs as blocking
 
+> Upstream record: issue #414 (filed 2026-08-10 from `platypeeps/rwbp-website`
+> evidence, pack 0.64.3) documents this same defect with a verified
+> reproduction, the `parse_checks` line numbers, and a proposed same-name
+> dedupe fix — and records why `CANCELLED` must NOT simply join the
+> `{SKIPPED, NEUTRAL}` allow-set. Treat #414 as the evidence annex; close it
+> with this task's shipping PR. Per #414's own note, this is distinct from
+> issue #412 (watch outcome vocabulary; task
+> `08-14-watch-settled-blocked-classification`) and from
+> `08-08-pr-eligibility-stale-blocked-review` (mergeStateStatus staleness).
+
 ## Goal
 
 Stop the merge-eligibility probe from blocking on check runs that belong to a
@@ -173,20 +183,25 @@ the pack drives end to end.
 
 ## Acceptance Criteria
 
-- [ ] A rollup containing a `CANCELLED` row and a later `SUCCESS` row for the
+- [x] A rollup containing a `CANCELLED` row and a later `SUCCESS` row for the
       same check name yields `blocking == 0` and an `eligible` verdict, with the
       PR #360 rollup shape used verbatim as the fixture.
-- [ ] A rollup whose only row for a check name is `CANCELLED` still yields a
+- [x] A rollup whose only row for a check name is `CANCELLED` still yields a
       `checks_blocking` verdict.
-- [ ] A rollup whose every row is superseded does not become eligible: it is
+- [x] A rollup whose every row is superseded does not become eligible: it is
       refused by `checks_no_success` or an equivalent explicit reason, never by
       an empty blocking count alone.
-- [ ] The probe's observed-checks evidence marks each discounted row, and a
+- [x] The probe's observed-checks evidence marks each discounted row, and a
       reader can tell which row superseded it.
-- [ ] Probe count per invocation is unchanged: one GitHub query, asserted in
+- [x] Probe count per invocation is unchanged: one GitHub query, asserted in
       test.
-- [ ] `parse_checks` still raises `EligibilityInputError` for a row missing any
-      field the new rule reads.
+- [x] `parse_checks` still fails closed on the timestamp the new rule reads,
+      split by kind as `design.md` records: a `startedAt` that is present but
+      unusable raises `EligibilityInputError`; an absent one is no evidence of
+      ordering, so the row is not superseded and stays blocking. Raising on an
+      absent value was rejected during review — it can only turn probes that
+      pass today into hard errors, while the chosen split can only keep a
+      block.
 
 ## Notes
 

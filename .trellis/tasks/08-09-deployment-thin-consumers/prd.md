@@ -1,5 +1,14 @@
 # Reshape pack deployment: thin consumers, centrally resolved surfaces
 
+> Known blocker (recorded 2026-08-14): the thin-candidate validation in
+> `docs/fleet/candidate-validation.json` reports `anomaly-metric-creator`
+> **blocked: 175 consumer-authored reference(s) to removed paths** (the 13
+> pack-owned citations are repointed by the conversion's own rewrite and are
+> not release defects). Those consumer-authored references must be
+> dispositioned — repointed, allowlisted, or accepted as intentionally
+> stale — before AMC's conversion child can start; AMC sits in the final
+> cohort, so canary and post-canary children are not gated by this.
+
 Parent task. Owns the requirement set, the child task map, and the
 cross-child acceptance criteria for moving the pack from vendored
 per-consumer installs to thin consumers with centrally resolved

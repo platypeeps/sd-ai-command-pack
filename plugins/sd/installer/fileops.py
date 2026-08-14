@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -292,6 +293,33 @@ def payload_source_bytes(file: PackFile, source: Path, *, is_thin: bool) -> byte
     return rewritten.encode("utf-8")
 
 
+def provenance_vouches_content(
+    file: PackFile,
+    current: bytes,
+    *,
+    provenance_files: Mapping[str, str] | None,
+) -> bool:
+    """Whether provenance records `current` as the bytes this pack installed.
+
+    A hit means the previous release wrote exactly these bytes and nobody has
+    edited them since, so installing the new release displaces no decision
+    anyone made. That is the same evidence `may_remove_pack_file` accepts as
+    authority to delete a pack file; here it is authority to update one.
+
+    Absent evidence answers False and the caller conflicts, which is what an
+    unreadable, symlinked, or malformed provenance reduces to -- its reader
+    normalizes all three to an empty mapping -- and what a run interrupted
+    before its provenance rewrite leaves behind.
+    """
+
+    if not provenance_files:
+        return False
+    recorded = provenance_files.get(file.target.as_posix())
+    if not recorded:
+        return False
+    return recorded == "sha256:" + hashlib.sha256(current).hexdigest()
+
+
 def is_previously_shipped_default(
     file: PackFile,
     current: bytes,
@@ -343,6 +371,7 @@ def install_file(
     backup: bool,
     is_thin: bool = False,
     planned_result: InstallResult | None = None,
+    provenance_files: Mapping[str, str] | None = None,
 ) -> InstallResult:
     source = file.source
     if source is None:
@@ -469,6 +498,25 @@ def install_file(
             return InstallResult(
                 file,
                 InstallStatus.PRESERVED,
+                source_digest=digest,
+                source_content=new_content,
+                source_executable=executable,
+            )
+        if provenance_vouches_content(
+            file, current, provenance_files=provenance_files
+        ):
+            # The previous release wrote these exact bytes, so this is the
+            # ordinary act of taking a new one -- not a conflict, and not
+            # something `--force` should have to authorize. No backup: the
+            # displaced content is a published pack release, recoverable from
+            # the pack, and `--backup` promises to preserve what `--force`
+            # took from the consumer.
+            if not dry_run:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_bytes(destination, new_content, executable=executable)
+            return InstallResult(
+                file,
+                InstallStatus.UPDATED,
                 source_digest=digest,
                 source_content=new_content,
                 source_executable=executable,
@@ -965,6 +1013,7 @@ __all__ = [
     "payload_source_bytes",
     "path_is_occupied",
     "prune_empty_parent_dirs",
+    "provenance_vouches_content",
     "read_bytes_for_remove",
     "remove_marked_block",
     "remove_text_block_file",

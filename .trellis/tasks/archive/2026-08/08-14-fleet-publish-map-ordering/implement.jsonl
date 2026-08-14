@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines the pack's diagnostic and exit-status vocabulary the new preflight check must report through."}
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Owns the manifest/payload rules governing the shipped script change and its version bump."}

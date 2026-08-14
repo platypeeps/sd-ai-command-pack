@@ -623,11 +623,18 @@ by Git, because `.git/info/exclude` cannot hide changes to tracked files. Remove
 existing Trellis or pack-generated files from Git tracking first, or use the
 normal tracked install when the repository should share one setup.
 
-By default, conflicting files are left untouched and the tracked refresh exits
-before writing anything; add `--force` to overwrite and `--backup` (with
-`--force`) to keep a `.bak` of each overwritten file. Customized
-`.prism/rules.json`, `.gito/config.toml`, and `.github/PULL_REQUEST_TEMPLATE.md`
-are reported as `preserved` and never overwritten.
+Taking a new release does not need `--force`. A pack file whose bytes are the
+ones the previous release installed — proved by the digest in
+`.sd-ai-command-pack/provenance.json` — is reported as `updated` and rewritten,
+because replacing it discards nothing you decided.
+
+A conflict means something else: the file's content is not what any release put
+there, so the installer cannot tell what it would be throwing away. Conflicting
+files are left untouched and the tracked refresh exits before writing anything;
+add `--force` to overwrite them and `--backup` (with `--force`) to keep a `.bak`
+of each overwritten file. Customized `.prism/rules.json`, `.gito/config.toml`,
+and `.github/PULL_REQUEST_TEMPLATE.md` are reported as `preserved` and never
+overwritten.
 
 Use `--remove` to uninstall the pack. It deletes only manifest-recognized
 pack-vouched or template-matching files, generated `.sd-ai-command-pack/` state,

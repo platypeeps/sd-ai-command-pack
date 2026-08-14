@@ -155,33 +155,98 @@ but defines no ordering or transition policy:
   dedicated lightweight Trellis task for this consumer and target release when
   no current task exists. Give its PRD the immutable release identity, managed
   scope, preparation/check commands, and finish-work expectation; bind it to
-  the refresh branch. After activation, assert the task's `task.json`
-  `description` is present and non-empty before advancing this stage; an empty
-  or missing description is a checkout-validation failure with an actionable
-  message (re-create the task with a real `--description`), not a silent
-  advance — a belt-and-suspenders guard against an upstream `task.py create`
-  that tolerates an empty description. An unrelated current task, dirty Trellis
-  state, or externally owned checkout means `ownership-skip`; never repurpose
-  another task, stash, reset, clean, or install.
+  the refresh branch.
+
+  Immediately after `task.py create`, set the PR target explicitly:
+
+  ```bash
+  python3 ./.trellis/scripts/task.py set-base-branch <task-dir> <default-branch>
+  ```
+
+  Do **not** use `task.py create --base-branch`. That flag ships with the same
+  vendored `task_store.py` revision that fixes the defect, so on exactly the
+  consumers that need it `create` fails with `unrecognized arguments`. The older
+  revision writes `base_branch` as the currently checked-out branch
+  unconditionally, which on this stage is the refresh branch — and the review
+  preflight then rejects the lane at `focused-candidate` under its root-task
+  rule. `set-base-branch` exists in both revisions. Reordering creation before
+  the branch switch is not a substitute: it produces the right answer only by
+  accident of which branch happens to be checked out.
+
+  Then validate the seeded task mechanically before advancing, from **this
+  source checkout** against the consumer:
+
+  ```bash
+  node scripts/sd-ai-command-pack-review-preflight.mjs seeded-task \
+    --repo <absolute consumer checkout> --task-dir <consumer-relative task dir> --json
+  ```
+
+  Require schema version 1 and `status: valid` with `seeded_task_valid`. Any
+  other status is a checkout-validation failure: report the findings verbatim —
+  each names the offending file and what must change, with a line number when
+  the finding is line-scoped (the `base_branch` and `description` findings are
+  field-level and have none) — and do not advance. It rejects
+  an empty `description`, a `base_branch` that is not the consumer's default
+  branch, `TBD` placeholders left in `prd.md`, `_example` scaffold rows still in
+  `implement.jsonl` / `check.jsonl`, and a context row citing a path under the
+  seeded task's **own** directory, which `task.py archive` would dangle inside
+  the same completion bundle that publishes it.
+
+  Run it from the source checkout, never the consumer's installed copy: this
+  stage runs *before* `install-update`, so the consumer still carries the
+  previous release, whose preflight exits `2` with
+  `unknown review-preflight command`. Leave the pack's default-branch override
+  environment variable unset for the whole lane — under `--repo` it outranks the
+  consumer's own `origin/HEAD` and would decide the very rule this gate
+  enforces. The receipt's `evidence.defaultBranchSource` records which one
+  answered.
+
+  This replaces the prose description assertion that used to live here. The
+  guard was always meant to be belt-and-suspenders against an upstream
+  `task.py create` that tolerates an empty description; as prose it could be and
+  was skipped, and consumers reached `focused-candidate` with
+  `field description must be a non-empty string`.
+
+  An unrelated current task, dirty Trellis state, or externally owned checkout
+  means `ownership-skip`; never repurpose another task, stash, reset, clean, or
+  install.
 - `install-update` and `install-audit`: run only the commands printed by
   preflight. The installer, provenance, and audit remain authoritative.
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
   manifest-ordered preparation/check commands and the consumer's documented
   full local gate.
-- `pr-publication`: commit only the dedicated consumer task artifacts,
-  installer-managed output, receipts/provenance, and deterministic preparation
-  output. Classify the exact base/head with
-  `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
-  PR. Record the published head and PR number. Fold finish-work into the
-  reviewed head with `sd-ai-command-pack-fleet-publish.py`: it makes the work
-  commit (pack + active task + a pre-computed post-archive `repomix-map` on
-  repomix-indexed consumers), then archives the task and records the journal via
-  the shipped `record-session` wrapper so the pushed head already carries all
-  bookkeeping. It refuses to run on a tree dirty outside the managed allowlist,
-  transactionally restores the task on any error, asserts the completion delta
-  is `.trellis`-only, and never pushes on an invalid receipt — so the merge
-  stage sees zero head-advance and no successor to reclassify. When a prior
-  merge action
+- `pr-publication`: this stage has one order, and it is the order below. Every
+  step that generates content runs before the push, so the pushed head is the
+  reviewed head and nothing is appended to it afterwards.
+
+  1. Stage only the dedicated consumer task artifacts, installer-managed
+     output, receipts/provenance, and deterministic preparation output.
+  2. Fold finish-work into that head with
+     `sd-ai-command-pack-fleet-publish.py`. It makes the work commit (pack +
+     active task + a `repomix-map` pre-computed against the post-archive
+     layout on repomix-indexed consumers), then archives the task and records
+     the journal via the shipped `record-session` wrapper, takes the
+     completion receipt, asserts the delta, and pushes — so the pushed head
+     already carries all bookkeeping. It refuses to run on a tree dirty
+     outside the managed allowlist, transactionally restores the task on any
+     error, asserts the completion delta is `.trellis`-only, and never pushes
+     on an invalid receipt — so the merge stage sees zero head-advance and no
+     successor to reclassify.
+  3. Classify the exact base and pushed head with
+     `sd-ai-command-pack-fleet-review-classify.py`.
+  4. Create or reuse one PR, and record the published head and PR number.
+
+  On a consumer the helper refuses — one carrying
+  `.github/scripts/bookkeeping_ci_scope.py`, including this pack itself — the
+  repo self-releases through `sd-finish-work`. The same ordering constraint
+  still holds: regenerate any committed structural map after `task.py archive`
+  and before the finish-work push, never as a commit appended to a pushed
+  head. A map committed ahead of the archive move names task paths the
+  published head no longer has, and
+  `sd-ai-command-pack-review-preflight.mjs` fails that head on the
+  `generated structural map paths` check.
+
+  When a prior merge action
   returned here because `sd-finish-work` advanced the PR, do not create another
   commit or push: verify the retained finish-work receipt names the current
   local and remote PR head, reclassify that exact successor, reuse the existing

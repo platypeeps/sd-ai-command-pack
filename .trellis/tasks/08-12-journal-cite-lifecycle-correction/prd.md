@@ -130,10 +130,23 @@ a cited commit must not smuggle in an unrelated task-state change.
       classifies any push delta touching `.trellis/workspace/` as a
       planning bundle and then requires a new completed session and its
       sibling index. Both the edit and its revert fail. So this criterion
-      is satisfiable only by the "explicitly left as historical" branch,
-      unless the fix chosen for requirement 2 also supplies a migration
-      path — which is `.trellis/tasks/08-09-force-backup-journal` and
-      issue #401's territory, not assumed here.
+      is satisfiable only by the "explicitly left as historical" branch.
+
+      An earlier draft of this PRD hedged that a migration path chosen for
+      requirement 2 might make reconciliation available, and cited
+      `.trellis/tasks/08-09-force-backup-journal` for it. Both halves were
+      wrong. That task covers the machine-scope installer's
+      `machine-install.intent.json` backup records, a different subsystem
+      sharing only the word "journal". The append-only migration question is
+      issue #401, now owned by
+      `.trellis/tasks/08-14-journal-developer-directory-migration` — and that
+      task does not supply this escape hatch either. It accepts removing a
+      developer directory whose sessions are preserved verbatim under
+      another directory, and its requirement 6 keeps in-place edits of a
+      committed session failing. Editing a committed session in place is
+      exactly what reconciling
+      `08-12-thin-parent-status-blocks-finalization` would require. No task
+      supplies it, and none should.
 
 ## Out of scope
 

@@ -788,3 +788,397 @@ Filed 08-12-journal-cite-lifecycle-correction after shipping PR #438 hit the def
 ### Next Steps
 
 - None - task complete
+
+
+## Session 369: Regenerate the managed ignore block before the fleet publish work commit
+
+**Date**: 2026-08-13
+**Task**: Regenerate the managed ignore block before the fleet publish work commit
+**Branch**: `fix/fleet-publish-ignore-block-ordering`
+
+### Summary
+
+sd-ai-command-pack-fleet-publish.py built the work commit before anything regenerated the pack-managed .obsidian-kb block in a consumer's .gitignore, so a release that changes that block dirtied the tree only at the merge gate, after the completion bundle was already published and could no longer absorb it. Move the regeneration ahead of work_commit(), allowlist .gitignore, and decide the reported state from the file rather than the helper's exit code.
+
+### Main Changes
+
+- refresh_managed_ignore_block() runs after check_preconditions() and before work_commit(), and ahead of the repomix step so the map indexes the final ignore state
+- .gitignore added to DEFAULT_ALLOWED_PREFIXES, for the operator who already ran housekeeping; allowlisting alone is not the fix, because an untouched tree is still clean at publish time
+- A missing updater reports absent and a failing one is advisory; neither aborts a pack refresh, since the KB folder is regenerable and ignored
+- The returned state is decided by comparing .gitignore before and after, not by the exit code: update-spec-kb.py writes the block before it copies anything, then exits 3 on KB-copy conflicts alone
+- New spec .trellis/spec/tooling/fleet-publish-generated-content.md generalizes the rule to all pack-managed generated content, with the --if-present and cwd traps recorded
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d15a47cc` | fix(fleet): regenerate the managed ignore block before the work commit |
+| `3c4106d4` | docs(task): record the live verification of the ignore-block ordering fix |
+| `13ad9dbd` | test(fleet): pin the ignore-block ordering through publish() |
+| `e22663d6` | fix(fleet): decide the ignore-block state from the file, not the exit code |
+| `c3cc80d1` | docs(fleet): correct the ignore-block warning's two false implications |
+| `8d89ec79` | chore(task): record the completion branch for fleet-publish-ignore-block-ordering |
+| `05e78523` | chore(task): archive 08-12-fleet-publish-ignore-block-ordering |
+
+### Testing
+
+- [OK] python3 -m unittest tests.test_fleet_publish -- Ran 23 tests, OK
+- [OK] Ordering guard falsified deliberately: with refresh_managed_ignore_block() moved after work_commit(), only test_publish_captures_a_stale_ignore_block_in_the_work_commit fails (23 run, 1 failure); restored, OK
+- [OK] scripts/sd-ai-command-pack-check.py --json -- passed, 7 passed / 1 skipped
+- [OK] Live on four consumer refreshes to 0.71.2: stale block on mezmo_benchmark (fae338bc) and hoa-manager (54170bb5) folded .gitignore into H1; current block on rwbp-website (bb8309e7) added no .gitignore entry
+- [OK] GitHub Copilot review on PR #440 converged over 4 rounds to no new comments, 0 unresolved threads, 11 checks / 0 failing
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 370: Seed-task self-citation requirement for 08-12-fleet-refresh-task-seeding
+
+**Date**: 2026-08-13
+**Task**: Seed-task self-citation requirement for 08-12-fleet-refresh-task-seeding
+**Branch**: `task/seeding-research-citation-requirement`
+
+### Summary
+
+Documented a fourth recurring fleet-refresh seeding defect -- context entries citing the seeded task's own directory -- and added requirement 5 banning self-referential jsonl citations. Converged a four-round Copilot review on PR #441.
+
+### Main Changes
+
+- prd.md: fourth defect entry, requirement 5 quoting the preflight allowed-root regex at scripts/sd-ai-command-pack-review-preflight.mjs:3977 verbatim, two acceptance criteria, and a Verification section recording three same-day instances
+- prd.md/task.json: corrected the defect count from three to four across every artifact that asserted it, and scoped the PR 222 observation paragraph to defects 1-3 (defect 4 first appeared on hoa-manager PR 247)
+- prd.md/implement.jsonl: cite the preflight by its real path, scripts/sd-ai-command-pack-review-preflight.mjs, and replaced a dead pre-archive task-path literal with its archive location
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d299ebf7` | docs(task): require seeded tasks to stop citing their own directory |
+| `88c742f2` | docs(task): correct the defect-count prose and drop a dead active-path literal |
+| `35e92709` | docs(task): cite the review preflight by its real path |
+| `17c62079` | docs(task): scope the observation paragraph to defects 1-3 |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs -- 0 failures, 0 warnings
+- [OK] scripts/sd-ai-command-pack-check.py --json -- status passed, 7 passed / 1 skipped
+- [OK] Copilot review rounds 1-4 on PR #441; round 4 generated no comments and no suppressed comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 371: Seed fleet-refresh consumer tasks with real PRD and context entries
+
+**Date**: 2026-08-13
+**Task**: Seed fleet-refresh consumer tasks with real PRD and context entries
+**Branch**: `task/fleet-refresh-task-seeding`
+
+### Summary
+
+Added a seeded-task gate to the review preflight and wired it into the fleet-refresh checkout-validation stage, so the four defects that recurred across consumer lanes fail where the task is created instead of at focused-candidate or after the completion bundle is published.
+
+### Main Changes
+
+- New review-preflight subcommand seeded-task validates a freshly created consumer task: non-empty description, base_branch equal to the consumer default branch, no TBD PRD placeholders, and no _example scaffold rows -- including the lone-scaffold shape merge time deliberately exempts.
+- New rule rejecting context rows that cite a path under their own task directory, which resolves while the task is active and dangles the instant task.py archive moves the directory.
+- SKILL.md checkout-validation now sets base_branch with task.py set-base-branch, never task.py create --base-branch, which the older vendored task_store.py rejects as an unrecognized argument.
+- Findings name the repair, not just the constraint: the empty-metadata finding cites task.py create flags that exist in both vendored revisions, and the seeded base_branch finding recommends only set-base-branch instead of embedding the shared rule's meta.base_branch_exemption escape hatch.
+- Fixed the human-readable receipt, which printed 'null bundle undefined..undefined' for seeded-task because printBookkeepingResult special-cased only pre-archive.
+- Bumped the pack to 0.71.3 for the shipped payload change.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af21e01b` | docs(task): add design and implementation plan for seeded-task validation |
+| `0b700b32` | chore(task): activate seeded-task validation and bind it to its branch |
+| `7d3d2150` | fix(task): repoint self-citing context rows at specs before the rule lands |
+| `95aea12a` | feat(preflight): reject task context rows citing their own task directory |
+| `5f9a7857` | feat(preflight): reject generated TBD placeholders in a changed Trellis PRD |
+| `bbdc3a20` | chore: propagate the preflight rules to every shipped copy |
+| `152e97e0` | feat(preflight): add a seeded-task gate and wire it into checkout-validation |
+| `687556f2` | fix(preflight): carry the self-reference repair into the seeded-task receipt |
+| `cda25be6` | chore(release): bump the pack to 0.71.3 for the seeded-task payload change |
+| `8c78aff7` | docs: replace stale line anchors with symbol references after review |
+| `b2a3abcc` | fix(preflight): name the repair in the empty task-metadata finding |
+| `642712ed` | fix(preflight): stop the seeded base_branch finding from advising an exemption |
+| `fe4a4ae7` | fix(preflight): print a task count, not a bundle range, for seeded-task |
+
+### Testing
+
+- [OK] sd-check: status=passed, all 8 rows passed
+- [OK] tests/test_bookkeeping_validator.py: Ran 97 tests, OK
+- [OK] tests/test_review_preflight.py: Ran 70 tests, OK
+- [OK] release payload gate: release version gate: shipped payload changed; manifest version 0.71.2 -> 0.71.3
+- [OK] pre-archive gate: status=valid, reasonCodes=['pre_archive_valid']
+- [OK] PR 442 CI settled: 9 pass, 2 skipping, 0 fails; Copilot round 5 clean; 3 threads, 0 unresolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 372: Corrective release 0.71.4: seeded-task gate rejects an unfilled context manifest
+
+**Date**: 2026-08-13
+**Task**: Corrective release 0.71.4: seeded-task gate rejects an unfilled context manifest
+**Branch**: `task/seeded-task-unfilled-manifest`
+
+### Summary
+
+The 0.71.3 fleet campaign blocked itself when the canary consumer's review found that seeded-task accepted a context manifest that existed but carried no usable rows -- the shape a fleet lane most plausibly produces, and the one the pack's own documentation told operators to produce. Fixed the rule, corrected the documentation that had made the defect an approved path, and shipped it as 0.71.4.
+
+### Main Changes
+
+- seeded-task now reports task_context_unfilled when a present manifest yields zero rows carrying a file key, guarded so it never masks a more specific finding
+- Corrected the doc passage telling operators the scaffold must be 'replaced or emptied', which was true for the two diff-scoped lanes and exactly wrong for seeded-task; added the seeded-task reference section the pack never had
+- Extracted bookkeepingResultSubject, which throws on an unrecognized command instead of printing an undefined subject
+- Copilot round 1 found a real ordering defect: the whitespace sweep ran after the unfilled decision and did not count toward its guard, so a padded blank manifest double-reported
+- Swept the changed files for the comment defect Copilot surfaced twice and found three more instances of the same line-split
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3155aa8` | fix(review-preflight): reject an unfilled seeded-task context manifest |
+| `17283561` | fix(review-preflight): stop task_context_unfilled double-reporting whitespace |
+| `a5d6fa3e` | chore(fleet): refresh candidate ledger for the corrected payload |
+| `e40a2a1b` | test: decouple the no-manifests fixture from write_task's behavior |
+| `e237498e` | docs(tests): reflow split hyphenated terms and correct a stale parameter comment |
+| `6ae71f5f` | docs(task): record the verified acceptance criteria |
+
+### Testing
+
+- [OK] full suite: Ran 2448 tests, OK
+- [OK] bookkeeping validator: Ran 103 tests, OK
+- [OK] review preflight: Ran 70 tests, OK
+- [OK] sd-check: 8 passed, 0 failed
+- [OK] release version gate: manifest version 0.71.3 -> 0.71.4
+- [OK] pre-archive gate: pre_archive_valid
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 373: Installer upgrades provenance-vouched pack files without --force
+
+**Date**: 2026-08-14
+**Task**: Installer upgrades provenance-vouched pack files without --force
+**Branch**: `fix/installer-vouched-upgrade`
+
+### Summary
+
+Diagnosed and fixed the installer defect that made every consumer refresh in the 0.71.4 fleet campaign report an identical four-file conflict set: install_file never read provenance, so any pack file whose template changed since the installed release was a conflict only --force could clear.
+
+### Main Changes
+
+- Classified a target whose bytes provenance vouches as updated: written without --force and without a backup, while unvouched content, missing entries, and unreadable provenance still conflict
+- Threaded the provenance map once per run through _install_payload so the preflight, the apply pass, and --check cannot disagree
+- Updated test_audit_clean_source_changed_target_requires_refresh, which built the vouched-stale shape and asserted the defective conflict
+- Documented the classification in the manifest-and-filesystem spec, error-handling spec, README, and the installed pack documentation
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `06d56f68` | fix(installer): upgrade provenance-vouched pack files without --force |
+| `638e3c34` | test(installer): cover the vouched-upgrade filesystem and evidence boundaries |
+
+### Testing
+
+- [OK] unittest discover -s tests: Ran 2452 tests, OK
+- [OK] repro replay: 0.71.1 target upgraded to current with 4 updated lines, exit 0, audit passed, 0 .bak files
+- [OK] negative control: a hand-edited target still reported conflict and exit 2
+- [OK] sd-check: 7 passed, 1 skipped (obsidian-kb advisory), 0 failed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 374: Guard committed structural maps against pre-archive .trellis paths
+
+**Date**: 2026-08-14
+**Task**: Guard committed structural maps against pre-archive .trellis paths
+**Branch**: `fix/generated-map-ordering-guard`
+
+### Summary
+
+Fixed the fleet publication ordering defect that made four 0.71.5 consumer PRs need a post-push repomix-map commit: sd-fleet-refresh now states pr-publication as an explicit four-step sequence with sd-ai-command-pack-fleet-publish.py before the push, and review-preflight gained a generated structural map paths check that fails any committed map naming a .trellis/ path absent from the tree.
+
+### Main Changes
+
+- review-preflight: new parseGeneratedStructuralMapEntries plus checkGeneratedStructuralMapPaths, bounded to .trellis/ entries, fence-aware, warn-not-fail on unparseable indentation, capped at 20 reported failures
+- config: generatedStructuralMaps defaults to docs/repomix-map.md and joins the loadConfig array-merge key list
+- sd-fleet-refresh SKILL.md: pr-publication rewritten as stage, fold via fleet-publish.py, classify pushed head, open or reuse PR, plus the non-helper fallback ordering constraint
+- docs/FLEET_ROLLOUT.md: refresh steps 4-6 realigned and pointed at the skill as the single statement of the sequence
+- manifest 0.71.6 + CHANGELOG section for the shipped payload change
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `308d3bb3` | fix(preflight): fail committed structural maps that name missing .trellis paths |
+
+### Testing
+
+- [OK] make test: full suite, exit 0, no skips, install coverage gate held
+- [OK] sd-check --json: status passed, 7 passed / 1 skipped / 0 failed
+- [OK] tests.test_review_preflight: 76 tests OK, including 6 new generated-map cases
+- [OK] negative reproduction on the real anomaly-metric-creator tree: pre-archive map path reports 2 missing, the shipped post-archive map reports 0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 375: Backlog consolidation: open issues and follow-ups into planning tasks
+
+**Date**: 2026-08-14
+**Task**: Backlog consolidation: open issues and follow-ups into planning tasks
+**Branch**: `task/backlog-consolidation-0814`
+
+### Summary
+
+Reviewed the 12 open GitHub issues, the 73 open Trellis tasks, PR #444, and the fleet-campaign follow-ups. Created six planning tasks covering every previously untracked issue and the fleet-publish allowlist follow-up, and recorded consolidation citations: #414 into 08-07-eligibility-superseded-runs, #399 into 08-09-retire-review-pr-surface, #404 absorbed by 08-09-work-loop-pr-supersession, and the AMC 175-stale-references thin-conversion blocker in the 08-09-deployment-thin-consumers umbrella.
+
+### Main Changes
+
+- new planning tasks: 08-14-housekeeping-kb-selfblock (#432), 08-14-watch-settled-blocked-classification (#412), 08-14-review-local-robustness (#409+#405), 08-14-ship-planning-refinalization-exit (#408), 08-14-pack-paper-cuts (#413+#410+#398), 08-14-fleet-publish-manifest-allowlist
+- consolidation citations added to four existing PRDs so every open issue maps to exactly one owning task
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8ea2aa8c` | docs(tasks): consolidate open issues and follow-ups into the backlog |
+
+### Testing
+
+- [OK] sd-check --json: status passed, 7 passed / 1 skipped / 0 failed
+- [OK] review-preflight: no failures; multi-task-scope warning dispositioned as one backlog-consolidation batch
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 376: Housekeeping KB refresh must not block its own merge
+
+**Date**: 2026-08-14
+**Task**: Housekeeping KB refresh must not block its own merge
+**Branch**: `task/housekeeping-kb-selfblock`
+
+### Summary
+
+Made the Obsidian KB ignore-block writer semantically idempotent so a cosmetic banner change in a new pack release stops dirtying a tracked .gitignore across the fleet and blocking the merge that ships it (issue #432).
+
+### Main Changes
+
+- merge_kb_ignore_block rewrites the managed block only when it is functionally deficient (markers absent, no active entry ignoring the KB directory, or an unmanaged KB entry outside the span); a functional block is left byte-identical and reported as 'gitignore: present'
+- Added --rewrite-ignore-block to force the byte-exact rebuild, threaded through ensure_gitignore, planned_gitignore_state, and both preview modes so --dry-run and --check cannot promise a write the real run would not perform
+- sd-housekeeping working_tree_dirty anomalies now name up to ten dirty paths (then 'and N more') and say when this run's own KB refresh wrote .gitignore; only the tracked-file states set that flag, since .git/info/exclude never appears in git status
+- Recorded the managed-block ownership rule in the KB reference and the writer's docstring, with a paste-ready note for consumer provenance guidance that hashes .gitignore whole
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `71c78345c127769077e55c2d6a7c4f1e99c696b2` | docs(task): tick the acceptance criteria for housekeeping-kb-selfblock |
+| `28274c7676795fa9c7592979086cad03f8fc335e` | chore(task): record the branch for housekeeping-kb-selfblock |
+| `87bf72541135f50c04686b638068b18a4bd42153` | fix(housekeeping): scope the KB write note to the tracked ignore file |
+| `8eab6fd595b08a5bd8472be96417e8ff61800636` | fix(update-spec-kb): make the managed ignore block semantically idempotent |
+
+### Testing
+
+- [OK] python3 -m unittest discover tests -- Ran 2468 tests, OK
+- [OK] sd-ai-command-pack-check.py --json -- status passed, 8 passed / 0 failed
+- [OK] Issue #432 reproduction: a committed stale-banner block survives a refresh and git status --porcelain prints nothing
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 377: Merge eligibility counts superseded workflow runs as blocking
+
+**Date**: 2026-08-14
+**Task**: Merge eligibility counts superseded workflow runs as blocking
+**Branch**: `task/eligibility-superseded-runs`
+
+### Summary
+
+Narrowed the merge-eligibility probe's blocking population so a check run cancelled by a concurrency group and replaced by a later run no longer contradicts GitHub's own mergeStateStatus (issue #414).
+
+### Main Changes
+
+- parse_checks discounts a CANCELLED row when a later-started row shares its (workflowName, name) identity; the blocking predicate at both merge sites is untouched
+- Restricted to CANCELLED so a genuine FAILURE from an older run still blocks, and required a later sibling so an operator's cancellation of the only run still blocks
+- Ordering comes from startedAt in the existing single query; timestamps are read only for identities carrying a cancelled row, so no existing caller starts failing on a field the old code never touched
+- Receipt marks each discounted row with superseded and a supersededBy citation of the row that replaced it
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66c02eb4580fdf36fe496fa6e9dc1e5a234ccc9a` | docs(task): tick the acceptance criteria for eligibility-superseded-runs |
+| `99678da9f2759d1a359bbb7b0256e7aa04ed390d` | chore(task): record the branch for eligibility-superseded-runs |
+| `419bf17c9db409d4783c6c976621ba6a5f5f26e6` | fix(pr-eligibility): satisfy mypy in the supersession pass |
+
+### Testing
+
+- [OK] python3 -m unittest discover tests -- Ran 2473 tests, OK
+- [OK] sd-ai-command-pack-check.py --json -- status passed, 8 passed / 0 failed
+- [OK] PR #360 rollup shape yields eligible with reasonCodes []; stripping the replacements from the same fixture blocks again
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -91,11 +91,14 @@ class ReviewPreflightTests(InstallTestCase):
                 """
 import assert from 'node:assert/strict';
 import {
+  bookkeepingResultSubject,
   copiedTemplateKind,
+  countTrellisTaskContextRows,
   extractDocumentationPathReferences,
   findContradictoryJournalValidationFallbacks,
   findHistoricalTrellisJournalSessionEdits,
   findMissingTrellisChildReferences,
+  findTrellisPlanningPlaceholders,
   findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
   isBoundaryRiskReviewPath,
@@ -110,6 +113,7 @@ import {
   reviewRiskCategories,
   reviewRiskMatrix,
   shouldCheckDocumentationPathReference,
+  trellisTaskContextOwnerDirectory,
   trellisTaskDirectory,
   thrownValueMessage,
   unsupportedNodeVersionMessage,
@@ -377,8 +381,8 @@ assert.deepEqual(validateTrellisBookkeepingMetadata({
   branch: null,
   base_branch: 'main',
 }, '.trellis/tasks/07-17-demo', false), [
-  'title must be a non-empty string',
-  'description must be a non-empty string',
+  'title must be a non-empty string; re-create the task with a real title argument',
+  'description must be a non-empty string; re-create the task passing a real --description',
   'createdAt must be a valid date or timestamp',
 ]);
 assert.deepEqual(validateTrellisTaskMetadata({
@@ -537,13 +541,13 @@ assert.deepEqual(validateTrellisRootTaskBaseBranch({
 assert.equal(
   validateTrellisBookkeepingMetadata({
     description: '\\uFEFF',
-  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  }, '.trellis/tasks/07-17-demo', false).some((issue) => issue.startsWith('description must be a non-empty string')),
   true,
 );
 assert.equal(
   validateTrellisBookkeepingMetadata({
     description: '\\u0085',
-  }, '.trellis/tasks/07-17-demo', false).includes('description must be a non-empty string'),
+  }, '.trellis/tasks/07-17-demo', false).some((issue) => issue.startsWith('description must be a non-empty string')),
   false,
 );
 assert.deepEqual(findMissingTrellisChildReferences(
@@ -576,6 +580,44 @@ assert.equal(isPristineTrellisTaskContextScaffold('{"nested":{"_example":"x"}}\\
 assert.equal(isPristineTrellisTaskContextScaffold('malformed\\n'), false);
 assert.equal(isPristineTrellisTaskContextScaffold('["_example"]\\n'), false);
 assert.equal(isPristineTrellisTaskContextScaffold('null\\n'), false);
+
+// countTrellisTaskContextRows answers a file-level question the per-row issue
+// walk cannot: how many rows are usable at all.
+assert.equal(countTrellisTaskContextRows(''), 0);
+assert.equal(countTrellisTaskContextRows('\\n\\n\\n'), 0);
+assert.equal(countTrellisTaskContextRows('{}\\n{"note":"later"}\\n'), 0);
+assert.equal(countTrellisTaskContextRows('malformed\\n'), 0);
+assert.equal(countTrellisTaskContextRows('{"_example":"replace me"}\\n'), 0);
+// A rejected reference still counts as a row: the manifest is filled-but-wrong,
+// and the reference/self_reference finding names that defect precisely.
+assert.equal(countTrellisTaskContextRows('{"file":"src/a.py","reason":"x"}\\n'), 1);
+assert.equal(countTrellisTaskContextRows([
+  '{"file":".trellis/spec/backend/index.md","reason":"real"}',
+  '{"file":".trellis/spec/frontend/index.md","reason":"real"}',
+].join('\\n')), 2);
+
+// Every command that can reach a valid result names its own subject; anything
+// else throws rather than printing a plausible-looking wrong one.
+assert.equal(
+  bookkeepingResultSubject({command: 'seeded-task', evidence: {taskDirectories: ['a']}}),
+  '1 task(s)',
+);
+assert.equal(
+  bookkeepingResultSubject({command: 'pre-archive', evidence: {taskDirectories: ['a', 'b']}}),
+  '2 task(s)',
+);
+assert.equal(
+  bookkeepingResultSubject({
+    command: 'final-bundle',
+    mode: 'completion',
+    evidence: {baseOid: 'a'.repeat(40), headOid: 'b'.repeat(40)},
+  }),
+  `completion bundle ${'a'.repeat(12)}..${'b'.repeat(12)}`,
+);
+assert.throws(
+  () => bookkeepingResultSubject({command: 'future-command', evidence: {}}),
+  /subject is undefined for command "future-command"/,
+);
 assert.equal(isPristineTrellisTaskContextScaffold('"_example"\\n'), false);
 assert.equal(isPristineTrellisTaskContextScaffold('{}\\n'), false);
 assert.equal(isTrellisTaskContextReference('.trellis/spec'), true);
@@ -603,6 +645,67 @@ assert.deepEqual(findTrellisTaskContextIssues('implement.jsonl', [
   { file: 'implement.jsonl', line: 3, kind: 'seed' },
   { file: 'implement.jsonl', line: 4, kind: 'malformed' },
 ]);
+assert.equal(trellisTaskContextOwnerDirectory('.trellis/tasks/07-22-demo/check.jsonl'), '.trellis/tasks/07-22-demo');
+assert.equal(trellisTaskContextOwnerDirectory('./.trellis/tasks/07-22-demo/check.jsonl'), '.trellis/tasks/07-22-demo');
+assert.equal(
+  trellisTaskContextOwnerDirectory('.trellis/tasks/archive/2026-07/07-22-demo/check.jsonl'),
+  '.trellis/tasks/archive/2026-07/07-22-demo',
+);
+assert.equal(trellisTaskContextOwnerDirectory('.trellis/spec/backend/index.md'), '');
+assert.equal(trellisTaskContextOwnerDirectory(42), '');
+// A task citing its own research passes the allowed-root test -- that is exactly
+// how the defect reached main -- so the narrowing has to compare directories.
+assert.deepEqual(findTrellisTaskContextIssues('.trellis/tasks/07-22-demo/check.jsonl', [
+  '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"own"}',
+  '{"file":"./.trellis/tasks/07-22-demo/research/notes.md","reason":"own, ./ prefixed"}',
+  '{"file":".trellis/tasks/07-23-other/research/notes.md","reason":"sibling stays allowed"}',
+  '{"file":".trellis/spec/backend/index.md","reason":"spec stays allowed"}',
+].join('\\n')), [
+  { file: '.trellis/tasks/07-22-demo/check.jsonl', line: 1, kind: 'self_reference' },
+  { file: '.trellis/tasks/07-22-demo/check.jsonl', line: 2, kind: 'self_reference' },
+]);
+// The archive form is allowed because the move already happened, but an archived
+// task citing its OWN archived research is still self-reference.
+assert.deepEqual(findTrellisTaskContextIssues('.trellis/tasks/archive/2026-07/07-22-demo/implement.jsonl', [
+  '{"file":".trellis/tasks/archive/2026-07/07-22-demo/research/notes.md","reason":"own"}',
+  '{"file":".trellis/tasks/archive/2026-07/07-23-other/research/notes.md","reason":"sibling"}',
+].join('\\n')), [
+  { file: '.trellis/tasks/archive/2026-07/07-22-demo/implement.jsonl', line: 1, kind: 'self_reference' },
+]);
+// A citing file outside a task directory has no owner and must not self-match.
+assert.deepEqual(
+  findTrellisTaskContextIssues('implement.jsonl', '{"file":".trellis/tasks/07-22-demo/research/notes.md","reason":"r"}'),
+  [],
+);
+// All three shapes task.py create seeds, including the Goal body -- the one that
+// does not look like a list item and so survives a hand edit most often.
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', [
+  '# Title',
+  '',
+  '## Goal',
+  '',
+  'TBD.',
+  '',
+  '## Requirements',
+  '',
+  '- TBD',
+  '',
+  '## Acceptance Criteria',
+  '',
+  '- [ ] TBD',
+].join('\\n')), [
+  { file: 'prd.md', line: 5, text: 'TBD.' },
+  { file: 'prd.md', line: 9, text: '- TBD' },
+  { file: 'prd.md', line: 13, text: '- [ ] TBD' },
+]);
+// A PRD may DISCUSS the placeholder; the rule matches whole lines, not substrings.
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', [
+  'The generator seeds requirements with - TBD and criteria with - [ ] TBD.',
+  '- A prd.md retaining `- TBD` requirements fails checkout-validation.',
+  '- [ ] Planning artifacts are free of TBD placeholders.',
+  'TBD requirements are rejected.',
+].join('\\n')), []);
+assert.deepEqual(findTrellisPlanningPlaceholders('prd.md', 42), []);
 assert.deepEqual(parseNumstat('1\\t2\\tsrc/file\\tname.js\\0'), [
   { added: 1, deleted: 2, path: 'src/file\\tname.js' },
 ]);
@@ -2997,7 +3100,9 @@ assert.deepEqual(
             encoding="utf-8",
         )
         (task / "check.jsonl").write_text(
-            '{"file":".trellis/tasks/07-22-context-boundary/research/cases.md","reason":"research evidence"}\n',
+            # A sibling task's research/**, not this task's own: the own-directory
+            # form is rejected separately by the self-reference rule.
+            '{"file":".trellis/tasks/07-21-context-sibling/research/cases.md","reason":"research evidence"}\n',
             encoding="utf-8",
         )
         result = self.run_review_preflight(node, root)
@@ -4201,6 +4306,161 @@ assert.deepEqual(
         result = run_preflight()
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("tests/test_missing.py", result.stdout)
+
+    def make_generated_map_repo(self, map_lines: list[str] | None = None) -> Path:
+        # The generated-map guard reads a committed structural map, so the
+        # fixture only needs the preflight script plus the map itself.
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
+        )
+        if map_lines is not None:
+            docs = root / "docs"
+            docs.mkdir(exist_ok=True)
+            (docs / "repomix-map.md").write_text(
+                "\n".join(map_lines) + "\n", encoding="utf-8"
+            )
+        return root
+
+    def test_generated_map_guard_fails_on_missing_trellis_path(self) -> None:
+        # Regression: the fleet flow committed a map generated before the task
+        # archive move, so it named a .trellis path the published head lacked.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "  tasks/",
+                "    08-14-refresh/",
+                "      prd.md",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "docs/repomix-map.md:7 lists .trellis/tasks/08-14-refresh/prd.md",
+            result.stdout,
+        )
+
+    def test_generated_map_guard_passes_when_trellis_paths_exist(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "  config.yaml",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("generated structural map", result.stdout)
+
+    def test_generated_map_guard_passes_without_a_map(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo()
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("no generated structural map", result.stdout)
+
+    def test_generated_map_guard_passes_without_a_structure_section(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Repository Map",
+                "",
+                "No directory listing was generated.",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_generated_map_guard_ignores_missing_paths_outside_trellis(self) -> None:
+        # A clean checkout legitimately lacks untracked or ignored files, so
+        # only the fully tracked .trellis tree is checked for existence.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                "src/",
+                "  gone.py",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("src/gone.py", result.stdout)
+
+    def test_generated_map_guard_refuses_to_probe_outside_the_repo(self) -> None:
+        # A listed `..` component would make the existence probe stat outside
+        # the repository; no generator emits one, so it is a malformed map.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "  ../",
+                "    ../",
+                "      etc/",
+                "        passwd",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("does not stay inside the repository", result.stdout)
+        self.assertNotIn("which does not exist", result.stdout)
+
+    def test_generated_map_guard_warns_on_malformed_indentation(self) -> None:
+        # An unparseable map is a different defect; reporting it as drift would
+        # name the wrong remedy, so the guard warns instead of failing.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                ".trellis/",
+                "   tasks/",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("could not be parsed", result.stdout)
 
     def test_main_push_scope_allows_only_trellis_chore_paths(self) -> None:
         script = PACK_ROOT / ".github/scripts/check-main-push-scope.sh"

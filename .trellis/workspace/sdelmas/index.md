@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 368
-- **Last Active**: 2026-08-12
+- **Total Sessions**: 377
+- **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~780 | Active |
+| `journal-8.md` | ~1174 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,15 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 377 | 2026-08-14 | Merge eligibility counts superseded workflow runs as blocking | `66c02eb4580fdf36fe496fa6e9dc1e5a234ccc9a`, `99678da9f2759d1a359bbb7b0256e7aa04ed390d`, `419bf17c9db409d4783c6c976621ba6a5f5f26e6` | `task/eligibility-superseded-runs` |
+| 376 | 2026-08-14 | Housekeeping KB refresh must not block its own merge | `71c78345c127769077e55c2d6a7c4f1e99c696b2`, `28274c7676795fa9c7592979086cad03f8fc335e`, `87bf72541135f50c04686b638068b18a4bd42153`, `8eab6fd595b08a5bd8472be96417e8ff61800636` | `task/housekeeping-kb-selfblock` |
+| 375 | 2026-08-14 | Backlog consolidation: open issues and follow-ups into planning tasks | `8ea2aa8c` | `task/backlog-consolidation-0814` |
+| 374 | 2026-08-14 | Guard committed structural maps against pre-archive .trellis paths | `308d3bb3` | `fix/generated-map-ordering-guard` |
+| 373 | 2026-08-14 | Installer upgrades provenance-vouched pack files without --force | `06d56f68`, `638e3c34` | `fix/installer-vouched-upgrade` |
+| 372 | 2026-08-13 | Corrective release 0.71.4: seeded-task gate rejects an unfilled context manifest | `f3155aa8`, `17283561`, `a5d6fa3e`, `e40a2a1b`, `e237498e`, `6ae71f5f` | `task/seeded-task-unfilled-manifest` |
+| 371 | 2026-08-13 | Seed fleet-refresh consumer tasks with real PRD and context entries | `af21e01b`, `0b700b32`, `7d3d2150`, `95aea12a`, `5f9a7857`, `bbdc3a20`, `152e97e0`, `687556f2`, `cda25be6`, `8c78aff7`, `b2a3abcc`, `642712ed`, `fe4a4ae7` | `task/fleet-refresh-task-seeding` |
+| 370 | 2026-08-13 | Seed-task self-citation requirement for 08-12-fleet-refresh-task-seeding | `d299ebf7`, `88c742f2`, `35e92709`, `17c62079` | `task/seeding-research-citation-requirement` |
+| 369 | 2026-08-13 | Regenerate the managed ignore block before the fleet publish work commit | `d15a47cc`, `3c4106d4`, `13ad9dbd`, `e22663d6`, `c3cc80d1`, `8d89ec79`, `05e78523` | `fix/fleet-publish-ignore-block-ordering` |
 | 368 | 2026-08-12 | File the journal-cite lifecycle-correction defect | `9bdbea47` | `task/journal-cite-lifecycle-correction` |
 | 367 | 2026-08-12 | Return the thin-consumers parent to planning and unblock its subtree | `f0f12837`, `b8653750` | `fix/thin-parent-status-finalization` |
 | 366 | 2026-08-12 | Retire the codex vendored-retention carve-out on probe evidence | `9bc8ae9094c00489829790a770fd89037249ab15` | `feat/retire-codex-vendored-retention` |
