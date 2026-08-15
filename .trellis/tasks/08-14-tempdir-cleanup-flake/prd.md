@@ -31,8 +31,14 @@ the tree after `shutil.rmtree` has scanned a directory but before it calls
 time, so cleanup raises `Errno 39` and the test errors in teardown — after the
 test body itself has already passed.
 
-`tempfile.TemporaryDirectory(ignore_cleanup_errors=True)` swallows exactly this
-error class, leaving the stray files for the OS to reap.
+`tempfile.TemporaryDirectory(ignore_cleanup_errors=True)` makes teardown
+survive this race, leaving the stray files for the OS to reap. It is not
+narrowly scoped: the flag installs an ignore-everything handler, so *every*
+exception raised during cleanup is suppressed, not just `Errno 39`. That
+breadth is the tension this task has to resolve against the constraint below
+that unrelated teardown errors must stay visible — `design.md` decides whether
+blanket suppression is acceptable here or a handler that re-raises anything
+other than the race is required.
 
 ## Evidence this applies here
 
