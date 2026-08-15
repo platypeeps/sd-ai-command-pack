@@ -43,9 +43,25 @@ resolved outside status entirely — do not just add a call.
 
 ## Acceptance criteria
 
-- [ ] The release target is available and clearly distinguished from the
+- [x] The release target is available and clearly distinguished from the
       checkout target in both JSON and human output.
-- [ ] `--no-network` still produces a complete report, with the release target
+
+      `releaseTarget` is a top-level sibling of `targetPackVersion`, never
+      nested in it, and `render_fleet` prints its own `Release target:` line.
+      Proven by `test_release_target_reports_the_newest_tag` and
+      `test_fleet_report_keeps_every_key_when_the_release_is_unavailable`.
+
+- [x] `--no-network` still produces a complete report, with the release target
       explicitly labeled (`disabled`) rather than absent or silently
       substituted, and with no subprocess spawned for the lookup.
-- [ ] Status remains read-only: no fetch, install, or write is added.
+
+      `test_release_target_is_disabled_without_network` asserts the status is
+      `disabled` and `run_command.call_count == 0`, so the no-subprocess clause
+      is checked, not assumed.
+
+- [x] Status remains read-only: no fetch, install, or write is added.
+
+      `test_release_target_issues_only_read_only_commands` captures every argv
+      `run_command` receives and asserts the set is exactly
+      `git remote get-url origin` and `git ls-remote --tags --refs origin`. An
+      argv assertion, so a later edit slipping in `git fetch` fails the test.
