@@ -475,10 +475,11 @@ TOKEN = re.compile(r"[\w.*?/-]*[\w*?][./][\w.*?/-]*")
 # `docs/FLEET_ROLLOUT.md:630` prescribes the consumer migration: stop naming a
 # `scripts/sd-ai-command-pack-*` literal, and ask the surviving resolver where a
 # pack script lives by passing that script's *name*. The name is a bare basename
-# of a removed path, which is exactly what rule 5 of `cites_removed_path`
-# blocks. Following the documented recipe therefore produced a blocked verdict
-# with no next step -- measured on `rwbp-coordinator` at 0.71.13, where the
-# rewrite cleared 44 blockers and its own three resolver keys replaced them.
+# of a removed path, which is exactly what the bare-name rules of
+# `cites_removed_path` block. Following the documented recipe produced a
+# blocked verdict with no next step -- measured on `rwbp-coordinator` at
+# 0.71.13, where the rewrite cleared 44 blockers and its own three resolver
+# keys replaced them.
 #
 # A file that names the kept resolver has adopted the resolver contract, so a
 # bare pack basename in it is a key rather than a path. Both bare-name rules
@@ -491,14 +492,16 @@ TOKEN = re.compile(r"[\w.*?/-]*[\w*?][./][\w.*?/-]*")
 #   declared away from the call site -- `const NAME = '<basename>'` on one line
 #   and `--resolve` on another, which is the shape the resolver's own
 #   `review-preflight.mjs` uses;
-# * rule-5-only, because rules 1-4 still see any path-shaped pack citation in
-#   the same file. That is precisely the half-migrated trap
+# * bare-name family only. Rules 1, 2, and 4 are untouched, and so is rule 3's
+#   real job -- resolving a token that already contains a slash, such as
+#   `lib/x.sh` cited from a subdirectory. Every path-shaped pack citation in the
+#   same file therefore still blocks, which is precisely the half-migrated trap
 #   `docs/FLEET_ROLLOUT.md:639` names -- adopting `--resolve` while still
-#   naming the resolver under `scripts/` -- and it still blocks.
+#   naming the resolver under `scripts/`.
 #
-# The cost is the rest of rule 5 inside such a file, which this check already
-# describes as a distinctively-named-only lower bound; `--revert-thin`, not
-# this rule, is what makes a conversion safe.
+# The cost is the rest of the bare-name family inside such a file, which this
+# check already describes as a distinctively-named-only lower bound;
+# `--revert-thin`, not this rule, is what makes a conversion safe.
 LAYOUT_RESOLVER_KEPT_TARGET = (
     ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py"
 )
