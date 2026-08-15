@@ -2877,6 +2877,197 @@ class StatusTests(InstallTestCase):
         for row in report["repositories"]:
             self.assertIsNone(row["report"]["machineScope"])
 
+    # ------------------------------------------------------- release target
+
+    def release_listing(self, *tags: str) -> str:
+        return "".join(f"{'a' * 40}\trefs/tags/{tag}\n" for tag in tags)
+
+    def test_release_target_is_disabled_without_network(self) -> None:
+        # PRD criterion 2: --no-network must label the target, not omit it, and
+        # must not reach the network at all. The call count is the real
+        # assertion; the status alone would pass a lazy implementation.
+        status = self.load_status_module()
+        with mock.patch.object(status, "run_command") as run_command:
+            result = status.collect_release_target(PACK_ROOT, network=False)
+        self.assertEqual(run_command.call_count, 0)
+        self.assertEqual(result["status"], "disabled")
+        self.assertIsNone(result["version"])
+
+    def test_release_target_without_an_origin_is_not_configured(self) -> None:
+        status = self.load_status_module()
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[status.CommandResult(2, "")],
+        ):
+            result = status.collect_release_target(PACK_ROOT, network=True)
+        self.assertEqual(result["status"], "not-configured")
+        self.assertIsNone(result["version"])
+
+    def test_release_target_is_unavailable_when_the_remote_refuses(self) -> None:
+        status = self.load_status_module()
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[
+                status.CommandResult(0, "git@github.com:o/r.git\n"),
+                status.CommandResult(128, ""),
+            ],
+        ):
+            result = status.collect_release_target(PACK_ROOT, network=True)
+        self.assertEqual(result["status"], "unavailable")
+
+    def test_release_target_ignores_refs_that_are_not_release_tags(self) -> None:
+        # A remote with only pre-release or hand-made tags has published
+        # nothing this comparison can use. It reports that, rather than
+        # coercing "v1.0-rc1" into a version.
+        status = self.load_status_module()
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[
+                status.CommandResult(0, "git@github.com:o/r.git\n"),
+                status.CommandResult(
+                    0, self.release_listing("v1.0-rc1", "nightly", "1.2.3")
+                ),
+            ],
+        ):
+            result = status.collect_release_target(PACK_ROOT, network=True)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIsNone(result["version"])
+
+    def test_release_target_orders_by_version_not_by_tag_string(self) -> None:
+        # The defect a string max() ships: "v0.9.2" sorts above "v0.71.8", so
+        # the report would name a years-old version as newest and look
+        # perfectly well-formed doing it. Every other case here passes under
+        # the broken implementation.
+        status = self.load_status_module()
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[
+                status.CommandResult(0, "git@github.com:o/r.git\n"),
+                status.CommandResult(
+                    0, self.release_listing("v0.8.6", "v0.9.2", "v0.71.8", "v0.10.0")
+                ),
+            ],
+        ):
+            result = status.collect_release_target(PACK_ROOT, network=True)
+        self.assertEqual(result["version"], "0.71.8")
+        self.assertEqual(result["tag"], "v0.71.8")
+
+    def test_release_target_reports_version_and_tag(self) -> None:
+        status = self.load_status_module()
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[
+                status.CommandResult(0, "git@github.com:o/r.git\n"),
+                status.CommandResult(0, self.release_listing("v0.71.8")),
+            ],
+        ):
+            result = status.collect_release_target(PACK_ROOT, network=True)
+        self.assertEqual(
+            result, {"status": "available", "version": "0.71.8", "tag": "v0.71.8"}
+        )
+
+    def test_release_target_issues_only_read_only_commands(self) -> None:
+        # PRD criterion 3: status stays read-only. Both commands used here are,
+        # but only an argv assertion stops a later edit from adding a fetch.
+        status = self.load_status_module()
+        with mock.patch.object(
+            status,
+            "run_command",
+            side_effect=[
+                status.CommandResult(0, "git@github.com:o/r.git\n"),
+                status.CommandResult(0, self.release_listing("v0.71.8")),
+            ],
+        ) as run_command:
+            status.collect_release_target(PACK_ROOT, network=True)
+        self.assertEqual(
+            [call.args[0] for call in run_command.call_args_list],
+            [
+                ["git", "remote", "get-url", "origin"],
+                ["git", "ls-remote", "--tags", "--refs", "origin"],
+            ],
+        )
+
+    def release_records(self, status, release: object) -> list[str]:
+        return [
+            record["summary"]
+            for record in status.fleet_step_records([], "0.71.8", release_target=release)
+            if "published release" in record["summary"]
+        ]
+
+    def test_release_skew_emits_exactly_one_fleet_record(self) -> None:
+        # One record, not one per consumer: the checkout is a property of the
+        # operator, and asserting the count is what catches a duplicate.
+        status = self.load_status_module()
+        summaries = self.release_records(
+            status,
+            {"status": "available", "version": "0.72.0", "tag": "v0.72.0"},
+        )
+        self.assertEqual(len(summaries), 1)
+        self.assertIn("0.71.8", summaries[0])
+        self.assertIn("0.72.0", summaries[0])
+        # "differs from", never "is behind": an unreleased working copy is
+        # ahead, and that is one of the two cases this exists to surface.
+        self.assertNotIn("behind", summaries[0])
+
+    def test_release_matching_the_checkout_emits_no_record(self) -> None:
+        status = self.load_status_module()
+        self.assertEqual(
+            self.release_records(
+                status,
+                {"status": "available", "version": "0.71.8", "tag": "v0.71.8"},
+            ),
+            [],
+        )
+
+    def test_unresolved_release_target_emits_no_record(self) -> None:
+        status = self.load_status_module()
+        for state in ("disabled", "not-configured", "unavailable"):
+            with self.subTest(state=state):
+                self.assertEqual(
+                    self.release_records(
+                        status, {"status": state, "version": None, "tag": None}
+                    ),
+                    [],
+                )
+        self.assertEqual(self.release_records(status, None), [])
+
+    def test_fleet_report_carries_a_labeled_release_target(self) -> None:
+        # PRD criterion 2's "complete report" clause: with the lookup
+        # suppressed, the key is present and labeled, and every pre-existing
+        # top-level key survives.
+        status = self.load_status_module()
+        repo = self.make_status_repo(pack_version=PACK_VERSION)
+        manifest = self.write_fleet_manifest(
+            repo.parent / "fleet.json",
+            [self.fleet_consumer_entry("member0", repo, priority=10)],
+        )
+
+        report, _ = self.collect_fleet_with_machine(
+            status, manifest, self.machine_scope_fixture()
+        )
+
+        self.assertEqual(
+            report["releaseTarget"],
+            {"status": "disabled", "version": None, "tag": None},
+        )
+        for key in (
+            "schemaVersion",
+            "mode",
+            "targetPackVersion",
+            "machineScope",
+            "refsFreshness",
+            "configuration",
+            "repositories",
+            "followUps",
+            "nextSteps",
+        ):
+            self.assertIn(key, report)
+
     def test_machine_scope_api_loads_the_engine_beside_the_script(self) -> None:
         status = self.load_status_module()
         # The installed arrangement: scripts/ beside installer/. The canonical

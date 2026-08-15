@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 378
+- **Total Sessions**: 379
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1218 | Active |
+| `journal-8.md` | ~1264 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 379 | 2026-08-14 | Fleet status compares against the newest published release | `40ddb577`, `b5a627d1`, `b12564ff`, `b62aa852` | `task/fleet-status-release-target` |
 | 378 | 2026-08-14 | Derive the fleet-publish dirty-tree allowlist from the consumer manifest | `822fc335`, `45253123`, `ffcb9037`, `75f7260d` | `task/fleet-publish-manifest-allowlist` |
 | 377 | 2026-08-14 | Merge eligibility counts superseded workflow runs as blocking | `66c02eb4580fdf36fe496fa6e9dc1e5a234ccc9a`, `99678da9f2759d1a359bbb7b0256e7aa04ed390d`, `419bf17c9db409d4783c6c976621ba6a5f5f26e6` | `task/eligibility-superseded-runs` |
 | 376 | 2026-08-14 | Housekeeping KB refresh must not block its own merge | `71c78345c127769077e55c2d6a7c4f1e99c696b2`, `28274c7676795fa9c7592979086cad03f8fc335e`, `87bf72541135f50c04686b638068b18a4bd42153`, `8eab6fd595b08a5bd8472be96417e8ff61800636` | `task/housekeeping-kb-selfblock` |
