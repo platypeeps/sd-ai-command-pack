@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-14",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/consumer-config-layout-shim",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
