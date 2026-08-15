@@ -729,5 +729,90 @@ class RepointedScanTests(ResweepFixture):
         self.assertIs(resweep.thin.planned_repoints, thin.planned_repoints)
 
 
+class ConsumerConfigCitationTests(unittest.TestCase):
+    """A kept target may not name a path the conversion removes.
+
+    `repoint_kept_references` rewrites kept files during conversion, but only
+    forms `THIN_PROFILE` recognises: a `scripts/<name>` path, the manual, the
+    Copilot globs. A bare basename in prose matches none of them, and
+    `cites_removed_path` reports basenames -- so a comment reading
+    "already existed in ``sd-ai-command-pack-review-scope.sh``" is a permanent
+    `packDefect` in every consumer that installs the file, unfixable by the
+    conversion and blocking it outright.
+
+    That is not hypothetical. 0.71.11 shipped
+    `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py` as the second
+    `consumer-config` target, and its docstring and one inline comment cited two
+    machine-scope scripts by name. The first refresh that installed it put two
+    fresh pack defects into all three canaries at once, after the cohort had
+    already measured zero.
+
+    `consumer-config` is the category that needs the guard: `repo-native` files
+    are the consumer's own, and machine-scope files do not survive to be read.
+    """
+
+    def test_no_consumer_config_source_names_a_removed_path(self) -> None:
+        partition = json.loads(PARTITION.read_text(encoding="utf-8"))
+        manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+        sources = {entry["target"]: entry["source"] for entry in manifest["files"]}
+
+        removed = frozenset(
+            entry["target"]
+            for entry in partition["files"]
+            if entry["category"].startswith("machine-")
+        )
+        survivors = frozenset(
+            entry["target"]
+            for entry in partition["files"]
+            if not entry["category"].startswith("machine-")
+        )
+        # The same two forms `cites_removed_path` reports for a plain
+        # reference, and the same basename rule: `unambiguous_basenames` is
+        # borrowed rather than restated, so this guard cannot drift stricter
+        # than the check that produces the verdict. Restating it as "any
+        # basename" was tried and flagged `design.md` and `review.md`, which
+        # is exactly the ambiguity that rule exists to drop.
+        # Sorted once, not per line: `unambiguous_basenames` returns a
+        # frozenset, and an unordered scan reports the same failure in a
+        # different order per hash seed -- which is exactly when a stable list
+        # is worth having, since you only read it once the guard has failed.
+        names = sorted(resweep.unambiguous_basenames(removed, survivors) | removed)
+        self.assertIn("sd-ai-command-pack-review-scope.sh", names)
+
+        kept = [
+            entry["target"]
+            for entry in partition["files"]
+            if entry["category"] == "consumer-config"
+        ]
+        # Every consumer-config target must resolve to a manifest source.
+        # Skipping the ones that do not would make the guard quietly
+        # incomplete: a target added to the partition without a manifest entry
+        # is exactly the case this is here to catch, and it would evade the
+        # check by being unreadable rather than by being clean.
+        unmapped = sorted(target for target in kept if target not in sources)
+        self.assertEqual(
+            unmapped,
+            [],
+            "a consumer-config target has no manifest source, so its text "
+            "cannot be checked",
+        )
+
+        offenders = []
+        for target in kept:
+            source = sources[target]
+            text = (ROOT / source).read_text(encoding="utf-8")
+            for number, line in enumerate(text.splitlines(), start=1):
+                for name in names:
+                    if name in line:
+                        offenders.append(f"{source}:{number} names {name}")
+
+        self.assertEqual(
+            offenders,
+            [],
+            "a kept consumer-config target names a path the conversion removes; "
+            "the conversion cannot rewrite it, so it blocks every consumer",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
