@@ -125,7 +125,12 @@ Quick links:
   layout as data, so a repository's own review guard does not have to hardcode
   one. `--path P` classifies paths as `pack-payload` or `authored`;
   `--resolve NAME` reports where a pack script actually lives, which differs
-  between a fat install and a thin one. Its `mode` is output, never input:
+  between a fat install and a thin one. It tells the two apart by the thin pin
+  the conversion records in `.sd-ai-command-pack/manifest.json` and
+  `provenance.json`, not by which receipt files exist: conversion rewrites
+  `installed-targets.txt` down to the residual slice rather than deleting it, so
+  its presence says nothing about the install shape. Its `mode` is output, never
+  input:
   callers read what it resolved rather than branching on the install shape.
   When no install is found the mode is `unresolved` and no classification is
   emitted, because reporting everything as `authored` is indistinguishable from

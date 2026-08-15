@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.71.15 - 2026-08-15
+
+### Fixed
+
+- The layout resolver no longer reports a converted consumer as `fat`. It
+  decided the install mode from whether `.sd-ai-command-pack/installed-targets.txt`
+  exists, and conversion does not delete that file -- it rewrites it down to the
+  residual slice the repository still holds. So every converted consumer
+  classified as fat and the resolver then refused to locate any pack script,
+  because the names it looked for had just been removed from the very file it
+  was reading. Measured on `rwbp-coordinator` at 0.71.14, which resolved
+  `mode: fat` while both of its own receipts recorded `thin`:
+  `error: sd-ai-command-pack-full-check.sh is not listed in
+  .sd-ai-command-pack/installed-targets.txt`. Every consumer guard shells out to
+  `--resolve` and executes the result, so this made the conversion the rollout
+  is for unusable.
+
+  Mode now comes from the recorded thin pin, read the same way
+  `installer/conversion.py:thin_pin_state` reads it: `manifest.json` first, then
+  `provenance.json`, with thin-only pin keys under a non-thin mode reported as a
+  receipt that contradicts itself rather than silently read as fat. The
+  environment override still outranks everything, and a fat consumer resolves
+  exactly as before. A thin consumer keeps the residual receipt for path
+  classification, because those surviving rows are pack payload the repository
+  genuinely still carries; only script resolution branches on mode.
+
 ## 0.71.14 - 2026-08-15
 
 ### Fixed
