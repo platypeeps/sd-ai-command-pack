@@ -751,7 +751,7 @@ class ConsumerConfigCitationTests(unittest.TestCase):
     are the consumer's own, and machine-scope files do not survive to be read.
     """
 
-    def test_no_consumer_config_source_names_a_removed_script(self) -> None:
+    def test_no_consumer_config_source_names_a_removed_path(self) -> None:
         partition = json.loads(PARTITION.read_text(encoding="utf-8"))
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         sources = {entry["target"]: entry["source"] for entry in manifest["files"]}
@@ -775,13 +775,27 @@ class ConsumerConfigCitationTests(unittest.TestCase):
         names = resweep.unambiguous_basenames(removed, survivors) | removed
         self.assertIn("sd-ai-command-pack-review-scope.sh", names)
 
+        kept = [
+            entry["target"]
+            for entry in partition["files"]
+            if entry["category"] == "consumer-config"
+        ]
+        # Every consumer-config target must resolve to a manifest source.
+        # Skipping the ones that do not would make the guard quietly
+        # incomplete: a target added to the partition without a manifest entry
+        # is exactly the case this is here to catch, and it would evade the
+        # check by being unreadable rather than by being clean.
+        unmapped = sorted(target for target in kept if target not in sources)
+        self.assertEqual(
+            unmapped,
+            [],
+            "a consumer-config target has no manifest source, so its text "
+            "cannot be checked",
+        )
+
         offenders = []
-        for entry in partition["files"]:
-            if entry["category"] != "consumer-config":
-                continue
-            source = sources.get(entry["target"])
-            if source is None:
-                continue
+        for target in kept:
+            source = sources[target]
             text = (ROOT / source).read_text(encoding="utf-8")
             for number, line in enumerate(text.splitlines(), start=1):
                 for name in names:
