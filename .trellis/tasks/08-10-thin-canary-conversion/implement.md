@@ -64,7 +64,20 @@ not a re-run of the same command.
 the machine payload, not to the target, so `current` at a stale version is
 correct and is not the reading that matters here.
 
-## Phase 2 — refresh the three canaries to 0.71.12
+## Phase 2 — refresh the three canaries to 0.71.13
+
+**Ran once at 0.71.12 and stopped on its own validation line, 2026-08-15.** The
+refresh installed `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py`
+-- the second `consumer-config` target 0.71.11 added, which no consumer had
+carried before -- and its docstring and one inline comment named two
+machine-scope scripts. `packDefects` went 0 to 2 on all three canaries at once,
+identical file and lines. Conversion keeps that file and repoints none of those
+forms, so it was a permanent defect, not a rewrite away.
+
+That is what this validation line is for, so it was followed rather than worked
+around: back to phase 0, fixed in 0.71.13 with a guard that enumerates every
+`consumer-config` target from the surface partition and fails if its shipped
+source names a removed path. The version below is 0.71.13 for that reason.
 
 Per consumer, in cohort order (rwbp-coordinator, loadsmith, hoa-manager):
 
@@ -76,9 +89,41 @@ Per consumer, in cohort order (rwbp-coordinator, loadsmith, hoa-manager):
 - [ ] 2.5 `install.py <path> --check --json` reports state `current`.
 - [ ] 2.6 Re-run the resweep and record `packDefects`. **This closes phase 0.**
 
-**Validation:** all three at `0.71.12`, `packDefects: 0` for each. A non-zero
+**Validation:** all three at `0.71.13`, `packDefects: 0` for each. A non-zero
 count here means phase 0 missed a surface; return to phase 0 rather than
-proceeding with a partial fix.
+proceeding with a partial fix. *Exercised once already -- see the note above.*
+
+**Consumer state at the 0.71.12 stop.** Each is committed on
+`chore/sd-ai-command-pack-0.71.12` with its own full check at exit 0; the
+0.71.13 refresh lands on the same branches rather than opening a second PR
+apiece.
+
+| consumer | PR | check | blockers | packDefects |
+|---|---|---|---:|---:|
+| rwbp-coordinator | #226, green and comment-clean | exit 0 | 48 | 2 |
+| loadsmith | not yet pushed | exit 0 | 23 | 2 |
+| hoa-manager | not yet pushed | exit 0 | 34 | 2 |
+
+Two consumers needed work beyond the installer to pass their own gate, both
+about `docs/repomix-map.md` and resolved differently because the two repos
+generate it differently:
+
+- **loadsmith** embeds file bodies, and the refresh changed
+  `docs/SD_AI_COMMAND_PACK.md` under its `docs/**` include, so the freshness
+  gate failed. Regenerating would have satisfied it and been wrong: that payload
+  is installed, not authored. Excluded from `scripts/update_repomix` *and* from
+  `is_repomix_input_path` in `scripts/check_review_readiness.sh` -- they have to
+  agree, or a refresh reports the map stale and regenerating changes nothing.
+  The map lost 2,338 lines, none of them loadsmith's code, and blockers fell
+  50 to 23. This is design D3a's exclusion, carried out.
+  The exclusions are globs rather than exact paths: repomix writes its ignore
+  list into the generated header, so naming `docs/SD_AI_COMMAND_PACK.md`
+  exactly put a citation of it straight back into the map that excluding it had
+  just removed.
+- **hoa-manager** generates `--no-files`, a metadata listing. Regeneration was
+  checked against the measurement rather than assumed: 34 blockers before, 34
+  after, and the map itself contributes 0. Plain regeneration was correct there
+  and no product change was made.
 
 ## Phase 3 — rewrite each canary's own citations
 
