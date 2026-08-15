@@ -1,0 +1,28 @@
+{
+  "id": "tempdir-cleanup-flake",
+  "name": "tempdir-cleanup-flake",
+  "title": "Tolerate temp-dir teardown races in the install test helpers",
+  "description": "Port the ignore_cleanup_errors fix from se-ai-command-pack PR #225. Tests git init inside TemporaryDirectory trees, so git's background auto-gc can write under the tree between rmtree's scan and its rmdir, failing teardown with OSError Errno 39. Latent here: 216 TemporaryDirectory call sites across tests/, 4 in the shared helper, none using ignore_cleanup_errors.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-08-14",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "tests/install_test_support.py"
+  ],
+  "notes": "Ported from se-ai-command-pack PR #225 (commit 7bbba64) after a fleet sweep. Latent here, not observed: no Errno 39 in tests/ or .trellis/. Scope decision deferred to design.md \u2014 216 TemporaryDirectory call sites, only 4 shared, so the single-base-class fix used upstream is not available verbatim.",
+  "meta": {}
+}
