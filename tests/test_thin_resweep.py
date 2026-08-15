@@ -772,7 +772,11 @@ class ConsumerConfigCitationTests(unittest.TestCase):
         # than the check that produces the verdict. Restating it as "any
         # basename" was tried and flagged `design.md` and `review.md`, which
         # is exactly the ambiguity that rule exists to drop.
-        names = resweep.unambiguous_basenames(removed, survivors) | removed
+        # Sorted once, not per line: `unambiguous_basenames` returns a
+        # frozenset, and an unordered scan reports the same failure in a
+        # different order per hash seed -- which is exactly when a stable list
+        # is worth having, since you only read it once the guard has failed.
+        names = sorted(resweep.unambiguous_basenames(removed, survivors) | removed)
         self.assertIn("sd-ai-command-pack-review-scope.sh", names)
 
         kept = [
@@ -798,10 +802,7 @@ class ConsumerConfigCitationTests(unittest.TestCase):
             source = sources[target]
             text = (ROOT / source).read_text(encoding="utf-8")
             for number, line in enumerate(text.splitlines(), start=1):
-                # Sorted because `names` is a frozenset: an unordered scan
-                # reports the same failure in a different order per hash seed,
-                # which is exactly when a stable list is worth having.
-                for name in sorted(names):
+                for name in names:
                     if name in line:
                         offenders.append(f"{source}:{number} names {name}")
 
