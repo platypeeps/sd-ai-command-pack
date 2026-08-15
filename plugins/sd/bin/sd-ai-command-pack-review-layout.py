@@ -36,12 +36,84 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
+from collections.abc import Mapping
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from sd_ai_command_pack_lib import CommandError, resolve_state_root
-
 SCHEMA_VERSION = 1
+
+# `sd_ai_command_pack_lib` is deliberately *not* imported, and the import that
+# used to stand here was a latent defect rather than a style choice. It was a
+# bare sibling import, which works in both installed layouts only because both
+# copies travel together: fat keeps them side by side in `scripts/`, thin moves
+# both into the agents-bin directory. This file also installs to
+# `.sd-ai-command-pack/bin/`, which is `consumer-config` and therefore survives
+# thin conversion -- and the library, being `machine-claude`, does not. There
+# the import has no sibling to find and raises, in exactly the consumers where
+# this script is the only way left to locate the pack.
+#
+# So the two names it needed are carried here. `CommandError` is a bare
+# exception class; `resolve_state_root` is the five-rung ladder from the
+# `sd_ai_command_pack_lib` module. (Named without its path on purpose: the
+# plugin build refuses repository-root pack paths in shipped `bin/` scripts,
+# because a literal that is correct in a source checkout is wrong everywhere
+# the file actually runs.) Duplication that a test checks, as with the
+# constant mirrors below:
+# `tests/test_review_layout.py` asserts this ladder and the library's agree on
+# every rung, so drift fails a gate rather than a consumer.
+STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"  # sd_ai_command_pack_lib.py
+
+
+class CommandError(RuntimeError):
+    """Raised when a required external command cannot complete cleanly."""
+
+
+def resolve_state_root(
+    *,
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    os_name: str | None = None,
+    state_home: Path | None = None,
+) -> Path:
+    """Return the user-local private state root shared by every shipped script.
+
+    Carried copy of `sd_ai_command_pack_lib.resolve_state_root`; see the note
+    above for why it cannot be imported. The ladder is: explicit ``state_home``,
+    ``SD_AI_COMMAND_PACK_STATE_HOME``, ``XDG_STATE_HOME``, the Windows
+    local-app-data location, then the home fallback.
+    """
+
+    if state_home is not None:
+        candidate = state_home.expanduser()
+        if not candidate.is_absolute():
+            raise CommandError("state home must be an absolute path")
+        return candidate
+    env = os.environ if environ is None else environ
+    override = env.get(STATE_HOME_ENV, "").strip()
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            raise CommandError(f"{STATE_HOME_ENV} must be an absolute path")
+        return path
+    xdg = env.get("XDG_STATE_HOME", "").strip()
+    if xdg:
+        path = Path(xdg).expanduser()
+        if path.is_absolute():
+            return path / "sd-ai-command-pack"
+    platform_name = os.name if os_name is None else os_name
+    if platform_name == "nt":
+        local_app_data = env.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            windows_path = PureWindowsPath(local_app_data)
+            if windows_path.is_absolute():
+                # Path uses Windows semantics on Windows. Normalizing separators
+                # also keeps os_name-injected portability tests deterministic.
+                path = Path(str(windows_path).replace("\\", "/"))
+                return path / "sd-ai-command-pack" / "state"
+    resolved_home = (home or Path.home()).expanduser()
+    if not resolved_home.is_absolute():
+        raise CommandError("home directory must resolve to an absolute path")
+    return resolved_home / ".local" / "state" / "sd-ai-command-pack"
 
 # Mirrors of repo-side constants. `installer/` ships zero files -- it is build
 # machinery -- so importing from it would work in this checkout and fail in

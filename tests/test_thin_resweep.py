@@ -280,6 +280,51 @@ class CitationBucketTests(ResweepFixture):
         self.assertEqual([entry["line"] for entry in entries], [None])
 
 
+RESOLVER_VENDORED = "scripts/sd-ai-command-pack-review-layout.py"
+RESOLVER_KEPT = ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py"
+
+
+class LayoutResolverReferenceTests(ResweepFixture):
+    """The reference that asks *where the pack is* must not itself block.
+
+    Both directions from one fixture shape. A one-directional test would pass
+    on a rule that never fires -- classifying every citation as harmless looks
+    identical to classifying this one correctly -- so the same consumer file,
+    the same scan, and the same receipt are used for each, changing only which
+    of the two resolver paths the file names.
+    """
+
+    def consumer_citing(self, cited: str) -> Path:
+        return self.make_consumer(
+            {"scripts/guard.sh": f'python3 "{cited}" --resolve x\n'},
+            receipt=[RESOLVER_VENDORED, RESOLVER_KEPT, KEPT],
+        )
+
+    def test_citing_the_vendored_copy_blocks(self) -> None:
+        result = self.scan(self.consumer_citing(RESOLVER_VENDORED))
+        self.assertEqual(self.only_bucket(result, "scripts/guard.sh"), "blockers")
+
+    def test_citing_the_consumer_config_copy_does_not_block(self) -> None:
+        result = self.scan(self.consumer_citing(RESOLVER_KEPT))
+        self.assertEqual(
+            [entry for entry in result["blockers"] if entry["file"] == "scripts/guard.sh"],
+            [],
+        )
+        verdict, reasons = resweep.decide(result)
+        self.assertEqual((verdict, reasons), ("clear", ()))
+
+    def test_the_two_copies_are_classified_oppositely_by_the_partition(self) -> None:
+        # The scan results above are only meaningful if the partition really
+        # does split these two, so assert the premise rather than trusting the
+        # bucket to have been decided for the reason claimed.
+        rows = {
+            entry["target"]: entry["category"]
+            for entry in json.loads(PARTITION.read_text(encoding="utf-8"))["files"]
+        }
+        self.assertEqual(rows[RESOLVER_VENDORED], "machine-claude")
+        self.assertEqual(rows[RESOLVER_KEPT], "consumer-config")
+
+
 class VerdictTests(ResweepFixture):
     def test_a_clean_fixture_with_no_citations_is_clear(self) -> None:
         repo = self.make_consumer({"src/main.py": "print('hello')\n"})

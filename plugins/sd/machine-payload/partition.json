@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "0.71.10",
+  "manifestVersion": "0.71.11",
   "platforms": {
     "antigravity": {
       "scope": "repo-native",
@@ -82,7 +82,7 @@
     "machine-claude": 80,
     "machine-other": 89,
     "repo-native": 551,
-    "consumer-config": 6
+    "consumer-config": 7
   },
   "files": [
     {
@@ -3833,6 +3833,12 @@
       "target": ".reasonix/skills/sd-work-backlog/references/terminal-reconciliation.md",
       "platform": "reasonix",
       "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py",
+      "platform": "shared",
+      "category": "consumer-config",
       "sharedRuntime": false
     },
     {

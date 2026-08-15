@@ -610,6 +610,38 @@ Do not include stale aliases such as `green-button-manager` or historical
 predecessors such as `trellis-review-pr-pack`; they are explicitly excluded in
 the fleet manifest.
 
+## Thin conversion: the order a cohort must follow
+
+A consumer's own guards reference pack scripts by path. Everything under
+`scripts/` is machine-scope, so conversion removes it and the resweep counts
+every surviving reference as a blocker — and one blocker blocks as hard as
+ninety. Since 0.71.11 the layout resolver also installs to
+`.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py`, which is
+`consumer-config` and therefore survives conversion. That is the path a guard
+should name.
+
+The five steps, and why each precedes the next:
+
+1. **Ship** the resolver row (done in 0.71.11). The kept path exists in the
+   pack.
+2. **Refresh** the consumer to that version or later. The kept path now exists
+   *in the consumer*, committed. Nothing before this point may reference it.
+3. **Rewrite** the consumer's guards to call the kept path instead of any
+   `scripts/sd-ai-command-pack-*` literal, using `--resolve NAME` for the
+   scripts they used to name directly. Safe only after step 2: a rewrite that
+   lands first names a file that is not there.
+4. **Resweep** (`scripts/sd-ai-command-pack-thin-resweep.py <consumer>`). What
+   remains is the residue no runtime resolver reaches — glob patterns in
+   instructions prose and change-classifier fixture lists. Each needs
+   rewriting or a recorded acceptance; a resolver cannot rewrite a glob.
+5. **Convert.**
+
+Doing step 3 without step 1 is the trap worth naming: adopting `--resolve`
+while still naming the resolver under `scripts/` trades many blockers for one
+per calling file, and one is still blocked. Measured before the resolver
+shipped, the fleet's 288 resolve-reachable references were spread across 68
+files, not one bootstrap site per consumer.
+
 ## Ops: candidate ledger staleness and branch-protection merge-skew
 
 The fleet candidate ledger (`docs/fleet/candidate-validation.json`) carries a

@@ -377,6 +377,137 @@ class MirroredConstantTests(unittest.TestCase):
                 machinepayload.family_roots(home=home, environ=environ),
             )
 
+    def test_carried_state_root_ladder_matches_library(self) -> None:
+        """Every rung, against the library this script may not import.
+
+        The carried copy exists because a `consumer-config` install of this
+        file has no `sd_ai_command_pack_lib` beside it (see the module note).
+        A copy nobody compares is how the two quietly stop agreeing, so this
+        walks all five rungs plus the three absolute-path refusals rather than
+        spot-checking the one rung the other tests happen to exercise.
+        """
+
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("review_layout", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        from sd_ai_command_pack_lib import CommandError as LibraryCommandError
+        from sd_ai_command_pack_lib import resolve_state_root as library
+
+        self.assertIsNot(module.resolve_state_root, library)
+        self.assertEqual(module.STATE_HOME_ENV, "SD_AI_COMMAND_PACK_STATE_HOME")
+
+        home = Path("/tmp/fake-home")
+        cases: tuple[dict[str, object], ...] = (
+            # 1. explicit state_home wins over everything in the environment.
+            {
+                "state_home": Path("/tmp/explicit-state"),
+                "environ": {"SD_AI_COMMAND_PACK_STATE_HOME": "/tmp/ignored"},
+                "home": home,
+            },
+            # 2. the pack's own override.
+            {"environ": {"SD_AI_COMMAND_PACK_STATE_HOME": "/tmp/override"}, "home": home},
+            # 3. XDG, absolute and (ignored) relative.
+            {"environ": {"XDG_STATE_HOME": "/tmp/xdg"}, "home": home},
+            {"environ": {"XDG_STATE_HOME": "relative/xdg"}, "home": home},
+            # 4. Windows local-app-data, only under nt.
+            {
+                "environ": {"LOCALAPPDATA": "C:\\Users\\x\\AppData\\Local"},
+                "home": home,
+                "os_name": "nt",
+            },
+            {
+                "environ": {"LOCALAPPDATA": "C:\\Users\\x\\AppData\\Local"},
+                "home": home,
+                "os_name": "posix",
+            },
+            {"environ": {"LOCALAPPDATA": "relative"}, "home": home, "os_name": "nt"},
+            # Windows with no LOCALAPPDATA at all: falls through to the home
+            # rung rather than to an error, which is the branch a reader is
+            # most likely to assume goes the other way.
+            {"environ": {}, "home": home, "os_name": "nt"},
+            # 5. the home fallback, and an empty environment reaching it.
+            {"environ": {}, "home": home},
+            {"environ": {"SD_AI_COMMAND_PACK_STATE_HOME": "  "}, "home": home},
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                self.assertEqual(module.resolve_state_root(**case), library(**case))
+
+        refusals: tuple[dict[str, object], ...] = (
+            {"state_home": Path("relative/state")},
+            {"environ": {"SD_AI_COMMAND_PACK_STATE_HOME": "relative/override"}},
+            {"environ": {}, "home": Path("relative/home")},
+        )
+        for case in refusals:
+            with self.subTest(refusal=case):
+                with self.assertRaises(module.CommandError):
+                    module.resolve_state_root(**case)
+                # Same refusal, not merely some failure: the carried class is a
+                # distinct type from the library's, so the pair is checked by
+                # each raising its own rather than by a shared base.
+                with self.assertRaises(LibraryCommandError):
+                    library(**case)
+        self.assertIsNot(module.CommandError, LibraryCommandError)
+
+    def test_the_module_imports_without_the_library(self) -> None:
+        """The whole point of carrying the ladder, asserted rather than assumed.
+
+        Under thin this file installs to `.sd-ai-command-pack/bin/`, which
+        conversion keeps, while `sd_ai_command_pack_lib.py` is `machine-claude`
+        and goes away. Blocking the name in `sys.modules` makes any import of
+        it raise, so a reintroduced module-level import fails here instead of
+        in the consumers that have no other way to locate the pack.
+        """
+
+        import importlib.util
+
+        blocked = dict(sys.modules)
+        blocked_name = "sd_ai_command_pack_lib"
+        original = sys.modules.get(blocked_name, ...)
+        sys.modules[blocked_name] = None  # type: ignore[assignment]
+        try:
+            spec = importlib.util.spec_from_file_location("review_layout_solo", SCRIPT)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+        finally:
+            if original is ...:
+                sys.modules.pop(blocked_name, None)
+            else:
+                sys.modules[blocked_name] = original
+        self.assertEqual(blocked.keys() - sys.modules.keys(), set())
+
+        # It imported; now prove it still answers, so the test cannot pass by
+        # importing a module that does nothing useful without its library.
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            (state_root / "machine").mkdir(parents=True)
+            (state_root / "machine" / "machine-receipt.json").write_text(
+                json.dumps(
+                    {
+                        "files": [
+                            {
+                                "family": "agents-bin",
+                                "path": "sd-ai-command-pack-review-local.py",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            layout = module.resolve_layout(
+                Path(tmp),
+                environ={
+                    "SD_AI_COMMAND_PACK_STATE_HOME": str(state_root),
+                    "HOME": tmp,
+                },
+            )
+        self.assertEqual(layout.mode, "thin")
+
 
 class BindingAgreementTests(unittest.TestCase):
     """One implementation, three callers -- proven, not asserted in a comment.
@@ -394,6 +525,77 @@ class BindingAgreementTests(unittest.TestCase):
             "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
         )
         (self.root / "scripts").mkdir()
+
+    def test_the_shell_binding_agrees_with_the_script(self) -> None:
+        """The third caller the class docstring claims, actually exercised.
+
+        `review-scope.sh --json` delegates to the resolver rather than
+        restating it, so the two must not be able to disagree. Worth its own
+        case now that the resolver also installs to a `consumer-config` path:
+        the shell binding is the caller most likely to be rewritten by a
+        conversion cohort, and a silent divergence here would look like a
+        classification bug in the consumer.
+        """
+
+        # The receipt is supplied rather than discovered. Both callers land on
+        # `REPO_ROOT` (see below), and `.sd-ai-command-pack/installed-targets.txt`
+        # there is install-time output that `.gitignore:25` excludes -- so a
+        # developer who has installed the pack into its own checkout resolves
+        # `fat` and a clean CI checkout resolves `unresolved` and exits 1. That
+        # difference is about whose machine ran the test, not about whether the
+        # binding delegates. Pinning the receipt makes both sides read the same
+        # fixture in either environment.
+        environment = dict(os.environ)
+        for name in ("SD_AI_COMMAND_PACK_STATE_HOME", "XDG_STATE_HOME"):
+            environment.pop(name, None)
+        environment["SD_AI_COMMAND_PACK_TARGETS_FILE"] = str(
+            self.root / ".sd-ai-command-pack" / "installed-targets.txt"
+        )
+
+        arguments = [
+            "--path",
+            "scripts/sd-ai-command-pack-full-check.sh",
+            "--path",
+            "src/app.py",
+        ]
+        # Both sides get the same root, because the binding chooses one for
+        # itself: `review-scope.sh:6` sets `REPO_ROOT="$SCRIPT_DIR/.."`, the
+        # checkout hosting the script rather than the caller's repository. What
+        # is under test is that the binding delegates instead of restating the
+        # matcher; passing the fixture root to one side and letting the other
+        # derive its own would test root resolution and call it agreement.
+        direct = subprocess.run(
+            [sys.executable, str(SCRIPT), "--root", str(REPO_ROOT), *arguments],
+            capture_output=True,
+            text=True,
+            env=environment,
+            check=False,
+        )
+        self.assertEqual(direct.returncode, 0, direct.stderr)
+
+        shell = subprocess.run(
+            [
+                "bash",
+                str(REPO_ROOT / "scripts" / "sd-ai-command-pack-review-scope.sh"),
+                "--json",
+                *arguments,
+            ],
+            capture_output=True,
+            text=True,
+            cwd=self.root,
+            env=environment,
+            check=False,
+        )
+        self.assertEqual(shell.returncode, 0, shell.stderr)
+        self.assertEqual(json.loads(shell.stdout), json.loads(direct.stdout))
+        # Not vacuous: the two paths must actually be classified, and
+        # differently, or an `unresolved` report would satisfy the equality
+        # above while proving nothing about the matcher. Asserted rather than
+        # guarded now that the pinned receipt makes the mode deterministic.
+        document = json.loads(direct.stdout)
+        self.assertEqual(document["mode"], "fat")
+        categories = [entry["category"] for entry in document["paths"]]
+        self.assertEqual(categories, ["pack-payload", "authored"])
 
     def test_python_and_node_bindings_agree(self) -> None:
         node = subprocess.run(["node", "--version"], capture_output=True, check=False)
@@ -524,6 +726,55 @@ class InProcessLayoutTests(unittest.TestCase):
                     "HOME": str(self.home),
                 },
             )
+
+    def test_a_converted_consumer_classifies_a_removed_script_as_authored(
+        self,
+    ) -> None:
+        """The documented bound on `--path`, pinned so a change to it is loud.
+
+        `classify` consults the receipt before `COPIED_PREFIXES`, and
+        conversion rewrites the receipt down to the residual slice. So in a
+        converted consumer a `scripts/sd-ai-command-pack-*.py` path matches
+        neither test and comes back `authored` -- the wrong answer about what
+        that path *is*, and the right answer to the question the query asks,
+        which is about the current install rather than about history.
+
+        Unreachable in ordinary use, because in a converted consumer that path
+        does not exist and no changed-file set contains it. Reachable now that
+        the resolver installs somewhere conversion keeps, which is why the
+        behaviour is written down (design D5b, ledger C-4) instead of left to
+        be rediscovered by a cohort.
+        """
+
+        state_root = Path(self.tmp.name) / "state"
+        receipt = state_root / "machine" / "machine-receipt.json"
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(
+            json.dumps({"files": [{"family": "agents-bin", "path": "x.sh"}]}),
+            encoding="utf-8",
+        )
+        layout = self.module.resolve_layout(
+            self.root,
+            environ={
+                "SD_AI_COMMAND_PACK_STATE_HOME": str(state_root),
+                "HOME": str(self.home),
+            },
+        )
+        self.assertEqual(layout.mode, "thin")
+        self.assertEqual(
+            self.module.classify(layout, "scripts/sd-ai-command-pack-review-layout.py"),
+            self.module.CATEGORY_AUTHORED,
+        )
+        # The copy that survives conversion is covered by COPIED_PREFIXES, so
+        # the answer about the path a converted consumer actually holds stays
+        # correct. Without this half the test would read as "classification is
+        # broken under thin", which is not what is being pinned.
+        self.assertEqual(
+            self.module.classify(
+                layout, ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py"
+            ),
+            self.module.CATEGORY_PAYLOAD,
+        )
 
     def test_malformed_machine_receipt_is_reported_not_ignored(self) -> None:
         state_root = Path(self.tmp.name) / "state"

@@ -116,6 +116,18 @@ TARGET_OVERRIDES: tuple[tuple[str, str, bool], ...] = (
     # Review-provider repo configs.
     (".prism/**", CONSUMER_CONFIG, False),
     (".gito/**", CONSUMER_CONFIG, False),
+    # The layout resolver's second install target. Everything else a consumer
+    # references lives under `scripts/`, which conversion removes, so a
+    # consumer that wants to *ask* where the pack is must name a path that
+    # survives. This is that path, and it is deliberately the only executable
+    # classified here: it exists to make the rest of the payload reachable
+    # after conversion, not to keep a slice of the payload vendored.
+    #
+    # Narrower than `.sd-ai-command-pack/**` on purpose. The three install
+    # receipts share that directory and are not manifest rows; scoping to
+    # `bin/` keeps a future row targeted at the receipt directory from
+    # silently inheriting this category.
+    (".sd-ai-command-pack/bin/**", CONSUMER_CONFIG, False),
     # The shared toolchain ships as plugin executables, but non-Claude
     # surfaces call these scripts at runtime, so they are also part of the
     # machine installer payload (`sharedRuntime`).

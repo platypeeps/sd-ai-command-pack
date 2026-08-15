@@ -413,6 +413,58 @@ class ExpectedResidualTests(InstallTestCase):
     def test_bookkeeping_files_are_always_expected(self) -> None:
         self.assertTrue(BOOKKEEPING_TARGETS.issubset(self.residual()))
 
+    def test_the_layout_resolver_survives_conversion_for_any_platform_set(
+        self,
+    ) -> None:
+        """The one file a converted consumer keeps so it can find the rest.
+
+        Read against the *shipped* partition rather than a fixture. A fixture
+        would prove the category rule works and say nothing about whether the
+        row actually carries that category, which is the half that breaks: the
+        override lives in `.github/scripts/partition-surfaces.py` and the row
+        in `manifest.json`, and an edit to either alone is silent.
+
+        The platform set here deliberately excludes `claude`. The two existing
+        `.claude/**` consumer-config rows carry `platform: "claude"`, so a
+        resolver placed beside them would vanish for a consumer that does not
+        declare it -- which is the reason this target is not there.
+        """
+
+        shipped = load_partition(ROOT / "docs" / "fleet" / "surface-partition.json")
+        target = ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py"
+
+        row = shipped.row(target)
+        self.assertIsNotNone(row, target)
+        self.assertEqual(row.category, "consumer-config")
+
+        for platforms in (
+            frozenset({"gemini"}),
+            frozenset({"github", "opencode"}),
+            frozenset(),
+        ):
+            with self.subTest(platforms=sorted(platforms)):
+                self.assertIn(
+                    target,
+                    expected_residual_targets(
+                        frozenset({target}),
+                        shipped,
+                        platforms,
+                        present_managed_blocks=frozenset(),
+                    ),
+                )
+
+        # The vendored `scripts/` copy is the thing it replaces, so a test that
+        # only checked the survivor would pass with conversion removing nothing.
+        self.assertNotIn(
+            "scripts/sd-ai-command-pack-review-layout.py",
+            expected_residual_targets(
+                frozenset({"scripts/sd-ai-command-pack-review-layout.py"}),
+                shipped,
+                CONSUMER_PLATFORMS,
+                present_managed_blocks=frozenset(),
+            ),
+        )
+
     def test_a_source_target_with_no_partition_row_is_skipped(self) -> None:
         # The source manifest and the partition are generated separately, so a
         # freshly shipped file can reach one before the other. An unclassified

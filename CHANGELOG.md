@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.71.11 - 2026-08-14
+
+### Added
+
+- The layout resolver now also installs to
+  `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py`, which the
+  surface partition classifies `consumer-config` and thin conversion keeps.
+  A repository's guards should call that path. Everything under `scripts/` is
+  machine-scope, so a converted consumer that names the resolver there cannot
+  ask where the pack is without naming a path the conversion just deleted --
+  and the resweep fails closed on a single such reference. Measured across the
+  fleet before this shipped: 288 references to `scripts/sd-ai-command-pack-*`
+  spread over 68 files, so adopting `--resolve` alone would have traded many
+  blockers for one per calling file rather than for none.
+
+### Changed
+
+- `sd-ai-command-pack-review-layout.py` no longer imports
+  `sd_ai_command_pack_lib`. It was a bare sibling import that worked only
+  because both files travelled together; the `consumer-config` copy has no
+  such sibling, and the library is machine-scope. `resolve_state_root` and
+  `CommandError` are carried in the script, with a test walking every rung of
+  the ladder against the library's copy.
+- `docs/FLEET_ROLLOUT.md` records the conversion ordering cohorts depend on:
+  ship, refresh, rewrite guards, resweep, convert.
+
 ## 0.71.10 - 2026-08-14
 
 ### Added
