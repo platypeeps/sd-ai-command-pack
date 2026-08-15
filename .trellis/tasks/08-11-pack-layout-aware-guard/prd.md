@@ -50,18 +50,75 @@ The concentration is the finding. **Five consumers each independently
 reimplemented the same pack-layout guard**, under five different names:
 
 Each lives in its own consumer repository, under that repository's own
-scripts directory. None of these paths exists in this repository:
+scripts directory. None of these paths exists in this repository.
 
-- `rwbp-coordinator` — `check-review-churn.mjs` (36 of its 52 blockers)
-- `rwbp-website` — `review-guard.mjs` plus its test (43 of 68)
-- `mezmo_benchmark` — `check-review-preflight.mjs`
-- `hoa-manager` — `check_review_readiness.sh`
-- `anomaly-metric-creator` — `check-review-cycle-patterns.py`
+**Corrected 2026-08-14.** The list below was re-enumerated from the consumer
+checkouts named by `docs/fleet/consumers.json` `pathHint`. The original filing
+had the right *set* of five filenames but shuffled four of the five consumer
+attributions, and it missed `loadsmith` entirely while naming
+`anomaly-metric-creator` for a script that lives in `mezmo_benchmark`. Three of
+the five original consumer/path pairs do not exist on disk. Sizes are
+`wc -l`:
+
+| consumer | bespoke guard | lines |
+|---|---|---|
+| `rwbp-coordinator` | `scripts/check-review-churn.mjs` (+ `.test.mjs`, 20) | 762 |
+| `loadsmith` | `scripts/check_review_readiness.sh` | 1139 |
+| `hoa-manager` | `scripts/check-review-preflight.mjs` (+ `.test.mjs`, 589) | 902 |
+| `rwbp-website` | `scripts/review-guard.mjs` | 2466 |
+| `mezmo_benchmark` | `scripts/check-review-cycle-patterns.py` | 812 |
+
+`rwbp-website` has no test file beside its guard, contrary to the original
+filing's "plus its test".
+
+Two further files match the guard naming but are **dispatchers, not guards**,
+and must not be counted as bespoke reimplementations:
+
+- `loadsmith/scripts/check-review-preflight.mjs` (25 lines) — `spawnSync`s
+  `check_review_readiness.sh --full-gate --skip-build`.
+- `anomaly-metric-creator/scripts/check-review-preflight.mjs` (31 lines) —
+  runs four `tools/check_*.py` guards plus the pack's own
+  `sd-ai-command-pack-pr-body-scope.py`.
+
+So `anomaly-metric-creator`, the consumer with the *most* blockers, owns no
+bespoke layout guard at all. Its blockers come from somewhere else.
+
+**Re-measured 2026-08-14** with `sd-ai-command-pack-thin-resweep.py`:
+**175 blockers, not 207** — the 0.70.0 correction this PRD's Evidence section
+predicted. `verdict: blocked`, `worktreeClean: true`. Every one is a reference
+to a hardcoded `scripts/sd-ai-command-pack-*` literal, and 18 distinct pack
+paths account for all 175. They are the same defect as the five guards, spread
+across contract guards, their tests, and instruction prose instead of
+concentrated in one file. Design D3b adds the `--resolve` query that puts them
+in reach; the per-consumer figures live there rather than being restated
+here.
 
 Each one hardcodes the fat layout it was written against, which is why each
 one blocks its own consumer's conversion. Together with the test assertions
 that pin those scripts' output, **330 of the 510 blockers (65%) are consumer
-code asserting a pack layout the pack itself should own**.
+code asserting a pack layout the pack itself should own**. That 65% figure
+inherits the mis-attribution corrected above and the pre-0.70.0 measurement
+error already noted under Evidence; treat it as an upper bound on an upper
+bound until the resweep is re-run.
+
+**The pack already owns a runtime-resolving classifier.**
+`is_copied_review_scope_path` (`templates/scripts/sd-ai-command-pack-review-scope.sh:130`)
+answers the shared question these five guards each re-answer — is this changed
+path vendored pack payload or authored source — and it already resolves at
+runtime rather than hardcoding, by matching against
+`.sd-ai-command-pack/installed-targets.txt` (overridable via
+`SD_AI_COMMAND_PACK_TARGETS_FILE`). Two consumers already know this:
+`hoa-manager/scripts/check-review-preflight.mjs:70` comments that its matcher
+"Mirrors the pack's own matcher at scripts/sd-ai-command-pack-review-scope.sh:170",
+and `rwbp-website/scripts/review-guard.mjs:6` already imports
+`runReviewPreflight` from the pack's shipped preflight.
+
+This reframes the goal. The missing piece is not a new guard; it is that the
+existing classifier is reachable only from shell, and that its receipt-based
+resolution has not been proven under thin mode, where the consumer keeps
+neither `scripts/sd-ai-command-pack-*` nor, necessarily, the receipt in the
+same place. Design must start from extending what ships, and justify any new
+surface against that.
 
 Converting eight consumers without fixing this means editing five bespoke
 guards and their tests, five times, by hand — and leaving five copies to
@@ -77,9 +134,18 @@ thin mode with no consumer-side conditional.
 ## Requirements
 
 1. The guard resolves pack-owned paths through the same resolution the rest
-   of the installed pack uses — machine install under `~/.agents` when the
-   consumer is thin, vendored paths when it is fat — and never hardcodes
-   either.
+   of the installed pack uses — the machine install when the consumer is thin,
+   vendored paths when it is fat — and never hardcodes either.
+
+   Filed as "machine install under `~/.agents`". Corrected 2026-08-14: that is
+   where the *payload* lands, but the thin **receipt** the guard must read is
+   under `resolve_state_root()`
+   (`templates/scripts/sd_ai_command_pack_lib.py:248-292`), measured live as
+   `~/.local/state/sd-ai-command-pack` and reachable through a five-rung ladder
+   that `SD_AI_COMMAND_PACK_STATE_HOME` and `XDG_STATE_HOME` can move. A guard
+   that expanded `~/.agents` would skip four of those five rungs. See design
+   D4a; the requirement is the runtime resolution, and the literal path in the
+   original wording was wrong.
 2. It covers the behavior the five bespoke scripts actually implement. Read
    all five before designing the surface; do not assume they are the same
    check with different names. Record what each one does that the others do
