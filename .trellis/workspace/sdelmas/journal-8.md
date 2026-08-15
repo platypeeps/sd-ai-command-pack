@@ -1274,3 +1274,47 @@ sd-status fleet mode now reports the newest published pack release beside the ch
 ### Next Steps
 
 - None - task complete
+
+
+## Session 380: Ship a layout-aware review guard so consumers stop reimplementing one
+
+**Date**: 2026-08-14
+**Task**: Ship a layout-aware review guard so consumers stop reimplementing one
+**Branch**: `task/pack-layout-aware-guard`
+
+### Summary
+
+Added sd-ai-command-pack-review-layout.py, a pack-owned resolver that answers the layout question as data instead of leaving five consumers to reimplement it against a hardcoded fat layout. Two queries: --path classifies paths as pack-payload or authored, --resolve reports where a pack script actually lives. Measured the fleet reduction across all eight consumers, which corrected three of this task's own figures.
+
+### Main Changes
+
+- New payload script at its four byte-identical paths, with shell and Node bindings that delegate to the one implementation rather than restating it
+- mode is output, never input: an unresolved install emits no classification at all, because an all-authored answer is indistinguishable from a healthy run on a consumer that changed no pack files
+- Constants are mirrored from installer/ rather than imported, because installer/ ships zero files; tests assert each mirrored value still equals its original
+- Measured all eight consumers: fleet total is 456 not 510, and 355 (78%) are reachable here. The design's claim that --resolve reached all 175 anomaly-metric-creator blockers was wrong: 112 do, 8 fall to the surface enumeration, 55 are globs no resolver rewrites
+- Copilot round 1 found a real defect: resolve_script called Path.home() while resolve_layout honored environ, making the parameter a lie for embedding callers. Fixed with home_from(environ) driving the whole ladder
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `11b7870c` | feat(review): resolve the installed pack layout as data |
+| `eecebd91` | fix(review): honor the caller's environment when resolving a script |
+| `20c0b487` | chore(task): record the branch for pack-layout-aware-guard |
+| `60fc84d5` | chore(task): archive 08-11-pack-layout-aware-guard |
+
+### Testing
+
+- [OK] make check exit 0, and make release-prep exit 0
+- [OK] tests/test_review_layout.py: 40 tests, 100% statement and branch coverage of the new script (floor recorded at 95)
+- [OK] PR #461 CI green on both heads, including the Shell coverage lane and the ubuntu 3.10 job that hit the thin.py probe race previously
+- [OK] Copilot round 2 on eecebd91 returned no new findings; 0 unresolved review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
