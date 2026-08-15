@@ -1182,3 +1182,49 @@ Narrowed the merge-eligibility probe's blocking population so a check run cancel
 ### Next Steps
 
 - None - task complete
+
+
+## Session 378: Derive the fleet-publish dirty-tree allowlist from the consumer manifest
+
+**Date**: 2026-08-14
+**Task**: Derive the fleet-publish dirty-tree allowlist from the consumer manifest
+**Branch**: `task/fleet-publish-manifest-allowlist`
+
+### Summary
+
+fleet-publish gated its dirty-tree precondition on a hand-maintained literal tuple that had to silently agree with the installed payload. Measured against this checkout's manifest it had drifted both ways: 456 of 725 targets uncovered across 13 roots, while .codex/ matched nothing. derive_allowed_paths() now reads the consumer's own manifest.json at publish time, routing dotted roots to directory prefixes and everything else to exact paths, and refuses with a named reason code rather than falling back.
+
+### Main Changes
+
+- derive_allowed_paths() reads .sd-ai-command-pack/manifest.json at publish time; dotted first segments become directory prefixes, other targets become exact paths
+- is_allowed() and check_preconditions() carry two sets, so a derived scripts/a.py no longer sanctions scripts/a.py.orig via startswith
+- DEFAULT_ALLOWED_PREFIXES narrowed to the two residue directories; DEFAULT_ALLOWED_EXACT added for the two residue files, closing the same startswith hole one layer up (Copilot review)
+- Four refusal reason codes at exit 3: manifest_missing, manifest_unreadable, manifest_malformed, manifest_targets_empty; no fallback to the old literal
+- Dirty-tree refusal message names all three allowlist inputs and their counts (Copilot review)
+- .trellis/spec/tooling/fleet-publish-generated-content.md documents both allowlist sources and why a generated file belongs in the exact constant
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `822fc335` | fix(fleet-publish): derive the dirty-tree allowlist from the consumer manifest |
+| `45253123` | fix(fleet-publish): name all three allowlist sources in the refusal message |
+| `ffcb9037` | fix(fleet-publish): make the residue file entries exact, not string prefixes |
+| `75f7260d` | docs(task): check off the acceptance criteria with their proving tests |
+
+### Testing
+
+- [OK] unittest tests.test_fleet_publish: Ran 35 tests, OK
+- [OK] ruff check on the script and its tests: All checks passed!
+- [OK] mypy installer install.py scripts: Success: no issues found in 44 source files
+- [OK] sd-ai-command-pack-check.py --json: status passed, 7 passed / 1 skipped
+- [OK] PR #458 CI all green, mergeStateStatus CLEAN; two Copilot findings fixed and threads resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
