@@ -10,6 +10,41 @@ rollout (`platypeeps/rwbp-coordinator`, `platypeeps/loadsmith`,
 mutates those three repositories. This closes the first acceptance
 criterion. It does not extend to post-canary, per the paragraph below.
 
+**2026-08-15 — campaign re-authorized at 0.71.11, and widened to consumer
+product code.** Asked how far to take the conversion given the measured gates
+below, the user chose "refresh + rewrite + convert": refresh the three canaries
+to the current pack version, **rewrite their own blocker citations in
+consumer-owned code**, then convert, flip the registry, and execute the revert
+proof. This is a deliberate widening past the 2026-08-12 authorization, which
+covered conversion plus an installer-managed refresh. It authorizes editing
+product code in `rwbp-coordinator`, `loadsmith`, and `hoa-manager` only, and
+nothing in any other consumer.
+
+**2026-08-15 — measured state, superseding the 0.71.2 figures below.** Every
+number in the original text was taken at pack 0.71.2. The pack is now 0.71.11.
+Re-measured today:
+
+| gate | measured | PRD's assumption |
+|---|---|---|
+| canary payload | all three `0.71.6`, `refresh-required` | step 0 assumed a refresh away |
+| machine scope | `0.71.2` plugin and payload against target `0.71.11` | requirement 8, recorded satisfied at 0.71.2 |
+| pack-owned citations | **15 `packDefects` per consumer**, identical set, six `repo-native` surfaces | child 2b recorded as shipped |
+| consumer citations | rwbp-coordinator 49 / loadsmith 50 / hoa-manager 34, across 8 / 5 / 9 files | requirement 1 step 1 |
+| verdict | **`blocked` for all three** | — |
+
+The 15 pack-owned citations are the finding that changes the plan: `decide()`
+(`scripts/sd-ai-command-pack-thin-resweep.py:1773`) returns `blocked` on a
+non-empty `packDefects` bucket, so they would block all three canaries even
+with every consumer-owned citation rewritten. Child 2b's acceptance criteria
+measured whether the cited paths **resolve**, which is a different property
+from whether they are **cited**; the scanner tightened repeatedly afterwards.
+See `design.md` D0a. Closing that gap is phase 0 of `implement.md` and is a
+precondition of this task rather than a defect to re-open 2b for.
+
+Of the 133 canary blockers exactly **one** is a bare basename, so 0.71.11's
+kept resolver path helps by giving the rewrite a surviving target, not by
+clearing citations on its own.
+
 **2026-08-12 — fleet refresh scope widened, separately.** The canaries all
 hold stale payloads, so requirement 1 step 0 cannot be satisfied without a
 refresh first. Asked whether to refresh only the cohort or the whole fleet,
@@ -283,6 +318,16 @@ revert-and-restore proof.
 
 - [ ] Explicit user authorization for this cohort recorded in this file
       with its date before any consumer mutation.
+- [ ] **Added 2026-08-15.** The pack ships no reference to a removed path in
+      the surfaces conversion keeps, proven by a canary refreshed to the
+      version carrying the fix reporting `packDefects: 0` — not by grepping
+      `templates/`, which measures the string the author just typed. This is
+      phase 0 plus phase 2 of `implement.md`; the count to beat is the 15
+      measured today across six `repo-native` surfaces.
+- [ ] **Added 2026-08-15.** Each canary's own citations are rewritten to a
+      surviving path or an unambiguous command, evidenced by that consumer's
+      resweep reporting `blockers: 0` on a clean tree. Measured starting
+      points: 49 / 50 / 34.
 - [ ] All three canaries satisfy `installMode == "thin"`, `pin.state == "present"`, and
       `pin.version == machineScope.packVersion` in
       `sd-status fleet --json`; plus `machineScope.state == "installed"`
