@@ -58,7 +58,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Collection, Iterator, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -69,22 +69,31 @@ from sd_ai_command_pack_lib import run_git_minimal  # noqa: E402
 DEFAULT_REPOMIX_SCRIPT = "scripts/update_repomix"
 DEFAULT_REPOMIX_OUTPUT = "docs/repomix-map.md"
 TASK_ROOT = ".trellis/tasks"
-# Working-tree paths that may legitimately be dirty when the helper starts: the
-# active task, the journal workspace, the regenerated map, and the pack-managed
-# platform surfaces the installer just rewrote. Anything else dirty means unrelated
-# work would be swept into the publication commit, so the helper fails closed.
+PACK_MANIFEST_RELATIVE = ".sd-ai-command-pack/manifest.json"
+# Residue: working-tree paths that may legitimately be dirty when the helper
+# starts and that no installer payload target covers. The installer-managed
+# surfaces are NOT listed here -- derive_allowed_paths() reads them from the
+# consumer's own manifest, because a hand-maintained platform list silently
+# drifts from the payload and then fails every lane on the consumer that
+# gained a new target directory. Anything dirty outside the union of this
+# residue and the derived set means unrelated work would be swept into the
+# publication commit, so the helper fails closed.
+#
+# Split the same way derived targets are: a directory here is prefix-matched, a
+# file is exact-matched. A residue *file* left in the prefix tuple would sanction
+# `.gitignore.bak` and `docs/repomix-map.md.orig` for the same startswith reason
+# a derived `scripts/a.py` would sanction `scripts/a.py.orig`.
 DEFAULT_ALLOWED_PREFIXES = (
+    # Trellis owns this: the active task and the journal workspace are dirty
+    # by design at the moment this helper runs.
     ".trellis/",
-    ".agents/",
-    ".claude/",
-    ".codex/",
-    ".cursor/",
-    ".gemini/",
-    ".github/",
-    ".kiro/",
-    ".opencode/",
-    ".qoder/",
+    # The installer's own receipts (manifest, provenance, installed-targets),
+    # rewritten by the install that precedes publication. Not payload targets,
+    # so the manifest never names them.
     ".sd-ai-command-pack/",
+)
+DEFAULT_ALLOWED_EXACT = (
+    # The map generator's output, regenerated after the archive move.
     "docs/repomix-map.md",
     # Carries the pack-managed .obsidian-kb block. refresh_managed_ignore_block()
     # rewrites it before the work commit, and an operator who already ran
@@ -165,8 +174,78 @@ def porcelain_paths(cwd: Path) -> list[str]:
     return paths
 
 
-def is_allowed(path: str, prefixes: Sequence[str]) -> bool:
+def is_allowed(
+    path: str, prefixes: Sequence[str], exact: Collection[str] = ()
+) -> bool:
+    """Allow ``path`` when it matches a prefix, or equals an exact entry.
+
+    The two sets are not interchangeable. A payload target like
+    ``scripts/a.py`` must not be prefix-matched: ``startswith`` would also
+    sanction ``scripts/a.py.orig``, letting an editor backup ride into the
+    publication commit. Directory prefixes still need prefix semantics, and so
+    does every operator-supplied --allow-path-prefix value.
+    """
+
+    if path in exact:
+        return True
     return any(path == prefix or path.startswith(prefix) for prefix in prefixes)
+
+
+def derive_allowed_paths(repo: Path) -> tuple[tuple[str, ...], frozenset[str]]:
+    """Read the consumer's installed manifest into (prefixes, exact) sets.
+
+    Fails closed with a named reason: a missing, unreadable, malformed, or
+    target-less manifest refuses the publish rather than falling back to a
+    literal list, because a silent fallback is the drift this replaces.
+    """
+
+    manifest_path = repo / PACK_MANIFEST_RELATIVE
+    if not manifest_path.is_file():
+        raise PublishError(
+            f"manifest_missing: no installed pack manifest at "
+            f"{PACK_MANIFEST_RELATIVE}; cannot derive the managed allowlist",
+            code=3,
+        )
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise PublishError(
+            f"manifest_unreadable: cannot read {PACK_MANIFEST_RELATIVE}: {error}",
+            code=3,
+        ) from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
+        raise PublishError(
+            f"manifest_malformed: {PACK_MANIFEST_RELATIVE} is not an object with "
+            "a 'files' list",
+            code=3,
+        )
+
+    derived_prefixes: set[str] = set()
+    derived_exact: set[str] = set()
+    skipped = 0
+    for entry in payload["files"]:
+        target = entry.get("target") if isinstance(entry, dict) else None
+        if not isinstance(target, str) or not target:
+            skipped += 1
+            continue
+        if target.startswith("/") or ".." in Path(target).parts:
+            skipped += 1
+            continue
+        head = target.split("/", 1)[0]
+        if head.startswith("."):
+            derived_prefixes.add(f"{head}/")
+        else:
+            derived_exact.add(target)
+
+    if not derived_prefixes and not derived_exact:
+        raise PublishError(
+            f"manifest_targets_empty: {PACK_MANIFEST_RELATIVE} declares no usable "
+            f"target ({skipped} entr{'y' if skipped == 1 else 'ies'} skipped as "
+            "malformed or unsafe)",
+            code=3,
+        )
+    prefixes = tuple(sorted(set(DEFAULT_ALLOWED_PREFIXES) | derived_prefixes))
+    return prefixes, frozenset(set(DEFAULT_ALLOWED_EXACT) | derived_exact)
 
 
 def resolve_task_dir(repo: Path, slug: str) -> Path:
@@ -183,7 +262,12 @@ def resolve_task_dir(repo: Path, slug: str) -> Path:
     return task_dir
 
 
-def check_preconditions(repo: Path, slug: str, prefixes: Sequence[str]) -> None:
+def check_preconditions(
+    repo: Path,
+    slug: str,
+    prefixes: Sequence[str],
+    exact: Collection[str] = (),
+) -> None:
     top = git_out(["rev-parse", "--show-toplevel"], cwd=repo)
     if Path(top).resolve() != repo.resolve():
         raise PublishError(
@@ -204,13 +288,18 @@ def check_preconditions(repo: Path, slug: str, prefixes: Sequence[str]) -> None:
         )
     resolve_task_dir(repo, slug)
     disallowed = [
-        path for path in porcelain_paths(repo) if not is_allowed(path, prefixes)
+        path
+        for path in porcelain_paths(repo)
+        if not is_allowed(path, prefixes, exact)
     ]
     if disallowed:
         raise PublishError(
             "working tree is dirty outside the managed allowlist: "
             + ", ".join(sorted(disallowed))
-            + " (commit or stash unrelated work, or extend --allow-path-prefix)",
+            + f" (allowlist: {len(prefixes)} prefix(es) and {len(exact)} exact "
+            f"path(s), combining {PACK_MANIFEST_RELATIVE}, the built-in "
+            "residue, and any --allow-path-prefix override; commit or stash "
+            "unrelated work, or extend --allow-path-prefix)",
             code=3,
         )
 
@@ -419,7 +508,8 @@ def assert_trellis_only_delta(repo: Path, base: str, head: str) -> None:
 
 def publish(args: argparse.Namespace) -> dict[str, object]:
     repo = Path(args.repo).resolve()
-    prefixes = tuple(DEFAULT_ALLOWED_PREFIXES) + tuple(args.allow_path_prefix or ())
+    derived_prefixes, exact = derive_allowed_paths(repo)
+    prefixes = derived_prefixes + tuple(args.allow_path_prefix or ())
     record_session = (
         Path(args.record_session).resolve()
         if args.record_session
@@ -429,7 +519,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
     receipt_out = Path(args.receipt_out).resolve()
     month = args.archive_month or datetime.now(timezone.utc).strftime("%Y-%m")
 
-    check_preconditions(repo, args.slug, prefixes)
+    check_preconditions(repo, args.slug, prefixes, exact)
     base = git_out(["rev-parse", "HEAD"], cwd=repo)
 
     # Before the map: the block can newly ignore .obsidian-kb, and repomix must

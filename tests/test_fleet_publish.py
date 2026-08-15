@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,19 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         (task / "prd.md").write_text("# demo\n", encoding="utf-8")
         (self.repo / "src").mkdir()
         (self.repo / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
+        # scripts/ and docs/ must be tracked: git status collapses a wholly-
+        # untracked directory to one "scripts/" entry, which no per-file
+        # allowlist can match. A real consumer has both under version control.
+        (self.repo / "scripts").mkdir()
+        (self.repo / "scripts" / "keep.py").write_text("print(0)\n", encoding="utf-8")
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs" / "keep.md").write_text("# keep\n", encoding="utf-8")
+        # Every flow through publish() derives its allowlist from this file.
+        (self.repo / ".sd-ai-command-pack").mkdir()
+        (self.repo / ".sd-ai-command-pack" / "manifest.json").write_text(
+            json.dumps({"files": [{"target": ".claude/skills/x/SKILL.md"}]}),
+            encoding="utf-8",
+        )
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "seed")
 
@@ -60,14 +74,38 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "add repomix")
 
+    def _write_manifest(self, targets: object, *, raw: str | None = None) -> None:
+        """Write the consumer manifest the allowlist is derived from.
+
+        Each test states the payload shape it depends on instead of inheriting
+        whatever this repository happens to ship.
+        """
+
+        directory = self.repo / ".sd-ai-command-pack"
+        directory.mkdir(exist_ok=True)
+        path = directory / "manifest.json"
+        if raw is not None:
+            path.write_text(raw, encoding="utf-8")
+            return
+        entries = [
+            target if isinstance(target, dict) else {"target": target}
+            for target in targets  # type: ignore[union-attr]
+        ]
+        path.write_text(json.dumps({"files": entries}), encoding="utf-8")
+
+    def _gate(self, targets: object = (".claude/skills/x/SKILL.md",)) -> None:
+        """Resolve the allowlist from a fixture manifest and run the gate."""
+
+        self._write_manifest(targets)
+        prefixes, exact = publish.derive_allowed_paths(self.repo)
+        publish.check_preconditions(self.repo, self.slug, prefixes, exact)
+
     # ------------------------------------------------------------------ preconditions
 
     def test_refuses_when_tree_is_dirty_outside_allowlist(self) -> None:
         (self.repo / "src" / "app.py").write_text("print(2)\n", encoding="utf-8")
         with self.assertRaises(publish.PublishError) as ctx:
-            publish.check_preconditions(
-                self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
-            )
+            self._gate()
         self.assertEqual(ctx.exception.code, 3)
         self.assertIn("src/app.py", str(ctx.exception))
         # No commit was created.
@@ -88,9 +126,103 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         )
         (self.repo / ".claude").mkdir(exist_ok=True)
         (self.repo / ".claude" / "x").write_text("y\n", encoding="utf-8")
-        publish.check_preconditions(
-            self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
+        self._gate()
+
+    # ------------------------------------------------- manifest-derived allowlist
+
+    def test_new_payload_target_passes_without_a_code_edit(self) -> None:
+        # The defect this task fixes: a payload target the old literal tuple
+        # never named (scripts/) had to be hand-added before any lane on the
+        # affected consumer could publish.
+        target = "scripts/sd-ai-command-pack-check.py"
+        (self.repo / "scripts").mkdir(exist_ok=True)
+        (self.repo / target).write_text("print(1)\n", encoding="utf-8")
+        self.assertNotIn("scripts/", publish.DEFAULT_ALLOWED_PREFIXES)
+        self._gate([target])
+
+    def test_path_outside_derived_set_and_residue_still_refuses(self) -> None:
+        (self.repo / "src" / "app.py").write_text("print(3)\n", encoding="utf-8")
+        with self.assertRaises(publish.PublishError) as ctx:
+            self._gate(["scripts/sd-ai-command-pack-check.py"])
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertIn("src/app.py", str(ctx.exception))
+
+    def test_missing_manifest_refuses_with_a_named_reason(self) -> None:
+        (self.repo / publish.PACK_MANIFEST_RELATIVE).unlink()
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.derive_allowed_paths(self.repo)
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertIn("manifest_missing", str(ctx.exception))
+
+    def test_unreadable_manifest_refuses_with_a_named_reason(self) -> None:
+        self._write_manifest(None, raw="{not json")
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.derive_allowed_paths(self.repo)
+        self.assertIn("manifest_unreadable", str(ctx.exception))
+
+    def test_malformed_manifest_refuses_with_a_named_reason(self) -> None:
+        self._write_manifest(None, raw=json.dumps({"files": "not-a-list"}))
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.derive_allowed_paths(self.repo)
+        self.assertIn("manifest_malformed", str(ctx.exception))
+
+    def test_all_entries_skipped_refuses_and_reports_the_skip_count(self) -> None:
+        self._write_manifest(
+            [
+                {"target": "/etc/passwd"},
+                {"target": "../outside/x"},
+                {"nope": 1},
+                "",
+            ]
         )
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.derive_allowed_paths(self.repo)
+        message = str(ctx.exception)
+        self.assertIn("manifest_targets_empty", message)
+        self.assertIn("4 entries skipped", message)
+
+    def test_dotted_root_collapses_to_a_directory_prefix(self) -> None:
+        # The installer writes byproducts the manifest does not name; a dotted
+        # platform root is trusted at directory level.
+        (self.repo / ".claude" / "skills" / "x").mkdir(parents=True)
+        (self.repo / ".claude" / "skills" / "x" / "other.md").write_text(
+            "y\n", encoding="utf-8"
+        )
+        self._gate([".claude/skills/x/SKILL.md"])
+
+    def test_non_dotted_target_does_not_allow_a_sibling(self) -> None:
+        (self.repo / "scripts").mkdir(exist_ok=True)
+        (self.repo / "scripts" / "b.py").write_text("print(1)\n", encoding="utf-8")
+        with self.assertRaises(publish.PublishError) as ctx:
+            self._gate(["scripts/a.py"])
+        self.assertIn("scripts/b.py", str(ctx.exception))
+
+    def test_non_dotted_target_is_exact_not_a_string_prefix(self) -> None:
+        # The hole a naive implementation leaves: prefix-matching "scripts/a.py"
+        # also sanctions an editor backup beside it, which would ride into the
+        # publication commit. The sibling test above passes either way.
+        (self.repo / "scripts").mkdir(exist_ok=True)
+        (self.repo / "scripts" / "a.py.orig").write_text("print(1)\n", encoding="utf-8")
+        with self.assertRaises(publish.PublishError) as ctx:
+            self._gate(["scripts/a.py"])
+        self.assertIn("scripts/a.py.orig", str(ctx.exception))
+
+    def test_allow_path_prefix_keeps_prefix_semantics(self) -> None:
+        # Derived non-dotted targets became exact; the operator override did not.
+        (self.repo / "docs").mkdir(exist_ok=True)
+        (self.repo / "docs" / "repomix-map.md").write_text("# map\n", encoding="utf-8")
+        self._write_manifest([".claude/skills/x/SKILL.md"])
+        prefixes, exact = publish.derive_allowed_paths(self.repo)
+        publish.check_preconditions(
+            self.repo, self.slug, prefixes + ("docs/rep",), exact
+        )
+
+    def test_residue_survives_derivation(self) -> None:
+        (self.repo / publish.TASK_ROOT / self.slug / "prd.md").write_text(
+            "# edited\n", encoding="utf-8"
+        )
+        (self.repo / ".gitignore").write_text("/.obsidian-kb\n", encoding="utf-8")
+        self._gate([".claude/skills/x/SKILL.md"])
 
     def test_refuses_missing_task_directory(self) -> None:
         with self.assertRaises(publish.PublishError) as ctx:
@@ -116,9 +248,7 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
     def test_refuses_pack_repo_with_bookkeeping_gate(self) -> None:
         self._make_pack_bookkeeping_gate()
         with self.assertRaises(publish.PublishError) as ctx:
-            publish.check_preconditions(
-                self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
-            )
+            self._gate()
         self.assertEqual(ctx.exception.code, 3)
         self.assertIn("sd-finish-work", str(ctx.exception))
         self.assertIn("consumer-only", str(ctx.exception))
@@ -126,9 +256,7 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
     def test_consumer_repo_passes_self_publish_guard(self) -> None:
         # Default fixture carries no bookkeeping gate → the guard is a no-op and
         # a clean consumer tree passes preconditions.
-        publish.check_preconditions(
-            self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
-        )
+        self._gate()
 
     def test_main_propagates_self_publish_guard_code(self) -> None:
         self._make_pack_bookkeeping_gate()
@@ -403,11 +531,20 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
 
     def test_gitignore_is_in_the_default_allowlist(self) -> None:
         # An operator who already ran housekeeping arrives with .gitignore dirty.
-        self.assertIn(".gitignore", publish.DEFAULT_ALLOWED_PREFIXES)
+        # .gitignore is residue: housekeeping owns it, no payload target names
+        # it, so it must survive derivation from the manifest.
+        self.assertIn(".gitignore", publish.DEFAULT_ALLOWED_EXACT)
         (self.repo / ".gitignore").write_text("/.obsidian-kb\n", encoding="utf-8")
-        publish.check_preconditions(
-            self.repo, self.slug, publish.DEFAULT_ALLOWED_PREFIXES
-        )
+        self._gate()
+
+    def test_residue_file_entries_are_exact_not_string_prefixes(self) -> None:
+        # The same hole the derived set closes, applied to the residue: a
+        # residue *file* left in the prefix tuple would sanction an editor
+        # backup beside it, which is what this gate exists to stop.
+        (self.repo / ".gitignore.bak").write_text("/.obsidian-kb\n", encoding="utf-8")
+        with self.assertRaises(publish.PublishError) as ctx:
+            self._gate()
+        self.assertIn(".gitignore.bak", str(ctx.exception))
 
     def test_ignore_block_refresh_rewrites_the_managed_block(self) -> None:
         # Helper contract only. This says nothing about *when* publish() calls it;
