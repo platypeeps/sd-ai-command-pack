@@ -798,7 +798,10 @@ class ConsumerConfigCitationTests(unittest.TestCase):
             source = sources[target]
             text = (ROOT / source).read_text(encoding="utf-8")
             for number, line in enumerate(text.splitlines(), start=1):
-                for name in names:
+                # Sorted because `names` is a frozenset: an unordered scan
+                # reports the same failure in a different order per hash seed,
+                # which is exactly when a stable list is worth having.
+                for name in sorted(names):
                     if name in line:
                         offenders.append(f"{source}:{number} names {name}")
 
