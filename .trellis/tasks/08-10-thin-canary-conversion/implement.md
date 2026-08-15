@@ -17,23 +17,23 @@ All three were measured clean and on `main` at
 Rewritten after review round 2. The six templates are **not** edited: their fat
 wording is correct and the conversion already repoints it (design D2).
 
-- [ ] 0A.1 Teach the resweep to scan post-repoint bytes for kept, pack-owned
+- [x] 0A.1 Teach the resweep to scan post-repoint bytes for kept, pack-owned
       files, sourcing the rewrite from `installer.thin.planned_repoints` rather
       than restating the rules in the scanner.
-- [ ] 0A.2 Keep the change off every other bucket: `blockers` still scan the
+- [x] 0A.2 Keep the change off every other bucket: `blockers` still scan the
       bytes as written, because nothing rewrites a consumer's own file.
-- [ ] 0A.3 Tests, both directions: a pack-owned kept file whose citation the
+- [x] 0A.3 Tests, both directions: a pack-owned kept file whose citation the
       repoint fixes is **not** a `packDefect`; one whose citation survives the
       repoint still **is**. A one-directional test here passes by never firing.
-- [ ] 0B.1 Change the `.agents/skills/sd-*/SKILL.md` literal rewrite to name
+- [x] 0B.1 Change the `.agents/skills/sd-*/SKILL.md` literal rewrite to name
       `~/.agents/skills`, per design D2c and mirroring `AGENTS_DOC_DIRECTORY`'s
       recorded reasoning about suffix matching.
-- [ ] 0B.2 Test that the rewritten text no longer ends with a removed path.
-- [ ] 0.3 Cascade: `make sync`, `make generate`, candidate-check,
+- [x] 0B.2 Test that the rewritten text no longer ends with a removed path.
+- [x] 0.3 Cascade: `make sync`, `make generate`, candidate-check,
       `make generate`, version bump to `0.71.12`, CHANGELOG heading,
       `make sync`.
-- [ ] 0.4 `make check` and `make release-prep` exit 0.
-- [ ] 0.5 Answer design O1 — **superseded**: no template text changes, so the
+- [x] 0.4 `make check` and `make release-prep` exit 0.
+- [x] 0.5 Answer design O1 — **superseded**: no template text changes, so the
       emitted block is unchanged for a fat reader. Record that and close it.
 - [ ] 0.6 PR, Copilot review loop, merge.
 

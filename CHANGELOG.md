@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.71.12 - 2026-08-15
+
+### Fixed
+
+- The thin resweep now judges the bytes a conversion would write, not the ones
+  it reads. `repoint_kept_references` rewrites kept files' path citations as
+  part of every conversion, but the resweep scanned the pre-conversion text, so
+  a correct citation of a path the consumer currently has was reported as a
+  `packDefect`. `decide` blocks on any `packDefect` and `--thin` refuses any
+  verdict but `clear`, so no fat consumer in the fleet could convert: the pack
+  shipped the rewrite and the gate that rejected it. The scan now runs
+  `planned_repoints` and reads the rewritten text for any kept file the
+  conversion would repoint. Ownership is deliberately not consulted --
+  membership in the repoint set is the whole test, and `plan.keep` comes from
+  the receipt, so consumer-authored files are never in it. Measured across the
+  canary cohort: 15 pack defects each before, 0 after, with consumer-owned
+  blockers unmoved except one line in a pack-installed file the consumer had
+  taken over, which the conversion does repoint.
+- `THIN_PROFILE` rewrites the skills glob to `~/.agents/skills` rather than
+  `~/.agents/skills/sd-*/SKILL.md`. `cites_removed_path` matches path suffixes,
+  so the fuller form still ends with the removed `.agents/skills/sd-*/SKILL.md`
+  and reads as a citation of the path the rewrite just repointed away from --
+  the same trap `AGENTS_DOC_DIRECTORY` documents one screen above the rule that
+  fell into it. It was the single surviving defect once the repoint simulation
+  cleared the other fourteen.
+
 ## 0.71.11 - 2026-08-14
 
 ### Added

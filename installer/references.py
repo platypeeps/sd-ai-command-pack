@@ -331,6 +331,20 @@ AGENTS_DOC_DIRECTORY = "~/.agents/docs"
 # the only pack document there, and the surrounding prose already says so.
 THIN_DOC_REFERENCE = AGENTS_DOC_DIRECTORY
 
+# The skills family's relocated form, and the same suffix trap one screen up.
+#
+# `~/.agents/skills/sd-*/SKILL.md` is where those files truly live, and it ends
+# with the removed `.agents/skills/sd-*/SKILL.md`, so `cites_removed_path`
+# classifies the rewritten text as a citation of the path the rewrite just
+# repointed away from. Measured on the three canaries: it was the single
+# surviving `packDefect` after `planned_repoints` cleared the other fourteen.
+#
+# The doc reference solved this by naming the directory; so does this. The
+# surrounding sentence already lists entry points by name, so dropping the leaf
+# costs nothing a reader needed -- and unlike the doc case there is no single
+# file to name anyway, since the family is a glob over many skills.
+AGENTS_SKILLS_DIRECTORY = "~/.agents/skills"
+
 THIN_PROFILE = RewriteProfile(
     name="thin",
     script_template=f"{AGENTS_BIN_REFERENCE}/{{name}}",
@@ -355,7 +369,7 @@ THIN_PROFILE = RewriteProfile(
     # pack tree in the repository to aim at. Each is replaced by the location
     # that does survive, outside the repository.
     literal_rewrites={
-        "`.agents/skills/sd-*/SKILL.md`": "`~/.agents/skills/sd-*/SKILL.md`",
+        "`.agents/skills/sd-*/SKILL.md`": f"`{AGENTS_SKILLS_DIRECTORY}`",
         "`**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,": (
             "`**/skills/trellis-*/**` under `.agents/` (pack skills are not "
             "vendored in a thin checkout; they live at `~/.agents/skills`),"

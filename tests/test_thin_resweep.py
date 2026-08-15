@@ -15,10 +15,21 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# `load_resweep()` below reaches the script by file path, so nothing here has
+# needed the repo on `sys.path` until now. The identity assertion in
+# `RepointedScanTests` compares the installer function the resweep imported
+# against the one this file imports, and that comparison is only meaningful if
+# both resolve through the same package.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from installer import thin  # noqa: E402
+
 PARTITION = ROOT / "docs/fleet/surface-partition.json"
 
 # A machine-scope Claude target the conversion deletes, and a repo-native one
@@ -647,6 +658,75 @@ class CommandLineTests(ResweepFixture):
         (repo / "src/main.py").write_text("print('edited')\n", encoding="utf-8")
         document = resweep.resweep_consumer(self.registry_name(), repo)
         self.assertIn("(dirty)", resweep.render(document))
+
+
+class RepointedScanTests(ResweepFixture):
+    """The verdict judges the bytes the conversion writes, not the ones it reads.
+
+    `repoint_kept_references` (installer/thin.py) rewrites the kept files' path
+    citations as part of every conversion. Scanning the pre-conversion text made
+    the resweep report those rewrites as defects, and since `decide` blocks on a
+    non-empty `packDefects` bucket and `--thin` refuses anything but `clear`, a
+    fat consumer whose pack files correctly named the paths it currently had
+    could never convert. Measured across the canary cohort on 2026-08-15: fifteen
+    pack defects each, fourteen of them repointed, and nothing in the fleet
+    convertible.
+    """
+
+    def cited_from_a_kept_pack_file(self, body: str) -> Path:
+        """A kept, receipt-vouched `KEPT` whose text is `body`.
+
+        Ownership is receipt membership plus a matching recorded digest, so both
+        are supplied. The whole shell-helper population joins the receipt because
+        the citation under test names one of them: a path the receipt omits is
+        never removed, so nothing cites it and every bucket comes back empty --
+        which is how the first draft of these tests passed against the unfixed
+        scanner.
+        """
+
+        import hashlib
+
+        digest = "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+        return self.make_consumer(
+            {
+                KEPT: body,
+                ".sd-ai-command-pack/provenance.json": json.dumps(
+                    {
+                        "pack": "sd-ai-command-pack",
+                        "version": "0.0.0",
+                        "files": {KEPT: digest},
+                    }
+                )
+                + "\n",
+            },
+            receipt=[REMOVED, KEPT, *SHELL_HELPERS],
+        )
+
+    def test_a_citation_the_conversion_repoints_is_not_a_defect(self) -> None:
+        # `THIN_PROFILE.script_template` rewrites this to `~/.agents/bin/`, so
+        # the converted tree does not name the removed path and the pre-conversion
+        # text does not describe a defect.
+        repo = self.cited_from_a_kept_pack_file(
+            f"Run `{SHELL_HELPERS[0]}` first.\n"
+        )
+        result = self.scan(repo)
+        self.assertEqual(self.buckets_for(result, KEPT)["packDefects"], [])
+
+    def test_a_citation_the_conversion_cannot_repoint_still_defects(self) -> None:
+        # The other direction, and the reason it is not optional: a change that
+        # simply stopped scanning kept files would pass the test above while
+        # clearing every real defect with it. `REMOVED` is a command payload
+        # path with no rewrite rule, so the repoint leaves it exactly as it is.
+        repo = self.cited_from_a_kept_pack_file(f"See `{REMOVED}` for the steps.\n")
+        result = self.scan(repo)
+        self.assertEqual(self.only_bucket(result, KEPT), "packDefects")
+
+    def test_the_rewrite_is_sourced_from_the_installer(self) -> None:
+        # Not a duplicate of the two above: they would both pass against a
+        # second, drifting copy of the rewrite rules living in the scanner.
+        # What is pinned here is that there is only one implementation of
+        # "what will the conversion write".
+        self.assertIs(resweep.thin.planned_repoints, thin.planned_repoints)
 
 
 if __name__ == "__main__":

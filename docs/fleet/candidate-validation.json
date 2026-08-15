@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-15T05:10:59Z",
-  "packVersion": "0.71.11",
-  "payloadDigest": "sha256:3d40cf7c7f4f978bb5c87f6629bc98594eda3c9f2c360e9adfa78d2b624f4be1",
+  "validatedAt": "2026-08-15T11:44:34Z",
+  "packVersion": "0.71.12",
+  "payloadDigest": "sha256:26a8cf4a10b65930806ae0684ed891e5231ddf4dbd3dd092f2b8994b1967ecae",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
@@ -24,7 +24,7 @@
         ]
       ],
       "reasons": [
-        "49 consumer-authored reference(s) to removed paths"
+        "48 consumer-authored reference(s) to removed paths"
       ]
     },
     {
@@ -117,7 +117,7 @@
         ]
       ],
       "reasons": [
-        "44 consumer-authored reference(s) to removed paths"
+        "43 consumer-authored reference(s) to removed paths"
       ]
     },
     {
@@ -134,7 +134,7 @@
         ]
       ],
       "reasons": [
-        "24 consumer-authored reference(s) to removed paths"
+        "23 consumer-authored reference(s) to removed paths"
       ]
     },
     {
@@ -165,7 +165,7 @@
         ]
       ],
       "reasons": [
-        "14 consumer-authored reference(s) to removed paths"
+        "13 consumer-authored reference(s) to removed paths"
       ]
     },
     {
@@ -190,7 +190,7 @@
         ]
       ],
       "reasons": [
-        "175 consumer-authored reference(s) to removed paths"
+        "171 consumer-authored reference(s) to removed paths"
       ]
     }
   ]
