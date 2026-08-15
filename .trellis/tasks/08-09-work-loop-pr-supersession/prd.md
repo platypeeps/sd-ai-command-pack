@@ -15,6 +15,12 @@
 > owns it, so closing it is no longer part of shipping. Reference it as a
 > bare `#404` in the shipping PR — never with a closing keyword, per
 > `08-14-pack-paper-cuts` item 4.
+>
+> Sibling scope (2026-08-15): `08-15-work-loop-terminal-ledger-repair` owns the
+> terminal counterpart — correcting `current` evidence once `phase` is
+> `stopped`, where this task's gaps all sit before the run retires. Same ledger
+> and likely the same harness, so sequence them together, but the code paths do
+> not overlap: nothing here would have repaired the observed stopped run.
 
 ## Goal
 

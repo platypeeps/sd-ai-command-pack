@@ -1,0 +1,36 @@
+{
+  "id": "work-loop-terminal-ledger-repair",
+  "name": "work-loop-terminal-ledger-repair",
+  "title": "Repair work-loop ledger evidence on a terminal run",
+  "description": "No sanctioned CLI can correct branch/head/lastShippedSha after stop, and reconcile actively damages a terminal run's checkpoint.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "sdelmas",
+  "assignee": "sdelmas",
+  "createdAt": "2026-08-15",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "scripts/sd-ai-command-pack-work-loop.py",
+    "templates/.agents/skills/sd-work-backlog/references/terminal-reconciliation.md",
+    "templates/.agents/skills/sd-work-backlog/references/run-recovery.md",
+    ".trellis/tasks/08-09-work-loop-pr-supersession/prd.md"
+  ],
+  "notes": "",
+  "meta": {
+    "observedRepo": "rwbp/rwbp-website",
+    "observedRun": "d83bb64904154b00ba58e169e9301cde",
+    "observedPackVersion": "0.71.6",
+    "sibling": "08-09-work-loop-pr-supersession"
+  }
+}
