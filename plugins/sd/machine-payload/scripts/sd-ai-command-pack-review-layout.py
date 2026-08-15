@@ -19,8 +19,8 @@ vendored pack script under ``scripts/`` moves out of the consumer entirely
 (this docstring deliberately does not spell the literal glob: the plugin
 build's residue gate reads any repository-root pack path in a shipped script as
 sibling resolution, and it is right to, even here). So a
-consumer file naming one by literal path breaks -- 175 such references were
-measured in a single consumer, spanning 18 distinct pack paths.
+consumer file naming one by literal path breaks -- 288 such references were
+measured across the eight consumers, 112 of them in a single one.
 
 ``mode`` is output, never input: callers never branch on fat versus thin, they
 read what this resolved. When neither receipt is present the mode is
@@ -47,7 +47,9 @@ SCHEMA_VERSION = 1
 # machinery -- so importing from it would work in this checkout and fail in
 # every consumer this script is written for. The duplication is deliberate and
 # `tests/test_review_layout.py` asserts each value still equals its original.
-INSTALLED_TARGETS_RELATIVE = ".sd-ai-command-pack/installed-targets.txt"  # installer/registry.py
+INSTALLED_TARGETS_RELATIVE = (
+    ".sd-ai-command-pack/installed-targets.txt"  # installer/registry.py
+)
 MACHINE_STATE_DIR = "machine"  # installer/machinescope.py
 MACHINE_RECEIPT_FILE = "machine-receipt.json"  # installer/machinescope.py
 
@@ -101,6 +103,23 @@ def family_roots(home: Path, environ: dict[str, str]) -> dict[str, Path]:
     }
 
 
+def home_from(environ: dict[str, str]) -> Path:
+    """The home directory `environ` describes, falling back to the process's.
+
+    `Path.home()` reads the *process* environment, so calling it directly would
+    make `environ` a decorative parameter: a caller that passes a HOME would
+    still get this process's. The fallback is kept for Windows, where home comes
+    from `USERPROFILE` and an absent HOME is normal rather than an error.
+    """
+
+    value = environ.get("HOME", "").strip()
+    if value:
+        candidate = Path(value).expanduser()
+        if candidate.is_absolute():
+            return candidate
+    return Path.home()
+
+
 class Layout:
     """One resolved installation: its mode, its receipt, and what it holds."""
 
@@ -128,7 +147,9 @@ def _read_targets(path: Path) -> frozenset[str]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
-        raise LayoutError(f"cannot read installed-targets receipt {path}: {error}") from None
+        raise LayoutError(
+            f"cannot read installed-targets receipt {path}: {error}"
+        ) from None
     entries = set()
     for line in text.splitlines():
         entry = line.strip()
@@ -143,7 +164,9 @@ def _read_machine_receipt(path: Path) -> tuple[dict[str, Any], ...]:
     except OSError as error:
         raise LayoutError(f"cannot read machine receipt {path}: {error}") from None
     except json.JSONDecodeError as error:
-        raise LayoutError(f"machine receipt {path} is not valid JSON: {error}") from None
+        raise LayoutError(
+            f"machine receipt {path} is not valid JSON: {error}"
+        ) from None
     files = document.get("files")
     if not isinstance(files, list):
         raise LayoutError(f"machine receipt {path} has no files array")
@@ -179,7 +202,7 @@ def resolve_layout(
     # `~/.local/state` directly would skip SD_AI_COMMAND_PACK_STATE_HOME,
     # XDG_STATE_HOME, and the Windows rung -- four of its five.
     try:
-        state_root = resolve_state_root(environ=env)
+        state_root = resolve_state_root(environ=env, home=home_from(env))
     except CommandError as error:
         return Layout(MODE_UNRESOLVED, reason=f"cannot resolve state root: {error}")
 
@@ -253,7 +276,9 @@ def _command_name(target: str) -> str | None:
     return None
 
 
-def resolve_script(layout: Layout, name: str, *, root: Path, environ: dict[str, str]) -> Path:
+def resolve_script(
+    layout: Layout, name: str, *, root: Path, environ: dict[str, str]
+) -> Path:
     """Where a pack script lives in this installation.
 
     Refuses rather than guesses. A synthesized path is worse than an error here
@@ -267,7 +292,7 @@ def resolve_script(layout: Layout, name: str, *, root: Path, environ: dict[str, 
         return root / target
 
     if layout.mode == MODE_THIN:
-        roots = family_roots(Path.home(), environ)
+        roots = family_roots(home_from(environ), environ)
         for entry in layout.machine_files:
             if entry.get("path") != name:
                 continue
@@ -292,7 +317,9 @@ def build_report(
         report["reason"] = layout.reason
         return report
     report["receipt"] = _render_receipt(layout.receipt, root)
-    report["paths"] = [{"path": path, "category": classify(layout, path)} for path in paths]
+    report["paths"] = [
+        {"path": path, "category": classify(layout, path)} for path in paths
+    ]
     report["surface"] = {"commands": command_surface(layout)}
     return report
 

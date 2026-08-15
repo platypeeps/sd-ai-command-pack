@@ -138,9 +138,16 @@ sd-ai-command-pack-review-layout.py --json [--path P ...]
 }
 ```
 
-`--path` may be repeated or omitted; omitted means classify the current changed
-set, which is what every consumer guard actually wants and what each of the
-five reimplements with its own `git diff` plumbing.
+`--path` may be repeated or omitted; omitted yields an empty `paths` array, and
+the caller supplies its own changed set.
+
+An earlier draft of this paragraph said omitting `--path` classifies the current
+changed set. It does not, and shipping that contract would have been worse than
+the wrong doc: every one of the five guards already computes its changed set —
+from `git diff`, from a CI event payload, or from `argv` — and each computes it
+differently. A resolver that ran its own `git diff` would either silently
+disagree with the caller's set or force every caller onto its definition. The
+one question worth centralizing is the classification, not the enumeration.
 
 ### D3b — The second query: resolve a pack script's invocation path
 

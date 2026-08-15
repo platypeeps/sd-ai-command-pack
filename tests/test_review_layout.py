@@ -218,9 +218,19 @@ class ClassificationTests(unittest.TestCase):
         commands = json.loads(result.stdout)["surface"]["commands"]
         names = {entry["name"] for entry in commands}
         self.assertIn("review-pr", names)
+        # Not an existence check: this fixture writes the receipt without the
+        # files it lists, and the query's contract is "what the receipt says is
+        # installed", which `install-audit` -- not this -- compares to disk.
+        receipt = set(
+            (self.root / ".sd-ai-command-pack" / "installed-targets.txt")
+            .read_text(encoding="utf-8")
+            .split()
+        )
         for entry in commands:
+            self.assertTrue(entry["paths"], entry["name"])
             for path in entry["paths"]:
-                self.assertTrue((self.root / path) or path)
+                self.assertIn(path, receipt)
+                self.assertIn(entry["name"], path)
 
     def test_no_literal_command_list_is_embedded_in_the_script(self) -> None:
         """A hardcoded table passes every behavioral test on this pack.
@@ -682,6 +692,38 @@ class InProcessLayoutTests(unittest.TestCase):
         self.assertNotIn("paths", report)
         self.assertNotIn("surface", report)
         self.assertTrue(report["reason"])
+
+    def test_thin_resolution_honors_the_home_in_environ(self) -> None:
+        """`Path.home()` would read the process environment instead.
+
+        That makes `environ` decorative: a caller embedding this with its own
+        HOME would silently resolve against the running user's home. Asserting
+        the returned path sits under the *passed* home is what catches it.
+        """
+
+        state_root = Path(self.tmp.name) / "state"
+        receipt = state_root / "machine" / "machine-receipt.json"
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(
+            json.dumps({"files": [{"family": "agents-bin", "path": "wanted.sh"}]}),
+            encoding="utf-8",
+        )
+        environ = {
+            "SD_AI_COMMAND_PACK_STATE_HOME": str(state_root),
+            "HOME": str(self.home),
+        }
+        layout = self.module.resolve_layout(self.root, environ=environ)
+        resolved = self.module.resolve_script(
+            layout, "wanted.sh", root=self.root, environ=environ
+        )
+        self.assertEqual(resolved, self.home / ".agents" / "bin" / "wanted.sh")
+        self.assertNotEqual(self.home, Path.home())
+
+    def test_a_relative_home_in_environ_falls_back_to_the_process_home(self) -> None:
+        """Windows has no HOME; an unusable one must not become an error."""
+
+        self.assertEqual(self.module.home_from({"HOME": "relative/path"}), Path.home())
+        self.assertEqual(self.module.home_from({}), Path.home())
 
     def test_a_thin_install_missing_the_script_says_so(self) -> None:
         state_root = Path(self.tmp.name) / "state"
