@@ -537,13 +537,20 @@ class BindingAgreementTests(unittest.TestCase):
         classification bug in the consumer.
         """
 
+        # The receipt is supplied rather than discovered. Both callers land on
+        # `REPO_ROOT` (see below), and `.sd-ai-command-pack/installed-targets.txt`
+        # there is install-time output that `.gitignore:25` excludes -- so a
+        # developer who has installed the pack into its own checkout resolves
+        # `fat` and a clean CI checkout resolves `unresolved` and exits 1. That
+        # difference is about whose machine ran the test, not about whether the
+        # binding delegates. Pinning the receipt makes both sides read the same
+        # fixture in either environment.
         environment = dict(os.environ)
-        for name in (
-            "SD_AI_COMMAND_PACK_STATE_HOME",
-            "SD_AI_COMMAND_PACK_TARGETS_FILE",
-            "XDG_STATE_HOME",
-        ):
+        for name in ("SD_AI_COMMAND_PACK_STATE_HOME", "XDG_STATE_HOME"):
             environment.pop(name, None)
+        environment["SD_AI_COMMAND_PACK_TARGETS_FILE"] = str(
+            self.root / ".sd-ai-command-pack" / "installed-targets.txt"
+        )
 
         arguments = [
             "--path",
@@ -583,11 +590,12 @@ class BindingAgreementTests(unittest.TestCase):
         self.assertEqual(json.loads(shell.stdout), json.loads(direct.stdout))
         # Not vacuous: the two paths must actually be classified, and
         # differently, or an `unresolved` report would satisfy the equality
-        # above while proving nothing about the matcher.
+        # above while proving nothing about the matcher. Asserted rather than
+        # guarded now that the pinned receipt makes the mode deterministic.
         document = json.loads(direct.stdout)
-        if document["mode"] != "unresolved":
-            categories = [entry["category"] for entry in document["paths"]]
-            self.assertEqual(categories, ["pack-payload", "authored"])
+        self.assertEqual(document["mode"], "fat")
+        categories = [entry["category"] for entry in document["paths"]]
+        self.assertEqual(categories, ["pack-payload", "authored"])
 
     def test_python_and_node_bindings_agree(self) -> None:
         node = subprocess.run(["node", "--version"], capture_output=True, check=False)
