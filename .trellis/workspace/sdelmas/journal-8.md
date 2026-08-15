@@ -1228,3 +1228,49 @@ fleet-publish gated its dirty-tree precondition on a hand-maintained literal tup
 ### Next Steps
 
 - None - task complete
+
+
+## Session 379: Fleet status compares against the newest published release
+
+**Date**: 2026-08-14
+**Task**: Fleet status compares against the newest published release
+**Branch**: `task/fleet-status-release-target`
+
+### Summary
+
+sd-status fleet mode now reports the newest published pack release beside the checkout target, and emits one fleet-level record when the two disagree. The design's obvious implementation was wrong twice and adversarial review caught both before any code was written.
+
+### Main Changes
+
+- collect_release_target reads the newest v<semver> tag with git ls-remote --tags --refs origin against the pack source checkout, rides the existing --no-network switch, and returns a labeled status object (available / disabled / not-configured / unavailable) rather than ever substituting the checkout version
+- Selection parses each tag into an (major, minor, patch) integer tuple. Tag names sort lexicographically, so v0.9.2 > v0.71.8 and a string max() would have reported a year-old version as newest -- well-formed and wrong
+- The comparison stays string equality and the wording says differs from, not is behind: an unreleased working copy is ahead, which is the second failure mode the PRD names and an ordering test would hide
+- One fleet-level record at FLEET_STEP_RANK_SKEW, deliberately unlike the per-consumer stale row's ADVISORY: my checkout is not the published version invalidates every consumer comparison in the same report, so it must not be truncated away. Consumer rows, targetPackVersion, and every existing skew row are unchanged
+- Rejected gh release view after measuring that this repository has zero GitHub Releases -- publication is an annotated tag pushed by the Auto-tag release job. That implementation would have returned unavailable on every run forever
+- Bumped manifest.json 0.71.8 to 0.71.9 with the matching CHANGELOG heading: status.py is shipped payload at four byte-identical paths, and the release payload gate refuses a payload change that leaves the version alone
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `40ddb577` | feat(status): report the newest published release beside the checkout target |
+| `b5a627d1` | chore: bump manifest to 0.71.9 for the status payload change |
+| `b12564ff` | chore(task): record branch and prove the release-target acceptance criteria |
+| `b62aa852` | chore(task): archive 08-10-fleet-status-release-target |
+
+### Testing
+
+- [OK] tests.test_status: Ran 104 tests, OK (11 new, including the ordering case that is the only one a string max() fails)
+- [OK] sd-check --json: status passed, 7 passed / 0 failed
+- [OK] All four status.py mirrors byte-identical after make sync + make generate (diff -q, three OK)
+- [OK] PR #460 CI mergeStateStatus CLEAN; Release payload gate SUCCESS
+- [NOTE] unittest (ubuntu 3.10) failed once on an unrelated pre-existing race and passed on re-run; see follow-up below
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
