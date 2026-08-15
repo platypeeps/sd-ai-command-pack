@@ -102,6 +102,34 @@ reading `comparison: "current"` at 0.71.1 was **not** a reporting defect.
 `skew` the moment the machine reached 0.71.2 alone. Nothing here belongs
 to `.trellis/tasks/08-09-machine-status-copy-unavailable`.
 
+**Machine provisioning re-confirmed 2026-08-15 at 0.71.12.** The three lines
+above record a gate that was satisfied nine versions ago. That gate is the
+whole reason conversion is safe for a `runs codex` consumer -- the conversion
+deletes the vendored copies on the premise that the machine payload supplies
+them -- so it has to cite the provisioning actually standing in front of this
+conversion, not a version that predates it. Re-run after `0.71.12` merged as
+`a831cb74`:
+
+- `install.py --machine` — 116 files (106 owned-current, 9 owned-stale, 1
+  absent); receipt at pack 0.71.12, payload
+  `sha256:a5577f94a7f17325ab65e9f0a57dd7c32659eb7fd5be0086fa948e215c8e1099`.
+- `claude plugin marketplace update sd-ai-command-pack` then
+  `claude plugin update sd@sd-ai-command-pack` — 0.71.2 to 0.71.12. The
+  marketplace refresh alone still does not move an installed plugin, exactly
+  as recorded on 2026-08-12.
+
+Verified after both: `machineScope.state: installed`,
+`packVersion: 0.71.12`, `pluginVersion: 0.71.12`, `comparison: "current"`,
+against `targetPackVersion: 0.71.12`.
+
+Design O3 is answered on the same reading, by enumerating the destinations
+rather than the sources: all 25 `scripts/sd-ai-command-pack-*` targets in the
+surface partition resolve under `~/.agents/bin/`, `~/.agents/docs/SD_AI_COMMAND_PACK.md`
+is present, and `~/.agents/skills/` carries 19 `sd-*` skills. Those three
+directories are precisely what `THIN_PROFILE` rewrites kept citations to, so
+the check asks whether the rewritten text points at something real rather than
+whether the install reported success.
+
 **Superseded by the authorization above, retained for provenance.** This
 task mutates
 repositories outside `sd-ai-command-pack`: `platypeeps/rwbp-coordinator`,

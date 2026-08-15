@@ -44,15 +44,15 @@ not a re-run of the same command.
 
 ## Phase 1 — machine scope to 0.71.12
 
-- [ ] 1.1 `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- install.py --machine`
-- [ ] 1.2 `claude plugin marketplace update sd-ai-command-pack` then
+- [x] 1.1 `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- install.py --machine`
+- [x] 1.2 `claude plugin marketplace update sd-ai-command-pack` then
       `claude plugin update sd@sd-ai-command-pack`. The marketplace refresh
       alone does not move an installed plugin and `plugin install` reports
       "already installed" rather than upgrading (recorded 2026-08-12).
-- [ ] 1.3 Record the `sd-status fleet --json` machine scope block.
-- [ ] 1.4 Answer design O3: the install audit lists every script the rewritten
+- [x] 1.3 Record the `sd-status fleet --json` machine scope block.
+- [x] 1.4 Answer design O3: the install audit lists every script the rewritten
       call sites will resolve.
-- [ ] 1.5 Re-record PRD requirement 3's three machine-provisioning lines at
+- [x] 1.5 Re-record PRD requirement 3's three machine-provisioning lines at
       the new version. They currently cite 2026-08-12 at 0.71.2; that gate is
       the reason conversion is safe for a Codex user, and it must cite the
       provisioning that is actually in front of the conversion.
