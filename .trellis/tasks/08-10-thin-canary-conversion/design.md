@@ -290,6 +290,23 @@ carrying a mode branch and dead code to guard files none of them will have;
 and repointing them at `~/.agents/bin`, which fails in the one place the guard
 matters most, since a CI runner has no machine payload.
 
+### D3e. What each citation becomes, by what cites it
+
+Measured on rwbp-coordinator, whose 48 blockers carry every shape the other two
+canaries also have. The classification is by *what happens to the file the
+citation names*, which is not the same question as who owns the citing file --
+three categories, not the two D3c implies.
+
+| citing context | example | becomes |
+|---|---|---|
+| CI workflow step invoking pack payload | `.github/workflows/ci.yml:112-118` | **deleted.** The PRD acceptance criterion is "CI green post-conversion with zero pack CI steps", so this is settled, not a judgment call. A CI runner has no machine payload; a repointed step would fail there. |
+| local developer invocation | `scripts/lib/check-full.mjs:107`, `package.json:57` | **resolved.** `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py --resolve NAME` reports where the script actually lives. This is what that second install target exists for -- the manual says call this one from a repository's own guards -- and a developer machine does have the payload. |
+| guard asserting content of removed payload | `check-review-churn.mjs:363-392`, `:432-433` | **deleted**, per D3c. |
+| guard asserting content of a **rewritten but kept** file | `check-review-churn.mjs:205, 218, 221` | **repointed.** `.github/copilot-instructions.md` survives conversion and its managed block is rewritten by `literal_rewrites`, so the needle must match the post-conversion text. Deleting these would drop a live assertion about a file that still exists. |
+| glob straddling the boundary | `classify-ci-changes.sh:153` | **narrowed.** `.sd-ai-command-pack/*` survives and stays; the sibling `scripts/sd-ai-command-pack-*` is dead after conversion and goes. This answers design O2: the `.sd-ai-command-pack/*` citation needs no edit at all. |
+| prose in docs or spec | `.trellis/spec/web/operations/local-development.md:28` | **repointed** to the resolved form, or to the machine path where the sentence is about a developer's own machine. |
+| history-shaped record | `hoa-manager` task `prd.md` | **annotated**, per D3b. |
+
 ### D3d. Two loadsmith blockers are this campaign's own
 
 `scripts/update_repomix:62` and `:65` are from the phase 2 repomix exclusion,
