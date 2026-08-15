@@ -3,7 +3,7 @@
   "name": "fleet-status-release-target",
   "title": "Fleet status: compare against the newest published release",
   "description": "Make fleet status compare each consumer's installed pack version against the newest published release rather than the local source checkout, so a stale maintainer checkout cannot report the fleet as current.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

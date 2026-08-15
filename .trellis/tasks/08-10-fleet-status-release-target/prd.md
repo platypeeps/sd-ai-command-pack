@@ -22,8 +22,16 @@ copy sees the whole fleet flagged stale against a version nobody can install.
    `sd-ai-command-pack` release, not only the resolved checkout's manifest.
 2. Both targets stay distinguishable in the report; a reader must be able to
    tell which comparison produced a stale row.
-3. An unavailable release lookup is labeled `unavailable`, never silently
-   downgraded to the checkout target and never rendered as agreement.
+3. A release lookup that does not produce a version is **labeled with the
+   reason it did not**, never silently downgraded to the checkout target and
+   never rendered as agreement.
+
+   Filed as "labeled `unavailable`". Design D5 splits that into the vocabulary
+   `collect_github` already uses — `disabled` when `--no-network` suppressed
+   the lookup, `not-configured` when the pack checkout has no remote,
+   `unavailable` when the lookup ran and failed. The requirement is the
+   labeling; one word versus three was incidental, and three tell an operator
+   which fix applies.
 
 ## Constraint that makes this non-trivial
 
@@ -38,5 +46,6 @@ resolved outside status entirely — do not just add a call.
 - [ ] The release target is available and clearly distinguished from the
       checkout target in both JSON and human output.
 - [ ] `--no-network` still produces a complete report, with the release target
-      explicitly `unavailable` rather than absent or silently substituted.
+      explicitly labeled (`disabled`) rather than absent or silently
+      substituted, and with no subprocess spawned for the lookup.
 - [ ] Status remains read-only: no fetch, install, or write is added.
