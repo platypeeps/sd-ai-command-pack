@@ -36,10 +36,18 @@ runtime over reciting a list).
 
 ## Acceptance Criteria
 
-- [ ] A payload target path present in the installed manifest but absent from
+- [x] A payload target path present in the installed manifest but absent from
       the old literal tuple passes the dirty-tree gate without a code edit,
       proven by a test.
-- [ ] A dirty path outside both the derived set and the explicit residue
+      `test_new_payload_target_passes_without_a_code_edit`.
+- [x] A dirty path outside both the derived set and the explicit residue
       still refuses with the existing exit code and message shape.
-- [ ] Missing/malformed receipt evidence refuses with a named reason code.
-- [ ] The remaining literal entries each carry an ownership comment.
+      `test_path_outside_derived_set_and_residue_still_refuses`.
+- [x] Missing/malformed receipt evidence refuses with a named reason code.
+      The evidence file is `.sd-ai-command-pack/manifest.json`, not the
+      installed-targets receipt — see design D1 for why the receipt is unsafe
+      here. Four codes, one test each: `manifest_missing`,
+      `manifest_unreadable`, `manifest_malformed`, `manifest_targets_empty`.
+- [x] The remaining literal entries each carry an ownership comment.
+      Both residue constants: `DEFAULT_ALLOWED_PREFIXES` (directories) and
+      `DEFAULT_ALLOWED_EXACT` (files).
