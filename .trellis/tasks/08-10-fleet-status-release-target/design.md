@@ -155,9 +155,13 @@ unaffected.
 
 `tag` is carried alongside `version` because the ref is the published artifact
 and the version is derived from it by stripping the leading `v`. Keeping both
-means a malformed ref is visible rather than silently producing a wrong
-`version`. A tag that does not match
-`v<version>` yields `status: "unavailable"` with the raw tag retained.
+lets a reader see which ref produced the version rather than trusting a bare
+string. A ref that does not match `v<major>.<minor>.<patch>` never becomes a
+`version`: it is skipped during selection (D2a), not coerced and not retained.
+If skipping leaves no candidate, the result is `unavailable` with both
+`version` and `tag` null — the same shape as a failed lookup, because "the
+remote published nothing this code recognizes" is not more actionable than
+"the lookup failed".
 
 ## D6 — Comparison is string equality, not semver ordering
 
@@ -217,5 +221,12 @@ Edit the template, then run **both** generators: `make sync`
 with `scripts/sd-ai-command-pack-fleet-candidate-check.py` and commit it. That
 is why the precedent commit touched that file.
 
-Rollback is reverting the commit. Status writes nothing, so no consumer state
-persists.
+The payload change also forces a `manifest.json` version bump. The release
+payload gate refuses a shipped-payload change that leaves the version alone
+(`release version drift: shipped payload changed without manifest version
+bump`), and the changelog gate then requires a matching top heading. So the
+commit carries `0.71.8` to `0.71.9`, a `CHANGELOG.md` entry, and the
+`command-catalog.md` mirrors that `make sync` rewrites from the new version.
+
+Rollback is reverting the commit, version bump included. Status writes nothing,
+so no consumer state persists.

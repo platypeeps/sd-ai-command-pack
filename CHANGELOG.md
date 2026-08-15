@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.71.9 - 2026-08-14
+
+### Added
+
+- `sd-status fleet` reports the newest published release beside the checkout
+  target. The fleet target was the operator's own checkout manifest, so *stale*
+  meant "behind my checkout", not "behind what is published": an operator on an
+  old checkout saw a healthy fleet, and an operator on an unreleased working
+  copy saw every consumer flagged against a version nobody can install. The new
+  `releaseTarget` field carries `status`, `version`, and `tag`, and one
+  fleet-level step appears when the checkout differs from the release.
+
+  The source is `git ls-remote --tags`, not `gh release view`: this project
+  publishes annotated tags and has no GitHub Releases, so a `gh` lookup would
+  have reported `unavailable` forever. Selection orders on the parsed
+  `(major, minor, patch)` triple, because tag strings sort lexicographically
+  and `v0.9.2` outranks `v0.71.8`.
+
+  Consumer comparisons are unchanged and stay checkout-based. A lookup that
+  produces no version is always labeled -- `disabled` under `--no-network`,
+  `not-configured` without a remote, `unavailable` on failure -- never omitted
+  and never silently substituted. Status remains read-only, and the release
+  target is reported without counting toward the attention total.
+
 ## 0.71.8 - 2026-08-14
 
 ### Fixed

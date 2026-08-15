@@ -201,7 +201,26 @@ Every hit that reads the fleet report must still work with an added sibling
 key. A hit that enumerates top-level keys, rather than indexing them, is the
 one that breaks.
 
-## 7. Rollback
+## 7. Bump the manifest version
 
-Revert the single commit. Status writes nothing; no consumer state, no cache,
-no payload version change.
+This script is shipped payload, so the release payload gate refuses the change
+without a version bump:
+
+```
+error: release version drift: shipped payload changed without manifest version
+bump (...); manifest version stayed at '0.71.8'
+```
+
+Bump `manifest.json` to `0.71.9`, add the matching `## 0.71.9 - <date>` heading
+to `CHANGELOG.md` — the changelog gate requires the two to agree — then re-run
+`make sync`, which rewrites `.sd-ai-command-pack/manifest.json` and the
+`.agents/`/`.claude/` `command-catalog.md` mirrors from the new version.
+
+Because those mirrors are tooling/generated paths, the PR body needs a
+`## Tooling/generated scope:` section or
+`sd-ai-command-pack-pr-body-scope.py` fails the drift gate.
+
+## 8. Rollback
+
+Revert the single commit, version bump included. Status writes nothing; no
+consumer state and no cache to unwind.
