@@ -262,6 +262,44 @@ will recur in any consumer that tracks a generated whole-repo artifact; this
 task fixes loadsmith's, and records the pattern for the post-canary cohort
 rather than pre-solving it.
 
+### D3c. Assertions about vendored payload are deleted, not repointed
+
+**Operator decision, 2026-08-15.** The dominant blocker file in every canary is
+the same shape: a repo-local guard asserting facts about the *vendored pack
+payload*. `check-review-churn.mjs` (36), `check_review_readiness.sh` (16),
+`check-review-preflight.mjs` and its test (18) -- about seventy of the hundred
+and five. Conversion deletes the files those assertions are about, so they
+cannot be reworded; something has to happen to them.
+
+Three options were put to the operator, who chose deletion. Assertions about
+pack payload go; every assertion about the consumer's own code stays.
+
+The reasoning is that a consumer asserting the content of a vendored copy
+duplicates an upstream guard against a copy, which is why the copy churns. The
+premise was checked rather than assumed: `BASH_SOURCE[0]` and
+`cd -- "$REPO_ROOT"` are guarded by `tests/test_full_check.py` and
+`tests/test_pack_drift.py`, and `--no-auto-merge` is exercised behaviourally in
+`tests/test_housekeeping.py` -- a stronger guard than a grep for the flag.
+
+The accepted cost is stated plainly: if the pack regressed one of these
+properties, the three canaries would no longer notice it locally. They would
+notice it in the pack's own suite, which is where the property is owned.
+
+Rejected: gating the assertions on fat mode, which leaves three repositories
+carrying a mode branch and dead code to guard files none of them will have;
+and repointing them at `~/.agents/bin`, which fails in the one place the guard
+matters most, since a CI runner has no machine payload.
+
+### D3d. Two loadsmith blockers are this campaign's own
+
+`scripts/update_repomix:62` and `:65` are from the phase 2 repomix exclusion,
+not from loadsmith's history. Line 62 is a comment naming
+`docs/SD_AI_COMMAND_PACK.md` exactly -- in a comment whose subject is that
+exact suffix trap -- and line 65 is the glob it describes. Both are rewritten
+in phase 3 with everything else. Recorded because a measurement taken before
+phase 2 will not contain them, and their absence from an earlier count is not
+evidence that the count was wrong.
+
 ### D3b. History-shaped files are annotated, not rewritten
 
 `hoa-manager/.trellis/tasks/08-07-task-manifest-context-roots/prd.md` holds one
