@@ -12,28 +12,35 @@ hoa-manager       ~/repos/platypeeps/hoa-manager
 All three were measured clean and on `main` at
 `e76ca314` / `280cc49f` / `ab755cfe` on 2026-08-15.
 
-## Phase 0 — repoint the pack's own 15 citations (pack repo)
+## Phase 0 — unblock conversion at the source (pack repo)
 
-- [ ] 0.1 Read all six templates in full before editing; the citations sit in
-      managed blocks whose emission differs from the file on disk.
-- [ ] 0.2 Edit `templates/.github/copilot-instructions.sd-ai-command-pack.md`
-      (7 hits), `templates/.github/PULL_REQUEST_TEMPLATE.md` (2),
-      `templates/.github/prompts/sd-housekeeping.prompt.md` (2),
-      `templates/.github/prompts/sd-review-learnings.prompt.md` (2),
-      `templates/.github/prompts/sd-review.prompt.md` (1),
-      `templates/.github/prompts/sd-status.prompt.md` (1), per design D2's
-      three kinds.
+Rewritten after review round 2. The six templates are **not** edited: their fat
+wording is correct and the conversion already repoints it (design D2).
+
+- [ ] 0A.1 Teach the resweep to scan post-repoint bytes for kept, pack-owned
+      files, sourcing the rewrite from `installer.thin.planned_repoints` rather
+      than restating the rules in the scanner.
+- [ ] 0A.2 Keep the change off every other bucket: `blockers` still scan the
+      bytes as written, because nothing rewrites a consumer's own file.
+- [ ] 0A.3 Tests, both directions: a pack-owned kept file whose citation the
+      repoint fixes is **not** a `packDefect`; one whose citation survives the
+      repoint still **is**. A one-directional test here passes by never firing.
+- [ ] 0B.1 Change the `.agents/skills/sd-*/SKILL.md` literal rewrite to name
+      `~/.agents/skills`, per design D2c and mirroring `AGENTS_DOC_DIRECTORY`'s
+      recorded reasoning about suffix matching.
+- [ ] 0B.2 Test that the rewritten text no longer ends with a removed path.
 - [ ] 0.3 Cascade: `make sync`, `make generate`, candidate-check,
       `make generate`, version bump to `0.71.12`, CHANGELOG heading,
       `make sync`.
 - [ ] 0.4 `make check` and `make release-prep` exit 0.
-- [ ] 0.5 Answer design O1: read the emitted review-guidance block for a fat
-      consumer before and after, and record what changed for a fat reader.
+- [ ] 0.5 Answer design O1 — **superseded**: no template text changes, so the
+      emitted block is unchanged for a fat reader. Record that and close it.
 - [ ] 0.6 PR, Copilot review loop, merge.
 
-**Validation:** deferred by design D2a. The claim "the pack no longer cites
-removed paths" is proven by the first phase-2 resweep reporting
-`packDefects: 0`, not by grepping what I just wrote.
+**Validation:** local and immediate. With the canaries untouched at 0.71.6, all
+three resweeps report `packDefects: 0`, down from 15. Measured before: 15 / 15
+/ 15, identical by file and text. The negative direction is 0A.3's second test,
+not a re-run of the same command.
 
 ## Phase 1 — machine scope to 0.71.12
 

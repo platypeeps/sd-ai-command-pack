@@ -63,7 +63,105 @@ sits at 0.71.2 is the one configuration that loses a working surface (PRD
 requirement 3, requirement 8). Phase 3 before phase 4 because `--thin` refuses
 on a `blocked` verdict and that refusal is the contract, not an obstacle.
 
-## D2. Phase 0: what the pack's own text should say instead
+## D2. Phase 0: the scanner is wrong about 14 of the 15
+
+**Rewritten in review round 2. The version below this heading's first draft
+proposed rewording all six templates; that would have been actively harmful and
+is recorded here rather than deleted, because the reasoning is the finding.**
+
+The conversion already repoints these files. `repoint_kept_references`
+(`installer/thin.py:675`) exists for exactly this population, and its docstring
+names the consequence it prevents: kept `repo-native` files "still say
+`scripts/<name>` and `docs/SD_AI_COMMAND_PACK.md`, which is exactly what the
+conversion just removed... the resweep reports every one of them as a
+`packDefect`." `THIN_PROFILE.literal_rewrites`
+(`installer/references.py:355`) carries purpose-built rules for "the three
+globs in the Copilot managed block".
+
+Executed against loadsmith's actual bytes, `planned_repoints` changes all six
+files and takes the removed-path citations from **17 to 1**:
+
+| file | before | after |
+|---|---:|---:|
+| `.github/PULL_REQUEST_TEMPLATE.md` | 2 | 0 |
+| `.github/copilot-instructions.md` | 7 | **1** |
+| `.github/prompts/sd-housekeeping.prompt.md` | 3 | 0 |
+| `.github/prompts/sd-review-learnings.prompt.md` | 2 | 0 |
+| `.github/prompts/sd-review.prompt.md` | 2 | 0 |
+| `.github/prompts/sd-status.prompt.md` | 1 | 0 |
+
+So the pack's fat text is not the defect. A fat consumer that says
+`scripts/sd-ai-command-pack-full-check.sh` is telling the truth — the script is
+right there. Rewording those six templates to satisfy a pre-conversion scan
+would degrade correct guidance for every fat consumer in the fleet, to work
+around a measurement that is itself mistaken.
+
+### D2a. The deadlock, stated plainly
+
+`decide()` (`thin-resweep.py:1773`) returns `blocked` on a non-empty
+`packDefects` bucket. `--thin` refuses any verdict that is not `clear`
+(`installer/thin.py:124`). The scanner reads the tree's **current** bytes and
+performs no repoint simulation (`thin-resweep.py:1596-1634`). Therefore every
+fat consumer holding pack-owned kept files reports `packDefects` and can never
+reach `clear`.
+
+That is not a canary problem. **No consumer in the fleet can convert today**,
+and this task is the first thing to actually try, which is why it surfaced
+here rather than in the tooling task that built both halves.
+
+### D2b. The fix: measure what the verdict authorizes
+
+The verdict authorizes a conversion. So the bytes it should judge are the ones
+the conversion produces, not the ones preceding it. For a **kept, pack-owned**
+file, the resweep scans the text `planned_repoints` would write, and reports a
+`packDefect` only for a citation that survives that rewrite.
+
+Deliberately narrow. It changes nothing about `blockers` — a consumer-owned
+citation is still scanned as written, because nothing rewrites those and the
+consumer is the one who must act. It changes nothing about `scheduled`,
+`advisories`, or `missingFiles`. It reuses the installer's own computation
+rather than restating the rewrite rules in the scanner; two implementations of
+"what will the conversion write" is the drift A-046 was about.
+
+The honest cost: the resweep gains a dependency on the installer's plan, so a
+consumer's verdict now depends on the pack version computing it. That is
+already true of the removal set — `--thin` re-verifies the verdict's bindings
+and refuses a stale one — so the coupling is not new, only newly visible.
+
+### D2c. The one real defect
+
+The survivor is `.agents/skills/sd-*` in `copilot-instructions.md`. The rewrite
+turns `` `.agents/skills/sd-*/SKILL.md` `` into
+`` `~/.agents/skills/sd-*/SKILL.md` ``, and `cites_removed_path` matches path
+**suffixes** (`thin-resweep.py:1225`), so the rewritten text still ends with
+the removed path and is still a citation of it.
+
+This exact trap is already documented one screen above the rule that falls into
+it. `AGENTS_DOC_DIRECTORY` (`installer/references.py:326`) explains that
+`~/.agents/docs/SD_AI_COMMAND_PACK.md` "ends with the removed
+`docs/SD_AI_COMMAND_PACK.md` and is classified as a citation of it", and solves
+it by naming **the directory** and leaving the file to prose. The skills glob
+needs the same treatment and did not get it. Fix: rewrite to `~/.agents/skills`
+and let the surrounding sentence say what lives there.
+
+### D2d. What phase 0 is now
+
+Two changes, not six template rewrites:
+
+- **0A** — the resweep scans post-repoint bytes for kept pack-owned files.
+- **0B** — the `.agents/skills/sd-*/SKILL.md` literal rewrite names the
+  directory, per D2c.
+
+Neither is a payload text change, so the six templates keep their fat-correct
+wording. 0B touches `installer/references.py`, which is shipped payload, so the
+cascade and a version bump to `0.71.12` still apply.
+
+**Validation is immediate and local**, which the first draft got wrong by
+deferring it to a phase-2 refresh: the resweep runs from this checkout and
+reads consumer bytes, so `packDefects: 0` for all three canaries is measurable
+the moment 0A and 0B land, with the canaries untouched at 0.71.6.
+
+## D2-superseded. What the first draft proposed (retained for provenance)
 
 The 15 citations, measured against `templates/`, are:
 
@@ -118,13 +216,8 @@ Phase 0 is a payload change, so the full cascade applies: template edit,
 `make sync`, `make generate`, `candidate-check`, `make generate`, version bump
 to `0.71.12` with a CHANGELOG heading, `make sync` for the mirrors.
 
-### D2a. The check that phase 0 actually worked
-
-Not "grep the templates" — that measures the string I just typed. The gate is
-the scanner: after a canary refreshes to 0.71.12 (phase 2), its resweep must
-report `packDefects: 0`. Until a consumer holds 0.71.12 the claim is unproven,
-which is why phase 0's own acceptance is deferred to the first phase-2 resweep
-rather than asserted at merge.
+*(End of the superseded draft. Its D2a proposed deferring phase 0's validation
+to a phase-2 refresh; D2d supersedes that with a local measurement.)*
 
 ## D3. Phase 3: the consumer rewrite policy
 
@@ -283,3 +376,25 @@ were new.
 No unresolved blocker. C-5 is parked and non-blocking: it is a question about
 which phase produces an artifact the criterion already requires, not a doubt
 about whether the criterion is right.
+
+### Round 2
+
+Round 1 verified the plan's numbers. Round 2 asked the question round 1 did
+not: *is the gate this plan is built to satisfy measuring the right thing?*
+
+| ID | severity | concern | evidence | disposition |
+|---|---|---|---|---|
+| C-8 | blocking | Phase 0 proposed rewording six templates so a pre-conversion scan passes. The conversion **already** repoints them, so the rewording would degrade correct fat-mode guidance for the whole fleet to satisfy a mistaken signal | `installer/thin.py:675` `repoint_kept_references` exists for this population and names this consequence; `THIN_PROFILE.literal_rewrites` carries purpose-built rules for the three Copilot globs; executed, `planned_repoints` takes loadsmith's six files from 17 citations to 1 | **addressed** — D2 rewritten; the first draft retained as D2-superseded |
+| C-9 | blocking | The resweep scans pre-conversion bytes and blocks on them, while `--thin` requires `clear`. No fat consumer can reach `clear`, so **no consumer in the fleet can convert** | `decide()` at `thin-resweep.py:1773`; the verdict gate at `installer/thin.py:124`; no repoint simulation in the scan loop at `thin-resweep.py:1596-1634` | **addressed** — D2b makes the scan judge the bytes the conversion produces, for kept pack-owned files only |
+| C-10 | medium | One citation survives the repoint and is a genuine defect: the skills glob rewrite produces `~/.agents/skills/sd-*/SKILL.md`, which still ends with the removed path | measured 17 → 1; `cites_removed_path` matches suffixes (`thin-resweep.py:1225`); `AGENTS_DOC_DIRECTORY` (`references.py:326`) documents this exact trap and solves it by naming the directory | **addressed** — D2c; phase 0B |
+| C-11 | low | Phase 0's validation was deferred to a phase-2 refresh on the assumption the fix was in shipped text | the resweep runs from this checkout and reads consumer bytes, so a scanner fix is measurable against untouched canaries | **addressed** — D2d validates locally |
+
+Round 2's own cross-artifact sweep: the figure 15 now appears with two
+readings — 15 measured, 14 of them repointed — and both `prd.md` and
+`implement.md` were updated to state the distinction rather than the bare
+count. Phase 0's deliverable changed from six template edits to two code
+changes in `implement.md`, `design.md`, and the PRD's added acceptance
+criterion.
+
+Two remediation rounds have run; the contract permits no third automatic round.
+Nothing is unresolved.
