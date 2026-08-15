@@ -1859,6 +1859,7 @@ class InstallAuditTests(InstallTestCase):
             "sd-ai-command-pack-pack-update.sh",
             "sd-ai-command-pack-recovery-artifacts.py",
             "sd-ai-command-pack-review-full-check.sh",
+            "sd-ai-command-pack-review-layout.py",
             "sd-ai-command-pack-review-local.py",
             "sd-ai-command-pack-status.py",
             "sd-ai-command-pack-surface-check.py",

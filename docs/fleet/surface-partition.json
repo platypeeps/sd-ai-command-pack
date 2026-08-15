@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "0.71.9",
+  "manifestVersion": "0.71.10",
   "platforms": {
     "antigravity": {
       "scope": "repo-native",
@@ -79,7 +79,7 @@
     }
   },
   "counts": {
-    "machine-claude": 79,
+    "machine-claude": 80,
     "machine-other": 89,
     "repo-native": 551,
     "consumer-config": 6
@@ -4353,6 +4353,12 @@
     },
     {
       "target": "scripts/sd-ai-command-pack-review-full-check.sh",
+      "platform": "shared",
+      "category": "machine-claude",
+      "sharedRuntime": true
+    },
+    {
+      "target": "scripts/sd-ai-command-pack-review-layout.py",
       "platform": "shared",
       "category": "machine-claude",
       "sharedRuntime": true

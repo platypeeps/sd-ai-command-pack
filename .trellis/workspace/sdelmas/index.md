@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 379
+- **Total Sessions**: 380
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1264 | Active |
+| `journal-8.md` | ~1309 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 380 | 2026-08-14 | Ship a layout-aware review guard so consumers stop reimplementing one | `11b7870c`, `eecebd91`, `20c0b487`, `60fc84d5` | `task/pack-layout-aware-guard` |
 | 379 | 2026-08-14 | Fleet status compares against the newest published release | `40ddb577`, `b5a627d1`, `b12564ff`, `b62aa852` | `task/fleet-status-release-target` |
 | 378 | 2026-08-14 | Derive the fleet-publish dirty-tree allowlist from the consumer manifest | `822fc335`, `45253123`, `ffcb9037`, `75f7260d` | `task/fleet-publish-manifest-allowlist` |
 | 377 | 2026-08-14 | Merge eligibility counts superseded workflow runs as blocking | `66c02eb4580fdf36fe496fa6e9dc1e5a234ccc9a`, `99678da9f2759d1a359bbb7b0256e7aa04ed390d`, `419bf17c9db409d4783c6c976621ba6a5f5f26e6` | `task/eligibility-superseded-runs` |
