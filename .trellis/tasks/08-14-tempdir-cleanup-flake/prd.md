@@ -60,7 +60,7 @@ several hundred CI job runs before it was fixed.
 This repository has no such funnel: 216 independent call sites, only 4 of them
 shared. A verbatim port is therefore not available, and the design step must
 choose a scope rather than assume one. That choice is deliberately left open
-here — see the design task below.
+here; settling it is the second acceptance criterion below.
 
 ## Requirements
 
@@ -98,10 +98,11 @@ POSIX — the directory entry is removed and the inode persists until the last
 descriptor closes — so the obvious staging attempt does not reproduce anything.
 
 `se-ai-command-pack` wrote this reproduction into its acceptance criteria,
-could not meet it, and closed the task with the gap recorded (see that repo's
-`.trellis/tasks/archive/2026-08/08-14-tempdir-cleanup-flake/prd.md`). Do not
-repeat that: confidence here rests on the mechanism plus handler-level tests,
-and this PRD says so up front rather than discovering it at close-out.
+could not meet it, and closed the task with the gap recorded — see its archived
+task `08-14-tempdir-cleanup-flake` under
+<https://github.com/platypeeps/se-ai-command-pack/pull/228>. Do not repeat that:
+confidence here rests on the mechanism plus handler-level tests, and this PRD
+says so up front rather than discovering it at close-out.
 
 ## Constraints
 
@@ -113,8 +114,12 @@ and this PRD says so up front rather than discovering it at close-out.
 
 ## Notes
 
-- Origin of the fix: `se-ai-command-pack` PR #225, commit `7bbba64`, plus its
-  regression tests in `tests/test_install_test_support.py`.
+- Origin of the fix: `se-ai-command-pack` PR #225, commit `7bbba64`, plus the
+  regression tests added alongside it in that repository
+  (<https://github.com/platypeeps/se-ai-command-pack/pull/225>). Paths in that
+  repository are deliberately not written as bare paths here: this repository's
+  review preflight resolves documentation paths locally, and a cross-repo path
+  reads to it as a broken link.
 - Filed from a fleet sweep after that repo's flake fix landed; the sweep found
   this repository to be the only other one in the fleet with all the
   preconditions present.
