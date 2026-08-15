@@ -53,9 +53,11 @@ Measured on `origin/main` at `a129437c`:
 | CI Python matrix | 3.10 and 3.13 (`requires-python = ">=3.10"`) |
 
 **No occurrence of this flake has been observed in this repository.** A search
-for `Errno 39` / `Directory not empty` across `tests/` and `.trellis/` returns
-nothing. This is a latent hazard with every precondition present, not an active
-failure. In `se-ai-command-pack` the same construction failed roughly once per
+for `Errno 39` / `Directory not empty` across `tests/` returns nothing, and
+across `.trellis/` the only matches are this task's own `prd.md` and
+`task.json` — which describe the hazard rather than record a hit. Excluding
+this task directory, `.trellis/` is clean. This is a latent hazard with every
+precondition present, not an active failure. In `se-ai-command-pack` the same construction failed roughly once per
 several hundred CI job runs before it was fixed.
 
 ## How this repository differs from the origin of the fix
