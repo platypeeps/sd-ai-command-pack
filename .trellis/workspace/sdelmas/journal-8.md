@@ -1318,3 +1318,48 @@ Added sd-ai-command-pack-review-layout.py, a pack-owned resolver that answers th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 381: Consumer-config layout shim: install the resolver where thin conversion keeps it
+
+**Date**: 2026-08-14
+**Task**: Consumer-config layout shim: install the resolver where thin conversion keeps it
+**Branch**: `task/consumer-config-layout-shim`
+
+### Summary
+
+Installed the layout resolver a second time at .sd-ai-command-pack/bin/, a consumer-config path thin conversion retains, so a consumer reference to the pack stops being a conversion blocker without first centralizing its call sites.
+
+### Main Changes
+
+- Added a second manifest target for the resolver and a partition override classifying .sd-ai-command-pack/bin/** as consumer-config; version 0.71.10 -> 0.71.11.
+- Carried resolve_state_root and CommandError into the resolver, because its old sibling import of sd_ai_command_pack_lib is machine-claude and unavailable under thin; took a narrow, self-guarded A-046 exemption backed by a ten-case agreement test.
+- Measured the prior task's premise against the eight saved resweeps and refuted it: adopting --resolve without a surviving entrypoint trades 288 blockers for up to 68 files, not 8.
+- Documented the cohort ordering in docs/FLEET_ROLLOUT.md: ship, refresh, rewrite call sites, resweep, convert.
+- Fixed a CI-only failure in the new shell-binding agreement test, which resolved the layout through a gitignored install receipt and so measured whose machine ran it.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ea10fefb` | feat(layout): install the resolver where thin conversion keeps it |
+| `a9c7cf43` | test(layout): pin the binding agreement receipt instead of discovering it |
+| `74c1a3ae` | chore(task): record the branch on 08-14-consumer-config-layout-shim |
+
+### Testing
+
+- [OK] make check exit 0; make release-prep exit 0
+- [OK] resolver coverage 210 0 86 0 100% against a floor of 95
+- [OK] partition consumer-config 6 -> 7, total 726 -> 727, no other category moved
+- [OK] install audit passed at 201 targets; both copies byte-identical at mode 644
+- [OK] tests.test_review_layout 44 tests OK with the local receipt moved aside, reproducing the clean-checkout CI condition
+- [OK] PR #462 all 9 required checks SUCCESS at a9c7cf43
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
