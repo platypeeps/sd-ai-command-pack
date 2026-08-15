@@ -472,6 +472,40 @@ def marker_label(match: re.Match[str]) -> str:
 # or basename at all.
 TOKEN = re.compile(r"[\w.*?/-]*[\w*?][./][\w.*?/-]*")
 
+# `docs/FLEET_ROLLOUT.md:630` prescribes the consumer migration: stop naming a
+# `scripts/sd-ai-command-pack-*` literal, and ask the surviving resolver where a
+# pack script lives by passing that script's *name*. The name is a bare basename
+# of a removed path, which is exactly what the bare-name rules of
+# `cites_removed_path` block. Following the documented recipe produced a
+# blocked verdict with no next step -- measured on `rwbp-coordinator` at
+# 0.71.13, where the rewrite cleared 44 blockers and its own three resolver
+# keys replaced them.
+#
+# A file that names the kept resolver has adopted the resolver contract, so a
+# bare pack basename in it is a key rather than a path. Both bare-name rules
+# have to yield, not only rule 5: a guard living in `scripts/` makes rule 3
+# resolve the same key against its own directory and land on the removed path,
+# which is how `rwbp-coordinator`'s `scripts/check-full.test.mjs` blocked while
+# its sibling in `scripts/lib/` did not. Two further deliberate choices:
+#
+# * file-scoped, not line-scoped, because the key is normally a constant
+#   declared away from the call site -- `const NAME = '<basename>'` on one line
+#   and `--resolve` on another, which is the shape the resolver's own
+#   `review-preflight.mjs` uses;
+# * bare-name family only. Rules 1, 2, and 4 are untouched, and so is rule 3's
+#   real job -- resolving a token that already contains a slash, such as
+#   `lib/x.sh` cited from a subdirectory. Every path-shaped pack citation in the
+#   same file therefore still blocks, which is precisely the half-migrated trap
+#   `docs/FLEET_ROLLOUT.md:639` names -- adopting `--resolve` while still
+#   naming the resolver under `scripts/`.
+#
+# The cost is the rest of the bare-name family inside such a file, which this
+# check already describes as a distinctively-named-only lower bound;
+# `--revert-thin`, not this rule, is what makes a conversion safe.
+LAYOUT_RESOLVER_KEPT_TARGET = (
+    ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py"
+)
+
 SKIP_DIRS = (".git/",)
 
 
@@ -1221,6 +1255,8 @@ def cites_removed_path(
     relative_to: str,
     survivors: frozenset[str],
     unambiguous: frozenset[str],
+    *,
+    bare_names: bool = True,
 ) -> bool:
     """Does this token name something the conversion removes?
 
@@ -1289,11 +1325,16 @@ def cites_removed_path(
     parts = token.split("/")
     if any("/".join(parts[index:]) in removed for index in range(1, len(parts))):
         return True
-    parent = str(Path(relative_to).parent)
-    resolved = os.path.normpath(token if parent == "." else f"{parent}/{token}")
-    if resolved in removed:
-        return True
-    return "/" not in token and token in unambiguous
+    # Rules 3 and 5 are the bare-name family: neither reads a path out of the
+    # token, both infer one from context. `bare_names=False` turns that
+    # inference off for a slash-free token while leaving rule 3's real job --
+    # a relative path like `lib/x.sh` cited from a subdirectory -- intact.
+    if bare_names or "/" in token:
+        parent = str(Path(relative_to).parent)
+        resolved = os.path.normpath(token if parent == "." else f"{parent}/{token}")
+        if resolved in removed:
+            return True
+    return bare_names and "/" not in token and token in unambiguous
 
 
 def block_spans(lines: list[str]) -> list[tuple[int, int]] | None:
@@ -1676,10 +1717,23 @@ def scan(
             if len(candidate) == len(lines):
                 scanned = candidate
 
+        # See `LAYOUT_RESOLVER_KEPT_TARGET`. Read from `scanned`, not `lines`:
+        # a kept file whose resolver citation the conversion writes has adopted
+        # the contract in the tree the verdict is about.
+        bare_names = not any(
+            LAYOUT_RESOLVER_KEPT_TARGET in line for line in scanned
+        )
+
         for number, line in enumerate(scanned, start=1):
             if not any(
                 cites_removed_path(
-                    token, removed, repo, relative, survivors, unambiguous
+                    token,
+                    removed,
+                    repo,
+                    relative,
+                    survivors,
+                    unambiguous,
+                    bare_names=bare_names,
                 )
                 for token in TOKEN.findall(line)
             ):

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.71.14 - 2026-08-15
+
+### Fixed
+
+- The thin resweep no longer blocks on the migration it prescribes.
+  `docs/FLEET_ROLLOUT.md:630` tells a consumer to replace its
+  `scripts/sd-ai-command-pack-*` literals with `--resolve NAME` against the
+  kept layout resolver. `NAME` is the bare basename of a removed path, so both
+  bare-name rules in `cites_removed_path` fired on it: rule 5 directly, and
+  rule 3 by resolving it against the citing file's own directory whenever the
+  guard lives in `scripts/`. A consumer that followed the recipe exactly traded
+  many blockers for a few and stayed `blocked`, with no documented next step.
+  Measured on `rwbp-coordinator`: the rewrite cleared 44 blockers and its own
+  three resolver keys replaced them.
+
+  A file that names the kept resolver has adopted the resolver contract, so its
+  slash-free pack basenames are keys rather than paths. The exemption is
+  file-scoped, because the key is normally a constant declared away from the
+  call site, and it reaches only the two bare-name rules: a path-shaped pack
+  citation in the same file still blocks, which keeps the half-migrated trap
+  named at `docs/FLEET_ROLLOUT.md:639` -- adopting `--resolve` while still
+  naming the resolver under `scripts/` -- failing exactly as before.
+
 ## 0.71.13 - 2026-08-15
 
 ### Fixed

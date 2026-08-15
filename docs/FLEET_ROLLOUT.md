@@ -630,6 +630,15 @@ The five steps, and why each precedes the next:
    `scripts/sd-ai-command-pack-*` literal, using `--resolve NAME` for the
    scripts they used to name directly. Safe only after step 2: a rewrite that
    lands first names a file that is not there.
+
+   Cite the kept path **as a plain path**, in every file that passes a `NAME`.
+   Since 0.71.14 that citation is what tells the resweep the file has adopted
+   the resolver contract, which is what stops `NAME` — the bare basename of a
+   removed script — from reading as a stale path citation. A citation the
+   tokenizer cannot see does not count: measured on `rwbp-coordinator`, a test
+   asserting the resolver through a hand-escaped regex
+   (`/\.sd-ai-command-pack\/bin\/…\.py$/`) left the file blocked until the
+   assertion became an `endsWith` on the literal.
 4. **Resweep** (`scripts/sd-ai-command-pack-thin-resweep.py <consumer>`). What
    remains is the residue no runtime resolver reaches — glob patterns in
    instructions prose and change-classifier fixture lists. Each needs

@@ -1,15 +1,15 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-15T12:31:46Z",
-  "packVersion": "0.71.13",
-  "payloadDigest": "sha256:2e6a8d1e367a681600b08f883b353bd794f1012d5c463ca249fa0a26eec8a696",
+  "validatedAt": "2026-08-15T14:22:29Z",
+  "packVersion": "0.71.14",
+  "payloadDigest": "sha256:5299c680c5b813fa8b99558fafb9a18bdf777a6bbd41d1581f883b0486f7c7c2",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "e76ca314407245fc125a362f4ae7d459ac71b072",
+      "baseCommit": "b62ee75d66f61056ecc15c57291a292927234fb5",
       "status": "blocked",
       "prepares": [
         [
@@ -30,7 +30,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "280cc49f151a4db77d186a08566dc05772a70a0d",
+      "baseCommit": "97d358f3b72dbd6cb520a56ebf87aeefdba28679",
       "status": "blocked",
       "prepares": [
         [
@@ -47,13 +47,13 @@
         ]
       ],
       "reasons": [
-        "50 consumer-authored reference(s) to removed paths"
+        "23 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "ab755cfe8e18c7d7e9975e9528f5d2cd8549eb6f",
+      "baseCommit": "359a9020882180eee60d836f0170f9d8541c376b",
       "status": "blocked",
       "prepares": [
         [
@@ -74,7 +74,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "fb35830ed1568f47f22edfcd7f8bdaab8ded841b",
+      "baseCommit": "4e84f4a21c0eaf76729a8af68e659c9ac1187509",
       "status": "blocked",
       "prepares": [
         [
@@ -140,7 +140,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "2c236d5574c565e64bade1f097b3e271914652a8",
+      "baseCommit": "0370f12347e24ddc8a76695fdedf38c012e16388",
       "status": "blocked",
       "prepares": [
         [
@@ -165,13 +165,13 @@
         ]
       ],
       "reasons": [
-        "13 consumer-authored reference(s) to removed paths"
+        "12 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "ce537836f25d568b30e68b873d2f82f683459d1a",
+      "baseCommit": "d58b6da4fccfad306f18a048ed147d092ca15d70",
       "status": "blocked",
       "prepares": [
         [
