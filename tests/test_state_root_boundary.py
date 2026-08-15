@@ -30,6 +30,31 @@ LIB_NAME = "sd_ai_command_pack_lib.py"
 CONSOLIDATED = ("resolve_state_root", "ensure_private_directory")
 STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"
 
+# The one script that may carry its own ladder, and why.
+#
+# A-046 consolidated four forked ladders into the lib because each *could*
+# import it and had simply grown its own. This one cannot. Since 0.71.11 it
+# installs to two targets: `scripts/`, which is `machine-claude`, and
+# `.sd-ai-command-pack/bin/`, which is `consumer-config`. Thin conversion
+# removes the first and keeps the second, and the lib is `machine-claude`, so
+# in a converted consumer the kept copy has no lib to import -- in exactly the
+# consumers where this script is the only remaining way to locate the pack.
+# "Import instead of define" is not a choice available to it.
+#
+# The property A-046 bought was no drift, not literally one definition, and
+# that property is preserved by a stronger check than this AST gate could
+# apply: `tests/test_review_layout.py` runs both implementations against every
+# rung of the ladder and every absolute-path refusal and requires equal
+# answers. `test_the_exemption_is_backed_by_an_agreement_test` below refuses to
+# let the exemption outlive that check.
+#
+# Vendoring the lib alongside it was the alternative and is worse: 1230 lines
+# of git, subprocess and cache helpers in every consumer to avoid duplicating
+# ~45 lines of path arithmetic, in a conversion whose purpose is to stop
+# vendoring pack code.
+LADDER_EXEMPT = {"sd-ai-command-pack-review-layout.py"}
+AGREEMENT_TEST = "test_carried_state_root_ladder_matches_library"
+
 # The four modules that own user-local state and previously forked the ladder.
 STATE_MODULES = (
     "sd-ai-command-pack-work-loop.py",
@@ -72,12 +97,17 @@ class StateRootBoundaryTest(unittest.TestCase):
         """AC2: only the shared lib defines the two consolidated functions."""
 
         offenders: dict[str, list[tuple[str, int]]] = {}
+        exempt_hits: dict[str, list[tuple[str, int]]] = {}
         for path in sorted(SCRIPTS_DIR.glob("*.py")):
             if path.name == LIB_NAME:
                 continue
             hits = _top_level_defs(_tree(path), CONSOLIDATED)
-            if hits:
-                offenders[path.name] = hits
+            if not hits:
+                continue
+            if path.name in LADDER_EXEMPT:
+                exempt_hits[path.name] = hits
+                continue
+            offenders[path.name] = hits
         self.assertEqual(
             offenders,
             {},
@@ -85,6 +115,30 @@ class StateRootBoundaryTest(unittest.TestCase):
             "private wrapper to the module-level name by assignment instead. "
             f"Offenders: {offenders}",
         )
+        # An exemption for a file that stopped using it is an exemption nobody
+        # is checking. Every entry must still be carrying a definition.
+        self.assertEqual(set(exempt_hits), LADDER_EXEMPT, exempt_hits)
+        # And only the ladder: `ensure_private_directory` writes directories
+        # and enforces permissions, which is not path arithmetic and has no
+        # import-availability excuse.
+        for name, hits in exempt_hits.items():
+            with self.subTest(module=name):
+                self.assertEqual(
+                    sorted(hit for hit, _ in hits), ["resolve_state_root"]
+                )
+
+    def test_the_exemption_is_backed_by_an_agreement_test(self) -> None:
+        """The exemption trades one definition for a checked pair, not for trust.
+
+        A-046's property is that the ladder does not drift. The exempt script
+        keeps that property only while something compares its copy to the
+        library's; if that test is renamed or deleted, the exemption silently
+        becomes an unchecked fork and this fails instead.
+        """
+
+        source = (ROOT / "tests" / "test_review_layout.py").read_text(encoding="utf-8")
+        self.assertIn(f"def {AGREEMENT_TEST}", source)
+        self.assertIn("from sd_ai_command_pack_lib import resolve_state_root", source)
 
     def test_lib_defines_both_helpers_exactly_once(self) -> None:
         """The gate is only meaningful if the lib actually owns both names."""

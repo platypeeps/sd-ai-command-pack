@@ -849,12 +849,33 @@ class CommittedPluginTreeTests(PluginFixtureCase):
         self.assertEqual(plugin["version"], manifest["version"])
 
     def test_committed_tree_carries_no_consumer_config_payload(self) -> None:
-        """Neither under its own name nor renamed: content is checked too."""
+        """Neither under its own name nor renamed: content is checked too.
+
+        The name and content checks are proxies for a renamed copy, and they
+        are only sound for a source whose every target is consumer-config. One
+        source now has two targets in different categories -- the layout
+        resolver installs to `scripts/` as `machine-claude` and to
+        `.sd-ai-command-pack/bin/` as `consumer-config` -- so its name and
+        bytes appear in the plugin legitimately, through the row that belongs
+        there. Applying the proxies to it would report a leak that is really
+        the shipped copy doing its job.
+
+        What holds for every consumer-config row regardless is that its
+        *target path* is never materialized in the plugin tree, so that is
+        asserted unconditionally and the proxies are kept for the rows they
+        can still judge.
+        """
 
         partition = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
         manifest = json.loads((PACK_ROOT / "manifest.json").read_text(encoding="utf-8"))
         sources = {row["target"]: row["source"] for row in manifest["files"]}
+        categories: dict[str, set[str]] = {}
+        for entry in partition["files"]:
+            source = sources.get(entry["target"])
+            if source is not None:
+                categories.setdefault(source, set()).add(entry["category"])
         shipped = [path for path in PLUGIN_ROOT.rglob("*") if path.is_file()]
+        relative = {path.relative_to(PLUGIN_ROOT).as_posix() for path in shipped}
         names = {path.name for path in shipped}
         contents = {path.read_bytes() for path in shipped}
 
@@ -864,12 +885,21 @@ class CommittedPluginTreeTests(PluginFixtureCase):
             if entry["category"] == CONSUMER_CONFIG
         ]
         self.assertTrue(any(t.startswith(".claude/rules/") for t in excluded))
+        shared_source = 0
         for target in excluded:
             with self.subTest(target=target):
+                self.assertNotIn(target, relative)
+                if categories.get(sources[target], set()) != {CONSUMER_CONFIG}:
+                    shared_source += 1
+                    continue
                 self.assertNotIn(Path(target).name, names)
                 self.assertNotIn(
                     (PACK_ROOT / sources[target]).read_bytes(), contents
                 )
+        # The exemption must stay the narrow thing it is. If every
+        # consumer-config row acquired a second category the loop above would
+        # assert nothing and still pass.
+        self.assertLess(shared_source, len(excluded))
 
     def test_committed_tree_holds_no_markdown_residue(self) -> None:
         offenders: dict[str, list[str]] = {}

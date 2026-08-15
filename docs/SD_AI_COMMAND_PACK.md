@@ -130,6 +130,15 @@ Quick links:
   When no install is found the mode is `unresolved` and no classification is
   emitted, because reporting everything as `authored` is indistinguishable from
   a healthy run on a repository that changed no pack files.
+- `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py`: the same file,
+  installed a second time at a path that survives thin conversion. **Call this
+  one from a repository's own guards.** Everything under `scripts/` is
+  machine-scope, so a thin install moves it out of the repository and a guard
+  naming it by path breaks; this copy stays put, which is what lets a guard ask
+  where the pack is without first knowing where the pack is. It answers about
+  the current install rather than about history: after conversion, a path
+  under the repository's old vendored script directory is reported `authored`,
+  because that is no longer a path this repository holds.
 - `scripts/sd-ai-command-pack-review-preflight.mjs`: generic dependency-free
   review preflight for copied/generated disclosure, documentation path hygiene,
   Trellis journal consistency, npm override drift, and large diff warnings.

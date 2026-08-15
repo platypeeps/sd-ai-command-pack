@@ -38,6 +38,11 @@ BASELINE_ROWS: tuple[dict[str, str], ...] = (
         "kind": "script",
         "target": "scripts/sd-ai-command-pack-base.sh",
     },
+    {
+        "platform": "shared",
+        "kind": "script",
+        "target": ".sd-ai-command-pack/bin/sd-ai-command-pack-base.py",
+    },
 )
 
 
@@ -208,6 +213,7 @@ class PartitionSurfacesTests(InstallTestCase):
                             ".claude/sd-ai-command-pack/",
                             ".prism/",
                             ".gito/",
+                            ".sd-ai-command-pack/bin/",
                         )
                     )
                 )
@@ -258,7 +264,15 @@ class PartitionSurfacesTests(InstallTestCase):
             by_target[".claude/sd-ai-command-pack/contract.md"]["category"],
             "consumer-config",
         )
-        for target in (".prism/rules.json", ".gito/config.toml"):
+        # A `script` row is machine-claude everywhere else; under this
+        # override it is consumer-config, which is the whole point of the
+        # entry -- the resolver has to survive the conversion that removes the
+        # scripts it resolves.
+        for target in (
+            ".prism/rules.json",
+            ".gito/config.toml",
+            ".sd-ai-command-pack/bin/sd-ai-command-pack-base.py",
+        ):
             with self.subTest(target=target):
                 self.assertEqual(by_target[target]["category"], "consumer-config")
 

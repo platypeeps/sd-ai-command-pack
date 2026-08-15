@@ -442,7 +442,7 @@ class ResidualSelectionTests(InstallTestCase):
             self.assertIsNotNone(row, file.target)
             self.assertIn(row.category, {"repo-native", "consumer-config"})
 
-    def test_the_residual_is_the_measured_thirty_one_targets(self) -> None:
+    def test_the_residual_is_the_measured_thirty_two_targets(self) -> None:
         # The criterion's arithmetic, asserted rather than described.
         # `THIN_PLATFORMS` is rwbp-coordinator's recorded platform set, so this
         # is that consumer's shape and not a shape invented for the test.
@@ -465,7 +465,13 @@ class ResidualSelectionTests(InstallTestCase):
             present_managed_blocks=blocks,
         )
 
-        self.assertEqual(len(residual), 31, sorted(residual))
+        # 31 until 0.71.11 added the layout resolver's `consumer-config`
+        # target. That row is the reason the figure moved, and it moved by the
+        # one file a converted consumer keeps so it can locate the rest.
+        self.assertEqual(len(residual), 32, sorted(residual))
+        self.assertIn(
+            ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py", residual
+        )
         self.assertEqual(len(residual) - len(without), 1)
         self.assertIn(".github/copilot-instructions.md", without)
         self.assertLessEqual(blocks, residual)
@@ -714,7 +720,7 @@ class ConvertedConsumerInspectionTests(InstallTestCase):
         # inside `expected_residual_targets`: dropping it widens the residual,
         # but the installer skips a platform whose directory the repo does not
         # have, so this consumer's state is unmoved.
-        # `test_the_residual_is_the_measured_thirty_one_targets` is where that
+        # `test_the_residual_is_the_measured_thirty_two_targets` is where that
         # predicate is actually pinned.
         root = self.install_fat()
         self.convert(root)
