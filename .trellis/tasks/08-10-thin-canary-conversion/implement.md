@@ -81,28 +81,35 @@ source names a removed path. The version below is 0.71.13 for that reason.
 
 Per consumer, in cohort order (rwbp-coordinator, loadsmith, hoa-manager):
 
-- [ ] 2.1 `git -C <path> status --porcelain` empty; on `main`; record HEAD.
-- [ ] 2.2 Install the refresh. Installer-managed files only — no product code
+- [x] 2.1 `git -C <path> status --porcelain` empty; on `main`; record HEAD.
+- [x] 2.2 Install the refresh. Installer-managed files only — no product code
       in this phase's diff.
-- [ ] 2.3 That consumer's own full check passes.
-- [ ] 2.4 Consumer PR, land green.
-- [ ] 2.5 `install.py <path> --check --json` reports state `current`.
-- [ ] 2.6 Re-run the resweep and record `packDefects`. **This closes phase 0.**
+- [x] 2.3 That consumer's own full check passes.
+- [x] 2.4 Consumer PR, land green.
+- [x] 2.5 `install.py <path> --check --json` reports state `current`.
+- [x] 2.6 Re-run the resweep and record `packDefects`. **This closes phase 0.**
 
 **Validation:** all three at `0.71.13`, `packDefects: 0` for each. A non-zero
 count here means phase 0 missed a surface; return to phase 0 rather than
 proceeding with a partial fix. *Exercised once already -- see the note above.*
 
-**Consumer state at the 0.71.12 stop.** Each is committed on
-`chore/sd-ai-command-pack-0.71.12` with its own full check at exit 0; the
-0.71.13 refresh lands on the same branches rather than opening a second PR
-apiece.
+**Closed 2026-08-15 at 0.71.13.** All three merged to their default branches
+and re-measured there:
 
-| consumer | PR | check | blockers | packDefects |
-|---|---|---|---:|---:|
-| rwbp-coordinator | #226, green and comment-clean | exit 0 | 48 | 2 |
-| loadsmith | not yet pushed | exit 0 | 23 | 2 |
-| hoa-manager | not yet pushed | exit 0 | 34 | 2 |
+| consumer | PR | merge | install | blockers | packDefects |
+|---|---|---|---|---:|---:|
+| rwbp-coordinator | #226 | `b62ee75d` | `current 0.71.13` | 48 | **0** |
+| loadsmith | #223 | `97d358f3` | `current 0.71.13` | 23 | **0** |
+| hoa-manager | #252 | `359a9020` | `current 0.71.13` | 34 | **0** |
+
+`packDefects: 0` on all three is the reading that closes phase 0. The verdicts
+stay `blocked` on consumer-owned citations, which is phase 3's work.
+
+Two check failures on the way, neither caused by the pack and both recorded so
+a rerun does not rediscover them: rwbp's PR-body scope gate reads the *live* PR
+body, which still described 0.71.12 until it was rewritten; and hoa-manager's
+e2e hit `relation "users" does not exist` because the compose volume was empty
+on first boot and Payload created the schema during that same failing run.
 
 Two consumers needed work beyond the installer to pass their own gate, both
 about `docs/repomix-map.md` and resolved differently because the two repos
