@@ -4,7 +4,7 @@
 Five consumers each reimplemented the same question -- is this changed path
 vendored pack payload or authored source -- and each hardcoded the fat layout
 it was written against, which is what blocks their thin conversion. The logic
-already existed in ``sd-ai-command-pack-review-scope.sh``; what did not exist
+already existed in the pack's review-scope shell guard; what did not exist
 was a way to *get the answer as data*, so a Node or Python guard could use it
 without shelling out once per path. That gap, not a missing check, is why the
 copies exist.
@@ -61,7 +61,7 @@ SCHEMA_VERSION = 1
 # constant mirrors below:
 # `tests/test_review_layout.py` asserts this ladder and the library's agree on
 # every rung, so drift fails a gate rather than a consumer.
-STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"  # sd_ai_command_pack_lib.py
+STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"  # mirrors the pack library
 
 
 class CommandError(RuntimeError):

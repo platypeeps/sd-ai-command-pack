@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.71.13 - 2026-08-15
+
+### Fixed
+
+- `sd-ai-command-pack-review-layout.py` no longer names two machine-scope
+  scripts in its prose. It is a `consumer-config` target, so thin conversion
+  keeps it -- and `repoint_kept_references` rewrites only the forms
+  `THIN_PROFILE` recognises, none of which is a bare basename in a docstring.
+  A comment reading "already existed in ``sd-ai-command-pack-review-scope.sh``"
+  was therefore a permanent `packDefect` in every consumer that installed the
+  file, unfixable by the conversion and blocking it outright. Measured: the
+  first refresh carrying 0.71.12 put two fresh defects into all three canaries
+  at once, after the cohort had already measured zero.
+- A test now enumerates every `consumer-config` target from the surface
+  partition and fails if its shipped source names a removed path, borrowing
+  `unambiguous_basenames` from the resweep rather than restating it so the
+  guard cannot drift stricter than the check that produces the verdict. This
+  class of defect is invisible until a consumer installs the file, which is
+  the wrong place to find it.
+
 ## 0.71.12 - 2026-08-15
 
 ### Fixed
