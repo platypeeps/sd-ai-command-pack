@@ -302,10 +302,44 @@ three categories, not the two D3c implies.
 | CI workflow step invoking pack payload | `.github/workflows/ci.yml:112-118` | **deleted.** The PRD acceptance criterion is "CI green post-conversion with zero pack CI steps", so this is settled, not a judgment call. A CI runner has no machine payload; a repointed step would fail there. |
 | local developer invocation | `scripts/lib/check-full.mjs:107`, `package.json:57` | **resolved.** `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py --resolve NAME` reports where the script actually lives. This is what that second install target exists for -- the manual says call this one from a repository's own guards -- and a developer machine does have the payload. |
 | guard asserting content of removed payload | `check-review-churn.mjs:363-392`, `:432-433` | **deleted**, per D3c. |
-| guard asserting content of a **rewritten but kept** file | `check-review-churn.mjs:205, 218, 221` | **repointed.** `.github/copilot-instructions.md` survives conversion and its managed block is rewritten by `literal_rewrites`, so the needle must match the post-conversion text. Deleting these would drop a live assertion about a file that still exists. |
+| guard asserting content of a **rewritten but kept** file | `check-review-churn.mjs:205, 218, 221` | **unpinned.** Corrected 2026-08-15 while executing 3.1; the first form of this row said "repointed", and that is not implementable. `.github/copilot-instructions.md` survives conversion and its managed block is rewritten, so a needle can match the pre-conversion text or the post-conversion text but not both -- and the rewrite lands in a *later* commit than the guard edit. Pinning either literal makes exactly one side of the conversion red. The assertions that name a moving literal come out; the ones naming text the rewrite leaves alone stay, so the guard still proves the bullet exists. The block's wording is the pack's to guard, not a consumer's. |
 | glob straddling the boundary | `classify-ci-changes.sh:153` | **narrowed.** `.sd-ai-command-pack/*` survives and stays; the sibling `scripts/sd-ai-command-pack-*` is dead after conversion and goes. This answers design O2: the `.sd-ai-command-pack/*` citation needs no edit at all. |
 | prose in docs or spec | `.trellis/spec/web/operations/local-development.md:28` | **repointed** to the resolved form, or to the machine path where the sentence is about a developer's own machine. |
 | history-shaped record | `hoa-manager` task `prd.md` | **annotated**, per D3b. |
+
+### D3f. The prescribed migration blocked itself (0.71.14)
+
+Found 2026-08-15 executing 3.1, after rwbp-coordinator went 48 blockers to 3.
+All three survivors were the resolved form D3e's second row prescribes:
+`--resolve NAME`, where `NAME` is the bare basename of a script the conversion
+removes.
+
+Two bare-name rules in `cites_removed_path` fire on it. Rule 5 matches an
+unambiguous pack basename directly. Rule 3 resolves a slash-free token against
+the citing file's own directory, so any guard living in `scripts/` turns the
+key back into `scripts/<name>` and lands on the removal set -- which is why
+`scripts/check-full.test.mjs` blocked while its sibling under `scripts/lib/`
+did not, on the same string.
+
+So `docs/FLEET_ROLLOUT.md:630` prescribed a rewrite that cannot reach `clear`,
+and its step 4 ("what remains is the residue no runtime resolver reaches")
+described a state the tool would not produce. The pack's own fixture at
+`tests/test_thin_resweep.py:310` passed `--resolve x`, a name deliberately
+outside the removal set, so nothing measured the realistic call.
+
+Fixed in 0.71.14, not worked around in the consumer: a file that names the kept
+resolver has adopted the resolver contract, and its slash-free pack basenames
+are keys. File-scoped, because the key is normally a constant declared away
+from the call site; limited to the two bare-name rules, so a path-shaped pack
+citation in the same file still blocks and the half-migrated trap at
+`docs/FLEET_ROLLOUT.md:639` still fails.
+
+The consumer-side consequence worth carrying to loadsmith and hoa-manager: a
+guard that resolves a pack script must cite the kept resolver **as a plain
+path**. rwbp's test asserted it through a hand-escaped regex
+(`/\.sd-ai-command-pack\/bin\/...\.py$/`), which no token match sees, so the
+file did not count as adopting and stayed blocked until the assertion became
+an `endsWith` on the literal.
 
 ### D3d. Two loadsmith blockers are this campaign's own
 

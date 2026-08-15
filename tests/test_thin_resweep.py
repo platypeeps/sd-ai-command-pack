@@ -336,6 +336,69 @@ class LayoutResolverReferenceTests(ResweepFixture):
         self.assertEqual(rows[RESOLVER_KEPT], "consumer-config")
 
 
+class ResolverKeyTests(ResweepFixture):
+    """The *name* a guard hands `--resolve` is a key, not a path citation.
+
+    `docs/FLEET_ROLLOUT.md:630` tells a consumer to replace its
+    `scripts/sd-ai-command-pack-*` literals with `--resolve NAME`. NAME is the
+    bare basename of a removed path, so rule 5 blocked the very rewrite the
+    document prescribes. Both directions from one shape again: the same guard
+    body, differing only in whether the file names the kept resolver.
+    """
+
+    # A pack script that is removed, distinctively named, and -- unlike the
+    # resolver itself -- has no surviving twin, so it is genuinely in
+    # `unambiguous_basenames` and rule 5 really does fire on it.
+    KEY = SHELL_HELPERS[0].rsplit("/", 1)[-1]
+
+    def consumer_resolving(self, *, adopted: bool) -> Path:
+        # The key on its own line, away from the call site: a line-scoped
+        # exemption would pass this test for the wrong reason.
+        resolver = RESOLVER_KEPT if adopted else "scripts/find-it.py"
+        body = f'NAME="{self.KEY}"\npython3 "{resolver}" --resolve "$NAME"\n'
+        return self.make_consumer(
+            {"scripts/guard.sh": body},
+            receipt=[RESOLVER_KEPT, KEPT, *SHELL_HELPERS],
+        )
+
+    def test_a_key_in_a_file_that_names_the_kept_resolver_is_not_a_blocker(self) -> None:
+        result = self.scan(self.consumer_resolving(adopted=True))
+        self.assertEqual(
+            [entry for entry in result["blockers"] if entry["file"] == "scripts/guard.sh"],
+            [],
+        )
+        verdict, reasons = resweep.decide(result)
+        self.assertEqual((verdict, reasons), ("clear", ()))
+
+    def test_the_same_key_without_the_resolver_still_blocks(self) -> None:
+        result = self.scan(self.consumer_resolving(adopted=False))
+        self.assertEqual(self.only_bucket(result, "scripts/guard.sh"), "blockers")
+
+    def test_the_exemption_does_not_reach_a_path_shaped_citation(self) -> None:
+        # `docs/FLEET_ROLLOUT.md:639`: adopting `--resolve` while still naming a
+        # pack script by path is the half-migrated trap, and it stays blocked.
+        repo = self.make_consumer(
+            {
+                "scripts/guard.sh": (
+                    f'python3 "{RESOLVER_KEPT}" --resolve "{self.KEY}"\n'
+                    f'bash "{SHELL_HELPERS[0]}"\n'
+                )
+            },
+            receipt=[RESOLVER_KEPT, KEPT, *SHELL_HELPERS],
+        )
+        result = self.scan(repo)
+        self.assertEqual(
+            [entry["line"] for entry in result["blockers"] if entry["file"] == "scripts/guard.sh"],
+            [2],
+        )
+
+    def test_the_key_is_a_basename_the_rule_would_otherwise_catch(self) -> None:
+        # The premise the two tests above rest on: without it they would agree
+        # for the trivial reason that rule 5 never applied to this name.
+        removed = frozenset(SHELL_HELPERS)
+        self.assertIn(self.KEY, resweep.unambiguous_basenames(removed, frozenset()))
+
+
 class VerdictTests(ResweepFixture):
     def test_a_clean_fixture_with_no_citations_is_clear(self) -> None:
         repo = self.make_consumer({"src/main.py": "print('hello')\n"})
