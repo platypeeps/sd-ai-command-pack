@@ -351,7 +351,26 @@ add_category() {
   scope_categories+=("$category")
 }
 
+# Delegate the layout question to the one implementation of it. This binding
+# exists so a caller that wants the classification *as data* stops having to
+# run this script once per path and read its exit code -- which is the gap that
+# produced five consumer-side reimplementations of the same matcher.
+layout_json() {
+  local python_bin
+  python_bin="$(command -v python3 || true)"
+  if [ -z "$python_bin" ]; then
+    fail "python3 is required for --json layout classification"
+  fi
+  "$python_bin" "$SCRIPT_DIR/sd-ai-command-pack-review-layout.py" --root "$REPO_ROOT" "$@"
+}
+
 main() {
+  if [ "${1:-}" = "--json" ]; then
+    shift
+    layout_json "$@"
+    return $?
+  fi
+
   if is_disabled "$MODE"; then
     warn "Skipping tooling/generated review-scope check because SD_AI_COMMAND_PACK_SCOPE_CHECK=$MODE."
     return 0

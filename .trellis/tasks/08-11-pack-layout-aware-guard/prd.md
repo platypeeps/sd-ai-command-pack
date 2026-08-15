@@ -62,11 +62,11 @@ the five original consumer/path pairs do not exist on disk. Sizes are
 
 | consumer | bespoke guard | lines |
 |---|---|---|
-| `rwbp-coordinator` | `scripts/check-review-churn.mjs` (+ `.test.mjs`, 20) | 762 |
-| `loadsmith` | `scripts/check_review_readiness.sh` | 1139 |
-| `hoa-manager` | `scripts/check-review-preflight.mjs` (+ `.test.mjs`, 589) | 902 |
-| `rwbp-website` | `scripts/review-guard.mjs` | 2466 |
-| `mezmo_benchmark` | `scripts/check-review-cycle-patterns.py` | 812 |
+| `rwbp-coordinator` | `scripts/` + `check-review-churn.mjs` (+ `.test.mjs`, 20) | 762 |
+| `loadsmith` | `scripts/` + `check_review_readiness.sh` | 1139 |
+| `hoa-manager` | `scripts/` + `check-review-preflight.mjs` (+ `.test.mjs`, 589) | 902 |
+| `rwbp-website` | `scripts/` + `review-guard.mjs` | 2466 |
+| `mezmo_benchmark` | `scripts/` + `check-review-cycle-patterns.py` | 812 |
 
 `rwbp-website` has no test file beside its guard, contrary to the original
 filing's "plus its test".
@@ -85,13 +85,17 @@ bespoke layout guard at all. Its blockers come from somewhere else.
 
 **Re-measured 2026-08-14** with `sd-ai-command-pack-thin-resweep.py`:
 **175 blockers, not 207** — the 0.70.0 correction this PRD's Evidence section
-predicted. `verdict: blocked`, `worktreeClean: true`. Every one is a reference
-to a hardcoded `scripts/sd-ai-command-pack-*` literal, and 18 distinct pack
-paths account for all 175. They are the same defect as the five guards, spread
-across contract guards, their tests, and instruction prose instead of
-concentrated in one file. Design D3b adds the `--resolve` query that puts them
-in reach; the per-consumer figures live there rather than being restated
-here.
+predicted. `verdict: blocked`, `worktreeClean: true`. 112 of the 175 are
+references to a hardcoded `scripts/sd-ai-command-pack-*` literal, spread over 14
+distinct pack paths. They are the same defect as the five guards, spread across
+contract guards, their tests, and instruction prose instead of concentrated in
+one file. Design D3b adds the `--resolve` query that puts them in reach; the
+per-consumer figures live there rather than being restated here.
+
+This paragraph first claimed all 175 were script references over 18 paths. The
+full fleet measurement (design D6) refuted it: 8 more name a command or skill
+file, and 55 are glob patterns that no runtime resolver rewrites. The fleet
+total is 456, not the 510 above, and this task reaches 355 of them.
 
 Each one hardcodes the fat layout it was written against, which is why each
 one blocks its own consumer's conversion. Together with the test assertions
@@ -100,6 +104,12 @@ code asserting a pack layout the pack itself should own**. That 65% figure
 inherits the mis-attribution corrected above and the pre-0.70.0 measurement
 error already noted under Evidence; treat it as an upper bound on an upper
 bound until the resweep is re-run.
+
+**The resweep has since been re-run** (design D6). The fleet total is 456, not
+510, and 355 of those (78%) are reachable by this task. Neither the 330 nor the
+65% survives as a measured claim: they were computed against a total that no
+longer exists, so the 78% is not a confirmation of the 65% and must not be
+reported as one.
 
 **The pack already owns a runtime-resolving classifier.**
 `is_copied_review_scope_path` (`templates/scripts/sd-ai-command-pack-review-scope.sh:130`)
@@ -160,15 +170,30 @@ thin mode with no consumer-side conditional.
 
 ## Acceptance criteria
 
-- [ ] All five bespoke guards read and their behavior tabulated, with each
+- [x] All five bespoke guards read and their behavior tabulated, with each
       difference marked ship / drop / consumer-local and a reason.
-- [ ] One pack-shipped guard exists, resolving layout at runtime, with pack
+      Design D0 and D1; every drop-column row proven against this pack rather
+      than asserted.
+- [x] One pack-shipped guard exists, resolving layout at runtime, with pack
       tests covering the shipped behaviors from the table.
-- [ ] `make check` and `make release-prep` pass.
-- [ ] A thin-mode and a fat-mode invocation of the guard are both exercised
+      `templates/scripts/sd-ai-command-pack-review-layout.py` plus its shell
+      and Node bindings; `tests/test_review_layout.py`, 38 tests, 100%
+      statement and branch coverage of the script.
+- [x] `make check` and `make release-prep` pass.
+      Both exit 0. Two task artifacts were edited after `release-prep` was
+      launched, so the checks that read them — the full review preflight (0
+      FAILs) and `tests.test_review_preflight` (77 tests, OK) — were re-run
+      against the frozen tree rather than claiming the earlier run covered
+      them.
+- [x] A thin-mode and a fat-mode invocation of the guard are both exercised
       by tests, proving no consumer-side conditional is needed.
-- [ ] The fleet resweep is re-run and the projected blocker reduction is
+      `ResolveTests.test_thin_resolves_somewhere_other_than_the_consumer`
+      asserts the two answers *differ*, which a shared-conditional
+      implementation cannot satisfy.
+- [x] The fleet resweep is re-run and the projected blocker reduction is
       recorded per consumer, measured rather than estimated.
+      Design D6: all eight consumers, 456 blockers, split by query, with the
+      three findings that correct this PRD's own figures.
 
 ## Out of scope
 

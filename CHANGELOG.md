@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.71.10 - 2026-08-14
+
+### Added
+
+- `sd-ai-command-pack-review-layout.py`: a pack-owned resolver for the
+  installed layout, with two queries -- classify changed paths as pack payload
+  or authored source, and resolve where a pack script actually lives. Five
+  consumers had each reimplemented the first question against a hardcoded fat
+  layout; the second exists because a thin install moves every
+  `scripts/sd-ai-command-pack-*` out of the consumer, so a literal path
+  reference breaks. Node and shell bindings delegate to the one implementation
+  rather than restating it.
+
 ## 0.71.9 - 2026-08-14
 
 ### Added

@@ -121,6 +121,15 @@ Quick links:
   the modified latest session instead of appending a duplicate.
 - `~/.agents/bin/sd-ai-command-pack-review-scope.sh`: copied/generated file scope
   preflight for mixed PRs.
+- `~/.agents/bin/sd-ai-command-pack-review-layout.py`: resolves the installed pack
+  layout as data, so a repository's own review guard does not have to hardcode
+  one. `--path P` classifies paths as `pack-payload` or `authored`;
+  `--resolve NAME` reports where a pack script actually lives, which differs
+  between a fat install and a thin one. Its `mode` is output, never input:
+  callers read what it resolved rather than branching on the install shape.
+  When no install is found the mode is `unresolved` and no classification is
+  emitted, because reporting everything as `authored` is indistinguishable from
+  a healthy run on a repository that changed no pack files.
 - `~/.agents/bin/sd-ai-command-pack-review-preflight.mjs`: generic dependency-free
   review preflight for copied/generated disclosure, documentation path hygiene,
   Trellis journal consistency, npm override drift, and large diff warnings.

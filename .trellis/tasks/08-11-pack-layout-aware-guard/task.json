@@ -2,7 +2,7 @@
   "id": "pack-layout-aware-guard",
   "name": "pack-layout-aware-guard",
   "title": "Ship a layout-aware review guard so consumers stop reimplementing one",
-  "description": "Ship one pack-owned, layout-aware review guard so consumers can delete their bespoke reimplementations instead of porting them. Five consumers each wrote their own pack-layout guard; those scripts and the tests pinning them carry 330 of the fleet's 510 thin-conversion blockers.",
+  "description": "Ship one pack-owned, layout-aware review guard so consumers can delete their bespoke reimplementations instead of porting them. Five consumers each wrote their own pack-layout guard; the fleet's thin-conversion blockers were re-measured at 456, of which 355 are reachable by this guard's two queries (design D6); the original filing's 330-of-510 was computed against a total that no longer exists.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

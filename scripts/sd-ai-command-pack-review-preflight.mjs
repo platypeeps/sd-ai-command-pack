@@ -229,6 +229,43 @@ const JOURNAL_VALIDATION_NEGATION_PATTERN =
 // zone, and runCheck consults this class while checks execute.
 class GitCommandError extends Error {}
 
+// Layout classification as data, for consumer guards written in Node. It lives
+// here rather than in a new module because `rwbp-website/scripts/review-guard.mjs`
+// already imports this file -- adopting it is one call, not a new integration.
+//
+// Deliberately a delegation, not a reimplementation: a second copy of the
+// matcher in a second language is the exact defect the pack-owned guard exists
+// to remove, and it would drift the first time only one side was updated.
+export function resolvePackLayout({ root = defaultRootDir, paths = [], resolve: scriptName = null } = {}) {
+  const args = ['--root', root];
+  if (scriptName) {
+    args.push('--resolve', scriptName);
+  } else {
+    for (const path of paths) args.push('--path', path);
+  }
+
+  const result = spawnSync(
+    'python3',
+    [resolve(scriptDir, 'sd-ai-command-pack-review-layout.py'), ...args],
+    { encoding: 'utf8', maxBuffer: GIT_MAX_BUFFER_BYTES },
+  );
+
+  if (result.error) {
+    throw new Error(`cannot run the pack layout resolver: ${result.error.message}`);
+  }
+  // An unresolved install exits non-zero *and* prints a document. Parse first
+  // so the caller gets the reason, and only then decide the call failed.
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(
+      `pack layout resolver produced no JSON (status ${result.status}): ${(result.stderr || '').trim()}`,
+    );
+  }
+  return parsed;
+}
+
 export function runReviewPreflight(options = {}) {
   rootDir = resolve(options.rootDir || defaultRootDir);
   failures = [];

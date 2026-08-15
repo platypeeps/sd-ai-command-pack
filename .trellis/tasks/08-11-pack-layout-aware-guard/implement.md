@@ -27,7 +27,7 @@ accept the same three headings:
 ```bash
 grep -n 'Tooling/generated scope' templates/scripts/sd-ai-command-pack-review-scope.sh
 grep -n 'SCOPE_BODY_PATTERN =' \
-  /Users/sven/repos/platypeeps/hoa-manager/scripts/check-review-preflight.mjs
+  "$HOA/scripts/check-review-preflight.mjs"   # $HOA = hoa-manager pathHint
 ```
 
 Both must list `Tooling/generated scope`, `Generated/tooling scope`, and
@@ -216,11 +216,18 @@ lower the figure:
 - the 510/330 counts predate 0.70.0's resweep fix (PRD Evidence);
 - `anomaly-metric-creator`'s count is **175**, re-measured 2026-08-14, not the
   PRD's original 207. It owns no bespoke layout guard, so none of it falls to
-  the ship column; all 175 fall to `--resolve` instead. Report the two
-  reductions separately, or the number cannot be attributed to a change.
+  the ship column. Report the reductions separately per query, or the number
+  cannot be attributed to a change.
 
 If the measured reduction is materially smaller than the PRD's framing implies,
 say so in the PR body. That is a finding, not a failure.
+
+**Done 2026-08-14.** All eight consumers measured; the table and the three
+findings are in design D6. This step's own expectation — "all 175 fall to
+`--resolve`" — was one of the things the measurement refuted: 112 do, 8 fall to
+the surface enumeration, and 55 are globs no resolver reaches. Fleet total is
+456, not 510, and this task reaches 355 of them. Both corrections belong in the
+PR body under the rule above.
 
 ## 7. Out of scope, restated because it is easy to drift into
 

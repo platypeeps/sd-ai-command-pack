@@ -147,9 +147,16 @@ five reimplements with its own `git diff` plumbing.
 Classification alone does not help the consumer with the most blockers. The
 resweep of `anomaly-metric-creator`, run 2026-08-14, measured **175** blockers
 (not the PRD's 207 — the 0.70.0 correction, as its Evidence section predicted),
-`verdict: blocked`, worktree clean. Every one is a reference to a hardcoded
-`scripts/sd-ai-command-pack-*` literal, and **18 distinct pack paths account
-for all 175**:
+`verdict: blocked`, worktree clean. **112 of the 175** are references to a
+hardcoded `scripts/sd-ai-command-pack-*` literal, and **14 distinct pack paths
+account for all 112**:
+
+An earlier draft of this paragraph said every one of the 175 was such a
+reference, spread over 18 paths. The full per-consumer measurement (D6) refuted
+both figures: 8 more blockers name a command or skill file rather than a script,
+and the remaining 55 are glob patterns that no runtime resolver rewrites. The
+table below is unchanged — its counts were always script references — but it
+sizes 112, not 175.
 
 | refs | path |
 |---|---|
@@ -177,7 +184,7 @@ sd-ai-command-pack-review-layout.py --resolve sd-ai-command-pack-full-check.sh
 
 ```json
 {"schemaVersion": 1, "mode": "thin", "name": "sd-ai-command-pack-full-check.sh",
- "path": "/Users/sven/.agents/bin/sd-ai-command-pack-full-check.sh"}
+ "path": "<home>/.agents/bin/sd-ai-command-pack-full-check.sh"}
 ```
 
 This is requirement 1's "resolves pack-owned paths through the same resolution
@@ -281,7 +288,7 @@ Measured 2026-08-14, because getting this wrong is the whole failure mode:
 
 ```
 $ python -c "import sd_ai_command_pack_lib as L; print(L.resolve_state_root())"
-/Users/sven/.local/state/sd-ai-command-pack
+<home>/.local/state/sd-ai-command-pack
 ```
 
 Two different user-level roots exist and the PRD's requirement 1 conflates
@@ -342,11 +349,57 @@ The projected blocker reduction must be re-measured, not carried forward:
 - they inherit the corrected mis-attribution — in particular
   `anomaly-metric-creator`, whose share was re-measured at **175**, not 207
   (D3b). It owns no bespoke layout guard, so none of it is reducible by the
-  ship column; `--resolve` is what puts all 175 in reach. The projection must
-  therefore be split by which query does the work, or a reduction cannot be
-  attributed to a change.
+  ship column. The projection must therefore be split by which query does the
+  work, or a reduction cannot be attributed to a change.
 
 Any per-consumer projection is stated as measured-after, or not stated.
+
+### Measured 2026-08-14
+
+All eight consumers resweept from a clean worktree
+(`sd-ai-command-pack-thin-resweep.py <consumer> --json`), each blocker attributed
+to the single query that reaches it:
+
+| consumer | blockers | `--resolve` | `surface` | `--path` | unreached |
+|---|---:|---:|---:|---:|---:|
+| `anomaly-metric-creator` | 175 | 112 | 8 | 0 | 55 |
+| `rwbp-website` | 66 | 36 | 12 | 9 | 9 |
+| `loadsmith` | 50 | 40 | 2 | 3 | 5 |
+| `rwbp-coordinator` | 49 | 29 | 6 | 9 | 5 |
+| `mezmo_benchmark` | 44 | 21 | 1 | 4 | 18 |
+| `hoa-manager` | 34 | 22 | 5 | 6 | 1 |
+| `se-ai-command-pack` | 24 | 16 | 1 | 0 | 7 |
+| `sd-github-review` | 14 | 12 | 1 | 0 | 1 |
+| **total** | **456** | **288** | **36** | **31** | **101** |
+
+Buckets are disjoint and tested in that order, so a hardcoded script path inside
+a bespoke guard is counted once, under `--resolve`. `surface` is the
+`surface.commands` enumeration in the classification document — a reference to a
+concrete installed command or skill file, which that array resolves; a *glob*
+over the same directory is not counted there, because enumeration cannot rewrite
+a pattern.
+
+Three findings, all of which lower or complicate this design's own framing:
+
+1. **The fleet total is 456, not 510.** The PRD's figure was flagged as an
+   upper bound pending 0.70.0's resweep correction; measured, the correction is
+   worth 54 blockers.
+2. **This design's claim that `--resolve` puts *all 175* of
+   `anomaly-metric-creator` in reach is wrong.** Measured: 112 by `--resolve`,
+   8 by `surface`, and **55 unreached**. The 55 are not script references at
+   all — they are glob patterns in one instructions file
+   (`.gemini/commands/sd/**`, `.agents/skills/sd-*/**`) plus a CI-change
+   classifier's fixture list. No runtime resolver rewrites a glob, so no
+   version of this task reaches them.
+3. **Reached: 355 of 456, or 78%.** Larger in share than the PRD's "65% of
+   510" framing, smaller in absolute terms (355 against 330 of a total that no
+   longer exists). The two numbers are not comparable and the PRD's should not
+   be restated as if this confirmed it.
+
+The 101 unreached blockers are outside this task and outside the follow-up shim
+that removes the bootstrap site. They are consumer prose and fixtures that
+enumerate the pack's surface by pattern; whoever converts each consumer either
+rewrites those lines or accepts them, and this design does not claim otherwise.
 
 ## Risk
 
@@ -358,11 +411,15 @@ of this design most likely to be wrong — if a behavior filed there is in fact
 duplicated across consumers, it belongs in ship. The table is per-behavior with
 file:line so that claim is checkable rather than asserted.
 
-Second risk: `surface.commands` enumerated from the partition is only as good
-as the partition. If the partition and the installed reality disagree, this
-guard reports the partition's view and a consumer's real drift goes unseen. The
-existing `install-audit` is the check that compares those two; this guard does
-not duplicate it.
+Second risk: `surface.commands` is enumerated from the receipt (D3a), so it is
+only as good as the receipt. If the receipt and the files actually on disk
+disagree — a consumer deleted an installed command, or a partial install never
+finished — this guard reports what the receipt claims and the real drift goes
+unseen. That is the correct division: the existing `install-audit` is the check
+that compares the receipt against the filesystem, and this guard does not
+duplicate it. The earlier draft of this paragraph named the partition as the
+source, which D3a had already replaced because
+`docs/fleet/surface-partition.json` does not ship to consumers.
 
 ## Rollout and rollback
 
