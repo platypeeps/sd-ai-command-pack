@@ -10,6 +10,53 @@ rollout (`platypeeps/rwbp-coordinator`, `platypeeps/loadsmith`,
 mutates those three repositories. This closes the first acceptance
 criterion. It does not extend to post-canary, per the paragraph below.
 
+**2026-08-15 — campaign re-authorized at 0.71.11, and widened to consumer
+product code.** Asked how far to take the conversion given the measured gates
+below, the user chose "refresh + rewrite + convert": refresh the three canaries
+to the current pack version, **rewrite their own blocker citations in
+consumer-owned code**, then convert, flip the registry, and execute the revert
+proof. This is a deliberate widening past the 2026-08-12 authorization, which
+covered conversion plus an installer-managed refresh. It authorizes editing
+product code in `rwbp-coordinator`, `loadsmith`, and `hoa-manager` only, and
+nothing in any other consumer.
+
+**2026-08-15 — measured state, superseding the 0.71.2 figures below.** Every
+number in the original text was taken at pack 0.71.2. The pack is now 0.71.11.
+Re-measured today:
+
+| gate | measured | PRD's assumption |
+|---|---|---|
+| canary payload | all three `0.71.6`, `refresh-required` | step 0 assumed a refresh away |
+| machine scope | `0.71.2` plugin and payload against target `0.71.11` | requirement 8, recorded satisfied at 0.71.2 |
+| pack-owned citations | **15 `packDefects` per consumer**, identical by file and text, six `repo-native` surfaces — of which the conversion already repoints 14 | child 2b recorded as shipped |
+| consumer citations | rwbp-coordinator 49 / loadsmith 50 / hoa-manager 34, across 8 / 5 / 9 files | requirement 1 step 1 |
+| verdict | **`blocked` for all three** | — |
+
+The 15 pack-owned citations are the finding that changes the plan: `decide()`
+(`scripts/sd-ai-command-pack-thin-resweep.py:1773`) returns `blocked` on a
+non-empty `packDefects` bucket, so they would block all three canaries even
+with every consumer-owned citation rewritten.
+
+**Review round 2 found the diagnosis inverted.** The first reading — the pack
+ships broken text, so fix the text — is wrong. The conversion already repoints
+14 of the 15 (`installer/thin.py:675` exists for exactly this population;
+executed, it takes loadsmith's six files from 17 citations to 1). The pack's
+fat wording is *correct*: a fat consumer really does have those scripts. What
+is wrong is that the resweep judges pre-conversion bytes while `--thin` demands
+a `clear` verdict, so **no consumer in the fleet can convert today** —
+this task is simply the first to try. The fifteenth citation is a genuine
+defect in one rewrite rule. Design D2b and D2c; phase 0 is two code changes and
+no template edits.
+
+Child 2b is not re-opened and is not at fault: its acceptance criteria measured
+whether the cited paths **resolve**, which is a different property from whether
+they are **cited**, and the gate that now governs did not exist in its form
+then. See `design.md` D0a.
+
+Of the 133 canary blockers exactly **one** is a bare basename, so 0.71.11's
+kept resolver path helps by giving the rewrite a surviving target, not by
+clearing citations on its own.
+
 **2026-08-12 — fleet refresh scope widened, separately.** The canaries all
 hold stale payloads, so requirement 1 step 0 cannot be satisfied without a
 refresh first. Asked whether to refresh only the cohort or the whole fleet,
@@ -283,6 +330,20 @@ revert-and-restore proof.
 
 - [ ] Explicit user authorization for this cohort recorded in this file
       with its date before any consumer mutation.
+- [ ] **Added 2026-08-15, rewritten the same day after review round 2.** A fat
+      consumer's resweep reports `packDefects: 0`, measured against the three
+      canaries untouched at 0.71.6. The count today is 15 per consumer, and
+      **14 of those 15 are repointed by the conversion itself** — the pack's
+      fat wording is correct and is not edited. The 15 block only because the
+      scanner judges pre-conversion bytes while `--thin` requires the verdict
+      the conversion is authorized by. See design D2b. The fifteenth is a real
+      defect in the skills-glob rewrite (design D2c).
+      This is the criterion that says conversion is possible **at all**: as
+      measured, no consumer in the fleet can reach a `clear` verdict.
+- [ ] **Added 2026-08-15.** Each canary's own citations are rewritten to a
+      surviving path or an unambiguous command, evidenced by that consumer's
+      resweep reporting `blockers: 0` on a clean tree. Measured starting
+      points: 49 / 50 / 34.
 - [ ] All three canaries satisfy `installMode == "thin"`, `pin.state == "present"`, and
       `pin.version == machineScope.packVersion` in
       `sd-status fleet --json`; plus `machineScope.state == "installed"`

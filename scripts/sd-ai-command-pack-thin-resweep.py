@@ -43,7 +43,7 @@ import re  # noqa: E402
 
 from sd_ai_command_pack_lib import run_git_minimal  # noqa: E402
 
-from installer import conversion  # noqa: E402
+from installer import conversion, thin  # noqa: E402
 from installer.manifest import load_manifest  # noqa: E402
 from installer.provenance import PROVENANCE_FILE  # noqa: E402
 from installer.registry import (  # noqa: E402
@@ -1429,6 +1429,26 @@ def scan(
     )
     removed = frozenset(plan.delete) | frozenset(plan.retire)
     stripped = frozenset(plan.block_strip)
+    # The bytes a *kept, pack-owned* file will have once the conversion this
+    # verdict authorizes has run, rather than the bytes it has now.
+    #
+    # `repoint_kept_references` (installer/thin.py) rewrites exactly this
+    # population, for exactly this reason -- its docstring says the kept
+    # repo-native files "still say `scripts/<name>` and
+    # `docs/SD_AI_COMMAND_PACK.md`... and the resweep reports every one of them
+    # as a `packDefect`". Reading the pre-conversion bytes made that prophecy
+    # self-fulfilling: `decide` blocks on any packDefect and `--thin` refuses a
+    # verdict that is not `clear`, so a fat consumer whose pack files correctly
+    # name the paths it currently has could never reach `clear`. Measured
+    # 2026-08-15 across the canary cohort: 15 pack defects each, 14 of them
+    # repointed by the conversion, and no consumer in the fleet convertible.
+    #
+    # Sourced from the installer's own computation rather than restated here.
+    # Two implementations of "what will the conversion write" is precisely the
+    # drift that would let a verdict authorize bytes nobody is going to write.
+    # Consumer-owned files are deliberately excluded: nothing rewrites those,
+    # so their citations are scanned exactly as they are written.
+    repointed = thin.planned_repoints(repo, tuple(plan.keep))
     managed = frozenset(receipt.entries)
     # One read per generated bookkeeping file, before anything consults them.
     # Ownership parses these bytes and `scannedBytesDigest` hashes these bytes.
@@ -1622,8 +1642,41 @@ def scan(
             relative.startswith(HISTORICAL_PREFIXES) or relative in HISTORICAL_NAMES
         )
         commanded = command_lines(lines) | direct_path_lines(lines, relative, body)
+        # Scan what the conversion will leave behind, for pack-owned kept files
+        # only. Everything above -- ownership, markers, spans, command context,
+        # and `scannedBytesDigest` -- stays on the bytes actually present: those
+        # decide *whose* file this is and *what a binding recorded*, questions
+        # the rewrite does not touch. Only the citation test moves.
+        #
+        # Fails closed on a line-count change. Every rewrite is an in-line
+        # substitution today, so the counts match and `commanded`/`spans`
+        # indices stay aligned; if one ever introduces or removes a line, the
+        # alignment is silently wrong and the honest answer is the unrewritten
+        # text, which can only over-report.
+        # Membership in `repointed` is the whole test. `plan.keep` is built from
+        # the *receipt*, so it holds pack-installed targets and nothing else: a
+        # consumer-authored file like `scripts/check.sh` is not in it and is
+        # never scanned rewritten. It is not only `packDefects` that this can
+        # move, and the difference is not a leak. A pack-installed target the
+        # consumer has since edited -- measured: `rwbp-coordinator`'s
+        # `.prism/rules.json`, a `consumer-config` row it has taken over --
+        # reports as a `blocker` because the text is the consumer's, and the
+        # conversion repoints it all the same. One citation there stopped
+        # blocking, correctly: the question a verdict answers is whether the
+        # converted tree still names a removed path. Ownership decides who is
+        # accountable for a citation, not whether it survives.
+        # Ownership is deliberately not consulted here --
+        # `.github/copilot-instructions.md` is a managed-block target whose
+        # prologue the consumer owns, so whole-file ownership is false while the
+        # conversion rewrites the file all the same. Gating on ownership left
+        # its seven citations blocking a conversion that repoints them.
+        scanned = lines
+        if relative in repointed:
+            candidate = repointed[relative].splitlines()
+            if len(candidate) == len(lines):
+                scanned = candidate
 
-        for number, line in enumerate(lines, start=1):
+        for number, line in enumerate(scanned, start=1):
             if not any(
                 cites_removed_path(
                     token, removed, repo, relative, survivors, unambiguous

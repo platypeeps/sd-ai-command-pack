@@ -440,12 +440,31 @@ class ThinProfileTests(unittest.TestCase):
         rewritten = references.rewrite_text(
             source, profile=references.THIN_PROFILE
         )
-        self.assertIn("`~/.agents/skills/sd-*/SKILL.md`", rewritten)
+        self.assertIn("`~/.agents/skills`", rewritten)
         self.assertNotIn("`**/skills/sd-*/**`", rewritten)
         self.assertNotIn("`scripts/sd-ai-command-pack-*`", rewritten)
         # The Trellis glob beside it is not the pack's to repoint.
         self.assertIn("`**/skills/trellis-*/**`", rewritten)
         self.assertIn("`scripts/trellis-*.sh`", rewritten)
+
+    def test_the_skills_reference_avoids_the_removed_path_as_a_suffix(self) -> None:
+        """The same suffix trap as the doc case one test up, one family over.
+
+        `~/.agents/skills/sd-*/SKILL.md` is where those files truly live, and it
+        ends with the removed `.agents/skills/sd-*/SKILL.md`, so a resweep of the
+        converted tree reads the relocated form as a citation of the path the
+        rewrite just repointed away from. Measured on the canary cohort: it was
+        the single surviving `packDefect` once the repoint simulation cleared the
+        other fourteen. Naming the directory is what closes it, so no rewritten
+        form may end with the glob.
+        """
+
+        rewritten = references.rewrite_text(
+            "- entry points: `.agents/skills/sd-*/SKILL.md`, and\n",
+            profile=references.THIN_PROFILE,
+        )
+        self.assertNotIn(".agents/skills/sd-*/SKILL.md", rewritten)
+        self.assertIn("~/.agents/skills", rewritten)
 
     def test_the_payload_profiles_rewrite_no_literals(self) -> None:
         """The glob problem belongs to the converted repository alone."""
