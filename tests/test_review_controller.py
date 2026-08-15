@@ -7,6 +7,7 @@ except ModuleNotFoundError as exc:
         raise
     from . import install_test_support as _support
 
+contextlib = _support.contextlib
 json = _support.json
 mock = _support.mock
 os = _support.os
@@ -143,6 +144,61 @@ class ReviewControllerTests(InstallTestCase):
                 "idempotencyKey": request["logicalDispatchId"],
                 "completedAt": "2026-07-25T00:00:00Z",
             },
+            "correlationIds": [request["correlationId"]],
+        }
+
+    @staticmethod
+    def routed_receipt(
+        request: dict[str, object],
+        *,
+        phase: str,
+        status: str = "requested",
+    ) -> dict[str, object]:
+        """A routed receipt at one point in the lane's two-write sequence.
+
+        The lane publishes the receipt when its route step begins, carrying
+        `phase: "started"`, and rewrites it seconds later with the terminal
+        phase and a `completedAt`. A fixture that only ever produces the second
+        write cannot exercise the window the poller actually lands in.
+        """
+
+        dispatch: dict[str, object] = {
+            "status": status,
+            "phase": phase,
+            "idempotencyKey": request["logicalDispatchId"],
+            "startedAt": "2026-07-25T00:00:00Z",
+            "workflowUrl": (
+                "https://github.com/platypeeps/example/actions/runs/1"
+            ),
+        }
+        if phase != "started":
+            dispatch["completedAt"] = "2026-07-25T00:00:04Z"
+        return {
+            "schemaVersion": 1,
+            "receiptId": "receipt-copilot",
+            "logicalDispatchId": request["logicalDispatchId"],
+            "requestFingerprint": request["requestFingerprint"],
+            "repository": request["repository"],
+            "pullRequestNumber": request["pullRequestNumber"],
+            "headSha": request["headSha"],
+            "attempt": request["attempt"],
+            "selectedRoute": "copilot",
+            "backend": {
+                "id": "github-copilot",
+                "kind": "copilot",
+                "label": "GitHub Copilot",
+                "costTier": "medium",
+                "qualityTier": "advanced",
+                "capabilities": ["inline-comments", "review"],
+                "findingChannels": ["inline-comment", "review"],
+                "reviewAuthors": ["copilot-pull-request-reviewer[bot]"],
+                "checkNames": [],
+                "limitations": ["GitHub-managed model selection"],
+                "supportsRerequest": True,
+            },
+            "reason": "review floor required copilot",
+            "policyVersion": request["policyVersion"],
+            "dispatch": dispatch,
             "correlationIds": [request["correlationId"]],
         }
 
@@ -1880,6 +1936,203 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(len(state_files), 1)
         state = json.loads(state_files[0].read_text(encoding="utf-8"))
         self.assertEqual(state["phase"], "reconciliation-required")
+
+    def routed_review_context(self, controller, root: Path, artifacts: Path):
+        """Mocks for a `scope=pr` routed review, and its repeatable args.
+
+        Everything except the receipt query is fixed, so the tests below vary
+        one thing: what the durable receipt looks like at each poll.
+        """
+
+        pr = self.pr(controller, root)
+        args = controller.parse_args(
+            [
+                "--repo",
+                str(root),
+                "--scope",
+                "pr",
+                "--pr-number",
+                "42",
+                "--artifact-root",
+                str(artifacts),
+                "--json",
+            ]
+        )
+        observation = {
+            "status": "clean",
+            "materialized": True,
+            "reviewThreads": {"total": 0, "unresolved": 0, "items": []},
+            "conversationComments": [],
+            "reviews": [],
+            "checks": {"total": 0, "blocking": [], "backend": []},
+        }
+        patches = (
+            mock.patch.object(
+                controller,
+                "_run_check",
+                return_value={"schemaVersion": 1, "status": "passed"},
+            ),
+            mock.patch.object(
+                controller,
+                "_run_local",
+                return_value=self.local_report(controller, pr),
+            ),
+            mock.patch.object(controller, "_pr_evidence", return_value=pr),
+            mock.patch.object(
+                controller, "_capability", return_value=self.capability()
+            ),
+            mock.patch.object(
+                controller, "_collect_observation", return_value=observation
+            ),
+            mock.patch.object(controller, "_default_branch", return_value="main"),
+            mock.patch.object(controller.time, "sleep"),
+        )
+        return args, patches
+
+    def test_in_flight_receipt_is_polled_until_it_settles(self) -> None:
+        # The lane publishes the receipt at `phase: "started"` and rewrites it
+        # to a terminal phase seconds later. Breaking out of the poll loop on
+        # the first receipt that merely exists caches the in-flight write, and
+        # nothing re-queries a receipt that is already stored, so the attempt
+        # wedged instead of resolving.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        args, patches = self.routed_review_context(controller, root, artifacts)
+        # The real sequence: the pre-dispatch query finds nothing, the route is
+        # dispatched, and the first poll lands inside the lane's two-write
+        # window before the second sees the terminal write.
+        phases = iter([None, "started", "observed"])
+
+        def query(*_args, **kwargs):
+            phase = next(phases)
+            if phase is None:
+                return None
+            return self.routed_receipt(kwargs["request"], phase=phase)
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            receipt_query = stack.enter_context(
+                mock.patch.object(controller, "_query_receipt", side_effect=query)
+            )
+            dispatch = stack.enter_context(
+                mock.patch.object(controller, "_dispatch")
+            )
+            code, report = controller.run(args)
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        self.assertEqual(report["limitations"], [])
+        self.assertEqual(
+            report["remote"]["receipt"]["dispatch"]["phase"], "observed"
+        )
+        # Three queries: the empty pre-dispatch check, the in-flight write,
+        # then the terminal one. One dispatch: polling must never route again.
+        self.assertEqual(receipt_query.call_count, 3)
+        self.assertEqual(dispatch.call_count, 1)
+
+    def test_in_flight_receipt_is_refreshed_by_the_next_invocation(self) -> None:
+        # Exhausting the poll budget on an in-flight receipt is a legitimate
+        # `remote-reconciliation-required`, but it must stay recoverable: the
+        # unchanged attempt the skill tells callers to rerun has to re-query
+        # the stored receipt rather than replay it.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        args, patches = self.routed_review_context(controller, root, artifacts)
+
+        pending = iter([None])
+
+        def still_running(*_args, **kwargs):
+            # Empty once so the route is dispatched, then in flight for the
+            # rest of the poll budget.
+            if next(pending, "started") is None:
+                return None
+            return self.routed_receipt(kwargs["request"], phase="started")
+
+        def settled(*_args, **kwargs):
+            return self.routed_receipt(kwargs["request"], phase="observed")
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            receipt_query = stack.enter_context(
+                mock.patch.object(
+                    controller, "_query_receipt", side_effect=still_running
+                )
+            )
+            dispatch = stack.enter_context(
+                mock.patch.object(controller, "_dispatch")
+            )
+            first_code, first_report = controller.run(args)
+            first_queries = receipt_query.call_count
+            receipt_query.side_effect = settled
+            second_code, second_report = controller.run(args)
+
+        self.assertEqual((first_code, first_report["status"]), (3, "indeterminate"))
+        self.assertEqual(
+            first_report["limitations"], ["remote-reconciliation-required"]
+        )
+        self.assertEqual((second_code, second_report["status"]), (0, "ready"))
+        self.assertEqual(
+            second_report["remote"]["receipt"]["dispatch"]["phase"], "observed"
+        )
+        # The first run spends its whole budget; the second re-queries the
+        # stored receipt without dispatching again.
+        self.assertGreater(first_queries, 1)
+        self.assertGreater(receipt_query.call_count, first_queries)
+        self.assertEqual(dispatch.call_count, 1)
+
+    def test_settled_receipt_phases_are_not_polled_again(self) -> None:
+        # `not-started` is what a skipped `route: none` dispatch carries, and it
+        # is terminal for that route. Treating every non-`observed` phase as
+        # in-flight would burn the poll budget on a receipt that is already
+        # final.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        args, patches = self.routed_review_context(controller, root, artifacts)
+
+        def query(*_args, **kwargs):
+            return self.none_receipt(kwargs["request"])
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            receipt_query = stack.enter_context(
+                mock.patch.object(controller, "_query_receipt", side_effect=query)
+            )
+            stack.enter_context(mock.patch.object(controller, "_dispatch"))
+            code, report = controller.run(args)
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        self.assertEqual(receipt_query.call_count, 1)
+
+    def test_failed_dispatch_receipt_is_reported_without_polling(self) -> None:
+        # A failed dispatch is terminal-bad. Reconciling it is the operator's
+        # job; polling it would only delay the diagnostic by the poll budget.
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        args, patches = self.routed_review_context(controller, root, artifacts)
+
+        def query(*_args, **kwargs):
+            return self.routed_receipt(
+                kwargs["request"], phase="observed", status="failed"
+            )
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            receipt_query = stack.enter_context(
+                mock.patch.object(controller, "_query_receipt", side_effect=query)
+            )
+            stack.enter_context(mock.patch.object(controller, "_dispatch"))
+            code, report = controller.run(args)
+
+        self.assertEqual((code, report["status"]), (3, "indeterminate"))
+        self.assertEqual(report["limitations"], ["remote-reconciliation-required"])
+        self.assertEqual(receipt_query.call_count, 1)
 
     def test_fully_rebutted_local_stage_routes_like_a_clean_one(self) -> None:
         controller = self.load_controller()
