@@ -1410,3 +1410,47 @@ Installed the layout resolver a second time at .sd-ai-command-pack/bin/, a consu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 383: Close the post-canary and receipt-cache tasks; retire the consumer pack refresh
+
+**Date**: 2026-08-16
+**Task**: Close the post-canary and receipt-cache tasks; retire the consumer pack refresh
+**Branch**: `task/post-thin-reconciliation`
+
+### Summary
+
+Closed two tasks whose work had shipped, filed three measured follow-ups, and retired anomaly-metric-creator's scheduled command-pack refresh along with the contract that pinned it.
+
+### Main Changes
+
+- Closed 08-15-review-receipt-cache-race, shipped in #468 and left in_progress past the merge; each acceptance criterion now names the regression test that proves it, re-run against this checkout (47 tests, OK).
+- Closed 08-10-thin-post-canary-conversion with evidence collected from the live fleet: four consumers thin and pinned at 0.71.22, no pack CI steps at any post-merge HEAD, zero se-ai-command-pack derivation inputs touched, make release-prep green.
+- Recorded a criterion-4 deviation instead of ticking it clean. Three of four conversions added zero files; sd-github-review added 572 because it converted first, under code that deleted the managed .gitignore block rather than adopting it.
+- Filed 08-16-thin-conversion-gitignore-residue (236 paths still tracked in sd-github-review, all from one commit; c299260 untracked the .build/ half and missed node_modules/), 08-16-thin-revert-disable-marker, and 08-16-fleet-local-config-advisory.
+- Corrected 08-10-thin-final-conversion-gate-retirement's stale rationale: install.py --force against a thin consumer reports state: current and writes nothing, so deleting the sync workflow is cleanup, not a safety gate. That task stays in planning for the validate_consumer retirement.
+- Opened platypeeps/anomaly-metric-creator#380, deleting sd-ai-command-pack-sync.yml and the PR-body scope CI call, plus the REQUIRED_FILES entry, _check_pack_sync, its five tests, and the doc and spec surfaces that described the retired automation as current.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `197bf9fb` | chore(task): record branch metadata before finalization |
+| `304af0b5` | docs(task): close two shipped tasks and file three measured follow-ups |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_review_controller - Ran 47 tests, OK
+- [OK] make release-prep - exit 0, Full check complete
+- [OK] anomaly-metric-creator: pytest tests/ - 2011 passed, 2 skipped
+- [OK] anomaly-metric-creator: all four lightweight guards clean
+- [OK] Every path:line citation in the edited PRDs resolves against this checkout
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
