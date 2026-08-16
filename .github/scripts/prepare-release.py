@@ -27,6 +27,12 @@ PAYLOAD_SINGLETONS = frozenset(
         "templates/docs/SD_AI_COMMAND_PACK.md",
         ".claude-plugin/marketplace.json",
         ".github/scripts/generate-plugin.py",
+        # Consumed by se-review-skills in checkouts of this pack, so a change
+        # to it is a shipped-behaviour change. Listed as a singleton rather
+        # than adding a "generated/" prefix: whoever adds the next file under
+        # generated/ should decide whether it belongs in the release gate,
+        # instead of being enrolled silently.
+        "generated/registry-snapshot.json",
     }
 )
 PAYLOAD_PREFIXES = ("templates/", "plugins/")

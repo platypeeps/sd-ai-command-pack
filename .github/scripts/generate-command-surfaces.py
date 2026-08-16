@@ -206,6 +206,14 @@ GENERATED_REFERENCE_PATHS = frozenset(
     {HELP_CATALOG_PATH, STRUCTURED_QUESTION_REFERENCE_PATH}
 )
 
+# Consumed by se-review-skills' skill_review.py, which prefers this snapshot
+# over AST-parsing installer/registry.py. Bump the schema version only
+# alongside the consumer's SUPPORTED_REGISTRY_SNAPSHOT_SCHEMA_VERSIONS: a
+# version this consumer does not recognize raises rather than falling back, so
+# an unmatched bump turns every SD checkout into a hard failure.
+REGISTRY_SNAPSHOT_PATH = "generated/registry-snapshot.json"
+REGISTRY_SNAPSHOT_SCHEMA_VERSION = 1
+
 _COMMAND_SOURCE_PATTERNS = (
     re.compile(r"^templates/\.agents/skills/(sd-[a-z0-9-]+)/SKILL\.md$"),
     re.compile(
@@ -1104,6 +1112,38 @@ def generate_source_only_dev_adapters(outputs: dict[str, str]) -> dict[str, str]
     return dev
 
 
+def generate_registry_snapshot_text() -> str:
+    """Serialize the registry facts skill_review reconstructs, from the real
+    imported objects (authoritative rather than re-parsed).
+
+    Ordering is load-bearing: skills follow COMMAND_REGISTRY order and
+    platforms are sorted, so the snapshot-derived RegistryData is identical to
+    the AST-derived one on the fields the AST can actually read.
+
+    familyOrder and sharedReferences deliberately do NOT match the AST result.
+    skill_review._parse_registry looks for FAMILY_LABELS and SHARED_REFERENCES,
+    which are the se-ai-command-pack names; this pack calls the same concepts
+    COMMAND_FAMILIES and SHARED_SKILL_REFERENCES, so the parser is blind to
+    both and derives them as empty. Emitting empty here to match it would bake
+    a parser blind spot into the file that becomes the only registry source
+    once that AST path is removed, discarding data this pack really has.
+    """
+    payload = {
+        "schemaVersion": REGISTRY_SNAPSHOT_SCHEMA_VERSION,
+        "familyOrder": [family.id for family in COMMAND_FAMILIES],
+        "skills": [
+            {"name": command.name, "family": command.family}
+            for command in COMMAND_REGISTRY
+        ],
+        "platforms": sorted(PLATFORM_REGISTRY),
+        "sharedReferences": {
+            source: list(consumers)
+            for source, consumers in SHARED_SKILL_REFERENCES.items()
+        },
+    }
+    return json.dumps(payload, indent=2) + "\n"
+
+
 def generate_surfaces() -> dict[str, str]:
     outputs = generate_neutral_adapters()
     outputs.update(generate_adapters())
@@ -1114,6 +1154,7 @@ def generate_surfaces() -> dict[str, str]:
         generate_structured_question_reference()
     )
     outputs["manifest.json"] = generate_manifest_text()
+    outputs[REGISTRY_SNAPSHOT_PATH] = generate_registry_snapshot_text()
     return outputs
 
 

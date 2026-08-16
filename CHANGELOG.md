@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.71.25 - 2026-08-16
+
+### Added
+
+- The surface generator now emits `generated/registry-snapshot.json`, the same
+  `schemaVersion` 1 registry snapshot the SE pack already ships. `skill_review.py`
+  from `se-review-skills` prefers a snapshot and falls back to AST-parsing
+  `installer/registry.py` only when there is none; this pack shipped no snapshot,
+  so in an SD checkout the "fallback" was the only path on every run. The
+  snapshot is produced from the **imported** registry objects -- `COMMAND_FAMILIES`,
+  `COMMAND_REGISTRY`, `PLATFORM_REGISTRY`, `SHARED_SKILL_REFERENCES` -- and not by
+  re-parsing `installer/registry.py`, which would make the producer agree with the
+  parser by construction while both drift from the real objects.
+
+  `familyOrder` and `sharedReferences` carry the real values even though the AST
+  parser derives neither for this pack: it reads the SE names `FAMILY_LABELS` and
+  `SHARED_REFERENCES` and cannot see `COMMAND_FAMILIES` / `SHARED_SKILL_REFERENCES`.
+  Emitting the parser's empties would have encoded a blind spot into the file that
+  becomes the only registry source once the fallback is removed. The three fields
+  the parser *can* derive -- `families`, `skill_order`, `platforms` -- were verified
+  equal between both derivations on the same checkout (20 skills, 18 platforms).
+
+  A malformed snapshot fails closed in the consumer while an absent one falls
+  back, so the file is registered as a single output of the existing
+  `generate_surfaces()` dict: `--check` drift detection and byte-determinism come
+  from the machinery already in place rather than from a second code path.
+  `generated/registry-snapshot.json` is added to `PAYLOAD_SINGLETONS` -- a
+  singleton rather than a `generated/` prefix, so a future file under `generated/`
+  is enrolled in the release gate by whoever adds it, not silently.
+
 ## 0.71.24 - 2026-08-16
 
 ### Fixed
