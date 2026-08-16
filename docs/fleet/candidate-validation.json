@@ -1,16 +1,16 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-15T14:22:29Z",
-  "packVersion": "0.71.14",
-  "payloadDigest": "sha256:5299c680c5b813fa8b99558fafb9a18bdf777a6bbd41d1581f883b0486f7c7c2",
+  "validatedAt": "2026-08-16T00:00:47Z",
+  "packVersion": "0.71.15",
+  "payloadDigest": "sha256:06f418b0c78fdb306371dffe162f11af597756c8f070b32ae83496965dd928ce",
   "fleetManifestDigest": "sha256:ab9b5ed56dcd3d25707f4abae77a2f8f6d19dd04fd28b95620458616883a8bb7",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "b62ee75d66f61056ecc15c57291a292927234fb5",
-      "status": "blocked",
+      "baseCommit": "c10d29c4d82e3ee15830eb0a63cfe4526aabd3a8",
+      "status": "passed",
       "prepares": [
         [
           "bash",
@@ -23,15 +23,13 @@
           "scripts/check-review-churn.mjs"
         ]
       ],
-      "reasons": [
-        "48 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "97d358f3b72dbd6cb520a56ebf87aeefdba28679",
-      "status": "blocked",
+      "baseCommit": "b465c22a184160c8c095a548cf30ea6ad79484a4",
+      "status": "passed",
       "prepares": [
         [
           "bash",
@@ -46,15 +44,13 @@
           "--skip-build"
         ]
       ],
-      "reasons": [
-        "23 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "359a9020882180eee60d836f0170f9d8541c376b",
-      "status": "blocked",
+      "baseCommit": "b33d7f83aa83c8387bea19fdd97d19d562cfd0bc",
+      "status": "passed",
       "prepares": [
         [
           "bash",
@@ -67,14 +63,12 @@
           "scripts/check-review-preflight.mjs"
         ]
       ],
-      "reasons": [
-        "34 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "4e84f4a21c0eaf76729a8af68e659c9ac1187509",
+      "baseCommit": "efad5789ce8b1bd00c85dea523d0e67b4e98a035",
       "status": "blocked",
       "prepares": [
         [
@@ -99,7 +93,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "ce5dba08997f69888b6c5cc5d50860bf6bc0351a",
+      "baseCommit": "02f1db7a05523fff3f3a78ba3db5bce554a3f3ff",
       "status": "blocked",
       "prepares": [
         [
@@ -123,7 +117,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "564d4a2e0b33ad1f896777d93d92aca00aece43d",
+      "baseCommit": "8dda38514f38453a423b3b269cf2a8263f551691",
       "status": "blocked",
       "prepares": [],
       "checks": [
@@ -134,13 +128,13 @@
         ]
       ],
       "reasons": [
-        "23 consumer-authored reference(s) to removed paths"
+        "31 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "0370f12347e24ddc8a76695fdedf38c012e16388",
+      "baseCommit": "5a86c52d51d941d2a9831574798316db3df19283",
       "status": "blocked",
       "prepares": [
         [
@@ -165,13 +159,13 @@
         ]
       ],
       "reasons": [
-        "12 consumer-authored reference(s) to removed paths"
+        "15 consumer-authored reference(s) to removed paths"
       ]
     },
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "d58b6da4fccfad306f18a048ed147d092ca15d70",
+      "baseCommit": "a5cb2287f885c09878f72c6aafa0c115553dd281",
       "status": "blocked",
       "prepares": [
         [
