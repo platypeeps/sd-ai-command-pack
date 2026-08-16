@@ -101,6 +101,13 @@ for the gate between them):
 4. `08-10-thin-post-canary-conversion` — mutates consumer repositories
 5. `08-10-thin-final-conversion-gate-retirement` — mutates a consumer
    repository, then retires gates
+6. `08-16-thin-migration-record-closure` — records only. Added 2026-08-16,
+   after the conversion finished, to close this task's own acceptance
+   criteria against the evidence that settles them and to clear a stale
+   blocker header on the grandparent. It mutates no repository and no
+   consumer; it is a child rather than an edit-in-place because it edits
+   two active tasks' artifacts and therefore needs its own finalization
+   scope.
 
 Children 3–5 are blocked on explicit per-cohort user authorization,
 because they change repositories outside this one. That work is also
