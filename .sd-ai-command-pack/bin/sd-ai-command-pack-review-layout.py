@@ -264,6 +264,25 @@ PIN_STATE_THIN = "thin"
 PIN_STATE_MALFORMED = "malformed"
 
 
+def _inside(root: Path, path: Path) -> bool:
+    """Whether `path` really lands inside `root` once symlinks are followed.
+
+    Mirror of `installer/manifest.py:validate_resolved_target_path`, which the
+    installer applies to exactly these three receipt paths. Joining a relative
+    path to a root does not keep it there: a `.sd-ai-command-pack` symlinked
+    elsewhere makes every receipt under it another tree's, and this resolver
+    hands its answer to a caller whose next move is to execute it. Both sides
+    are resolved because a root reached through a symlink is ordinary -- macOS
+    `/tmp` is one -- and comparing a resolved child against an unresolved
+    parent would reject those.
+    """
+
+    try:
+        return path.resolve(strict=False).is_relative_to(root.resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
 def _receipt_declares_thin(path: Path) -> bool:
     """True only when `path` legibly says `mode: "thin"`.
 
@@ -293,9 +312,12 @@ def pin_state(root: Path) -> str:
     are `malformed`: that receipt was thin and something has since edited it.
     """
 
-    if _receipt_declares_thin(root / PACK_MANIFEST_RELATIVE):
+    manifest = root / PACK_MANIFEST_RELATIVE
+    if _inside(root, manifest) and _receipt_declares_thin(manifest):
         return PIN_STATE_THIN
     provenance = root / PROVENANCE_RELATIVE
+    if not _inside(root, provenance):
+        return PIN_STATE_FAT
     if provenance.is_symlink() or not provenance.is_file():
         return PIN_STATE_FAT
     try:
@@ -357,9 +379,15 @@ def resolve_layout(
             ),
         )
 
+    # The same containment rule as the pin, and for the same reason: this file
+    # is what `classify` answers from, so a receipt reached through a symlinked
+    # `.sd-ai-command-pack` would describe another repository's install as this
+    # one's. Out-of-tree means "no vendored receipt here" rather than an error,
+    # which leaves the ladder to report `unresolved` with its own reason.
     vendored = root / INSTALLED_TARGETS_RELATIVE
-    residual = _read_targets(vendored) if vendored.is_file() else frozenset()
-    if pinned == PIN_STATE_FAT and vendored.is_file():
+    usable = _inside(root, vendored) and vendored.is_file()
+    residual = _read_targets(vendored) if usable else frozenset()
+    if pinned == PIN_STATE_FAT and usable:
         return Layout(MODE_FAT, receipt=vendored, targets=residual)
 
     # `resolve_state_root` is called, never re-derived: expanding

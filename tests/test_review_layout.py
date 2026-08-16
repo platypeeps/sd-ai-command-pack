@@ -993,6 +993,48 @@ class InProcessLayoutTests(unittest.TestCase):
         self.assertEqual(layout.mode, "unresolved")
         self.assertIn("pinned thin", layout.reason)
 
+    def test_a_symlinked_pack_directory_reads_no_receipt_at_all(self) -> None:
+        """Containment, on every receipt this resolver reads from the repo.
+
+        Joining a relative path to a root does not keep it there. With
+        `.sd-ai-command-pack` pointing elsewhere, both the pin and the vendored
+        receipt come from a tree that is not this one -- and the answer is
+        handed to a caller whose next move is to execute it. The installer
+        validates exactly these paths (`installer/manifest.py:210`); guarding
+        only the pin would close half of it and leave the same escape open
+        through `installed-targets.txt`.
+        """
+
+        elsewhere = Path(self.tmp.name) / "elsewhere" / ".sd-ai-command-pack"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "installed-targets.txt").write_text(
+            "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+        )
+        (elsewhere / "manifest.json").write_text(
+            json.dumps({"mode": "thin"}), encoding="utf-8"
+        )
+        (self.root / ".sd-ai-command-pack").symlink_to(
+            elsewhere, target_is_directory=True
+        )
+
+        self.assertEqual(self.module.pin_state(self.root), "fat")
+        layout = self.module.resolve_layout(self.root, environ={"HOME": str(self.home)})
+        self.assertEqual(layout.mode, "unresolved")
+
+    def test_containment_does_not_reject_a_root_reached_through_a_symlink(self) -> None:
+        """The false positive a resolved-child-versus-raw-parent check makes.
+
+        A root reached through a symlink is ordinary -- macOS `/tmp` is one --
+        so comparing a resolved receipt against an unresolved root would call
+        every such consumer an escape and resolve nothing.
+        """
+
+        self.fat("scripts/sd-ai-command-pack-full-check.sh")
+        link = Path(self.tmp.name) / "linked-consumer"
+        link.symlink_to(self.root, target_is_directory=True)
+        layout = self.module.resolve_layout(link, environ={"HOME": str(self.home)})
+        self.assertEqual(layout.mode, "fat")
+
     def test_an_edited_pin_is_unresolved_rather_than_fat(self) -> None:
         """Thin-only keys under a non-thin mode mean the receipt was edited.
 

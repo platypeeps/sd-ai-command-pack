@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.71.15 - 2026-08-15
+## 0.71.16 - 2026-08-15
 
 ### Fixed
 
@@ -25,6 +25,38 @@
   exactly as before. A thin consumer keeps the residual receipt for path
   classification, because those surviving rows are pack payload the repository
   genuinely still carries; only script resolution branches on mode.
+
+## 0.71.15 - 2026-08-15
+
+### Fixed
+
+- `sd-review` can now observe a routed review finishing. The durable lane
+  writes its receipt Check Run twice -- once with `dispatch.phase: "started"`
+  as the route step begins, then a few seconds later with the terminal phase
+  and a `completedAt`. The coordinator polled inside that window and kept what
+  it found: the receipt was queried only when none was stored, the poll loop
+  broke on the first non-`None` result whether or not it was terminal, and the
+  terminal check then turned that cached `started` phase into
+  `remote-reconciliation-required`. Since the only branch that re-queries an
+  existing receipt is the dispatch-*failure* path, the rerun of the unchanged
+  attempt that `sd-review/SKILL.md` prescribes replayed the cache forever --
+  a wedged attempt rather than a pending one.
+
+  Measured on `platypeeps/sd-github-review` PR #86, the first pull request to
+  run against a fully installed durable lane: `21:51:30.633Z` to
+  `21:51:34.172Z`, then `22:03:16.347Z` to `22:03:19.403Z` at a second head.
+
+  A stored receipt whose dispatch is still in flight is now treated like a
+  missing one and re-queried, so a receipt that settles within the existing
+  poll budget is observed in the same invocation and a later rerun of the
+  unchanged attempt gets a fresh read rather than the cache. Only
+  `phase: "started"` counts as in flight: `not-started` is what a skipped
+  `route: none` dispatch carries and still flows straight to observation, and
+  a `failed` status stays terminal for the operator to reconcile. The
+  fail-closed diagnostic is unchanged -- a receipt still non-terminal when the
+  budget is exhausted continues to report `remote-reconciliation-required` --
+  and a re-query never dispatches, never widens receipt matching, and never
+  discards a stored receipt when the query transiently returns nothing.
 
 ## 0.71.14 - 2026-08-15
 
