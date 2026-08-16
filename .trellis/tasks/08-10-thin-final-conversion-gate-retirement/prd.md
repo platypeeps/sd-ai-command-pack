@@ -88,10 +88,74 @@ but it is ordinary cleanup, not the load-bearing safety deletion this
 requirement describes. The same correction applies to the `pr-body-scope.py`
 call, which parent decision D2 already classified as a no-op.
 
-**This task stays in planning.** Requirement 2 (retiring `validate_consumer` in
-`scripts/sd-ai-command-pack-fleet-candidate-check.py`) and requirement 4 (the
-spec/doc correction sweep) are untouched real work, and requirement 3's warning
-about `scripts/sd-ai-command-pack-surface-check.py` still applies to them.
+**This task stays in planning** for requirement 2, which is the only remaining
+work. Requirement 4 is already satisfied; see below. Requirement 3's warning
+about `scripts/sd-ai-command-pack-surface-check.py` still applies.
+
+## Requirement 4 is already satisfied (measured 2026-08-16)
+
+This requirement asks for the spec/doc correction sweep to be done "by
+enumeration — a grep of the install/fleet spec surfaces and `docs/` — not from
+memory". Run:
+
+```text
+$ grep -rnE 'consumers? (vendor|vendors|install a copy)|vendored (into|in) (each|the) consumer|consumer.{0,20}vendor' .trellis/spec/ docs/ \
+    | grep -viE 'historical|used to|formerly|before the thin|no longer|until the thin|prior to'
+docs/FLEET_ROLLOUT.md:15:consumer vendors no tree, so fleet status reports its pin — `present` with a
+```
+
+One hit, and it is not a stale claim: read in context it says "A `thin`
+consumer vendors no tree", which is the new behaviour stated correctly. A
+second, differently-worded sweep for `fat install`, `vendored tree`, and
+`installed payload in the consumer` returns three hits
+(`.trellis/spec/backend/manifest-and-filesystem.md:262`,
+`.trellis/spec/backend/fleet-consumer-conversion.md:58`,
+`docs/SD_AI_COMMAND_PACK.md:128`), all of which describe the fat/thin
+*distinction* the installer still implements rather than asserting that
+consumers vendor.
+
+So the count of present-tense descriptions of consumer vendoring is **zero**,
+which is what this requirement asks for. Nothing is left to correct. Re-run
+both greps at implementation time rather than trusting this record; the point
+of the requirement is that the answer comes from the tree, not from a note.
+
+## Requirement 2 has an unresolved premise — resolve in design
+
+Requirement 2 says what retires is "consumer fat installation and audit, which
+lives in `validate_consumer`". Retiring it as written would remove the only
+consumer validation the candidate check has, while the state that validation
+exists for is still reachable and still recommended.
+
+- `validate_consumer` is the sole validator in the file:
+  `grep -n 'def validate_' scripts/sd-ai-command-pack-fleet-candidate-check.py`
+  returns exactly one line, `:489`. It spans 368 lines, has one caller, and 24
+  test references.
+- `--revert-thin` is not deprecated. It is a live installer flag
+  (`install.py:415`), and `docs/FLEET_ROLLOUT.md:257` prescribes it as *the*
+  recovery route: "`--revert-thin` plus a reviewed reconversion, never a fleet
+  sweep." `docs/SD_AI_COMMAND_PACK.md:2099` documents its `.gitignore`
+  behaviour.
+
+A consumer that follows the documented recovery path therefore ends up fat, and
+after this retirement nothing in the candidate loop would validate it. The
+retirement and the recovery path cannot both be right as currently written.
+
+Design must pick one and record why:
+
+1. **Retire and accept the gap** — fat is a transient state inside a supervised
+   recovery, so candidate validation is not the control that protects it. Then
+   name what does, because "nothing" is an answer that should be written down
+   rather than arrived at silently.
+2. **Retire the fleet-sweep path, keep a reachable validator** — the fat audit
+   stops running across the fleet but stays callable for a reverted consumer.
+   This is the smaller change and probably the honest one.
+3. **Deprecate `--revert-thin` first** — only coherent if revert is genuinely
+   being withdrawn, which contradicts `docs/FLEET_ROLLOUT.md:257` and would
+   need its own decision.
+
+Whichever is chosen, requirement 2's instruction to enumerate the exact
+functions and tests removed or rescoped still governs, and the 24 test
+references are part of that enumeration rather than collateral.
 
 ## Acceptance criteria
 

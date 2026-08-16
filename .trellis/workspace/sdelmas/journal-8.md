@@ -1454,3 +1454,47 @@ Closed two tasks whose work had shipped, filed three measured follow-ups, and re
 ### Next Steps
 
 - None - task complete
+
+
+## Session 384: Revoke the orphaned refresh token, close the residue task, rescope the gate retirement
+
+**Date**: 2026-08-16
+**Task**: Revoke the orphaned refresh token, close the residue task, rescope the gate retirement
+**Branch**: `task/gate-retirement-scope-and-residue-closure`
+
+### Summary
+
+Deleted the credential the retired sync workflow left behind, closed the gitignore-residue task against merged main, and recorded two findings that change the size and shape of the remaining gate-retirement work.
+
+### Main Changes
+
+- Deleted the SD_AI_COMMAND_PACK_PR_TOKEN Actions secret from anomaly-metric-creator. The sync-workflow deletion left it with zero workflow references across all nine repos while it still held contents, pull-request, and workflow write. The PAT itself still needs revoking at its source; deleting the secret does not invalidate it.
+- Closed 08-16-thin-conversion-gitignore-residue against merged main: 236 tracked-but-ignored paths to 0, 18829 deletions with zero insertions and no status letter but D, and the other seven consumers unchanged. The CI test lane proved npm ci rebuilds node_modules from the lockfile on a runner where it is no longer in the repository.
+- Recorded that the commit leaves the files on disk but a branch switch does not: checking out main restored the still-tracked copies and pulling the merge removed them, so node_modules briefly disappeared before npm ci restored it.
+- Resolved the deviation standing against criterion 4 of the archived 08-10-thin-post-canary-conversion; its pointer now resolves to a fix rather than an open defect.
+- Established by enumeration that requirement 4 of 08-10-thin-final-conversion-gate-retirement is already satisfied: zero present-tense descriptions of consumer vendoring in the spec surfaces and docs.
+- Recorded an unresolved premise in that task's requirement 2: validate_consumer is the only validator the candidate check has, while --revert-thin remains the recovery route docs/FLEET_ROLLOUT.md:257 prescribes, so retiring it as written leaves a reverted consumer unvalidated. Three design options recorded.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0c763675` | chore(task): record branch metadata before finalization |
+| `bcb264f5` | docs(task): close the residue task and scope the gate retirement to its real work |
+
+### Testing
+
+- [OK] sd-github-review merged main: tracked-but-ignored 0, npm ci reconstructs, CI route and test both pass
+- [OK] Other seven consumers re-measured after the merge: counts unchanged
+- [OK] Every path:line citation in both edited PRDs resolves against this checkout
+- [OK] validate_consumer figures re-derived from the tree: 368 lines, 1 caller, 24 test references
+- [OK] pre-archive: pre_archive_valid
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
