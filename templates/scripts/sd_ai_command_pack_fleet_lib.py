@@ -241,8 +241,15 @@ def _pack_identity(pack_source: Path) -> tuple[Path, str]:
     return resolved_source, manifest_version(manifest)
 
 
-def _find_pack_source(manifest_path: Path) -> Path | None:
-    for candidate in (manifest_path.parent, *manifest_path.parents):
+def find_pack_source(start: Path) -> Path | None:
+    """The pack source checkout at or above `start`, or None.
+
+    Public because the runtime root is no longer one arithmetic step from a
+    script's own location: a machine install puts the shipped scripts under
+    `~/.agents/bin`, so a caller that needs the source checkout has to search
+    for it rather than compute it.
+    """
+    for candidate in (start, *start.parents):
         pack_manifest = candidate / "manifest.json"
         if not pack_manifest.is_file():
             continue
@@ -253,6 +260,10 @@ def _find_pack_source(manifest_path: Path) -> Path | None:
         if manifest.get("name") == PACK_NAME:
             return candidate.resolve()
     return None
+
+
+def _find_pack_source(manifest_path: Path) -> Path | None:
+    return find_pack_source(manifest_path.parent)
 
 
 def resolve_fleet_configuration(

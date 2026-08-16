@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -23,7 +25,7 @@ from installer.fileops import (
     remove_text_block_file,
 )
 from installer.manifest import read_text_strict
-from installer.references import THIN_PROFILE, rewrite_text
+from installer.references import THIN_PROFILE, restore_thin_text, rewrite_text
 from installer.registry import (
     COPILOT_GUIDANCE_END,
     COPILOT_GUIDANCE_START,
@@ -497,12 +499,26 @@ def writability_reason(root: Path, label: str) -> str | None:
     """
     if not root.is_dir():
         return f"{label} {root} is not a directory"
-    probe = root / ".sd-ai-command-pack-writability-probe"
+    # `mkstemp` and not a fixed `probe.touch()`/`probe.unlink()` pair, for two
+    # reasons that both end in a wrong answer. A fixed name is shared state: two
+    # conversions probing the same registry race, the first unlink wins, and the
+    # second raises `FileNotFoundError` -- reported as "not writable" for a root
+    # that plainly is. And `touch()` on a name that already exists succeeds on
+    # write permission to *that file*, not to the directory, so a leftover probe
+    # from a killed run answers the wrong question and then gets deleted.
+    # `mkstemp` creates with `O_EXCL` under a unique name: it fails exactly when
+    # the directory cannot take a new entry, which is the thing being asked.
     try:
-        probe.touch()
-        probe.unlink()
+        handle, created = tempfile.mkstemp(
+            dir=root, prefix=".sd-ai-command-pack-writability-probe-"
+        )
     except OSError as error:
         return f"{label} {root} is not writable: {error}"
+    os.close(handle)
+    try:
+        os.unlink(created)
+    except OSError:  # pragma: no cover - the probe wrote, so the root is writable
+        pass
     return None
 
 
@@ -654,6 +670,52 @@ def planned_repoints(target: Path, keep: tuple[str, ...]) -> dict[str, str]:
         if rewritten != text:
             planned[entry] = rewritten
     return planned
+
+
+def planned_unrepoints(
+    target: Path, keep: tuple[str, ...]
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """The pre-conversion text for every kept file the thin rewrite changed.
+
+    Revert's payload restore cannot reach these files. A kept surface was
+    never deleted, so there is nothing to put back -- and both of the ones
+    that carry references, `.github/PULL_REQUEST_TEMPLATE.md` and
+    `.github/copilot-instructions.md`, are consumer-owned enough that
+    `install_file` returns `PRESERVED` for them rather than overwrite. A
+    revert that stops there exits zero and leaves the consumer's own files
+    still pointing at `~/.agents`, which is the one thing a fat checkout has
+    no way to follow.
+
+    So the undo is the inverse rewrite, applied to the current text rather
+    than to remembered bytes -- a consumer who edited the file after
+    converting keeps those edits, and only the pack's own repoint is taken
+    back. Each candidate is then checked by rewriting the restoration
+    forward: if it does not reproduce what is on disk byte for byte, this
+    text is not something `planned_repoints` could have produced, and the
+    entry is returned as a refusal instead of a guess.
+
+    Returns the restorations and the entries that failed that check.
+    """
+
+    planned: dict[str, str] = {}
+    refused: list[str] = []
+    for entry in keep:
+        path = target / entry
+        if not path.is_file() or path.is_symlink():
+            continue
+        try:
+            # Bytes then decode, for the reason `planned_repoints` gives.
+            text = path.read_bytes().decode("utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        restored = restore_thin_text(text)
+        if restored == text:
+            continue
+        if rewrite_text(restored, profile=THIN_PROFILE, key=entry) != text:
+            refused.append(entry)
+            continue
+        planned[entry] = restored
+    return planned, tuple(refused)
 
 
 def repointed_provenance_files(

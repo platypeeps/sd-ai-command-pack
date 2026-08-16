@@ -17,6 +17,7 @@ implementation is that a rule proven for one payload holds for the other.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from installer import references
 from installer.references import (
@@ -26,6 +27,8 @@ from installer.references import (
     ReferenceRewriteError,
     RewriteProfile,
 )
+
+PACK_ROOT = Path(__file__).resolve().parents[1]
 
 SCRIPT = "sd-ai-command-pack-toolchain.sh"
 DOC_TARGET = "~/.agents/docs/SD_AI_COMMAND_PACK.md"
@@ -508,6 +511,95 @@ class ThinProfileTests(unittest.TestCase):
             references.rewrite_text(source, profile=references.THIN_PROFILE),
             source,
         )
+
+
+class ThinRestoreTests(unittest.TestCase):
+    """`restore_thin_text`, which `--revert-thin` uses to undo a repoint."""
+
+    KEY = ".github/PULL_REQUEST_TEMPLATE.md"
+
+    def assert_round_trips(self, source: str, key: str = "") -> str:
+        rewritten = references.rewrite_text(
+            source, profile=references.THIN_PROFILE, key=key
+        )
+        self.assertNotEqual(rewritten, source, "nothing was rewritten to undo")
+        restored = references.restore_thin_text(rewritten)
+        self.assertEqual(restored, source)
+        return rewritten
+
+    def test_every_shipped_kept_surface_round_trips(self) -> None:
+        """The population, enumerated from the templates rather than listed.
+
+        A test naming two files by hand passes for as long as nobody ships a
+        third kept surface with a pack reference in it, and a revert that
+        silently stops undoing one is exactly the defect this covers. So the
+        candidate set comes off disk: every template whose text the thin
+        rewrite changes at all.
+        """
+
+        templates = PACK_ROOT / "templates"
+        checked = 0
+        for path in sorted(templates.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                source = path.read_bytes().decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            key = path.relative_to(templates).as_posix()
+            rewritten = references.rewrite_text(
+                source, profile=references.THIN_PROFILE, key=key
+            )
+            if rewritten == source:
+                continue
+            with self.subTest(template=key):
+                self.assertEqual(
+                    references.restore_thin_text(rewritten), source
+                )
+            checked += 1
+        self.assertGreater(checked, 0, "no template exercises the thin rewrite")
+
+    def test_a_sentence_final_doc_reference_is_restored(self) -> None:
+        """The bug the round trip found: `~/.agents/docs.` ends a sentence.
+
+        The forward rule has a leading boundary and no trailing one, so it
+        rewrites a reference that a period follows. An inverse that borrowed
+        the forward boundary on the trailing side treated that period as part
+        of a longer path and left the reference relocated -- through a full
+        revert, exit zero, with the file still naming the machine.
+        """
+
+        self.assert_round_trips("as described in docs/SD_AI_COMMAND_PACK.md.\n")
+
+    def test_the_machine_manual_path_is_not_read_as_the_thin_directory(self) -> None:
+        """`~/.agents/docs/SD_AI_COMMAND_PACK.md` is a different profile's form.
+
+        It starts with the thin directory reference, so an unbounded inverse
+        turns it into `docs/SD_AI_COMMAND_PACK.md/SD_AI_COMMAND_PACK.md`.
+        """
+
+        source = "the machine payload writes ~/.agents/docs/SD_AI_COMMAND_PACK.md\n"
+        self.assertEqual(references.restore_thin_text(source), source)
+
+    def test_the_nested_skills_literal_survives_the_shorter_one(self) -> None:
+        """Inversion order, and why it is reversed rather than insertion order.
+
+        One literal's replacement contains the whole of another's, so undoing
+        the short form first eats a substring of the long one and leaves a
+        bullet neither rule can finish.
+        """
+
+        source = (
+            "- `**/skills/trellis-*/**` and `**/skills/sd-*/**` under `.agents/`,\n"
+            "- entry points: `.agents/skills/sd-*/SKILL.md`\n"
+        )
+        self.assert_round_trips(source)
+
+    def test_text_naming_nothing_relocated_is_returned_unchanged(self) -> None:
+        """Revert offers every kept file, so a no-op has to stay a no-op."""
+
+        source = "Nothing here names a pack resource at all.\n"
+        self.assertEqual(references.restore_thin_text(source), source)
 
 
 if __name__ == "__main__":

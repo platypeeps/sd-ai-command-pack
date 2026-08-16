@@ -3557,6 +3557,56 @@ class StatusTests(InstallTestCase):
         with self.assertRaisesRegex(ValueError, "XDG_CONFIG_HOME must be an absolute"):
             fleet.fleet_profile_path({"XDG_CONFIG_HOME": "relative"})
 
+    def test_the_pack_source_is_searched_for_not_computed(self) -> None:
+        fleet = self.load_fleet_lib()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-status-pack-source-")
+        self.addCleanup(tempdir.cleanup)
+        outside = Path(tempdir.name)
+
+        self.assertEqual(
+            fleet.find_pack_source(PACK_ROOT / "scripts"), PACK_ROOT.resolve()
+        )
+        self.assertEqual(fleet.find_pack_source(PACK_ROOT), PACK_ROOT.resolve())
+        self.assertIsNone(fleet.find_pack_source(outside))
+
+    def test_the_fleet_root_asks_the_working_directory_before_its_own_path(
+        self,
+    ) -> None:
+        """A machine install is not one `parents[1]` step from the checkout.
+
+        `~/.agents/bin/../` is `~/.agents`, which is not a pack source, so the
+        last rung of `resolve_fleet_configuration` refused and `sd-status
+        fleet` reported missing configuration even when it ran from inside the
+        checkout holding the manifest.
+        """
+
+        status = self.load_status_module()
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-status-fleet-root-")
+        self.addCleanup(tempdir.cleanup)
+        machine_bin = Path(tempdir.name) / "home/.agents/bin"
+        machine_bin.mkdir(parents=True)
+        # `fleet_api()` imports the helper from beside the script, so a faux
+        # machine install has to carry it the way a real one does.
+        shutil.copy2(
+            PACK_ROOT / "templates/scripts/sd_ai_command_pack_fleet_lib.py",
+            machine_bin / "sd_ai_command_pack_fleet_lib.py",
+        )
+        elsewhere = Path(tempdir.name) / "elsewhere"
+        elsewhere.mkdir()
+
+        original = status.__file__
+        status.__file__ = str(machine_bin / "sd-ai-command-pack-status.py")
+        try:
+            from_checkout = status.runtime_pack_root(cwd=PACK_ROOT / "scripts")
+            from_nowhere = status.runtime_pack_root(cwd=elsewhere)
+        finally:
+            status.__file__ = original
+
+        self.assertEqual(from_checkout, PACK_ROOT.resolve())
+        # No pack anywhere: still the script's own root, so the caller gets the
+        # same "run install.py --configure-fleet" refusal it always got.
+        self.assertEqual(from_nowhere, machine_bin.parent.resolve())
+
     def test_profile_writer_is_opt_in_atomic_and_preserves_path_overrides(self) -> None:
         fleet = self.load_fleet_lib()
         tempdir = tempfile.TemporaryDirectory(prefix="sd-status-profile-")

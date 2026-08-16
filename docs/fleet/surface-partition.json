@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "0.71.21",
+  "manifestVersion": "0.71.22",
   "platforms": {
     "antigravity": {
       "scope": "repo-native",

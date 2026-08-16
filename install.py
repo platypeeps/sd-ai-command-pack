@@ -1142,6 +1142,40 @@ def _run_thin_revert(
         )
     selected, skipped = selected_files(files, target, platforms, False)
 
+    # The source-derived residual, and specifically not the pin's provenance
+    # `files`. Provenance omits `.github/PULL_REQUEST_TEMPLATE.md` -- it is in
+    # `FORCE_PRESERVED_TARGETS`, so no install ever vouches for its bytes --
+    # and that file is both a kept surface and one the conversion repoints,
+    # which is the exact combination this undo exists for. Reading the kept
+    # set from provenance would skip it and nothing here would say so.
+    unrepoints, uninvertible = thin.planned_unrepoints(
+        target,
+        tuple(
+            sorted(
+                conversion.expected_residual_targets(
+                    frozenset(file.target.as_posix() for file in files),
+                    conversion.load_partition(ROOT / SURFACE_PARTITION_FILE),
+                    frozenset(platforms),
+                    present_managed_blocks=frozenset(
+                        managed
+                        for managed in MANAGED_BLOCK_REMOVAL_TARGETS
+                        if (target / managed).exists()
+                    ),
+                )
+            )
+        ),
+    )
+    if uninvertible:
+        return _refuse(
+            [
+                f"{entry} carries a relocated reference this checkout cannot "
+                "trace back to what it replaced"
+                for entry in uninvertible
+            ],
+            "a kept file's repoint cannot be undone; restore it from Git "
+            "history and re-run",
+        )
+
     preflight_results, _ = _install_payload(
         selected, target, local_only=False, force=False, dry_run=True, backup=False
     )
@@ -1180,6 +1214,8 @@ def _run_thin_revert(
             print(f"would-{result.status:11} {result.file.target}")
         for receipt_path in (PACK_MANIFEST_FILE, INSTALLED_TARGETS_FILE, PROVENANCE_FILE):
             print(f"would-rewrite  {receipt_path.as_posix()}")
+        for entry in sorted(unrepoints):
+            print(f"would-unrepoint {entry}")
         for entry in receipt.retired:
             print(f"would-not-restore {entry}")
         for note in settings_plan.notes:
@@ -1213,6 +1249,11 @@ def _run_thin_revert(
             if result.source_content is not None
         },
     )
+    # Before the receipts, so the digests they record are taken from the text
+    # this leaves on disk rather than from the repointed text it replaces.
+    unrepointed = thin.repoint_kept_references(target, unrepoints, backup=False)
+    if unrepointed:
+        print(f"unrepoint   {unrepointed} kept file(s) restored to repository paths")
     kept_receipt_targets = _install_receipt_files(
         manifest_data,
         files,
