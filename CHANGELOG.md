@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.71.17 - 2026-08-15
+
+### Fixed
+
+- The two shipped shell guards no longer assume they live inside the
+  repository they are checking. Both derived their root as
+  `$SCRIPT_DIR/..`, which is the consumer checkout under a fat install and the
+  agents directory under a thin one -- so a converted consumer's full check
+  ended at `fatal: not a git repository` before the first check ran, with the
+  layout resolver having correctly located and started the script. Measured on
+  `rwbp-coordinator` converted at 0.71.16.
+
+  `sd-ai-command-pack-full-check.sh` and `sd-ai-command-pack-review-scope.sh`
+  now resolve the root through the same ladder the shared shell library
+  already uses for its cache root, rather than a second convention:
+  `SD_AI_COMMAND_PACK_REPO_ROOT`, then `git rev-parse --show-toplevel` from the
+  caller's working tree, then the hosting checkout. Under a fat install
+  invoked from inside the repository the second rung returns exactly what the
+  third one used to, so every existing caller keeps its current root.
+
 ## 0.71.16 - 2026-08-15
 
 ### Fixed

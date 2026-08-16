@@ -350,6 +350,14 @@ class FullCheckTests(InstallTestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('${BASH_SOURCE[0]}', script)
+        # The root ladder, not a single derivation: a thin install moves this
+        # script to the machine, where `$SCRIPT_DIR/..` is the agents directory
+        # and no checkout at all. The fallback stays last so a fat install
+        # invoked from outside any repository still resolves what it always did.
+        self.assertIn('REPO_ROOT="${SD_AI_COMMAND_PACK_REPO_ROOT:-}"', script)
+        self.assertIn(
+            'REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"', script
+        )
         self.assertIn('REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"', script)
         self.assertIn('! cd -- "$REPO_ROOT"', script)
         self.assertIn("run_sd_ai_command_pack_scope_check()", script)

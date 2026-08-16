@@ -1721,6 +1721,136 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("review-fix commit made", doc)
             self.assertIn("never invokes full-check, Prism, or Gito", doc)
 
+    def test_scope_guard_classifies_the_caller_repo_when_installed_off_tree(
+        self,
+    ) -> None:
+        """The thin layout, proven rather than asserted from source text.
+
+        A thin install moves this script to the machine, so `$SCRIPT_DIR/..`
+        stops being any checkout. Measured on `rwbp-coordinator` converted at
+        0.71.16, the old derivation ended the run at
+        `fatal: not a git repository` before the first check ran. The script is
+        placed outside the repository here for exactly that reason -- running
+        it from inside its own checkout cannot tell the two derivations apart.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            consumer = root / "consumer"
+            (consumer / ".sd-ai-command-pack").mkdir(parents=True)
+            (consumer / ".sd-ai-command-pack" / "installed-targets.txt").write_text(
+                "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+            )
+            for command in (["init", "-q"], ["add", "-A"]):
+                subprocess.run(
+                    ["git", *command], cwd=consumer, check=True, capture_output=True
+                )
+
+            # Not `scripts/` under any repository: the machine layout this
+            # script has to work from once the payload leaves the consumer.
+            machine_bin = root / "agents-bin"
+            machine_bin.mkdir()
+            for name in (
+                "sd-ai-command-pack-review-scope.sh",
+                "sd-ai-command-pack-shell-lib.sh",
+                "sd-ai-command-pack-review-layout.py",
+            ):
+                shutil.copy2(PACK_ROOT / "templates" / "scripts" / name, machine_bin / name)
+
+            environment = dict(os.environ)
+            for name in (
+                "SD_AI_COMMAND_PACK_TARGETS_FILE",
+                "SD_AI_COMMAND_PACK_REPO_ROOT",
+                "SD_AI_COMMAND_PACK_STATE_HOME",
+                "XDG_STATE_HOME",
+            ):
+                environment.pop(name, None)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(machine_bin / "sd-ai-command-pack-review-scope.sh"),
+                    "--json",
+                    "--path",
+                    "scripts/sd-ai-command-pack-full-check.sh",
+                    "--path",
+                    "src/app.ts",
+                ],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                env=environment,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("not a git repository", result.stderr)
+            document = json.loads(result.stdout)
+            # The consumer's receipt answered, so the caller's tree is what the
+            # script resolved -- an off-tree root would have found no receipt
+            # here and reported `unresolved` instead.
+            self.assertEqual(document["mode"], "fat")
+            self.assertEqual(
+                [entry["category"] for entry in document["paths"]],
+                ["pack-payload", "authored"],
+            )
+
+    def test_scope_guard_prefers_an_explicit_root_over_the_caller_tree(self) -> None:
+        """The override rung, which the shared shell library already defines."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            elsewhere = root / "elsewhere"
+            (elsewhere / ".sd-ai-command-pack").mkdir(parents=True)
+            (elsewhere / ".sd-ai-command-pack" / "installed-targets.txt").write_text(
+                "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+            )
+            caller = root / "caller"
+            caller.mkdir()
+            subprocess.run(
+                ["git", "init", "-q"], cwd=caller, check=True, capture_output=True
+            )
+
+            machine_bin = root / "agents-bin"
+            machine_bin.mkdir()
+            for name in (
+                "sd-ai-command-pack-review-scope.sh",
+                "sd-ai-command-pack-shell-lib.sh",
+                "sd-ai-command-pack-review-layout.py",
+            ):
+                shutil.copy2(PACK_ROOT / "templates" / "scripts" / name, machine_bin / name)
+
+            environment = dict(os.environ)
+            for name in (
+                "SD_AI_COMMAND_PACK_TARGETS_FILE",
+                "SD_AI_COMMAND_PACK_STATE_HOME",
+                "XDG_STATE_HOME",
+            ):
+                environment.pop(name, None)
+            environment["SD_AI_COMMAND_PACK_REPO_ROOT"] = str(elsewhere)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(machine_bin / "sd-ai-command-pack-review-scope.sh"),
+                    "--json",
+                    "--path",
+                    "scripts/sd-ai-command-pack-full-check.sh",
+                ],
+                cwd=caller,
+                capture_output=True,
+                text=True,
+                env=environment,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            document = json.loads(result.stdout)
+            self.assertEqual(document["mode"], "fat")
+            self.assertEqual(
+                [entry["category"] for entry in document["paths"]], ["pack-payload"]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# The repository being classified, which is not necessarily the one hosting
+# this script: a thin install moves this file to the machine, where
+# `$SCRIPT_DIR/..` is the agents directory rather than any checkout. Same
+# three rungs as `sd-ai-command-pack-full-check.sh`, whose comment records
+# which two come from the shared shell library and why the third does not.
+# Under a fat install invoked from inside the repository the second rung
+# returns exactly what the third one used to.
+REPO_ROOT="${SD_AI_COMMAND_PACK_REPO_ROOT:-}"
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+fi
 TARGETS_FILE="${SD_AI_COMMAND_PACK_TARGETS_FILE:-$REPO_ROOT/.sd-ai-command-pack/installed-targets.txt}"
 MODE="${SD_AI_COMMAND_PACK_SCOPE_CHECK:-auto}"
 GH_MODE="${SD_AI_COMMAND_PACK_SCOPE_CHECK_GH:-auto}"
