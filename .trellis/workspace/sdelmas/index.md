@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 383
+- **Total Sessions**: 384
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1444 | Active |
+| `journal-8.md` | ~1488 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 384 | 2026-08-16 | Revoke the orphaned refresh token, close the residue task, rescope the gate retirement | `0c763675`, `bcb264f5` | `task/gate-retirement-scope-and-residue-closure` |
 | 383 | 2026-08-16 | Close the post-canary and receipt-cache tasks; retire the consumer pack refresh | `197bf9fb`, `304af0b5` | `task/post-thin-reconciliation` |
 | 382 | 2026-08-16 | Fix the resweep's post-repoint line alignment and close the thin canary conversion | `71a47ddc`, `c8386d9a`, `07f3bb11`, `bf1a2fb9`, `a6cc149e` | `task/thin-canary-conversion-closure` |
 | 381 | 2026-08-14 | Consumer-config layout shim: install the resolver where thin conversion keeps it | `ea10fefb`, `a9c7cf43`, `74c1a3ae` | `task/consumer-config-layout-shim` |
