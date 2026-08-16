@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.71.24 - 2026-08-16
+
+### Fixed
+
+- A routed `copilot` review no longer claims remote confidence for a review it
+  did not cause. The Action already distinguishes the two cases -- it probes for
+  the reviewer before requesting and records `dispatch.status` as `requested` or
+  `already-present` -- and the coordinator validated that enum and then threw it
+  away, harvesting reviews by author and head commit alone with no causal guard
+  while conversation comments carried `created_at >= dispatch.startedAt`. A
+  repository ruleset that requests Copilot when the pull request opens therefore
+  had its review counted as the routed lane's own evidence. Every terminal report
+  produced after remote observation now carries
+  `remote-evidence-not-dispatch-caused` when the receipt says `already-present`.
+  The findings are reported unchanged and no exit code moves -- what the
+  limitation withdraws is the causal claim, not the evidence. A symmetric
+  `submitted_at` guard was rejected because a ruleset requests early and the
+  reviewer submits late, so a timestamp admits the foreign review anyway;
+  rejecting `already-present` evidence outright was rejected because it would
+  zero out remote confidence permanently wherever the piggyback is deliberate.
+
 ## 0.71.23 - 2026-08-16
 
 ### Fixed

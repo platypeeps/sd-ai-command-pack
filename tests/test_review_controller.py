@@ -2134,6 +2134,127 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(report["limitations"], ["remote-reconciliation-required"])
         self.assertEqual(receipt_query.call_count, 1)
 
+    def run_routed_review_with_dispatch_status(
+        self, controller, root: Path, artifacts: Path, *, status: str
+    ):
+        """One routed review through the lane's real two-write sequence.
+
+        The pre-dispatch query finds nothing, the route is dispatched, the
+        first poll lands on the in-flight `started` write, and the second sees
+        the terminal one. A fixture that only ever produces the terminal write
+        would not exercise the window the poller actually lands in.
+        """
+
+        args, patches = self.routed_review_context(controller, root, artifacts)
+        phases = iter([None, "started", "observed"])
+
+        def query(*_args, **kwargs):
+            # Settle on the terminal write once the scripted sequence is spent.
+            # These tests assert on the report's limitations, not on how many
+            # times the poller queried, and `test_in_flight_receipt_is_polled_
+            # until_it_settles` already owns the call-count guarantee. Letting
+            # the iterator run dry would turn any future change in poll budget
+            # into a bare `StopIteration` instead of a legible assertion.
+            phase = next(phases, "observed")
+            if phase is None:
+                return None
+            return self.routed_receipt(
+                kwargs["request"], phase=phase, status=status
+            )
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            stack.enter_context(
+                mock.patch.object(controller, "_query_receipt", side_effect=query)
+            )
+            stack.enter_context(mock.patch.object(controller, "_dispatch"))
+            return controller.run(args)
+
+    def test_already_present_dispatch_qualifies_remote_confidence(self) -> None:
+        # `already-present` means the reviewer was on the pull request before
+        # the Action routed, so something else summoned it -- here, the `main`
+        # ruleset's `copilot_code_review` rule. The receipt has always carried
+        # the discriminator; the report claimed full remote confidence anyway.
+        controller = self.load_controller()
+        root = self.make_repo()
+        code, report = self.run_routed_review_with_dispatch_status(
+            controller, root, self.artifact_root(root), status="already-present"
+        )
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        self.assertEqual(
+            report["limitations"], ["remote-evidence-not-dispatch-caused"]
+        )
+        self.assertEqual(
+            report["remote"]["receipt"]["dispatch"]["status"], "already-present"
+        )
+
+    def test_requested_dispatch_claims_remote_confidence(self) -> None:
+        # The dispatch that actually summoned the reviewer owns the evidence it
+        # caused. Qualifying this case too would make the limitation noise.
+        controller = self.load_controller()
+        root = self.make_repo()
+        code, report = self.run_routed_review_with_dispatch_status(
+            controller, root, self.artifact_root(root), status="requested"
+        )
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        self.assertEqual(report["limitations"], [])
+
+    def test_dispatch_status_does_not_change_harvested_findings(self) -> None:
+        # The failure mode being fixed is overclaimed confidence, not
+        # oversupplied evidence. `_collect_observation` must be blind to
+        # `dispatch.status`: a real Copilot finding cannot become invisible
+        # because the ruleset requested the reviewer first.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        request = {
+            "logicalDispatchId": "dispatch-1",
+            "requestFingerprint": "fingerprint-1",
+            "repository": "platypeeps/example",
+            "pullRequestNumber": 42,
+            "headSha": pr["head"],
+            "attempt": 1,
+            "policyVersion": 1,
+            "correlationId": "correlation-1",
+        }
+        reviews = [
+            {
+                "id": 7,
+                "html_url": "https://github.com/platypeeps/example/pull/42#r7",
+                "state": "CHANGES_REQUESTED",
+                "body": "this needs a guard",
+                "commit_id": pr["head"],
+                "user": {"login": "copilot-pull-request-reviewer[bot]"},
+            }
+        ]
+
+        def observe(status: str) -> dict[str, object]:
+            with mock.patch.object(
+                controller, "_collect_review_threads", return_value=[]
+            ), mock.patch.object(
+                controller, "_paginated_rest_array", return_value=reviews
+            ), mock.patch.object(
+                controller, "_gh_json", return_value=[]
+            ):
+                return controller._collect_observation(
+                    root,
+                    pr=pr,
+                    receipt=self.routed_receipt(
+                        request, phase="observed", status=status
+                    ),
+                    receipt_check_name="sd-github-review/receipt",
+                )
+
+        caused = observe("requested")
+        piggybacked = observe("already-present")
+
+        self.assertEqual(caused["status"], "findings")
+        self.assertEqual(caused, piggybacked)
+        self.assertEqual(len(piggybacked["reviews"]), 1)
+
     def test_fully_rebutted_local_stage_routes_like_a_clean_one(self) -> None:
         controller = self.load_controller()
         absent = {"state": "absent", "reason": "setup-descriptor-absent"}

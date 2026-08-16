@@ -2203,6 +2203,18 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             limitations=("remote-reconciliation-required",),
         )
 
+    # `already-present` means the reviewer was on the pull request before this
+    # dispatch routed, so the evidence below was summoned by something else --
+    # a repository ruleset, or a direct request. The findings are still real and
+    # still reported; what changes is the confidence claim attached to them. A
+    # timestamp guard cannot substitute here: a ruleset requests early but the
+    # reviewer submits late, so `submitted_at >= startedAt` admits the foreign
+    # review anyway. `dispatch.status` is the field that already knows.
+    qualifiers: tuple[str, ...] = (
+        ("remote-evidence-not-dispatch-caused",)
+        if dispatch.get("status") == "already-present"
+        else ()
+    )
     latest = _pr_evidence(repo, pr["number"])
     if latest["head"] != pr["head"]:
         raise ReviewError("pull request head changed before remote observation")
@@ -2217,24 +2229,26 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     observation_status = observation["status"]
     if observation_status == "clean":
         _advance(state_path, state, "ready")
-        return 0, _report(state=state, status="ready")
+        return 0, _report(state=state, status="ready", limitations=qualifiers)
     if observation_status == "findings":
         return 1, _report(
             state=state,
             status="findings",
             diagnostic="remote review findings require disposition",
+            limitations=qualifiers,
         )
     if observation_status == "blocked":
         return 1, _report(
             state=state,
             status="blocked",
             diagnostic="pull request checks block review readiness",
+            limitations=qualifiers,
         )
     return 3, _report(
         state=state,
         status="pending",
         diagnostic="remote findings or CI have not reached a terminal exact-head state",
-        limitations=("observation-pending",),
+        limitations=(*qualifiers, "observation-pending"),
     )
 
 

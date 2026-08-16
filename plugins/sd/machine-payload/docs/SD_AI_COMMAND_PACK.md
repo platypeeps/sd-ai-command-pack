@@ -953,6 +953,14 @@ incompatible setup, provider failure, malformed receipts, stale heads, and
 ambiguous dispatch fail closed. The successor never calls `sd-review-pr` or
 GitHub's reviewer API directly.
 
+A routed receipt records whether the dispatch summoned the reviewer or found it
+already there. When `dispatch.status` is `already-present` — a repository
+ruleset or another channel requested the reviewer first — the report carries the
+`remote-evidence-not-dispatch-caused` limitation. The findings themselves are
+real and are reported unchanged; what the limitation withdraws is the claim that
+this dispatch caused them. `requested` carries no such limitation. The
+limitation never licenses a direct reviewer request outside the lane.
+
 Run `sd-review scope=codebase` when you want a full checked-out repository
 review. In that mode, Prism runs `prism review codebase`; Gito normally runs
 `gito review --all --path <absolute-repo-root>` and writes to
