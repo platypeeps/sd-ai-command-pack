@@ -359,6 +359,10 @@ class FullCheckTests(InstallTestCase):
             'REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"', script
         )
         self.assertIn('REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"', script)
+        self.assertIn(
+            'if ! REPO_ROOT="$(cd -- "$REPO_ROOT" 2>/dev/null && pwd -P)"; then', script
+        )
+        self.assertIn('export SD_AI_COMMAND_PACK_REPO_ROOT="$REPO_ROOT"', script)
         self.assertIn('! cd -- "$REPO_ROOT"', script)
         self.assertIn("run_sd_ai_command_pack_scope_check()", script)
         # Pack helpers resolve next to this script, never from a repository-root

@@ -1,6 +1,6 @@
 {
   "name": "sd",
-  "version": "0.71.17",
+  "version": "0.71.18",
   "description": "Software Delivery command pack: the /sd command surface, its skills, and the shared pack toolchain as executables.",
   "author": {
     "name": "platypeeps",
