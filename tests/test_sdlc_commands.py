@@ -745,7 +745,10 @@ class SdlcCommandsTests(InstallTestCase):
             "cannot capture NUL-delimited changed paths; stop before Step 6.",
             "cannot fetch GitHub's auto-filled PR body; stop before Step 6.",
             "automatic PR-body update failed; stop before Step 6.",
-            "mixed-scope",
+            # Exit 3 is "nothing to declare", not "mixed": a mixed diff is
+            # declared with the generated paths named, which is what keeps the
+            # heading in place through sd-ship finalization.
+            "nothing to declare",
             "stop before Step 6",
             "secure regular temporary",
         ):
