@@ -621,7 +621,10 @@ function parseBookkeepingCli(args) {
   const command = args[0];
   const options = {
     command,
-    rootDir: defaultRootDir(),
+    // Left null so parsing never spawns `git rev-parse`: `--repo` may set it
+    // below, and `runBookkeepingValidator` resolves the default only when
+    // nothing did. A parse that fails should cost nothing at all.
+    rootDir: null,
     taskDirs: [],
     json: false,
   };
