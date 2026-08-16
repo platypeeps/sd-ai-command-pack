@@ -109,17 +109,70 @@ conversion-caused residue.
 
 ## Acceptance criteria
 
-- [ ] `git ls-files -z | git check-ignore --no-index --stdin -z` reports zero
+- [x] `git ls-files -z | git check-ignore --no-index --stdin -z` reports zero
       paths in `sd-github-review` after the change.
-- [ ] `npm ci` still populates `node_modules` in that repository's CI. The
+- [x] `npm ci` still populates `node_modules` in that repository's CI. The
       dependency is declared in `package.json` with a `package-lock.json`
       beside it, and that consumer's `ci.yml` runs `npm ci`, so nothing
       depended on the tracked copy — but the passing CI run is the proof, not
       the reasoning.
-- [ ] The change deletes only tracked entries: its diff contains zero
+- [x] The change deletes only tracked entries: its diff contains zero
       insertions and zero modifications.
-- [ ] The other seven consumers' tracked-but-ignored counts are unchanged,
+- [x] The other seven consumers' tracked-but-ignored counts are unchanged,
       re-measured after the merge rather than assumed.
+
+## Closure
+
+Shipped in
+[platypeeps/sd-github-review#90](https://github.com/platypeeps/sd-github-review/pull/90),
+commit `1b1ca58`, merged `2026-08-16T15:17:10Z` as `557ceba`. Every measurement
+below was taken against merged `main`, not against the branch.
+
+```text
+$ git ls-files -z | git check-ignore --no-index --stdin -z | tr -d -c '\0' | wc -c
+0                                    # was 236
+$ git show --format='' --numstat 1b1ca58 | awk -F'\t' '{a+=$1; d+=$2} END {print a+0, d+0}'
+0 18829                              # zero insertions
+$ git show --format='' --name-status 1b1ca58 | cut -c1 | sort -u
+D                                    # deletions only, no M and no A
+```
+
+Criterion 2 is the one that could not be settled locally, and CI settled it:
+the `test` lane passed on a runner where `node_modules` is no longer in the
+repository, so `npm ci` rebuilt it from `package-lock.json` alone. `route` also
+passed. Copilot reviewed and generated no comments.
+
+Criterion 4, re-measured after the merge:
+
+| Consumer | Tracked-but-ignored | vs. pre-merge |
+| --- | --- | --- |
+| `rwbp-coordinator` | 1 | unchanged |
+| `loadsmith` | 0 | unchanged |
+| `hoa-manager` | 0 | unchanged |
+| `rwbp-website` | 3 | unchanged |
+| `mezmo_benchmark` | 2 | unchanged |
+| `se-ai-command-pack` | 0 | unchanged |
+| `anomaly-metric-creator` | 1 | unchanged |
+
+Requirements 2 and 3 held: `.gitignore` was not touched, and none of the four
+unrelated pre-existing entries in other consumers was disturbed.
+
+### One observation worth recording
+
+The commit removes the files from the index while leaving them on disk, which
+is what `git rm --cached` does and what requirement 1 asks for. That is not the
+same as their surviving a branch switch. Checking out `main` restored the
+still-tracked copies, and pulling the merge then deleted them as ordinary
+tracked-file removals, so `node_modules/` did briefly disappear from the
+working tree before `npm ci` restored it. No harm — the directory is
+reconstructible by definition, which is the whole reason it should not have
+been tracked — but "the files stay on disk" is true of the commit and not of
+every path through it.
+
+This closes the deviation recorded against criterion 4 of
+`08-10-thin-post-canary-conversion`. That task is already archived with the
+deviation documented and pointing here; the pointer now resolves to a fix
+rather than to an open defect.
 
 ## Notes
 
