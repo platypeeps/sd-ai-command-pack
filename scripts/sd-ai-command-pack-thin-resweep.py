@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import difflib  # noqa: E402
 import fnmatch  # noqa: E402
 import hashlib  # noqa: E402
 import os  # noqa: E402
@@ -1393,6 +1394,42 @@ def stripped_spans(
     return [span for span in all_spans if marker in lines[span[0] - 1]]
 
 
+def aligned_line_numbers(original: list[str], rewritten: list[str]) -> list[int]:
+    """Map each rewritten line back to a line number in the file on disk.
+
+    The citation test runs against post-repoint bytes, but everything the hit is
+    then classified against -- `spans`, `all_spans`, `commanded` -- is indexed
+    off the bytes actually present, and the reported `line` has to point at a
+    line an operator can open. Positional indexing only agrees with both when
+    the rewrite preserves the line count. It stopped doing that in 0.71.21,
+    where a rewritten Copilot glob bullet gains a `narrow-globs: skip` comment
+    line: the equal-count guard this replaces then fell back to the unrewritten
+    text and reported seven already-repointed citations as pack defects, which
+    no release could clear.
+
+    A diff answers the question the line count was standing in for. Unchanged
+    and substituted lines map to the line they came from. An inserted line has
+    no line of its own, so it takes the original line it was inserted after --
+    adjacency is the right answer for block membership and command context, and
+    the alternative, inventing a number past the end of the file, is not.
+    """
+    mapping: list[int] = []
+    matcher = difflib.SequenceMatcher(a=original, b=rewritten, autojunk=False)
+    for tag, first, last, other_first, other_last in matcher.get_opcodes():
+        if tag == "delete":
+            continue
+        for offset in range(other_last - other_first):
+            # `first + offset` is the line this one replaced, when there was
+            # one; past the end of the replaced run -- and for every inserted
+            # line, whose run is empty -- fall back to the last original line
+            # at or before the splice, clamped to a real line.
+            index = first + offset
+            if index >= last:
+                index = max(first - 1, 0) if first == last else last - 1
+            mapping.append(min(index, len(original) - 1) + 1 if original else 1)
+    return mapping
+
+
 def shipped_template_digests() -> dict[str, str]:
     """Digest of the pack's own shipped bytes, per force-preserved target.
 
@@ -1689,11 +1726,10 @@ def scan(
         # decide *whose* file this is and *what a binding recorded*, questions
         # the rewrite does not touch. Only the citation test moves.
         #
-        # Fails closed on a line-count change. Every rewrite is an in-line
-        # substitution today, so the counts match and `commanded`/`spans`
-        # indices stay aligned; if one ever introduces or removes a line, the
-        # alignment is silently wrong and the honest answer is the unrewritten
-        # text, which can only over-report.
+        # A rewrite may change the line count -- 0.71.21's narrow-globs comment
+        # does -- so the scanned index is not a line number. `aligned_line_numbers`
+        # carries each scanned line back to the line it came from, and every
+        # lookup below and the reported `line` use that, not the position.
         # Membership in `repointed` is the whole test. `plan.keep` is built from
         # the *receipt*, so it holds pack-installed targets and nothing else: a
         # consumer-authored file like `scripts/check.sh` is not in it and is
@@ -1712,10 +1748,10 @@ def scan(
         # conversion rewrites the file all the same. Gating on ownership left
         # its seven citations blocking a conversion that repoints them.
         scanned = lines
+        origin = list(range(1, len(lines) + 1))
         if relative in repointed:
-            candidate = repointed[relative].splitlines()
-            if len(candidate) == len(lines):
-                scanned = candidate
+            scanned = repointed[relative].splitlines()
+            origin = aligned_line_numbers(lines, scanned)
 
         # See `LAYOUT_RESOLVER_KEPT_TARGET`. Read from `scanned`, not `lines`:
         # a kept file whose resolver citation the conversion writes has adopted
@@ -1724,7 +1760,8 @@ def scan(
             LAYOUT_RESOLVER_KEPT_TARGET in line for line in scanned
         )
 
-        for number, line in enumerate(scanned, start=1):
+        for position, line in enumerate(scanned):
+            number = origin[position]
             if not any(
                 cites_removed_path(
                     token,

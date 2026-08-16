@@ -35,7 +35,7 @@ wording is correct and the conversion already repoints it (design D2).
 - [x] 0.4 `make check` and `make release-prep` exit 0.
 - [x] 0.5 Answer design O1 — **superseded**: no template text changes, so the
       emitted block is unchanged for a fat reader. Record that and close it.
-- [ ] 0.6 PR, Copilot review loop, merge.
+- [x] 0.6 PR, Copilot review loop, merge.
 
 **Validation:** local and immediate. With the canaries untouched at 0.71.6, all
 three resweeps report `packDefects: 0`, down from 15. Measured before: 15 / 15
@@ -142,19 +142,19 @@ Measured 2026-08-15, per canary, before any rewrite:
 | loadsmith | 50 | 5 |
 | hoa-manager | 34 | 9 |
 
-- [ ] 3.1 rwbp-coordinator: `.github/workflows/ci.yml` (4),
+- [x] 3.1 rwbp-coordinator: `.github/workflows/ci.yml` (4),
       `.prism/rules.json` (1, PRD requirement 4),
       `.trellis/spec/web/operations/local-development.md` (1),
       `package.json` (1), `scripts/check-full.test.mjs` (1),
       `scripts/check-review-churn.mjs` (36), `scripts/classify-ci-changes.sh` (4),
       `scripts/lib/check-full.mjs` (1).
-- [ ] 3.2 loadsmith: `.github/workflows/ci.yml` (2),
+- [x] 3.2 loadsmith: `.github/workflows/ci.yml` (2),
       `.trellis/spec/guides/operations-and-release.md` (1),
       `docs/repomix-map.md` (30 — **exclude pack payload from
       `scripts/update_repomix`, then regenerate**; regenerating alone
       reproduces all 30, see design D3a),
       `scripts/check.sh` (2), `scripts/check_review_readiness.sh` (15).
-- [ ] 3.3 hoa-manager: `.github/workflows/ci.yml` (4),
+- [x] 3.3 hoa-manager: `.github/workflows/ci.yml` (4),
       `.trellis/spec/web/testing/verification-commands.md` (3),
       `.trellis/tasks/08-07-task-manifest-context-roots/prd.md` (1 — annotate
       with a dated note; do not rewrite the historical line, design D3b),
@@ -162,34 +162,45 @@ Measured 2026-08-15, per canary, before any rewrite:
       `scripts/check-full-prelude.mjs` (3), `scripts/check-full-prelude.test.mjs` (1),
       `scripts/check-review-preflight.mjs` (5),
       `scripts/check-review-preflight.test.mjs` (13).
-- [ ] 3.4 Answer design O2 before editing rwbp-coordinator: does the
+- [x] 3.4 Answer design O2 before editing rwbp-coordinator: does the
       `.sd-ai-command-pack/*` citation need an edit at all, given conversion
       keeps that directory?
-- [ ] 3.5 Each consumer's own full check passes after its rewrite.
+- [x] 3.5 Each consumer's own full check passes after its rewrite.
 
 **Validation:** per consumer, the resweep reports `blockers: 0` and verdict
 `clear`. Both directions matter: a `clear` verdict with a dirty tree is not
 `clear`, because `decide()` counts worktree cleanliness as a reason.
+
+**Closed 2026-08-15.** Each canary's citations were rewritten in the same PR
+that converted it, and each consumer's own full check passed before that PR
+landed. The measured close is the phase 4 table below: a `clear` verdict counts
+`blockers: 0` and a clean worktree together, so the conversion could not have
+run on any of the three otherwise.
+
+Design O2, answered: no. Conversion keeps `.sd-ai-command-pack/`, so a citation
+of `.sd-ai-command-pack/*` names a surviving path and needs no edit. What did
+need one was `.prism/rules.json:63` — PRD requirement 4 — which named removed
+paths and is agent-executed.
 
 ## Phase 4 — convert, per canary, in cohort order
 
 The literal sequence is PRD requirement 1 and is not restated here. Per
 consumer:
 
-- [ ] 4.1 `install.py <path> --check --json` state `current`.
-- [ ] 4.2 Clean tree; resweep to `/tmp/<consumer>-verdict.json`; verdict `clear`.
-- [ ] 4.3 `install.py <path> --thin --resweep-verdict /tmp/<consumer>-verdict.json`.
-- [ ] 4.4 Step 2b: `~/.agents/bin/sd-ai-command-pack-update-spec-kb.py --if-present`.
-- [ ] 4.5 Step 2c: post-conversion resweep; repoint anything it still reports
+- [x] 4.1 `install.py <path> --check --json` state `current`.
+- [x] 4.2 Clean tree; resweep to `/tmp/<consumer>-verdict.json`; verdict `clear`.
+- [x] 4.3 `install.py <path> --thin --resweep-verdict /tmp/<consumer>-verdict.json`.
+- [x] 4.4 Step 2b: `~/.agents/bin/sd-ai-command-pack-update-spec-kb.py --if-present`.
+- [x] 4.5 Step 2c: post-conversion resweep; repoint anything it still reports
       **in this same PR**.
-- [ ] 4.6 Consumer PR; land green; verify zero pack CI steps by grepping that
+- [x] 4.6 Consumer PR; land green; verify zero pack CI steps by grepping that
       consumer's `.github/workflows/` at its post-merge HEAD.
-- [ ] 4.7 Pack PR carrying that consumer's `mode: thin` row, written by
+- [x] 4.7 Pack PR carrying that consumer's `mode: thin` row, written by
       `--thin` and not by hand. `make release-prep` — not `make check` alone,
       because each flip changes the fleet-manifest digest pinned into
       `docs/fleet/candidate-validation.json`
       (`scripts/sd_ai_command_pack_fleet_lib.py:766`).
-- [ ] 4.8 Compare the post-conversion tree against that consumer's
+- [x] 4.8 Compare the post-conversion tree against that consumer's
       **pre-conversion installed-targets receipt**, not against the current
       partition. Record the removal count per consumer; the PRD's 179 dates
       from 0.71.2 and is recomputed, not assumed.
@@ -198,16 +209,91 @@ consumer:
 `installMode == "thin"`, `pin.state == "present"`,
 `pin.version == machineScope.packVersion`.
 
+**Closed 2026-08-15/16.** Converted in cohort order, each by its own consumer
+PR plus the pack-side registry flip written by `--thin`:
+
+| consumer | conversion PR | conversion commit | pack CI steps at post-merge HEAD |
+|---|---|---|---:|
+| rwbp-coordinator | #231 | `ada371e` | 1 (a comment on line 111 of that consumer's own `ci.yml` workflow, not a step) |
+| loadsmith | #228 | `52c51fe` | 0 |
+| hoa-manager | #257 | `6d2fe26` | 0 |
+
+4.8, measured against each consumer's **pre-conversion** receipt rather than the
+current partition: `loadsmith` went 201 receipt entries to 31, so 170 removals,
+and only `.gitignore` survives the block strip, carrying the adopted header. The
+PRD's 179 dates from 0.71.2 and does not reproduce; it is recomputed here, not
+assumed.
+
+The conversion round left the fleet at pack 0.71.22 with `mismatches: 0`: all
+eight consumers report `mode=thin pin=present 0.71.22` against
+`machineScope.state installed`, `comparison current`.
+
 ## Phase 5 — revert proof on loadsmith
 
-- [ ] 5.1 `install.py <loadsmith> --revert-thin` at a named commit.
-- [ ] 5.2 loadsmith CI green in the reverted state.
-- [ ] 5.3 Confirm the only residue is the `enabledPlugins` disable marker.
-- [ ] 5.4 Fresh exact-head resweep against the **reverted** tree.
-- [ ] 5.5 Re-convert on that fresh verdict.
+- [x] 5.1 `install.py <loadsmith> --revert-thin` at a named commit.
+- [x] 5.2 loadsmith CI green in the reverted state.
+- [x] 5.3 Confirm the only residue is the `enabledPlugins` disable marker.
+- [x] 5.4 Fresh exact-head resweep against the **reverted** tree.
+- [x] 5.5 Re-convert on that fresh verdict.
 
 **Validation:** the reverted commit is named, its CI run is cited, and the
 re-conversion used a verdict whose recorded head equals the reverted head.
+
+**Closed 2026-08-16 on `loadsmith`, branch `proof/thin-revert-rehearsal`.** The
+branch reverts, proves CI, re-converts; it is never merged, so `main` never
+carries the fat tree.
+
+| step | evidence |
+|---|---|
+| 5.1 revert | `d4e1385` |
+| 5.2 CI green reverted | run `31946741912`, success |
+| 5.3 residue | only `+ /enabledPlugins/sd@sd-ai-command-pack = false`. `.trellis/.template-hashes.json` was ruled out: gitignored at `.gitignore:33` and untracked since `d6af7f4` |
+| 5.4 fresh resweep | `clear`, blockers 0, packDefects 0, recorded head `d4e1385` |
+| 5.5 re-conversion | `b7b6625` verdict `clear`; converted at `703117e` — 169 deleted, 1 block stripped, 28 kept, 6 repointed, `registry loadsmith -> thin` |
+
+**5.4 needed a pack fix first, and it is the finding of this phase.** The first
+exact-head resweep on the reverted tree returned `blocked` with `packDefects:
+7`, all in `.github/copilot-instructions.md`. Not a revert defect: 0.71.21's
+`narrow-globs: skip` marker makes that file's repoint one line longer than the
+text it replaces, and the resweep's post-repoint scan required an equal line
+count and otherwise fell back to unrewritten bytes. Since 0.71.21 **no fat
+consumer could reach `clear`** — the same regression class phase 0 existed to
+fix. Repaired by mapping rewritten lines back to real line numbers with a diff
+(`aligned_line_numbers`); PR #476.
+
+**5.5 also found that revert and re-convert are not a bare round trip.** The
+re-conversion refused:
+
+```
+.claude/settings.json: enabledPlugins['sd@sd-ai-command-pack'] is already set
+to false, which is not true
+```
+
+Both halves are deliberate. Revert writes the disable marker on purpose
+(`installer/thin.py:1265`) so a fat consumer does not run the plugin beside its
+vendored payload, and the conversion's settings merge blocks rather than
+overwrites a value it did not write (`installer/thin.py:263`), because it cannot
+tell a deliberate `false` from a stale one. The operator owes one edit between
+the two commands. Removing the key — rather than setting it `true` — restores
+the shape `080dc5d` had before any conversion and hands ownership back, so the
+re-conversion records it in `createdContainers` and a later revert still owns
+it. Recorded at `b7b6625`. Worth a follow-up: revert says nothing about this
+when it writes the marker.
+
+**Round-trip fidelity.** Against the pre-revert thin tree `c04a461`, the
+re-converted tree differs in two files, and both trace to `loadsmith`'s
+*original* conversion rather than to the revert:
+
+- `.gitignore` — same bytes, different position. `52c51fe` moved the adopted
+  block to the top of the file; this conversion adopts it in place, at line 19,
+  where the pack block sat in the fat tree. `git diff 080dc5d d4e1385 --
+  .gitignore` is one line, and that line is a pack text change between 0.55.0
+  and 0.71.22 (the obsidian-kb banner no longer names a repository-root script,
+  which a thin install does not have). So the revert restored the fat layout
+  exactly.
+- `.sd-ai-command-pack/provenance.json` — `createdContainers` now records
+  `enabledPlugins` beside `extraKnownMarketplaces`. The conversion created both
+  containers both times; the original receipt under-recorded one.
 
 ## Stop conditions
 

@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from installer import thin  # noqa: E402
+from installer import references, thin  # noqa: E402
 
 PARTITION = ROOT / "docs/fleet/surface-partition.json"
 
@@ -790,6 +790,88 @@ class RepointedScanTests(ResweepFixture):
         # What is pinned here is that there is only one implementation of
         # "what will the conversion write".
         self.assertIs(resweep.thin.planned_repoints, thin.planned_repoints)
+
+
+class LineAlignmentTests(ResweepFixture):
+    """A rewrite that changes the line count still reports real line numbers.
+
+    The citation test reads post-repoint bytes; `spans`, `all_spans`,
+    `commanded`, and the reported `line` all belong to the bytes on disk. The
+    first version of this reconciled the two by requiring equal line counts and
+    falling back to the unrewritten text otherwise -- which held until 0.71.21
+    gave the Copilot glob bullet a `narrow-globs: skip` comment line. From that
+    release no fat consumer could reach `clear`: measured on `loadsmith`, seven
+    already-repointed citations in `.github/copilot-instructions.md` came back
+    as pack defects, and `decide` blocks on a non-empty `packDefects` bucket.
+    """
+
+    NARROW_GLOBS_BULLET = (
+        "- `scripts/sd-ai-command-pack-*`, legacy `scripts/trellis-*.sh`, and"
+    )
+    cited_from_a_kept_pack_file = RepointedScanTests.cited_from_a_kept_pack_file
+
+    def test_the_installer_still_changes_this_line_count(self) -> None:
+        # The premise of every case below. If a later release makes the thin
+        # rewrite line-count-preserving again, these stop testing alignment
+        # and start passing for free, so the premise is asserted rather than
+        # assumed.
+        rewritten = references.rewrite_text(
+            self.NARROW_GLOBS_BULLET + "\n", profile=references.THIN_PROFILE
+        )
+        self.assertNotEqual(
+            len(rewritten.splitlines()), len(self.NARROW_GLOBS_BULLET.splitlines())
+        )
+
+    def test_a_hit_after_an_inserted_line_reports_its_own_line(self) -> None:
+        body = f"{self.NARROW_GLOBS_BULLET}\n\nSee `{REMOVED}` for the steps.\n"
+        repo = self.cited_from_a_kept_pack_file(body)
+        result = self.scan(repo)
+        defects = self.buckets_for(result, KEPT)["packDefects"]
+        self.assertEqual([entry["line"] for entry in defects], [3])
+        # Line 3 of the file on disk, not line 4 of the rewritten text.
+        self.assertIn(REMOVED, body.splitlines()[2])
+
+    def test_the_repointed_glob_is_not_a_defect(self) -> None:
+        # The other half: under the equal-count fallback the scan saw the
+        # pre-rewrite bullet, whose `scripts/sd-ai-command-pack-*` glob selects
+        # a population the conversion removes entirely.
+        repo = RepointedScanTests.cited_from_a_kept_pack_file(
+            self, self.NARROW_GLOBS_BULLET + "\n"
+        )
+        result = self.scan(repo)
+        self.assertEqual(self.buckets_for(result, KEPT)["packDefects"], [])
+
+    def test_unchanged_and_substituted_lines_map_to_themselves(self) -> None:
+        self.assertEqual(
+            resweep.aligned_line_numbers(["a", "b", "c"], ["a", "B", "c"]),
+            [1, 2, 3],
+        )
+
+    def test_an_inserted_line_takes_the_line_it_follows(self) -> None:
+        self.assertEqual(
+            resweep.aligned_line_numbers(["a", "b"], ["a", "x", "b"]), [1, 1, 2]
+        )
+
+    def test_an_insertion_before_the_first_line_clamps_to_it(self) -> None:
+        # There is no line 0 to point at.
+        self.assertEqual(resweep.aligned_line_numbers(["a"], ["x", "a"]), [1, 1])
+
+    def test_extra_lines_in_a_substitution_take_the_last_line_replaced(
+        self,
+    ) -> None:
+        self.assertEqual(
+            resweep.aligned_line_numbers(["a", "b", "c"], ["a", "X", "Y", "c"]),
+            [1, 2, 2, 3],
+        )
+
+    def test_a_deleted_line_contributes_nothing(self) -> None:
+        self.assertEqual(resweep.aligned_line_numbers(["a", "b", "c"], ["a", "c"]), [1, 3])
+
+    def test_an_empty_original_maps_to_the_first_line(self) -> None:
+        # Unreachable through a rewrite, which never adds text to an empty
+        # file, but the mapping must be total: an index error here would fail
+        # a whole consumer's scan rather than one file's.
+        self.assertEqual(resweep.aligned_line_numbers([], ["a"]), [1])
 
 
 class ConsumerConfigCitationTests(unittest.TestCase):
