@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.71.26 - 2026-08-16
+
+### Fixed
+
+- `sd-check` now locates its five shipped-helper built-ins by installation
+  mode instead of reading `scripts/` unconditionally, so a consumer converted
+  to a thin install can pass again. Conversion moves the payload to the machine
+  install and `pack.install-audit` fails any attempt to vendor it back, so
+  every converted consumer reported `unavailable` for `pack.review-preflight`,
+  `pack.install-audit`, `knowledge.obsidian-kb`, `pack.review-scope`, and
+  `pack.pr-body-scope` while all five were installed and working. Because
+  `unavailable` outranks `passed` in the aggregate, `sd-check` could never
+  reach `passed` there and `sd-review` failed closed with
+  `deterministic-check-not-passed` ahead of dispatch -- taking the whole
+  `sd-ship` chain with it. Measured on `sd-github-review` at 0.71.24.
+
+  Resolution goes through the pack-owned layout resolver and is gated on the
+  consumer's own thin pin rather than on the resolver's machine rung, which
+  fires for any directory on a machine that has the pack installed: a
+  repository with no pack receipt still reads `scripts/`, unchanged. This
+  decides where to look and not what counts as present -- a helper absent from
+  both the repository and the machine install stays `unavailable` with its
+  existing diagnostic. `.sd-ai-command-pack/check.json` was never a workaround
+  for this: built-in rows are appended before configuration is read and
+  duplicate row IDs are rejected, so a configured entry can neither replace nor
+  suppress an `unavailable` built-in.
+
 ## 0.71.25 - 2026-08-16
 
 ### Added

@@ -62,6 +62,7 @@ EXIT_BY_STATUS = {
 }
 ID_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 WINDOWS_DRIVE_PATTERN = re.compile(r"[A-Za-z]:")
+LAYOUT_RESOLVER_NAME = "sd-ai-command-pack-review-layout.py"
 CONFIG_KEYS = frozenset({"schemaVersion", "prerequisites", "checks"})
 ENTRY_KEYS = frozenset({"id", "argv", "cwd", "timeoutSeconds"})
 FORBIDDEN_EXECUTABLES = frozenset(
@@ -871,6 +872,84 @@ def _append_guard_failure(
     )
 
 
+def _layout_module() -> Any | None:
+    """The pack-owned layout resolver, loaded from beside this script.
+
+    Loaded by path rather than imported because the filename is not an
+    identifier. The sibling lookup holds in both installed layouts for the
+    reason the resolver's own header gives: the two copies travel together --
+    fat keeps them side by side in `scripts/`, thin moves both into the
+    agents-bin directory.
+
+    Returns `None` rather than raising. A consumer whose resolver is missing or
+    unloadable must still get the vendored answer; losing helper resolution
+    altogether would be a worse failure than the one this repairs.
+    """
+
+    import importlib.util
+
+    script = Path(__file__).resolve().parent / LAYOUT_RESOLVER_NAME
+    if not script.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "sd_ai_command_pack_review_layout", script
+        )
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    return module
+
+
+def shipped_helper_path(repo: Path, name: str, environ: Mapping[str, str]) -> Path:
+    """Where this installation keeps the pack helper `name`.
+
+    A vendored consumer keeps the payload in `scripts/`; a converted one keeps
+    none of it and reads the machine install instead, because
+    `pack.install-audit` fails any attempt to put it back. Resolving only
+    `repo/scripts/` therefore reported `unavailable` for helpers that were
+    installed and working -- and since `unavailable` outranks `passed` in
+    AGGREGATE_PRECEDENCE, sd-check could never pass and sd-review failed closed
+    ahead of dispatch. Measured on `sd-github-review` at 0.71.24: five rows,
+    every helper present in the machine install.
+
+    Mode comes from the receipts, never from which files happen to exist.
+    Deciding by existence is the plausible-looking version of this that calls a
+    converted consumer fat and then refuses to locate the very scripts
+    conversion moved.
+
+    The gate is `pin_state` -- what *this repository's* receipt says it is --
+    and not `resolve_layout` alone, because the ladder's machine rung fires for
+    any directory on a machine that has the pack installed. That is right for
+    the resolver's own callers and wrong here: it would make every unrelated
+    checkout on a developer's machine resolve `thin` and start executing
+    machine helpers against a repository that is not a consumer at all. So only
+    a repository pinned thin leaves its own tree; `repo/scripts/` still wins
+    everywhere else, and a repository with no pack receipt keeps today's
+    behaviour byte for byte.
+    """
+
+    vendored = repo / f"scripts/{name}"
+    module = _layout_module()
+    if module is None:
+        return vendored
+    try:
+        if module.pin_state(repo) != module.PIN_STATE_THIN:
+            return vendored
+        layout = module.resolve_layout(repo, environ=dict(environ))
+        if layout.mode != module.MODE_THIN:
+            return vendored
+        return module.resolve_script(layout, name, root=repo, environ=dict(environ))
+    except Exception:
+        # Includes LayoutError for a name the machine receipt does not list.
+        # The caller reports that as the existing `unavailable` row, which is
+        # the honest answer: absent from the repository and from the install.
+        return vendored
+
+
 def build_report(repo: Path, config_path: Path) -> dict[str, object]:
     config_present = config_path.exists() or config_path.is_symlink()
     report = _base_report(repo, config_present=config_present)
@@ -966,6 +1045,9 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
             remediation=remediation,
         )
 
+    def shipped_helper(name: str) -> Path:
+        return shipped_helper_path(repo, name, environment)
+
     def shipped_helper_row(
         identifier: str,
         helper: Path,
@@ -985,7 +1067,7 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
         )
 
     def review_preflight_row() -> dict[str, object]:
-        helper = repo / "scripts/sd-ai-command-pack-review-preflight.mjs"
+        helper = shipped_helper("sd-ai-command-pack-review-preflight.mjs")
         return shipped_helper_row(
             "pack.review-preflight",
             helper,
@@ -995,7 +1077,7 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
         )
 
     def install_audit_row() -> dict[str, object]:
-        audit = repo / "scripts/sd-ai-command-pack-install-audit.py"
+        audit = shipped_helper("sd-ai-command-pack-install-audit.py")
         return shipped_helper_row(
             "pack.install-audit",
             audit,
@@ -1014,7 +1096,7 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
                 diagnostic="no .obsidian-kb directory is present",
                 remediation="run sd-update-spec to create it when repository knowledge export is desired",
             )
-        helper = repo / "scripts/sd-ai-command-pack-update-spec-kb.py"
+        helper = shipped_helper("sd-ai-command-pack-update-spec-kb.py")
         if not helper.is_file() or helper.is_symlink():
             return _result_row(
                 "knowledge.obsidian-kb",
@@ -1054,7 +1136,7 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
         return row
 
     def review_scope_row() -> dict[str, object]:
-        helper = repo / "scripts/sd-ai-command-pack-review-scope.sh"
+        helper = shipped_helper("sd-ai-command-pack-review-scope.sh")
         return shipped_helper_row(
             "pack.review-scope",
             helper,
@@ -1064,7 +1146,7 @@ def build_report(repo: Path, config_path: Path) -> dict[str, object]:
         )
 
     def pr_body_scope_row() -> dict[str, object]:
-        helper = repo / "scripts/sd-ai-command-pack-pr-body-scope.py"
+        helper = shipped_helper("sd-ai-command-pack-pr-body-scope.py")
         return shipped_helper_row(
             "pack.pr-body-scope",
             helper,
