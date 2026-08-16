@@ -3,7 +3,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# The repository being checked, which is not necessarily the one hosting this
+# script. A thin install moves this file to the machine, where `$SCRIPT_DIR/..`
+# is the agents directory rather than any checkout -- so the old derivation
+# ended the run at `fatal: not a git repository` before the first check.
+#
+# Same ladder the shared shell library already uses for its cache root
+# (`sd-ai-command-pack-shell-lib.sh:172`), rather than a second convention:
+# an explicit override, then the working tree the caller is standing in, then
+# the hosting checkout. Under a fat install invoked from inside the repository
+# the second rung resolves to exactly what the third one used to return, so
+# every existing caller keeps its current root.
+REPO_ROOT="${SD_AI_COMMAND_PACK_REPO_ROOT:-}"
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+fi
 # errexit does not help here: bash's `cd ""` is a silent success, so an
 # empty root (failed resolution above) must be rejected explicitly.
 if [ -z "$REPO_ROOT" ] || ! cd -- "$REPO_ROOT"; then
