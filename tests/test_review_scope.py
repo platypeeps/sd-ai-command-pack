@@ -1851,6 +1851,74 @@ class ReviewScopeTests(InstallTestCase):
                 [entry["category"] for entry in document["paths"]], ["pack-payload"]
             )
 
+    def test_scope_guard_accepts_a_relative_explicit_root(self) -> None:
+        """A relative override survives the guard changing directories.
+
+        Only this rung can produce a relative root, and every path derived from
+        it -- the targets receipt above all -- is built before `main` enters the
+        repository. Left relative, the receipt lookup silently reads nothing and
+        the guard reports no tooling/generated scope at all.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            elsewhere = root / "elsewhere"
+            (elsewhere / ".sd-ai-command-pack").mkdir(parents=True)
+            (elsewhere / ".sd-ai-command-pack" / "installed-targets.txt").write_text(
+                "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+            )
+            copied = elsewhere / "scripts" / "sd-ai-command-pack-full-check.sh"
+            copied.parent.mkdir()
+            copied.write_text("old\n", encoding="utf-8")
+            for command in (
+                ["git", "init", "-q", "."],
+                ["git", "config", "user.email", "scope@example.invalid"],
+                ["git", "config", "user.name", "scope"],
+                ["git", "add", "-A"],
+                ["git", "commit", "-qm", "init"],
+            ):
+                subprocess.run(
+                    command, cwd=elsewhere, check=True, capture_output=True
+                )
+            copied.write_text("old\nchanged\n", encoding="utf-8")
+
+            machine_bin = root / "agents-bin"
+            machine_bin.mkdir()
+            for name in (
+                "sd-ai-command-pack-review-scope.sh",
+                "sd-ai-command-pack-shell-lib.sh",
+                "sd-ai-command-pack-review-layout.py",
+                "sd-ai-command-pack-toolchain.sh",
+            ):
+                shutil.copy2(PACK_ROOT / "templates" / "scripts" / name, machine_bin / name)
+
+            environment = dict(os.environ)
+            for name in (
+                "SD_AI_COMMAND_PACK_TARGETS_FILE",
+                "SD_AI_COMMAND_PACK_STATE_HOME",
+                "XDG_STATE_HOME",
+            ):
+                environment.pop(name, None)
+            environment["SD_AI_COMMAND_PACK_REPO_ROOT"] = "elsewhere"
+            environment["SD_AI_COMMAND_PACK_CACHE_ENV_READY"] = "1"
+
+            result = subprocess.run(
+                ["bash", str(machine_bin / "sd-ai-command-pack-review-scope.sh")],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                env=environment,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "copied/generated Trellis or sd-ai-command-pack files", result.stdout
+            )
+            self.assertIn(
+                "scripts/sd-ai-command-pack-full-check.sh", result.stdout
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

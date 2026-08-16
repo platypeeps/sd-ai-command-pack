@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.71.18 - 2026-08-15
+
+### Fixed
+
+- A relative `SD_AI_COMMAND_PACK_REPO_ROOT` no longer silently disables the
+  review-scope guard. The override is the only root rung that can answer
+  relative -- `git rev-parse --show-toplevel` and `cd ... && pwd` cannot -- and
+  every path derived from it, the installed-targets receipt first, is built
+  before the guard enters the repository. Once it did, the relative receipt path
+  re-resolved against the new working directory, matched nothing, and the guard
+  reported no tooling/generated scope at all while still exiting `0`. Both
+  shipped shell guards now normalize the override with `cd ... && pwd -P` and
+  export the absolute form back, since the shared shell library reads the raw
+  variable rather than the script's local copy.
+
 ## 0.71.17 - 2026-08-15
 
 ### Fixed

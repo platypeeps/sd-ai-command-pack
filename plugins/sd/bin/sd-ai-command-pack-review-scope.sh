@@ -11,6 +11,22 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Under a fat install invoked from inside the repository the second rung
 # returns exactly what the third one used to.
 REPO_ROOT="${SD_AI_COMMAND_PACK_REPO_ROOT:-}"
+if [ -n "$REPO_ROOT" ]; then
+  # Only this rung can hand back a relative path: `git rev-parse
+  # --show-toplevel` and `cd ... && pwd` both answer absolute. Left relative it
+  # would be re-resolved against the working directory this script later `cd`s
+  # into, so every path built from it -- the targets receipt first -- would
+  # point somewhere else the moment the root stopped being the caller's cwd.
+  if ! REPO_ROOT="$(cd -- "$REPO_ROOT" 2>/dev/null && pwd -P)"; then
+    REPO_ROOT=""
+  else
+    # The shared shell library reads the raw override rather than this
+    # variable (`sd-ai-command-pack-shell-lib.sh:172`), so normalizing only the
+    # local copy would leave the relative form live for the cache root and for
+    # every child process. Put the absolute form back where it came from.
+    export SD_AI_COMMAND_PACK_REPO_ROOT="$REPO_ROOT"
+  fi
+fi
 if [ -z "$REPO_ROOT" ]; then
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 fi
