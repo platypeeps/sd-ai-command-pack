@@ -122,8 +122,22 @@ def resolve_state_root(
 INSTALLED_TARGETS_RELATIVE = (
     ".sd-ai-command-pack/installed-targets.txt"  # installer/registry.py
 )
+PACK_MANIFEST_RELATIVE = ".sd-ai-command-pack/manifest.json"  # installer/registry.py
+PROVENANCE_RELATIVE = ".sd-ai-command-pack/provenance.json"  # installer/registry.py
 MACHINE_STATE_DIR = "machine"  # installer/machinescope.py
 MACHINE_RECEIPT_FILE = "machine-receipt.json"  # installer/machinescope.py
+
+THIN_PIN_MODE = "thin"  # installer/conversion.py
+# Every key only a conversion writes; a survivor on a receipt that no longer
+# says `thin` means the pin was edited rather than reverted.
+PIN_KEYS = (  # installer/provenance.py
+    "mode",
+    "platforms",
+    "consumer",
+    "settingsAdditions",
+    "forced",
+    "retired",
+)
 
 TARGETS_FILE_ENV = "SD_AI_COMMAND_PACK_TARGETS_FILE"
 
@@ -245,6 +259,80 @@ def _read_machine_receipt(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(entry for entry in files if isinstance(entry, dict))
 
 
+PIN_STATE_FAT = "fat"
+PIN_STATE_THIN = "thin"
+PIN_STATE_MALFORMED = "malformed"
+
+
+def _inside(root: Path, path: Path) -> bool:
+    """Whether `path` really lands inside `root` once symlinks are followed.
+
+    Mirror of `installer/manifest.py:validate_resolved_target_path`, which the
+    installer applies to exactly these three receipt paths. Joining a relative
+    path to a root does not keep it there: a `.sd-ai-command-pack` symlinked
+    elsewhere makes every receipt under it another tree's, and this resolver
+    hands its answer to a caller whose next move is to execute it. Both sides
+    are resolved because a root reached through a symlink is ordinary -- macOS
+    `/tmp` is one -- and comparing a resolved child against an unresolved
+    parent would reject those.
+    """
+
+    try:
+        return path.resolve(strict=False).is_relative_to(root.resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
+def _receipt_declares_thin(path: Path) -> bool:
+    """True only when `path` legibly says `mode: "thin"`.
+
+    Deliberately narrower than `pin_state`: this is the *second* witness, so it
+    answers only the question it can answer well. A symlink is refused rather
+    than followed, matching the install preflight's refusal on the same paths.
+    """
+
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("mode") == THIN_PIN_MODE
+
+
+def pin_state(root: Path) -> str:
+    """What this consumer's own receipts say it is: fat, thin, or malformed.
+
+    Mirror of `installer/conversion.py:thin_pin_state`, including its two
+    witnesses and their order: `manifest.json` is written before
+    `provenance.json`, so when only one survives it is the earlier one.
+    Unreadable bytes carrying no thin evidence are `fat`, because that is what
+    they have always been -- a mangled receipt is a recoverable fat state the
+    installer rebuilds. Thin-only pin keys under anything but `mode: "thin"`
+    are `malformed`: that receipt was thin and something has since edited it.
+    """
+
+    manifest = root / PACK_MANIFEST_RELATIVE
+    if _inside(root, manifest) and _receipt_declares_thin(manifest):
+        return PIN_STATE_THIN
+    provenance = root / PROVENANCE_RELATIVE
+    if not _inside(root, provenance):
+        return PIN_STATE_FAT
+    if provenance.is_symlink() or not provenance.is_file():
+        return PIN_STATE_FAT
+    try:
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return PIN_STATE_FAT
+    if not isinstance(payload, dict):
+        return PIN_STATE_FAT
+    if payload.get("mode") == THIN_PIN_MODE:
+        return PIN_STATE_THIN
+    if any(key in payload for key in PIN_KEYS):
+        return PIN_STATE_MALFORMED
+    return PIN_STATE_FAT
+
+
 def resolve_layout(
     root: Path,
     *,
@@ -252,9 +340,23 @@ def resolve_layout(
 ) -> Layout:
     """Which installation this consumer has, by the documented ladder.
 
-    Order is override, vendored, machine, nothing -- and the override stays
-    first because consumers set it today and this must not change what they
-    already get.
+    Order is override, recorded pin, vendored, machine, nothing -- and the
+    override stays first because consumers set it today and this must not
+    change what they already get.
+
+    The pin outranks the vendored receipt because that receipt's *existence*
+    does not mean what it looks like it means. A conversion does not delete
+    `installed-targets.txt`; it rewrites it down to the residual slice the
+    repository still holds. Deciding mode by existence therefore called every
+    converted consumer fat and then refused to locate any pack script, since
+    the names it looked for had just been removed from the very file it was
+    reading -- measured on `rwbp-coordinator` at 0.71.14, which resolved `fat`
+    while both of its own receipts said `thin`.
+
+    A thin consumer keeps that residual receipt in `targets`, because those
+    rows are pack payload the repository genuinely still carries and
+    `classify` is right to consult them. Only `resolve_script` branches on
+    mode, and it reads the machine receipt.
     """
 
     env = dict(os.environ if environ is None else environ)
@@ -266,9 +368,27 @@ def resolve_layout(
             return Layout(MODE_FAT, receipt=path, targets=_read_targets(path))
         raise LayoutError(f"{TARGETS_FILE_ENV} names a missing file: {path}")
 
+    pinned = pin_state(root)
+    if pinned == PIN_STATE_MALFORMED:
+        return Layout(
+            MODE_UNRESOLVED,
+            reason=(
+                f"{PROVENANCE_RELATIVE} under {root} carries thin pin keys "
+                "without a thin mode; repair or reinstall the pack rather "
+                "than resolving against a receipt that contradicts itself"
+            ),
+        )
+
+    # The same containment rule as the pin, and for the same reason: this file
+    # is what `classify` answers from, so a receipt reached through a symlinked
+    # `.sd-ai-command-pack` would describe another repository's install as this
+    # one's. Out-of-tree means "no vendored receipt here" rather than an error,
+    # which leaves the ladder to report `unresolved` with its own reason.
     vendored = root / INSTALLED_TARGETS_RELATIVE
-    if vendored.is_file():
-        return Layout(MODE_FAT, receipt=vendored, targets=_read_targets(vendored))
+    usable = _inside(root, vendored) and vendored.is_file()
+    residual = _read_targets(vendored) if usable else frozenset()
+    if pinned == PIN_STATE_FAT and usable:
+        return Layout(MODE_FAT, receipt=vendored, targets=residual)
 
     # `resolve_state_root` is called, never re-derived: expanding
     # `~/.local/state` directly would skip SD_AI_COMMAND_PACK_STATE_HOME,
@@ -283,7 +403,20 @@ def resolve_layout(
         return Layout(
             MODE_THIN,
             receipt=machine_receipt,
+            targets=residual,
             machine_files=_read_machine_receipt(machine_receipt),
+        )
+
+    if pinned == PIN_STATE_THIN:
+        # Falling back to the residual receipt here is exactly the defect this
+        # ladder exists to prevent: it would report `fat` and then fail to find
+        # a script whose name conversion had already removed from that file.
+        return Layout(
+            MODE_UNRESOLVED,
+            reason=(
+                f"{root} is pinned thin but the machine install is missing: "
+                f"no {machine_receipt}"
+            ),
         )
 
     return Layout(

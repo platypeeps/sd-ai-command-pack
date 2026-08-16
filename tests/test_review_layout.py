@@ -143,6 +143,40 @@ class LayoutResolutionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["mode"], "fat")
 
+    def test_a_converted_consumer_resolves_thin_through_the_cli(self) -> None:
+        """The contract consumers actually invoke, on a post-conversion tree.
+
+        Every consumer guard shells out to `--resolve` and executes what comes
+        back, so the in-process cases above are not sufficient evidence that a
+        converted checkout works.
+        """
+
+        self.write_fat_receipt(
+            ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py"
+        )
+        (self.root / ".sd-ai-command-pack" / "manifest.json").write_text(
+            json.dumps({"schemaVersion": 1, "mode": "thin"}), encoding="utf-8"
+        )
+        state_root = Path(self.tmp.name) / "state"
+        self.write_machine_receipt(state_root, "sd-ai-command-pack-full-check.sh")
+        result = run_script(
+            "--root",
+            str(self.root),
+            "--resolve",
+            "sd-ai-command-pack-full-check.sh",
+            env={
+                "SD_AI_COMMAND_PACK_STATE_HOME": str(state_root),
+                "HOME": str(self.home),
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(result.stdout)
+        self.assertEqual(document["mode"], "thin")
+        self.assertEqual(
+            document["path"],
+            str(self.home / ".agents" / "bin" / "sd-ai-command-pack-full-check.sh"),
+        )
+
     def test_no_installation_is_unresolved_and_emits_no_classification(self) -> None:
         """Failing loud, not open.
 
@@ -359,6 +393,74 @@ class MirroredConstantTests(unittest.TestCase):
         )
         self.assertEqual(module.MACHINE_STATE_DIR, machinescope.MACHINE_STATE_DIR)
         self.assertEqual(module.MACHINE_RECEIPT_FILE, machinescope.RECEIPT_FILE)
+        self.assertEqual(
+            module.PACK_MANIFEST_RELATIVE, str(registry.PACK_MANIFEST_FILE)
+        )
+        self.assertEqual(module.PROVENANCE_RELATIVE, str(registry.PROVENANCE_FILE))
+
+    def test_thin_pin_constants_match_installer(self) -> None:
+        """The pin the ladder now reads, compared against its one writer."""
+
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("review_layout", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        from installer import conversion, provenance
+
+        self.assertEqual(module.THIN_PIN_MODE, conversion.THIN_MODE)
+        self.assertEqual(module.PIN_KEYS, provenance.PIN_KEYS)
+        for name in ("FAT", "THIN", "MALFORMED"):
+            self.assertEqual(
+                getattr(module, f"PIN_STATE_{name}"),
+                getattr(conversion, f"PIN_STATE_{name}"),
+            )
+
+    def test_pin_state_agrees_with_the_installer_on_every_receipt_shape(self) -> None:
+        """Same bytes, same verdict -- the copy checked rather than trusted.
+
+        `pin_state` is a mirror of `thin_pin_state`, and the two disagreeing is
+        precisely how a converted consumer would resolve as fat again. The
+        shapes below are the three states plus the two edits that separate
+        `malformed` from `fat`.
+        """
+
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("review_layout", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        from installer import conversion
+
+        shapes = {
+            "fat-plain": ({"version": "1"}, None),
+            "thin-provenance": ({"mode": "thin", "version": "1"}, None),
+            "thin-manifest": ({"version": "1"}, {"mode": "thin"}),
+            "edited-pin": ({"mode": "thin-corrupt", "consumer": "x"}, None),
+            "unreadable": ("{not json", None),
+        }
+        for label, (provenance_body, manifest_body) in shapes.items():
+            with self.subTest(label):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    (root / ".sd-ai-command-pack").mkdir()
+                    (root / ".sd-ai-command-pack" / "provenance.json").write_text(
+                        provenance_body
+                        if isinstance(provenance_body, str)
+                        else json.dumps(provenance_body),
+                        encoding="utf-8",
+                    )
+                    if manifest_body is not None:
+                        (root / ".sd-ai-command-pack" / "manifest.json").write_text(
+                            json.dumps(manifest_body), encoding="utf-8"
+                        )
+                    self.assertEqual(
+                        module.pin_state(root), conversion.thin_pin_state(root)
+                    )
 
     def test_family_roots_match_installer(self) -> None:
         import importlib.util
@@ -775,6 +877,189 @@ class InProcessLayoutTests(unittest.TestCase):
             ),
             self.module.CATEGORY_PAYLOAD,
         )
+
+    def thin_pin(self, *, manifest: bool = True) -> None:
+        """Pin this fixture the way a conversion pins a real consumer."""
+
+        directory = self.root / ".sd-ai-command-pack"
+        directory.mkdir(parents=True, exist_ok=True)
+        if manifest:
+            (directory / "manifest.json").write_text(
+                json.dumps({"schemaVersion": 1, "mode": "thin", "version": "0.71.15"}),
+                encoding="utf-8",
+            )
+        (directory / "provenance.json").write_text(
+            json.dumps({"mode": "thin", "version": "0.71.15", "consumer": "x"}),
+            encoding="utf-8",
+        )
+
+    def machine(self, *names: str) -> Path:
+        state_root = Path(self.tmp.name) / "state"
+        receipt = state_root / "machine" / "machine-receipt.json"
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "files": [
+                        {"family": "agents-bin", "path": name} for name in names
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return state_root
+
+    def thin_environ(self, state_root: Path) -> dict[str, str]:
+        return {
+            "SD_AI_COMMAND_PACK_STATE_HOME": str(state_root),
+            "HOME": str(self.home),
+        }
+
+    def test_a_pinned_consumer_is_thin_even_though_its_receipt_survived(self) -> None:
+        """The defect that stopped the canary cohort, pinned as a test.
+
+        Conversion rewrites `installed-targets.txt` down to the residual slice
+        rather than deleting it, so deciding mode by that file's existence
+        called `rwbp-coordinator` fat at 0.71.14 -- and then refused to locate
+        `sd-ai-command-pack-full-check.sh`, because the name had just been
+        removed from the file the refusal was reading.
+        """
+
+        self.fat(".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py")
+        self.thin_pin()
+        state_root = self.machine("sd-ai-command-pack-full-check.sh")
+        layout = self.module.resolve_layout(
+            self.root, environ=self.thin_environ(state_root)
+        )
+        self.assertEqual(layout.mode, "thin")
+        self.assertEqual(
+            self.module.resolve_script(
+                layout,
+                "sd-ai-command-pack-full-check.sh",
+                root=self.root,
+                environ=self.thin_environ(state_root),
+            ),
+            self.home / ".agents" / "bin" / "sd-ai-command-pack-full-check.sh",
+        )
+
+    def test_a_pinned_consumer_still_classifies_its_residual_payload(self) -> None:
+        """The surviving rows are payload, and the receipt is how anyone knows.
+
+        Dropping them would classify every file conversion deliberately kept as
+        the consumer's own work, which is the same silent-wrong-answer failure
+        the module docstring refuses for the unresolved case.
+        """
+
+        self.fat(".prism/rules.json")
+        self.thin_pin()
+        state_root = self.machine("sd-ai-command-pack-full-check.sh")
+        layout = self.module.resolve_layout(
+            self.root, environ=self.thin_environ(state_root)
+        )
+        self.assertEqual(
+            self.module.classify(layout, ".prism/rules.json"),
+            self.module.CATEGORY_PAYLOAD,
+        )
+
+    def test_the_manifest_alone_is_enough_to_pin_a_consumer_thin(self) -> None:
+        """Two witnesses, and the write order makes this the surviving one.
+
+        `manifest.json` is written before `provenance.json`, so a conversion
+        interrupted between them leaves exactly this state.
+        """
+
+        self.fat("scripts/sd-ai-command-pack-full-check.sh")
+        directory = self.root / ".sd-ai-command-pack"
+        (directory / "manifest.json").write_text(
+            json.dumps({"mode": "thin"}), encoding="utf-8"
+        )
+        state_root = self.machine("sd-ai-command-pack-full-check.sh")
+        layout = self.module.resolve_layout(
+            self.root, environ=self.thin_environ(state_root)
+        )
+        self.assertEqual(layout.mode, "thin")
+
+    def test_a_pinned_consumer_without_a_machine_install_refuses(self) -> None:
+        """Falling back to the residual receipt here is the defect itself."""
+
+        self.fat("scripts/sd-ai-command-pack-full-check.sh")
+        self.thin_pin()
+        empty = Path(self.tmp.name) / "empty-state"
+        empty.mkdir()
+        layout = self.module.resolve_layout(
+            self.root, environ=self.thin_environ(empty)
+        )
+        self.assertEqual(layout.mode, "unresolved")
+        self.assertIn("pinned thin", layout.reason)
+
+    def test_a_symlinked_pack_directory_reads_no_receipt_at_all(self) -> None:
+        """Containment, on every receipt this resolver reads from the repo.
+
+        Joining a relative path to a root does not keep it there. With
+        `.sd-ai-command-pack` pointing elsewhere, both the pin and the vendored
+        receipt come from a tree that is not this one -- and the answer is
+        handed to a caller whose next move is to execute it. The installer
+        validates exactly these paths (`installer/manifest.py:210`); guarding
+        only the pin would close half of it and leave the same escape open
+        through `installed-targets.txt`.
+        """
+
+        elsewhere = Path(self.tmp.name) / "elsewhere" / ".sd-ai-command-pack"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "installed-targets.txt").write_text(
+            "scripts/sd-ai-command-pack-full-check.sh\n", encoding="utf-8"
+        )
+        (elsewhere / "manifest.json").write_text(
+            json.dumps({"mode": "thin"}), encoding="utf-8"
+        )
+        (self.root / ".sd-ai-command-pack").symlink_to(
+            elsewhere, target_is_directory=True
+        )
+
+        self.assertEqual(self.module.pin_state(self.root), "fat")
+        layout = self.module.resolve_layout(self.root, environ={"HOME": str(self.home)})
+        self.assertEqual(layout.mode, "unresolved")
+
+    def test_containment_does_not_reject_a_root_reached_through_a_symlink(self) -> None:
+        """The false positive a resolved-child-versus-raw-parent check makes.
+
+        A root reached through a symlink is ordinary -- macOS `/tmp` is one --
+        so comparing a resolved receipt against an unresolved root would call
+        every such consumer an escape and resolve nothing.
+        """
+
+        self.fat("scripts/sd-ai-command-pack-full-check.sh")
+        link = Path(self.tmp.name) / "linked-consumer"
+        link.symlink_to(self.root, target_is_directory=True)
+        layout = self.module.resolve_layout(link, environ={"HOME": str(self.home)})
+        self.assertEqual(layout.mode, "fat")
+
+    def test_an_edited_pin_is_unresolved_rather_than_fat(self) -> None:
+        """Thin-only keys under a non-thin mode mean the receipt was edited.
+
+        Reading that as fat would resolve against a receipt that contradicts
+        itself, and the caller's next move is to execute what came back.
+        """
+
+        self.fat("scripts/sd-ai-command-pack-full-check.sh")
+        directory = self.root / ".sd-ai-command-pack"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "provenance.json").write_text(
+            json.dumps({"mode": "thin-corrupt", "consumer": "x"}), encoding="utf-8"
+        )
+        layout = self.module.resolve_layout(self.root, environ={"HOME": str(self.home)})
+        self.assertEqual(layout.mode, "unresolved")
+
+    def test_an_ordinary_fat_receipt_is_unaffected_by_the_pin_rung(self) -> None:
+        """The rung is added, not substituted: a fat consumer still resolves."""
+
+        self.fat("scripts/sd-ai-command-pack-full-check.sh")
+        (self.root / ".sd-ai-command-pack" / "provenance.json").write_text(
+            json.dumps({"version": "0.71.15", "files": {}}), encoding="utf-8"
+        )
+        layout = self.module.resolve_layout(self.root, environ={"HOME": str(self.home)})
+        self.assertEqual(layout.mode, "fat")
 
     def test_malformed_machine_receipt_is_reported_not_ignored(self) -> None:
         state_root = Path(self.tmp.name) / "state"
