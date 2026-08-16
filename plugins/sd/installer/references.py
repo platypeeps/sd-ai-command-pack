@@ -107,18 +107,12 @@ class ReferenceRewriteError(Exception):
 # justifications these mirror.
 BIN_LITERAL_ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
     "sd-ai-command-pack-check.py": (
-        "repo-scoped payload discovery: sd-check reports whether the repository "
-        "under --repo carries the vendored helpers, so the paths describe that "
-        "repository's layout, not this script's siblings",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-install-audit.py",
-                "scripts/sd-ai-command-pack-pr-body-scope.py",
-                "scripts/sd-ai-command-pack-review-preflight.mjs",
-                "scripts/sd-ai-command-pack-review-scope.sh",
-                "scripts/sd-ai-command-pack-update-spec-kb.py",
-            }
-        ),
+        "remediation prose: the one remaining literal is the command text a "
+        "human is told to run, printed in a row's remediation field. Resolution "
+        "itself is converted and goes through shipped_helper_path(), which "
+        "reads the consumer's own thin pin and leaves the repository only for "
+        "a converted install",
+        frozenset({"scripts/sd-ai-command-pack-update-spec-kb.py"}),
     ),
     "sd-ai-command-pack-full-check.sh": (
         "pack-source-only release gate: the fleet candidate checker has no "

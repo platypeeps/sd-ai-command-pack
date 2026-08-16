@@ -555,6 +555,179 @@ class CheckTests(InstallTestCase):
         self.assertEqual(row["status"], "unavailable")
         self.assertEqual(report["status"], "unavailable")
 
+    # -- thin-install helper resolution -------------------------------------
+    #
+    # A converted consumer keeps none of `scripts/sd-ai-command-pack-*`: the
+    # payload moved to the machine install and `pack.install-audit` fails any
+    # attempt to put it back. Resolving only `repo/scripts/` therefore reported
+    # five `unavailable` rows for helpers that were installed and working, and
+    # since `unavailable` outranks `passed` in AGGREGATE_PRECEDENCE, sd-check
+    # could never pass and sd-review failed closed ahead of dispatch. Measured
+    # on `sd-github-review` at 0.71.24.
+
+    THIN_HELPERS = (
+        "sd-ai-command-pack-review-preflight.mjs",
+        "sd-ai-command-pack-install-audit.py",
+        "sd-ai-command-pack-review-scope.sh",
+        "sd-ai-command-pack-pr-body-scope.py",
+    )
+
+    def convert_to_thin(
+        self, root: Path, *, machine_helpers: tuple[str, ...] | None = None
+    ) -> dict[str, str]:
+        """Convert a fat fixture the way a real conversion converts a consumer.
+
+        Conversion removes the vendored payload, pins the mode in the consumer
+        receipt, and rewrites `installed-targets.txt` down to the residual
+        slice rather than deleting it -- that survival is exactly what made
+        mode-by-existence call converted consumers fat.
+        """
+
+        for name in self.THIN_HELPERS:
+            (root / "scripts" / name).unlink()
+
+        directory = root / ".sd-ai-command-pack"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "provenance.json").write_text(
+            json.dumps({"mode": "thin", "version": "0.71.24", "consumer": "fixture"}),
+            encoding="utf-8",
+        )
+        (directory / "installed-targets.txt").write_text(
+            ".sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py\n",
+            encoding="utf-8",
+        )
+
+        installed = self.THIN_HELPERS if machine_helpers is None else machine_helpers
+        home = root.parent / "home"
+        agents_bin = home / ".agents" / "bin"
+        agents_bin.mkdir(parents=True, exist_ok=True)
+        bodies = {
+            "sd-ai-command-pack-review-preflight.mjs": "process.exit(0);\n",
+            "sd-ai-command-pack-install-audit.py": "raise SystemExit(0)\n",
+            "sd-ai-command-pack-review-scope.sh": "#!/usr/bin/env bash\nexit 0\n",
+            "sd-ai-command-pack-pr-body-scope.py": "raise SystemExit(0)\n",
+            "sd-ai-command-pack-update-spec-kb.py": (
+                "import sys\n"
+                "assert sys.argv[1:] == ['--check']\n"
+                "raise SystemExit(0)\n"
+            ),
+        }
+        for name in installed:
+            (agents_bin / name).write_text(bodies[name], encoding="utf-8")
+
+        state_root = root.parent / "state"
+        receipt = state_root / "machine" / "machine-receipt.json"
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "files": [
+                        {"family": "agents-bin", "path": name, "executable": True}
+                        for name in installed
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "HOME": str(home),
+            "SD_AI_COMMAND_PACK_STATE_HOME": str(state_root),
+        }
+
+    def test_thin_consumer_resolves_shipped_helpers_from_the_machine_install(
+        self,
+    ) -> None:
+        root = self.make_check_repo()
+        env = self.convert_to_thin(root)
+        for name in self.THIN_HELPERS:
+            self.assertFalse(
+                (root / "scripts" / name).exists(),
+                f"{name} must be absent from the converted consumer",
+            )
+
+        result = self.run_check(root, extra_env=env)
+        report = self.parse_report(result)
+
+        rows = {row["id"]: row for row in report["checks"]}
+        for identifier in (
+            "pack.review-preflight",
+            "pack.install-audit",
+            "pack.review-scope",
+            "pack.pr-body-scope",
+        ):
+            self.assertEqual(
+                rows[identifier]["status"], "passed", rows[identifier]
+            )
+        self.assertEqual(report["status"], "passed", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_thin_consumer_without_the_machine_helper_stays_unavailable(self) -> None:
+        """Widening where the check looks must not widen what counts as present.
+
+        The helper is absent from the repository *and* from the machine
+        install, so the honest answer is still `unavailable` -- the same row
+        the vendored fixture produces when its own copy is deleted.
+        """
+
+        root = self.make_check_repo()
+        env = self.convert_to_thin(
+            root,
+            machine_helpers=tuple(
+                name
+                for name in self.THIN_HELPERS
+                if name != "sd-ai-command-pack-install-audit.py"
+            ),
+        )
+
+        result = self.run_check(root, extra_env=env)
+        report = self.parse_report(result)
+
+        rows = {row["id"]: row for row in report["checks"]}
+        self.assertEqual(rows["pack.install-audit"]["status"], "unavailable")
+        self.assertEqual(
+            rows["pack.install-audit"]["diagnostic"],
+            "installed payload audit helper is not present",
+        )
+        self.assertEqual(rows["pack.review-scope"]["status"], "passed")
+        self.assertEqual(report["status"], "unavailable")
+        self.assertEqual(result.returncode, 3, result.stdout)
+
+    def test_vendored_consumer_still_resolves_its_own_helpers(self) -> None:
+        """The fat layout is unchanged, proven against a populated machine install.
+
+        `repo/scripts/` wins where it exists, so a consumer that still vendors
+        the payload cannot silently start executing a different copy of it.
+        """
+
+        root = self.make_check_repo()
+        env = self.convert_to_thin(root)
+        # Put the vendored payload back and drop the thin pin: a fat consumer
+        # with a machine install present must still read its own scripts/.
+        for name in self.THIN_HELPERS:
+            (root / "scripts" / name).write_text(
+                (root.parent / "home" / ".agents" / "bin" / name).read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+        (root / ".sd-ai-command-pack" / "provenance.json").write_text(
+            json.dumps({"mode": "fat", "version": "0.71.24", "consumer": "fixture"}),
+            encoding="utf-8",
+        )
+        (root / ".sd-ai-command-pack" / "installed-targets.txt").write_text(
+            "\n".join(f"scripts/{name}" for name in self.THIN_HELPERS) + "\n",
+            encoding="utf-8",
+        )
+        (root / "scripts" / "sd-ai-command-pack-install-audit.py").unlink()
+
+        result = self.run_check(root, extra_env=env)
+        report = self.parse_report(result)
+
+        rows = {row["id"]: row for row in report["checks"]}
+        self.assertEqual(rows["pack.install-audit"]["status"], "unavailable")
+        self.assertEqual(result.returncode, 3, result.stdout)
+
 
 def _load_check_module():
     import importlib.util

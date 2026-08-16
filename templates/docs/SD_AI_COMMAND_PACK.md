@@ -725,7 +725,27 @@ tool is `unavailable`, never a pass.
 
 Built-ins run staged/unstaged whitespace checks plus the installed review
 preflight, payload audit, Obsidian KB `--check`, tooling/generated scope, and
-PR-body scope helpers when applicable. The command never refreshes stale
+PR-body scope helpers when applicable.
+
+Those five helpers are located by installation mode, not by searching. A
+vendored consumer keeps them in `scripts/`; a consumer converted to a thin
+install keeps none of them, because the payload lives in the machine install
+and `pack.install-audit` fails any attempt to vendor it back. The mode comes
+from the consumer's own thin pin, read through the pack-owned layout resolver,
+so only a repository pinned thin resolves outside its own tree -- a repository
+with no pack receipt reads `scripts/` exactly as before, even on a machine that
+has the pack installed. A helper absent from both the repository and the
+machine install stays `unavailable` with its existing diagnostic: this decides
+where to look, never what counts as present.
+
+Before 0.71.25 the built-ins read `scripts/` unconditionally, so every
+converted consumer reported five `unavailable` rows for helpers that were
+installed and working. Because `unavailable` outranks `passed`, `sd-check`
+could not reach `passed` there, and `sd-review` failed closed with
+`deterministic-check-not-passed` before reaching dispatch -- which made the
+whole `sd-ship` chain unreachable on a thin install.
+
+The command never refreshes stale
 knowledge, runs Prism/Gito/Copilot/routed review, mutates Git/GitHub, or reads
 the legacy full-check environment/package-hook contract. Every subprocess uses
 the shared external cache environment. If repository, index, ref, generated
