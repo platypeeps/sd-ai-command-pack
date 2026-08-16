@@ -345,13 +345,15 @@ case "$PREPARE_STATUS" in
 esac
 ```
 
-Exit `3` is the helper's non-error mixed-scope result. Any other nonzero status,
-an unavailable helper/toolchain, a non-regular temporary body, or a failed body
-fetch/edit blocks the handoff: stop before Step 6 so review never starts with a
-known-missing tooling/generated section. The helper owns the canonical path
-classification and appends the recognized section only when every changed path
-is tooling/generated or repository bookkeeping; the skill must not duplicate
-those patterns.
+Exit `3` is the helper's non-error "nothing to declare" result: the branch diff
+was empty, or no path in it is tooling/generated or repository bookkeeping. Any
+other nonzero status, an unavailable helper/toolchain, a non-regular temporary
+body, or a failed body fetch/edit blocks the handoff: stop before Step 6 so
+review never starts with a known-missing tooling/generated section. The helper
+owns the canonical path classification and appends the recognized section
+whenever at least one changed path is tooling/generated or repository
+bookkeeping, naming those paths when the diff also carries authored changes;
+the skill must not duplicate those patterns.
 
 If `SD_AI_COMMAND_PACK_CREATE_PR_DRAFT=1`, create the PR as draft unless the
 user explicitly asked for a ready PR.

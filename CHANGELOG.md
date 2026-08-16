@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.71.23 - 2026-08-16
+
+### Fixed
+
+- `sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body` now declares the
+  tooling subset of a mixed diff instead of refusing it. Previously it appended
+  the scope section only when *every* changed path was generated or repository
+  bookkeeping, and exited `3` writing nothing otherwise -- which left the PR
+  body without a heading in exactly the case that needs one. `sd-ship` Stage 2b
+  commits the workspace journal and index after the body has been authored and
+  judged complete; those files are a `pack.review-scope` category, so the gate
+  began requiring a heading at the finalization head, on a body that was
+  correct when written and was no longer being edited. Seen on PRs #156, #163,
+  #172, #203 and #208.
+
+  The old refusal was a truthfulness guard, not an oversight: the canned
+  section claims the change is *limited to* generated surfaces, false when
+  authored files are present. A mixed diff now gets a section naming only the
+  paths proven to be generated, worded as a non-exhaustive "include:" list --
+  the branch acquires further generated files after the body is written, so an
+  exhaustive claim would be false by the time the gate reads it. Paths are
+  sorted, escaped with `json.dumps` so a newline in a filename cannot inject
+  Markdown into a published body, and capped at 20 with an explicit remainder
+  count rather than silently truncated.
+
+  `pack.review-scope` itself is unchanged. Exit `3` survives with a narrower,
+  honest meaning -- nothing to declare -- so a diff carrying no generated path
+  still writes nothing and an unexplained generated change still reaches the
+  gate undeclared and still fails.
+
 ## 0.71.22 - 2026-08-16
 
 ### Fixed
