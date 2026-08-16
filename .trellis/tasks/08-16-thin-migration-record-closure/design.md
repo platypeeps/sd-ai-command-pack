@@ -126,8 +126,10 @@ bookkeeping change.
 Every `path:line` this task adds must resolve in this checkout — the CI scope
 preflight resolves citations against the local tree, so a cross-repo path fails.
 AMC's workflow state is evidence for criterion 3 but lives in another
-repository: name the consumer and the merged change without a resolvable
-`path:line`.
+repository. Record it as a repository plus PR or commit reference — the form
+cross-repo evidence takes — rather than as a `path:line` that cannot resolve
+here. This is not a weaker standard for that criterion: a repo-qualified PR
+reference is checkable, a dangling local path is not.
 
 ## Rollback
 

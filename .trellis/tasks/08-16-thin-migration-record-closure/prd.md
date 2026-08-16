@@ -52,7 +52,11 @@ Criterion 4 is the reason the parent cannot simply be ticked and archived.
    the resolved state. Historical text may stay if it reads as history; a
    present-tense blocker that no longer blocks may not.
 2. Tick each criterion that re-measurement actually settles, with the evidence
-   that settles it, cited so the citation resolves in this checkout. Do not
+   that settles it. Any `path:line` citation must resolve in this checkout —
+   the CI scope preflight resolves against the local tree. Evidence that lives
+   outside this repository, such as criterion 3's merged consumer change, is
+   recorded as a repository plus PR or commit reference instead; that is the
+   correct form for it, not an exception to the rule. Do not
    tick criterion 4. A criterion whose evidence cannot be located stays
    unticked and records what was searched — ticking on recollection is the
    failure mode this task exists to remove, so reproducing it here would be

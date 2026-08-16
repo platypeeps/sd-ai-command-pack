@@ -11,10 +11,13 @@ gate:
 
 ```bash
 python3 -c "
-import json,glob
-bad=[(p.split('/')[-2], json.load(open(p))['status'])
-     for p in glob.glob('.trellis/tasks/*/task.json')
-     if json.load(open(p)).get('status') in ('in_progress','review')]
+import json, glob
+bad = []
+for p in sorted(glob.glob('.trellis/tasks/*/task.json')):
+    with open(p, encoding='utf-8') as fh:
+        task = json.load(fh)
+    if task.get('status') in ('in_progress', 'review'):
+        bad.append((p.split('/')[-2], task['status'], task.get('parent'), task.get('children')))
 print(bad or 'none')
 "
 ```
@@ -62,7 +65,7 @@ and is explicitly not the evidence.
 | --- | --- |
 | 1 (`:116`) | read the archived `08-10-thin-canary-conversion`'s own recorded evidence for the canary consumer and its CI outcome — not the parent's summary of it |
 | 2 (`:119`) | search for a durable record of the revert rehearsal. `git log` the archive for the loadsmith work, and grep the archived task tree and journal for the rehearsal. If nothing durable exists, leave it unticked and record what was searched |
-| 3 (`:123`) | AMC's merged conversion removed both surfaces. Evidence lives in another repository, so name the consumer and the merged change without a `path:line` |
+| 3 (`:123`) | AMC's merged conversion removed both surfaces. Evidence lives in another repository, so record it as a repository plus PR or commit reference rather than a `path:line` |
 | 4 (`:125`) | do not tick — annotate per Step 3 |
 | 5 (`:128`) | read `.github/scripts/prepare-release.py` for the candidate-check invocation and the raise that blocks on failure, and cite the lines you actually read |
 
