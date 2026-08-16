@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.71.19 - 2026-08-15
+
+### Fixed
+
+- The review preflight no longer reviews the wrong tree under a thin install.
+  It derived its root as `resolve(scriptDir, '..')`, which is the consumer
+  checkout when the file is vendored and the agents directory when a thin
+  install moves it to the machine. There it found no repository content and
+  reported `PASS` -- `package.json is not present`, six `could not inspect
+  current diff` warnings, and a clean result over a tree nobody asked about.
+  The root now follows the same ladder the shipped shell guards use: the
+  `SD_AI_COMMAND_PACK_REPO_ROOT` override, then the caller's working tree via
+  `git rev-parse --show-toplevel`, then this file's parent last, so a vendored
+  install resolves exactly what it always did.
+
 ## 0.71.18 - 2026-08-15
 
 ### Fixed
