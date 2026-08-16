@@ -30,15 +30,16 @@ the first thing a reader sees on the program's top-level task and it is false.
 
 ### 2. `08-09-thin-migration` has five unticked acceptance criteria
 
-Measured against the tree and the fleet, four are satisfied and one is half
-satisfied. The evidence exists — spread across archived children, merged PRs,
+Measured against the tree and the fleet, three are satisfied, one is unproven,
+and one is half satisfied. For the satisfied three the evidence exists — spread
+across archived children, merged PRs,
 and this repository — but none of it is recorded against the criteria it
 settles.
 
 | # | Criterion (abbreviated) | Assessment |
 | --- | --- | --- |
 | 1 | First canary converted, CI green, zero pack CI steps | satisfied by archived child `08-10-thin-canary-conversion` |
-| 2 | Revert restores fat, CI stays green | satisfied by the `loadsmith` rehearsal |
+| 2 | Revert restores fat, CI stays green | **unproven** — asserted from a `loadsmith` rehearsal recalled in session, with no citation located in this checkout; see `design.md` D2 |
 | 3 | AMC conversion removes the advisory CI call and `sd-ai-command-pack-sync.yml` | satisfied; both deletions merged |
 | 4 | Retired gates removed/rescoped; grep finds zero present-tense vendoring descriptions | **half** — the grep half is satisfied and recorded; the gate half is not |
 | 5 | Rescoped candidate loop runs in release-prep and blocks on failure | satisfied; `.github/scripts/prepare-release.py` defines the candidate check and raises on failure |
@@ -50,9 +51,12 @@ Criterion 4 is the reason the parent cannot simply be ticked and archived.
 1. Replace the stale blocker header on `08-09-deployment-thin-consumers` with
    the resolved state. Historical text may stay if it reads as history; a
    present-tense blocker that no longer blocks may not.
-2. Tick each satisfied criterion on `08-09-thin-migration` with the evidence
+2. Tick each criterion that re-measurement actually settles, with the evidence
    that settles it, cited so the citation resolves in this checkout. Do not
-   tick criterion 4.
+   tick criterion 4. A criterion whose evidence cannot be located stays
+   unticked and records what was searched — ticking on recollection is the
+   failure mode this task exists to remove, so reproducing it here would be
+   self-defeating.
 3. Record against criterion 4 what remains and where it lives, so the parent's
    one open dependency is named rather than implied.
 4. Re-measure every assessment in the table above rather than copying it. This
@@ -83,8 +87,11 @@ wrong status left the whole subtree unshippable.
 - [ ] `08-09-deployment-thin-consumers` contains no present-tense claim that
       `anomaly-metric-creator` is blocked, and the candidate ledger's
       all-`passed` state is cited as what replaced it.
-- [ ] Criteria 1, 2, 3, and 5 on `08-09-thin-migration` are ticked, each with
+- [ ] Criteria 1, 3, and 5 on `08-09-thin-migration` are ticked, each with
       evidence re-measured in this session rather than carried from this PRD.
+- [ ] Criterion 2 is resolved either way: ticked if a durable record of the
+      revert rehearsal is located, or left unticked with the search recorded.
+      Both outcomes satisfy this criterion; ticking it unevidenced does not.
 - [ ] Criterion 4 remains unticked and names
       `08-10-thin-final-conversion-gate-retirement` requirement 2 as the
       specific outstanding work, along with the unresolved premise that blocks
