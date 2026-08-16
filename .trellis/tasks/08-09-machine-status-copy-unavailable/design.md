@@ -83,8 +83,14 @@ after the thin migration, not an event.
 step only on `comparison == "skew"`. Because `unavailable` forces
 `comparison: "unknown"` upstream, that step is currently unreachable *whenever
 the listing has duplicates* — including for a machine whose plugin and receipt
-genuinely disagree. Restoring the version therefore restores an alarm, and the
-restoration needs its own test rather than being assumed from the version fix.
+genuinely disagree. Restoring the version therefore restores an alarm.
+
+The existing coverage does not catch this and could not have. Both tests that
+exercise the `:3200` row (`tests/test_status.py:2766` and `:2793`) supply
+`comparison="skew"` directly through `machine_scope_fixture`, so they prove the
+generator renders the row without ever asking whether `collect_machine_scope`
+can produce that input. A test that closes the seam has to run the real
+collector against a real listing.
 
 ## Propagation path
 
@@ -142,7 +148,7 @@ duplicates.
 | --- | --- | --- |
 | new | `status.py` | three entries, one version, one path reports that version and `pluginDetail is None` |
 | `tests/test_status.py:3219` | `status.py` | the existing `9.9.9`/`9.9.8` case still reports `unavailable`; expected detail changes from "more than once" to the conflict wording |
-| new | `status.py` | a plugin/receipt version disagreement produces the `comparison == "skew"` next step from `:3200` |
+| new | `status.py` | `collect_machine_scope` with a duplicate-but-agreeing listing and a *diverging* receipt returns `comparison: "skew"`. The downstream step generator is already covered — `tests/test_status.py:2766` asserts the `:3200` row renders — but it injects `comparison="skew"` through `machine_scope_fixture` and therefore cannot observe that a real duplicate listing never reaches that value. The untested seam is `collect_machine_scope`, not `fleet_step_records` |
 | `tests/test_pack_update.py:320` | `pack-update.sh` | `test_duplicate_entries_are_refused` inverts — it duplicates the identical entry (`dict(listing[-1])`), which is the benign shape. Split into an exit-`0` reconciliation test and a new conflicting-`installPath` test that still exits `12` |
 | unchanged | both | every other discovery failure in the `tests/test_status.py:3219` case table — CLI absent, nonzero exit, malformed JSON, not an array, plugin missing, entry without a version — keeps its current outcome |
 

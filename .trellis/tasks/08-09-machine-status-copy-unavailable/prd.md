@@ -126,10 +126,12 @@ legitimately declares it. The tool asks for a fix that would be a regression.
       so `current` is the expected value; the criterion is written as "not
       `unknown`" because the receipt half is independent of this fix and a
       truthful `skew` would also satisfy it.
-- [ ] A fixture where the plugin and receipt versions genuinely disagree
-      produces the `comparison == "skew"` next step at
-      `scripts/sd-ai-command-pack-status.py:3200`, proving the alarm this bug
-      suppressed is reachable again.
+- [ ] `collect_machine_scope`, run against a duplicate-but-agreeing listing and
+      a receipt that disagrees, returns `comparison: "skew"` — proving the alarm
+      at `scripts/sd-ai-command-pack-status.py:3200` is reachable from a real
+      machine again. The existing row tests inject that comparison through a
+      fixture, so the seam this criterion covers is `collect_machine_scope`
+      itself.
 - [ ] Replaying the `pack-update.sh` resolver against the same listing exits
       `0` and prints the single install path, where it previously exited `12`.
 - [ ] A listing whose matching entries disagree on version still reports
