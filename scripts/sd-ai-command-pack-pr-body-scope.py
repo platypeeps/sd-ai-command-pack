@@ -33,8 +33,9 @@ Exit codes:
   author is an exempt bot (``--actor`` / ``SD_AI_COMMAND_PACK_PR_BODY_SCOPE_ACTOR``).
 * ``1`` - a supplied PR body is missing a required scope section.
 * ``2`` - argument, git, config, or I/O error.
-* ``3`` - ``--prepare-tooling-body`` found an empty or mixed-scope diff and
-  intentionally left the body unchanged.
+* ``3`` - ``--prepare-tooling-body`` had nothing to declare -- the branch diff
+  was empty, or no path in it is generated or repository bookkeeping -- and
+  intentionally left the body unchanged. A mixed diff is declared, not refused.
 """
 
 from __future__ import annotations
@@ -73,6 +74,18 @@ TOOLING_SCOPE_LABEL = "Tooling/generated scope"
 TOOLING_SCOPE_SECTION = (
     "Tooling/generated scope:\n\n"
     "- Changes are limited to generated or repository-bookkeeping surfaces.\n"
+)
+# A mixed diff cannot use the sentence above: it claims the change is *limited
+# to* generated surfaces, which is false once authored files are present. It
+# also cannot claim to be exhaustive, because `sd-ship` finalization adds
+# journal and index files after this body is written. Hence "include:".
+MAX_ENUMERATED_SCOPE_PATHS = 20
+MIXED_SCOPE_SECTION_HEADING = "Tooling/generated scope:"
+MIXED_SCOPE_SECTION_LEAD = (
+    "- Generated or repository-bookkeeping paths in this branch include:\n"
+)
+MIXED_SCOPE_SECTION_TRAILER = (
+    "- Remaining changes are authored and reviewed normally.\n"
 )
 
 
@@ -608,18 +621,25 @@ def _tooling_scope_rules(rules: tuple[ScopeRule, ...]) -> tuple[ScopeRule, ...]:
     )
 
 
-def _tooling_only_unmatched_paths(
+def _partition_tooling_paths(
     paths: list[str], rules: tuple[ScopeRule, ...]
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], list[str], str | None]:
+    """Split paths into (matched, unmatched) against the tooling rules.
+
+    Both halves are computed in one pass so a later rule change cannot move a
+    path in one list without moving it out of the other.
+    """
     tooling_rules = _tooling_scope_rules(rules)
     if not tooling_rules:
-        return [], f"{TOOLING_SCOPE_LABEL} rule is unavailable"
-    unmatched = [
-        path
-        for path in paths
-        if not any(_rule_matches_path(rule, path) for rule in tooling_rules)
-    ]
-    return unmatched, None
+        return [], [], f"{TOOLING_SCOPE_LABEL} rule is unavailable"
+    matched: list[str] = []
+    unmatched: list[str] = []
+    for path in paths:
+        if any(_rule_matches_path(rule, path) for rule in tooling_rules):
+            matched.append(path)
+        else:
+            unmatched.append(path)
+    return matched, unmatched, None
 
 
 def _load_regular_utf8_file(path: Path) -> tuple[str | None, int | None, str | None]:
@@ -638,14 +658,42 @@ def _load_regular_utf8_file(path: Path) -> tuple[str | None, int | None, str | N
     return body, stat.S_IMODE(file_stat.st_mode), None
 
 
-def _append_tooling_scope(body: str) -> str:
+def _render_mixed_scope_section(matched: list[str]) -> str:
+    """Enumerate the proven-tooling paths of a mixed diff.
+
+    Paths are repository-controlled text about to be published in a PR body, so
+    they are escaped the same way the diagnostics escape them: a newline in a
+    filename must not become a new Markdown line in the body that
+    ``pack.review-scope`` later reads.
+    """
+    ordered = sorted(matched)
+    shown = ordered[:MAX_ENUMERATED_SCOPE_PATHS]
+    omitted = len(ordered) - len(shown)
+    lines = [f"{MIXED_SCOPE_SECTION_HEADING}\n\n", MIXED_SCOPE_SECTION_LEAD]
+    lines.extend(f"  - {json.dumps(path, ensure_ascii=True)}\n" for path in shown)
+    if omitted:
+        # Bounded, never silently truncated: a reader can tell the list is
+        # partial and by how much.
+        lines.append(
+            f"  - ...and {omitted} more generated or "
+            "repository-bookkeeping paths.\n"
+        )
+    lines.append(MIXED_SCOPE_SECTION_TRAILER)
+    return "".join(lines)
+
+
+def _append_section(body: str, section: str) -> str:
     if body.endswith("\n\n"):
         separator = ""
     elif body.endswith("\n"):
         separator = "\n"
     else:
         separator = "\n\n"
-    return f"{body}{separator}{TOOLING_SCOPE_SECTION}"
+    return f"{body}{separator}{section}"
+
+
+def _append_tooling_scope(body: str) -> str:
+    return _append_section(body, TOOLING_SCOPE_SECTION)
 
 
 def _atomic_write_body(path: Path, body: str, mode: int) -> str | None:
@@ -681,28 +729,39 @@ def prepare_tooling_body(
     changed_files_path: Path,
     config_path: Path | None = None,
 ) -> tuple[int, list[str]]:
-    """Append the tooling section only for a proven tooling-only branch diff."""
+    """Declare the tooling paths of a branch diff in the auto-filled PR body.
+
+    A tooling-only diff gets the exhaustive section. A mixed diff gets a section
+    naming just the paths proven to be generated, which is what closes the
+    late-arrival gap: the heading has to exist before `sd-ship` finalization
+    commits the journal and index files that arm `pack.review-scope`, and by
+    then the body is no longer being authored. A diff with nothing provable is
+    left alone, so an unexplained generated change still reaches the gate
+    undeclared and still fails.
+    """
     changed_files, changed_error = _load_changed_files(root, changed_files_path)
     if changed_error is not None:
         return 2, [changed_error]
     if not changed_files:
         return PREPARE_NOT_APPLICABLE, [
-            "info: PR body left unchanged because the branch diff is empty."
+            "info: PR body left unchanged because there is nothing to declare: "
+            "the branch diff is empty."
         ]
 
     rules, rules_error = _rules_for_repo(root, config_path)
     if rules_error is not None:
         return 2, [rules_error]
-    unmatched, tooling_error = _tooling_only_unmatched_paths(changed_files, rules)
+    matched, unmatched, tooling_error = _partition_tooling_paths(changed_files, rules)
     if tooling_error is not None:
         return 2, [tooling_error]
-    if unmatched:
+    if not matched:
         rendered_unmatched = ", ".join(
             json.dumps(path, ensure_ascii=True) for path in unmatched[:5]
         )
         return PREPARE_NOT_APPLICABLE, [
-            "info: PR body left unchanged because the branch diff is not "
-            f"tooling/generated-only: {rendered_unmatched}"
+            "info: PR body left unchanged because there is nothing to declare: "
+            "no path in the branch diff is generated or repository "
+            f"bookkeeping: {rendered_unmatched}"
         ]
 
     body, mode, body_error = _load_regular_utf8_file(body_file)
@@ -722,12 +781,21 @@ def prepare_tooling_body(
             "scope section; left it unchanged."
         ]
 
-    write_error = _atomic_write_body(body_file, _append_tooling_scope(body), mode)
+    if unmatched:
+        section = _render_mixed_scope_section(matched)
+        summary = (
+            f"info: appended {TOOLING_SCOPE_LABEL} naming {len(matched)} "
+            "generated or repository-bookkeeping path(s) to the auto-filled "
+            "PR body; the diff also contains authored changes."
+        )
+    else:
+        section = TOOLING_SCOPE_SECTION
+        summary = f"info: appended {TOOLING_SCOPE_LABEL} to the auto-filled PR body."
+
+    write_error = _atomic_write_body(body_file, _append_section(body, section), mode)
     if write_error is not None:
         return 2, [write_error]
-    return 0, [
-        f"info: appended {TOOLING_SCOPE_LABEL} to the auto-filled PR body."
-    ]
+    return 0, [summary]
 
 
 def _resolve_actor(explicit: str | None) -> str:
@@ -839,9 +907,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--prepare-tooling-body",
         action="store_true",
         help=(
-            f"append {TOOLING_SCOPE_LABEL} to --body-file only when every "
-            "path in --changed-files belongs to that category; empty or mixed "
-            "scope exits 3"
+            f"append {TOOLING_SCOPE_LABEL} to --body-file, naming the paths in "
+            "--changed-files that belong to that category; a diff with nothing "
+            "to declare exits 3"
         ),
     )
     parser.add_argument(

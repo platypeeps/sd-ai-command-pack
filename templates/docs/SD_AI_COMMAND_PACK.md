@@ -41,8 +41,9 @@ Quick links:
 - `.agents/skills/sd-create-pr/SKILL.md`: spec-refresh, commit, push, PR
   creation/reuse, and PR-review orchestration workflow; custom Markdown bodies
   are materialized literally and passed to GitHub CLI with `--body-file`, while
-  tooling/generated-only auto-filled bodies gain the required scope section
-  before either standalone or `sd-ship` review handoff.
+  auto-filled bodies gain the required scope section, naming the generated
+  paths when the diff also contains authored changes, before either standalone
+  or `sd-ship` review handoff.
 - `.agents/skills/sd-work-backlog/SKILL.md`: sequential Trellis backlog work
   loop and canonical resumable controller for planning through clean merge,
   including typed `all` and `needs-design` selectors.
@@ -823,10 +824,16 @@ The `sd-create-pr` no-custom-body path reuses the same classifier through
 `sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body`. It captures the
 exact auto-filled GitHub body and NUL-delimited `base...HEAD` paths in secure
 regular temporary files. A fully tooling/generated or Trellis-bookkeeping diff
-gets the recognized section through `gh pr edit --body-file`; exit `3` means a
-mixed or empty diff and leaves the body unchanged. Other failures stop before
-review. User-provided bodies never enter this preparation mode and remain
-byte-for-byte subject to the existing validator.
+gets the recognized section through `gh pr edit --body-file`. A mixed diff gets
+one too, naming just the paths proven to be generated and claiming nothing
+about the rest; that is what puts the heading in place before `sd-ship`
+finalization commits the workspace journal and index that arm
+`pack.review-scope`, on a body no longer being authored. Exit `3` now means
+there was nothing to declare -- an empty diff, or one with no generated path --
+and leaves the body unchanged, so an unexplained generated change still reaches
+the gate undeclared. Other failures stop before review. User-provided bodies
+never enter this preparation mode and remain byte-for-byte subject to the
+existing validator.
 
 The review preflight is intentionally generic and safe to run without project
 dependencies. `sd-create-pr` runs it before staging, committing, or pushing so

@@ -1373,9 +1373,10 @@ review exactly once.
 - Composite stop-points: `sd-ship until=pr|review|merge`.
 - Auto-filled body preparation:
   `sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body --body-file <regular-file> --changed-files <nul-list>`.
-- Preparation exits: `0` means prepared/already compliant, `3` means an empty
-  or mixed diff was intentionally unchanged, and every other nonzero result is
-  an error.
+- Preparation exits: `0` means prepared/already compliant — including a mixed
+  diff, which is declared rather than refused from pack 0.71.23 — `3` means
+  there was nothing to declare and the body was intentionally left unchanged,
+  and every other nonzero result is an error.
 
 #### 3. Contracts
 
@@ -1404,8 +1405,13 @@ review exactly once.
   before update-spec or Git/GitHub side effects.
 - Partial, mismatched, inferred, or stale internal context -> reject rather
   than skipping review.
-- Empty or mixed changed-path input -> exit `3`, leave the auto-filled body
-  unchanged, and continue with normal mixed-scope review.
+- Empty input, or input whose changed paths include no generated or
+  repository-bookkeeping path at all -> exit `3` (*nothing to declare*), leave
+  the auto-filled body unchanged, and continue with normal review.
+- Mixed input, where some changed paths are generated and some are not -> exit
+  `0` and append a section enumerating only the proven-generated paths as a
+  non-exhaustive `include:` list, then edit the PR through `--body-file`. From
+  pack 0.71.23; this input previously exited `3` and wrote nothing.
 - Tooling-only input with an existing recognized heading -> exit `0` and
   preserve the body byte-for-byte.
 - Tooling-only input without the heading -> append the canonical section,
