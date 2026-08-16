@@ -2909,9 +2909,16 @@ def runtime_pack_root(cwd: Path | None = None) -> Path:
     yields `~/.agents` -- not a pack checkout, so
     `resolve_fleet_configuration`'s last rung refuses and `sd-status fleet`
     reports missing configuration even when it is run from inside the very
-    checkout that holds the manifest. Ask the working directory before falling
-    back to the script's own location, and fall back to it rather than to
-    `None` so an unconfigured machine still gets that same refusal.
+    checkout that holds the manifest.
+
+    So the script's own location is still asked first, and the working
+    directory is the added rung rather than the new preference: everywhere the
+    old arithmetic already answered correctly it keeps answering the same, and
+    the search only widens where it used to fail. When the script does live in
+    a source checkout, that checkout is the one it belongs to, which is a
+    better answer than wherever the caller happened to be standing. The last
+    resort is `own` rather than `None` so an unconfigured machine still gets
+    `resolve_fleet_configuration`'s refusal instead of a `TypeError` here.
     """
 
     fleet = fleet_api()
