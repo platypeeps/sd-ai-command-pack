@@ -374,8 +374,20 @@ THIN_PROFILE = RewriteProfile(
             "`**/skills/trellis-*/**` under `.agents/` (pack skills are not "
             "vendored in a thin checkout; they live at `~/.agents/skills`),"
         ),
-        "`scripts/sd-ai-command-pack-*`, legacy `scripts/trellis-*.sh`, and": (
-            "legacy `scripts/trellis-*.sh` and"
+        # The marker is part of the replacement rather than the template
+        # because Trellis' narrow-globs gate builds its paragraphs out of the
+        # diff's added lines alone (check-narrow-globs.py: only `+` lines
+        # reach `_split_paragraphs`). A marker already sitting in the template
+        # is context, not an addition, so it would not be in the paragraph the
+        # gate assembles for this bullet. Before the conversion the bullet led
+        # with `scripts/sd-ai-command-pack-*`, which matches in every consumer;
+        # dropping it leaves `scripts/trellis-*.sh`, a legacy Trellis family
+        # that most consumers never had, as the line's first glob -- and the
+        # rewrite is what makes the gate read the line at all.
+        "- `scripts/sd-ai-command-pack-*`, legacy `scripts/trellis-*.sh`, and": (
+            "<!-- narrow-globs: skip - legacy Trellis script payloads may not "
+            "exist in every repo. -->\n"
+            "  - legacy `scripts/trellis-*.sh` and"
         ),
     },
 )

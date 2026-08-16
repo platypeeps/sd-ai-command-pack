@@ -447,6 +447,33 @@ class ThinProfileTests(unittest.TestCase):
         self.assertIn("`**/skills/trellis-*/**`", rewritten)
         self.assertIn("`scripts/trellis-*.sh`", rewritten)
 
+    def test_the_surviving_legacy_glob_keeps_a_narrow_globs_marker(self) -> None:
+        """Trellis' gate reads the bullet only because the rewrite touched it.
+
+        `check-narrow-globs.py` assembles paragraphs from the diff's added
+        lines, so the marker has to arrive with the rewritten bullet: one in
+        the template would be context and never reach the paragraph. Without
+        it, `scripts/trellis-*.sh` -- legacy Trellis scripts most consumers
+        never had -- becomes the line's first glob and fails the gate as a
+        zero-match on the conversion PR.
+        """
+
+        source = (
+            "  - `scripts/sd-ai-command-pack-*`, legacy `scripts/trellis-*.sh`, and\n"
+            "    `scripts/update_repomix*`\n"
+        )
+        rewritten = references.rewrite_text(
+            source, profile=references.THIN_PROFILE
+        )
+
+        self.assertEqual(
+            rewritten,
+            "  <!-- narrow-globs: skip - legacy Trellis script payloads may "
+            "not exist in every repo. -->\n"
+            "  - legacy `scripts/trellis-*.sh` and\n"
+            "    `scripts/update_repomix*`\n",
+        )
+
     def test_the_skills_reference_avoids_the_removed_path_as_a_suffix(self) -> None:
         """The same suffix trap as the doc case one test up, one family over.
 

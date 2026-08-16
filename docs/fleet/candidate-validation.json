@@ -1,15 +1,15 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-16T05:52:20Z",
-  "packVersion": "0.71.20",
-  "payloadDigest": "sha256:205a2f9a91546ac4704bd23b6421b6f4a5024053fb8c1ff1bac525092ddecfa7",
+  "validatedAt": "2026-08-16T08:01:37Z",
+  "packVersion": "0.71.21",
+  "payloadDigest": "sha256:3c7359c64ccdd434d8842890af795c19898914574f7eed31857fe6753703d706",
   "fleetManifestDigest": "sha256:38ad47edc21c8cede997ae777f259d189bd1d202a4386953c31a5b163706bd6f",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "a6a0dde682a0ec1327758435dc7a857bd4e3252d",
+      "baseCommit": "a7028d6ddffe1af55913fd174a1bd90b7ccb79b6",
       "status": "passed",
       "prepares": [
         [
@@ -28,7 +28,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "fb751f6bd5c590bc73aa36d2cca6a547c09cf01b",
+      "baseCommit": "5e69d7fc6ad06d1d4cd959c444e8bdc175075839",
       "status": "passed",
       "prepares": [
         [
@@ -49,7 +49,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "3543971f2caa03f4ed27ed3c12500d230dce48e3",
+      "baseCommit": "95045e2cbf3c6e6f8acadec3e0904027cce8f135",
       "status": "passed",
       "prepares": [
         [
@@ -111,7 +111,7 @@
         ]
       ],
       "reasons": [
-        "43 consumer-authored reference(s) to removed paths"
+        "44 consumer-authored reference(s) to removed paths"
       ]
     },
     {
@@ -134,8 +134,8 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "5a86c52d51d941d2a9831574798316db3df19283",
-      "status": "blocked",
+      "baseCommit": "d8f61a589757040fd19465e461625ac2efa31a93",
+      "status": "passed",
       "prepares": [
         [
           "npm",
@@ -158,9 +158,7 @@
           "validate:metadata"
         ]
       ],
-      "reasons": [
-        "15 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "anomaly-metric-creator",
@@ -184,7 +182,7 @@
         ]
       ],
       "reasons": [
-        "171 consumer-authored reference(s) to removed paths"
+        "174 consumer-authored reference(s) to removed paths"
       ]
     }
   ]

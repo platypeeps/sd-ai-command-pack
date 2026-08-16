@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.71.21 - 2026-08-16
+
+### Fixed
+
+- A thin conversion no longer fails a consumer's narrow-globs gate on the
+  Copilot payload-families list. The rewrite drops
+  `scripts/sd-ai-command-pack-*` from that bullet, which promotes the legacy
+  `scripts/trellis-*.sh` beside it to the line's first glob -- a Trellis family
+  most consumers never had, so it matches nothing. Trellis'
+  `check-narrow-globs.py` builds its paragraphs from the diff's added lines
+  alone, so the bullet was invisible to the gate until the conversion touched
+  it, and a `<!-- narrow-globs: skip -->` marker already sitting in the
+  template would be context rather than an addition and never reach the
+  paragraph. The marker now arrives as part of the rewritten bullet. Measured
+  on `mezmo_benchmark`: the conversion PR's `preflight` job failed gate 6 with
+  `glob \`scripts/trellis-*.sh\` matches 0 files in the working tree`, and
+  every consumer running that gate without those legacy scripts would have hit
+  the same wall.
+
 ## 0.71.20 - 2026-08-16
 
 ### Fixed
