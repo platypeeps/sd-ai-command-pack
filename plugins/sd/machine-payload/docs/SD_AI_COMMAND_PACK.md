@@ -738,7 +738,7 @@ has the pack installed. A helper absent from both the repository and the
 machine install stays `unavailable` with its existing diagnostic: this decides
 where to look, never what counts as present.
 
-Before 0.71.25 the built-ins read `scripts/` unconditionally, so every
+Before 0.71.26 the built-ins read `scripts/` unconditionally, so every
 converted consumer reported five `unavailable` rows for helpers that were
 installed and working. Because `unavailable` outranks `passed`, `sd-check`
 could not reach `passed` there, and `sd-review` failed closed with
