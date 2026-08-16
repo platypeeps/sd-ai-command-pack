@@ -22,6 +22,7 @@ from installer.fileops import (
     remove_adopted_block,
     remove_text_block_file,
 )
+from installer.manifest import read_text_strict
 from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     COPILOT_GUIDANCE_END,
@@ -1016,7 +1017,11 @@ def unadopt_gitignore_block(target: Path, *, backup: bool) -> bool:
     destination = target / TRELLIS_GITIGNORE_TARGET
     if not destination.is_file() or destination.is_symlink():
         return False
-    current = destination.read_text(encoding="utf-8")
+    # `read_text_strict`, not `read_text`: a `.gitignore` that is unreadable or
+    # not UTF-8 must refuse with the installer's own diagnostic. Returning False
+    # would be worse than crashing -- the restore below would re-insert the
+    # managed block beside adopted rules this could not remove.
+    current = read_text_strict(destination, ".gitignore")
     restored = remove_adopted_block(current)
     if restored == current:
         return False

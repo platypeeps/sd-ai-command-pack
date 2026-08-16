@@ -1423,6 +1423,16 @@ class InstallCoreTests(InstallTestCase):
         root = self.make_repo()
         self.assertFalse(thin.unadopt_gitignore_block(root, backup=False))
 
+    def test_unadopting_an_unreadable_gitignore_refuses(self) -> None:
+        # Not `return False`: the caller's next move is the payload restore,
+        # which re-inserts the managed block. Reporting "nothing to undo" for a
+        # file this could not read would stack the two copies.
+        root = self.make_repo()
+        (root / ".gitignore").write_bytes(b"dist/\n\xff\xfe not utf-8\n")
+        with self.assertRaises(SystemExit) as caught:
+            thin.unadopt_gitignore_block(root, backup=False)
+        self.assertIn("not valid UTF-8", str(caught.exception))
+
     def test_branch_edges_in_dry_run_updated_paths(self) -> None:
         root = self.make_repo()
         copilot_file = next(
