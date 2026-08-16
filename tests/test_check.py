@@ -662,6 +662,62 @@ class CheckTests(InstallTestCase):
         self.assertEqual(report["status"], "passed", result.stdout)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_thin_consumer_resolves_the_kb_helper_from_the_machine_install(
+        self,
+    ) -> None:
+        """The fifth helper, which the other thin tests cannot reach.
+
+        `knowledge.obsidian-kb` is the one conditional row: without an
+        `.obsidian-kb` directory it reports `skipped` before it ever looks for
+        a helper, so a fixture that omits the directory exercises none of its
+        resolution. Give it the directory and the row goes down the same thin
+        path as the other four -- and the machine stub asserts its own argv, so
+        this also pins the `--check` contract the row invokes it with.
+        """
+
+        root = self.make_check_repo()
+        env = self.convert_to_thin(
+            root,
+            machine_helpers=(
+                *self.THIN_HELPERS,
+                "sd-ai-command-pack-update-spec-kb.py",
+            ),
+        )
+        (root / "scripts" / "sd-ai-command-pack-update-spec-kb.py").unlink(
+            missing_ok=True
+        )
+        (root / ".obsidian-kb").mkdir()
+
+        result = self.run_check(root, extra_env=env)
+        report = self.parse_report(result)
+
+        rows = {row["id"]: row for row in report["checks"]}
+        self.assertEqual(
+            rows["knowledge.obsidian-kb"]["status"], "passed", rows["knowledge.obsidian-kb"]
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_thin_consumer_without_the_kb_helper_stays_unavailable(self) -> None:
+        """The KB row's own absent-from-both case, not just the audit's."""
+
+        root = self.make_check_repo()
+        env = self.convert_to_thin(root)
+        (root / "scripts" / "sd-ai-command-pack-update-spec-kb.py").unlink(
+            missing_ok=True
+        )
+        (root / ".obsidian-kb").mkdir()
+
+        result = self.run_check(root, extra_env=env)
+        report = self.parse_report(result)
+
+        rows = {row["id"]: row for row in report["checks"]}
+        self.assertEqual(rows["knowledge.obsidian-kb"]["status"], "unavailable")
+        self.assertEqual(
+            rows["knowledge.obsidian-kb"]["diagnostic"],
+            "Obsidian KB exists but its read-only freshness helper is missing",
+        )
+        self.assertEqual(result.returncode, 3, result.stdout)
+
     def test_thin_consumer_without_the_machine_helper_stays_unavailable(self) -> None:
         """Widening where the check looks must not widen what counts as present.
 
