@@ -68,20 +68,54 @@ root discards. That failure is correct; it is also a dead end.
 
 ## Acceptance criteria
 
-- [ ] A routed review whose receipt is first seen at `dispatch.phase: "started"`
+- [x] A routed review whose receipt is first seen at `dispatch.phase: "started"`
       and becomes `observed` within the poll budget reaches a terminal state in
       that same invocation.
-- [ ] The same transition observed across two invocations of the unchanged
+- [x] The same transition observed across two invocations of the unchanged
       attempt also reaches a terminal state, rather than replaying the cached
       non-terminal receipt.
-- [ ] A receipt that never becomes terminal still reports
+- [x] A receipt that never becomes terminal still reports
       `remote-reconciliation-required`, and never falls back to a direct request.
-- [ ] A `route: none` receipt with `phase: "not-started"` still proceeds to
+- [x] A `route: none` receipt with `phase: "not-started"` still proceeds to
       observation and is not polled as if it were in flight.
-- [ ] Re-querying triggers no second dispatch for the same
+- [x] Re-querying triggers no second dispatch for the same
       `logicalDispatchId`.
-- [ ] Regression coverage drives the real two-write shape the lane produces —
+- [x] Regression coverage drives the real two-write shape the lane produces —
       `started` then `observed` — not a single terminal write.
+
+## Closure
+
+Shipped in PR
+[#468](https://github.com/platypeeps/sd-ai-command-pack/pull/468), merged
+`2026-08-16T01:02:28Z` into `main` (head `743b84a`, base `bc468b6`; 21 files,
++612/-63). The task record was left `in_progress` past the merge; this section
+is the closure the merge should have carried.
+
+Each criterion maps to a named regression test in
+`tests/test_review_controller.py`, re-run against the current checkout:
+
+| Criterion | Test | Line |
+| --- | --- | --- |
+| Settles in one invocation | `test_in_flight_receipt_is_polled_until_it_settles` | `tests/test_review_controller.py:1992` |
+| Settles across two invocations | `test_in_flight_receipt_is_refreshed_by_the_next_invocation` | `tests/test_review_controller.py:2034` |
+| Exhausted budget still reports | `test_in_flight_receipt_is_refreshed_by_the_next_invocation` (first half) | `tests/test_review_controller.py:2034` |
+| `not-started` is not polled | `test_settled_receipt_phases_are_not_polled_again` | `tests/test_review_controller.py:2086` |
+| No second dispatch | dispatch count asserted `1` in both in-flight tests | `tests/test_review_controller.py:1992`, `:2034` |
+| Two-write shape driven | all four tests write `started` then a terminal phase | `tests/test_review_controller.py:1992-2130` |
+
+```text
+$ .venv/bin/python -m unittest tests.test_review_controller
+Ran 47 tests in 8.209s
+OK
+```
+
+The four criterion tests each report `ok` in that run. PR #468 additionally
+records that with the fix reverted exactly the two wedge tests fail
+(`(3, 'indeterminate') != (0, 'ready')`) while the two guard tests still pass,
+which is the evidence that the coverage is load-bearing rather than incidental.
+
+Consumer-side tracking named under Notes stays with
+`platypeeps/sd-github-review`; this record closes the pack-side work only.
 
 ## Notes
 

@@ -44,6 +44,55 @@ vendoring as current behavior corrected.
    install/fleet spec surfaces and `docs/` — not from memory. Text that
    is explicitly historical may stay and must read as history.
 
+## Status of requirement 1 as of 2026-08-16
+
+Requirement 1's conversion half is done and its deletion half is in flight.
+Requirement 2's retirement — the half this task is actually still open for —
+has not started.
+
+`anomaly-metric-creator` was converted with the rest of the fleet:
+`sd-status fleet --json` reports it `installMode: "thin"`,
+`pin.state: "present"`, `pin.version: 0.71.22`, matching
+`machineScope.packVersion` with `machineScope.state: "installed"` and
+`machineScope.comparison: "current"`. All eight consumers now read that way.
+
+Both enumerated deletions are in
+[platypeeps/anomaly-metric-creator#380](https://github.com/platypeeps/anomaly-metric-creator/pull/380),
+open at the time of writing. Retiring the sync workflow entirely — rather than
+narrowing it — is the operator's standing decision: pack refreshes are
+initiated by hand against the machine install and never by a consumer.
+
+### The stated rationale for the sync deletion is stale
+
+This requirement calls `sd-ai-command-pack-sync.yml` "the highest-consequence
+deletion in this task" because leaving it "would silently undo the conversion."
+That is no longer true, and the record should not carry a justification that
+does not hold.
+
+The workflow ran `install.py "$GITHUB_WORKSPACE" --force`. Against a thin
+consumer that refreshes nothing: `_residual_files_for_thin` (`install.py:805`)
+narrows the payload to the residual slice as soon as the provenance receipt
+reads `mode: "thin"`, and `_selection_for_target` (`install.py:834`) takes the
+pin's platforms rather than detecting fresh. Measured against the live
+consumer:
+
+```text
+$ .venv/bin/python install.py ~/repos/platypeeps/anomaly-metric-creator --check --json
+state: current
+```
+
+A `--force` run writes nothing, so the workflow could not have re-vendored.
+Deleting it is still correct — it is a scheduled job, a scoped secret, and a
+contract in `tools/check_ci_review_contract.py` all maintained for a no-op —
+but it is ordinary cleanup, not the load-bearing safety deletion this
+requirement describes. The same correction applies to the `pr-body-scope.py`
+call, which parent decision D2 already classified as a no-op.
+
+**This task stays in planning.** Requirement 2 (retiring `validate_consumer` in
+`scripts/sd-ai-command-pack-fleet-candidate-check.py`) and requirement 4 (the
+spec/doc correction sweep) are untouched real work, and requirement 3's warning
+about `scripts/sd-ai-command-pack-surface-check.py` still applies to them.
+
 ## Acceptance criteria
 
 - [ ] Explicit user authorization for this cohort recorded in this file
