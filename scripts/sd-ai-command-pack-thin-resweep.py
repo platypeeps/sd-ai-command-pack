@@ -1760,8 +1760,8 @@ def scan(
             LAYOUT_RESOLVER_KEPT_TARGET in line for line in scanned
         )
 
-        for index, line in enumerate(scanned):
-            number = origin[index]
+        for position, line in enumerate(scanned):
+            number = origin[position]
             if not any(
                 cites_removed_path(
                     token,
