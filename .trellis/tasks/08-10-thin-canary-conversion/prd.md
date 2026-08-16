@@ -356,9 +356,9 @@ revert-and-restore proof.
 
 ## Acceptance criteria
 
-- [ ] Explicit user authorization for this cohort recorded in this file
+- [x] Explicit user authorization for this cohort recorded in this file
       with its date before any consumer mutation.
-- [ ] **Added 2026-08-15, rewritten the same day after review round 2.** A fat
+- [x] **Added 2026-08-15, rewritten the same day after review round 2.** A fat
       consumer's resweep reports `packDefects: 0`, measured against the three
       canaries untouched at 0.71.6. The count today is 15 per consumer, and
       **14 of those 15 are repointed by the conversion itself** — the pack's
@@ -368,20 +368,20 @@ revert-and-restore proof.
       defect in the skills-glob rewrite (design D2c).
       This is the criterion that says conversion is possible **at all**: as
       measured, no consumer in the fleet can reach a `clear` verdict.
-- [ ] **Added 2026-08-15.** Each canary's own citations are rewritten to a
+- [x] **Added 2026-08-15.** Each canary's own citations are rewritten to a
       surviving path or an unambiguous command, evidenced by that consumer's
       resweep reporting `blockers: 0` on a clean tree. Measured starting
       points: 49 / 50 / 34.
-- [ ] All three canaries satisfy `installMode == "thin"`, `pin.state == "present"`, and
+- [x] All three canaries satisfy `installMode == "thin"`, `pin.state == "present"`, and
       `pin.version == machineScope.packVersion` in
       `sd-status fleet --json`; plus `machineScope.state == "installed"`
       and `machineScope.comparison == "current"`. "No skew row" is not
       used: fleet mode exits zero on skew and its follow-up rows are
       untyped prose, so it cannot fail when it should.
-- [ ] Each canary's CI is green post-conversion with zero pack CI steps,
+- [x] Each canary's CI is green post-conversion with zero pack CI steps,
       verified by grepping that consumer's `.github/workflows/` at its
       post-merge HEAD.
-- [ ] No vendored payload remains in any canary beyond what that
+- [x] No vendored payload remains in any canary beyond what that
       consumer's **recorded platform choice** retains — the `repo-native` +
       `consumer-config` slices, plus the whole shared machine slice for a
       consumer that declares a platform still carried in
@@ -391,7 +391,7 @@ revert-and-restore proof.
       derived under that choice. A comparison against the current
       partition alone would pass while orphan files from an older pin
       survive.
-- [ ] Each canary's Codex advisory is recorded rather than cleared: since
+- [x] Each canary's Codex advisory is recorded rather than cleared: since
       0.71.2 the marker forces no per-consumer choice, because declaring
       `codex` retains nothing. Evidence is the post-conversion resweep
       reporting the marker under `advisories` with an empty `blockers`
@@ -399,26 +399,63 @@ revert-and-restore proof.
       requires — confirmed machine provisioning for any canary that runs
       Codex. A canary that still shows a marker under `blockers` is a
       partition or scanner defect, not a declaration decision.
-- [ ] `rwbp-coordinator/.prism/rules.json` names no removed path at the
+- [x] `rwbp-coordinator/.prism/rules.json` names no removed path at the
       converted HEAD, verified by the resweep returning `clear` for that
       consumer rather than by reading the file — the rule text moved once
       already and a hand check would re-measure the old bytes.
-- [ ] Machine scope verified present (plugin + machine receipt) before
+- [x] Machine scope verified present (plugin + machine receipt) before
       the first canary mutation, with the `sd-status` output recorded.
-- [ ] Requirement 1 steps 2b and 2c executed per canary, evidenced by a
+- [x] Requirement 1 steps 2b and 2c executed per canary, evidenced by a
       post-conversion resweep reporting zero `packDefects` for that
       consumer. An aggregate "conversion looked clean" does not close this:
       the KB block and a consumer-owned PR template are precisely the two
       surfaces a conversion leaves untouched while appearing complete.
-- [ ] The revert proof was executed on a named canary at a named
+- [x] The revert proof was executed on a named canary at a named
       commit, CI stayed green, and the only residue was the
       `enabledPlugins` disable marker. Re-conversion ran a **fresh
       exact-head resweep** against the reverted tree first: the revert
       changes the tree, so the verdict that authorized the first
       conversion does not authorize the second.
-- [ ] `make release-prep` passes on this repo after the registry flips
+- [x] `make release-prep` passes on this repo after the registry flips
       — not `make check` alone. Each `mode` flip changes the
       fleet-manifest digest pinned into
       `docs/fleet/candidate-validation.json`
       (`scripts/sd_ai_command_pack_fleet_lib.py:766`), so `make check`
       cannot pass until release-prep refreshes the ledger.
+
+## Acceptance evidence
+
+Recorded 2026-08-16. Each row names the instrument, not a reading of the diff.
+
+| criterion | evidence |
+|---|---|
+| cohort authorization recorded before mutation | the dated 2026-08-12 and 2026-08-15 paragraphs above, both predating the first conversion commit |
+| a fat consumer's resweep reports `packDefects: 0` | all three canaries, before and after the refresh round. Re-broken by 0.71.21 and re-closed by PR #476; see `implement.md` phase 5 |
+| each canary's own citations rewritten, `blockers: 0` | all three canaries on a clean tree |
+| `installMode == "thin"`, `pin.state == "present"`, `pin.version == machineScope.packVersion` | `sd-status fleet --json` at 0.71.22: 8 consumers, `mismatches: 0` |
+| `machineScope.state == "installed"`, `comparison == "current"` | same run, after the machine install and plugin update to 0.71.22 |
+| CI green post-conversion with zero pack CI steps | loadsmith 0, hoa-manager 0; rwbp-coordinator's single hit is a comment at `.github/workflows/ci.yml:111` |
+| no vendored payload beyond the retained slices | loadsmith's own pre-conversion receipt, 201 entries, against 31 after; only `.gitignore` survives the block strip and it carries the adopted header |
+| Codex advisory recorded rather than cleared | three `undeclared codex usage` rows under `advisories`, `blockers` empty |
+| `.prism/rules.json` names no removed path | subsumed by rwbp-coordinator's `clear` verdict, which is the instrument this criterion asks for |
+| machine scope verified before the first mutation | recorded in the 2026-08-15 provisioning paragraph above |
+| steps 2b and 2c executed per canary | post-conversion resweep, zero `packDefects` per consumer |
+| revert proof executed, CI green, fresh exact-head re-conversion | `implement.md` phase 5: revert `d4e1385`, run `31946741912`, re-conversion `703117e` on a verdict swept at `b7b6625` |
+| `make release-prep` passes after the registry flips | exit 0 |
+
+Two departures from the criteria as written, both recorded rather than worked
+around:
+
+- **"the only residue was the `enabledPlugins` disable marker"** is exactly
+  true, and this task is the first to measure what that residue costs: the
+  marker blocks a later re-conversion, because the settings merge refuses to
+  overwrite a value it cannot prove it wrote. Re-conversion therefore ran at
+  `b7b6625`, one commit past the reverted head, where that one operator edit
+  lives. The criterion's substance — a *fresh* verdict against the tree being
+  converted, not the one that authorized the first conversion — holds; the
+  verdict was swept at `b7b6625` and the conversion ran against `b7b6625`.
+- **`packDefects: 0` for a fat consumer regressed after this criterion first
+  closed.** It closed at 0.71.13, broke at 0.71.21, and was closed again by
+  PR #476. The criterion is not weakened by that: it now has a regression test
+  that fails if the rewrite ever changes line count and the scanner stops
+  following it.
