@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 382
+- **Total Sessions**: 383
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1400 | Active |
+| `journal-8.md` | ~1444 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 383 | 2026-08-16 | Close the post-canary and receipt-cache tasks; retire the consumer pack refresh | `197bf9fb`, `304af0b5` | `task/post-thin-reconciliation` |
 | 382 | 2026-08-16 | Fix the resweep's post-repoint line alignment and close the thin canary conversion | `71a47ddc`, `c8386d9a`, `07f3bb11`, `bf1a2fb9`, `a6cc149e` | `task/thin-canary-conversion-closure` |
 | 381 | 2026-08-14 | Consumer-config layout shim: install the resolver where thin conversion keeps it | `ea10fefb`, `a9c7cf43`, `74c1a3ae` | `task/consumer-config-layout-shim` |
 | 380 | 2026-08-14 | Ship a layout-aware review guard so consumers stop reimplementing one | `11b7870c`, `eecebd91`, `20c0b487`, `60fc84d5` | `task/pack-layout-aware-guard` |
