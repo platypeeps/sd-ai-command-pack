@@ -163,6 +163,22 @@ class RoundTripTests(RevertFixture):
             {"enabledPlugins": {PLUGIN_KEY: False}},
         )
 
+    def test_a_tree_with_no_adopted_rules_reverts_anyway(self) -> None:
+        # A consumer converted before 0.71.20, where the conversion deleted the
+        # ignore rules instead of handing them over. There is no adopted
+        # section to take out, and the restore still has to put the managed
+        # block back.
+        self.convert()
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text("node_modules/\n", encoding="utf-8")
+
+        result = self.run_revert()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("adopted rules removed", result.stdout)
+        restored = gitignore.read_text(encoding="utf-8")
+        self.assertIn(install.TRELLIS_GITIGNORE_START, restored)
+        self.assertIn("node_modules/", restored)
+
     def test_a_reverted_consumer_installs_again(self) -> None:
         # The two guards meeting from the other side: the R19-C1 refusal reads
         # the pin, so a revert that left either witness thin would make an

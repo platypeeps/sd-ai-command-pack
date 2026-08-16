@@ -1194,6 +1194,12 @@ def _run_thin_revert(
     # re-runs cleanly -- restoring a file that is already byte-identical is a
     # no-op. The receipts commit; the settings undo happens only after the
     # files it was covering for are back; the registry is last.
+    #
+    # The adopted ignore rules come out first of all, because the payload
+    # restore below is what puts the pack's managed block back and the two
+    # copies would otherwise stack.
+    if thin.unadopt_gitignore_block(target, backup=False):
+        print("gitignore   adopted rules removed; the managed block returns below")
     results, generated_targets = _install_payload(
         selected,
         target,

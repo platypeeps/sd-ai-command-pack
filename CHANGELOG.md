@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.71.20 - 2026-08-16
+
+### Fixed
+
+- A thin conversion no longer drops the consumer's ignore rules. The managed
+  `.gitignore` block was deleted outright, and its rules are about the
+  consumer's own tree -- `.env`, `.build/`, `.trellis/` runtime state,
+  `.claude/settings.local.json` -- not about the payload being removed. The
+  first `git add -A` after a conversion therefore committed local state the
+  repository had been ignoring for as long as the pack was installed; measured
+  across four converted consumers, one of which published 317 review-receipt
+  files to its default branch that way. The conversion now *adopts* the block:
+  the rules stay, the markers and the generated notice go, and a plain comment
+  pair records that the repository owns them now. `--revert-thin` removes the
+  adopted section before the payload restore re-inserts the managed block, so
+  the two never stack.
+
 ## 0.71.19 - 2026-08-15
 
 ### Fixed

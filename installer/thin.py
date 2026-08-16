@@ -19,8 +19,10 @@ from urllib.parse import urlsplit
 from installer.fileops import (
     atomic_write_text,
     backup_existing_file,
+    remove_adopted_block,
     remove_text_block_file,
 )
+from installer.manifest import read_text_strict
 from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     COPILOT_GUIDANCE_END,
@@ -745,18 +747,25 @@ def structural_audit_reasons(root: Path, target: Path) -> tuple[str, ...]:
     return tuple(failures)
 
 
+# Per managed-block target: the marker pair, the label diagnostics use, whether
+# the file may hold invalid UTF-8, and whether the block is *adopted* rather
+# than deleted. Only `.gitignore` is adopted: its rules describe the consumer's
+# own tree and outlive the payload, while the Copilot block describes the
+# payload itself.
 BLOCK_MARKERS = {
     TRELLIS_GITIGNORE_TARGET.as_posix(): (
         TRELLIS_GITIGNORE_START,
         TRELLIS_GITIGNORE_END,
         ".gitignore",
         False,
+        True,
     ),
     COPILOT_INSTRUCTIONS_TARGET.as_posix(): (
         COPILOT_GUIDANCE_START,
         COPILOT_GUIDANCE_END,
         ".github/copilot-instructions.md",
         True,
+        False,
     ),
 }
 
@@ -804,7 +813,7 @@ def removal_preflight_reasons(
             # consumer loses a surface silently.
             reasons.append(f"{entry} carries no known managed block to strip")
             continue
-        start, end, label, invalid_utf8 = markers
+        start, end, label, invalid_utf8, adopt = markers
         result = remove_text_block_file(
             target,
             Path(entry),
@@ -814,6 +823,7 @@ def removal_preflight_reasons(
             dry_run=True,
             backup=False,
             preserve_invalid_utf8=invalid_utf8,
+            adopt=adopt,
         )
         if result.status is RemoveStatus.PRESERVED:
             reasons.append(f"{entry} block cannot be stripped: {result.detail}")
@@ -938,7 +948,7 @@ def apply_conversion(
             backup=backup,
         )
     for entry in plan.block_strip:
-        start, end, label, invalid_utf8 = BLOCK_MARKERS[entry]
+        start, end, label, invalid_utf8, adopt = BLOCK_MARKERS[entry]
         remove_text_block_file(
             target,
             Path(entry),
@@ -948,6 +958,7 @@ def apply_conversion(
             dry_run=False,
             backup=backup,
             preserve_invalid_utf8=invalid_utf8,
+            adopt=adopt,
         )
     repointed = repoint_kept_references(target, repoints, backup=backup)
     written.append(
@@ -990,6 +1001,33 @@ def flip_registry_mode(root: Path, consumer: str, mode: str = "thin") -> None:
     else:
         raise SystemExit(f"error: {consumer} is not in {path}")
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def unadopt_gitignore_block(target: Path, *, backup: bool) -> bool:
+    """Drop the adopted ignore rules so revert can restore the managed block.
+
+    Runs before the payload restore, not after: the restore is what re-inserts
+    the pack's own block, and a file that still carries the adopted copy at
+    that moment ends up with every rule twice.
+
+    Returns whether anything changed, so the caller can report a revert that
+    had nothing to undo -- a tree converted before adoption existed -- without
+    treating it as a failure.
+    """
+    destination = target / TRELLIS_GITIGNORE_TARGET
+    if not destination.is_file() or destination.is_symlink():
+        return False
+    # `read_text_strict`, not `read_text`: a `.gitignore` that is unreadable or
+    # not UTF-8 must refuse with the installer's own diagnostic. Returning False
+    # would be worse than crashing -- the restore below would re-insert the
+    # managed block beside adopted rules this could not remove.
+    current = read_text_strict(destination, ".gitignore")
+    restored = remove_adopted_block(current)
+    if restored == current:
+        return False
+    backup_existing_file(target, destination, backup=backup, dry_run=False)
+    atomic_write_text(destination, restored)
+    return True
 
 
 def read_registry(root: Path) -> dict:

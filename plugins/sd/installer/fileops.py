@@ -765,6 +765,80 @@ def remove_marked_block(
     return current[:start_index] + current[replace_end:]
 
 
+ADOPTED_BLOCK_START = (
+    "# --- adopted from sd-ai-command-pack; repo-owned since the thin conversion ---"
+)
+ADOPTED_BLOCK_END = "# --- end adopted sd-ai-command-pack rules ---"
+# Deliberately not `# sd-ai-command-pack <label> start`. That shape is what the
+# installer, the audit, and the thin resweep all read as "the pack owns these
+# lines", and the whole point of adoption is that it no longer does.
+_GENERATED_NOTICE = "DO NOT EDIT MANUALLY"
+
+
+def adopt_marked_block(
+    current: str,
+    *,
+    start_marker: str,
+    end_marker: str,
+    label: str,
+) -> str:
+    """Hand a managed block's contents to the repository, markers removed.
+
+    Removing the block outright is what a conversion did before, and for
+    `.gitignore` that was wrong: the block's rules are about the consumer's own
+    tree -- `.env`, `.build/`, Trellis runtime state -- not about the payload
+    being deleted. A conversion that drops them makes the next `git add -A`
+    commit local state the repository had been ignoring for as long as the pack
+    was installed. Measured on four consumers, one of which published 317
+    review-receipt files to its default branch that way.
+
+    So the rules stay and the ownership moves: the markers and the generated
+    notice go, a plain comment pair records where the lines came from, and
+    nothing afterwards vouches for them.
+    """
+    start_index, end_index = marker_pair_indexes(
+        current,
+        start_marker,
+        end_marker,
+        label,
+    )
+    if start_index == -1:
+        return current
+    replace_end = end_index + len(end_marker)
+    if replace_end < len(current) and current[replace_end] == "\n":
+        replace_end += 1
+    block = current[start_index:replace_end]
+    body = [
+        line
+        for line in block.split("\n")[1:]
+        if not line.startswith(end_marker) and _GENERATED_NOTICE not in line
+    ]
+    while body and not body[-1].strip():
+        body.pop()
+    adopted = "\n".join([ADOPTED_BLOCK_START, *body, ADOPTED_BLOCK_END, ""])
+    return current[:start_index] + adopted + current[replace_end:]
+
+
+def remove_adopted_block(current: str) -> str:
+    """Undo `adopt_marked_block`, so a revert can restore the managed block.
+
+    Without this, reverting re-inserts the pack's block beside the adopted copy
+    and the file carries every rule twice. Absent markers mean a tree that was
+    converted before adoption existed, or one where somebody removed the
+    section by hand; both are "nothing to undo", not an error.
+    """
+    start = current.find(ADOPTED_BLOCK_START)
+    if start == -1:
+        return current
+    end = current.find(ADOPTED_BLOCK_END, start)
+    if end == -1:
+        return current
+    replace_end = end + len(ADOPTED_BLOCK_END)
+    if replace_end < len(current) and current[replace_end] == "\n":
+        replace_end += 1
+    return current[:start] + current[replace_end:]
+
+
 def backup_existing_file(
     target: Path,
     destination: Path,
@@ -829,7 +903,14 @@ def remove_text_block_file(
     dry_run: bool,
     backup: bool,
     preserve_invalid_utf8: bool = False,
+    adopt: bool = False,
 ) -> RemoveResult:
+    """Take the pack's block out of a consumer-owned file.
+
+    `adopt` keeps the block's lines and drops only the pack's ownership of
+    them; see `adopt_marked_block` for why `.gitignore` needs that and
+    `.github/copilot-instructions.md` does not.
+    """
     try:
         destination = removal_target_destination(target, relative_path)
     except SystemExit as error:
@@ -866,7 +947,7 @@ def remove_text_block_file(
                 detail=system_exit_detail(error),
             )
     try:
-        stripped = remove_marked_block(
+        stripped = (adopt_marked_block if adopt else remove_marked_block)(
             current,
             start_marker=start_marker,
             end_marker=end_marker,
