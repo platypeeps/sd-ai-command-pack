@@ -134,14 +134,16 @@
       ],
       "candidateChecks": [
         [
-          "node",
-          "scripts/sd-ai-command-pack-review-preflight.mjs"
+          "bash",
+          "-c",
+          "node \"$HOME/.agents/bin/sd-ai-command-pack-review-preflight.mjs\""
         ],
         [
           "node",
           "scripts/ops-check.mjs"
         ]
-      ]
+      ],
+      "mode": "thin"
     },
     {
       "name": "mezmo_benchmark",
@@ -169,7 +171,8 @@
           "HEAD",
           "--include-working-tree"
         ]
-      ]
+      ],
+      "mode": "thin"
     },
     {
       "name": "se-ai-command-pack",
@@ -187,10 +190,11 @@
       "candidateChecks": [
         [
           "bash",
-          "scripts/sd-ai-command-pack-housekeeping.sh",
-          "--self-test"
+          "-c",
+          "bash \"$HOME/.agents/bin/sd-ai-command-pack-housekeeping.sh\" --self-test"
         ]
-      ]
+      ],
+      "mode": "thin"
     },
     {
       "name": "sd-github-review",
@@ -255,7 +259,8 @@
           "python3",
           "tools/check_copilot_instruction_contract.py"
         ]
-      ]
+      ],
+      "mode": "thin"
     }
   ],
   "excludedAliases": [
