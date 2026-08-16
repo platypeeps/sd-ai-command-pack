@@ -225,7 +225,8 @@
           "run",
           "validate:metadata"
         ]
-      ]
+      ],
+      "mode": "thin"
     },
     {
       "name": "anomaly-metric-creator",

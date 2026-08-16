@@ -2092,6 +2092,14 @@ node_modules/
 # sd-ai-command-pack trellis-gitignore end
 ```
 
+A thin conversion **adopts** this block rather than deleting it: the rules
+describe the consumer's own tree and outlive the payload, so `--thin` replaces
+the markers and the generated notice with a plain
+`# --- adopted from sd-ai-command-pack ... ---` comment pair and stops
+managing the file. `--revert-thin` removes the adopted section before it
+restores the managed block, so the two never stack. The Copilot block below is
+not adopted — it describes the payload, which a thin consumer no longer has.
+
 ```markdown
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->
 Pack-owned review guidance lives here.

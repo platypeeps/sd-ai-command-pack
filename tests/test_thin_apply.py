@@ -22,7 +22,7 @@ Path = _support.Path
 install = _support.install
 InstallTestCase = _support.InstallTestCase
 
-from installer import conversion, thin  # noqa: E402
+from installer import conversion, fileops, thin  # noqa: E402
 
 
 class ConversionFixture(InstallTestCase):
@@ -280,6 +280,80 @@ class DriftPreflightTests(ConversionFixture):
 
         reasons = self.reasons(root)
         self.assertTrue(any(".gitignore" in reason for reason in reasons), reasons)
+
+
+class AdoptedIgnoreRuleTests(ConversionFixture):
+    """The conversion keeps the ignore rules and gives them to the consumer.
+
+    Deleting the block outright is what shipped through 0.71.19, and it is how
+    four converted consumers started tracking local state they had been
+    ignoring for as long as the pack was installed -- one of them published 317
+    review receipts to its default branch. The rules describe the consumer's
+    tree, not the payload, so they outlive the payload.
+    """
+
+    def gitignore(self, root: Path) -> str:
+        return (root / ".gitignore").read_text(encoding="utf-8")
+
+    def test_the_rules_survive_the_conversion_without_the_pack_owning_them(
+        self,
+    ) -> None:
+        root = self.installed_consumer()
+        before = self.gitignore(root)
+        self.assertIn(install.TRELLIS_GITIGNORE_START, before)
+        rules = [
+            line
+            for line in before.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        self.assertIn(".build/", rules, "fixture no longer ignores build artifacts")
+
+        self.convert(root)
+
+        after = self.gitignore(root)
+        for rule in rules:
+            self.assertIn(rule, after, f"the conversion dropped {rule!r}")
+        # Ownership moved: nothing in the file claims the pack manages it, and
+        # the marker the installer, the audit, and the resweep all read is gone.
+        self.assertNotIn(install.TRELLIS_GITIGNORE_START, after)
+        self.assertNotIn(install.TRELLIS_GITIGNORE_END, after)
+        self.assertNotIn("DO NOT EDIT MANUALLY", after)
+
+    def test_a_revert_restores_the_managed_block_without_duplicating_it(
+        self,
+    ) -> None:
+        # The restore re-inserts the pack's block. If the adopted copy were
+        # still there the file would carry every rule twice, which is the whole
+        # reason revert removes it first.
+        root = self.installed_consumer()
+        before = self.gitignore(root)
+        self.convert(root)
+        self.assertTrue(thin.unadopt_gitignore_block(root, backup=False))
+
+        after = self.gitignore(root)
+        self.assertNotIn(fileops.ADOPTED_BLOCK_START, after)
+        self.assertEqual(
+            before.replace(
+                before[
+                    before.index(install.TRELLIS_GITIGNORE_START) : before.index(
+                        install.TRELLIS_GITIGNORE_END
+                    )
+                    + len(install.TRELLIS_GITIGNORE_END)
+                    + 1
+                ],
+                "",
+            ),
+            after,
+            "removing the adopted rules must leave exactly the unmanaged remainder",
+        )
+
+    def test_undoing_an_absent_adoption_changes_nothing(self) -> None:
+        # A tree converted before adoption existed, or one where somebody
+        # removed the section by hand. Reverting it is not an error.
+        root = self.installed_consumer()
+        before = self.gitignore(root)
+        self.assertFalse(thin.unadopt_gitignore_block(root, backup=False))
+        self.assertEqual(self.gitignore(root), before)
 
 
 class RetentionFixtureTests(ConversionFixture):

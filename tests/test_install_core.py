@@ -28,6 +28,8 @@ INSTALLER = _support.INSTALLER
 SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
+from installer import fileops, thin  # noqa: E402
+
 
 class InstallCoreTests(InstallTestCase):
     """Tests for installer CLI, manifest validation, platform selection, and file install behavior."""
@@ -1375,6 +1377,51 @@ class InstallCoreTests(InstallTestCase):
             label=".gitignore",
         )
         self.assertEqual(removed, "keep\n")
+
+    def test_adoption_edges_that_leave_the_text_alone(self) -> None:
+        gi_start = install.TRELLIS_GITIGNORE_START
+        gi_end = install.TRELLIS_GITIGNORE_END
+        adopt = fileops.adopt_marked_block
+
+        # No block: a consumer whose .gitignore the pack never managed. There
+        # is nothing to hand over, and inventing a header would claim there was.
+        self.assertEqual(
+            adopt("dist/\n", start_marker=gi_start, end_marker=gi_end, label=".gitignore"),
+            "dist/\n",
+        )
+
+        # A block ending at EOF with no trailing newline still adopts, and the
+        # result ends with one -- the marker line must not be glued to a rule.
+        adopted = adopt(
+            f"keep\n{gi_start}\n.env\n{gi_end}",
+            start_marker=gi_start,
+            end_marker=gi_end,
+            label=".gitignore",
+        )
+        self.assertEqual(
+            adopted,
+            f"keep\n{fileops.ADOPTED_BLOCK_START}\n.env\n{fileops.ADOPTED_BLOCK_END}\n",
+        )
+
+        # Undoing: absent header, and a header whose footer somebody deleted.
+        # Guessing where the section ends would take the rest of the file with it.
+        self.assertEqual(fileops.remove_adopted_block("dist/\n"), "dist/\n")
+        truncated = f"{fileops.ADOPTED_BLOCK_START}\n.env\ndist/\n"
+        self.assertEqual(fileops.remove_adopted_block(truncated), truncated)
+        # A footer at EOF with no trailing newline is still a complete section.
+        self.assertEqual(
+            fileops.remove_adopted_block(
+                f"keep\n{fileops.ADOPTED_BLOCK_START}\n.env\n{fileops.ADOPTED_BLOCK_END}"
+            ),
+            "keep\n",
+        )
+
+    def test_unadopting_a_gitignore_that_is_not_there(self) -> None:
+        # Revert calls this before restoring the payload. A consumer with no
+        # .gitignore at all -- or one where the path is a directory -- has
+        # nothing to undo, and must not be an error on the way to a restore.
+        root = self.make_repo()
+        self.assertFalse(thin.unadopt_gitignore_block(root, backup=False))
 
     def test_branch_edges_in_dry_run_updated_paths(self) -> None:
         root = self.make_repo()
