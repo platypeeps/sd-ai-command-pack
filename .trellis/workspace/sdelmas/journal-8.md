@@ -1363,3 +1363,50 @@ Installed the layout resolver a second time at .sd-ai-command-pack/bin/, a consu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 382: Fix the resweep's post-repoint line alignment and close the thin canary conversion
+
+**Date**: 2026-08-16
+**Task**: Fix the resweep's post-repoint line alignment and close the thin canary conversion
+**Branch**: `task/thin-canary-conversion-closure`
+
+### Summary
+
+0.71.21's narrow-globs marker made a repoint one line longer than the text it replaced, and the resweep's post-repoint scan required an equal line count, so it fell back to unrewritten bytes and reported already-repointed citations as pack defects. No fat consumer could reach a clear verdict from 0.71.21 on, which blocked phase 5.4 of the thin canary conversion. Replaced the guard with a diff-based mapping from rewritten lines back to real line numbers, then finished phases 3, 4, and 5 and recorded their evidence.
+
+### Main Changes
+
+- Replaced the resweep's equal-line-count guard with aligned_line_numbers, a difflib mapping from each rewritten line back to a line that exists on disk: unchanged and substituted lines map to themselves, an inserted line takes the original line it follows, a deleted line contributes nothing. spans, all_spans, commanded, and the reported line number all stay anchored to the bytes an operator can open.
+- Added LineAlignmentTests. Two cases are end-to-end and were run against the old guard first, where both fail, so neither passes vacuously; one asserts the premise that references.rewrite_text still changes this line count, so a future line-count-preserving rewrite fails loudly rather than making the alignment cases pass for free.
+- Renamed the scan loop's index, which shadowed scan's later index = git(repo, 'ls-files', '-s') and failed CI mypy. make check hid it locally because check runs test before lint and test was failing on an unrelated dirty fleet digest.
+- Completed phase 5.5 on loadsmith. The re-conversion refused until the revert's plugin disable marker was cleared: revert writes that marker deliberately and the conversion's settings merge blocks rather than overwrites a value it cannot prove it wrote, so revert and re-convert do not compose into a bare round trip. Recorded rather than worked around.
+- Measured the round trip against the pre-revert thin tree. Two files differ and both trace to loadsmith's original conversion, not to the revert: .gitignore has identical bytes in a different position, and the original receipt under-recorded one created settings container.
+- Ticked all 38 implement.md boxes and all 12 prd.md acceptance criteria with per-phase evidence tables, including the two departures from the criteria as written.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `71a47ddc` | fix(resweep): align repointed line numbers instead of requiring an equal count |
+| `c8386d9a` | fix(resweep): rename the scan loop index so it stops shadowing the git index |
+| `07f3bb11` | docs(task): record the phase 3, 4, and 5 evidence for the thin canary conversion |
+| `bf1a2fb9` | docs(task): stop citing a consumer workflow line as a path in this repo |
+| `a6cc149e` | chore(task): record the branch for thin-canary-conversion |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_thin_resweep -- 57 tests, OK
+- [OK] Resweep on the reverted loadsmith tree at d4e1385: blocked with packDefects 7 before, clear with packDefects 0 after, same recorded head
+- [OK] Re-conversion at 703117e from a verdict swept at b7b6625: 169 deleted, 1 block stripped, 28 kept, 6 repointed
+- [OK] make check: the only failure was tests.test_surface_closure on an unrelated uncommitted fleet-registry edit; with that file at its committed state the module is 14/14 OK
+- [OK] PR #476 CI: lint, security, CI scope, CI Result, Release payload gate, Shell coverage, and all three unittest matrix jobs pass; Copilot reviewed and generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
