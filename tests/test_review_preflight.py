@@ -918,6 +918,51 @@ assert.deepEqual(
         self.assertIn("Review preflight:", result.stdout)
         self.assertNotEqual(result.stdout.strip(), "")
 
+    def test_review_preflight_classifies_the_caller_repo_when_installed_off_tree(
+        self,
+    ) -> None:
+        """The machine layout: the script is outside every repository.
+
+        `resolve(scriptDir, '..')` is the agents directory there, and the
+        preflight has nothing to inspect, so it reports PASS over a tree that
+        is not the one being reviewed.
+        """
+
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        copied_surface = root / ".agents/skills/sd-review-pr/SKILL.md"
+        copied_surface.parent.mkdir(parents=True, exist_ok=True)
+        copied_surface.write_text("# Review PR\n", encoding="utf-8")
+
+        machine_home = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-machine-")
+        self.addCleanup(machine_home.cleanup)
+        machine_bin = Path(machine_home.name) / "agents-bin"
+        machine_bin.mkdir(parents=True)
+        for name in (
+            "sd-ai-command-pack-review-preflight.mjs",
+            "sd-ai-command-pack-review-layout.py",
+        ):
+            shutil.copyfile(
+                install.ROOT / "templates/scripts" / name, machine_bin / name
+            )
+
+        result = subprocess.run(
+            [node, str(machine_bin / "sd-ai-command-pack-review-preflight.mjs")],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(".agents/skills/sd-review-pr/SKILL.md", result.stdout)
+
     def test_review_preflight_reports_untracked_copied_surfaces(self) -> None:
         node = shutil.which("node")
         if node is None:

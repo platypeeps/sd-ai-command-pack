@@ -10,8 +10,24 @@ import { TextDecoder } from 'node:util';
 // vendored scripts/ directory, a plugin bin/, or a machine-wide install; only
 // repository content is resolved against rootDir.
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const defaultRootDir = resolve(scriptDir, '..');
-let rootDir = defaultRootDir;
+// The repository being checked, which is not necessarily the one hosting this
+// file. A thin install moves the preflight to the machine, where
+// `resolve(scriptDir, '..')` is the agents directory rather than any checkout --
+// and this check fails silently there, reporting PASS over a tree that has no
+// repository content to inspect. Same ladder the shipped shell guards use
+// (`sd-ai-command-pack-full-check.sh`): the override, then the caller's working
+// tree, then this file's parent last, so a vendored install resolves exactly
+// what it always did.
+function defaultRootDir() {
+  const override = (process.env.SD_AI_COMMAND_PACK_REPO_ROOT || '').trim();
+  if (override) return resolve(override);
+  const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  if (top.status === 0 && typeof top.stdout === 'string' && top.stdout.trim()) {
+    return resolve(top.stdout.trim());
+  }
+  return resolve(scriptDir, '..');
+}
+let rootDir = resolve(scriptDir, '..');
 let config = defaultConfig();
 let failures = [];
 let warnings = [];
@@ -236,7 +252,8 @@ class GitCommandError extends Error {}
 // Deliberately a delegation, not a reimplementation: a second copy of the
 // matcher in a second language is the exact defect the pack-owned guard exists
 // to remove, and it would drift the first time only one side was updated.
-export function resolvePackLayout({ root = defaultRootDir, paths = [], resolve: scriptName = null } = {}) {
+export function resolvePackLayout({ root = null, paths = [], resolve: scriptName = null } = {}) {
+  root = root || defaultRootDir();
   const args = ['--root', root];
   if (scriptName) {
     args.push('--resolve', scriptName);
@@ -267,7 +284,7 @@ export function resolvePackLayout({ root = defaultRootDir, paths = [], resolve: 
 }
 
 export function runReviewPreflight(options = {}) {
-  rootDir = resolve(options.rootDir || defaultRootDir);
+  rootDir = options.rootDir ? resolve(options.rootDir) : defaultRootDir();
   failures = [];
   warnings = [];
   passes = [];
@@ -604,7 +621,7 @@ function parseBookkeepingCli(args) {
   const command = args[0];
   const options = {
     command,
-    rootDir: defaultRootDir,
+    rootDir: defaultRootDir(),
     taskDirs: [],
     json: false,
   };
@@ -676,7 +693,7 @@ function parseBookkeepingCli(args) {
 }
 
 export function runBookkeepingValidator(options = {}) {
-  rootDir = resolve(options.rootDir || defaultRootDir);
+  rootDir = options.rootDir ? resolve(options.rootDir) : defaultRootDir();
   config = defaultConfig();
   readTextCache.clear();
   lastBookkeepingGitFailure = null;
