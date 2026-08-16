@@ -165,7 +165,7 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             config_path=config_path,
         )
 
-    def test_prepare_help_documents_empty_and_mixed_exit_three(self) -> None:
+    def test_prepare_help_documents_nothing_to_declare_exit_three(self) -> None:
         stdout = io.StringIO()
 
         with mock.patch.object(sys, "stdout", stdout), self.assertRaises(
@@ -174,7 +174,12 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             self.mod._parse_args(["--help"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertIn("empty or mixed scope exits 3", " ".join(stdout.getvalue().split()))
+        rendered = " ".join(stdout.getvalue().split())
+        # Exit 3 now means "nothing to declare", not "mixed". A mixed diff is
+        # declared rather than refused, so the old wording must be gone: leaving
+        # it would document a contract the script no longer honors.
+        self.assertIn("nothing to declare", rendered)
+        self.assertNotIn("empty or mixed scope exits 3", rendered)
 
     def test_nul_delimited_paths_preserve_newlines_and_edge_whitespace(self) -> None:
         changed = (
@@ -198,10 +203,12 @@ class ToolingBodyPreparationTests(unittest.TestCase):
 
             status, messages = self._prepare(root, changed_file, body_file)
 
-            self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
-            diagnostic = "\n".join(messages)
-            self.assertNotIn("option-like\nname.py", diagnostic)
-            self.assertIn(r"option-like\nname.py", diagnostic)
+            # Mixed diffs are declared now, so this reaches the append path.
+            # The escaping property still has to hold wherever a path is
+            # rendered, which is now the body rather than the refusal message.
+            self.assertEqual(status, 0, messages)
+            rendered = body_file.read_text(encoding="utf-8") + "\n".join(messages)
+            self.assertNotIn("option-like\nname.py", rendered)
 
     def test_bookkeeping_only_body_preserves_fill_content_and_appends_scope(self) -> None:
         original = "Commit-derived summary with `code`, $VALUE, and $(literal).\n"
@@ -255,7 +262,14 @@ class ToolingBodyPreparationTests(unittest.TestCase):
             self.assertEqual(body_file.read_text(encoding="utf-8"), original)
             self.assertTrue(any("branch diff is empty" in item for item in messages))
 
-    def test_mixed_scope_returns_not_applicable_without_rewriting_body(self) -> None:
+    def test_mixed_scope_declares_the_tooling_subset(self) -> None:
+        """The late-arrival fix: a mixed diff is declared, not refused.
+
+        Before this behavior existed the preparer wrote nothing here, so the PR
+        body carried no heading; `sd-ship` Stage 2b then committed the journal
+        and index files and `pack.review-scope` failed at the successor head on
+        a body that had been correct when it was authored.
+        """
         original = "Commit-derived summary.\n"
         with tempfile.TemporaryDirectory() as raw:
             root, changed_file, body_file = self._fixture_root(
@@ -269,11 +283,100 @@ class ToolingBodyPreparationTests(unittest.TestCase):
 
             status, messages = self._prepare(root, changed_file, body_file)
 
+            self.assertEqual(status, 0, messages)
+            prepared = body_file.read_text(encoding="utf-8")
+            self.assertTrue(prepared.startswith(original))
+            self.assertEqual(prepared.count("Tooling/generated scope:"), 1)
+            # The tooling path is named; the authored one is not, because the
+            # section may only speak for paths it proved are generated.
+            self.assertIn(".trellis/workspace/dev/journal-1.md", prepared)
+            self.assertNotIn("src/runtime.py", prepared)
+            # No completeness claim: the branch acquires further generated files
+            # at finalization, so "limited to" would be false by the time the
+            # gate reads this body.
+            self.assertNotIn("limited to", prepared)
+
+    def test_no_tooling_path_returns_not_applicable_without_rewriting_body(self) -> None:
+        """The gate keeps its teeth: nothing provable, nothing declared."""
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed="src/runtime.py\nREADME.md\n",
+                body=original,
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
             self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE, messages)
             self.assertEqual(body_file.read_text(encoding="utf-8"), original)
-            self.assertTrue(any("not tooling/generated-only" in item for item in messages))
+            self.assertTrue(any("nothing to declare" in item for item in messages))
 
-    def test_mixed_scope_cli_reports_non_error_result_only_on_stdout(self) -> None:
+    def test_mixed_scope_preparation_is_idempotent(self) -> None:
+        original = "Commit-derived summary.\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=(
+                    ".trellis/workspace/dev/journal-1.md\n"
+                    "src/runtime.py\n"
+                ),
+                body=original,
+            )
+
+            first_status, _ = self._prepare(root, changed_file, body_file)
+            after_first = body_file.read_text(encoding="utf-8")
+            second_status, _ = self._prepare(root, changed_file, body_file)
+            after_second = body_file.read_text(encoding="utf-8")
+
+            self.assertEqual(first_status, 0)
+            self.assertEqual(second_status, 0)
+            self.assertEqual(after_first, after_second)
+            self.assertEqual(after_second.count("Tooling/generated scope:"), 1)
+
+    def test_enumeration_is_capped_with_an_explicit_remainder(self) -> None:
+        """A bounded list, and the overflow is counted rather than dropped."""
+        cap = self.mod.MAX_ENUMERATED_SCOPE_PATHS
+        total = cap + 5
+        tooling = [f".trellis/tasks/07-21-demo/note-{index:03d}.md" for index in range(total)]
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed="\n".join([*tooling, "src/runtime.py"]) + "\n",
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, 0, messages)
+            prepared = body_file.read_text(encoding="utf-8")
+            listed = [path for path in tooling if path in prepared]
+            self.assertEqual(len(listed), cap)
+            # Sorted, so the enumerated window is deterministic and reviewable.
+            self.assertEqual(listed, sorted(tooling)[:cap])
+            self.assertIn(f"and {total - cap} more", prepared)
+
+    def test_enumerated_paths_are_escaped_in_the_body(self) -> None:
+        """A path is repository-controlled text landing in a published PR body.
+
+        The diagnostic path already escapes these; the section renderer must
+        too, or a newline in a filename injects arbitrary Markdown into the
+        body that `pack.review-scope` then reads.
+        """
+        hostile = ".trellis/tasks/07-21-demo/na\nme.md"
+        with tempfile.TemporaryDirectory() as raw:
+            root, changed_file, body_file = self._fixture_root(
+                Path(raw),
+                changed=f"{hostile}\0src/runtime.py\0",
+            )
+
+            status, messages = self._prepare(root, changed_file, body_file)
+
+            self.assertEqual(status, 0, messages)
+            prepared = body_file.read_text(encoding="utf-8")
+            self.assertNotIn("na\nme.md", prepared)
+            self.assertIn(r"na\nme.md", prepared)
+
+    def test_nothing_to_declare_cli_reports_non_error_result_only_on_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root, changed_file, body_file = self._fixture_root(
                 Path(raw),
@@ -298,7 +401,7 @@ class ToolingBodyPreparationTests(unittest.TestCase):
                 )
 
             self.assertEqual(status, self.mod.PREPARE_NOT_APPLICABLE)
-            self.assertIn("not tooling/generated-only", stdout.getvalue())
+            self.assertIn("nothing to declare", stdout.getvalue())
             self.assertEqual(stderr.getvalue(), "")
 
     def test_missing_explicit_config_fails_without_rewriting_body(self) -> None:

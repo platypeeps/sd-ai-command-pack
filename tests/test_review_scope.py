@@ -309,6 +309,81 @@ class ReviewScopeTests(InstallTestCase):
         self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
         self.assertNotIn("warning:", result.stdout)
 
+    def test_prepared_mixed_body_survives_the_finalization_diff(self) -> None:
+        """The late-arrival sequence, end to end, in enforcing mode.
+
+        Reproduces what failed on PRs #156, #163, #172, #203 and #208: a body
+        authored against the PR-creation diff, then a finalization commit that
+        adds the journal and index files which trigger the gate. The body is
+        never edited in between -- it has to have been right the first time.
+        """
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.commit_installed_repo(root)
+
+        # Stage 1. The creation-time diff mixes authored prose under
+        # `.trellis/spec/**`, which matches no tooling pattern, with a task file
+        # under `.trellis/tasks/**`, which does. That mix is what used to make
+        # the preparer decline and write no heading at all.
+        spec_dir = root / ".trellis" / "spec" / "backend"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "guide.md").write_text("# guide\n", encoding="utf-8")
+        task_dir = root / ".trellis" / "tasks" / "08-16-demo"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "prd.md").write_text("# prd\n", encoding="utf-8")
+
+        changed_file = root / "changed-at-creation.txt"
+        changed_file.write_text(
+            ".trellis/spec/backend/guide.md\n.trellis/tasks/08-16-demo/prd.md\n",
+            encoding="utf-8",
+        )
+        body_file = root / "pr-body.md"
+        body_file.write_text("Summary of the change.\n", encoding="utf-8")
+
+        prepared = subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts" / "sd-ai-command-pack-pr-body-scope.py"),
+                str(root),
+                "--prepare-tooling-body",
+                "--body-file",
+                str(body_file),
+                "--changed-files",
+                str(changed_file),
+            ],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(prepared.returncode, 0, prepared.stdout)
+
+        # Stage 2b. Finalization adds the category-3 files that arm the gate.
+        workspace = root / ".trellis" / "workspace" / "dev"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "journal-4.md").write_text("# journal\n", encoding="utf-8")
+        (workspace / "index.md").write_text("# index\n", encoding="utf-8")
+
+        # The successor-head re-entry, enforcing (no SD_AI_COMMAND_PACK_SCOPE_CHECK
+        # override), reading the body exactly as Stage 1 left it.
+        result = subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_SCOPE_PR_BODY": body_file.read_text(
+                    encoding="utf-8"
+                ),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_review_scope_advisory_warns_pr_exists_when_provided_body_lacks_section(
         self,
     ) -> None:
