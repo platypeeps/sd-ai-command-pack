@@ -2149,7 +2149,13 @@ class ReviewControllerTests(InstallTestCase):
         phases = iter([None, "started", "observed"])
 
         def query(*_args, **kwargs):
-            phase = next(phases)
+            # Settle on the terminal write once the scripted sequence is spent.
+            # These tests assert on the report's limitations, not on how many
+            # times the poller queried, and `test_in_flight_receipt_is_polled_
+            # until_it_settles` already owns the call-count guarantee. Letting
+            # the iterator run dry would turn any future change in poll budget
+            # into a bare `StopIteration` instead of a legible assertion.
+            phase = next(phases, "observed")
             if phase is None:
                 return None
             return self.routed_receipt(
