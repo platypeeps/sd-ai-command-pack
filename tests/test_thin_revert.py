@@ -37,8 +37,16 @@ PLUGIN_KEY = "sd@sd-ai-command-pack"
 class RevertFixture(InstallTestCase):
     """An installed consumer, converted through `apply_conversion`, then reverted."""
 
+    # The platform set is a fixture knob because the round trip is only as
+    # wide as the tree it runs on: a `claude`-only consumer has no
+    # `.github/PULL_REQUEST_TEMPLATE.md`, and that is a *kept* surface the
+    # conversion repoints in place rather than deletes, so nothing here would
+    # have noticed it coming back unrepointed.
+    PLATFORM_DIRS = (".claude",)
+    PLATFORMS = ("claude",)
+
     def setUp(self) -> None:
-        self.root = self.make_repo(".claude")
+        self.root = self.make_repo(*self.PLATFORM_DIRS)
         self.assertEqual(self.run_install(self.root).returncode, 0)
         self.before = self.snapshot()
         self.flips: list[tuple[str, str]] = []
@@ -68,7 +76,7 @@ class RevertFixture(InstallTestCase):
         plan = conversion.build_conversion_plan(
             receipt,
             partition,
-            frozenset({"claude"}),
+            frozenset(self.PLATFORMS),
             occupied=conversion.occupied_receipt_targets(self.root, receipt),
         )
         self.assertEqual(plan.blocked, (), "fixture plan is not classifiable")
@@ -86,7 +94,7 @@ class RevertFixture(InstallTestCase):
                 manifest_data=manifest_data,
                 residual=frozenset(plan.keep) | frozenset(plan.receipts),
                 existing_files=provenance_files,
-                platforms=("claude",),
+                platforms=self.PLATFORMS,
                 consumer=consumer,
                 forced=(),
                 files_by_target={file.target.as_posix(): file for file in files},
@@ -768,6 +776,100 @@ class DryRunTests(RevertFixture):
         created = set(self.snapshot()) - before
         self.assertTrue(printed, "the dry run announced no creations")
         self.assertEqual(created - printed, set())
+
+
+class GithubRoundTripTests(RoundTripTests):
+    """The same round trip on a tree that has the `github` kept surfaces.
+
+    `RoundTripTests` runs on `.claude` alone, where the conversion is almost
+    entirely deletion. Subclassing rather than copying keeps the byte-for-byte
+    promise one assertion: a restore that regresses only for `github` fails
+    the inherited test, not a parallel one somebody forgot to update.
+    """
+
+    PLATFORM_DIRS = (".claude", ".github")
+    PLATFORMS = ("claude", "github")
+
+    def test_the_kept_surfaces_come_back_unrepointed(self) -> None:
+        """Lives here and not on the base, which has no such surface.
+
+        A conversion does not delete a kept surface -- it rewrites the pack
+        references inside it in place, which is a different operation with a
+        different inverse. `.github/PULL_REQUEST_TEMPLATE.md` is the widest of
+        them, and the inherited byte-for-byte round trip would report its
+        regression among two hundred other paths. This names it.
+        """
+
+        template = Path(".github/PULL_REQUEST_TEMPLATE.md")
+        fat_bytes = self.before[template.as_posix()]
+
+        self.convert()
+        self.assertNotEqual(
+            (self.root / template).read_bytes(),
+            fat_bytes,
+            "the conversion did not repoint the kept surface, so the inverse "
+            "this test checks is vacuous",
+        )
+
+        self.assertEqual(self.run_revert().returncode, 0)
+
+        self.assertEqual((self.root / template).read_bytes(), fat_bytes)
+
+    def test_the_dry_run_names_the_kept_surfaces_it_would_unrepoint(self) -> None:
+        """And touches none of them, which is the half a dry run can get wrong.
+
+        The undo is computed before the payload restore and applied after it,
+        so a dry run that reported the plan by computing it twice could report
+        one thing and do another. This asserts the announcement against the
+        files themselves.
+        """
+
+        self.convert()
+        converted = self.snapshot()
+
+        result = self.run_revert("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        announced = {
+            line.split(None, 1)[1]
+            for line in result.stdout.splitlines()
+            if line.startswith("would-unrepoint ")
+        }
+        self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", announced)
+        self.assertEqual(self.snapshot(), converted)
+        self.assertEqual(self.flips, [], "a dry run touched the registry")
+
+
+class UninvertibleRepointTests(RevertFixture):
+    """A kept file whose relocated reference has no traceable origin."""
+
+    PLATFORM_DIRS = (".claude", ".github")
+    PLATFORMS = ("claude", "github")
+
+    def test_a_reference_the_inverse_cannot_reproduce_refuses(self) -> None:
+        """And refuses before anything is written, not halfway through.
+
+        The undo is the thin rewrite read backwards, so it is only as sound
+        as the forward rule is injective. A machine path inside a URL is the
+        readable case: the inverse rewrites it to a repository path, and the
+        forward rule's root-relative boundary then declines to rewrite it
+        back -- proof that the restoration is not what the conversion
+        consumed. Guessing there would corrupt a link in a file the consumer
+        owns, so the whole revert stops and names the file.
+        """
+
+        self.convert()
+        template = self.root / ".github/PULL_REQUEST_TEMPLATE.md"
+        template.write_text(
+            template.read_text(encoding="utf-8")
+            + "see https://example.test/~/.agents/bin/"
+            "sd-ai-command-pack-toolchain.sh\n",
+            encoding="utf-8",
+        )
+        occupied = template.read_bytes()
+
+        self.assert_refused(self.run_revert(), ".github/PULL_REQUEST_TEMPLATE.md")
+        self.assertEqual(template.read_bytes(), occupied)
 
 
 if __name__ == "__main__":

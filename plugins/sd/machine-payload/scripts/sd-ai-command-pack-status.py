@@ -2900,6 +2900,29 @@ def fleet_api() -> Any:
     return fleet
 
 
+def runtime_pack_root(cwd: Path | None = None) -> Path:
+    """Where the fleet's last-resort pack source checkout is looked for.
+
+    `scripts/../` was the only rung for as long as every install vendored the
+    pack, and it is still the right answer inside a source checkout. A machine
+    install puts this script at `~/.agents/bin/`, where the same arithmetic
+    yields `~/.agents` -- not a pack checkout, so
+    `resolve_fleet_configuration`'s last rung refuses and `sd-status fleet`
+    reports missing configuration even when it is run from inside the very
+    checkout that holds the manifest. Ask the working directory before falling
+    back to the script's own location, and fall back to it rather than to
+    `None` so an unconfigured machine still gets that same refusal.
+    """
+
+    fleet = fleet_api()
+    own = Path(__file__).resolve().parents[1]
+    for candidate in (own, Path.cwd() if cwd is None else cwd):
+        found = fleet.find_pack_source(candidate)
+        if found is not None:
+            return found
+    return own
+
+
 def load_fleet(
     pack_root: Path,
     path: Path | None,
@@ -3554,7 +3577,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if args.mode == "fleet":
-        pack_root = Path(__file__).resolve().parents[1]
+        pack_root = runtime_pack_root()
         try:
             report = collect_fleet(
                 pack_root,

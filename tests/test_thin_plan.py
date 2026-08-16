@@ -23,6 +23,7 @@ install = _support.install
 
 import hashlib  # noqa: E402
 import os  # noqa: E402
+import threading  # noqa: E402
 
 from installer import thin  # noqa: E402
 from installer.registry import PACK_REPOSITORY  # noqa: E402
@@ -536,6 +537,53 @@ class WritabilityTests(unittest.TestCase):
         self.addCleanup(root.chmod, 0o700)
         self.assertIn("not writable", thin.writability_reason(root, "target"))
 
+    def test_the_probe_leaves_the_directory_as_it_found_it(self) -> None:
+        root = _temp_dir(self)
+        (root / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+        self.assertIsNone(thin.writability_reason(root, "target"))
+
+        self.assertEqual([entry.name for entry in root.iterdir()], ["keep.txt"])
+
+    def test_a_leftover_probe_is_neither_trusted_nor_deleted(self) -> None:
+        """A killed run's probe must not answer for the directory.
+
+        The old fixed-name probe called `touch()` on it, which succeeds on
+        write permission to that *file* rather than to the directory -- and
+        then deleted a file this function never created. A unique name asks
+        the directory itself and leaves the debris for whoever owns it.
+        """
+        root = _temp_dir(self)
+        leftover = root / ".sd-ai-command-pack-writability-probe"
+        leftover.write_text("from a killed run\n", encoding="utf-8")
+
+        self.assertIsNone(thin.writability_reason(root, "target"))
+
+        self.assertTrue(leftover.is_file())
+        self.assertEqual(leftover.read_text(encoding="utf-8"), "from a killed run\n")
+
+    def test_concurrent_probes_do_not_unlink_each_other(self) -> None:
+        """A fixed name made two callers race; the loser read as unwritable."""
+        root = _temp_dir(self)
+        barrier = threading.Barrier(4)
+        results: list[str | None] = []
+        lock = threading.Lock()
+
+        def probe() -> None:
+            barrier.wait(timeout=10)
+            reason = thin.writability_reason(root, "target")
+            with lock:
+                results.append(reason)
+
+        threads = [threading.Thread(target=probe) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertEqual(results, [None, None, None, None])
+        self.assertEqual(list(root.iterdir()), [])
+
 
 class ResweepModuleTests(unittest.TestCase):
     def test_the_shipped_resweep_imports_as_a_module(self) -> None:
@@ -846,6 +894,93 @@ class RepointPlanTests(unittest.TestCase):
         # And the bytes themselves, so a failure names the cause rather than
         # only a hash mismatch.
         self.assertEqual(path.read_bytes(), rewritten.encode("utf-8"))
+
+
+class UnrepointPlanTests(unittest.TestCase):
+    """What `--revert-thin` offers to the inverse rewrite, and what it refuses.
+
+    Same shape as `RepointPlanTests` one class up, and deliberately not folded
+    into it: the two run against opposite trees. The forward plan reads a fat
+    checkout and the undo reads a converted one, so a row that is inert in one
+    direction -- a symlink, a binary, an unreadable file -- has to be proven
+    inert separately in the other. What is new here is the refusal: the
+    inverse is only sound where it reproduces the file it was derived from.
+    """
+
+    def setUp(self) -> None:
+        self.target = _temp_dir(self)
+
+    def write(self, name: str, text: str) -> None:
+        path = self.target / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_a_relocated_reference_is_traced_back_to_its_repository_path(self) -> None:
+        self.write("doc.md", "run `~/.agents/bin/sd-ai-command-pack-status.py` here\n")
+        planned, refused = thin.planned_unrepoints(self.target, ("doc.md",))
+        self.assertEqual(refused, ())
+        self.assertEqual(
+            planned["doc.md"], "run `scripts/sd-ai-command-pack-status.py` here\n"
+        )
+
+    def test_a_reference_the_forward_rule_cannot_reproduce_is_refused(self) -> None:
+        """A machine path inside a URL: the inverse would corrupt a link.
+
+        Restoring it yields `https://example.test/~/scripts/<name>`, which the
+        forward rule's root-relative boundary declines to rewrite -- so the
+        restoration is provably not what the conversion consumed, and the
+        entry is named rather than guessed at.
+        """
+
+        self.write(
+            "doc.md",
+            "see https://example.test/~/.agents/bin/"
+            "sd-ai-command-pack-status.py\n",
+        )
+        planned, refused = thin.planned_unrepoints(self.target, ("doc.md",))
+        self.assertEqual(planned, {})
+        self.assertEqual(refused, ("doc.md",))
+
+    def test_a_kept_file_naming_nothing_relocated_is_not_planned(self) -> None:
+        self.write("plain.md", "nothing to see here\n")
+        self.assertEqual(
+            thin.planned_unrepoints(self.target, ("plain.md",)), ({}, ())
+        )
+
+    def test_a_missing_entry_is_skipped(self) -> None:
+        self.assertEqual(
+            thin.planned_unrepoints(self.target, ("absent.md",)), ({}, ())
+        )
+
+    def test_a_directory_is_skipped(self) -> None:
+        (self.target / "adir").mkdir()
+        self.assertEqual(thin.planned_unrepoints(self.target, ("adir",)), ({}, ()))
+
+    def test_a_symlink_is_skipped_even_when_its_target_matches(self) -> None:
+        self.write("real.md", "run `~/.agents/bin/sd-ai-command-pack-status.py`\n")
+        (self.target / "link.md").symlink_to(self.target / "real.md")
+        self.assertEqual(
+            thin.planned_unrepoints(self.target, ("link.md",)), ({}, ())
+        )
+
+    def test_bytes_that_are_not_utf8_are_skipped(self) -> None:
+        (self.target / "blob.bin").write_bytes(b"\xff\xfe ~/.agents/bin/x.py \x00")
+        self.assertEqual(
+            thin.planned_unrepoints(self.target, ("blob.bin",)), ({}, ())
+        )
+
+    def test_an_unreadable_file_is_skipped_rather_than_raising(self) -> None:
+        path = self.target / "locked.md"
+        path.write_text(
+            "~/.agents/bin/sd-ai-command-pack-status.py\n", encoding="utf-8"
+        )
+        path.chmod(0o000)
+        self.addCleanup(path.chmod, 0o644)
+        if os.access(path, os.R_OK):  # pragma: no cover - root ignores the mode
+            self.skipTest("this user can read a mode-000 file")
+        self.assertEqual(
+            thin.planned_unrepoints(self.target, ("locked.md",)), ({}, ())
+        )
 
 
 if __name__ == "__main__":

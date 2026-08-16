@@ -295,6 +295,19 @@ class RewriteProfile:
     # closure gates, which reason about names a payload either ships or does
     # not -- a glob is neither. Keeping them as literal pairs means each one is
     # written down, reviewable, and retired individually.
+    #
+    # A general `scripts/sd-ai-command-pack-*` -> `~/.agents/bin/...` rule was
+    # proposed after that residual class showed up in every consumer, and the
+    # completed rollout is the evidence against it: the right action per site
+    # was deletion, not repointing. A `.pre-commit-config.yaml` `files:` regex
+    # repointed at the machine path matches nothing it is allowed to match; a
+    # CI classifier arm for a path that can no longer appear in a diff is dead
+    # weight; a contract anchor asserting the payload is present asserts a
+    # falsehood. Repointing all three would have produced text that reads
+    # correct and does nothing. Every glob left in the fleet after the last
+    # conversion is either a historical record -- archived tasks, journals,
+    # review-learnings -- which must not be rewritten at all, or prose that is
+    # already correct about the thin shape.
     literal_rewrites: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -393,6 +406,64 @@ THIN_PROFILE = RewriteProfile(
 )
 
 THIN_CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {}
+
+# The thin rewrite read backwards, for `--revert-thin`.
+#
+# Only the thin profile has an inverse, and it is not an oversight that the
+# others do not: `PLUGIN_PROFILE`'s `script_template` is `{name}`, which
+# discards the directory outright, and nothing ever un-installs a payload
+# rewrite in place. A conversion is the one rewrite that runs against files a
+# consumer keeps, so it is the one that owes an undo.
+#
+# The doc pattern refuses a trailing `/` or name character so the machine
+# payload's `~/.agents/docs/SD_AI_COMMAND_PACK.md` is not read as the thin
+# directory reference plus stray text. It deliberately *allows* a trailing
+# `.`, unlike the root-relative boundary the forward rules use: the reference
+# ends sentences in prose, and excluding `.` there is what left
+# `~/.agents/docs.` untouched through a whole round trip. The bin pattern
+# needs no such guard because it consumes the whole script name.
+_THIN_SCRIPT_RESTORE_RE = re.compile(
+    rf"{re.escape(AGENTS_BIN_REFERENCE)}/({_PACK_SCRIPT_NAME})"
+)
+_THIN_DOC_RESTORE_RE = re.compile(
+    rf"{re.escape(THIN_DOC_REFERENCE)}(?![A-Za-z0-9_/-])"
+)
+
+
+def restore_thin_text(text: str) -> str:
+    """Where every relocated reference in `text` pointed before the conversion.
+
+    No `key`, and so no exemption table, unlike `rewrite_text`. An exemption
+    makes the forward rule leave `scripts/<name>` alone, which means the
+    relocated form this reads for was never produced -- there is nothing for
+    an exempt branch to decline. A machine path that turns up in an exempt
+    file for some other reason is caught by the caller's forward check below
+    rather than by a second copy of the exemption logic here.
+
+    Each rule is inverted and the rules are replayed in reverse order, which
+    is load-bearing for the literals rather than tidiness: the skills-glob
+    bullet's replacement *contains* the shorter `` `~/.agents/skills` `` that
+    another literal produces on its own, so inverting the short one first
+    would eat a substring of the long one's text and leave a bullet that no
+    inverse can finish. Reverse order consumes the long form first.
+
+    This is a right inverse, not a proven left one -- `~/.agents/docs` came
+    from a file reference and restores to one, so text that named the machine
+    directory *before* any conversion would come back naming the manual. Every
+    caller here therefore checks `rewrite_text(restore_thin_text(t)) == t`
+    before writing, and refuses rather than guessing when it does not hold.
+    That check catches a restoration that would not reproduce the file; it
+    cannot catch one that leaves a relocated reference *behind*, since an
+    unrestored reference is a fixpoint of the forward rewrite. The round-trip
+    test in `tests/test_thin_revert.py` is what covers that direction, and it
+    is what found the boundary bug the doc pattern above now documents.
+    """
+
+    text = _THIN_DOC_RESTORE_RE.sub(lambda _match: PACK_DOC_REFERENCE, text)
+    text = _THIN_SCRIPT_RESTORE_RE.sub(lambda match: f"scripts/{match.group(1)}", text)
+    for literal, replacement in reversed(list(THIN_PROFILE.literal_rewrites.items())):
+        text = text.replace(replacement, literal)
+    return text
 
 MACHINE_PROFILE = RewriteProfile(
     name="machine",

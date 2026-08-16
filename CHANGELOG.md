@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.71.22 - 2026-08-16
+
+### Fixed
+
+- `install.py TARGET --revert-thin` now undoes the conversion's repoint of the
+  files it keeps. A conversion does not delete a kept surface -- it rewrites
+  the pack references inside it in place -- and the payload restore has no
+  inverse for that: `.github/PULL_REQUEST_TEMPLATE.md` is in
+  `FORCE_PRESERVED_TARGETS`, so `install_file` returns `PRESERVED` for it and
+  the revert exited zero with the consumer's own template still pointing at
+  `~/.agents/docs`, which a fat checkout cannot follow. The undo is the thin
+  rewrite read backwards, applied to the current text so post-conversion
+  consumer edits survive, and each restoration is rewritten forward again and
+  must reproduce the file byte for byte or the whole revert refuses and names
+  it. Found by widening the round-trip test to a tree that installs the
+  `github` platform; on `.claude` alone the conversion is almost entirely
+  deletion and nothing exercised the kept-surface path.
+- The thin `~/.agents/docs` reference is restored when a sentence ends on it.
+  The forward rule has a leading boundary and no trailing one, so it rewrites
+  `docs/SD_AI_COMMAND_PACK.md.`; an inverse that mirrored the forward boundary
+  on the trailing side read the period as a path character and left the
+  reference relocated -- through a full revert, exit zero.
+- `install.py TARGET --thin` and `--revert-thin` no longer misreport a
+  writable registry root as unwritable when two conversions probe it at once.
+  The probe was a fixed `probe.touch()`/`probe.unlink()` pair: the first
+  unlink wins and the second raises `FileNotFoundError`, and a leftover probe
+  from a killed run made `touch()` answer about write permission to that file
+  rather than to the directory. It is now `tempfile.mkstemp`, which creates
+  under `O_EXCL` with a unique name and so fails exactly when the directory
+  cannot take a new entry.
+- `sd-status fleet` finds the fleet manifest when it is run from inside a pack
+  source checkout by a machine install. `scripts/../` was the only rung, and a
+  machine install puts the script at `~/.agents/bin/`, where that arithmetic
+  yields `~/.agents` -- not a pack checkout, so the last resolver rung refused
+  and the command reported missing configuration from inside the very checkout
+  holding the manifest. The runtime root now asks the working directory too,
+  through a new public `find_pack_source` in the shared fleet library.
+
 ## 0.71.21 - 2026-08-16
 
 ### Fixed
