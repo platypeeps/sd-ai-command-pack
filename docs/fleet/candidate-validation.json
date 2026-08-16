@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-16T08:01:37Z",
+  "validatedAt": "2026-08-16T08:32:56Z",
   "packVersion": "0.71.21",
   "payloadDigest": "sha256:3c7359c64ccdd434d8842890af795c19898914574f7eed31857fe6753703d706",
-  "fleetManifestDigest": "sha256:38ad47edc21c8cede997ae777f259d189bd1d202a4386953c31a5b163706bd6f",
+  "fleetManifestDigest": "sha256:67d6949a1f929b43e8b7f3706503c0b3433817de7e713ff3c82498ba00c2ec3f",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
@@ -68,8 +68,8 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "efad5789ce8b1bd00c85dea523d0e67b4e98a035",
-      "status": "blocked",
+      "baseCommit": "4e7ae2914c678b7420182e56e1b486d6cc4f7174",
+      "status": "passed",
       "prepares": [
         [
           "bash",
@@ -78,23 +78,22 @@
       ],
       "checks": [
         [
-          "node",
-          "scripts/sd-ai-command-pack-review-preflight.mjs"
+          "bash",
+          "-c",
+          "node \"$HOME/.agents/bin/sd-ai-command-pack-review-preflight.mjs\""
         ],
         [
           "node",
           "scripts/ops-check.mjs"
         ]
       ],
-      "reasons": [
-        "66 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "02f1db7a05523fff3f3a78ba3db5bce554a3f3ff",
-      "status": "blocked",
+      "baseCommit": "4378f2ce1cc9126a8d5b27b788d1aafc0f18dbda",
+      "status": "passed",
       "prepares": [
         [
           "bash",
@@ -110,26 +109,22 @@
           "--include-working-tree"
         ]
       ],
-      "reasons": [
-        "44 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "8dda38514f38453a423b3b269cf2a8263f551691",
-      "status": "blocked",
+      "baseCommit": "e2441d1fa1e10c6686b85faed80699d24021709d",
+      "status": "passed",
       "prepares": [],
       "checks": [
         [
           "bash",
-          "scripts/sd-ai-command-pack-housekeeping.sh",
-          "--self-test"
+          "-c",
+          "bash \"$HOME/.agents/bin/sd-ai-command-pack-housekeeping.sh\" --self-test"
         ]
       ],
-      "reasons": [
-        "31 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "sd-github-review",
@@ -163,8 +158,8 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "a5cb2287f885c09878f72c6aafa0c115553dd281",
-      "status": "blocked",
+      "baseCommit": "b07d5cf733bf42d6ea3d021403f75a88c5721920",
+      "status": "passed",
       "prepares": [
         [
           "bash",
@@ -181,9 +176,7 @@
           "tools/check_copilot_instruction_contract.py"
         ]
       ],
-      "reasons": [
-        "174 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     }
   ]
 }
