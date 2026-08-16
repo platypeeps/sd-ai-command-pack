@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "familyOrder": [
+    "orientation-knowledge",
+    "planning-backlog",
+    "verification-improvement",
+    "pull-requests-shipping",
+    "maintenance-fleet"
+  ],
+  "skills": [
+    {
+      "name": "sd-help",
+      "family": "orientation-knowledge"
+    },
+    {
+      "name": "sd-status",
+      "family": "orientation-knowledge"
+    },
+    {
+      "name": "sd-continue",
+      "family": "orientation-knowledge"
+    },
+    {
+      "name": "sd-start",
+      "family": "orientation-knowledge"
+    },
+    {
+      "name": "sd-finish-work",
+      "family": "orientation-knowledge"
+    },
+    {
+      "name": "sd-create-pr",
+      "family": "pull-requests-shipping"
+    },
+    {
+      "name": "sd-work-backlog",
+      "family": "planning-backlog"
+    },
+    {
+      "name": "sd-audit-repo",
+      "family": "verification-improvement"
+    },
+    {
+      "name": "sd-fix-ci",
+      "family": "verification-improvement"
+    },
+    {
+      "name": "sd-update-deps",
+      "family": "maintenance-fleet"
+    },
+    {
+      "name": "sd-fleet-refresh",
+      "family": "maintenance-fleet"
+    },
+    {
+      "name": "sd-test-gaps",
+      "family": "verification-improvement"
+    },
+    {
+      "name": "sd-retro",
+      "family": "orientation-knowledge"
+    },
+    {
+      "name": "sd-ship",
+      "family": "pull-requests-shipping"
+    },
+    {
+      "name": "sd-review",
+      "family": "pull-requests-shipping"
+    },
+    {
+      "name": "sd-review-pr",
+      "family": "pull-requests-shipping"
+    },
+    {
+      "name": "sd-review-learnings",
+      "family": "verification-improvement"
+    },
+    {
+      "name": "sd-check",
+      "family": "verification-improvement"
+    },
+    {
+      "name": "sd-housekeeping",
+      "family": "pull-requests-shipping"
+    },
+    {
+      "name": "sd-update-spec",
+      "family": "orientation-knowledge"
+    }
+  ],
+  "platforms": [
+    "antigravity",
+    "claude",
+    "codebuddy",
+    "codex",
+    "cursor",
+    "devin",
+    "droid",
+    "gemini",
+    "github",
+    "kilo",
+    "kiro",
+    "opencode",
+    "pi",
+    "qoder",
+    "reasonix",
+    "shared",
+    "trae",
+    "zcode"
+  ],
+  "sharedReferences": {
+    "sd-help": [
+      "references/command-catalog.md",
+      "references/completion-lifecycle.md",
+      "references/environment-blocked-recovery.md",
+      "references/examples.md",
+      "references/recovery-artifacts.md",
+      "references/structured-questions.md"
+    ],
+    "sd-ship": [
+      "references/watch-coordinator.md"
+    ],
+    "sd-update-spec": [
+      "references/architecture.md",
+      "references/repository-map.md",
+      "references/obsidian-kb.md"
+    ],
+    "sd-work-backlog": [
+      "references/autonomous-loop.md",
+      "references/ledger-recovery.md",
+      "references/ownership-recovery.md",
+      "references/run-recovery.md",
+      "references/terminal-reconciliation.md"
+    ]
+  }
+}
