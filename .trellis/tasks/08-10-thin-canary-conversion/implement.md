@@ -214,7 +214,7 @@ PR plus the pack-side registry flip written by `--thin`:
 
 | consumer | conversion PR | conversion commit | pack CI steps at post-merge HEAD |
 |---|---|---|---:|
-| rwbp-coordinator | #231 | `ada371e` | 1 (a comment in `.github/workflows/ci.yml:111`, not a step) |
+| rwbp-coordinator | #231 | `ada371e` | 1 (a comment on line 111 of that consumer's own `ci.yml` workflow, not a step) |
 | loadsmith | #228 | `52c51fe` | 0 |
 | hoa-manager | #257 | `6d2fe26` | 0 |
 

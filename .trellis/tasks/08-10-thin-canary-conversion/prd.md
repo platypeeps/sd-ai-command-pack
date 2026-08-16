@@ -434,7 +434,7 @@ Recorded 2026-08-16. Each row names the instrument, not a reading of the diff.
 | each canary's own citations rewritten, `blockers: 0` | all three canaries on a clean tree |
 | `installMode == "thin"`, `pin.state == "present"`, `pin.version == machineScope.packVersion` | `sd-status fleet --json` at 0.71.22: 8 consumers, `mismatches: 0` |
 | `machineScope.state == "installed"`, `comparison == "current"` | same run, after the machine install and plugin update to 0.71.22 |
-| CI green post-conversion with zero pack CI steps | loadsmith 0, hoa-manager 0; rwbp-coordinator's single hit is a comment at `.github/workflows/ci.yml:111` |
+| CI green post-conversion with zero pack CI steps | loadsmith 0, hoa-manager 0; rwbp-coordinator's single hit is a comment on line 111 of that consumer's own `ci.yml` workflow |
 | no vendored payload beyond the retained slices | loadsmith's own pre-conversion receipt, 201 entries, against 31 after; only `.gitignore` survives the block strip and it carries the adopted header |
 | Codex advisory recorded rather than cleared | three `undeclared codex usage` rows under `advisories`, `blockers` empty |
 | `.prism/rules.json` names no removed path | subsumed by rwbp-coordinator's `clear` verdict, which is the instrument this criterion asks for |
