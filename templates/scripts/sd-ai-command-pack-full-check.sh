@@ -8,12 +8,15 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # is the agents directory rather than any checkout -- so the old derivation
 # ended the run at `fatal: not a git repository` before the first check.
 #
-# Same ladder the shared shell library already uses for its cache root
-# (`sd-ai-command-pack-shell-lib.sh:172`), rather than a second convention:
-# an explicit override, then the working tree the caller is standing in, then
-# the hosting checkout. Under a fat install invoked from inside the repository
-# the second rung resolves to exactly what the third one used to return, so
-# every existing caller keeps its current root.
+# The first two rungs are the shared shell library's, so the override name and
+# the caller's-working-tree rule stay one convention rather than two:
+# `sd-ai-command-pack-shell-lib.sh:172` reads SD_AI_COMMAND_PACK_REPO_ROOT (or
+# an already-set REPO_ROOT) and then `git rev-parse --show-toplevel`. The third
+# rung is this script's own: the library fails there, which it can afford
+# because it runs after a root is established, while this is where the root
+# gets established. Under a fat install invoked from inside the repository the
+# second rung resolves to exactly what the third one used to return, so every
+# existing caller keeps its current root.
 REPO_ROOT="${SD_AI_COMMAND_PACK_REPO_ROOT:-}"
 if [ -z "$REPO_ROOT" ]; then
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
