@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 389
+- **Total Sessions**: 391
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1719 | Active |
+| `journal-8.md` | ~1800 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 391 | 2026-08-17 | Correct the Trellis drift wording from minors to patch releases | `073b846f`, `58a9c90b` | `task/fleet-one-path-planning-split` |
+| 390 | 2026-08-17 | Plan the canonical fleet path and split its Trellis leg | `cc244be2` | `task/fleet-one-path-planning-split` |
 | 389 | 2026-08-17 | Record the local bash 3.2 syntax gate gap as a task | `214a2c19` | `task/record-local-bash32-syntax-gap` |
 | 388 | 2026-08-17 | Park the worktree developer-identity fix; split its reporting half | `b82f55fc` | `task/park-developer-identity-worktree-fallback` |
 | 387 | 2026-08-16 | work-loop start refuses to replace a non-resumable ledger | `eef0e6ac`, `d3340745`, `a61ed83b`, `6afeb3f4`, `afaa85a4` | `task/08-07-work-loop-start-refuses-stopped-ledger` |
