@@ -202,9 +202,13 @@ A repository-wide check in `make check` that fails on the forbidden forms:
 - any `node`/`bash`/`python3` directly invoking a `sd-ai-command-pack-*` helper;
 - any pack helper named as the second operand of `run --`.
 
-The gate enumerates from the filesystem — every `SKILL.md` under
-`.agents/skills/` — rather than from a list of known sites, so a skill added
-later is covered without editing the gate.
+The gate enumerates from the filesystem — every `*.md` under
+`.agents/skills/`, not just `SKILL.md` — rather than from a list of known
+sites, so a skill or reference document added later is covered without editing
+the gate. The wider glob is load-bearing: eight `references/` and `charters/`
+files carry 13 of the 50 class-A occurrences and are executed exactly like
+`SKILL.md` text, so a `SKILL.md`-only gate would pass a tree with thirteen live
+defects in it.
 
 ## Tradeoffs and what this costs
 
