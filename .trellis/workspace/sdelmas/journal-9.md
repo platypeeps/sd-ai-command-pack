@@ -46,3 +46,39 @@ Review of PR #502 found the task's site counts were measured against SKILL.md al
 ### Next Steps
 
 - None - task complete
+
+
+## Session 398: Carry the wider gate scope into design.md
+
+**Date**: 2026-08-17
+**Task**: Carry the wider gate scope into design.md
+**Branch**: `task/plugin-path-version-split-design`
+
+### Summary
+
+Review of PR #502 found design.md's Gate section still scoped to SKILL.md after implement.md Step 4 had been widened to every *.md under .agents/skills/. Corrected design.md so the two artifacts describe the same gate.
+
+### Main Changes
+
+- design.md's Gate section now globs every *.md under .agents/skills/ and states why the wider glob is load-bearing: eight reference and charter files carry 13 of the 50 class-A occurrences
+- Recorded that the previous round's cross-artifact sweep searched for the changed counts but not for the scope wording that produced them, which is why the stale copy survived
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `49c877dda0f231e771fb0f9235c7decbfec6a305` | fix(task): carry the wider gate scope into design.md |
+
+### Testing
+
+- [OK] Sweep for SKILL.md-scope statements across all three artifacts: design.md, implement.md Step 0, and implement.md Step 4 now agree on *.md
+- [OK] review-preflight: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

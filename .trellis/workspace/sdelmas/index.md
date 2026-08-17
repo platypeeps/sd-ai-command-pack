@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 397
+- **Total Sessions**: 398
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~38 | Active |
+| `journal-9.md` | ~75 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 398 | 2026-08-17 | Carry the wider gate scope into design.md | `49c877dda0f231e771fb0f9235c7decbfec6a305` | `task/plugin-path-version-split-design` |
 | 397 | 2026-08-17 | Correct the plugin-path task's scope figures to the whole skill tree | `2d39a97ca06606b6b2c76bf7a4c5be3296f42e49` | `task/plugin-path-version-split-design` |
 | 396 | 2026-08-17 | Design the pack-helper resolution rule for 08-17-plugin-path-version-split | `8d939933c5ffae9af1760614ead24818a12a2e4e` | `task/plugin-path-version-split-design` |
 | 395 | 2026-08-17 | Correct a volatility claim contradicted by its own measurement table | `dd962d640badad6bb44271f4d5ecefcbf59f0130` | `task/fleet-one-path-remeasure` |
