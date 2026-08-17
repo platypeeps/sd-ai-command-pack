@@ -3250,6 +3250,38 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(archived["replacedRunId"], state["runId"])
         self.assertEqual(archived["state"], json.loads(before.decode("utf-8")))
 
+    def test_reset_accepts_a_run_id_other_than_the_discarded_one(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, state = self.make_persisted_status(
+            module, "stopped"
+        )
+        outgoing = state_path.read_bytes()
+
+        result, stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--reset",
+                "--run-id",
+                "fresh-run",
+                "--json",
+            ],
+        )
+        self.assertEqual(result, 0, stderr)
+        self.assertEqual(json.loads(stdout)["runId"], "fresh-run")
+
+        archived = json.loads(
+            (state_path.parent / module.REPLACED_LEDGER_NAME).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(archived["replacedRunId"], state["runId"])
+        self.assertEqual(archived["state"], json.loads(outgoing.decode("utf-8")))
+
     def test_resume_reactivates_a_stopped_run_without_resetting_its_history(
         self,
     ) -> None:

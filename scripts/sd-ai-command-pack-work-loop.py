@@ -2956,20 +2956,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     raise WorkLoopError(
                         "existing loop state belongs to a different repository identity"
                     )
+                if args.reset:
+                    # --reset discards this ledger deliberately, so a differing
+                    # --run-id names the replacement rather than mismatching the
+                    # run being replaced. Only reusing the discarded ID is
+                    # refused: that is the one value that makes the fresh ledger
+                    # indistinguishable from the run it replaced.
+                    if args.run_id == state["runId"]:
+                        raise WorkLoopError(
+                            f"refusing to mint a new run under the discarded run "
+                            f"ID {state['runId']}; omit --run-id to reset"
+                        )
                 # Hoisted out of the resume branch below: a run ID naming an
                 # existing ledger means "this specific run" for every status it
                 # can hold, and the non-resumable ones are exactly where a fresh
                 # ledger minted under that ID is indistinguishable from the run
                 # the caller meant to resume.
-                if args.run_id and args.run_id != state["runId"]:
+                elif args.run_id and args.run_id != state["runId"]:
                     raise WorkLoopError(
                         f"loop state for this repository already exists as run "
                         f"{state['runId']}"
-                    )
-                if args.reset and args.run_id == state["runId"]:
-                    raise WorkLoopError(
-                        f"refusing to mint a new run under the discarded run ID "
-                        f"{state['runId']}; omit --run-id to reset"
                     )
                 if args.reset:
                     replaced = state
