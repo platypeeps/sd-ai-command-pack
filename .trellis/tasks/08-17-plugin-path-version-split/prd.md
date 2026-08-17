@@ -24,8 +24,10 @@ $ python3 -c '...installed_plugins.json...'
 user 0.71.29 -
 ```
 
-The running session resolves every bare `sd-ai-command-pack-*` name to 0.71.22
-while the installed plugin is 0.71.29. The operator report of this defect
+Any bare `sd-ai-command-pack-*` name the session resolves therefore lands on
+0.71.22 while the installed plugin is 0.71.29. (How much of the pack actually
+resolves that way is the subject of the amendment below: less than this PRD
+originally assumed.) The operator report of this defect
 described the same split at a different pair of versions: binaries at 0.71.13
 under a skill loaded from 0.71.14.
 
@@ -49,13 +51,13 @@ First match wins, so the *oldest* surviving entry is the one that answers. The
 pack's own cache retains 12 versions from 0.71.1 to 0.71.29, 63 MB, with no
 mechanism that removes one.
 
-**The pack invokes its binaries by bare name.** Shipped skills call
-`sd-ai-command-pack-review-preflight.mjs`, `sd-ai-command-pack-pr-eligibility.py`,
-`sd-ai-command-pack-full-check.sh`, and six more without a path, and zero
-shipped skills reference `$HOME/.agents/bin` or `CLAUDE_PLUGIN_ROOT`. Every one
-of those calls is resolved by whatever `PATH` happens to name. A skill from one
-release therefore drives helpers from another, silently, and the failure mode is
-a validator or gate behaving to a contract the skill does not describe.
+**The pack has no single rule for naming its own binaries.** A skill from one
+release can therefore drive helpers from another, silently, and the failure mode
+is a validator or gate behaving to a contract the skill does not describe.
+
+*(Corrected 2026-08-17 — see the amendment below. The original text of this
+paragraph claimed nine bare-name call sites all resolved through `PATH`. That
+is not what the skills do.)*
 
 This is distinct from the machine-scope skew `sd-status` already reports. That
 line compares the *installed* pack against the target and is now `current`;
@@ -68,14 +70,17 @@ it says nothing about which copy a given process will actually execute.
    cross-version execution is the defect; picking a winner without saying so is
    not a fix.
 2. The resolution rule is one rule, stated once, and every shipped skill uses
-   it. Nine bare-name call sites across the skills are the current surface;
-   the fix is not nine local edits that can drift apart again.
+   it. Three resolution forms are in use across the skills today and the
+   dominant one cannot work from a thin consumer at all; the fix is one rule
+   applied everywhere, not per-site edits that can drift apart again.
 3. `sd-status` reports the split when it exists — the resolved binary version
    beside the loaded skill version — so an operator sees it without reproducing
    it by hand. The existing machine-scope line does not cover this and must not
    be overloaded to imply it does.
 4. The reporting path works from a consumer checkout, where the pack is thin and
-   the skill root is the machine install rather than a vendored tree.
+   the skill root is the machine install rather than a vendored tree. This is
+   not only about reporting: today no shipped skill's helper invocation runs
+   there at all.
 5. Nothing in this task prunes another tool's plugin cache, edits `PATH` for the
    user, or writes into a consumer checkout. Cache retention is Claude Code's,
    not the pack's; this task may recommend, never reach in.
@@ -118,3 +123,63 @@ reported `machine: installed 0.71.29 / status: current`:
   not the machine install at `~/.agents/bin`.
 - 12 retained cache versions, 63 MB, none pruned.
 - Operator report of the same split at 0.71.13 binaries under a 0.71.14 skill.
+
+## Amendment, 2026-08-17: what the skills actually do
+
+Written while starting `design.md`, by enumerating every
+`sd-ai-command-pack-*.{mjs,py,sh}` reference under `.agents/skills/` rather than
+by re-reading the PRD. Four corrections, and one defect this PRD did not know
+about.
+
+**Three resolution forms are in use, not one.**
+
+| Form | Occurrences | Resolved by |
+|---|---|---|
+| `scripts/sd-ai-command-pack-*` | 50+ | the current working directory |
+| bare name | 9 | `PATH` |
+| `$HOME/.agents/bin/...` | 0 in skills | the machine install |
+
+**Only one bare-name occurrence is an executable invocation.** Of the nine, the
+sole call site is `sd-create-pr/SKILL.md:213`, inside a `command -v` guard. The
+other eight are prose naming a helper in descriptive text, and two of those
+(`sd-review-pr/SKILL.md:262-263`) are a *negative* instruction telling the
+reader not to fall back to those scripts. Prose naming a helper is not a
+resolution defect, so requirement 2's surface is smaller than stated in one
+direction and much larger in another.
+
+**The dominant form is not `PATH`-resolved at all.** `scripts/…` resolves
+against the working directory, so it silently binds to whatever checkout the
+skill happens to run in. That is a different failure than the version split and
+it is the more common one.
+
+**The convention this task was going to invent already exists.**
+`docs/fleet/consumers.json` already invokes two helpers as
+`node "$HOME/.agents/bin/sd-ai-command-pack-review-preflight.mjs"` and
+`bash "$HOME/.agents/bin/sd-ai-command-pack-housekeeping.sh"`. The machine
+install is the established consumer-side answer; the shipped skills simply do
+not use it. Requirement 2 is therefore *adopt the existing rule everywhere*,
+not *choose a rule*.
+
+**The defect this PRD missed.** `sd-create-pr/SKILL.md:213-217` guards on
+`PATH` **or** `scripts/`, then unconditionally invokes `node
+scripts/sd-ai-command-pack-review-preflight.mjs`. On a thin consumer the helper
+is on `PATH` and absent from `scripts/`, so the guard passes and the next line
+throws. Reproduced read-only in `~/repos/platypeeps/loadsmith`:
+
+```
+guard: PASSES (helper is on PATH)
+scripts/ copy: ABSENT
+node:internal/modules/cjs/loader:1573
+  throw err;
+```
+
+This is version-independent: it fails identically when every version agrees. It
+is in scope because it has the same root cause — no single rule for resolving a
+pack helper — and because the pre-publication gate it disables is the one thing
+`sd-create-pr` runs before pushing.
+
+**Consequence for scope.** `~/.agents/bin` holds 28 helpers and is **not** on
+`PATH` on this machine, while the only pack `PATH` entry is the plugin cache at
+`sd/0.71.22/bin`. So a rule of "always use `$HOME/.agents/bin`" is executable
+today without touching `PATH`, which requirement 5 forbids anyway. That is the
+rule this task should adopt.
