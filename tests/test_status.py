@@ -3276,6 +3276,31 @@ class StatusTests(InstallTestCase):
         self.assertIsNone(section["pluginDetail"])
         self.assertEqual(section["comparison"], "current")
 
+    def test_duplicate_versions_are_compared_after_normalization(self) -> None:
+        # Reconciliation compares the canonical value, not the raw one. Two
+        # entries differing only past `safe_text`'s 80-character limit are the
+        # same version to every consumer of this field, so treating them as a
+        # conflict would refuse on a difference nothing can observe.
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        plugin_id = status.MACHINE_PLUGIN_ID
+        home, state_home = self.machine_scratch()
+        long_version = "9.9.9+" + ("b" * 100)
+        truncated = status.safe_text(long_version, limit=80)
+        self.assertNotEqual(truncated, long_version)
+        self.write_machine_receipt(state_home, pack_version=truncated)
+        listing = self.plugin_listing(
+            {"id": plugin_id, "version": long_version, "scope": "user"},
+            {"id": plugin_id, "version": long_version + "TAIL", "scope": "project"},
+        )
+
+        with self.stub_claude(status, listing):
+            section = self.machine_section(status, root, home, state_home)
+
+        self.assertEqual(section["pluginVersion"], truncated)
+        self.assertIsNone(section["pluginDetail"])
+        self.assertEqual(section["comparison"], "current")
+
     def test_agreeing_duplicate_entries_still_reach_a_skew_verdict(self) -> None:
         # The alarm the refusal suppressed. The fleet skew tests inject
         # `comparison="skew"` through the section fixture, so they prove the
