@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 388
+- **Total Sessions**: 389
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1676 | Active |
+| `journal-8.md` | ~1719 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 389 | 2026-08-17 | Record the local bash 3.2 syntax gate gap as a task | `214a2c19` | `task/record-local-bash32-syntax-gap` |
 | 388 | 2026-08-17 | Park the worktree developer-identity fix; split its reporting half | `b82f55fc` | `task/park-developer-identity-worktree-fallback` |
 | 387 | 2026-08-16 | work-loop start refuses to replace a non-resumable ledger | `eef0e6ac`, `d3340745`, `a61ed83b`, `6afeb3f4`, `afaa85a4` | `task/08-07-work-loop-start-refuses-stopped-ledger` |
 | 386 | 2026-08-16 | Leftover local branches no longer block housekeeping; anomalies gain typed severity | `34249d2f`, `0a0cd767`, `01d7a3c2`, `c5d93d52`, `849946ec` | `task/08-07-status-anomaly-severity` |
