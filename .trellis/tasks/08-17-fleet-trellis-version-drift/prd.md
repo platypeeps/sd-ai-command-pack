@@ -35,12 +35,13 @@ This repository vendors **0.6.14**. All eight consumers are on **0.6.7**.
 
 Two distinct defects:
 
-**The drift itself.** Seven patch releases of Trellis changes are missing from every
-consumer, including the scripts the pack's own skills call into. The vendored
-compatibility spec exists (`.trellis/spec/tooling/vendored-trellis-compatibility.md`)
-precisely because pack behavior depends on the vendored version; eight consumers
-running a version this repository stopped testing against is a standing
-compatibility risk, not a cosmetic lag.
+**The drift itself.** Seven patch releases of Trellis changes are missing from
+every consumer, including the scripts the pack's own skills call into. The
+vendored compatibility spec exists
+(`.trellis/spec/tooling/vendored-trellis-compatibility.md`) precisely because
+pack behavior depends on the vendored version; eight consumers running a
+version this repository stopped testing against is a standing compatibility
+risk, not a cosmetic lag.
 
 **The drift is invisible where operators look.** A thin consumer's fleet row
 reports its pin instead of an installed-versus-target pair, by design — a thin
