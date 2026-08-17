@@ -1600,3 +1600,46 @@ Removed the leftover-branch strict anomaly that made every successful merge repo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 387: work-loop start refuses to replace a non-resumable ledger
+
+**Date**: 2026-08-16
+**Task**: work-loop start refuses to replace a non-resumable ledger
+**Branch**: `task/08-07-work-loop-start-refuses-stopped-ledger`
+
+### Summary
+
+start silently overwrote a stopped or completed ledger through its new_state fall-through, and the --run-id guard sat inside the resume branch it could never reach. start now refuses, --resume reactivates in place, and --reset archives the outgoing ledger to a one-generation sibling.
+
+### Main Changes
+
+- Refuse a non-resumable ledger in start, naming the status and both flags; add mutually exclusive --resume and --reset
+- Hoist the --run-id mismatch guard to cover every persisted status, with --reset refusing only the discarded run's own ID
+- Archive the outgoing ledger to a replaced.json sibling after the lock is held, and report it from status as replacedLedger
+- Document the contract in the pack docs, the sd-work-backlog skill and its run-recovery reference, and both spec guidelines
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eef0e6ac` | fix(work-loop): refuse to replace a non-resumable ledger in start |
+| `d3340745` | test(work-loop): cover unreadable and mistyped replaced-ledger siblings |
+| `a61ed83b` | fix(work-loop): let --reset choose a new run ID |
+| `6afeb3f4` | docs(spec): scope the replacedLedger contract to the two ledger shapes |
+| `afaa85a4` | chore(task): tick acceptance criteria and record the task branch |
+
+### Testing
+
+- [OK] tests.test_work_loop: 113 tests, OK (4 target tests confirmed red at HEAD first)
+- [OK] make check: 0 failures
+- [OK] Copilot review rounds 1-3: 2 inline findings and 1 suppressed finding accepted and fixed; round 3 clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
