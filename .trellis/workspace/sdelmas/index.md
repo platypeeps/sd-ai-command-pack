@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-8.md`
-- **Total Sessions**: 395
+- **Active File**: `journal-9.md`
+- **Total Sessions**: 399
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1958 | Active |
+| `journal-9.md` | ~112 | Active |
+| `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +37,10 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 399 | 2026-08-17 | Make the plugin-path plan able to pass its own gate | `cd70e0d2621235ee2d934639c2e829ae4364d645` | `task/plugin-path-version-split-design` |
+| 398 | 2026-08-17 | Carry the wider gate scope into design.md | `49c877dda0f231e771fb0f9235c7decbfec6a305` | `task/plugin-path-version-split-design` |
+| 397 | 2026-08-17 | Correct the plugin-path task's scope figures to the whole skill tree | `2d39a97ca06606b6b2c76bf7a4c5be3296f42e49` | `task/plugin-path-version-split-design` |
+| 396 | 2026-08-17 | Design the pack-helper resolution rule for 08-17-plugin-path-version-split | `8d939933c5ffae9af1760614ead24818a12a2e4e` | `task/plugin-path-version-split-design` |
 | 395 | 2026-08-17 | Correct a volatility claim contradicted by its own measurement table | `dd962d640badad6bb44271f4d5ecefcbf59f0130` | `task/fleet-one-path-remeasure` |
 | 394 | 2026-08-17 | Re-measure the fleet for 08-08-fleet-one-path Step 0 | `94b0fcb6ef0c846a616ca59938d668e44a41444f` | `task/fleet-one-path-remeasure` |
 | 393 | 2026-08-17 | Clear preflight on the plugin PATH-versus-skill task | `044e35d0` | `task/plugin-path-version-split` |
