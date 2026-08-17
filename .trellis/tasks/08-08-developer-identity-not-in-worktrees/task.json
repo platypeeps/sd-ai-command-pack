@@ -1,9 +1,9 @@
 {
   "id": "developer-identity-not-in-worktrees",
   "name": "developer-identity-not-in-worktrees",
-  "title": "The developer identity file is gitignored, so every fresh worktree fails record-session",
-  "description": ".trellis/.developer is gitignored (correctly), so it is never materialized in a new worktree and get_developer (common/paths.py:69) — the resolver all callers delegate to — reads only the worktree-local file. The remedy the tooling prints, init_developer.py, writes a second worktree-local identity rather than reusing the primary checkout's, silently forking the identity the journal path derives from. Fix the resolver to fall back to the primary checkout; keep the file uncommitted. Vendored Trellis code, so upstream-handoff-first. Makes the .trellis/.developer part of 08-07-sd-submit-pack-task requirement 8 redundant; the rest of that requirement stands.",
-  "status": "planning",
+  "title": "PARKED: The developer identity file is gitignored, so every fresh worktree fails record-session",
+  "description": ".trellis/.developer is gitignored (correctly), so it is never materialized in a new worktree and get_developer (common/paths.py:69) \u2014 the resolver all callers delegate to \u2014 reads only the worktree-local file. The remedy the tooling prints, init_developer.py, writes a second worktree-local identity rather than reusing the primary checkout's, silently forking the identity the journal path derives from. Fix the resolver to fall back to the primary checkout; keep the file uncommitted. Vendored Trellis code, so upstream-handoff-first. Makes the .trellis/.developer part of 08-07-sd-submit-pack-task requirement 8 redundant; the rest of that requirement stands.",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -22,5 +22,6 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "blockedOn": "Trellis release carrying 0740d1d6 (fallback already implemented upstream, untagged and not on fork/main) plus a vendored refresh; resume when research/staged_test_worktree_identity.py runs against the vendored tree with zero skips"
 }
