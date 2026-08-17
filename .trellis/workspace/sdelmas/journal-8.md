@@ -1769,3 +1769,44 @@ Write design.md and implement.md for 08-08-fleet-one-path, rescope its PRD aroun
 ### Next Steps
 
 - None - task complete
+
+
+## Session 391: Correct the Trellis drift wording from minors to patch releases
+
+**Date**: 2026-08-17
+**Task**: Correct the Trellis drift wording from minors to patch releases
+**Branch**: `task/fleet-one-path-planning-split`
+
+### Summary
+
+Round-2 review corrections on PR #499: 0.6.7 to 0.6.14 differ in the patch segment, not the minor, so every artifact that called it 'seven minors' was wrong. Corrected across the task pair, the journal entry that repeated it, and the pull request body, then restored the wrap the substitution broke.
+
+### Main Changes
+
+- Copilot's semver objection was verified against the version strings before acting: 0.6.7 and 0.6.14 share the minor segment 6, so the gap is seven patch releases. Corrected the 08-17-fleet-trellis-version-drift title in task.json, its prd.md heading and body sentence, the 08-08-fleet-one-path design.md note, session 390's journal entry, and the PR #499 body - five artifacts, one wrong phrase, found by enumerating with grep rather than fixing only the two spots the review pointed at.
+- Reworded implement.md's 'revertability' and 'revertable' into plain prose about reverting one leg independently, rather than swapping one abstract noun for another. The archived tasks that use 'revertable' are pre-existing house style and outside this bundle.
+- The correction commit touched only .trellis paths, so CI classified the pushed range as bookkeeping and required it to stand alone as a planning bundle. It could not: journal content changed with no sibling index update and no new session, giving journal_index_missing and journal_session_missing. A journal-only-recovery bundle could not rescue it either, because the commit it would have to cite changes a workspace path. The lesson is that a review-fix commit on a planning branch is itself bookkeeping and needs its own finalization in the same push.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `073b846f` | docs(task): correct the Trellis drift from minors to patch releases |
+| `58a9c90b` | docs(task): restore the 80-column wrap the version correction broke |
+
+### Testing
+
+- [OK] final-bundle --mode planning --base cc244be2 --head 073b846f: planning_bundle_valid, 0 advisories
+- [FAIL] final-bundle --mode planning --base ab1a1441 --head 073b846f: journal_index_missing, journal_session_missing - the CI bookkeeping range, reproduced locally from the run's own BEFORE_SHA/AFTER_SHA
+- [FAIL] final-bundle --mode planning --base 073b846f --head <journal-only>: planning_recovery_commit_scope_invalid - 073b846f changes a workspace path, which journal-only recovery does not support
+- [OK] grep for 'seven minors' across .trellis/ and docs/: 0 hits after the correction
+- [OK] All three PR #499 review threads replied to and resolved
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
