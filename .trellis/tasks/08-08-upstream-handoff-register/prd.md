@@ -50,14 +50,50 @@ Each entry must resolve to exactly one of: a filed task in the Trellis fork
     Upstream should carry `--description` in every runnable example once
     entry 11 makes it required.
 
+13. Developer identity in linked worktrees — upgrade-delivered but
+    **unreleased**. `.trellis/.developer` is gitignored, so a fresh worktree has
+    no identity and every identity-dependent script fails there. Upstream
+    already resolves it through the main working tree
+    (`common/paths.py:121-160` with `common/git.py:143-192`), introduced by
+    `0740d1d6` on `chore/task-backlog-2026-08` — untagged and not on
+    `fork/main`, so no vendored refresh can carry it yet. Pack task
+    `08-08-developer-identity-not-in-worktrees` is parked on that release chain
+    and holds a staged suite (that task's
+    `research/staged_test_worktree_identity.py`, kept outside `tests/` because
+    the repo gate fails on any skip) which skips entirely against vendored
+    0.6.14 and passes 9/0 against a copy of upstream's scripts. Resume when a
+    refresh makes it run with zero skips.
+14. Identity reporting disagrees across eight gates — Trellis fork task to file,
+    specified in pack task `08-17-trellis-identity-message-consistency`, which
+    stays **open, not parked**: the patch, its staged tests, and this entry's
+    update are all executable in this repository; only the uptake waits on the
+    same release chain as entry 13. `get_developer` returns a name or `None`, so
+    no site can tell "no identity anywhere" from "the identity file is
+    unreadable", and most of them recommend creating a second identity for a
+    broken first one (`get_developer.py:21` offers no remedy at all, and
+    `common/task_queue.py:138` raises a bare `Developer not set`). The eight
+    gates span four media: stderr prose, a JSON contract with an upstream
+    regression test, two separate returned context documents, and a raised
+    `ValueError`. Upstream's `[worktree-identity]` suite
+    (`regression.test.ts:12526-12723`) already pins some of that wording. Needs
+    one resolution carrying a reason plus one shared diagnosis, rendered per
+    medium. The patch is that task's Step 1 and is not written yet.
+
 ## Acceptance criteria
 
 - [ ] Every entry resolves to a named Trellis-fork task path, an
       upgrade-verification checkbox in 08-08-trellis-upgrade, or a recorded
       keep-workaround decision.
-- [ ] `research/` holds all nine source PRDs verbatim.
+- [ ] `research/` holds all nine source PRDs verbatim, plus the
+      paste-ready material for entries added after the consolidation.
 - [ ] Register closes only when every entry is resolved.
 
 ## Evidence
 
 2026-08-08 consolidation; source PRDs copied at drop time from git HEAD.
+
+2026-08-17: entries 13 and 14 added from
+`08-08-developer-identity-not-in-worktrees` and its split successor
+`08-17-trellis-identity-message-consistency`. Paste-ready material and the
+two-tree test evidence are in
+`research/2026-08-17-trellis-developer-identity-worktree-and-reporting.md`.

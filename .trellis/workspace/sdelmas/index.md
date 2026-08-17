@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 387
-- **Last Active**: 2026-08-16
+- **Total Sessions**: 388
+- **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1635 | Active |
+| `journal-8.md` | ~1676 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 388 | 2026-08-17 | Park the worktree developer-identity fix; split its reporting half | `b82f55fc` | `task/park-developer-identity-worktree-fallback` |
 | 387 | 2026-08-16 | work-loop start refuses to replace a non-resumable ledger | `eef0e6ac`, `d3340745`, `a61ed83b`, `6afeb3f4`, `afaa85a4` | `task/08-07-work-loop-start-refuses-stopped-ledger` |
 | 386 | 2026-08-16 | Leftover local branches no longer block housekeeping; anomalies gain typed severity | `34249d2f`, `0a0cd767`, `01d7a3c2`, `c5d93d52`, `849946ec` | `task/08-07-status-anomaly-severity` |
 | 385 | 2026-08-16 | Reconcile agreeing duplicate plugin registrations in both machine-scope entry points | `46bb8ac0`, `5716bf9d`, `09c21bd1`, `ba485c16`, `e9fa10a8` | `task/plugin-duplicate-registration-reconcile` |
