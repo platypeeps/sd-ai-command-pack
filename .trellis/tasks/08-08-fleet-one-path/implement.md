@@ -31,9 +31,20 @@ otherwise) beside `staged`, `unstaged`, and `untracked` counts; a `.get("dirty")
 prints `None` for every consumer and reads as "nothing is dirty".
 
 Reconcile every row that differs from the design's table and correct the design
-in the same session. Specifically re-derive the dirty set: it decides which
-consumers Step 6 may touch at all, and it changes without notice because the
-checkouts are other people's working trees.
+in the same session.
+
+**Do not build a skip list here.** The dirty set is volatile on a sub-hour
+timescale — `design.md`'s consequence 3 records three measurements on
+2026-08-17 that returned three different dirty sets, including one consumer
+that was dirty, then clean, then dirty again across them. This step establishes the pins,
+which are stable, and nothing else that Step 6 is allowed to rely on. Step 6
+re-checks cleanliness per consumer at the moment its lane starts and again
+immediately before any write. A skip list computed once at preflight will
+authorize a write into a checkout that went dirty in between.
+
+The 2026-08-17 19:30 measurement also cleared Step 6's **Gate A**: machine
+install and plugin both 0.71.29 against target 0.71.29, `comparison: current`.
+Re-confirm it rather than trusting this sentence; the machine can drift back.
 
 ## Step 1 — the PRD amendment is already done
 
@@ -155,8 +166,10 @@ a shell executable**: the procedure is source-only and is loaded by reading
 Expect: preflight recorded, current consumers marked `at-target`, every remaining
 selected consumer marked `skipped`, no mutation, record completed
 (`docs/FLEET_ROLLOUT.md:396`). Confirm afterwards that no consumer checkout
-changed — compare against Step 0's table, since three of them were already dirty
-before this task existed and "dirty" alone proves nothing:
+changed — compare against the table this step just recorded, not against any
+earlier one. Some consumers are dirty for reasons that predate this task, so
+"dirty" alone proves nothing; only a difference from this pass's own baseline
+does:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
@@ -169,23 +182,42 @@ reachable. It proves nothing about the pins.
 
 ## Step 6 — the rollout (gated)
 
-**Gate A, operator:** the machine install must be at the release target. It is
-behind today, and every thin consumer resolves its surfaces from it.
+**Gate A, operator — satisfied 2026-08-17.** The machine install must be at the
+release target, because every thin consumer resolves its surfaces from it. It
+now reports `installed 0.71.29; plugin 0.71.29; current`. Re-confirm from
+Step 0's output rather than trusting this note; if it has drifted back:
 
 ```bash
 bash scripts/sd-ai-command-pack-pack-update.sh   # run from this checkout; machine-scope write
 ```
 
-Do not run this without the operator asking for it, and do not proceed while the
-plugin and receipt still report `skew`.
+Do not run that without the operator asking for it, and do not proceed while the
+plugin and receipt report `skew`. Note it refuses with exit 12 when the plugin
+is registered at conflicting install paths — a project-scope install record left
+behind at an older version is the way that happens, and it is removed with
+`claude plugin uninstall <id> -s project`, which also rewrites the repository's
+tracked `.claude/settings.json` and must be restored afterwards.
 
-**Gate B, sequencing:** run `08-08-copilot-request-policy` (T-48) first if the
+**Gate B, sequencing:** run `08-08-copilot-request-policy` first if the
 one-review-per-head observation is wanted from this pass. Otherwise record
 explicitly that smoke item 2 is deferred and expect duplicate Copilot requests.
-Do not patch the request surfaces from inside a rollout lane.
+Do not patch the request surfaces from inside a rollout lane. This is an
+operator decision; the rollout does not pick a default.
 
-**Gate C, cleanliness:** exclude every dirty consumer. Never stash, reset, clean,
-or commit in another checkout. Record each exclusion in the ledger from Step 1.
+**Gate C, ownership — evaluated per lane, never precomputed.** Exclude every
+consumer whose checkout is dirty *at the moment its lane starts*, and re-check
+immediately before any write to it. Do not carry Step 0's snapshot forward:
+`design.md` consequence 3 records the set changing three times in four hours.
+Never stash, reset, clean, or commit in another checkout. Record each exclusion
+in the ledger from Step 1, with the measurement time that justified it.
+
+A consumer sitting on an active feature branch is a **separate** question from a
+dirty tree, and `FLEET_ROLLOUT.md:250` covers both ("an unrelated active task
+**or** dirty Trellis state"). The campaign builds its PR from the recorded
+default-branch commit (`:243-258`), so a feature branch does not by itself make
+the write unsafe. Whether it makes ownership ambiguous is the operator's call,
+and it is not a small population: four of eight were on one at the last
+measurement. Get an explicit answer before the first lane, and record it.
 
 Then run the campaign through its own procedure by invoking the command
 `sd-fleet-refresh` (again a command, not a shell executable). It owns preflight,

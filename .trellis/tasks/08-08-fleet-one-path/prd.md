@@ -34,9 +34,10 @@ and the rollout checklist and ledger.
 Requirements 3 and 4 are **propagation, not decisions**: `08-08-ci-lane-cost`
 owns the lane shape and its numbers, `08-08-copilot-request-policy` owns the
 request surfaces and the ruleset pass. This task links them from the
-canonical-path doc and supplies the eight real PRs that T-48's
-one-review-per-head criterion is observed on. It does not restate their figures,
-because two artifacts holding the same number is one artifact going stale.
+canonical-path doc and supplies the eight real PRs that
+`08-08-copilot-request-policy`'s one-review-per-head criterion is observed on.
+It does not restate their figures, because two artifacts holding the same
+number is one artifact going stale.
 
 The Trellis-version leg moved out entirely, to
 `08-17-fleet-trellis-version-drift`: all 8 consumers measured at 0.6.7 against
@@ -59,15 +60,25 @@ that task.
 
 **Amendment, 2026-08-17.** The third criterion previously read "All 8 consumers
 on target pack + Trellis versions after rollout". It is not satisfiable as
-written: three consumer checkouts are dirty at the time of planning
-(loadsmith, hoa-manager, mezmo_benchmark), the rollout procedure stops on a dirty
-consumer by design (`docs/FLEET_ROLLOUT.md:250`), and the standing rule forbids
-touching another checkout to clean it. A criterion whose truth depends on other
-people's working trees can never be closed, so the uniform-fleet claim is
-replaced by a complete per-consumer ledger. Measurement to compare against, from
+written: at any given moment some consumer checkout is dirty or mid-task, the
+rollout procedure stops on such a consumer by design
+(`docs/FLEET_ROLLOUT.md:250`), and the standing rule forbids touching another
+checkout to clean it. A criterion whose truth depends on other people's working
+trees can never be closed, so the uniform-fleet claim is replaced by a complete
+per-consumer ledger.
+
+Deliberately no consumer is named here. Three measurements on 2026-08-17 —
+15:30, 18:50, and 19:30 — returned three different dirty sets, and one consumer
+was dirty, then clean, then dirty again across them; `design.md` carries the
+table. A named exclusion list in a PRD is stale the day it is written and reads
+as a standing property of those repositories, which it is not.
+
+Measurement to compare against, from
 `scripts/sd-ai-command-pack-status.py fleet --json`: pins were 7x 0.71.22 and
-1x 0.71.26 against target 0.71.29. The Trellis half of the original criterion
-moved to `08-17-fleet-trellis-version-drift` with its own ledger.
+1x 0.71.26 against target 0.71.29, and that has held across all three
+measurements — the *pins* are stable, only the working trees move. The Trellis
+half of the original criterion moved to `08-17-fleet-trellis-version-drift`
+with its own ledger.
 
 ## Evidence
 

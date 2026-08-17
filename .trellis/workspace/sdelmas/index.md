@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 393
+- **Total Sessions**: 395
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1881 | Active |
+| `journal-8.md` | ~1958 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 395 | 2026-08-17 | Correct a volatility claim contradicted by its own measurement table | `dd962d640badad6bb44271f4d5ecefcbf59f0130` | `task/fleet-one-path-remeasure` |
+| 394 | 2026-08-17 | Re-measure the fleet for 08-08-fleet-one-path Step 0 | `94b0fcb6ef0c846a616ca59938d668e44a41444f` | `task/fleet-one-path-remeasure` |
 | 393 | 2026-08-17 | Clear preflight on the plugin PATH-versus-skill task | `044e35d0` | `task/plugin-path-version-split` |
 | 392 | 2026-08-17 | File the plugin PATH-versus-skill version split, and clear the machine skew that exposed it | `105c5b2f` | `task/plugin-path-version-split` |
 | 391 | 2026-08-17 | Correct the Trellis drift wording from minors to patch releases | `073b846f`, `58a9c90b` | `task/fleet-one-path-planning-split` |

@@ -10,25 +10,28 @@ carries per-consumer bespoke checks/prepares; the 8 consumers drift in Trellis
 version, pack version, review path, and Copilot policy". The thin migration
 landed in between, so two of those four premises now read differently.
 
-Measured 2026-08-17 from `scripts/sd-ai-command-pack-status.py fleet --json`
-(pin from `repositories[].pin.version`, Trellis from
-`repositories[].report.versions.trellis`):
+Measured 2026-08-17 19:30 UTC from
+`scripts/sd-ai-command-pack-status.py fleet --json` (pin from
+`repositories[].pin.version`, Trellis from
+`repositories[].report.versions.trellis`, cleanliness from
+`repositories[].report.git.workingTree.state` — there is no `git.dirty` key):
 
 | Consumer | Mode | Pin | Trellis | Tree | Branch |
 |---|---|---|---|---|---|
-| rwbp-coordinator | thin | 0.71.22 | 0.6.7 | clean | `fix/lockfile-richtext-pin` |
-| loadsmith | thin | 0.71.22 | 0.6.7 | **dirty** | `chore/store-decomposition-pr9-statics` |
-| hoa-manager | thin | 0.71.22 | 0.6.7 | **dirty** | `fix/stale-pack-citations` |
+| rwbp-coordinator | thin | 0.71.22 | 0.6.7 | clean | `deps/next-16.3.1` |
+| loadsmith | thin | 0.71.22 | 0.6.7 | clean | `main` |
+| hoa-manager | thin | 0.71.22 | 0.6.7 | **dirty** | `fix/staging-health-never-runs` |
 | rwbp-website | thin | 0.71.22 | 0.6.7 | clean | `feat/rwbpr-024-slice-2-privacy-data-tool` |
-| mezmo_benchmark | thin | 0.71.22 | 0.6.7 | **dirty** | `lead/augur-removal-consumers` |
+| mezmo_benchmark | thin | 0.71.22 | 0.6.7 | clean | `lead/repomix-ordering-evidence` |
 | se-ai-command-pack | thin | 0.71.22 | 0.6.7 | clean | `main` |
 | sd-github-review | thin | 0.71.26 | 0.6.7 | clean | `main` |
-| anomaly-metric-creator | thin | 0.71.22 | 0.6.7 | clean | `feat/repomix-map-freshness-lint` |
+| anomaly-metric-creator | thin | 0.71.22 | 0.6.7 | clean | `main` |
 
 Source repository: pack 0.71.29, release target 0.71.29, Trellis **0.6.14**.
-Machine scope: install 0.71.26, plugin 0.71.22 — `comparison: skew`.
+Machine scope: install 0.71.29, plugin 0.71.29 — `comparison: current`.
+The skew that blocked the rollout is cleared; see *Gate A is satisfied*.
 
-Three consequences for this task:
+Four consequences for this task:
 
 1. **All 8 consumers are `mode: thin`.** There is no vendored pack tree left to
    drift; the pack leg is now one number per consumer, its pin. Requirement 2 is
@@ -45,18 +48,51 @@ Three consequences for this task:
    `08-17-fleet-trellis-version-drift`, which carries both the upgrade pass and
    the reporting-visibility question. This task keeps the leg in the
    canonical-path doc and points there.
-3. **Three checkouts are dirty**, so the standing rule against touching a dirty
-   or externally owned checkout excludes loadsmith, hoa-manager, and
-   mezmo_benchmark from any rollout pass that runs today. `docs/FLEET_ROLLOUT.md:250`
-   independently stops such a consumer ("Stop when an unrelated active task or
-   dirty Trellis state makes ownership ambiguous"). The PRD's "All 8 consumers on
-   target" criterion cannot be met in a single pass; see *Acceptance criteria that
-   need restating*.
+3. **The dirty set is volatile, and a snapshot of it is not a plan.** Three
+   measurements of the same fleet on 2026-08-17:
+
+   | Time (UTC) | Dirty | Consumers on a feature branch |
+   |---|---|---|
+   | ~15:30 | loadsmith, hoa-manager, mezmo_benchmark | 5 |
+   | ~18:50 | loadsmith | 6 |
+   | 19:30 | hoa-manager | 4 |
+
+   No consumer holds still. `loadsmith` and `mezmo_benchmark` were dirty in the
+   first measurement and clean by the third. `hoa-manager` went the other way
+   twice — dirty, then clean, then dirty again — so it is a counterexample to
+   both "it will clear up" and "once dirty, stay excluded". Four consumers also
+   changed branch inside the forty minutes between the last two readings. These
+   are other people's working trees; they move while the campaign runs.
+
+   The consequence is not "the table above needs refreshing" — it is that
+   **exclusion must be decided per consumer at the moment its lane starts, and
+   re-checked immediately before any write to it.** A pass that computes its
+   skip list once at preflight will write into a checkout that went dirty in
+   between, which is the exact thing the standing rule forbids.
+   `docs/FLEET_ROLLOUT.md:250` already stops such a consumer ("Stop when an
+   unrelated active task or dirty Trellis state makes ownership ambiguous"), so
+   the procedure is right; what this task must not do is precompute a skip list
+   and treat it as authoritative.
+
+   The PRD's "All 8 consumers on target" criterion therefore cannot be met in a
+   single pass, and not because of any particular consumer — at any given
+   moment some consumer is mid-work. See *Acceptance criteria that need
+   restating*.
+
+4. **Gate A is satisfied.** The machine install and the plugin both report
+   0.71.29 against target 0.71.29, `comparison: current`. Every thin consumer
+   resolves its surfaces from that install, so the precondition that blocked
+   `implement.md` Step 6 is cleared. Two gates remain and neither is this
+   task's to decide alone: the `08-08-copilot-request-policy` sequencing
+   question, and whether a consumer sitting on an active feature branch counts
+   as ambiguous ownership under `FLEET_ROLLOUT.md:250`. Four of eight are on
+   one right now.
 
 ## The canonical path: four legs, four owners
 
 The doc requirement 1 asks for is normative about the *value* of each leg and
-about *which task owns changing it*. It decides nothing that T-13 or T-48 owns.
+about *which task owns changing it*. It decides nothing that
+`08-08-ci-lane-cost` or `08-08-copilot-request-policy` owns.
 
 | Leg | Canonical value | Observed | Mechanism | Owner |
 |---|---|---|---|---|
@@ -150,8 +186,8 @@ that repository's own workflow.
 The number that makes it matter, from that task's PRD: the macOS leg is 73% of
 billable minutes at the 10× multiplier, and `$0` here only because this
 repository is public. This task does not re-derive it and does not re-decide the
-lane shape; a design that restated T-13's numbers would give two artifacts to
-keep in sync and no extra guarantee.
+lane shape; a design that restated `08-08-ci-lane-cost`'s numbers would give
+two artifacts to keep in sync and no extra guarantee.
 
 ## Requirement 4: Copilot policy propagation
 
@@ -159,14 +195,15 @@ Owned by `08-08-copilot-request-policy`. Its requirement 4 is an operator pass
 switching the repo-level automatic review ruleset off on all 8 repos, and its
 acceptance criteria include "One Copilot review per PR head observed on a smoke
 PR (no duplicates)". That observation happens on **this** task's rollout PRs —
-which is the whole reason the two tasks are sequenced rather than merged: T-48
-changes the request surfaces, this task provides the eight real PRs that prove
-the change fleet-wide.
+which is the whole reason the two tasks are sequenced rather than merged:
+`08-08-copilot-request-policy` changes the request surfaces, this task provides
+the eight real PRs that prove the change fleet-wide.
 
-Sequencing consequence: a rollout pass that runs before T-48 lands will show
-duplicate Copilot requests on its PRs, and that is not this task's defect. Run
-T-48 first, or accept the duplicates and record that the smoke observation is
-deferred. Do not "fix" it inside a rollout lane.
+Sequencing consequence: a rollout pass that runs before
+`08-08-copilot-request-policy` lands will show duplicate Copilot requests on its
+PRs, and that is not this task's defect. Run that task first, or accept the
+duplicates and record that the smoke observation is deferred. Do not "fix" it
+inside a rollout lane.
 
 ## Requirement 5: rollout, and what the smoke PR is
 
@@ -182,8 +219,8 @@ record:
 
 1. the pin moves to the release target, and the consumer's own full check passes
    in its own CI;
-2. exactly one Copilot review request per head — the T-48 observation, when T-48
-   has landed;
+2. exactly one Copilot review request per head — the
+   `08-08-copilot-request-policy` observation, when that task has landed;
 3. the review lane produces a durable head-bound receipt;
 4. the housekeeping merge gate reports green and comment-clean before merge; and
 5. after merge, `sd-status fleet --json` shows the consumer's `pin.version` at
@@ -202,23 +239,32 @@ Order and concurrency come from the manifest's existing `rolloutPolicy` and are
 not redesigned here: canary `rwbp-coordinator`, `loadsmith`, `hoa-manager`
 sequentially, then post-canary `rwbp-website`, `mezmo_benchmark`,
 `se-ai-command-pack`, `sd-github-review` at concurrency 2, then final
-`anomaly-metric-creator`. Note that two of the three canaries are dirty today,
-so the first pass has to start from the clean set and record the skips rather
-than reorder the cohorts.
+`anomaly-metric-creator`. The canary cohort is where the volatility bites
+hardest: it is three named consumers run sequentially, and at each of the three
+2026-08-17 measurements a different subset of it was dirty. The pass starts from
+whichever canaries are clean when it starts, records the rest as skips, and does
+not reorder the cohorts to route around a dirty one.
 
 ## Preconditions the rollout cannot start without
 
-- **Machine install at the release target.** It is 0.71.26 against a 0.71.29
-  target, and every thin consumer resolves its surfaces from the machine
-  install, so a refresh run now would move eight pins to a version the machine
-  cannot serve. The first action is `bash scripts/sd-ai-command-pack-pack-update.sh`
-  from this checkout — a machine-scope write, and an operator action.
-- **Plugin and receipt reconciled.** Plugin 0.71.22 against receipt 0.71.26,
-  reported as `skew`. Two of the three status follow-ups (F-2, F-3) name exactly
-  this.
-- **Nothing dirty in the consumers being touched.** loadsmith, hoa-manager, and
-  mezmo_benchmark are excluded until their owners commit or discard. This task
-  never cleans another checkout.
+- **Machine install at the release target — satisfied 2026-08-17.** Every thin
+  consumer resolves its surfaces from the machine install, so a refresh run
+  against a behind machine would move eight pins to a version the machine cannot
+  serve. It was 0.71.26 against a 0.71.29 target; `bash
+  scripts/sd-ai-command-pack-pack-update.sh` from this checkout — a machine-scope
+  write, and an operator action — brought it to 0.71.29.
+- **Plugin and receipt reconciled — satisfied 2026-08-17.** Both now report
+  0.71.29, `comparison: current`. It was plugin 0.71.22 against receipt 0.71.26.
+  The update refused once with exit 12 on conflicting install paths: two
+  project-scope plugin install records still pointed at the old cached version
+  after user scope moved. They are removed with
+  `claude plugin uninstall <id> -s project`, which also rewrites the
+  repository's tracked `.claude/settings.json` and must be restored after.
+- **Nothing dirty in the consumer being touched, checked at its lane.** No
+  consumer is named here on purpose — consequence 3 records the dirty set
+  changing three times in four hours. The precondition is a per-lane check
+  immediately before the write, not a list. This task never cleans another
+  checkout.
 
 ## Verification
 
@@ -256,8 +302,8 @@ task whose criterion depends on other people's working trees can never be
 closed. Replace it with a per-consumer ledger: every consumer is either at target
 or carries a recorded reason (dirty tree, owner-blocked, deliberately deferred),
 and the task closes when the ledger is complete rather than when the fleet is
-uniform. The fourth criterion, about repo-level Copilot rulesets, belongs to T-48
-and is verified there; this task cites it.
+uniform. The fourth criterion, about repo-level Copilot rulesets, belongs to
+`08-08-copilot-request-policy` and is verified there; this task cites it.
 
 That restatement is a PRD edit, and it was made in planning — `prd.md` carries the
 dated 2026-08-17 amendment with the original wording preserved — not a quiet
@@ -278,7 +324,8 @@ nothing to execute; it owns only the ledger the amended criterion requires.
 
 ## Out of scope
 
-- Re-deciding the CI lane shape (T-13) or the Copilot request surfaces (T-48).
+- Re-deciding the CI lane shape (`08-08-ci-lane-cost`) or the Copilot request
+  surfaces (`08-08-copilot-request-policy`).
 - Writing into any consumer checkout, cleaning a dirty one, or running the
   machine-scope pack update without the operator asking for it.
 - Changing `rolloutPolicy` cohorts or concurrency.
