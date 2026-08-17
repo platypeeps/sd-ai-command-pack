@@ -2282,6 +2282,12 @@ def branch_classification_anomalies(
     merged-but-undeleted branch and a branch with an open pull request are
     ordinary states; reporting them would rebuild the every-run signal this
     classification exists to replace. They stay visible as rows and follow-ups.
+
+    Each message names several branches and the worktree paths holding them,
+    all externally controlled, so the assembled string carries the same 500
+    character budget every other anomaly source uses. The bound belongs here
+    rather than at the append site: the rows survive intact in
+    ``localBranchClassification`` for a caller that needs them in full.
     """
 
     if classification.get("status") != "ok":
@@ -2301,9 +2307,17 @@ def branch_classification_anomalies(
         anomalies.append(
             (
                 "local_branches_unmerged_without_pr",
-                f"{len(prless)} local branch(es) are unmerged with no open pull "
-                "request: " + ", ".join(render(row) for row in prless[:HUMAN_ITEM_LIMIT])
-                + (f"; +{len(prless) - HUMAN_ITEM_LIMIT} more" if len(prless) > HUMAN_ITEM_LIMIT else ""),
+                safe_text(
+                    f"{len(prless)} local branch(es) are unmerged with no open pull "
+                    "request: "
+                    + ", ".join(render(row) for row in prless[:HUMAN_ITEM_LIMIT])
+                    + (
+                        f"; +{len(prless) - HUMAN_ITEM_LIMIT} more"
+                        if len(prless) > HUMAN_ITEM_LIMIT
+                        else ""
+                    ),
+                    limit=500,
+                ),
             )
         )
     unknown = [row for row in rows if row.get("disposition") == "unknown"]
@@ -2318,9 +2332,12 @@ def branch_classification_anomalies(
         anomalies.append(
             (
                 "local_branches_pr_state_unknown",
-                f"{len(unknown)} local branch(es) could not be classified "
-                f"({', '.join(reasons) or 'incomplete evidence'}); this is an "
-                "unknown, not a claim that they have no pull request",
+                safe_text(
+                    f"{len(unknown)} local branch(es) could not be classified "
+                    f"({', '.join(reasons) or 'incomplete evidence'}); this is an "
+                    "unknown, not a claim that they have no pull request",
+                    limit=500,
+                ),
             )
         )
     return anomalies

@@ -1972,6 +1972,37 @@ class StatusTests(InstallTestCase):
         )
         self.assertEqual(classification["evidence"]["defaultBranch"], "stale")
 
+    def test_branch_advisories_stay_within_the_anomaly_size_budget(self) -> None:
+        """Several externally controlled names per message, one shared budget.
+
+        Branch names and worktree paths both come from outside, and one advisory
+        names up to HUMAN_ITEM_LIMIT of each, so the assembled string is the
+        place the bound has to hold.
+        """
+
+        status = self.load_status_module()
+        rows = [
+            {
+                "branch": "chore/" + "b" * 114,
+                "disposition": "unmerged-without-pull-request",
+                "pullRequest": None,
+                "heldByWorktree": "/tmp/" + "w" * 295,
+            }
+            for _ in range(status.HUMAN_ITEM_LIMIT + 3)
+        ]
+        anomalies = status.branch_classification_anomalies(
+            {
+                "status": "ok",
+                "evidence": {"pullRequests": "available", "defaultBranch": "current"},
+                "rows": rows,
+                "truncated": False,
+            }
+        )
+
+        self.assertEqual([code for code, _ in anomalies], ["local_branches_unmerged_without_pr"])
+        for _, message in anomalies:
+            self.assertLessEqual(len(message), 500)
+
     def test_an_open_pull_request_survives_stale_merge_evidence(self) -> None:
         """The evidence gates guard the absence claim, not this presence one.
 
