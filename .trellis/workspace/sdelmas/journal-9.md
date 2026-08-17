@@ -82,3 +82,40 @@ Review of PR #502 found design.md's Gate section still scoped to SKILL.md after 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 399: Make the plugin-path plan able to pass its own gate
+
+**Date**: 2026-08-17
+**Task**: Make the plugin-path plan able to pass its own gate
+**Branch**: `task/plugin-path-version-split-design`
+
+### Summary
+
+Review of PR #502 found Step 3 and Step 4 contradicted each other: Step 3 kept scripts/-prefixed toolchain operands while the Step 4 gate forbids that prefix anywhere in an executable block, so the converted tree would have failed the gate the plan installs.
+
+### Main Changes
+
+- Step 3 now strips the scripts/ prefix from toolchain operands as well as from the bootstrap, at the cost of one extra edit per operand
+- Rejected the narrower alternative of exempting toolchain operands: the exemption would have to distinguish the harmless prefix from the CWD-relative bootstrap that is the defect, leaving a reader unable to tell which scripts/ token is which
+- design.md records the tradeoff beside the gate rule, where it would otherwise be re-litigated
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd70e0d2621235ee2d934639c2e829ae4364d645` | fix(task): make the plan able to pass its own gate |
+
+### Testing
+
+- [OK] Swept all three artifacts for any surviving statement that operands stay unchanged: none
+- [OK] review-preflight: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

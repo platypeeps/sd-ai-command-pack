@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 398
+- **Total Sessions**: 399
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~75 | Active |
+| `journal-9.md` | ~112 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 399 | 2026-08-17 | Make the plugin-path plan able to pass its own gate | `cd70e0d2621235ee2d934639c2e829ae4364d645` | `task/plugin-path-version-split-design` |
 | 398 | 2026-08-17 | Carry the wider gate scope into design.md | `49c877dda0f231e771fb0f9235c7decbfec6a305` | `task/plugin-path-version-split-design` |
 | 397 | 2026-08-17 | Correct the plugin-path task's scope figures to the whole skill tree | `2d39a97ca06606b6b2c76bf7a4c5be3296f42e49` | `task/plugin-path-version-split-design` |
 | 396 | 2026-08-17 | Design the pack-helper resolution rule for 08-17-plugin-path-version-split | `8d939933c5ffae9af1760614ead24818a12a2e4e` | `task/plugin-path-version-split-design` |
