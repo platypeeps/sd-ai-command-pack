@@ -13,7 +13,7 @@ python3 - <<'EOF'
 import re, pathlib
 pat = re.compile(r'sd-ai-command-pack-[A-Za-z0-9_-]+\.(?:mjs|py|sh)')
 a = b = 0
-for p in sorted(pathlib.Path('.agents/skills').rglob('SKILL.md')):
+for p in sorted(pathlib.Path('.agents/skills').rglob('*.md')):
     for i, line in enumerate(p.read_text().splitlines(), 1):
         if not pat.search(line):
             continue
@@ -26,9 +26,16 @@ print(f'class A (toolchain) {a} | class B (direct) {b}')
 EOF
 ```
 
-Expect roughly 50 class A and 9 class B. A materially different count means the
-skills moved since the design was written — reconcile before continuing, do not
-adjust the plan silently.
+Expect 50 class A and 9 class B, across 22 files in 16 skills. A materially
+different count means the skills moved since the design was written — reconcile
+before continuing, do not adjust the plan silently.
+
+**Glob `*.md`, not `SKILL.md`.** Eight of the 22 files are `references/` and
+`charters/` documents — `sd-help/references/recovery-artifacts.md`,
+`sd-ship/references/watch-coordinator.md`, and six more — and they carry 13 of
+the 50 class-A occurrences. They are executed exactly like `SKILL.md` text and
+must be converted with it. A `SKILL.md`-only sweep reports 37 and silently
+leaves those thirteen behind.
 
 ## Step 1 — write the bootstrap reference
 
@@ -57,8 +64,8 @@ the skills use. Step 4's gate enforces the second half.
 ## Step 2 — convert class B to class A
 
 The nine class-B invocations, from Step 0's own output rather than from this
-list. These are **not** the nine bare-name occurrences `prd.md` counts — the
-two sets are disjoint and share only their size. As of 2026-08-17 they are
+list. These are **not** the eleven bare-name occurrences `prd.md` counts; the
+two sets are disjoint. As of 2026-08-17 they are
 `sd-fleet-refresh:180`, `sd-review-pr:234`,
 `sd-review-pr:776`, `sd-finish-work:85`, `sd-finish-work:150`,
 `sd-housekeeping:22`, `sd-housekeeping:30`, `sd-update-deps:84`,
@@ -78,10 +85,20 @@ install; that is what makes the interpreter unnecessary. Re-verify rather than
 assume:
 
 ```bash
-for h in $(ls ~/.agents/bin/sd-ai-command-pack-*); do
-  [ -x "$h" ] || echo "NOT EXECUTABLE: $h"
+shopt -s nullglob
+found=0
+for h in "$HOME"/.agents/bin/sd-ai-command-pack-*; do
+  found=1
+  [ -x "$h" ] || printf 'NOT EXECUTABLE: %s\n' "$h"
 done
+[ "$found" = 1 ] || printf 'no pack helpers found in %s/.agents/bin\n' "$HOME" >&2
 ```
+
+Iterate the glob directly rather than `$(ls …)`: word-splitting `ls` output
+breaks on any path containing whitespace, and an unmatched glob would otherwise
+be passed through literally and reported as a missing file. `nullglob` plus the
+`found` flag turns "no helpers at all" into its own diagnosis instead of a
+silent pass.
 
 Any non-executable helper that a skill invokes directly blocks this step for
 that helper — report it, do not work around it by naming the interpreter.
@@ -111,8 +128,9 @@ grep -rn "scripts/sd-ai-command-pack-toolchain.sh" .agents/skills || echo "none 
 
 ## Step 4 — the gate
 
-Add a check to `make check` that enumerates `SKILL.md` files from the filesystem
-and fails on:
+Add a check to `make check` that enumerates every `*.md` under
+`.agents/skills/` from the filesystem — not just `SKILL.md`, for the reason
+Step 0 gives — and fails on:
 
 1. `scripts/sd-ai-command-pack-` inside a fenced executable block;
 2. `bash|node|python3` directly invoking a `sd-ai-command-pack-*` helper;
@@ -121,17 +139,17 @@ and fails on:
 Rule 3 is the one that catches the interpreter trap, and it is the rule most
 likely to be omitted because the failure it prevents looks like working code.
 
-Enumerating from `rglob('SKILL.md')` rather than from a fixed list is
-deliberate: a skill added later is covered without anyone remembering to edit
-the gate.
+Enumerating from `rglob('*.md')` rather than from a fixed list is deliberate: a
+skill or reference file added later is covered without anyone remembering to
+edit the gate.
 
 Prose references must **not** fail the gate — restrict rules 1 and 2 to fenced
 `bash` blocks. Nine prose occurrences exist today and two of them
 (`sd-review-pr:262-263`) instruct the reader not to use the scripts they name;
 a gate that flagged those would be telling the author to break the sentence.
 
-Validation: the gate fails on a deliberately reintroduced
-`scripts/…toolchain.sh` line and passes on the converted tree. Both
+Validation: the gate fails on a deliberately reintroduced scripts-prefixed
+toolchain line and passes on the converted tree. Both
 directions — a gate only ever observed passing has not been tested.
 
 ## Step 5 — `sd-status` reporting

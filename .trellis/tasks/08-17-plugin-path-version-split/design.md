@@ -25,7 +25,7 @@ working-directory-relative and is not resolved by anything. A thin consumer has
 no `scripts/sd-ai-command-pack-*` at all — verified across the fleet — so the
 bootstrap fails before the resolver is ever reached.
 
-So the task is not "make 50 call sites version-safe." It is "make the one
+So the task is not "make every call site version-safe." It is "make the one
 bootstrap correct, and route the handful of calls that bypass the resolver back
 through it."
 
@@ -35,19 +35,18 @@ Enumerated from `.agents/skills/`, not from the PRD:
 
 | Class | Shape | Sites | Resolution today |
 |---|---|---|---|
-| A | `bash scripts/…toolchain.sh run[-python] -- <helper>` | ~50 | operand already correct; **bootstrap** is CWD-relative |
-| B | `node scripts/…preflight.mjs`, `bash scripts/…housekeeping.sh` | 9 | none — bypasses the resolver entirely |
+| A | `bash <scripts-prefixed toolchain> run[-python] -- <helper>` | 50 | operand already correct; **bootstrap** is CWD-relative |
+| B | `node`/`bash` invoking a scripts-prefixed helper directly | 9 | none — bypasses the resolver entirely |
 
 Class B, exhaustively — `sd-fleet-refresh:180`, `sd-review-pr:234`,
 `sd-review-pr:776`, `sd-finish-work:85`, `sd-finish-work:150`,
 `sd-housekeeping:22`, `sd-housekeeping:30`, `sd-update-deps:84`,
 `sd-create-pr:218`.
 
-Class B numbers nine, and so does the bare-name set `prd.md` counts — but they
-are a **different nine**: disjoint line sets that happen to fall in the same
-four skills. The coincidence is worth naming before it reads as a transcription
-error. The bare-name nine are mostly not call sites: eight are the helper named
-rather than run — seven in prose, one inside an error message
+The eleven bare-name occurrences `prd.md` counts are a **different set** from
+class B, not a subset of it — disjoint lines, overlapping only in which skills
+they fall in. They are also mostly not call sites: ten are the helper named
+rather than run — nine in prose, one inside an error message
 (`sd-create-pr:215`) — and two of the prose ones (`sd-review-pr:262-263`)
 instruct the reader *not* to use the scripts they name. Only `sd-create-pr:213`
 is executable, and it is a `command -v` guard rather than an invocation. Naming
@@ -172,7 +171,7 @@ What is observable, and what this design commits to:
 - **Disagreement is reported, not resolved.** When the resolved toolchain's
   install differs from the machine install, or a `PATH` entry names a third,
   that is a real observable and belongs in `sd-status` (requirement 3) — not in
-  a per-invocation check that would add a version probe to all ~50 sites.
+  a per-invocation check that would add a version probe to all 50 sites.
 
 So requirement 1 is met by making a split *impossible along the executed path*,
 and requirement 3 by making a split *visible* when the environment still has
@@ -217,7 +216,8 @@ pack checkout is a place someone is deliberately editing helpers, and
 `sd-status` reports the resulting disagreement. The alternative — machine
 install always — makes pack development require an install round-trip per edit.
 
-**~50 mechanical edits across 22 skills.** Large diff, low risk each, and the
+**50 mechanical edits across 22 files in 16 skills.** Large diff, low risk
+each, and the
 gate prevents regression. The alternative of leaving class A alone and fixing
 only class B was considered and rejected: class A is the majority of the
 breakage on thin consumers, which is requirement 4.

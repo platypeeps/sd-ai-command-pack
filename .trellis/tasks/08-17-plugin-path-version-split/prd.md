@@ -135,22 +135,22 @@ about.
 
 | Form | Occurrences | Resolved by |
 |---|---|---|
-| `scripts/sd-ai-command-pack-*` | 50+ | the current working directory |
-| bare name | 9 | `PATH` |
+| `scripts/sd-ai-command-pack-*` | 50 | the current working directory |
+| bare name | 11 | `PATH` |
 | `$HOME/.agents/bin/...` | 0 in skills | the machine install |
 
-**Only one bare-name occurrence is an executable invocation.** Of the nine, the
-sole call site is `sd-create-pr/SKILL.md:213`, inside a `command -v` guard. The
-other eight are prose naming a helper in descriptive text, and two of those
+**Only one bare-name occurrence is an executable invocation.** Of the eleven,
+the sole call site is `sd-create-pr/SKILL.md:213`, inside a `command -v` guard.
+The other ten name a helper without running it, and two of those
 (`sd-review-pr/SKILL.md:262-263`) are a *negative* instruction telling the
 reader not to fall back to those scripts. Prose naming a helper is not a
 resolution defect, so requirement 2's surface is smaller than stated in one
 direction and much larger in another.
 
-**The dominant form is not `PATH`-resolved at all.** `scripts/…` resolves
-against the working directory, so it silently binds to whatever checkout the
-skill happens to run in. That is a different failure than the version split and
-it is the more common one.
+**The dominant form is not `PATH`-resolved at all.** A `scripts/`-prefixed
+invocation resolves against the working directory instead, so it silently binds
+to whatever checkout the skill happens to run in. That is a different failure
+than the version split and it is the more common one.
 
 **The convention this task was going to invent already exists.**
 `docs/fleet/consumers.json` already invokes two helpers as
