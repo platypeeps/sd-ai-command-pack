@@ -158,8 +158,11 @@ for entry in matches:
 if not roots:
     raise SystemExit(13)
 if len(roots) > 1:
-    # Exit 12 borrows stdout to carry the conflicting paths into the caller's
-    # message. The caller reads stdout as a plugin root only for status 0.
+    # Exit 12 borrows stdout to carry the conflicting paths into the message
+    # the caller prints. Stdout is read as a plugin root only for status 0.
+    # Keep apostrophes out of every comment inside this command substitution:
+    # bash 3.2, still /bin/bash on macOS, mis-scans one as an unterminated
+    # quote and fails the whole file with "unexpected EOF".
     detail = ", ".join(sorted(roots))
     print(detail[:400], end="")
     raise SystemExit(12)

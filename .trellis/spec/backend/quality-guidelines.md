@@ -1883,6 +1883,23 @@ also includes Ruff, pinned in `requirements-dev.txt`, over `install.py`,
 `installer/`, `scripts/`, `templates/scripts/`, and `tests/`; a macOS unittest
 leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 
+> **Warning**: bash 3.2 — still `/bin/bash` on macOS — mis-scans an apostrophe
+> in a comment inside a `$( ... )` command substitution as an unterminated
+> quote, and rejects the **whole file** with
+> `unexpected EOF while looking for matching \`''`. Comments inside a
+> substitution therefore cannot contain `'`: write "the caller" or "of the
+> caller", never "the caller's". Heredoc bodies inside the substitution are
+> scanned too, so a Python comment in an embedded `<<'PY'` block is subject to
+> the same rule.
+>
+> A developer machine with a modern bash on `PATH` accepts the file, so
+> `make check` passes and the macOS CI leg is the first thing to see it. Catch
+> it locally against the same interpreter CI uses:
+>
+> ```bash
+> for f in $(git ls-files '*.sh'); do /bin/bash -n "$f" || echo "BASH32-FAIL $f"; done
+> ```
+
 Add or update tests when changing:
 
 - CLI flags or argument behavior
