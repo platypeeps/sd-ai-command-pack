@@ -1928,3 +1928,40 @@ Re-ran the fleet status collector for 08-08-fleet-one-path's Step 0 and found th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 395: Correct a volatility claim contradicted by its own measurement table
+
+**Date**: 2026-08-17
+**Task**: Correct a volatility claim contradicted by its own measurement table
+**Branch**: `task/fleet-one-path-remeasure`
+
+### Summary
+
+Review of PR #501 found that all three 08-08-fleet-one-path artifacts claimed every consumer dirty in the first 2026-08-17 measurement was clean by the third, while design.md's own table shows hoa-manager dirty in both. Rewrote the claim in each artifact to match the table.
+
+### Main Changes
+
+- Replaced the all-cleared claim with the measured reading: loadsmith and mezmo_benchmark cleared, hoa-manager went dirty then clean then dirty again inside four hours
+- Kept the stronger consequence that the corrected reading supports — hoa-manager is a counterexample to both waiting for a dirty consumer to clear and excluding it for the rest of the pass
+- Noted that the batch's cross-artifact sweep compared shared values between artifacts but never checked that prose entailed the table it cites, which is how the contradiction survived
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dd962d640badad6bb44271f4d5ecefcbf59f0130` | fix(task): correct a volatility claim the measurement table contradicts |
+
+### Testing
+
+- [OK] Entailment check against the recorded table: the old claim evaluates False, both replacement claims evaluate True
+- [OK] grep for the retracted wording across the task directory: only the corrected, table-consistent sentence remains
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
