@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-8.md`
-- **Total Sessions**: 396
+- **Active File**: `journal-9.md`
+- **Total Sessions**: 397
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1997 | Active |
+| `journal-9.md` | ~38 | Active |
+| `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 397 | 2026-08-17 | Correct the plugin-path task's scope figures to the whole skill tree | `2d39a97ca06606b6b2c76bf7a4c5be3296f42e49` | `task/plugin-path-version-split-design` |
 | 396 | 2026-08-17 | Design the pack-helper resolution rule for 08-17-plugin-path-version-split | `8d939933c5ffae9af1760614ead24818a12a2e4e` | `task/plugin-path-version-split-design` |
 | 395 | 2026-08-17 | Correct a volatility claim contradicted by its own measurement table | `dd962d640badad6bb44271f4d5ecefcbf59f0130` | `task/fleet-one-path-remeasure` |
 | 394 | 2026-08-17 | Re-measure the fleet for 08-08-fleet-one-path Step 0 | `94b0fcb6ef0c846a616ca59938d668e44a41444f` | `task/fleet-one-path-remeasure` |
