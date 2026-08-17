@@ -1965,3 +1965,44 @@ Review of PR #501 found that all three 08-08-fleet-one-path artifacts claimed ev
 ### Next Steps
 
 - None - task complete
+
+
+## Session 396: Design the pack-helper resolution rule for 08-17-plugin-path-version-split
+
+**Date**: 2026-08-17
+**Task**: Design the pack-helper resolution rule for 08-17-plugin-path-version-split
+**Branch**: `task/plugin-path-version-split-design`
+
+### Summary
+
+Wrote design.md and implement.md for 08-17-plugin-path-version-split. Enumerating the shipped skills falsified the PRD's central premise, so the PRD was amended before designing against it, and the design targets a much smaller and better-founded surface than the PRD described.
+
+### Main Changes
+
+- Established that the toolchain's resolve_pack_script_operand already guarantees version coherence by resolving helpers next to itself, so the defect is the CWD-relative bootstrap that locates the toolchain, not the helper calls
+- Classified every helper reference into class A (50 through the toolchain, correct operand, broken bootstrap) and class B (9 direct invocations that bypass the resolver entirely)
+- Recorded a version-independent defect the PRD missed: sd-create-pr guards on PATH or scripts/ then unconditionally invokes scripts/, so on a thin consumer the guard passes and the next line throws, disabling the pre-publication preflight
+- Adopted $HOME/.agents/bin as the machine-install fallback rather than inventing a rule, because docs/fleet/consumers.json already invokes helpers that way; PATH is deliberately excluded from the bootstrap order
+- Declined to claim requirement 1 in full — no process can observe which SKILL.md the agent loaded — and recorded that as a limit instead of asserting an unimplementable check
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d939933c5ffae9af1760614ead24818a12a2e4e` | docs(task): design the pack-helper resolution rule, and correct the PRD's premise |
+
+### Testing
+
+- [OK] Reproduced the sd-create-pr guard/invocation mismatch read-only in a thin consumer: guard passes, node throws on the absent scripts/ copy
+- [OK] Verified both class-B helpers are executable with shebangs in the machine install, which is what lets the interpreter be dropped
+- [OK] Adversarial review, three rounds: four concerns raised and addressed, including two off-by-one source citations and a skill count taken from a truncated listing
+- [OK] Round 2 caught a garbled sentence introduced by round 1's own fix
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

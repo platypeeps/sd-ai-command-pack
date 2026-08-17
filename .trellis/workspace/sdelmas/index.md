@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 395
+- **Total Sessions**: 396
 - **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1958 | Active |
+| `journal-8.md` | ~1997 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 396 | 2026-08-17 | Design the pack-helper resolution rule for 08-17-plugin-path-version-split | `8d939933c5ffae9af1760614ead24818a12a2e4e` | `task/plugin-path-version-split-design` |
 | 395 | 2026-08-17 | Correct a volatility claim contradicted by its own measurement table | `dd962d640badad6bb44271f4d5ecefcbf59f0130` | `task/fleet-one-path-remeasure` |
 | 394 | 2026-08-17 | Re-measure the fleet for 08-08-fleet-one-path Step 0 | `94b0fcb6ef0c846a616ca59938d668e44a41444f` | `task/fleet-one-path-remeasure` |
 | 393 | 2026-08-17 | Clear preflight on the plugin PATH-versus-skill task | `044e35d0` | `task/plugin-path-version-split` |
