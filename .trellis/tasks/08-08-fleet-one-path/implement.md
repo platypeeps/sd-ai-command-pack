@@ -35,8 +35,8 @@ in the same session.
 
 **Do not build a skip list here.** The dirty set is volatile on a sub-hour
 timescale — `design.md`'s consequence 3 records three measurements on
-2026-08-17 that returned three different dirty sets, with every
-first-measurement consumer clean by the third. This step establishes the pins,
+2026-08-17 that returned three different dirty sets, including one consumer
+that was dirty, then clean, then dirty again across them. This step establishes the pins,
 which are stable, and nothing else that Step 6 is allowed to rely on. Step 6
 re-checks cleanliness per consumer at the moment its lane starts and again
 immediately before any write. A skip list computed once at preflight will

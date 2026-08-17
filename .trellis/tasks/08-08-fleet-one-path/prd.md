@@ -68,8 +68,8 @@ trees can never be closed, so the uniform-fleet claim is replaced by a complete
 per-consumer ledger.
 
 Deliberately no consumer is named here. Three measurements on 2026-08-17 —
-15:30, 18:50, and 19:30 — returned three different dirty sets, and every
-consumer dirty in the first was clean by the third; `design.md` carries the
+15:30, 18:50, and 19:30 — returned three different dirty sets, and one consumer
+was dirty, then clean, then dirty again across them; `design.md` carries the
 table. A named exclusion list in a PRD is stale the day it is written and reads
 as a standing property of those repositories, which it is not.
 

@@ -57,10 +57,12 @@ Four consequences for this task:
    | ~18:50 | loadsmith | 6 |
    | 19:30 | hoa-manager | 4 |
 
-   Every consumer that was dirty in the first measurement was clean by the
-   third, a different one had gone dirty, and four consumers changed branch
-   inside forty minutes. These are other people's working trees; they move
-   while the campaign runs.
+   No consumer holds still. `loadsmith` and `mezmo_benchmark` were dirty in the
+   first measurement and clean by the third. `hoa-manager` went the other way
+   twice — dirty, then clean, then dirty again — so it is a counterexample to
+   both "it will clear up" and "once dirty, stay excluded". Four consumers also
+   changed branch inside the forty minutes between the last two readings. These
+   are other people's working trees; they move while the campaign runs.
 
    The consequence is not "the table above needs refreshing" — it is that
    **exclusion must be decided per consumer at the moment its lane starts, and
