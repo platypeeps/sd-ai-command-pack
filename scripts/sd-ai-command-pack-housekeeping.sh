@@ -115,6 +115,10 @@ worktree_holding_branch() {
   local wanted="$1" here="" path="" holder=""
   [ -n "$wanted" ] || return 0
   here="$(git rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
+  # Without this checkout's own root there is no way to tell "another worktree
+  # holds it" from "this one does", and every path would compare unequal to the
+  # empty string. Report no holder so the caller keeps its blocking diagnosis.
+  [ -n "$here" ] || return 0
   while IFS= read -r line; do
     case "$line" in
       "worktree "*) path="${line#worktree }" ;;

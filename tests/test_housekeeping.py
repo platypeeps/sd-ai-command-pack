@@ -334,6 +334,42 @@ class HousekeepingTests(InstallTestCase):
         self.assertIn(f"held={holder.resolve()}", result.stdout)
         self.assertIn("free=\n", result.stdout + "\n")
 
+    def test_an_unknown_repository_root_names_no_holder(self) -> None:
+        """A checkout that cannot locate itself must not accuse itself.
+
+        Every worktree path compares unequal to an empty root, so without the
+        guard the reporting worktree reads as the holder and a real switch
+        failure would be downgraded from blocking to advisory.
+        """
+
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self._worktree_probe_repo()
+        script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            "set -uo pipefail;"
+            "git() {"
+            '  case "$1 $2" in'
+            '    "rev-parse --path-format=absolute") return 1 ;;'
+            '    "worktree list") printf "worktree %s\\nbranch refs/heads/main\\n" '
+            f'"{root}" ;;'
+            "    *) return 1 ;;"
+            "  esac;"
+            "};"
+            f"eval \"$(awk '/^worktree_holding_branch\\(\\)/,/^}}/' {script})\";"
+            'printf "holder=[%s]\\n" "$(worktree_holding_branch main)"'
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", probe],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertIn("holder=[]", result.stdout)
+
     def _run_switch_probe(self, root: Path, *, git_stub: str = "") -> str:
         script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
         probe = (

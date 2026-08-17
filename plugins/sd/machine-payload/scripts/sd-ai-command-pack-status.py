@@ -2167,7 +2167,10 @@ def classify_local_branches(
     about something *not* existing, so it is asserted only from complete
     evidence. Absent, truncated, or stale evidence reports ``unknown`` with the
     reason instead. In particular ``gh pr list`` is bounded at MAX_ITEMS, so a
-    full page proves nothing about a branch missing from it.
+    full page proves nothing about a branch missing from it. The evidence gates
+    guard that absence claim alone: a branch whose open pull request is present
+    in the listing is classified from that row, because a present row is direct
+    evidence and needs no complete listing behind it.
 
     Merge evidence is reachability from the local default tip. A branch merged
     by squash or rebase is not reachable and reads unmerged; with its pull
@@ -2233,12 +2236,16 @@ def classify_local_branches(
         if merged is not None and branch in merged:
             disposition = "merged"
             pull_request = None
+        elif pull_request is not None:
+            # An open pull request is direct evidence that the branch is not
+            # merged, on its own authority: it does not derive from the
+            # reachability walk, so it survives merge evidence that is stale or
+            # missing entirely.
+            disposition = "unmerged-with-pull-request"
         elif merged is None or default_evidence != "current":
             # Without trustworthy merge evidence, "unmerged" is not established,
             # so neither is anything that follows from it.
             disposition = "unknown"
-        elif pull_request is not None:
-            disposition = "unmerged-with-pull-request"
         elif pr_evidence == "available":
             disposition = "unmerged-without-pull-request"
         else:

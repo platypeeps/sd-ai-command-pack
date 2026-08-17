@@ -1972,6 +1972,35 @@ class StatusTests(InstallTestCase):
         )
         self.assertEqual(classification["evidence"]["defaultBranch"], "stale")
 
+    def test_an_open_pull_request_survives_stale_merge_evidence(self) -> None:
+        """The evidence gates guard the absence claim, not this presence one.
+
+        A stale default branch is the ordinary case between two fetches. An open
+        pull request is direct evidence from another channel, so gating it on the
+        reachability walk would report ``unknown`` for the most informative row
+        in the inventory.
+        """
+
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "chore/open-pr")
+        (root / "later.txt").write_text("later\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "local default advances")
+
+        status, git = self.collect_git_for(root)
+        self.assertIsNot(git["defaultMatchesRemote"], True)
+        classification = status.classify_local_branches(
+            git,
+            self.github_evidence(prs=[{"number": 41, "head": "chore/open-pr"}]),
+        )
+
+        self.assertEqual(classification["evidence"]["defaultBranch"], "stale")
+        self.assertEqual(
+            self.dispositions(classification),
+            {"chore/open-pr": "unmerged-with-pull-request"},
+        )
+        self.assertEqual(classification["rows"][0]["pullRequest"], 41)
+
     def test_advisory_and_strict_report_the_same_branch_findings(self) -> None:
         root = self.make_status_repo()
         self.run_git(root, "branch", "chore/merged-leftover")
