@@ -3288,6 +3288,53 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(resumed["counters"]["reviewRounds"], 29)
         self.assertEqual(resumed["stopReason"], state["stopReason"])
 
+    def test_status_reports_a_replaced_ledger_without_trusting_its_contents(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        replaced_path = state_path.parent / module.REPLACED_LEDGER_NAME
+
+        absent = module.status_snapshot(root, state_root=state_root)
+        self.assertEqual(
+            absent["replacedLedger"],
+            {"present": False, "replacedAt": None, "replacedRunId": None},
+        )
+
+        module.archive_replaced_ledger(state_path, state)
+        recorded = module.status_snapshot(root, state_root=state_root)
+        self.assertTrue(recorded["replacedLedger"]["present"])
+        self.assertEqual(recorded["replacedLedger"]["replacedRunId"], state["runId"])
+        self.assertTrue(recorded["replacedLedger"]["replacedAt"])
+
+        # A sibling that is unreadable, that is some other JSON document, or
+        # that carries a non-string identity is reported as present but
+        # unusable. Read-only status must not raise on any of them, and it must
+        # not echo an identity it did not validate.
+        for payload in (
+            "{not json",
+            json.dumps({"schemaVersion": 1, "kind": "something-else"}),
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "kind": module.REPLACED_LEDGER_KIND,
+                    "replacedAt": None,
+                    "replacedRunId": 7,
+                    "state": {},
+                }
+            ),
+        ):
+            with self.subTest(payload=payload[:24]):
+                replaced_path.write_text(payload, encoding="utf-8")
+                snapshot = module.status_snapshot(root, state_root=state_root)
+                self.assertEqual(snapshot["status"], "active")
+                self.assertTrue(snapshot["replacedLedger"]["present"])
+                self.assertIsNone(snapshot["replacedLedger"]["replacedRunId"])
+                self.assertIsNone(snapshot["replacedLedger"]["replacedAt"])
+                self.assertTrue(snapshot["replacedLedger"]["error"])
+
     def test_cli_resumes_paused_run_and_does_not_create_repo_state(self) -> None:
         module = self.load_module()
         root = self.make_repo()
