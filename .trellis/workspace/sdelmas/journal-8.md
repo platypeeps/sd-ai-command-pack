@@ -1810,3 +1810,45 @@ Round-2 review corrections on PR #499: 0.6.7 to 0.6.14 differ in the patch segme
 ### Next Steps
 
 - None - task complete
+
+
+## Session 392: File the plugin PATH-versus-skill version split, and clear the machine skew that exposed it
+
+**Date**: 2026-08-17
+**Task**: File the plugin PATH-versus-skill version split, and clear the machine skew that exposed it
+**Branch**: `task/plugin-path-version-split`
+
+### Summary
+
+Diagnosed three reported symptoms across the fleet, corrected one misdiagnosis, updated the machine to the release target, closed the issue it fixed, and filed the one defect that had no owner.
+
+### Main Changes
+
+- The duplicate plugin registration was not a config problem. claude plugin list --json returns identical rows from any directory, including /tmp, so it was machine-wide, not per-project. The rows came from two machine-local project-scope install records in ~/.claude/plugins/installed_plugins.json bound to sd-github-review and anomaly-metric-creator - not from the consumers' git-tracked .claude/settings.json declarations, which installer/thin.py:58 writes deliberately as the thin delivery mechanism.
+- Updated the machine to 0.71.29. The first attempt failed with exit 12: user scope moved to 0.71.29 while the two project-scope records still pointed at 0.71.22, turning agreeing duplicates into a genuine install-path conflict. Removed both records and reran; machine and plugin now both report 0.71.29, status current.
+- claude plugin uninstall -s project also rewrites the repository's tracked .claude/settings.json, stripping enabledPlugins and extraKnownMarketplaces and reordering every key. Both consumer files were restored to their recorded bytes and verified by checksum; neither checkout was left modified.
+- Closed issue #497. The reconciliation landed in 46bb8ac0 and shipped only in v0.71.29, which is why every installed collector still reported plugin unavailable.
+- Filed 08-17-plugin-path-version-split. PATH names a specific cached plugin version and the loaded skill root is resolved separately; nothing binds them, stale entries accumulate unpruned, and first match wins. Nine shipped skills invoke pack helpers by bare name with zero references to $HOME/.agents/bin or CLAUDE_PLUGIN_ROOT.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `105c5b2f` | docs(task): file the plugin PATH-versus-skill version split |
+
+### Testing
+
+- [OK] python -m unittest tests.test_status: 125 tests OK, including test_agreeing_duplicate_plugin_entries_resolve_to_that_version
+- [OK] pack-update.sh second run: machine installed 0.71.29, plugin 0.71.29, status current, exit 0
+- [OK] sd-status from se-ai-command-pack: 'machine scope: installed 0.71.29; plugin 0.71.29; current' - previously plugin unavailable
+- [OK] Both consumer .claude/settings.json restored to cafd323c5584e9a89c678e91f7cbdb7e43cf5b58; git status clean in both checkouts
+- [FAIL] pack-update.sh first run: exit 12, conflicting install paths (.../sd/0.71.22, .../sd/0.71.29)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
