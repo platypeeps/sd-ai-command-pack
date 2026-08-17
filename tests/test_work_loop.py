@@ -3250,6 +3250,54 @@ class WorkLoopTests(InstallTestCase):
         self.assertEqual(archived["replacedRunId"], state["runId"])
         self.assertEqual(archived["state"], json.loads(before.decode("utf-8")))
 
+    def test_start_rejects_conflicting_intent_and_a_resume_with_nothing_to_resume(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        identity = module.repository_identity(root)
+        state_path, _lock_path = module.state_paths(identity, state_root)
+
+        # Both refusals must land before any file is written: the point of the
+        # flags is that "start a new run" is never what a caller gets by
+        # accident, and a half-applied intent is the accident.
+        for argv, expected in (
+            (["--resume", "--reset"], "mutually exclusive"),
+            (["--resume"], "to resume"),
+        ):
+            with self.subTest(argv=" ".join(argv)):
+                result, _stdout, stderr = self.run_cli(
+                    module,
+                    ["--state-home", str(state_root), "start", "--repo", str(root)]
+                    + argv,
+                )
+                self.assertNotEqual(result, 0, stderr)
+                self.assertIn(expected, stderr)
+                self.assertFalse(state_path.exists())
+
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+        module.release_lock(lock_path, state["runId"])
+        state["status"] = "stopped"
+        module.atomic_write_json(state_path, state)
+        before = state_path.read_bytes()
+        result, _stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--resume",
+                "--reset",
+            ],
+        )
+        self.assertNotEqual(result, 0, stderr)
+        self.assertIn("mutually exclusive", stderr)
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse((state_path.parent / module.REPLACED_LEDGER_NAME).exists())
+
     def test_reset_accepts_a_run_id_other_than_the_discarded_one(self) -> None:
         module = self.load_module()
         root, state_root, state_path, state = self.make_persisted_status(
