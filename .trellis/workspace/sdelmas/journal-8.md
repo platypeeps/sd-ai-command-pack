@@ -1498,3 +1498,52 @@ Deleted the credential the retired sync workflow left behind, closed the gitigno
 ### Next Steps
 
 - None - task complete
+
+
+## Session 385: Reconcile agreeing duplicate plugin registrations in both machine-scope entry points
+
+**Date**: 2026-08-16
+**Task**: Reconcile agreeing duplicate plugin registrations in both machine-scope entry points
+**Branch**: `task/plugin-duplicate-registration-reconcile`
+
+### Summary
+
+Both machine-scope entry points refused any duplicate entry in `claude plugin list --json`, including duplicates agreeing on every consumed field. Three agreeing entries were measured live. The refusal cost the fleet its machine-currency answer, suppressed the plugin-versus-receipt skew alarm, and stranded the only refresh path a thin machine has. Each site now reconciles on the field it consumes and refuses only a genuine disagreement.
+
+### Main Changes
+
+- Reconciled duplicate entries in `collect_plugin_version` on normalized `version`, and in the pack-update resolver on `installPath`. Exit 12 kept and narrowed to a path conflict, its message now naming the conflicting paths.
+- Measured before and after on the machine that reproduced it: `comparison` moved from `unknown` to `skew` and the resolver replay from exit 12 to exit 0 with one path. The `skew` is a real divergence the bug was hiding -- plugin cache 0.71.22 against a machine receipt at 0.71.26.
+- Added five tests, each seen red against the unfixed tree first: agreeing duplicates resolve; agreeing duplicates still reach a computed `skew` verdict through `collect_machine_scope` rather than an injected fixture; versions differing only past the 80-character limit reconcile rather than conflict; the updater reconciles agreeing registrations; conflicting paths still exit 12.
+- Fixed a defect the macOS CI leg caught and local validation could not: an apostrophe in a comment inside a `$( ... )` command substitution, which bash 3.2 mis-scans as an unterminated quote and which rejects the whole file.
+- Recorded two durable rules in the specs: multiplicity is not ambiguity (reconcile on the consumed field, refuse only disagreement, and test that the benign shape still succeeds), and the bash 3.2 apostrophe gotcha with a local sweep that reproduces it.
+- Bumped the pack to 0.71.27 with a CHANGELOG entry recording the bootstrap route: the first refresh after this release must run from the pack source checkout, because the installed updater still exits 12.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46bb8ac0` | fix(machine): reconcile agreeing duplicate plugin registrations |
+| `5716bf9d` | docs(spec): record that multiplicity is not ambiguity |
+| `09c21bd1` | fix(pack-update): drop an apostrophe bash 3.2 cannot parse |
+| `ba485c16` | docs(task): record the evidence that settles each acceptance criterion |
+| `e9fa10a8` | chore(task): record the finalization branch |
+
+### Testing
+
+- [OK] `make check` exit 0
+- [OK] `make release-prep` exit 0; candidate ledger valid for the current payload and fleet
+- [OK] CI on PR #491: 9 SUCCESS, 2 SKIPPED, 0 failures
+- [OK] Two GitHub Copilot review rounds, no comments generated, zero inline threads
+- [OK] `sd-review scope=pr` attempt 2: `ready`, typed `sd-check` passed, local provider `gito` clean, 0 findings
+- [OK] `/bin/bash -n` (bash 3.2) clean across every tracked shell script
+- [OK] Enumerated from the filesystem: all four copies of each of the two scripts carry the change; zero carry the old refusal
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
