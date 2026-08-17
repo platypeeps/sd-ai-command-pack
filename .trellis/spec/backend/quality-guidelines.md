@@ -745,6 +745,17 @@ schema.
   error and no inferred run ID. Keep the two lock sources distinct so the
   typed recovery directive can be executed from one status response without
   reconstructing user-state paths manually.
+- Both the ledger-present and ledger-absent snapshots emit `replacedLedger`
+  with `present`, `replacedAt`, and `replacedRunId`. The `invalid` terminal
+  shape does not: like `lock` and `terminalLock`, this diagnostic is omitted
+  there, because that branch is the error handler for a snapshot whose identity
+  or state root may not have resolved at all, and it must not go back to the
+  filesystem to answer a second question. Absent is
+  the ordinary case and never an anomaly; a malformed sibling reports
+  `present: true` with a bounded `error` and null identity rather than raising,
+  because read-only status must not turn an unreadable file into an exception
+  path. The `sd-status` adapter allowlists the fields it retains, so this
+  diagnostic is helper-only until that allowlist is deliberately extended.
 - A run snapshot may include a complete `terminalReconciliation` audit record
   with verified status, timestamp, archived task path/ID, delivery PR evidence,
   optional all-or-none bookkeeping PR evidence, and observed default

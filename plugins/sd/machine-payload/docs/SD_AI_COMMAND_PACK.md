@@ -1645,6 +1645,18 @@ bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
   --run-id <run-id> --head <sha> --pr-number <n> --pr-url <url>
 ```
 
+`start` never replaces an existing ledger implicitly. An `active` or `paused`
+run resumes as before. A run in any other status — `stopped` or `completed` —
+refuses with a nonzero exit that names the status and both flags: `--resume`
+reactivates it in place, keeping its run ID, iteration, counters, and stop
+reason, and `--reset` archives it to a `replaced.json` sibling and mints a new
+run. The two flags are mutually exclusive, `--resume` without an existing
+ledger is an error rather than a silent new run, and `--reset --run-id <the
+discarded run ID>` is refused so no fresh ledger can carry the run ID it
+replaced. `status` reports whether that sibling is present, along with the
+replaced run ID and timestamp; nothing reads it back automatically, so
+recovering a mistaken reset means copying it over `state.json` deliberately.
+
 After resuming a paused checkpoint, reconcile its complete locally observed
 state before selecting more work. Add `--verified-live-advance` when the live
 lifecycle is ahead, then repeat the same complete reconcile without that flag

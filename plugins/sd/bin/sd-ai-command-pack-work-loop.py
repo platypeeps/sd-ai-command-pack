@@ -43,6 +43,12 @@ MAX_HISTORY = 20
 MAX_NOTES = 50
 DEFAULT_STALE_LOCK_SECONDS = 15 * 60
 TERMINAL_LOCK_NAME = "terminal-reconcile.lock.json"
+# One generation of ledger that ``start --reset`` deliberately discarded, kept
+# beside the live one so an immediately regretted reset stays recoverable. It
+# is never read back automatically: recovery is an operator copying it over
+# ``state.json``.
+REPLACED_LEDGER_NAME = "replaced.json"
+REPLACED_LEDGER_KIND = "work-loop-replaced-ledger"
 FOCUS_FIELDS = frozenset({"priority", "package", "task", "status", "scope"})
 FOCUS_PREFIX_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$", re.DOTALL)
 WORD_RE = re.compile(r"[A-Za-z0-9_.-]+")
@@ -2503,6 +2509,63 @@ def recovery_reason_code(
     return "normal"
 
 
+def archive_replaced_ledger(state_path: Path, outgoing: Mapping[str, Any]) -> Path:
+    """Record the ledger ``start --reset`` is about to discard, one generation.
+
+    The wrapper carries its own ``kind`` so nothing mistakes the sibling for a
+    ledger, and the outgoing state is stored verbatim rather than summarized:
+    the failure this protects against is wanting the whole thing back.
+    """
+
+    path = state_path.parent / REPLACED_LEDGER_NAME
+    atomic_write_json(
+        path,
+        {
+            "schemaVersion": SCHEMA_VERSION,
+            "kind": REPLACED_LEDGER_KIND,
+            "replacedAt": utc_now(),
+            "replacedRunId": outgoing["runId"],
+            "state": copy.deepcopy(dict(outgoing)),
+        },
+    )
+    return path
+
+
+def _read_replaced_ledger(path: Path) -> dict[str, Any]:
+    """Summarize the replaced-ledger sibling for read-only status.
+
+    Absent is the ordinary case, not an anomaly. A malformed sibling reports
+    present-but-unreadable for the same reason ``_read_status_lock`` does:
+    status must not turn an unreadable file into an exception path.
+    """
+
+    if not path.is_file():
+        return {"present": False, "replacedAt": None, "replacedRunId": None}
+    try:
+        payload = read_json(path)
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("kind") != REPLACED_LEDGER_KIND
+        ):
+            raise WorkLoopError("replaced ledger is not a work-loop replaced ledger")
+        replaced_at = payload.get("replacedAt")
+        replaced_run_id = payload.get("replacedRunId")
+        if not isinstance(replaced_at, str) or not isinstance(replaced_run_id, str):
+            raise WorkLoopError("replaced ledger is missing its replacement identity")
+        return {
+            "present": True,
+            "replacedAt": compact_text(replaced_at, limit=64),
+            "replacedRunId": compact_text(replaced_run_id, limit=64),
+        }
+    except (WorkLoopError, OSError, UnicodeError, json.JSONDecodeError) as error:
+        return {
+            "present": True,
+            "replacedAt": None,
+            "replacedRunId": None,
+            "error": compact_text(error, limit=500),
+        }
+
+
 def _read_status_lock(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     """Read one lock without turning read-only status into an exception path."""
 
@@ -2565,6 +2628,9 @@ def status_snapshot(
                 "terminalLock": _status_lock_snapshot(
                     terminal_lock, terminal_lock_error
                 ),
+                "replacedLedger": _read_replaced_ledger(
+                    state_path.parent / REPLACED_LEDGER_NAME
+                ),
             }
         state = upgrade_state(read_json(state_path))
         validate_state(state)
@@ -2607,6 +2673,9 @@ def status_snapshot(
             "lock": _status_lock_snapshot(lock, lock_error),
             "terminalLock": _status_lock_snapshot(
                 terminal_lock, terminal_lock_error
+            ),
+            "replacedLedger": _read_replaced_ledger(
+                state_path.parent / REPLACED_LEDGER_NAME
             ),
         }
     except (KeyError, TypeError, WorkLoopError) as error:
@@ -2736,6 +2805,16 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--focus-only", action="append", default=[])
     start.add_argument("--bare-focus")
     start.add_argument("--run-id")
+    start.add_argument(
+        "--resume",
+        action="store_true",
+        help="reactivate an existing ledger, including a stopped or completed one",
+    )
+    start.add_argument(
+        "--reset",
+        action="store_true",
+        help="discard an existing ledger and mint a new run, archiving the old one",
+    )
     start.add_argument("--recover-stale-lock", action="store_true")
     start.add_argument("--json", action="store_true")
 
@@ -2867,6 +2946,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             focus_requested = bool(
                 args.bare_focus is not None or args.focus or args.focus_only
             )
+            if args.resume and args.reset:
+                raise WorkLoopError("--resume and --reset are mutually exclusive")
+            replaced: Mapping[str, Any] | None = None
             if state_path.is_file():
                 state = upgrade_state(read_json(state_path))
                 validate_state(state)
@@ -2874,11 +2956,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                     raise WorkLoopError(
                         "existing loop state belongs to a different repository identity"
                     )
-                if state["status"] in {"active", "paused"}:
-                    if args.run_id and args.run_id != state["runId"]:
+                if args.reset:
+                    # --reset discards this ledger deliberately, so a differing
+                    # --run-id names the replacement rather than mismatching the
+                    # run being replaced. Only reusing the discarded ID is
+                    # refused: that is the one value that makes the fresh ledger
+                    # indistinguishable from the run it replaced.
+                    if args.run_id == state["runId"]:
                         raise WorkLoopError(
-                            f"resumable loop already exists as run {state['runId']}"
+                            f"refusing to mint a new run under the discarded run "
+                            f"ID {state['runId']}; omit --run-id to reset"
                         )
+                # Hoisted out of the resume branch below: a run ID naming an
+                # existing ledger means "this specific run" for every status it
+                # can hold, and the non-resumable ones are exactly where a fresh
+                # ledger minted under that ID is indistinguishable from the run
+                # the caller meant to resume.
+                elif args.run_id and args.run_id != state["runId"]:
+                    raise WorkLoopError(
+                        f"loop state for this repository already exists as run "
+                        f"{state['runId']}"
+                    )
+                if args.reset:
+                    replaced = state
+                elif state["status"] in {"active", "paused"} or args.resume:
                     conflicting_options = [
                         name
                         for name, requested, persisted in (
@@ -2911,6 +3012,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                         status_snapshot(args.repo, state_root=root), as_json=args.json
                     )
                     return 0
+                else:
+                    raise WorkLoopError(
+                        f"loop state for this repository is {state['status']} "
+                        f"(run {state['runId']}); resume it with --resume, or "
+                        "discard it with --reset (the replaced ledger is archived "
+                        "beside it)"
+                    )
+            elif args.resume:
+                raise WorkLoopError(
+                    "no loop state exists for this repository to resume; omit "
+                    "--resume to start a new run"
+                )
             state = new_state(
                 identity,
                 mode=args.mode or "backlog",
@@ -2924,6 +3037,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state,
                 recover_stale=args.recover_stale_lock,
             )
+            # After the lock, before the new ledger: a --reset that loses the
+            # lock race to a live owner must write nothing at all, and the
+            # archive must exist before the file it is a copy of is gone.
+            if replaced is not None:
+                archive_replaced_ledger(state_path, replaced)
             atomic_write_json(state_path, state)
             _print(status_snapshot(args.repo, state_root=root), as_json=args.json)
             return 0

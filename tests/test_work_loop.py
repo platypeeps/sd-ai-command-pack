@@ -2924,6 +2924,11 @@ class WorkLoopTests(InstallTestCase):
                     "runId": None,
                     "error": None,
                 },
+                "replacedLedger": {
+                    "present": False,
+                    "replacedAt": None,
+                    "replacedRunId": None,
+                },
             },
         )
         state, state_path, _lock_path = self.make_state(module, root, state_root)
@@ -3120,6 +3125,295 @@ class WorkLoopTests(InstallTestCase):
         module.atomic_write_json(terminal_lock_path, module.lock_payload(red_state))
         terminal = module.status_snapshot(red_root, state_root=red_state_root)
         self.assertEqual(terminal["recovery"]["reasonCode"], "terminal_reconciliation")
+
+    def make_persisted_status(self, module, status: str, run_id: str = "run-1"):
+        """Write a ledger in ``status`` the way the CLI would leave one behind."""
+
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, lock_path = self.make_state(
+            module, root, state_root, run_id=run_id
+        )
+        if status != "active":
+            module.release_lock(lock_path, state["runId"])
+        state["status"] = status
+        module.atomic_write_json(state_path, state)
+        return root, state_root, state_path, state
+
+    def run_cli(self, module, argv):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = module.main(argv)
+        return result, stdout.getvalue(), stderr.getvalue()
+
+    def test_start_refuses_every_non_resumable_status(self) -> None:
+        module = self.load_module()
+        for status in sorted(module.STATUSES - {"active", "paused"}):
+            with self.subTest(status=status):
+                root, state_root, state_path, _state = self.make_persisted_status(
+                    module, status
+                )
+                before = state_path.read_bytes()
+                result, _stdout, stderr = self.run_cli(
+                    module,
+                    ["--state-home", str(state_root), "start", "--repo", str(root)],
+                )
+                self.assertNotEqual(result, 0, stderr)
+                self.assertIn(status, stderr)
+                self.assertEqual(state_path.read_bytes(), before)
+
+    def test_start_run_id_guards_every_persisted_status(self) -> None:
+        module = self.load_module()
+        for status in sorted(module.STATUSES):
+            with self.subTest(status=status):
+                root, state_root, state_path, _state = self.make_persisted_status(
+                    module, status
+                )
+                before = state_path.read_bytes()
+                result, _stdout, stderr = self.run_cli(
+                    module,
+                    [
+                        "--state-home",
+                        str(state_root),
+                        "start",
+                        "--repo",
+                        str(root),
+                        "--run-id",
+                        "some-other-run",
+                    ],
+                )
+                self.assertNotEqual(result, 0, stderr)
+                self.assertIn("run-1", stderr)
+                self.assertEqual(state_path.read_bytes(), before)
+
+                if status in {"active", "paused"}:
+                    result, stdout, stderr = self.run_cli(
+                        module,
+                        [
+                            "--state-home",
+                            str(state_root),
+                            "start",
+                            "--repo",
+                            str(root),
+                            "--json",
+                        ],
+                    )
+                    self.assertEqual(result, 0, stderr)
+                    resumed = json.loads(stdout)
+                    self.assertEqual(resumed["runId"], "run-1")
+                    self.assertEqual(resumed["status"], "active")
+
+    def test_reset_archives_the_outgoing_ledger_and_refuses_its_run_id(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, state = self.make_persisted_status(
+            module, "stopped"
+        )
+        replaced_path = state_path.parent / "replaced.json"
+        before = state_path.read_bytes()
+
+        result, _stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--reset",
+                "--run-id",
+                state["runId"],
+            ],
+        )
+        self.assertNotEqual(result, 0, stderr)
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse(replaced_path.exists())
+
+        result, stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--reset",
+                "--json",
+            ],
+        )
+        self.assertEqual(result, 0, stderr)
+        fresh = json.loads(stdout)
+        self.assertNotEqual(fresh["runId"], state["runId"])
+
+        archived = json.loads(replaced_path.read_text(encoding="utf-8"))
+        self.assertEqual(archived["kind"], "work-loop-replaced-ledger")
+        self.assertEqual(archived["replacedRunId"], state["runId"])
+        self.assertEqual(archived["state"], json.loads(before.decode("utf-8")))
+
+    def test_start_rejects_conflicting_intent_and_a_resume_with_nothing_to_resume(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        identity = module.repository_identity(root)
+        state_path, _lock_path = module.state_paths(identity, state_root)
+
+        # Both refusals must land before any file is written: the point of the
+        # flags is that "start a new run" is never what a caller gets by
+        # accident, and a half-applied intent is the accident.
+        for argv, expected in (
+            (["--resume", "--reset"], "mutually exclusive"),
+            (["--resume"], "to resume"),
+        ):
+            with self.subTest(argv=" ".join(argv)):
+                result, _stdout, stderr = self.run_cli(
+                    module,
+                    ["--state-home", str(state_root), "start", "--repo", str(root)]
+                    + argv,
+                )
+                self.assertNotEqual(result, 0, stderr)
+                self.assertIn(expected, stderr)
+                self.assertFalse(state_path.exists())
+
+        state, _state_path, lock_path = self.make_state(module, root, state_root)
+        module.release_lock(lock_path, state["runId"])
+        state["status"] = "stopped"
+        module.atomic_write_json(state_path, state)
+        before = state_path.read_bytes()
+        result, _stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--resume",
+                "--reset",
+            ],
+        )
+        self.assertNotEqual(result, 0, stderr)
+        self.assertIn("mutually exclusive", stderr)
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse((state_path.parent / module.REPLACED_LEDGER_NAME).exists())
+
+    def test_reset_accepts_a_run_id_other_than_the_discarded_one(self) -> None:
+        module = self.load_module()
+        root, state_root, state_path, state = self.make_persisted_status(
+            module, "stopped"
+        )
+        outgoing = state_path.read_bytes()
+
+        result, stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--reset",
+                "--run-id",
+                "fresh-run",
+                "--json",
+            ],
+        )
+        self.assertEqual(result, 0, stderr)
+        self.assertEqual(json.loads(stdout)["runId"], "fresh-run")
+
+        archived = json.loads(
+            (state_path.parent / module.REPLACED_LEDGER_NAME).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(archived["replacedRunId"], state["runId"])
+        self.assertEqual(archived["state"], json.loads(outgoing.decode("utf-8")))
+
+    def test_resume_reactivates_a_stopped_run_without_resetting_its_history(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, lock_path = self.make_state(module, root, state_root)
+        module.release_lock(lock_path, state["runId"])
+        state["status"] = "stopped"
+        state["iteration"] = 7
+        state["counters"]["completed"] = 8
+        state["counters"]["mergedPrs"] = 8
+        state["counters"]["reviewRounds"] = 29
+        state["stopReason"] = "operator_stop: clean boundary on main"
+        module.atomic_write_json(state_path, state)
+
+        result, stdout, stderr = self.run_cli(
+            module,
+            [
+                "--state-home",
+                str(state_root),
+                "start",
+                "--repo",
+                str(root),
+                "--resume",
+                "--json",
+            ],
+        )
+        self.assertEqual(result, 0, stderr)
+        resumed = json.loads(stdout)
+        self.assertEqual(resumed["runId"], state["runId"])
+        self.assertEqual(resumed["status"], "active")
+        self.assertEqual(resumed["iteration"], 7)
+        self.assertEqual(resumed["counters"]["completed"], 8)
+        self.assertEqual(resumed["counters"]["mergedPrs"], 8)
+        self.assertEqual(resumed["counters"]["reviewRounds"], 29)
+        self.assertEqual(resumed["stopReason"], state["stopReason"])
+
+    def test_status_reports_a_replaced_ledger_without_trusting_its_contents(
+        self,
+    ) -> None:
+        module = self.load_module()
+        root = self.make_repo()
+        state_root = root.parent / "state"
+        state, state_path, _lock_path = self.make_state(module, root, state_root)
+        replaced_path = state_path.parent / module.REPLACED_LEDGER_NAME
+
+        absent = module.status_snapshot(root, state_root=state_root)
+        self.assertEqual(
+            absent["replacedLedger"],
+            {"present": False, "replacedAt": None, "replacedRunId": None},
+        )
+
+        module.archive_replaced_ledger(state_path, state)
+        recorded = module.status_snapshot(root, state_root=state_root)
+        self.assertTrue(recorded["replacedLedger"]["present"])
+        self.assertEqual(recorded["replacedLedger"]["replacedRunId"], state["runId"])
+        self.assertTrue(recorded["replacedLedger"]["replacedAt"])
+
+        # A sibling that is unreadable, that is some other JSON document, or
+        # that carries a non-string identity is reported as present but
+        # unusable. Read-only status must not raise on any of them, and it must
+        # not echo an identity it did not validate.
+        for payload in (
+            "{not json",
+            json.dumps({"schemaVersion": 1, "kind": "something-else"}),
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "kind": module.REPLACED_LEDGER_KIND,
+                    "replacedAt": None,
+                    "replacedRunId": 7,
+                    "state": {},
+                }
+            ),
+        ):
+            with self.subTest(payload=payload[:24]):
+                replaced_path.write_text(payload, encoding="utf-8")
+                snapshot = module.status_snapshot(root, state_root=state_root)
+                self.assertEqual(snapshot["status"], "active")
+                self.assertTrue(snapshot["replacedLedger"]["present"])
+                self.assertIsNone(snapshot["replacedLedger"]["replacedRunId"])
+                self.assertIsNone(snapshot["replacedLedger"]["replacedAt"])
+                self.assertTrue(snapshot["replacedLedger"]["error"])
 
     def test_cli_resumes_paused_run_and_does_not_create_repo_state(self) -> None:
         module = self.load_module()
