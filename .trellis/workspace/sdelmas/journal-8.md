@@ -1727,3 +1727,45 @@ Publish the planning artifacts for 08-16-local-bash32-syntax-gap, the follow-up 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 390: Plan the canonical fleet path and split its Trellis leg
+
+**Date**: 2026-08-17
+**Task**: Plan the canonical fleet path and split its Trellis leg
+**Branch**: `task/fleet-one-path-planning-split`
+
+### Summary
+
+Write design.md and implement.md for 08-08-fleet-one-path, rescope its PRD around what the thin migration left it, and file 08-17-fleet-trellis-version-drift for the Trellis leg. Planning only: no code, no generated payload, and no consumer checkout touched.
+
+### Main Changes
+
+- 08-08-fleet-one-path gains design.md (four legs, four owners; the candidate-contract normalization model; the smoke-PR definition) and implement.md (eight ordered steps, gated at the machine install and at 08-08-copilot-request-policy).
+- Rescoped that PRD: the thin migration absorbed most of requirement 1 (all 8 consumers are mode thin, so drift is one pin each and no vendored tree remains), and requirements 3 and 4 are marked citation-only because 08-08-ci-lane-cost owns the lane shape and 08-08-copilot-request-policy owns the request surfaces.
+- Amended the PRD's third acceptance criterion in planning, original wording preserved. 'All 8 consumers on target pack + Trellis versions after rollout' is unsatisfiable: three checkouts are dirty, the procedure stops on a dirty consumer (docs/FLEET_ROLLOUT.md:250), and cleaning another checkout is out of bounds. It is now a complete per-consumer ledger.
+- Settled the canonical candidate check as housekeeping.sh --self-test, hermetic and read-only per scripts/sd-ai-command-pack-housekeeping.sh:1328-1333. Rejected a bare review-preflight.mjs: its subject is a change set and the validator runs in a diff-less clone, so it cannot fail there. candidateChecks is parsed allow_empty=False (sd_ai_command_pack_fleet_lib.py:679-691), so normalization is canonical-check-first plus annotated deviations, never deletion to zero.
+- New task 08-17-fleet-trellis-version-drift, P2 planning: all 8 consumers on Trellis 0.6.7 against 0.6.14 here, and a thin fleet row prints the pack pin with no Trellis version, so the human report reads consistent while repositories[].report.versions.trellis shows seven minors missing. Two defects, one task, ledger-shaped.
+- Host adversarial review ran two batches. Round 1 caught a nonexistent git.dirty JSON key (real shape git.workingTree.state, so the no-consumer-changed check passed vacuously), three wrong line citations, and sd-fleet-refresh written as a shell command when it is a source-only command. Round 2 caught the ledger-mixing hazard between the two tasks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cc244be2` | docs(task): plan the canonical fleet path and split its Trellis leg |
+
+### Testing
+
+- [OK] sd-ai-command-pack-check.py --json: schemaVersion 1, status passed, 8 rows, exit 0
+- [OK] git diff --cached --check clean on all 7 staged paths
+- [OK] Fleet measurement reproduced from sd-ai-command-pack-status.py fleet --json: 8 consumers, pins 7x 0.71.22 and 1x 0.71.26 against target 0.71.29, all 8 on Trellis 0.6.7
+- [WARN] Copilot review requested on PR #499 and never produced a review, comment, or thread; GitHub GraphQL returned HTTP 503 during three of six polls. Remote review unavailable, so local gates are the only evidence
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
