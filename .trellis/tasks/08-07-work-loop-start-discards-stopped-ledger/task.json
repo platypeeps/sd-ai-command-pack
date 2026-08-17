@@ -3,7 +3,7 @@
   "name": "work-loop-start-discards-stopped-ledger",
   "title": "start on a stopped work-loop run silently discards the ledger",
   "description": "work-loop start falls through to new_state for any status outside active/paused, overwriting a stopped run's ledger with no warning or backup.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

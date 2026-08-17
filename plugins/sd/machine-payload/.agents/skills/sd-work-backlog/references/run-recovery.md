@@ -32,3 +32,15 @@ bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
 After reconciliation, re-run `status` and follow only its next typed recovery
 directive. A stopped run with externally merged/archive evidence may advance to
 `terminal_reconciliation`; do not choose that path yourself.
+
+Reconcile first, then reactivate. `start --resume` puts a stopped run back into
+`active` without consulting live state, so it is correct only once the ledger
+and live evidence already agree — after the reconcile above, or when status
+reported no contradiction to begin with. It preserves the run ID, iteration,
+counters, and stop reason; the ledger keeps saying why it stopped.
+
+`start --reset` is the opposite intent: discard this run's history and mint a
+new one. It archives the outgoing ledger to a `replaced.json` sibling that
+nothing reads back automatically, and it refuses `--run-id <the discarded run
+ID>` so the replacement can never be mistaken for the run it replaced. Plain
+`start` against a stopped run does neither — it refuses and names both flags.

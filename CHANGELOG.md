@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.71.29 - 2026-08-16
+
+### Changed
+
+- `work-loop.py start` no longer replaces an existing ledger implicitly. A
+  `stopped` or `completed` run used to fall out of the resume branch and reach
+  `new_state()`, overwriting the ledger in place with no warning, no backup,
+  and no reason code -- and the `--run-id` mismatch guard sat inside that same
+  resume branch, so `start --run-id <the run I meant to resume>` was exactly
+  the invocation that minted a fresh ledger carrying the run ID it destroyed.
+  One consumer lost 8 completed / 8 merged PRs / 29 review rounds that way, and
+  the loss is recorded only because an operator hand-wrote it into the run's
+  own stop reason. `start` now refuses such a ledger with a nonzero exit naming
+  the status and both flags: `--resume` reactivates the run in place, keeping
+  its run ID, iteration, counters, and stop reason, and `--reset` archives the
+  outgoing ledger to a `replaced.json` sibling before minting a new run. The
+  flags are mutually exclusive, `--resume` without an existing ledger is an
+  error rather than a silent new run, and `--reset --run-id <the discarded run
+  ID>` is refused. `active` and `paused` resume semantics are unchanged.
+- The `--run-id` mismatch guard now covers every existing ledger rather than
+  only the resumable ones, and `status` reports whether a replaced-ledger
+  sibling is present along with the replaced run ID and timestamp. An
+  unreadable sibling reports present-but-unreadable; read-only status never
+  raises on it.
+
 ## 0.71.28 - 2026-08-16
 
 ### Changed
