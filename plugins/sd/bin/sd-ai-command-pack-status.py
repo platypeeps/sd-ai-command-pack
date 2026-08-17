@@ -38,6 +38,22 @@ MAX_ROADMAP_LINE_CHARS = 2_000
 MAX_ROADMAP_ITEMS = 500
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 COMMIT_RE = re.compile(r"[0-9a-f]{40,64}")
+ANOMALY_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+SEVERITY_BLOCKING = "blocking"
+SEVERITY_ADVISORY = "advisory"
+# Caller anomaly codes -- replayed here through --prior-anomaly -- whose severity
+# is advisory. The caller (sd-ai-command-pack-housekeeping.sh) reports the same
+# codes through its own typed channel, where
+# sd-ai-command-pack-housekeeping-result.py holds the authoritative set; a test
+# asserts the two sets are identical, because a code that is advisory in one and
+# blocking in the other produces a clean verdict from a run that exited nonzero.
+# An unrecognized code is blocking: severity fails closed.
+ADVISORY_CALLER_ANOMALY_CODES = frozenset(
+    {
+        "branch_retained_default_held",
+        "default_branch_held_elsewhere",
+    }
+)
 GITHUB_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 # This project publishes releases as annotated tags, not GitHub Releases, so the
 # newest release is the highest v<semver> tag on the remote. Anything that does
@@ -458,8 +474,8 @@ def collect_git(
     remote: str,
     supplied_default: str | None,
     refs_refreshed: bool,
-) -> tuple[dict[str, Any], list[str]]:
-    anomalies: list[str] = []
+) -> tuple[dict[str, Any], list[tuple[str, str, str]]]:
+    anomalies: list[tuple[str, str, str]] = []
     porcelain = git_output(
         repo,
         "status",
@@ -468,7 +484,9 @@ def collect_git(
         "--untracked-files=all",
     )
     if porcelain is None:
-        return {}, ["git status is unavailable"]
+        return {}, [
+            ("git_status_unavailable", SEVERITY_BLOCKING, "git status is unavailable")
+        ]
     state = parse_porcelain_v2(porcelain)
     resolved_default = default_branch(repo, remote, supplied_default)
     state["defaultBranch"] = resolved_default
@@ -519,10 +537,32 @@ def collect_git(
         )
     else:
         state["branchesHeldElsewhere"] = None
+    # Merge evidence for the leftover-branch classification. Reachability from
+    # the *local* default tip, because status never fetches: a default branch
+    # behind its remote is reported as stale evidence rather than silently
+    # answering the question wrongly.
+    state["mergedIntoDefault"] = None
+    if isinstance(resolved_default, str) and resolved_default:
+        merged = git_output(
+            repo,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--merged",
+            f"refs/heads/{resolved_default}",
+            "refs/heads",
+        )
+        if merged is not None:
+            state["mergedIntoDefault"] = sorted(merged.splitlines())
     stash_list = git_output(repo, "stash", "list", "--format=%gd")
     if stash_list is None:
         state["stashCount"] = None
-        anomalies.append("git stash inventory is unavailable")
+        anomalies.append(
+            (
+                "git_stash_unavailable",
+                SEVERITY_BLOCKING,
+                "git stash inventory is unavailable",
+            )
+        )
     else:
         state["stashCount"] = len(stash_list.splitlines()) if stash_list else 0
     remote_url = git_output(repo, "remote", "get-url", remote)
@@ -547,7 +587,13 @@ def collect_git(
         state["defaultRemoteExists"] = False
         state["defaultMatchesRemote"] = None
     if remote_url is None:
-        anomalies.append(f"remote {safe_text(remote)} is not configured")
+        anomalies.append(
+            (
+                "git_remote_unconfigured",
+                SEVERITY_BLOCKING,
+                f"remote {safe_text(remote)} is not configured",
+            )
+        )
     return state, anomalies
 
 
@@ -2105,6 +2151,174 @@ def collect_github(
     }
 
 
+def classify_local_branches(
+    git: Mapping[str, Any],
+    github: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Classify every local branch other than the default one.
+
+    Two independent axes. The disposition -- merged, unmerged with an open pull
+    request, unmerged without one, or unknown -- answers what the branch is; the
+    holding worktree answers whether anyone could act on it. They are orthogonal:
+    a branch can be merged and held, or unmerged and PR-less and held, so this
+    reports a matrix rather than a set of exclusive labels.
+
+    ``unmerged-without-pull-request`` is the one disposition that is a claim
+    about something *not* existing, so it is asserted only from complete
+    evidence. Absent, truncated, or stale evidence reports ``unknown`` with the
+    reason instead. In particular ``gh pr list`` is bounded at MAX_ITEMS, so a
+    full page proves nothing about a branch missing from it.
+
+    Merge evidence is reachability from the local default tip. A branch merged
+    by squash or rebase is not reachable and reads unmerged; with its pull
+    request closed it then reads PR-less. That is a false positive on an
+    advisory row, which is why the row names the branch instead of blocking on
+    it -- and why the stale-default gate matters, since it catches the much more
+    common case of a default branch that simply has not been pulled.
+    """
+
+    default = git.get("defaultBranch")
+    local_branches = git.get("localBranches")
+    if not isinstance(local_branches, list):
+        return {
+            "status": "unavailable",
+            "evidence": {"pullRequests": "unknown", "defaultBranch": "unknown"},
+            "rows": [],
+            "truncated": False,
+        }
+
+    open_prs: list[Mapping[str, Any]] = []
+    pr_evidence = "github_unavailable"
+    if isinstance(github, dict):
+        raw_prs = github.get("openPrs")
+        if github.get("openPrsStatus") == "available" and isinstance(raw_prs, list):
+            open_prs = [row for row in raw_prs if isinstance(row, dict)]
+            pr_evidence = (
+                "pr_evidence_truncated"
+                if len(open_prs) >= MAX_ITEMS
+                else "available"
+            )
+
+    if not git.get("defaultLocalExists"):
+        default_evidence = "unknown"
+    elif git.get("defaultMatchesRemote") is True:
+        default_evidence = "current"
+    else:
+        default_evidence = "stale"
+
+    merged_value = git.get("mergedIntoDefault")
+    merged = set(merged_value) if isinstance(merged_value, list) else None
+    held_rows = git.get("worktrees")
+    holders: dict[str, str] = {}
+    if isinstance(held_rows, dict) and isinstance(held_rows.get("rows"), list):
+        for row in held_rows["rows"]:
+            if not isinstance(row, dict) or row.get("current"):
+                continue
+            branch = row.get("branch")
+            path = row.get("path")
+            if isinstance(branch, str) and branch and isinstance(path, str):
+                holders.setdefault(branch, path)
+
+    prs_by_head: dict[str, int] = {}
+    for row in open_prs:
+        head = row.get("head")
+        number = row.get("number")
+        if isinstance(head, str) and head and isinstance(number, int):
+            prs_by_head.setdefault(head, number)
+
+    extras = sorted(item for item in local_branches if item != default)
+    rows: list[dict[str, Any]] = []
+    for branch in extras[:MAX_ITEMS]:
+        pull_request: int | None = prs_by_head.get(branch)
+        if merged is not None and branch in merged:
+            disposition = "merged"
+            pull_request = None
+        elif merged is None or default_evidence != "current":
+            # Without trustworthy merge evidence, "unmerged" is not established,
+            # so neither is anything that follows from it.
+            disposition = "unknown"
+        elif pull_request is not None:
+            disposition = "unmerged-with-pull-request"
+        elif pr_evidence == "available":
+            disposition = "unmerged-without-pull-request"
+        else:
+            disposition = "unknown"
+        rows.append(
+            {
+                "branch": safe_text(branch, limit=120),
+                "disposition": disposition,
+                "pullRequest": pull_request,
+                "heldByWorktree": (
+                    safe_text(holders[branch], limit=300)
+                    if branch in holders
+                    else None
+                ),
+            }
+        )
+    return {
+        "status": "ok",
+        "evidence": {
+            "pullRequests": pr_evidence,
+            "defaultBranch": default_evidence,
+        },
+        "rows": rows,
+        "truncated": len(extras) > MAX_ITEMS,
+    }
+
+
+def branch_classification_anomalies(
+    classification: Mapping[str, Any],
+) -> list[tuple[str, str]]:
+    """Advisory anomalies derived from the branch classification.
+
+    Only the two dispositions that leave a question open produce an entry. A
+    merged-but-undeleted branch and a branch with an open pull request are
+    ordinary states; reporting them would rebuild the every-run signal this
+    classification exists to replace. They stay visible as rows and follow-ups.
+    """
+
+    if classification.get("status") != "ok":
+        return []
+    rows = classification.get("rows")
+    if not isinstance(rows, list):
+        return []
+
+    def render(row: Mapping[str, Any]) -> str:
+        held = row.get("heldByWorktree")
+        name = safe_text(row.get("branch"), limit=120)
+        return f"{name} [held by {held}]" if held else name
+
+    anomalies: list[tuple[str, str]] = []
+    prless = [row for row in rows if row.get("disposition") == "unmerged-without-pull-request"]
+    if prless:
+        anomalies.append(
+            (
+                "local_branches_unmerged_without_pr",
+                f"{len(prless)} local branch(es) are unmerged with no open pull "
+                "request: " + ", ".join(render(row) for row in prless[:HUMAN_ITEM_LIMIT])
+                + (f"; +{len(prless) - HUMAN_ITEM_LIMIT} more" if len(prless) > HUMAN_ITEM_LIMIT else ""),
+            )
+        )
+    unknown = [row for row in rows if row.get("disposition") == "unknown"]
+    if unknown:
+        evidence = classification.get("evidence")
+        reasons = []
+        if isinstance(evidence, dict):
+            if evidence.get("pullRequests") != "available":
+                reasons.append(str(evidence.get("pullRequests")))
+            if evidence.get("defaultBranch") != "current":
+                reasons.append(f"default_branch_{evidence.get('defaultBranch')}")
+        anomalies.append(
+            (
+                "local_branches_pr_state_unknown",
+                f"{len(unknown)} local branch(es) could not be classified "
+                f"({', '.join(reasons) or 'incomplete evidence'}); this is an "
+                "unknown, not a claim that they have no pull request",
+            )
+        )
+    return anomalies
+
+
 def strict_anomalies(
     git: Mapping[str, Any],
     *,
@@ -2113,36 +2327,113 @@ def strict_anomalies(
     source_branch: str | None,
     keep_remote_branch: bool,
     dry_run: bool,
-) -> list[str]:
-    anomalies: list[str] = []
+) -> list[tuple[str, str, str]]:
+    """Postconditions of a housekeeping run, as (code, severity, message).
+
+    Every entry here is something *this run* was supposed to achieve. Leftover
+    local branches the run never touched are deliberately absent: they are
+    pre-existing repository state, they are a normal steady state for anyone
+    running concurrent worktrees, and blocking on them produced a verdict that
+    fired on every successful merge and therefore carried no information. They
+    are classified instead, in both modes, by classify_local_branches. What that
+    entry incidentally covered -- a source branch that survived deletion -- is
+    checked explicitly below.
+    """
+
+    anomalies: list[tuple[str, str, str]] = []
     tree = git.get("workingTree")
     if isinstance(tree, dict) and tree.get("state") != "clean":
-        anomalies.append("working tree is dirty after housekeeping")
+        anomalies.append(
+            (
+                "working_tree_dirty",
+                SEVERITY_BLOCKING,
+                "working tree is dirty after housekeeping",
+            )
+        )
     if dry_run:
         return anomalies
     branch = git.get("branch")
     if default is None:
-        anomalies.append("default branch is unknown; skipped branch inventory checks")
+        anomalies.append(
+            (
+                "default_branch_unknown",
+                SEVERITY_BLOCKING,
+                "default branch is unknown; skipped branch inventory checks",
+            )
+        )
         return anomalies
     if branch != default:
         anomalies.append(
-            f"current branch is {safe_text(branch or 'detached HEAD')}, expected {safe_text(default)}"
+            (
+                "current_branch_unexpected",
+                SEVERITY_BLOCKING,
+                f"current branch is {safe_text(branch or 'detached HEAD')}, expected {safe_text(default)}",
+            )
         )
     if not git.get("defaultLocalExists"):
-        anomalies.append(f"local default branch {safe_text(default)} does not exist")
+        anomalies.append(
+            (
+                "default_branch_local_missing",
+                SEVERITY_BLOCKING,
+                f"local default branch {safe_text(default)} does not exist",
+            )
+        )
     elif not git.get("defaultRemoteExists"):
         anomalies.append(
-            f"remote default branch {safe_text(remote)}/{safe_text(default)} does not exist"
+            (
+                "default_branch_remote_missing",
+                SEVERITY_BLOCKING,
+                f"remote default branch {safe_text(remote)}/{safe_text(default)} does not exist",
+            )
         )
     elif git.get("defaultMatchesRemote") is not True:
-        anomalies.append(f"{safe_text(default)} does not match {safe_text(remote)}/{safe_text(default)}")
+        anomalies.append(
+            (
+                "default_branch_diverged",
+                SEVERITY_BLOCKING,
+                f"{safe_text(default)} does not match {safe_text(remote)}/{safe_text(default)}",
+            )
+        )
     local_branches = git.get("localBranches")
-    if isinstance(local_branches, list):
-        extras = [item for item in local_branches if item != default]
-        if extras:
+    if (
+        source_branch
+        and source_branch != default
+        and isinstance(local_branches, list)
+        and source_branch in local_branches
+    ):
+        held = git.get("branchesHeldElsewhere")
+        holder = None
+        if isinstance(held, list) and source_branch in held:
+            worktrees = git.get("worktrees")
+            if isinstance(worktrees, dict) and isinstance(worktrees.get("rows"), list):
+                for row in worktrees["rows"]:
+                    if (
+                        isinstance(row, dict)
+                        and row.get("branch") == source_branch
+                        and not row.get("current")
+                        and isinstance(row.get("path"), str)
+                    ):
+                        holder = row["path"]
+                        break
+        if holder is not None:
+            # Held by a live worktree: deletion was impossible, not skipped.
+            # Blocking on a condition the operator cannot resolve is what made
+            # the old leftover-branch entry useless.
             anomalies.append(
-                "extra local branches remain: "
-                + ",".join(safe_text(item, limit=80) for item in extras)
+                (
+                    "local_source_branch_held_elsewhere",
+                    SEVERITY_ADVISORY,
+                    f"source branch {safe_text(source_branch)} still exists; it is "
+                    f"checked out in worktree {safe_text(holder, limit=300)}",
+                )
+            )
+        else:
+            anomalies.append(
+                (
+                    "local_source_branch_retained",
+                    SEVERITY_BLOCKING,
+                    f"source branch {safe_text(source_branch)} still exists after housekeeping",
+                )
             )
     if source_branch and source_branch != default:
         remote_ref = f"{remote}/{source_branch}"
@@ -2150,11 +2441,58 @@ def strict_anomalies(
         present = isinstance(remote_branches, list) and remote_ref in remote_branches
         if keep_remote_branch and not present:
             anomalies.append(
-                f"remote source branch {safe_text(remote_ref)} is absent despite --keep-remote-branch"
+                (
+                    "remote_source_branch_missing",
+                    SEVERITY_BLOCKING,
+                    f"remote source branch {safe_text(remote_ref)} is absent despite --keep-remote-branch",
+                )
             )
         elif not keep_remote_branch and present:
-            anomalies.append(f"remote source branch still tracked: {safe_text(remote_ref)}")
+            anomalies.append(
+                (
+                    "remote_source_branch_retained",
+                    SEVERITY_BLOCKING,
+                    f"remote source branch still tracked: {safe_text(remote_ref)}",
+                )
+            )
     return anomalies
+
+
+def anomaly_details(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Typed anomalies, synthesizing them for a report that predates the key.
+
+    A report without ``anomalyDetails`` is treated as entirely blocking rather
+    than as having no anomalies: an unknown severity is a reason to stop, not a
+    reason to proceed quietly.
+    """
+
+    details = report.get("anomalyDetails")
+    if isinstance(details, list):
+        return [item for item in details if isinstance(item, dict)]
+    messages = report.get("anomalies")
+    if not isinstance(messages, list):
+        return []
+    return [
+        {"code": "status_anomaly", "severity": SEVERITY_BLOCKING, "message": message}
+        for message in messages
+    ]
+
+
+def blocking_anomalies(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Anomalies that stop a caller, as opposed to ones it should merely see.
+
+    An advisory anomaly is real and reported; it just is not a failure of the
+    run that observed it. The exit status, the human attention header, and the
+    housekeeping verdict all key on this subset so that a condition nobody can
+    act on -- a branch held by another live worktree, say -- stays visible
+    without producing a blocked verdict on every successful merge.
+    """
+
+    return [
+        item
+        for item in anomaly_details(report)
+        if item.get("severity") != SEVERITY_ADVISORY
+    ]
 
 
 def collect_follow_ups(
@@ -2189,10 +2527,36 @@ def collect_follow_ups(
             candidate["line"] = line
         candidates.append(candidate)
 
-    anomalies = report.get("anomalies")
-    if isinstance(anomalies, list):
-        for anomaly in anomalies:
-            add("issue", f"Resolve status anomaly: {anomaly}", "anomalies")
+    for detail in anomaly_details(report):
+        message = detail.get("message")
+        if not isinstance(message, str):
+            continue
+        if detail.get("severity") == SEVERITY_ADVISORY:
+            add("recommendation", f"Status advisory: {message}", "anomalies")
+        else:
+            add("issue", f"Resolve status anomaly: {message}", "anomalies")
+    classification = report.get("localBranchClassification")
+    if isinstance(classification, dict) and classification.get("status") == "ok":
+        deletable = [
+            row.get("branch")
+            for row in classification.get("rows", [])
+            if isinstance(row, dict)
+            and row.get("disposition") == "merged"
+            and not row.get("heldByWorktree")
+        ]
+        if deletable:
+            shown = ", ".join(str(name) for name in deletable[:HUMAN_ITEM_LIMIT])
+            suffix = (
+                f"; +{len(deletable) - HUMAN_ITEM_LIMIT} more"
+                if len(deletable) > HUMAN_ITEM_LIMIT
+                else ""
+            )
+            add(
+                "action",
+                f"Delete {len(deletable)} merged local branch(es) no worktree holds: "
+                f"{shown}{suffix}",
+                "localBranchClassification",
+            )
 
     git_value = report.get("git")
     git: Mapping[str, Any] = git_value if isinstance(git_value, dict) else {}
@@ -2331,7 +2695,7 @@ def collect_follow_ups(
 
 def next_steps(report: Mapping[str, Any]) -> list[str]:
     steps: list[str] = []
-    if report.get("anomalies"):
+    if blocking_anomalies(report):
         steps.append("Resolve the reported anomalies, then rerun sd-status.")
     git_value = report.get("git")
     git: Mapping[str, Any] = git_value if isinstance(git_value, dict) else {}
@@ -2440,7 +2804,7 @@ def collect_local(
     expect_clean: bool,
     keep_remote_branch: bool,
     dry_run: bool,
-    prior_anomalies: Sequence[str],
+    prior_anomalies: Sequence[Sequence[str]],
     target_pack_version: str | None = None,
     include_machine_scope: bool = True,
 ) -> dict[str, Any] | None:
@@ -2498,29 +2862,70 @@ def collect_local(
         }
         if source_branch or dry_run
         else None,
-        "anomalies": [safe_text(item, limit=500) for item in prior_anomalies]
-        + anomalies
-        + [safe_text(item, limit=500) for item in roadmap_diagnostics],
+        "anomalies": [],
+        "anomalyDetails": [],
+        "localBranchClassification": {},
         "followUps": [],
         "nextSteps": [],
     }
+    # One construction path for both views, so the parallel invariant between
+    # `anomalies` and `anomalyDetails` cannot drift: same length, same order,
+    # identical messages. `anomalies` keeps its list-of-strings shape for every
+    # existing reader; `anomalyDetails` adds the stable code and the severity
+    # that decides the exit status and the housekeeping verdict.
+    details: list[tuple[str, str, str]] = []
+    # Replayed caller anomalies keep the caller's own code, so severity here
+    # matches the severity the caller's typed channel reports. Anything else
+    # would let one run exit nonzero while its verdict reads clean.
+    for code, message in prior_anomalies:
+        normalized = code if ANOMALY_CODE_RE.fullmatch(code) else "prior_anomaly"
+        details.append(
+            (
+                normalized,
+                SEVERITY_ADVISORY
+                if normalized in ADVISORY_CALLER_ANOMALY_CODES
+                else SEVERITY_BLOCKING,
+                safe_text(message, limit=500),
+            )
+        )
+    details.extend(anomalies)
+    for diagnostic in roadmap_diagnostics:
+        details.append(
+            (
+                "roadmap_source_unreadable",
+                SEVERITY_BLOCKING,
+                safe_text(diagnostic, limit=500),
+            )
+        )
     if work_loop.get("status") == "invalid":
-        report["anomalies"].append(
-            "work-loop state is invalid: "
-            + safe_text(work_loop.get("error") or "unknown error", limit=400)
+        details.append(
+            (
+                "work_loop_state_invalid",
+                SEVERITY_BLOCKING,
+                "work-loop state is invalid: "
+                + safe_text(work_loop.get("error") or "unknown error", limit=400),
+            )
         )
     if recovery.get("status") == "invalid":
-        report["anomalies"].append(
-            "recovery-artifact state is invalid: "
-            + safe_text(recovery.get("error") or "unknown error", limit=400)
+        details.append(
+            (
+                "recovery_state_invalid",
+                SEVERITY_BLOCKING,
+                "recovery-artifact state is invalid: "
+                + safe_text(recovery.get("error") or "unknown error", limit=400),
+            )
         )
     machine_scope = report["machineScope"]
     if isinstance(machine_scope, dict) and machine_scope.get("state") == "invalid":
         # Same rule the two user-local ledgers above follow: a corrupt state
         # file is an anomaly, an unreadable one (`unavailable`) is not.
-        report["anomalies"].append(
-            "machine-scope receipt is invalid: "
-            + safe_text(machine_scope.get("detail") or "unknown error", limit=400)
+        details.append(
+            (
+                "machine_receipt_invalid",
+                SEVERITY_BLOCKING,
+                "machine-scope receipt is invalid: "
+                + safe_text(machine_scope.get("detail") or "unknown error", limit=400),
+            )
         )
     completed_outside_archive = trellis.get("completedOutsideArchive", [])
     if completed_outside_archive:
@@ -2533,12 +2938,23 @@ def collect_local(
             if len(completed_outside_archive) > HUMAN_ITEM_LIMIT
             else ""
         )
-        report["anomalies"].append(
-            f"{len(completed_outside_archive)} completed Trellis task(s) remain "
-            f"outside .trellis/tasks/archive/: {shown}{suffix}"
+        details.append(
+            (
+                "completed_tasks_outside_archive",
+                SEVERITY_BLOCKING,
+                f"{len(completed_outside_archive)} completed Trellis task(s) remain "
+                f"outside .trellis/tasks/archive/: {shown}{suffix}",
+            )
         )
+    # The leftover-branch classification is computed in both modes from one
+    # code path, which is what lets the advisory and strict surfaces report the
+    # same findings instead of disagreeing about the same repository.
+    classification = classify_local_branches(git, report["github"])
+    report["localBranchClassification"] = classification
+    for code, message in branch_classification_anomalies(classification):
+        details.append((code, SEVERITY_ADVISORY, message))
     if expect_clean:
-        report["anomalies"].extend(
+        details.extend(
             strict_anomalies(
                 git,
                 default=default if isinstance(default, str) else None,
@@ -2548,6 +2964,11 @@ def collect_local(
                 dry_run=dry_run,
             )
         )
+    report["anomalies"] = [message for _, _, message in details]
+    report["anomalyDetails"] = [
+        {"code": code, "severity": severity, "message": message}
+        for code, severity, message in details
+    ]
     report["followUps"] = collect_follow_ups(
         report,
         roadmap_candidates=roadmap_candidates,
@@ -2647,9 +3068,8 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     repository = report["repository"]
     git = report["git"]
     tree = git["workingTree"]
-    anomalies = report["anomalies"]
     attention = (
-        bool(anomalies)
+        bool(blocking_anomalies(report))
         or tree.get("state") != "clean"
         or git.get("syncState") != "synchronized"
     )
@@ -2873,9 +3293,15 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     )
 
     print("\n==> Anomalies")
-    if anomalies:
-        for anomaly in anomalies:
-            print(f"- {anomaly}")
+    details = anomaly_details(report)
+    if details:
+        # One heading still holds everything a reader must see; the marking is
+        # what distinguishes "this run failed" from "you may want to look".
+        for detail in details:
+            marker = (
+                "[advisory] " if detail.get("severity") == SEVERITY_ADVISORY else ""
+            )
+            print(f"- {marker}{detail.get('message')}")
     else:
         print("none")
 
@@ -3574,6 +4000,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--prior-anomaly",
         action="append",
+        nargs=2,
+        metavar=("CODE", "MESSAGE"),
         default=[],
         help=argparse.SUPPRESS,
     )
@@ -3634,7 +4062,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(local_report, indent=2, sort_keys=False))
     else:
         render_local(local_report, dry_run=args.dry_run)
-    return 1 if args.expect_clean and local_report["anomalies"] else 0
+    # Advisory anomalies are reported but do not fail the run: a successful
+    # merge whose only leftover is a branch another worktree holds is not a
+    # failed housekeeping run, and a nonzero exit there is what made the signal
+    # unreadable. Every other strict anomaly still exits 1.
+    return 1 if args.expect_clean and blocking_anomalies(local_report) else 0
 
 
 if __name__ == "__main__":

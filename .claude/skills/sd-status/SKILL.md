@@ -61,7 +61,11 @@ reinterpret them as shell text.
    the Git worktree inventory (every worktree with its path, checked-out
    branch or detached HEAD, cleanliness, and the reporting row marked; local
    branches held in another worktree carry a ` [worktree]` marking, and an
-   unavailable inventory is reported explicitly),
+   unavailable inventory is reported explicitly), the leftover local-branch
+   classification (each branch other than the default reported as merged,
+   unmerged with an open pull request, unmerged without one, or unknown, plus
+   the worktree holding it when one does; incomplete, truncated, or stale pull
+   request evidence reports unknown and never a false "no pull request"),
    installed pack and Trellis versions, relevant PR, open PRs/issues, current
    and queued Trellis work, completed tasks stranded outside the Trellis
    archive, the user-local autonomous work-loop state, pack recovery-artifact
@@ -134,8 +138,12 @@ reinterpret them as shell text.
 
 ## Final Response
 
-Relay the collector's summary and anomalies, then preserve these headings and
-selection IDs exactly:
+Relay the collector's summary and anomalies. Anomalies carry a severity:
+entries printed with an `[advisory]` marker are reported but do not fail the
+run, and only blocking entries make the header read `attention` or make
+`--expect-clean` exit nonzero. Keep the marker when relaying them; never
+present an advisory entry as a blocker or drop it as noise. Then preserve these
+headings and selection IDs exactly:
 
 ```text
 Follow-ups

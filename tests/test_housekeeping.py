@@ -283,6 +283,123 @@ class HousekeepingTests(InstallTestCase):
         self.assertIn("branch=main", result.stdout)
         self.assertNotIn("branch=null", result.stdout)
 
+    def _worktree_probe_repo(self) -> Path:
+        """A repo on a feature branch whose default branch another worktree holds."""
+
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-housekeeping-wt-")
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name) / "repo"
+        root.mkdir()
+        run = lambda *args: subprocess.run(  # noqa: E731
+            ["git", *args], cwd=root, check=True, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        run("init", "--initial-branch=main")
+        run("config", "user.name", "Housekeeping Test")
+        run("config", "user.email", "housekeeping@example.com")
+        (root / "README.md").write_text("seed\n", encoding="utf-8")
+        run("add", ".")
+        run("commit", "-m", "seed")
+        run("switch", "-c", "feature")
+        return root
+
+    def test_worktree_holding_branch_names_the_holder(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self._worktree_probe_repo()
+        holder = root.parent / "wt-main"
+        subprocess.run(
+            ["git", "worktree", "add", str(holder), "main"],
+            cwd=root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            "set -uo pipefail;"
+            f"eval \"$(awk '/^worktree_holding_branch\\(\\)/,/^}}/' {script})\";"
+            'printf "held=%s\\n" "$(worktree_holding_branch main)";'
+            'printf "free=%s\\n" "$(worktree_holding_branch feature)"'
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", probe],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertIn(f"held={holder.resolve()}", result.stdout)
+        self.assertIn("free=\n", result.stdout + "\n")
+
+    def _run_switch_probe(self, root: Path, *, git_stub: str = "") -> str:
+        script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
+        probe = (
+            "set -uo pipefail;"
+            'DEFAULT_BRANCH=main; DRY_RUN=0;'
+            "ACTIONS=(); ACTION_CODES=(); ANOMALIES=(); ANOMALY_CODES=();"
+            'add_action() { ACTION_CODES+=("$1"); shift; ACTIONS+=("$*"); };'
+            'add_anomaly() { ANOMALY_CODES+=("$1"); shift; ANOMALIES+=("$*"); };'
+            'current_branch() { git rev-parse --abbrev-ref HEAD; };'
+            + git_stub
+            + f"eval \"$(awk '/^worktree_holding_branch\\(\\)/,/^}}/' {script})\";"
+            + f"eval \"$(awk '/^switch_to_default_branch\\(\\)/,/^}}/' {script})\";"
+            'switch_to_default_branch;'
+            'printf "ANOMALY_CODES=%s\\n" "${ANOMALY_CODES[*]-}";'
+            'printf "ANOMALIES=%s\\n" "${ANOMALIES[*]-}";'
+            'printf "ACTION_CODES=%s\\n" "${ACTION_CODES[*]-}"'
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", probe],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        return result.stdout
+
+    def test_default_branch_held_by_worktree_is_diagnosed_not_opaque(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self._worktree_probe_repo()
+        holder = root.parent / "wt-main-held"
+        subprocess.run(
+            ["git", "worktree", "add", str(holder), "main"],
+            cwd=root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        output = self._run_switch_probe(root)
+
+        self.assertIn("ANOMALY_CODES=default_branch_held_elsewhere", output)
+        self.assertIn(str(holder.resolve()), output)
+        self.assertNotIn("default_branch_switch_failed", output)
+
+    def test_switch_failure_without_a_holder_still_blocks(self) -> None:
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self._worktree_probe_repo()
+        # No worktree holds main; the switch fails for an unrelated reason, which
+        # is a defect rather than an impossibility and must keep its blocking code.
+        git_stub = (
+            'git() {'
+            '  case "$1" in'
+            '    switch) printf "fatal: local changes would be overwritten\\n" >&2; return 1 ;;'
+            '  esac;'
+            '  command git "$@"; };'
+        )
+
+        output = self._run_switch_probe(root, git_stub=git_stub)
+
+        self.assertIn("ANOMALY_CODES=default_branch_switch_failed", output)
+        self.assertIn("local changes would be overwritten", output)
+        self.assertNotIn("default_branch_held_elsewhere", output)
+
     def _run_reconcile_recovery(
         self,
         *,

@@ -613,9 +613,19 @@ branch, staged/unstaged/untracked counts, Git stash count, upstream ahead/behind
 and local/remote branches, installed SD pack and Trellis versions, relevant PR,
 open PRs/issues, current/in-progress/planned Trellis work, completed tasks
 stranded outside the Trellis archive, user-local autonomous loop state,
-pack recovery-artifact classifications, anomalies, complete selectable
+pack recovery-artifact classifications, the leftover local-branch
+classification, severity-tagged anomalies, complete selectable
 F-prefixed follow-ups and T-prefixed unarchived
-tasks, and numbered next steps. Task-like items in bounded roadmap sources are
+tasks, and numbered next steps. Every local branch other than the default one is
+classified as merged, unmerged with an open pull request, unmerged without one,
+or unknown, carrying the worktree holding it when one does; the
+unmerged-without verdict is asserted only from pull request evidence that was
+available, untruncated, and current, and anything else reports unknown with its
+reason. Anomalies carry a stable code and a `blocking` or `advisory` severity in
+`anomalyDetails`, parallel to the `anomalies` message list. Only blocking
+entries make `--expect-clean` exit nonzero or make the human header read
+`attention`; advisory entries print under the same `Anomalies` heading with an
+`[advisory]` marker. Task-like items in bounded roadmap sources are
 reported as source-backed F-prefixed follow-ups only when no unarchived Trellis
 task represents them. Sources are limited to roadmap/backlog/TODO/program-design
 or implementation-plan Markdown/text files and files below `roadmap/`,
