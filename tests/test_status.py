@@ -1831,6 +1831,384 @@ class StatusTests(InstallTestCase):
             set(held).issubset(set(report["git"]["localBranches"]))
         )
 
+    # --- leftover-branch classification and anomaly severity -----------------
+
+    def collect_git_for(self, root):
+        status = self.load_status_module()
+        git, _ = status.collect_git(
+            root,
+            remote="origin",
+            supplied_default=None,
+            refs_refreshed=False,
+        )
+        return status, git
+
+    def github_evidence(self, *, status_value="available", prs=()):
+        return {
+            "openPrs": list(prs),
+            "openPrsStatus": status_value,
+        }
+
+    def unmerged_branch(self, root, name: str) -> None:
+        self.run_git(root, "switch", "-c", name)
+        (root / f"{name.replace('/', '-')}.txt").write_text("work\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", f"work on {name}")
+        self.run_git(root, "switch", "main")
+
+    def dispositions(self, classification) -> dict:
+        return {
+            row["branch"]: row["disposition"] for row in classification["rows"]
+        }
+
+    def test_branch_dispositions_separate_merged_unmerged_and_prless(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "chore/merged")
+        self.unmerged_branch(root, "chore/open-pr")
+        self.unmerged_branch(root, "chore/no-pr")
+
+        status, git = self.collect_git_for(root)
+        classification = status.classify_local_branches(
+            git,
+            self.github_evidence(prs=[{"number": 7, "head": "chore/open-pr"}]),
+        )
+
+        self.assertEqual(
+            self.dispositions(classification),
+            {
+                "chore/merged": "merged",
+                "chore/open-pr": "unmerged-with-pull-request",
+                "chore/no-pr": "unmerged-without-pull-request",
+            },
+        )
+        rows = {row["branch"]: row for row in classification["rows"]}
+        self.assertEqual(rows["chore/open-pr"]["pullRequest"], 7)
+        self.assertIsNone(rows["chore/no-pr"]["pullRequest"])
+        self.assertFalse(classification["truncated"])
+
+    def test_held_branch_carries_worktree_path_on_every_disposition(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "chore/merged-held")
+        self.unmerged_branch(root, "chore/prless-held")
+        merged_tree = root.parent / "wt-merged-held"
+        prless_tree = root.parent / "wt-prless-held"
+        self.run_git(root, "worktree", "add", str(merged_tree), "chore/merged-held")
+        self.run_git(root, "worktree", "add", str(prless_tree), "chore/prless-held")
+
+        status, git = self.collect_git_for(root)
+        classification = status.classify_local_branches(git, self.github_evidence())
+        rows = {row["branch"]: row for row in classification["rows"]}
+
+        # Held-ness is an independent axis: both dispositions survive it.
+        self.assertEqual(rows["chore/merged-held"]["disposition"], "merged")
+        self.assertEqual(
+            rows["chore/prless-held"]["disposition"],
+            "unmerged-without-pull-request",
+        )
+        # git reports the resolved path; on macOS /var is a symlink to
+        # /private/var, so compare resolved paths rather than the literal ones.
+        self.assertEqual(
+            Path(rows["chore/merged-held"]["heldByWorktree"]).resolve(),
+            merged_tree.resolve(),
+        )
+        self.assertEqual(
+            Path(rows["chore/prless-held"]["heldByWorktree"]).resolve(),
+            prless_tree.resolve(),
+        )
+
+    def test_unavailable_pr_evidence_reports_unknown_not_prless(self) -> None:
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "chore/unknown-pr")
+
+        status, git = self.collect_git_for(root)
+        classification = status.classify_local_branches(
+            git,
+            self.github_evidence(status_value="unavailable"),
+        )
+
+        self.assertEqual(
+            self.dispositions(classification), {"chore/unknown-pr": "unknown"}
+        )
+        self.assertEqual(
+            classification["evidence"]["pullRequests"], "github_unavailable"
+        )
+
+    def test_full_pr_page_reports_unknown_not_prless(self) -> None:
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "chore/maybe-has-pr")
+
+        status, git = self.collect_git_for(root)
+        # Exactly MAX_ITEMS rows means the listing may have been cut off, so a
+        # branch missing from it proves nothing.
+        saturated = [
+            {"number": index, "head": f"other/{index}"}
+            for index in range(status.MAX_ITEMS)
+        ]
+        classification = status.classify_local_branches(
+            git,
+            self.github_evidence(prs=saturated),
+        )
+
+        self.assertEqual(
+            self.dispositions(classification), {"chore/maybe-has-pr": "unknown"}
+        )
+        self.assertEqual(
+            classification["evidence"]["pullRequests"], "pr_evidence_truncated"
+        )
+
+    def test_stale_default_branch_reports_unknown_not_prless(self) -> None:
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "chore/after-stale")
+        (root / "later.txt").write_text("later\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "local default advances")
+
+        status, git = self.collect_git_for(root)
+        self.assertIsNot(git["defaultMatchesRemote"], True)
+        classification = status.classify_local_branches(git, self.github_evidence())
+
+        self.assertEqual(
+            self.dispositions(classification), {"chore/after-stale": "unknown"}
+        )
+        self.assertEqual(classification["evidence"]["defaultBranch"], "stale")
+
+    def test_branch_advisories_stay_within_the_anomaly_size_budget(self) -> None:
+        """Several externally controlled names per message, one shared budget.
+
+        Branch names and worktree paths both come from outside, and one advisory
+        names up to HUMAN_ITEM_LIMIT of each, so the assembled string is the
+        place the bound has to hold.
+        """
+
+        status = self.load_status_module()
+        rows = [
+            {
+                "branch": "chore/" + "b" * 114,
+                "disposition": "unmerged-without-pull-request",
+                "pullRequest": None,
+                "heldByWorktree": "/tmp/" + "w" * 295,
+            }
+            for _ in range(status.HUMAN_ITEM_LIMIT + 3)
+        ]
+        anomalies = status.branch_classification_anomalies(
+            {
+                "status": "ok",
+                "evidence": {"pullRequests": "available", "defaultBranch": "current"},
+                "rows": rows,
+                "truncated": False,
+            }
+        )
+
+        self.assertEqual([code for code, _ in anomalies], ["local_branches_unmerged_without_pr"])
+        for _, message in anomalies:
+            self.assertLessEqual(len(message), 500)
+
+    def test_an_open_pull_request_survives_stale_merge_evidence(self) -> None:
+        """The evidence gates guard the absence claim, not this presence one.
+
+        A stale default branch is the ordinary case between two fetches. An open
+        pull request is direct evidence from another channel, so gating it on the
+        reachability walk would report ``unknown`` for the most informative row
+        in the inventory.
+        """
+
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "chore/open-pr")
+        (root / "later.txt").write_text("later\n", encoding="utf-8")
+        self.run_git(root, "add", ".")
+        self.run_git(root, "commit", "-m", "local default advances")
+
+        status, git = self.collect_git_for(root)
+        self.assertIsNot(git["defaultMatchesRemote"], True)
+        classification = status.classify_local_branches(
+            git,
+            self.github_evidence(prs=[{"number": 41, "head": "chore/open-pr"}]),
+        )
+
+        self.assertEqual(classification["evidence"]["defaultBranch"], "stale")
+        self.assertEqual(
+            self.dispositions(classification),
+            {"chore/open-pr": "unmerged-with-pull-request"},
+        )
+        self.assertEqual(classification["rows"][0]["pullRequest"], 41)
+
+    def test_advisory_and_strict_report_the_same_branch_findings(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "chore/merged-leftover")
+        self.unmerged_branch(root, "chore/unmerged-leftover")
+
+        advisory = self.run_status(root, "--json")
+        strict = self.run_status(root, "--json", "--expect-clean")
+
+        self.assertEqual(advisory.returncode, 0, advisory.stdout)
+        self.assertEqual(strict.returncode, 0, strict.stdout)
+        advisory_report = json.loads(advisory.stdout)
+        strict_report = json.loads(strict.stdout)
+        self.assertEqual(
+            advisory_report["localBranchClassification"]["rows"],
+            strict_report["localBranchClassification"]["rows"],
+        )
+        branch_codes = {
+            "local_branches_unmerged_without_pr",
+            "local_branches_pr_state_unknown",
+        }
+        self.assertEqual(
+            {
+                item["code"]
+                for item in advisory_report["anomalyDetails"]
+                if item["code"] in branch_codes
+            },
+            {
+                item["code"]
+                for item in strict_report["anomalyDetails"]
+                if item["code"] in branch_codes
+            },
+        )
+        # The reported shape the PRD objects to -- one surface saying nothing is
+        # wrong while the other blocks on the same repository -- cannot occur:
+        # neither surface blocks, and both carry the same entries.
+        self.assertEqual(advisory_report["anomalies"], strict_report["anomalies"])
+
+    def test_leftover_branches_alone_exit_zero_under_expect_clean(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "chore/leftover")
+        self.unmerged_branch(root, "chore/stranded")
+
+        result = self.run_status(root, "--json", "--expect-clean")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(
+            [
+                item["code"]
+                for item in report["anomalyDetails"]
+                if item["severity"] != "advisory"
+            ],
+            [],
+        )
+        self.assertNotIn("extra local branches remain", result.stdout)
+
+    def test_dirty_tree_still_exits_nonzero_under_expect_clean(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "chore/leftover")
+        (root / "README.md").write_text("dirty\n", encoding="utf-8")
+
+        result = self.run_status(root, "--json", "--expect-clean")
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertIn(
+            "working_tree_dirty",
+            [item["code"] for item in report["anomalyDetails"]],
+        )
+
+    def test_retained_source_branch_still_blocks(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "task/not-deleted")
+
+        result = self.run_status(
+            root,
+            "--json",
+            "--expect-clean",
+            "--source-branch",
+            "task/not-deleted",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        report = json.loads(result.stdout)
+        blocking = {
+            item["code"]
+            for item in report["anomalyDetails"]
+            if item["severity"] != "advisory"
+        }
+        self.assertIn("local_source_branch_retained", blocking)
+
+    def test_retained_source_branch_held_elsewhere_is_advisory(self) -> None:
+        root = self.make_status_repo()
+        self.run_git(root, "branch", "task/held-source")
+        holder = root.parent / "wt-held-source"
+        self.run_git(root, "worktree", "add", str(holder), "task/held-source")
+
+        result = self.run_status(
+            root,
+            "--json",
+            "--expect-clean",
+            "--source-branch",
+            "task/held-source",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        held = [
+            item
+            for item in report["anomalyDetails"]
+            if item["code"] == "local_source_branch_held_elsewhere"
+        ]
+        self.assertEqual(len(held), 1, report["anomalyDetails"])
+        self.assertEqual(held[0]["severity"], "advisory")
+        self.assertIn(holder.name, held[0]["message"])
+
+    def test_anomaly_details_parallel_the_anomaly_list(self) -> None:
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "chore/parallel")
+        (root / "README.md").write_text("dirty\n", encoding="utf-8")
+
+        result = self.run_status(root, "--json", "--expect-clean")
+
+        report = json.loads(result.stdout)
+        self.assertEqual(
+            report["anomalies"],
+            [item["message"] for item in report["anomalyDetails"]],
+        )
+
+    def test_blocking_prior_anomaly_code_still_exits_nonzero(self) -> None:
+        root = self.make_status_repo()
+
+        result = self.run_status(
+            root,
+            "--expect-clean",
+            "--prior-anomaly",
+            "local_branch_delete_failed",
+            "could not delete the merged branch",
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not delete the merged branch", result.stdout)
+
+    def test_advisory_prior_anomaly_code_does_not_block(self) -> None:
+        root = self.make_status_repo()
+
+        result = self.run_status(
+            root,
+            "--json",
+            "--expect-clean",
+            "--prior-anomaly",
+            "default_branch_held_elsewhere",
+            "main is checked out in worktree /elsewhere",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        replayed = [
+            item
+            for item in report["anomalyDetails"]
+            if item["code"] == "default_branch_held_elsewhere"
+        ]
+        self.assertEqual(len(replayed), 1, report["anomalyDetails"])
+        self.assertEqual(replayed[0]["severity"], "advisory")
+
+    def test_prior_anomaly_requires_a_code_and_message(self) -> None:
+        root = self.make_status_repo()
+
+        result = self.run_status(
+            root,
+            "--expect-clean",
+            "--prior-anomaly",
+            "message only",
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+
     def test_worktree_empty_state_is_explicit(self) -> None:
         root = self.make_status_repo()
 
@@ -2056,7 +2434,10 @@ class StatusTests(InstallTestCase):
             )
 
         self.assertIsNone(git["stashCount"])
-        self.assertIn("git stash inventory is unavailable", anomalies)
+        self.assertIn(
+            ("git_stash_unavailable", "blocking", "git stash inventory is unavailable"),
+            anomalies,
+        )
 
     def test_dirty_state_is_advisory_unless_housekeeping_requests_strict_mode(
         self,
@@ -2069,6 +2450,7 @@ class StatusTests(InstallTestCase):
             root,
             "--expect-clean",
             "--prior-anomaly",
+            "local_branch_delete_failed",
             "cleanup helper failed\x07",
         )
 

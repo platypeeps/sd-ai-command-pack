@@ -22,6 +22,16 @@ result_builder = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = result_builder
 SPEC.loader.exec_module(result_builder)
 
+STATUS_PATH = install.ROOT / "scripts/sd-ai-command-pack-status.py"
+STATUS_SPEC = importlib.util.spec_from_file_location(
+    "sd_ai_command_pack_status_for_result", STATUS_PATH
+)
+if STATUS_SPEC is None or STATUS_SPEC.loader is None:
+    raise RuntimeError(f"cannot load {STATUS_PATH}")
+status_collector = importlib.util.module_from_spec(STATUS_SPEC)
+sys.modules[STATUS_SPEC.name] = status_collector
+STATUS_SPEC.loader.exec_module(status_collector)
+
 HEAD = "1" * 40
 
 
@@ -241,7 +251,10 @@ class HousekeepingResultTests(unittest.TestCase):
             },
         )
 
-    def test_status_anomalies_block_even_without_shell_anomaly(self) -> None:
+    def test_legacy_status_without_details_still_blocks(self) -> None:
+        # An embedded document from a collector that predates anomalyDetails
+        # carries no severity, so every anomaly blocks under the one opaque
+        # code. Fail closed rather than read an unknown severity as advisory.
         self.status["anomalies"] = ["remote source branch still tracked"]
         self.write_json(self.status_path, self.status)
 
@@ -249,6 +262,86 @@ class HousekeepingResultTests(unittest.TestCase):
 
         self.assertEqual(result["outcome"]["status"], "blocked")
         self.assertEqual(result["outcome"]["reasonCodes"], ["status_anomalies"])
+
+    def test_blocking_status_anomalies_name_their_cause(self) -> None:
+        self.status["anomalies"] = ["working tree is dirty after housekeeping"]
+        self.status["anomalyDetails"] = [
+            {
+                "code": "working_tree_dirty",
+                "severity": "blocking",
+                "message": "working tree is dirty after housekeeping",
+            }
+        ]
+        self.write_json(self.status_path, self.status)
+
+        result = result_builder.build_result(self.args(status_exit=1))
+
+        self.assertEqual(result["outcome"]["verdict"], "blocked")
+        self.assertEqual(
+            result["outcome"]["reasonCodes"], ["status_working_tree_dirty"]
+        )
+
+    def test_advisory_status_anomalies_do_not_block(self) -> None:
+        self.status["anomalies"] = ["2 local branch(es) are unmerged with no open pull request: a, b"]
+        self.status["anomalyDetails"] = [
+            {
+                "code": "local_branches_unmerged_without_pr",
+                "severity": "advisory",
+                "message": "2 local branch(es) are unmerged with no open pull request: a, b",
+            }
+        ]
+        self.write_json(self.status_path, self.status)
+
+        result = result_builder.build_result(self.args(status_exit=0))
+
+        self.assertEqual(result["outcome"]["verdict"], "clean")
+        self.assertEqual(result["outcome"]["reasonCodes"], [])
+
+    def test_advisory_shell_anomaly_yields_clean_verdict(self) -> None:
+        # The absorbed 08-08 case: every merge action succeeded and the only
+        # anomalies are that another live worktree holds the default branch.
+        # Assert the exact verdict -- `failed` and `indeterminate` would both
+        # satisfy a merely-not-blocked assertion.
+        anomalies = [
+            [
+                "default_branch_held_elsewhere",
+                "main is checked out in worktree /elsewhere; this checkout stays on feature",
+            ],
+            [
+                "branch_retained_default_held",
+                "still on feature because main is held by another worktree; skipped branch deletion",
+            ],
+        ]
+
+        result = result_builder.build_result(self.args(anomaly=anomalies))
+
+        self.assertEqual(result["outcome"]["verdict"], "clean")
+        self.assertEqual(result["outcome"]["reasonCodes"], [])
+        self.assertEqual(
+            [item["code"] for item in result["anomalies"]],
+            ["default_branch_held_elsewhere", "branch_retained_default_held"],
+        )
+
+    def test_advisory_code_does_not_outrank_indeterminate(self) -> None:
+        anomalies = [
+            ["default_branch_held_elsewhere", "main is held by another worktree"],
+            ["pull_request_unavailable", "could not read the pull request"],
+        ]
+
+        result = result_builder.build_result(self.args(anomaly=anomalies))
+
+        self.assertEqual(result["outcome"]["verdict"], "indeterminate")
+        self.assertIn("pull_request_unavailable", result["outcome"]["reasonCodes"])
+
+    def test_advisory_code_sets_agree_across_scripts(self) -> None:
+        # The collector mirrors this severity when housekeeping replays its own
+        # anomalies through --prior-anomaly. A code that is advisory in one
+        # script and blocking in the other produces a clean verdict from a run
+        # that exited nonzero, so the two sets are pinned together here.
+        self.assertEqual(
+            status_collector.ADVISORY_CALLER_ANOMALY_CODES,
+            result_builder.ADVISORY_ANOMALY_CODES,
+        )
 
     def test_invalid_schema_code_message_and_symlink_fail_closed(self) -> None:
         self.status["schemaVersion"] = 1

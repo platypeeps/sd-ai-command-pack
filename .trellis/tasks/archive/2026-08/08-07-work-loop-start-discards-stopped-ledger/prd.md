@@ -114,13 +114,13 @@ names.
 
 ## Acceptance Criteria
 
-- [ ] `start` against a stopped ledger without an explicit opt-in does not
+- [x] `start` against a stopped ledger without an explicit opt-in does not
       write `new_state`; it either resumes or exits nonzero with a reason
-- [ ] `start --run-id <stopped-run-id>` never produces a fresh ledger carrying
+- [x] `start --run-id <stopped-run-id>` never produces a fresh ledger carrying
       that run ID
-- [ ] A test covers each existing status (`active`, `paused`, `stopped`, and
+- [x] A test covers each existing status (`active`, `paused`, `stopped`, and
       any other persisted value) against `start` with and without `--run-id`
-- [ ] Open question 1 is answered in `design.md` with a decision and rationale
+- [x] Open question 1 is answered in `design.md` with a decision and rationale
 
 ## Notes
 

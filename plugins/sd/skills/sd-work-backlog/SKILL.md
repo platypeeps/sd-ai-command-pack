@@ -112,6 +112,15 @@ bash sd-ai-command-pack-toolchain.sh run-python -- \
   --selector <all|needs-design> --until <design|merge> --json
 ```
 
+That invocation resumes an `active` or `paused` ledger and starts a new run
+when none exists. Against a `stopped` or `completed` ledger it refuses instead
+of replacing it: pass `--resume` to reactivate that run in place, keeping its
+run ID, iteration, and counters, or `--reset` to discard it and mint a genuinely
+new run, which archives the outgoing ledger beside the live one. Read `status`
+first, as the prerequisites above already require, and let the reported reason
+code decide: `run_stopped` routes to `references/run-recovery.md`, which
+reconciles before either flag is appropriate.
+
 Pass normalized focus as repeatable `--focus`, `--focus-only`, or one
 `--bare-focus` value. `SD_AI_COMMAND_PACK_STATE_HOME` may override the user
 state root only with an absolute path. Otherwise the helper uses the documented

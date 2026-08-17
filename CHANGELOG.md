@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.71.29 - 2026-08-16
+
+### Changed
+
+- `work-loop.py start` no longer replaces an existing ledger implicitly. A
+  `stopped` or `completed` run used to fall out of the resume branch and reach
+  `new_state()`, overwriting the ledger in place with no warning, no backup,
+  and no reason code -- and the `--run-id` mismatch guard sat inside that same
+  resume branch, so `start --run-id <the run I meant to resume>` was exactly
+  the invocation that minted a fresh ledger carrying the run ID it destroyed.
+  One consumer lost 8 completed / 8 merged PRs / 29 review rounds that way, and
+  the loss is recorded only because an operator hand-wrote it into the run's
+  own stop reason. `start` now refuses such a ledger with a nonzero exit naming
+  the status and both flags: `--resume` reactivates the run in place, keeping
+  its run ID, iteration, counters, and stop reason, and `--reset` archives the
+  outgoing ledger to a `replaced.json` sibling before minting a new run. The
+  flags are mutually exclusive, `--resume` without an existing ledger is an
+  error rather than a silent new run, and `--reset --run-id <the discarded run
+  ID>` is refused. `active` and `paused` resume semantics are unchanged.
+- The `--run-id` mismatch guard now covers every existing ledger rather than
+  only the resumable ones, and `status` reports whether a replaced-ledger
+  sibling is present along with the replaced run ID and timestamp. An
+  unreadable sibling reports present-but-unreadable; read-only status never
+  raises on it.
+
+## 0.71.28 - 2026-08-16
+
+### Changed
+
+- Housekeeping no longer returns `blocked` because local branches the run never
+  touched still exist. That check fired on every successful merge in any
+  repository that keeps branches around -- 3 branches and 14 branches produced
+  the same verdict -- so it could not distinguish tidy-up from the one case that
+  mattered, an unmerged branch with no pull request holding work present nowhere
+  else. It also could not clear at all for anyone running concurrent worktrees,
+  since a branch checked out elsewhere cannot be deleted by any correct cleanup.
+
+  In its place the status collector classifies every local branch other than the
+  default one, in both its advisory and strict modes, and publishes the result as
+  `localBranchClassification`: `merged`, `unmerged-with-pull-request`,
+  `unmerged-without-pull-request`, or `unknown`, each carrying the worktree
+  holding it when one does. `unmerged-without-pull-request` is asserted only from
+  pull request evidence that was available, untruncated, and current; anything
+  else reports `unknown` with the reason rather than a false claim that no pull
+  request exists. Merged branches no worktree holds surface as a follow-up
+  action; the rest are reported without blocking.
+
+  What that check incidentally covered -- the run's own source branch surviving
+  deletion -- is now an explicit blocking postcondition, `local_source_branch_retained`.
+
+- Status anomalies carry a severity. `anomalyDetails` runs parallel to
+  `anomalies` (same order, same messages) and adds a stable code plus
+  `blocking` or `advisory`. `--expect-clean` exits nonzero for blocking entries
+  only, and the human report marks advisory ones `[advisory]` under the same
+  `Anomalies` heading. Every previously blocking condition still blocks: a dirty
+  tree, a diverged or missing default branch, a retained remote source branch.
+
+- A default branch held by another live worktree is diagnosed instead of being
+  reported as an opaque failure. Housekeeping emits `default_branch_held_elsewhere`
+  naming the holding worktree, and `branch_retained_default_held` for the branch
+  deletion it therefore skipped; both are advisory, so a merge whose every action
+  succeeded returns `clean`. A switch that fails for any other reason keeps
+  `default_branch_switch_failed` and now carries git's own first line of stderr.
+  This closes the case where 14 pull requests merged in one session (#358-#379)
+  each reported the same two opaque anomalies and a `blocked` verdict.
+
+- A blocked housekeeping verdict names its cause where the reader is looking.
+  The opaque `status_anomalies` reason code is replaced by the collector's own
+  codes, prefixed -- `status_working_tree_dirty` rather than a pointer to the
+  embedded document. An embedded status result without `anomalyDetails` keeps
+  today's whole-list blocking behavior under the old code, so a mixed pair fails
+  closed.
+
+- `--prior-anomaly` on the status collector now takes a code and a message
+  rather than a message alone, so a replayed caller anomaly keeps its severity.
+  It is an internal flag with one caller, `sd-ai-command-pack-housekeeping.sh`.
+
 ## 0.71.27 - 2026-08-16
 
 ### Fixed

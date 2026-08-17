@@ -51,6 +51,20 @@ MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_MESSAGE_LENGTH = 1000
 CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Anomaly codes that are reported but do not block. They name a condition the
+# operator is not free to resolve at this moment -- a branch or the default
+# branch held by another live worktree -- rather than a defect in the run. A
+# verdict that blocks on a normal steady state fires on every successful merge
+# and stops carrying information, which is the failure this set exists to
+# prevent. Membership is deliberately narrow: a switch that failed for any other
+# reason keeps its blocking code. The collector holds an identical set for the
+# codes it replays through --prior-anomaly; a test pins the two together.
+ADVISORY_ANOMALY_CODES = frozenset(
+    {
+        "branch_retained_default_held",
+        "default_branch_held_elsewhere",
+    }
+)
 INDETERMINATE_ANOMALY_CODES = frozenset(
     {
         "default_branch_unavailable",
@@ -226,6 +240,34 @@ def deduplicate(values: Sequence[str]) -> list[str]:
     return result
 
 
+def status_blocking_reasons(status: Mapping[str, Any] | None) -> list[str]:
+    """Reason codes for the embedded collector's blocking anomalies.
+
+    A collector that emits ``anomalyDetails`` reports a severity per anomaly, so
+    an advisory one -- a branch held by another live worktree -- is visible
+    without blocking. An older embedded document has neither codes nor
+    severities, so every anomaly blocks and the single opaque
+    ``status_anomalies`` code stands in: fail closed rather than silently treat
+    an unknown severity as advisory.
+    """
+
+    if status is None:
+        return []
+    details = status.get("anomalyDetails")
+    if isinstance(details, list):
+        codes: list[str] = []
+        for item in details:
+            if not isinstance(item, Mapping) or item.get("severity") == "advisory":
+                continue
+            code = item.get("code")
+            if isinstance(code, str) and CODE_RE.fullmatch(code):
+                codes.append(f"status_{code}"[:64])
+            else:
+                codes.append("status_anomalies")
+        return deduplicate(codes)
+    return ["status_anomalies"] if status.get("anomalies") else []
+
+
 def classify_outcome(
     *,
     status: Mapping[str, Any] | None,
@@ -234,8 +276,11 @@ def classify_outcome(
     eligibility: Mapping[str, Any] | None,
     anomalies: Sequence[Mapping[str, str]],
 ) -> dict[str, Any]:
-    status_anomalies = [] if status is None else status.get("anomalies", [])
-    event_codes = [item["code"] for item in anomalies]
+    status_blocking = status_blocking_reasons(status)
+    all_event_codes = [item["code"] for item in anomalies]
+    event_codes = [
+        code for code in all_event_codes if code not in ADVISORY_ANOMALY_CODES
+    ]
     eligibility_status = None if eligibility is None else eligibility.get("status")
     eligibility_reasons = (
         [] if eligibility is None else list(eligibility.get("reasonCodes", []))
@@ -248,15 +293,18 @@ def classify_outcome(
         outcome = "failed"
         reasons = ["status_collection_failed"]
     elif eligibility_status == "indeterminate" or any(
-        code in INDETERMINATE_ANOMALY_CODES for code in event_codes
+        code in INDETERMINATE_ANOMALY_CODES for code in all_event_codes
     ):
         outcome = "indeterminate"
         reasons = eligibility_reasons + event_codes
-    elif eligibility_status == "blocked" or event_codes or status_anomalies:
+    elif eligibility_status == "blocked" or event_codes or status_blocking:
         outcome = "blocked"
         reasons = eligibility_reasons + event_codes
-        if status_anomalies and not event_codes:
-            reasons.append("status_anomalies")
+        # Name the cause where the reader is already looking. The old opaque
+        # `status_anomalies` code left the top-level reason list saying only
+        # that something in the embedded document was wrong, one level away
+        # from what it was.
+        reasons.extend(status_blocking)
     elif status_exit == 1:
         outcome = "failed"
         reasons = ["status_collection_failed"]

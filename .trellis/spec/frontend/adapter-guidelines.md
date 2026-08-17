@@ -254,6 +254,15 @@ timeouts, retries, dry-run behavior, and output formats explicit.
   explicit branch evidence must resolve and any resolvable recorded branch
   must match the submitted head. Conflicting PRs, unrelated branches, and
   non-descendant commits fail red.
+- `start` never replaces an existing ledger implicitly. An `active` or `paused`
+  run resumes; any other persisted status refuses with a nonzero exit naming
+  the status and both flags. `--resume` reactivates the run in place and
+  preserves its run ID, iteration, counters, and stop reason; `--reset`
+  archives the outgoing ledger to a one-generation sibling before minting a new
+  run. The two flags are mutually exclusive, `--resume` without an existing
+  ledger is an error rather than a silent new run, and the `--run-id` mismatch
+  guard covers every persisted status so no fresh ledger can carry the run ID
+  it replaced.
 - User-local state stores only bounded coordination metadata and uses atomic
   writes, versioned JSON, private permissions where supported, and a
   recoverable run lock. Every non-null current-state string must remain

@@ -1547,3 +1547,143 @@ Both machine-scope entry points refused any duplicate entry in `claude plugin li
 ### Next Steps
 
 - None - task complete
+
+
+## Session 386: Leftover local branches no longer block housekeeping; anomalies gain typed severity
+
+**Date**: 2026-08-16
+**Task**: Leftover local branches no longer block housekeeping; anomalies gain typed severity
+**Branch**: `task/08-07-status-anomaly-severity`
+
+### Summary
+
+Removed the leftover-branch strict anomaly that made every successful merge report blocked, replaced it with a branch classification carrying evidence gates, gave every anomaly a stable code and a blocking/advisory severity, and taught the housekeeping shell gate to tell an impossible switch from a failed one.
+
+### Main Changes
+
+- strict_anomalies no longer treats extra local branches as blocking; leftover branches are a steady state, not a postcondition of the run
+- status.localBranchClassification classifies each non-default branch as merged, unmerged-with-pull-request, unmerged-without-pull-request, or unknown, and names the worktree holding it
+- the unmerged-without-pull-request verdict is asserted only from pull-request evidence that was available, untruncated, and current; everything else reports unknown with its reason
+- anomalies carry a stable code and a blocking or advisory severity in anomalyDetails, built from one construction path so the coded and message views cannot disagree
+- only blocking entries drive the --expect-clean exit status, the attention header, and issue-kind follow-ups; advisory entries print with an [advisory] marker
+- --prior-anomaly now takes CODE and MESSAGE so the housekeeping replay channel carries severity instead of assuming it; a legacy report without anomalyDetails fails closed as blocking
+- worktree_holding_branch diagnoses a default branch held elsewhere as advisory while a switch failure with no holder still blocks with the bounded git diagnostic
+- housekeeping-result maps status anomalies to named status_<code> reasons instead of the opaque status_anomalies, and advisory codes never outrank an indeterminate verdict
+- review round 2 reordered the open-pull-request check ahead of the merge-evidence gate, and guarded worktree_holding_branch against an unknown repository root
+- review round 3 bounded the branch advisory message to the 500-character budget every other anomaly source uses
+- spec: .trellis/spec/backend/error-handling.md gains 'Don't: block on a normal steady state'
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34249d2f` | fix(status): stop blocking on leftover local branches, add anomaly severity |
+| `0a0cd767` | fix(status): classify an open pull request from its own evidence |
+| `01d7a3c2` | fix(status): bound the branch advisory to the shared anomaly budget |
+| `c5d93d52` | chore(task): record the implementation branch on the task record |
+| `849946ec` | chore(task): archive 08-07-status-housekeeping-anomaly-disagreement |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_status tests.test_housekeeping_result tests.test_housekeeping -- 199 tests, OK
+- [OK] make check -- review preflight 0 failure(s)
+- [OK] make generate -- shipped-surface closure clean, 44 changed path(s)
+- [OK] /bin/bash -n over every tracked *.sh (bash 3.2, the macOS CI version) -- clean
+- [OK] red check at HEAD in a detached worktree -- 14/14 new status tests red, 4/6 new shell+result tests red; the 3 passing are deliberate no-regression guards
+- [OK] PR #493 CI green on head 0a0cd767; Copilot review round 3 generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 387: work-loop start refuses to replace a non-resumable ledger
+
+**Date**: 2026-08-16
+**Task**: work-loop start refuses to replace a non-resumable ledger
+**Branch**: `task/08-07-work-loop-start-refuses-stopped-ledger`
+
+### Summary
+
+start silently overwrote a stopped or completed ledger through its new_state fall-through, and the --run-id guard sat inside the resume branch it could never reach. start now refuses, --resume reactivates in place, and --reset archives the outgoing ledger to a one-generation sibling.
+
+### Main Changes
+
+- Refuse a non-resumable ledger in start, naming the status and both flags; add mutually exclusive --resume and --reset
+- Hoist the --run-id mismatch guard to cover every persisted status, with --reset refusing only the discarded run's own ID
+- Archive the outgoing ledger to a replaced.json sibling after the lock is held, and report it from status as replacedLedger
+- Document the contract in the pack docs, the sd-work-backlog skill and its run-recovery reference, and both spec guidelines
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eef0e6ac` | fix(work-loop): refuse to replace a non-resumable ledger in start |
+| `d3340745` | test(work-loop): cover unreadable and mistyped replaced-ledger siblings |
+| `a61ed83b` | fix(work-loop): let --reset choose a new run ID |
+| `6afeb3f4` | docs(spec): scope the replacedLedger contract to the two ledger shapes |
+| `afaa85a4` | chore(task): tick acceptance criteria and record the task branch |
+
+### Testing
+
+- [OK] tests.test_work_loop: 113 tests, OK (4 target tests confirmed red at HEAD first)
+- [OK] make check: 0 failures
+- [OK] Copilot review rounds 1-3: 2 inline findings and 1 suppressed finding accepted and fixed; round 3 clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 388: Park the worktree developer-identity fix; split its reporting half
+
+**Date**: 2026-08-17
+**Task**: Park the worktree developer-identity fix; split its reporting half
+**Branch**: `task/park-developer-identity-worktree-fallback`
+
+### Summary
+
+Task 08-08 is parked on an upstream Trellis release: the worktree identity fallback is already implemented upstream on an untagged branch, so this repository records evidence instead of writing a patch. A staged acceptance suite lives under the task's research/ (it skips against the vendored tree and passes 9/0 against upstream), the never-skipping half stays in tests/, and the reporting half becomes task 08-17, which stays open because its work is executable here.
+
+### Main Changes
+
+- Parked 08-08-developer-identity-not-in-worktrees with a dated park note, a blockedOn naming the staged suite as the resume trigger, and a PARKED: title prefix so the backlog selector skips it. The record stays planning, like every other parked task here
+- Added .trellis/tasks/08-08-developer-identity-not-in-worktrees/research/staged_test_worktree_identity.py: nine behavioral tests gated on a throwaway-fixture probe, with the scripts directory resolved from SD_DEVELOPER_IDENTITY_SCRIPTS so one file runs against both the vendored tree and a copy of upstream's
+- Added tests/test_developer_identity.py, the half that never skips: .trellis/.developer stays gitignored. The behavioral suite cannot live in tests/ because Makefile:49 fails the gate on any skip
+- Created 08-17-trellis-identity-message-consistency for the reporting half: eight gates in four media, one shared diagnosis rendered per medium, and a warning rule whose medium is never the gate's failure medium
+- Recorded handoff-register entries 13 and 14 plus paste-ready upstream research, including both staged-suite run results and the two fixture traps that produced false greens
+- Captured the convention in .trellis/spec/tooling/vendored-trellis-compatibility.md: where a suite that must skip until an upstream release lands lives, how to gate a skip on behavior rather than a symbol name, and what such a suite cannot prove
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b82f55fc` | docs(task): park the worktree identity fix and split its reporting half |
+
+### Testing
+
+- [OK] make check — ==> Full check complete, exit 0
+- [OK] staged suite against vendored .trellis/scripts — Ran 9 tests, OK (skipped=9)
+- [OK] staged suite against a mktemp -d copy of upstream's scripts/ — Ran 9 tests, OK (0 skipped)
+- [OK] tests/test_developer_identity.py — Ran 1 test, OK
+- [OK] review preflight — 0 failure(s), 2 warning(s) (boundary-risk matrix, 3 task directories)
+- [OK] sd-review scope=pr — status ready, local gate clean, limitations router-not-configured / zero-remote-confidence
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

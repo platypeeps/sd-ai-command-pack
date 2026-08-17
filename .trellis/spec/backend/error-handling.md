@@ -88,6 +88,59 @@ value and that the downstream verdict it feeds is reachable — a test that
 injects the downstream verdict directly proves the renderer works, never that
 the collector can produce it.
 
+### Don't: block on a normal steady state
+
+**Problem**: a fail-closed check fires on a condition that is ordinary, or that
+the operator cannot resolve at the moment it fires. Every run reports the same
+verdict, so the verdict stops carrying information and readers learn to skip it.
+
+The failure is not that the check is wrong; it is that it cannot discriminate.
+The signal that fires on all fourteen branches fires identically on the one that
+holds stranded work.
+
+```python
+# Wrong: every extra branch is a blocker, including branches another live
+# worktree holds and therefore nobody can delete.
+if extras:
+    anomalies.append("extra local branches remain: " + ",".join(extras))
+```
+
+```python
+# Right: classify, and reserve blocking for what this run was responsible for.
+classification = classify(extras)          # both modes, one code path
+details.extend(advisory_from(classification))
+if expect_clean:
+    details.extend(strict_postconditions(...))   # blocking
+```
+
+Three rules make this concrete:
+
+- **Blocking belongs to postconditions.** A check earns a blocking severity when
+  it verifies something *this run* was supposed to achieve. Pre-existing state
+  the run never touched is reported, not blocked on.
+- **Impossible is not the same as failed.** A condition the operator cannot act
+  on -- a branch held elsewhere, a resource owned by another process -- is
+  advisory. Blocking on it produces a verdict that can never clear. Prove the
+  impossibility from evidence (the worktree inventory), and keep the blocking
+  code for every other cause; "the switch failed" and "the switch could not have
+  succeeded" are different findings.
+- **A claim about absence needs complete evidence.** "No pull request exists"
+  may only be asserted from evidence that was available, untruncated, and
+  current. A bounded listing that came back full proves nothing about what is
+  missing from it. Report `unknown` with the reason instead; an unknown is
+  useful and a false negative is not.
+
+Severity has exactly one owner. When two scripts must agree on it -- a producer
+that replays codes into a consumer -- pin the two tables together in a test
+rather than trusting them to stay in step; a code that is advisory on one side
+and blocking on the other yields a clean verdict from a run that exited nonzero.
+
+**Test point**: reclassifying one condition must not become a general
+exit-zero rule. Pair the test that proves the reclassified case passes with one
+test per surviving blocking condition proving it still fails, and assert the
+exact verdict -- `verdict == "clean"`, not `verdict != "blocked"`, since
+`failed` and `indeterminate` would satisfy the negative form.
+
 ## API Error Responses
 
 There is no HTTP API. For CLI errors, print actionable text that names the
