@@ -1687,3 +1687,43 @@ Task 08-08 is parked on an upstream Trellis release: the worktree identity fallb
 ### Next Steps
 
 - None - task complete
+
+
+## Session 389: Record the local bash 3.2 syntax gate gap as a task
+
+**Date**: 2026-08-17
+**Task**: Record the local bash 3.2 syntax gate gap as a task
+**Branch**: `task/record-local-bash32-syntax-gap`
+
+### Summary
+
+Publish the planning artifacts for 08-16-local-bash32-syntax-gap, the follow-up from PR #491 where an apostrophe inside a command substitution passed every local gate and failed only on the macOS CI leg. Records only: no code, no generated payload. The branch predated four merges, so current main was merged in before finalization to keep the journal append from conflicting.
+
+### Main Changes
+
+- New task .trellis/tasks/08-16-local-bash32-syntax-gap with prd.md, task.json, and the implement/check manifests. The PRD's subject is the gate, not the rule: quality-guidelines.md already documents the bash 3.2 gotcha, and a documented rule does not fail a build.
+- The gap it records: make check validates shell with whichever bash is on PATH, so on a machine with a modern bash a bash-3.2-only syntax error is invisible locally and surfaces first on the macOS CI leg.
+- Merged origin/main (dea2aecd) into the branch. The branch was 21 commits behind and its journal copy was 140 lines shorter than main's, so appending a session without the merge would have conflicted in journal-8.md and index.md at merge time.
+- Finalization is planning mode: the task stays status planning with completedAt and branch null, so the bundle is the journal plus its sibling index over base c42e63fa.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `214a2c19` | docs(task): record the local bash 3.2 syntax gate gap |
+| `c42e63fa` | Merge remote-tracking branch 'origin/main' into task/record-local-bash32-syntax-gap |
+
+### Testing
+
+- [OK] make check exit=0 on the merged branch; 78 OK blocks, largest lanes Ran 148/145/125 tests, zero skipped (grep -c 'skipped=[1-9]' = 0)
+- [OK] git merge origin/main resolved with no conflicts; git merge-tree against main reported none beforehand
+- [OK] PR #492: all 11 checks SUCCESS at 214a2c19; no review threads, one Copilot COMMENTED review
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
