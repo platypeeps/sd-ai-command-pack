@@ -745,8 +745,12 @@ schema.
   error and no inferred run ID. Keep the two lock sources distinct so the
   typed recovery directive can be executed from one status response without
   reconstructing user-state paths manually.
-- Every canonical helper snapshot, ledger present or absent, emits
-  `replacedLedger` with `present`, `replacedAt`, and `replacedRunId`. Absent is
+- Both the ledger-present and ledger-absent snapshots emit `replacedLedger`
+  with `present`, `replacedAt`, and `replacedRunId`. The `invalid` terminal
+  shape does not: like `lock` and `terminalLock`, this diagnostic is omitted
+  there, because that branch is the error handler for a snapshot whose identity
+  or state root may not have resolved at all, and it must not go back to the
+  filesystem to answer a second question. Absent is
   the ordinary case and never an anomaly; a malformed sibling reports
   `present: true` with a bounded `error` and null identity rather than raising,
   because read-only status must not turn an unreadable file into an exception
