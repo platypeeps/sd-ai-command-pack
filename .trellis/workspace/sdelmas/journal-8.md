@@ -1852,3 +1852,39 @@ Diagnosed three reported symptoms across the fleet, corrected one misdiagnosis, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 393: Clear preflight on the plugin PATH-versus-skill task
+
+**Date**: 2026-08-17
+**Task**: Clear preflight on the plugin PATH-versus-skill task
+**Branch**: `task/plugin-path-version-split`
+
+### Summary
+
+Two preflight failures on the newly filed task, both from how the task record was created rather than from its content.
+
+### Main Changes
+
+- task.py create leaves task.json description as an empty string and offers no setter for it. set-meta looks like the setter but writes meta.description, a different key the validator does not read, so it reported success while the failure stood. Set the top-level field directly and left meta back at {}.
+- The PRD quoted a PATH sample containing a personal macOS absolute path, which preflight rejects. Rewritten home-relative; the evidence is unchanged.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `044e35d0` | docs(task): give the task a description and drop the personal path |
+
+### Testing
+
+- [OK] review-preflight.mjs: 0 FAIL after the fix, down from 2
+- [WARN] PR body needs a tooling/generated scope section; the branch changes check.jsonl and implement.jsonl
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
