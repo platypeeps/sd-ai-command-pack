@@ -230,6 +230,16 @@ What was delivered instead of a fix:
   `research/2026-08-17-trellis-developer-identity-worktree-and-reporting.md`.
 - The reporting half filed as `08-17-trellis-identity-message-consistency`.
 
+**Status while parked: `planning`.** The iteration that produced this note ran
+`task.py start` before the park decision, which left the record `in_progress`.
+Every other parked task in this repository is `planning`, and the finalization
+validator enforces the same shape — a planning-mode bundle requires `status`
+`planning`, `completedAt` null, and `branch` null, at the bundle base as well as
+in the bundle (`sd-ai-command-pack-review-preflight.mjs:2532` and `:2544`). The
+record was returned to `planning` in the same branch. A resume starts the task
+again; nothing here was implemented, so there is no in-flight work that status
+would be hiding.
+
 **What resumes it:** a Trellis release carrying `0740d1d6` reaching this
 repository through a vendored refresh, after which the staged suite runs with
 **zero skips** and moves into `tests/`. That is the resume trigger — not the fallback probe alone, which
