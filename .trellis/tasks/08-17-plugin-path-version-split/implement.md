@@ -111,10 +111,21 @@ it. That disagreement is the defect recorded in `design.md`.
 ## Step 3 — convert class A bootstraps
 
 Replace every `bash scripts/sd-ai-command-pack-toolchain.sh` with the bootstrap
-plus `bash "$SD_PACK_TOOLCHAIN"`. The **operand** after `run-python --` needs no
-change: `resolve_pack_script_operand` already strips a `scripts/` prefix
-(`scripts/sd-ai-command-pack-toolchain.sh:48`), so existing operands keep
-working either way. Leaving them as-is keeps this diff to one edit per block.
+plus `bash "$SD_PACK_TOOLCHAIN"`, **and drop the `scripts/` prefix from the
+operand too**:
+
+```bash
+bash "$SD_PACK_TOOLCHAIN" run-python -- sd-ai-command-pack-status.py --json
+```
+
+The operand change is not strictly required for correctness —
+`resolve_pack_script_operand` strips a `scripts/` prefix
+(`scripts/sd-ai-command-pack-toolchain.sh:48`), so the old operand resolves
+fine. It is required for the gate. Step 4 rule 1 forbids `scripts/` in any
+executable block with no exception, because a gate that carved out operands
+would have to tell the harmless prefix apart from the CWD-relative bootstrap
+that is the defect. Leaving operands prefixed would make the converted tree fail
+its own gate.
 
 A skill with several blocks resolves the bootstrap once per block, not once per
 file — each fenced block is executed independently and cannot rely on a variable
@@ -132,7 +143,8 @@ Add a check to `make check` that enumerates every `*.md` under
 `.agents/skills/` from the filesystem — not just `SKILL.md`, for the reason
 Step 0 gives — and fails on:
 
-1. `scripts/sd-ai-command-pack-` inside a fenced executable block;
+1. `scripts/sd-ai-command-pack-` inside a fenced executable block — with no
+   exception for toolchain operands, which Step 3 therefore strips;
 2. `bash|node|python3` directly invoking a `sd-ai-command-pack-*` helper;
 3. a pack helper name appearing as the **second** operand of `run --`.
 

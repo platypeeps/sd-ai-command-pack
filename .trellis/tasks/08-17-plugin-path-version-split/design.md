@@ -198,9 +198,20 @@ what the existing `comparison: current` line does not say.
 
 A repository-wide check in `make check` that fails on the forbidden forms:
 
-- any `scripts/sd-ai-command-pack-` in a shipped skill's executable block;
+- any `scripts/sd-ai-command-pack-` in a shipped skill's executable block —
+  **including the toolchain's own operands**, see below;
 - any `node`/`bash`/`python3` directly invoking a `sd-ai-command-pack-*` helper;
 - any pack helper named as the second operand of `run --`.
+
+The first rule admits no exception, and that costs an extra edit per operand.
+`resolve_pack_script_operand` strips a `scripts/` prefix, so
+`run-python -- scripts/sd-ai-command-pack-status.py` resolves correctly and a
+narrower gate could allow it. It is still forbidden. A gate that permits
+`scripts/`-prefixed operands has to distinguish the harmless prefix from the
+CWD-relative bootstrap that is the entire defect, and a reader then cannot tell
+by looking which `scripts/` token is which. Operands become bare helper names,
+the rule stays "no `scripts/` in an executable block", and the gate says exactly
+what the rule says.
 
 The gate enumerates from the filesystem — every `*.md` under
 `.agents/skills/`, not just `SKILL.md` — rather than from a list of known
