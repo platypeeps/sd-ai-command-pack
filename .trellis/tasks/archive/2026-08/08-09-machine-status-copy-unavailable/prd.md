@@ -120,26 +120,57 @@ legitimately declares it. The tool asks for a fix that would be a regression.
 
 ## Acceptance criteria
 
-- [ ] With the live three-entry listing, `sd-status fleet --json` reports a real
+- [x] With the live three-entry listing, `sd-status fleet --json` reports a real
       `machineScope.pluginVersion` and a `comparison` that is not `unknown`. The
       before and after JSON are both recorded. Both halves read `0.71.22` today,
       so `current` is the expected value; the criterion is written as "not
       `unknown`" because the receipt half is independent of this fix and a
       truthful `skew` would also satisfy it.
-- [ ] `collect_machine_scope`, run against a duplicate-but-agreeing listing and
+- [x] `collect_machine_scope`, run against a duplicate-but-agreeing listing and
       a receipt that disagrees, returns `comparison: "skew"` — proving the alarm
       at `scripts/sd-ai-command-pack-status.py:3200` is reachable from a real
       machine again. The existing row tests inject that comparison through a
       fixture, so the seam this criterion covers is `collect_machine_scope`
       itself.
-- [ ] Replaying the `pack-update.sh` resolver against the same listing exits
+- [x] Replaying the `pack-update.sh` resolver against the same listing exits
       `0` and prints the single install path, where it previously exited `12`.
-- [ ] A listing whose matching entries disagree on version still reports
+- [x] A listing whose matching entries disagree on version still reports
       `unavailable`, and the updater still exits `12`. Proven by test, not by
       reading the diff.
-- [ ] The claim that the machine copy is byte-identical to the source is
+- [x] The claim that the machine copy is byte-identical to the source is
       re-measured at implementation time rather than trusted from this record.
-- [ ] Every one of the four mirrored copies carries the change, enumerated by
+- [x] Every one of the four mirrored copies carries the change, enumerated by
       re-running the `len(matches) > 1` grep across the tree and confirming no
       stale copy remains.
-- [ ] `make check` and `make release-prep` pass.
+- [x] `make check` and `make release-prep` pass.
+
+## Evidence recorded at completion
+
+Measured 2026-08-16 on the developer machine that reproduced the failure, at
+branch `task/plugin-duplicate-registration-reconcile`.
+
+| criterion | evidence |
+| --- | --- |
+| 1 | before: `pluginVersion: unavailable`, `pluginDetail: "...more than once"`, `comparison: unknown`. After: `pluginVersion: 0.71.22`, `pluginDetail: null`, `comparison: skew`. Live listing: 3 entries, 1 distinct version, 1 distinct `installPath` |
+| 2 | `tests/test_status.py` `test_agreeing_duplicate_entries_still_reach_a_skew_verdict` — agreeing listing plus a disagreeing receipt, computed through `collect_machine_scope`, not injected |
+| 3 | same resolver extraction replayed against the same captured listing: exit `12` at `HEAD`, exit `0` with one path after |
+| 4 | `test_conflicting_install_paths_are_refused` (exit `12`, both paths named) and the `"plugin listed at conflicting versions"` row of the discovery-failure table |
+| 5 | `diff -q` of both `~/.agents/bin/` copies against `scripts/` at Step 0: no difference, so the installed copies carried the bug |
+| 6 | enumerated from the filesystem, not from the edit list: all four `status.py` copies and all four `pack-update.sh` copies carry the reconciliation; zero carry the old refusal |
+| 7 | `make check` exit `0`, `make release-prep` exit `0` |
+
+`comparison` reads `skew` rather than `current` because the machine receipt is
+at `0.71.26` while the plugin cache is at `0.71.22`. That is a real machine
+divergence this bug was suppressing, and the criterion was written to accept it.
+
+Two records in `implement.md` were stale by the time it ran: the manifest was
+at `0.71.26`, not `0.71.22` (bumped to `0.71.27` here), and the pre-change
+`len(matches) > 1` count was 10 rather than 12, because two of the twelve sites
+were the source files already edited when the count was taken. The post-change
+count of four is as predicted.
+
+One defect escaped local validation and was caught by the macOS CI leg: an
+apostrophe in a comment inside a `$( ... )` command substitution, which bash
+3.2 mis-scans as an unterminated quote. Fixed in `09c21bd1`; the gotcha and a
+local reproduction sweep are recorded in
+`.trellis/spec/backend/quality-guidelines.md`.

@@ -317,16 +317,40 @@ class PackUpdateTests(InstallTestCase):
                 self.assertIn(f"plugin {PLUGIN_ID} is not installed", result.stdout)
                 self.assertFalse((root / "machine-install.log").exists())
 
-    def test_duplicate_entries_are_refused(self) -> None:
+    def test_agreeing_duplicate_entries_are_reconciled(self) -> None:
+        # The ordinary shape of a live listing: the plugin registered once at
+        # user scope and again per project that enables it. Every entry names
+        # the same root, so there is nothing to refuse -- and refusing would
+        # strand the only refresh path a thin machine has.
+        root = self.make_update_fixture()
+        listing = self.listing_for(PLUGIN_ROOT)
+        duplicate = dict(listing[-1])
+        duplicate["scope"] = "project"
+        duplicate["projectPath"] = str(root)
+        self.write_claude_stub(root, [*listing, duplicate])
+
+        result = self.run_pack_update(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"installing machine surfaces from {PLUGIN_ROOT}", result.stdout)
+        self.assertIn("status:  current", result.stdout)
+
+    def test_conflicting_install_paths_are_refused(self) -> None:
         root = self.make_update_fixture()
         plugin_root = self.write_stub_plugin_root(root)
         listing = self.listing_for(plugin_root)
-        self.write_claude_stub(root, [*listing, dict(listing[-1])])
+        # `listing_for` builds the entry, so the second path has to be written
+        # onto the copy: this is the disagreement exit 12 still means.
+        conflicting = dict(listing[-1])
+        conflicting["installPath"] = str(root / "other-plugin-root")
+        self.write_claude_stub(root, [*listing, conflicting])
 
         result = self.run_pack_update(root)
 
         self.assertEqual(result.returncode, 12, result.stdout)
-        self.assertIn(f"reports {PLUGIN_ID} more than once", result.stdout)
+        self.assertIn(f"reports {PLUGIN_ID} at conflicting install paths", result.stdout)
+        self.assertIn(str(root / "other-plugin-root"), result.stdout)
+        self.assertIn(str(plugin_root), result.stdout)
         self.assertFalse((root / "machine-install.log").exists())
 
     def test_entry_without_an_install_path_is_refused(self) -> None:
@@ -337,7 +361,10 @@ class PackUpdateTests(InstallTestCase):
         result = self.run_pack_update(root)
 
         self.assertEqual(result.returncode, 13, result.stdout)
-        self.assertIn("carries no installPath", result.stdout)
+        self.assertIn(
+            f"no claude plugin list entry for {PLUGIN_ID} carries an installPath",
+            result.stdout,
+        )
         self.assertFalse((root / "machine-install.log").exists())
 
     def test_install_path_that_is_not_a_directory_is_refused(self) -> None:

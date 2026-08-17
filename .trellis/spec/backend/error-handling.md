@@ -37,6 +37,57 @@ expressed through process exit codes and concise terminal output.
 - Catch `FileNotFoundError` only for optional tooling. `run_diff_check()` warns
   and continues if `git` is missing.
 
+### Don't: treat multiplicity as ambiguity
+
+**Problem**: an external listing reports the same subject more than once, and
+the reader refuses the whole result.
+
+```python
+# Don't do this
+matches = [e for e in entries if e.get("id") == wanted]
+if len(matches) > 1:
+    return UNAVAILABLE, f"{wanted} is listed more than once"
+```
+
+**Why it's bad**: several entries usually mean several *registrations* of one
+thing, not several things. `claude plugin list --json` emits one entry per
+scope — user, then one per project that enables the plugin — and every entry
+carries the same version and install path. Refusing them reports a machine
+unknowable when it is perfectly knowable, and the failure text names an action
+that does not exist ("resolve the duplicate install"), which sends the operator
+to break a working configuration. The cost compounds: a refusal upstream of a
+comparison suppresses the comparison's alarm too, so a real divergence goes
+unreported rather than merely unexplained.
+
+**Instead**: reconcile on the field actually consumed, and refuse only a
+genuine disagreement. Normalize before deduplicating, so entries differing
+only past a truncation limit do not read as a conflict.
+
+```python
+# Do this instead
+versions: list[str] = []
+for entry in matches:
+    version = entry.get("version")
+    normalized = safe_text(version, limit=80) if isinstance(version, str) else ""
+    if normalized and normalized not in versions:
+        versions.append(normalized)
+if not versions:
+    return UNAVAILABLE, f"no listed {wanted} entry carries a version"
+if len(versions) > 1:
+    return UNAVAILABLE, f"{wanted} is listed at conflicting versions ({', '.join(sorted(versions))})"
+return versions[0], None
+```
+
+Each reader reconciles on its own consumed field: the status collector on
+`version`, the machine updater on `installPath`. Two readers of the same
+listing can legitimately disagree about whether a given listing is conflicting.
+
+**Test point**: a fail-closed refusal needs a case proving the *benign* shape
+still succeeds, not only cases proving failures refuse. Assert the reconciled
+value and that the downstream verdict it feeds is reachable — a test that
+injects the downstream verdict directly proves the renderer works, never that
+the collector can produce it.
+
 ## API Error Responses
 
 There is no HTTP API. For CLI errors, print actionable text that names the

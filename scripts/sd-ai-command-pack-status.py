@@ -1695,9 +1695,16 @@ def collect_plugin_version(repo: Path) -> tuple[str, str | None]:
     """The installed plugin version, or ``unavailable`` and why.
 
     Every discovery failure -- no CLI, a nonzero exit, unparsable output, a
-    missing or duplicated entry, an entry without a version -- reports
-    ``unavailable``. A guess here would let a broken `claude` masquerade as an
-    up-to-date machine.
+    missing entry, an entry without a version -- reports ``unavailable``. A
+    guess here would let a broken `claude` masquerade as an up-to-date machine.
+
+    Several entries are not a failure. One plugin registered at user scope and
+    again per project is the ordinary shape of `claude plugin list --json`, and
+    every such entry describes the same install. They are reconciled by the one
+    field this function consumes: entries that agree on a version answer with
+    it, and only a genuine disagreement is unresolvable. Refusing the agreeing
+    case would be the same guess in the other direction -- reporting a machine
+    unknowable when it is not.
     """
     if shutil.which("claude") is None:
         return MACHINE_UNAVAILABLE, "the Claude Code CLI is not on PATH"
@@ -1723,19 +1730,25 @@ def collect_plugin_version(repo: Path) -> tuple[str, str | None]:
     ]
     if not matches:
         return MACHINE_UNAVAILABLE, f"plugin {MACHINE_PLUGIN_ID} is not installed"
-    if len(matches) > 1:
+    versions: list[str] = []
+    for entry in matches:
+        version = entry.get("version")
+        normalized = safe_text(version, limit=80) if isinstance(version, str) else ""
+        if normalized and normalized not in versions:
+            versions.append(normalized)
+    if not versions:
         return (
             MACHINE_UNAVAILABLE,
-            f"claude plugin list --json reports {MACHINE_PLUGIN_ID} more than once",
+            f"no listed {MACHINE_PLUGIN_ID} entry carries a version",
         )
-    version = matches[0].get("version")
-    normalized = safe_text(version, limit=80) if isinstance(version, str) else ""
-    if not normalized:
+    if len(versions) > 1:
         return (
             MACHINE_UNAVAILABLE,
-            f"the listed {MACHINE_PLUGIN_ID} entry carries no version",
+            f"claude plugin list --json reports {MACHINE_PLUGIN_ID} at "
+            f"conflicting versions ({', '.join(sorted(versions))}); reinstall "
+            "the plugin so every registration reports one version",
         )
-    return normalized, None
+    return versions[0], None
 
 
 def machine_receipt_state(

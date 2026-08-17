@@ -17,8 +17,11 @@
 #   5   this script's own directory could not be resolved
 #   10  `claude plugin list --json` output was not a usable plugin array
 #   11  the plugin is not installed
-#   12  the plugin is listed more than once
-#   13  the listed plugin entry has no usable install path
+#   12  the plugin is listed at conflicting install paths. Several listed
+#       entries are normal -- user scope plus one per project -- and are
+#       reconciled when they name the same path; only a disagreement is
+#       unresolvable.
+#   13  no listed plugin entry has a usable install path
 #   14  both halves ran but the machine install does not match the plugin
 #   15  the plugin version or the machine install state could not be read
 #   127 a required program is missing (the Claude CLI, a sibling helper, or
@@ -142,12 +145,28 @@ matches = [
 ]
 if not matches:
     raise SystemExit(11)
-if len(matches) > 1:
-    raise SystemExit(12)
-root = matches[0].get("installPath")
-if not isinstance(root, str) or not root.strip():
+
+# Several entries are the ordinary shape: the plugin registered once at user
+# scope and again for each project that enables it. They describe one install,
+# so reconcile them on the only field consumed here.
+roots = []
+for entry in matches:
+    root = entry.get("installPath")
+    root = root.strip() if isinstance(root, str) else ""
+    if root and root not in roots:
+        roots.append(root)
+if not roots:
     raise SystemExit(13)
-print(root.strip(), end="")
+if len(roots) > 1:
+    # Exit 12 borrows stdout to carry the conflicting paths into the message
+    # the caller prints. Stdout is read as a plugin root only for status 0.
+    # Keep apostrophes out of every comment inside this command substitution:
+    # bash 3.2, still /bin/bash on macOS, mis-scans one as an unterminated
+    # quote and fails the whole file with "unexpected EOF".
+    detail = ", ".join(sorted(roots))
+    print(detail[:400], end="")
+    raise SystemExit(12)
+print(roots[0], end="")
 PY
 )" || resolve_status=$?
 
@@ -155,8 +174,8 @@ case "$resolve_status" in
   0) ;;
   10) fail "claude plugin list --json did not return a JSON array of installed plugins; the machine install did not run." 10 ;;
   11) fail "plugin $PLUGIN_ID is not installed, so there is no root to install from; add it with: claude plugin install $PLUGIN_ID" 11 ;;
-  12) fail "claude plugin list --json reports $PLUGIN_ID more than once; resolve the duplicate install before updating." 12 ;;
-  13) fail "the claude plugin list entry for $PLUGIN_ID carries no installPath, so the updated plugin root is unknown." 13 ;;
+  12) fail "claude plugin list --json reports $PLUGIN_ID at conflicting install paths ($PLUGIN_ROOT); reinstall the plugin so every registration resolves to one root before updating." 12 ;;
+  13) fail "no claude plugin list entry for $PLUGIN_ID carries an installPath, so the updated plugin root is unknown." 13 ;;
   *) fail "could not resolve the updated plugin root for $PLUGIN_ID (exit $resolve_status)." "$resolve_status" ;;
 esac
 
