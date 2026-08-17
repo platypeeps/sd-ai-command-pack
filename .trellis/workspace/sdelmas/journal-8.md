@@ -1705,6 +1705,7 @@ Publish the planning artifacts for 08-16-local-bash32-syntax-gap, the follow-up 
 - The gap it records: make check validates shell with whichever bash is on PATH, so on a machine with a modern bash a bash-3.2-only syntax error is invisible locally and surfaces first on the macOS CI leg.
 - Merged origin/main (dea2aecd) into the branch. The branch was 21 commits behind and its journal copy was 140 lines shorter than main's, so appending a session without the merge would have conflicted in journal-8.md and index.md at merge time.
 - Finalization is planning mode: the task stays status planning with completedAt and branch null, so the bundle is the journal plus its sibling index over base c42e63fa.
+- The merge commit c42e63fa is deliberately not cited above. A journal-only-recovery bundle proves each cited commit and requires it to have exactly one parent, so citing the merge failed with `planning_recovery_commit_non_linear` ("Session 389 commit c42e63fa must have exactly one parent"). The merge is the bundle's base, not its work: only 214a2c19 carries changes. Cite work commits, never the merge that catches a branch up.
 
 
 ### Git Commits
@@ -1712,7 +1713,6 @@ Publish the planning artifacts for 08-16-local-bash32-syntax-gap, the follow-up 
 | Hash | Message |
 |------|---------|
 | `214a2c19` | docs(task): record the local bash 3.2 syntax gate gap |
-| `c42e63fa` | Merge remote-tracking branch 'origin/main' into task/record-local-bash32-syntax-gap |
 
 ### Testing
 
