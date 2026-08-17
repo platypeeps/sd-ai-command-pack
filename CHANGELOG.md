@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.71.27 - 2026-08-16
+
+### Fixed
+
+- Both machine-scope entry points now reconcile duplicate
+  `claude plugin list --json` entries instead of refusing them. One plugin
+  registered at user scope and again for each project that enables it is the
+  ordinary shape of that listing -- three agreeing entries were measured on a
+  developer machine -- and every entry describes the same install. Refusing
+  them cost three things at once: `sd-status fleet` reported
+  `pluginVersion: unavailable` and `comparison: unknown` for every consumer,
+  which also suppressed the plugin-versus-receipt skew alarm rather than
+  merely hiding a version; and `sd-ai-command-pack-pack-update.sh` exited `12`
+  before running either half, stranding the only refresh path a thin machine
+  has now that the consumer-side sync automation is retired. The failure text
+  ("resolve the duplicate install before updating") named an action that does
+  not exist -- there is no duplicate install to resolve, and following it would
+  mean disabling the plugin in a consumer that legitimately declares it.
+
+  Each site reconciles on the one field it consumes and refuses only a genuine
+  disagreement: the status collector on `version`, the updater on
+  `installPath`. Exit `12` is kept and narrowed to that path conflict, and its
+  message now names the conflicting paths. Nothing consumes these exit codes
+  programmatically, so the narrowing is not a contract change.
+
+  **Bootstrap:** the first refresh after this release must be run from the pack
+  source checkout --
+  `bash scripts/sd-ai-command-pack-pack-update.sh` -- because the installed
+  updater is still the previous one and will still exit `12` on a duplicated
+  listing. Subsequent refreshes work normally from either copy.
+
 ## 0.71.26 - 2026-08-16
 
 ### Fixed

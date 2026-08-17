@@ -3,7 +3,7 @@
   "name": "machine-status-copy-unavailable",
   "title": "Machine-payload status copy reports plugin version unavailable",
   "description": "Make the machine-payload status script copy report a real plugin version or a documented, tested unavailable diagnostic when run from a machine install context.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

@@ -3216,7 +3216,7 @@ class StatusTests(InstallTestCase):
             ("not an array", '{"id": "sd"}', 0, "did not return a plugin array"),
             ("plugin missing", '[{"id": "other@market", "version": "1"}]', 0, "is not installed"),
             (
-                "plugin duplicated",
+                "plugin listed at conflicting versions",
                 json.dumps(
                     [
                         {"id": plugin_id, "version": "9.9.9"},
@@ -3224,13 +3224,13 @@ class StatusTests(InstallTestCase):
                     ]
                 ),
                 0,
-                "more than once",
+                "conflicting versions (9.9.8, 9.9.9)",
             ),
             (
                 "entry without a version",
                 json.dumps([{"id": plugin_id}]),
                 0,
-                "carries no version",
+                "carries a version",
             ),
         )
         for label, listing, returncode, expected_detail in cases:
@@ -3252,6 +3252,51 @@ class StatusTests(InstallTestCase):
                 self.assertEqual(section["pluginVersion"], "unavailable")
                 self.assertIn(expected_detail, section["pluginDetail"])
                 self.assertEqual(section["comparison"], "unknown")
+
+    def test_agreeing_duplicate_plugin_entries_resolve_to_that_version(self) -> None:
+        # The live shape of `claude plugin list --json`: one user-scope
+        # registration plus one per project that enables the plugin. Every
+        # entry describes the same install, so the version is knowable, and
+        # reporting it unavailable would hide the machine's real currency.
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        plugin_id = status.MACHINE_PLUGIN_ID
+        home, state_home = self.machine_scratch()
+        self.write_machine_receipt(state_home, pack_version="9.9.9")
+        listing = self.plugin_listing(
+            {"id": plugin_id, "version": "9.9.9", "scope": "user"},
+            {"id": plugin_id, "version": "9.9.9", "scope": "project"},
+            {"id": plugin_id, "version": "9.9.9", "scope": "project"},
+        )
+
+        with self.stub_claude(status, listing):
+            section = self.machine_section(status, root, home, state_home)
+
+        self.assertEqual(section["pluginVersion"], "9.9.9")
+        self.assertIsNone(section["pluginDetail"])
+        self.assertEqual(section["comparison"], "current")
+
+    def test_agreeing_duplicate_entries_still_reach_a_skew_verdict(self) -> None:
+        # The alarm the refusal suppressed. The fleet skew tests inject
+        # `comparison="skew"` through the section fixture, so they prove the
+        # row renders without ever asking whether the collector can produce
+        # that input from a duplicated listing.
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        plugin_id = status.MACHINE_PLUGIN_ID
+        home, state_home = self.machine_scratch()
+        self.write_machine_receipt(state_home, pack_version="9.9.8")
+        listing = self.plugin_listing(
+            {"id": plugin_id, "version": "9.9.9", "scope": "user"},
+            {"id": plugin_id, "version": "9.9.9", "scope": "project"},
+        )
+
+        with self.stub_claude(status, listing):
+            section = self.machine_section(status, root, home, state_home)
+
+        self.assertEqual(section["pluginVersion"], "9.9.9")
+        self.assertEqual(section["packVersion"], "9.9.8")
+        self.assertEqual(section["comparison"], "skew")
 
     def test_machine_scope_survives_an_engine_that_raises(self) -> None:
         status = self.load_status_module()
