@@ -61,6 +61,61 @@ Tests: `tests/test_status.py`
    `make release-prep` green (shipped-payload wrappers changed → manifest
    version + changelog + regenerated candidate ledger).
 
+## Testing a fix that lives upstream and is not released yet
+
+Scope/trigger: a defect whose fix belongs in `.trellis/scripts/**` (vendored
+Trellis, owned by the fork) and already exists upstream on an untagged branch.
+Established by task `08-08-developer-identity-not-in-worktrees` (the developer
+identity that a linked worktree never inherits).
+
+The suite that proves the fix cannot live in `tests/`: `Makefile:49` fails the
+gate on **any** skip
+(`grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log`), and such a suite skips
+until the release lands. Weakening that grep is not the fix. Split it:
+
+- the behavioral half goes to the owning task's
+  `research/staged_test_<topic>.py`, resolving its scripts directory from an
+  env var (`SD_..._SCRIPTS`) so one file runs against both the vendored tree and
+  a `mktemp -d` copy of upstream's `scripts/`;
+- the half that never skips — the repository-side fact the whole analysis rests
+  on — stays in `tests/`. For the identity task that is one assertion:
+  `git check-ignore -v .trellis/.developer` exits 0.
+
+Record both runs in the handoff register entry, reported as two:
+`OK (skipped=N)` against vendored, `OK` with 0 skips against upstream. The
+zero-skip staged run is the resume trigger; name that file in `blockedOn`, never
+the `tests/` half, which already reports zero skips today and would fire the
+trigger immediately.
+
+### Gate the skip on behavior, not on a symbol name
+
+- WRONG: `if not hasattr(paths, "main_worktree_root"): skipTest(...)` — the name
+  can exist while the resolver still ignores it.
+- CORRECT: build a throwaway primary+worktree fixture, resolve through the real
+  CLI, and skip unless it returns the primary's name.
+- Scrub `TRELLIS_DEVELOPER` from the child environment once, at module level:
+  the resolver consults it ahead of every file, so an operator who exports it
+  makes the probe resolve their own name and skips the suite for an unrelated
+  reason. Only the test about the override puts it back.
+
+### Two fixture facts that cost a debugging round each
+
+- **Gitignore `.trellis/.developer` inside the fixture** and commit the seed
+  before writing it. A committed identity is handed to the worktree by the
+  checkout, so every fallback test passes with no fallback running.
+- `get_workspace_dir` is `repo_root / .trellis/workspace/<developer>`, so
+  `add_session.py` in a worktree writes into *that worktree's* workspace. A
+  realistic fixture runs `init_developer.py` in the primary and commits the
+  workspace while the identity stays ignored.
+
+### What such a suite cannot prove
+
+`_read_developer_file` swallows `OSError` and returns `None`, so unreadable
+files do not prove non-consultation: a resolver that reads both files and then
+prefers the environment passes the same assertions. Claim only result
+independence — the answer does not depend on the files' contents or readability
+— and say that proving non-consultation needs syscall tracing.
+
 ## Wrong vs correct
 
 - WRONG: `result = run([task_py, "current"])` then parse stdout as a path
