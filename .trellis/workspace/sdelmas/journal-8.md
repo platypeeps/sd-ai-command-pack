@@ -1888,3 +1888,43 @@ Two preflight failures on the newly filed task, both from how the task record wa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 394: Re-measure the fleet for 08-08-fleet-one-path Step 0
+
+**Date**: 2026-08-17
+**Task**: Re-measure the fleet for 08-08-fleet-one-path Step 0
+**Branch**: `task/fleet-one-path-remeasure`
+
+### Summary
+
+Re-ran the fleet status collector for 08-08-fleet-one-path's Step 0 and found the dirty set had turned over completely in the 30 minutes since the previous reading. Rewrote the task's three planning artifacts around the volatility rather than around a refreshed table, and replaced report-local T-number citations with durable task slugs.
+
+### Main Changes
+
+- Recorded three timestamped 2026-08-17 measurements (15:30, 18:50, 19:30) in design.md consequence 3; the pins held at 7x 0.71.22 and 1x 0.71.26 while the dirty set changed at every reading
+- Established the rule that consumer exclusion is decided per lane at the moment it starts and re-checked immediately before any write, replacing the precomputed skip list in implement.md Step 0 and Gate C
+- Removed every named consumer from the prd.md amendment, because a named exclusion list reads as a standing property of those repositories
+- Marked Gate A satisfied: machine install and plugin both 0.71.29, comparison current, with the exit-12 conflicting-install-path story and the settings-rewrite caveat recorded in the preconditions
+- Replaced report-local T-13/T-48 citations with 08-08-ci-lane-cost and 08-08-copilot-request-policy across design.md, implement.md, and prd.md; T-48 had already shifted to a different task
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `94b0fcb6ef0c846a616ca59938d668e44a41444f` | docs(task): re-measure the fleet and record that the dirty set is volatile |
+
+### Testing
+
+- [OK] Cross-artifact value sweep over pack versions, Trellis versions, counts, and timestamps: all occurrences agree across the three artifacts
+- [OK] grep for report-local T-*/F-* identifiers across the task directory: none remain
+- [OK] Long-line count in the three artifacts: 47, down from 53 on main
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
