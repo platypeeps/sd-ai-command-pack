@@ -132,7 +132,11 @@ worktree_holding_branch() {
   done <<EOF
 $(git worktree list --porcelain 2>/dev/null || true)
 EOF
-  printf '%s' "$holder"
+  # A worktree path is externally controlled and lands in an anomaly message
+  # the result builder validates: control characters make validate_event reject
+  # the whole event, and the message budget is 1000 characters. Bound it here,
+  # at the single place every caller reads it from, rather than per message.
+  printf '%s' "$holder" | tr -d '[:cntrl:]' | cut -c1-300
 }
 
 print_list() {

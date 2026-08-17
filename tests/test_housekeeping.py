@@ -334,6 +334,48 @@ class HousekeepingTests(InstallTestCase):
         self.assertIn(f"held={holder.resolve()}", result.stdout)
         self.assertIn("free=\n", result.stdout + "\n")
 
+    def test_a_holder_path_is_bounded_and_control_character_free(self) -> None:
+        """The holder path is externally controlled and ends up in an event.
+
+        `validate_event` in the result builder rejects any message carrying a
+        control character and caps it at 1000 characters, so an unsanitized path
+        would not merely look untidy -- it would fail result building for a run
+        whose every action succeeded.
+        """
+
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        root = self._worktree_probe_repo()
+        script = str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
+        hostile = "/tmp/" + "p" * 600
+        probe = (
+            "set -uo pipefail;"
+            "git() {"
+            '  case "$1 $2" in'
+            f'    "rev-parse --path-format=absolute") printf "{root}\\n" ;;'
+            '    "worktree list") printf "worktree %s\\bx\\nbranch refs/heads/main\\n" '
+            f'"{hostile}" ;;'
+            "    *) return 1 ;;"
+            "  esac;"
+            "};"
+            f"eval \"$(awk '/^worktree_holding_branch\\(\\)/,/^}}/' {script})\";"
+            'holder="$(worktree_holding_branch main)";'
+            'printf "len=%s\\n" "${#holder}";'
+            'printf "clean=%s\\n" "$(printf "%s" "$holder" | tr -d "[:cntrl:]" | wc -c | tr -d " ")"'
+        )
+        result = subprocess.run(
+            [self._bash_path, "-c", probe],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertIn("len=300", result.stdout)
+        # Stripping control characters removes nothing, so none survived.
+        self.assertIn("clean=300", result.stdout)
+
     def test_an_unknown_repository_root_names_no_holder(self) -> None:
         """A checkout that cannot locate itself must not accuse itself.
 
