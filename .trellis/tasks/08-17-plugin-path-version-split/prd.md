@@ -18,7 +18,7 @@ from 0.71.22 to 0.71.29:
 
 ```
 $ echo "$PATH" | tr ':' '\n' | grep sd-ai-command-pack
-/Users/sven/.claude/plugins/cache/sd-ai-command-pack/sd/0.71.22/bin
+~/.claude/plugins/cache/sd-ai-command-pack/sd/0.71.22/bin
 
 $ python3 -c '...installed_plugins.json...'
 user 0.71.29 -

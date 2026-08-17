@@ -2,7 +2,7 @@
   "id": "plugin-path-version-split",
   "name": "plugin-path-version-split",
   "title": "Pack binaries resolve from a stale plugin-cache PATH entry, not the loaded skill's root",
-  "description": "",
+  "description": "A pack skill and the pack binaries it invokes are resolved by two independent mechanisms - the loaded plugin root and a PATH entry naming a specific cached version - so a skill from one release can silently drive helpers from another. Bind them, or fail with both versions named.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
