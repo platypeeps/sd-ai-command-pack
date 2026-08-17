@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-8.md`
-- **Total Sessions**: 385
+- **Total Sessions**: 386
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-8.md` | ~1535 | Active |
+| `journal-8.md` | ~1589 | Active |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
 | `journal-5.md` | ~2011 | Archived |
@@ -36,6 +36,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 386 | 2026-08-16 | Leftover local branches no longer block housekeeping; anomalies gain typed severity | `34249d2f`, `0a0cd767`, `01d7a3c2`, `c5d93d52`, `849946ec` | `task/08-07-status-anomaly-severity` |
 | 385 | 2026-08-16 | Reconcile agreeing duplicate plugin registrations in both machine-scope entry points | `46bb8ac0`, `5716bf9d`, `09c21bd1`, `ba485c16`, `e9fa10a8` | `task/plugin-duplicate-registration-reconcile` |
 | 384 | 2026-08-16 | Revoke the orphaned refresh token, close the residue task, rescope the gate retirement | `0c763675`, `bcb264f5` | `task/gate-retirement-scope-and-residue-closure` |
 | 383 | 2026-08-16 | Close the post-canary and receipt-cache tasks; retire the consumer pack refresh | `197bf9fb`, `304af0b5` | `task/post-thin-reconciliation` |

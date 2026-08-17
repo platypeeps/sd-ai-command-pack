@@ -107,6 +107,38 @@ add_anomaly() {
   ANOMALIES+=("$*")
 }
 
+# Path of another live worktree holding $1, or empty. A branch checked out
+# elsewhere cannot be switched to or deleted here, which is a different
+# condition from a switch that failed for a dirty tree or a stale index lock:
+# one is impossible and the other is a defect, and only the defect should block.
+worktree_holding_branch() {
+  local wanted="$1" here="" path="" holder=""
+  [ -n "$wanted" ] || return 0
+  here="$(git rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
+  # Without this checkout's own root there is no way to tell "another worktree
+  # holds it" from "this one does", and every path would compare unequal to the
+  # empty string. Report no holder so the caller keeps its blocking diagnosis.
+  [ -n "$here" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) path="${line#worktree }" ;;
+      "branch refs/heads/$wanted")
+        if [ -n "$path" ] && [ "$path" != "$here" ]; then
+          holder="$path"
+          break
+        fi
+        ;;
+    esac
+  done <<EOF
+$(git worktree list --porcelain 2>/dev/null || true)
+EOF
+  # A worktree path is externally controlled and lands in an anomaly message
+  # the result builder validates: control characters make validate_event reject
+  # the whole event, and the message budget is 1000 characters. Bound it here,
+  # at the single place every caller reads it from, rather than per message.
+  printf '%s' "$holder" | tr -d '[:cntrl:]' | cut -c1-300
+}
+
 print_list() {
   local item
   if [ "$#" -eq 0 ]; then
@@ -530,6 +562,7 @@ github_repo_from_remote_url() {
 }
 
 switch_to_default_branch() {
+  local switch_error="" switch_ok=0 holder=""
   if [ -z "$DEFAULT_BRANCH" ]; then
     return 0
   fi
@@ -545,10 +578,16 @@ switch_to_default_branch() {
   fi
 
   if git show-ref --verify --quiet "refs/heads/$DEFAULT_BRANCH"; then
-    if git switch "$DEFAULT_BRANCH"; then
+    switch_error="$(git switch "$DEFAULT_BRANCH" 2>&1 >/dev/null)" && switch_ok=1 || switch_ok=0
+    if [ "$switch_ok" -eq 1 ]; then
       add_action default_branch_switched "switched to $DEFAULT_BRANCH"
     else
-      add_anomaly default_branch_switch_failed "failed to switch to $DEFAULT_BRANCH"
+      holder="$(worktree_holding_branch "$DEFAULT_BRANCH")"
+      if [ -n "$holder" ]; then
+        add_anomaly default_branch_held_elsewhere "$DEFAULT_BRANCH is checked out in worktree $holder; this checkout stays on $(current_branch)"
+      else
+        add_anomaly default_branch_switch_failed "failed to switch to $DEFAULT_BRANCH: $(printf '%s' "$switch_error" | head -n 1 | tr -d '[:cntrl:]' | cut -c1-400)"
+      fi
     fi
   elif git show-ref --verify --quiet "refs/remotes/$REMOTE/$DEFAULT_BRANCH"; then
     if git switch -c "$DEFAULT_BRANCH" "$REMOTE/$DEFAULT_BRANCH"; then
@@ -922,7 +961,11 @@ cleanup_merged_branch() {
   fast_forward_default_branch
 
   if [ "$DRY_RUN" -eq 0 ] && [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
-    add_anomaly branch_switch_incomplete "still on $branch; skipped branch deletion"
+    if [ -n "$(worktree_holding_branch "$DEFAULT_BRANCH")" ]; then
+      add_anomaly branch_retained_default_held "still on $branch because $DEFAULT_BRANCH is held by another worktree; skipped branch deletion"
+    else
+      add_anomaly branch_switch_incomplete "still on $branch; skipped branch deletion"
+    fi
     return 0
   fi
 
@@ -1193,7 +1236,7 @@ emit_json_result() {
 }
 
 run_status_report() {
-  local anomaly
+  local index
   local status=0
   local result_status=0
   local temp_dir=""
@@ -1227,8 +1270,11 @@ run_status_report() {
     status_args+=(--dry-run)
   fi
   if [ "${#ANOMALIES[@]}" -gt 0 ]; then
-    for anomaly in "${ANOMALIES[@]}"; do
-      status_args+=(--prior-anomaly "$anomaly")
+    # Carry the code, not just the message: the collector mirrors this severity,
+    # and a replayed advisory code read as blocking would exit nonzero while the
+    # typed verdict built from the same anomaly reads clean.
+    for index in "${!ANOMALIES[@]}"; do
+      status_args+=(--prior-anomaly "${ANOMALY_CODES[$index]}" "${ANOMALIES[$index]}")
     done
   fi
 

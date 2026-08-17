@@ -203,23 +203,23 @@ for surfacing it more loudly.
 
 ## Acceptance Criteria
 
-- [ ] One shared classification; no state yields `Anomalies: none` alongside
+- [x] One shared classification; no state yields `Anomalies: none` alongside
       `reasonCodes: ['status_anomalies']`
-- [ ] An unmerged, PR-less local branch is reported distinctly from a merged
+- [x] An unmerged, PR-less local branch is reported distinctly from a merged
       undeleted one, and from either of those while held by a live worktree
-- [ ] Unavailable, truncated, or stale PR evidence yields an explicit unknown
+- [x] Unavailable, truncated, or stale PR evidence yields an explicit unknown
       rather than a false "no pull request" claim
-- [ ] A branch held by a live worktree is reported distinctly from both, and
+- [x] A branch held by a live worktree is reported distinctly from both, and
       does not by itself produce a `blocked` verdict
-- [ ] A successful merge whose **only** embedded strict anomaly is the
+- [x] A successful merge whose **only** embedded strict anomaly is the
       leftover-branch entry does not exit nonzero. Every other strict anomaly --
       dirty tree, divergent default branch, retained remote source branch --
       still blocks exactly as it does today; this criterion reclassifies one
       condition and must not become a general exit-zero rule
-- [ ] Any surviving `blocked` verdict names its cause in the same structure a
+- [x] Any surviving `blocked` verdict names its cause in the same structure a
       reader inspects, not only in the embedded `status.anomalies`
-- [ ] A test asserts the two surfaces agree on a fixture with leftover branches
-- [ ] Open question 1 is answered in `design.md` with a decision and rationale
+- [x] A test asserts the two surfaces agree on a fixture with leftover branches
+- [x] Open question 1 is answered in `design.md` with a decision and rationale
 
 ## Notes
 

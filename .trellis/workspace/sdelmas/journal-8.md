@@ -1547,3 +1547,56 @@ Both machine-scope entry points refused any duplicate entry in `claude plugin li
 ### Next Steps
 
 - None - task complete
+
+
+## Session 386: Leftover local branches no longer block housekeeping; anomalies gain typed severity
+
+**Date**: 2026-08-16
+**Task**: Leftover local branches no longer block housekeeping; anomalies gain typed severity
+**Branch**: `task/08-07-status-anomaly-severity`
+
+### Summary
+
+Removed the leftover-branch strict anomaly that made every successful merge report blocked, replaced it with a branch classification carrying evidence gates, gave every anomaly a stable code and a blocking/advisory severity, and taught the housekeeping shell gate to tell an impossible switch from a failed one.
+
+### Main Changes
+
+- strict_anomalies no longer treats extra local branches as blocking; leftover branches are a steady state, not a postcondition of the run
+- status.localBranchClassification classifies each non-default branch as merged, unmerged-with-pull-request, unmerged-without-pull-request, or unknown, and names the worktree holding it
+- the unmerged-without-pull-request verdict is asserted only from pull-request evidence that was available, untruncated, and current; everything else reports unknown with its reason
+- anomalies carry a stable code and a blocking or advisory severity in anomalyDetails, built from one construction path so the coded and message views cannot disagree
+- only blocking entries drive the --expect-clean exit status, the attention header, and issue-kind follow-ups; advisory entries print with an [advisory] marker
+- --prior-anomaly now takes CODE and MESSAGE so the housekeeping replay channel carries severity instead of assuming it; a legacy report without anomalyDetails fails closed as blocking
+- worktree_holding_branch diagnoses a default branch held elsewhere as advisory while a switch failure with no holder still blocks with the bounded git diagnostic
+- housekeeping-result maps status anomalies to named status_<code> reasons instead of the opaque status_anomalies, and advisory codes never outrank an indeterminate verdict
+- review round 2 reordered the open-pull-request check ahead of the merge-evidence gate, and guarded worktree_holding_branch against an unknown repository root
+- review round 3 bounded the branch advisory message to the 500-character budget every other anomaly source uses
+- spec: .trellis/spec/backend/error-handling.md gains 'Don't: block on a normal steady state'
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34249d2f` | fix(status): stop blocking on leftover local branches, add anomaly severity |
+| `0a0cd767` | fix(status): classify an open pull request from its own evidence |
+| `01d7a3c2` | fix(status): bound the branch advisory to the shared anomaly budget |
+| `c5d93d52` | chore(task): record the implementation branch on the task record |
+| `849946ec` | chore(task): archive 08-07-status-housekeeping-anomaly-disagreement |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_status tests.test_housekeeping_result tests.test_housekeeping -- 199 tests, OK
+- [OK] make check -- review preflight 0 failure(s)
+- [OK] make generate -- shipped-surface closure clean, 44 changed path(s)
+- [OK] /bin/bash -n over every tracked *.sh (bash 3.2, the macOS CI version) -- clean
+- [OK] red check at HEAD in a detached worktree -- 14/14 new status tests red, 4/6 new shell+result tests red; the 3 passing are deliberate no-regression guards
+- [OK] PR #493 CI green on head 0a0cd767; Copilot review round 3 generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

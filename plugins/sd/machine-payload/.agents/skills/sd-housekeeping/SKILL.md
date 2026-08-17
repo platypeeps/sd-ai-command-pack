@@ -129,11 +129,21 @@ alone does not block current-stream cleanup.
 
 ## Expected clean state
 
-A clean result has `outcome.verdict: clean`, no anomalies, a clean synchronized
-default branch, only the intended local branches, the expected remote source
-branch state, a merged relevant PR when one applied, and authoritative status
-inventory. Any difference belongs in `Anomalies`; keep its exact code/message
-and the corresponding recovery action.
+A clean result has `outcome.verdict: clean`, no blocking anomalies, a clean
+synchronized default branch, the run's own source branch retired, the expected
+remote source branch state, a merged relevant PR when one applied, and
+authoritative status inventory. Any difference belongs in `Anomalies`; keep its
+exact code/message and the corresponding recovery action.
+
+A clean verdict may still carry advisory anomalies. Those name a condition the
+operator is not free to resolve right now -- the default branch or the source
+branch held by another live worktree -- rather than a failure of the run, so
+they are reported without blocking. Leftover local branches the run never
+touched are not anomalies at all: the collector classifies them in
+`status.localBranchClassification` (merged, unmerged with an open pull request,
+unmerged without one, or unknown, each with the holding worktree when there is
+one) and surfaces the actionable classes as follow-ups. Report the advisory
+entries and the classification; do not describe either as a blocker.
 
 The assistant summary begins `Housekeeping completed cleanly.` only for that
 typed clean result and includes:
