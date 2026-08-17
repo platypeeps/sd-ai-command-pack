@@ -58,7 +58,8 @@ table:
    owning task, and what a deviation costs;
 2. the rule that a leg's value is named by a command, never hardcoded — a
    literal `0.71.29` in prose goes stale on the next release and no gate fails;
-3. the pin-versus-Trellis PR separation and why (revertability along one leg);
+3. the pin-versus-Trellis PR separation, and why: either leg can be reverted
+   on its own only while they sit in separate PRs;
 4. the smoke-PR checklist, five items, from `design.md`'s requirement 5 section;
    and
 5. the precondition list, including that a thin consumer resolves its surfaces
@@ -235,7 +236,7 @@ skipped consumer is not a rolled-out one.
 - After Step 5: nothing to roll back — `dry-run` mutates nothing.
 - After Step 6: per-consumer. An unmerged PR is closed and its branch deleted
   (the campaign's own recovery path). A merged one is reverted in that
-  consumer's repository by its owner, and the pin leg is revertable
+  consumer's repository by its owner, and the pin leg can be reverted
   independently of the Trellis leg precisely because that leg is a separate task
   with separate PRs.
 

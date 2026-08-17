@@ -40,7 +40,7 @@ Three consequences for this task:
    installed-versus-target pair, so `trellis` appears only in `--json`. Any
    verification of the PRD's third acceptance criterion has to read the JSON
    path above, and a reviewer checking the human rows would conclude the fleet
-   is consistent when seven Trellis minors are missing. That finding is why the
+   is consistent when seven Trellis patch releases are missing. That finding is why the
    leg was split out: it is owned by `08-17-fleet-trellis-version-drift`, which
    carries both the upgrade pass and the reporting-visibility question. This task
    keeps the leg in the canonical-path doc and points there.

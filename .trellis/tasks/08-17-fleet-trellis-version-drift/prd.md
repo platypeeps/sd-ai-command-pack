@@ -1,4 +1,4 @@
-# Fleet Trellis version drift: 8 consumers seven minors behind
+# Fleet Trellis version drift: 8 consumers seven patch releases behind
 
 ## Goal
 
@@ -35,7 +35,7 @@ This repository vendors **0.6.14**. All eight consumers are on **0.6.7**.
 
 Two distinct defects:
 
-**The drift itself.** Seven minors of Trellis changes are missing from every
+**The drift itself.** Seven patch releases of Trellis changes are missing from every
 consumer, including the scripts the pack's own skills call into. The vendored
 compatibility spec exists (`.trellis/spec/tooling/vendored-trellis-compatibility.md`)
 precisely because pack behavior depends on the vendored version; eight consumers
