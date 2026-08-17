@@ -1643,3 +1643,48 @@ start silently overwrote a stopped or completed ledger through its new_state fal
 ### Next Steps
 
 - None - task complete
+
+
+## Session 388: Park the worktree developer-identity fix; split its reporting half
+
+**Date**: 2026-08-17
+**Task**: Park the worktree developer-identity fix; split its reporting half
+**Branch**: `task/developer-identity-worktree-fallback`
+
+### Summary
+
+Task 08-08 is parked on an upstream Trellis release: the worktree identity fallback is already implemented upstream on an untagged branch, so this repository records evidence instead of writing a patch. A staged acceptance suite lives under the task's research/ (it skips against the vendored tree and passes 9/0 against upstream), the never-skipping half stays in tests/, and the reporting half becomes task 08-17, which stays open because its work is executable here.
+
+### Main Changes
+
+- Parked 08-08-developer-identity-not-in-worktrees with a dated park note, a blockedOn naming the staged suite as the resume trigger, and a PARKED: title prefix so the backlog selector skips it
+- Added .trellis/tasks/08-08-developer-identity-not-in-worktrees/research/staged_test_worktree_identity.py: nine behavioral tests gated on a throwaway-fixture probe, with the scripts directory resolved from SD_DEVELOPER_IDENTITY_SCRIPTS so one file runs against both the vendored tree and a copy of upstream's
+- Added tests/test_developer_identity.py, the half that never skips: .trellis/.developer stays gitignored. The behavioral suite cannot live in tests/ because Makefile:49 fails the gate on any skip
+- Created 08-17-trellis-identity-message-consistency for the reporting half: eight gates in four media, one shared diagnosis rendered per medium, and a warning rule whose medium is never the gate's failure medium
+- Recorded handoff-register entries 13 and 14 plus paste-ready upstream research, including both staged-suite run results and the two fixture traps that produced false greens
+- Captured the convention in .trellis/spec/tooling/vendored-trellis-compatibility.md: where a suite that must skip until an upstream release lands lives, how to gate a skip on behavior rather than a symbol name, and what such a suite cannot prove
+- Returned 08-08 to status planning, matching every other parked task here and the finalization validator's planning-mode baseline rule (status planning, completedAt null, branch null at the bundle base as well as in it)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `36365c30` | docs(task): park the worktree identity fix and split its reporting half |
+
+### Testing
+
+- [OK] make check — ==> Full check complete, exit 0
+- [OK] staged suite against vendored .trellis/scripts — Ran 9 tests, OK (skipped=9)
+- [OK] staged suite against a mktemp -d copy of upstream's scripts/ — Ran 9 tests, OK (0 skipped)
+- [OK] tests/test_developer_identity.py — Ran 1 test, OK
+- [OK] review preflight — 0 failure(s), 2 warning(s) (boundary-risk matrix, 3 task directories)
+- [OK] sd-review scope=pr attempt 1 — status ready, gito clean, limitations router-not-configured / zero-remote-confidence
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
