@@ -12,6 +12,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
@@ -35,10 +36,21 @@ class HelperResolutionGateTests(unittest.TestCase):
         cls.bootstrap = cls.gate.read_canonical_bootstrap()
 
     def findings(self, markdown: str) -> list:
-        with tempfile.TemporaryDirectory(dir=PACK_ROOT) as directory:
+        """`check_file` reports paths relative to the gate's repository root.
+
+        Point that root at the fixture directory rather than writing fixtures
+        into the working tree: a crashed test would otherwise leave an
+        untracked directory in the repository under test, which the delivery
+        tooling reads as a dirty tree.
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "SKILL.md"
             path.write_text(markdown, encoding="utf-8")
-            return self.gate.check_file(path, self.bootstrap)
+            with unittest.mock.patch.object(
+                self.gate, "REPO_ROOT", Path(directory)
+            ):
+                return self.gate.check_file(path, self.bootstrap)
 
     def block(self, body: str) -> str:
         return f"# skill\n\n```bash\n{body}\n```\n"
