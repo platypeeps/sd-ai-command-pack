@@ -1826,6 +1826,11 @@ assert.deepEqual(
         )
 
     def test_review_preflight_accepts_valid_changed_task_metadata(self) -> None:
+        # The started parent/child and the archived record all carry a branch,
+        # which is the correct state for their statuses: only `planning` is
+        # required to keep `branch` null. Keeping all three here means the
+        # planning branch-null rule cannot be widened into a status-blind one
+        # without this test going red.
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is not available on PATH")
@@ -1848,6 +1853,7 @@ assert.deepEqual(
             json.dumps(
                 self.trellis_task_record(
                     "parent",
+                    status="in_progress",
                     branch="codex/parent",
                     children=[child_name],
                 )
@@ -1863,6 +1869,7 @@ assert.deepEqual(
             json.dumps(
                 self.trellis_task_record(
                     "child",
+                    status="in_progress",
                     branch="codex/child",
                     base_branch="codex/parent",
                     parent=parent_name,
@@ -1890,6 +1897,67 @@ assert.deepEqual(
         self.assertIn(
             "checked 3 changed Trellis task metadata record(s)",
             result.stdout,
+        )
+
+    def test_review_preflight_rejects_planning_task_carrying_a_branch(
+        self,
+    ) -> None:
+        # The planning branch-null invariant already existed, but only inside
+        # the bookkeeping/finalization bundle path. The default no-argument
+        # invocation never reached it while still reporting that it had
+        # checked "lifecycle, branch, and link integrity" -- a check reported
+        # as run that never ran. This asserts the default path now enforces it,
+        # and that clearing the field alone returns the run to clean.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "baseline")
+
+        task = root / ".trellis/tasks/07-24-planned"
+        task.mkdir(parents=True)
+        task_file = task / "task.json"
+        task_file.write_text(
+            json.dumps(
+                self.trellis_task_record(
+                    "planned",
+                    status="planning",
+                    branch="task/07-24-planned",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_review_preflight(node, root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            ".trellis/tasks/07-24-planned/task.json field branch must be null "
+            "while status is planning",
+            result.stdout,
+        )
+
+        # Attribute the failure to the field rather than to incidental
+        # strictness in the fixture: clearing branch alone must return the same
+        # tree to a clean run.
+        task_file.write_text(
+            json.dumps(self.trellis_task_record("planned", status="planning"))
+            + "\n",
+            encoding="utf-8",
+        )
+
+        cleared = self.run_review_preflight(node, root)
+
+        self.assertEqual(cleared.returncode, 0, cleared.stdout)
+        self.assertIn(
+            "checked 1 changed Trellis task metadata record(s)",
+            cleared.stdout,
         )
 
     def test_review_preflight_accepts_declared_task_priority_provenance(
