@@ -57,6 +57,14 @@ class HelperResolutionGateTests(unittest.TestCase):
             [],
         )
 
+    def test_a_use_above_the_bootstrap_is_reported(self) -> None:
+        """Present is not reached: the earlier use runs with an empty value."""
+
+        body = "\n".join(['bash "$SD_PACK_TOOLCHAIN" doctor'] + self.bootstrap)
+        found = self.findings(self.block(body))
+
+        self.assertEqual([finding.rule for finding in found], ["bootstrap-after-use"])
+
     def test_a_helper_block_without_the_bootstrap_is_reported(self) -> None:
         found = self.findings(
             self.block(

@@ -190,17 +190,26 @@ def check_file(path: pathlib.Path, bootstrap: list[str]) -> list[Finding]:
                     "run resolves only its first operand, so the helper "
                     "argument is left unresolved",
                 ))
-        uses = any(
-            "$SD_PACK_TOOLCHAIN" in line
+        uses = [
+            offset
             for offset, line in enumerate(block.body)
-            if offset not in bootstrap_lines
-        )
+            if offset not in bootstrap_lines and "$SD_PACK_TOOLCHAIN" in line
+        ]
         if uses and not has_bootstrap:
             findings.append(Finding(
                 rel, block.start, "missing-bootstrap",
                 'the block uses "$SD_PACK_TOOLCHAIN" without a byte-identical '
                 f"copy of the bootstrap from {REFERENCE}; each fenced block "
                 "runs in its own shell",
+            ))
+        # Present is not the same as reached: a use above the bootstrap runs
+        # with the variable still empty, which is the failure the bootstrap
+        # exists to prevent, in a block the presence check calls clean.
+        elif uses and bootstrap_lines and uses[0] < min(bootstrap_lines):
+            findings.append(Finding(
+                rel, block.start + 1 + uses[0], "bootstrap-after-use",
+                'the block uses "$SD_PACK_TOOLCHAIN" before the bootstrap '
+                "sets it; move the bootstrap above its first use",
             ))
     return findings
 
