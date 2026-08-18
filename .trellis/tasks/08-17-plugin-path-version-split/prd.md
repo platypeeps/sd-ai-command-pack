@@ -87,18 +87,18 @@ it says nothing about which copy a given process will actually execute.
 
 ## Acceptance criteria
 
-- [ ] A skill invoking a pack helper while `PATH` names a different pack version
+- [x] A skill invoking a pack helper while `PATH` names a different pack version
       either executes the matching helper or fails with both versions named.
       Demonstrated against a deliberately constructed split, not only against a
       clean machine.
-- [ ] Zero shipped skills invoke a `sd-ai-command-pack-*` helper by bare name,
+- [x] Zero shipped skills invoke a `sd-ai-command-pack-*` helper by bare name,
       verified by a repository-wide grep that is part of `make check`.
-- [ ] `sd-status` prints the resolved-binary-versus-loaded-skill comparison, and
+- [x] `sd-status` prints the resolved-binary-versus-loaded-skill comparison, and
       a test covers the disagreeing case.
-- [ ] The comparison is correct from a thin consumer checkout, verified against
+- [x] The comparison is correct from a thin consumer checkout, verified against
       at least one real consumer.
-- [ ] `make check` passes.
-- [ ] No consumer checkout and no plugin cache directory is modified.
+- [x] `make check` passes.
+- [x] No consumer checkout and no plugin cache directory is modified.
 
 ## Out of scope
 
