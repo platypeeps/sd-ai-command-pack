@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.71.31 - 2026-08-18
+
+### Fixed
+
+- The generated structural map guard in `review-preflight` no longer passes
+  when the map it was pointed at has no `# Directory Structure` section.
+  `parseGeneratedStructuralMapEntries` returned `parsed: true` for that case
+  and the caller only inspected `parsed`, so a map with no readable section
+  reached the success path and printed
+  `checked 0 generated structural map .trellis/ path(s); all resolve`. That is
+  the guard's own failure mode one level up: if repomix renamed the heading,
+  every consumer's gate would validate nothing while still reporting PASS, and
+  nothing distinguished "this repository has no map" from "this map's format is
+  no longer one we can read".
+
+  An existing map with no section is now unreadable rather than empty. It warns
+  -- naming the file and the reason -- and does not emit a pass line, matching
+  how the unparseable-indentation case is already treated: a generator format
+  change is a pack-side defect, and failing every consumer's gate on it would
+  convert one upstream mistake into a fleet-wide outage. The success message
+  also splits in two, so a parsed map that simply lists no `.trellis/` path
+  reports `generated structural map(s) list no .trellis/ path; none needed
+  checking` instead of a `checked 0` line that reads as a validation that ran.
+
+- The same parser now skips a fence line carrying a language or info string
+  (` ```text `) and a tilde fence, not only a bare backtick fence. Repomix
+  currently opens the listing with a bare four-backtick fence, so no map is
+  misparsed today; had that changed, an indented fence line would have been
+  taken as a tree entry and reported as a `.trellis/` path that does not
+  resolve -- drift no regeneration could fix.
+
 ## 0.71.30 - 2026-08-17
 
 ### Changed
