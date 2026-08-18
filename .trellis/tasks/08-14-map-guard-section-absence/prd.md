@@ -63,12 +63,12 @@ least the info-string form.
 
 ## Acceptance Criteria
 
-- [ ] An existing map with no `# Directory Structure` section produces a
+- [x] An existing map with no `# Directory Structure` section produces a
       warning naming the file; a test covers it.
-- [ ] The existing six generated-map tests still pass unchanged in intent,
+- [x] The existing six generated-map tests still pass unchanged in intent,
       with the no-section test updated to assert the warning.
-- [ ] The zero-checked success message cannot be read as a completed
+- [x] The zero-checked success message cannot be read as a completed
       validation.
-- [ ] A fence line with an info string is skipped rather than parsed as a
+- [x] A fence line with an info string is skipped rather than parsed as a
       tree entry; a test covers it.
-- [ ] The fix ships in the payload with a manifest bump and CHANGELOG entry.
+- [x] The fix ships in the payload with a manifest bump and CHANGELOG entry.
