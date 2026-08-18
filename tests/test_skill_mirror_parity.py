@@ -24,16 +24,11 @@ MIRROR = REPO_ROOT / ".agents/skills"
 
 MODEL_PIN_RE = re.compile(r"^model:\s*\S+\s*$\n?", re.MULTILINE)
 
-
-def _without_model_pin(text: str) -> str:
-    """The one difference the mirror is allowed to carry.
-
-    A skill may pin the model it dispatches under; `sd-fleet-refresh`'s mirror
-    has dropped that pin since the file was introduced, so requiring byte
-    identity would fail on a difference nobody intends to remove.
-    """
-
-    return MODEL_PIN_RE.sub("", text, count=1)
+# Mirrors that intentionally drop the authored `model:` frontmatter pin, named
+# one by one. The pin selects the model a skill dispatches under, so a blanket
+# exception would hide a real difference in behaviour everywhere; every other
+# mirror is compared byte for byte.
+DROPS_MODEL_PIN = frozenset({"sd-fleet-refresh/SKILL.md"})
 
 
 class SkillMirrorParityTests(unittest.TestCase):
@@ -52,12 +47,35 @@ class SkillMirrorParityTests(unittest.TestCase):
                     f".agents/skills/{relative} is missing; the repository "
                     "runs the pack from this tree",
                 )
+                expected = path.read_text(encoding="utf-8")
+                if relative.as_posix() in DROPS_MODEL_PIN:
+                    expected = MODEL_PIN_RE.sub("", expected, count=1)
                 self.assertEqual(
-                    _without_model_pin(mirror.read_text(encoding="utf-8")),
-                    _without_model_pin(path.read_text(encoding="utf-8")),
+                    mirror.read_text(encoding="utf-8"),
+                    expected,
                     f".agents/skills/{relative} drifts from its authored "
                     "source; `make sync` repairs an installed skill, and a "
                     "source-only skill is copied by hand",
+                )
+
+    def test_every_declared_model_pin_drop_is_still_real(self) -> None:
+        """A stale allowance is an exception nobody is checking any more."""
+
+        for relative in sorted(DROPS_MODEL_PIN):
+            with self.subTest(skill=relative):
+                authored = (AUTHORED / relative).read_text(encoding="utf-8")
+                mirror = (MIRROR / relative).read_text(encoding="utf-8")
+                self.assertRegex(
+                    authored,
+                    MODEL_PIN_RE,
+                    f"templates/.agents/skills/{relative} has no model pin to "
+                    "drop; remove the allowance",
+                )
+                self.assertNotRegex(
+                    mirror,
+                    MODEL_PIN_RE,
+                    f".agents/skills/{relative} carries a model pin; remove "
+                    "the allowance and compare it byte for byte",
                 )
 
 
