@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.71.33 - 2026-08-18
+
+### Fixed
+
+- The review preflight's default working-tree run now enforces the
+  planning-phase branch invariant it already reported as checked.
+  `task.py start` is what records a branch, so a `status: planning` record
+  already carrying one means the task was started without its lifecycle
+  advancing with it. The bundle-scoped `planning_lifecycle_mutation` rule
+  encodes the same invariant, but only the bookkeeping and finalization paths
+  reach it, so an ordinary run printed a Trellis task metadata PASS covering
+  identity, lifecycle, and branch integrity while that one combination went
+  unchecked.
+
+  `validateTrellisBookkeepingMetadata` now rejects it directly, conditioned on
+  the record's own status rather than on bundle context, so `in_progress`,
+  `review`, and archived `completed` records keep their branches untouched.
+  Measured across this repository before the change: 77 active and 333
+  archived task records, none newly rejected.
+
 ## 0.71.32 - 2026-08-18
 
 ### Fixed
