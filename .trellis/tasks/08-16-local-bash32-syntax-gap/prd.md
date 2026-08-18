@@ -68,10 +68,10 @@ in the gate output. Design should pick one and say why, not do both.
 
 ## Acceptance criteria
 
-- [ ] A fixture carrying the exact bash-3.2 construct fails the local gate on a
+- [x] A fixture carrying the exact bash-3.2 construct fails the local gate on a
       machine whose `PATH` bash is 5.x, demonstrated by running it.
-- [ ] The scripts checked are enumerated from tracked `*.sh` at run time.
-- [ ] The no-bash-3.2 platform behavior is decided, implemented, and visible in
+- [x] The scripts checked are enumerated from tracked `*.sh` at run time.
+- [x] The no-bash-3.2 platform behavior is decided, implemented, and visible in
       the gate output rather than silent.
-- [ ] No new CI job or leg is added.
-- [ ] `make check` passes.
+- [x] No new CI job or leg is added.
+- [x] `make check` passes.
