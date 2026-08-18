@@ -21,7 +21,15 @@ repeat a side effect until the ledger and live state agree.
   stop. Never reconstruct missing evidence from conversation history.
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-work-loop.py reconcile --repo . \
   --run-id <run-id> --observed-phase <observed-lifecycle-phase> \
   --task <task> --branch <branch> --head <sha> \

@@ -902,21 +902,26 @@ class CommittedPluginTreeTests(PluginFixtureCase):
         self.assertLess(shared_source, len(excluded))
 
     def test_committed_tree_holds_no_markdown_residue(self) -> None:
-        offenders: dict[str, list[str]] = {}
+        """The committed tree answers to the plugin profile, so check that.
+
+        Not `residue_literals` alone: that is the raw pattern, blind to the
+        per-file exemptions and verbatim spans the profile carries, so it
+        reports the one file that quotes a repository path on purpose.
+        """
+
+        offenders: dict[str, str] = {}
         for path in sorted(PLUGIN_ROOT.rglob("*.md")):
             relative = path.relative_to(PLUGIN_ROOT).as_posix()
             if not self.generator.plugin_native(relative):
                 continue
-            found = sorted(
-                {
-                    match.rstrip(".")
-                    for match in references.RESIDUE_RE.findall(
-                        path.read_text(encoding="utf-8")
-                    )
-                }
-            )
-            if found:
-                offenders[relative] = found
+            try:
+                references.check_text_residue(
+                    relative,
+                    path.read_text(encoding="utf-8"),
+                    profile=references.PLUGIN_PROFILE,
+                )
+            except references.ReferenceRewriteError as error:
+                offenders[relative] = str(error)
 
         self.assertEqual(offenders, {})
 

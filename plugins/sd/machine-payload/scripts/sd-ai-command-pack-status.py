@@ -101,10 +101,22 @@ PARKED_PREFIX_RE = re.compile(r"^PARKED\s*:\s*", re.IGNORECASE)
 PR_SEPARATOR = "\x1f"
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 TASK_STATUS_ORDER = {"in_progress": 0, "planning": 1, "completed": 2}
-MACHINE_SCOPE_SCHEMA_VERSION = 1
+# Schema 2 adds `resolution`: which toolchain the shipped skills' bootstrap
+# reaches and whether PATH would have answered with a different install.
+MACHINE_SCOPE_SCHEMA_VERSION = 2
 # The plugin the machine-scope surfaces ship with; the identity
 # sd-ai-command-pack-pack-update.sh updates.
 MACHINE_PLUGIN_ID = "sd@sd-ai-command-pack"
+# The one file every install roots its helpers at. A directory holding it is a
+# pack `bin/`; that is a filesystem test, not a name pattern, so a differently
+# named install root is still recognized.
+TOOLCHAIN_FILENAME = "sd-ai-command-pack-toolchain.sh"
+# The bootstrap's candidate order, recorded in
+# templates/.agents/skills/sd-help/references/pack-helper-resolution.md.
+TOOLCHAIN_SOURCES = ("override", "checkout", "machine")
+TOOLCHAIN_VERDICTS = frozenset({"bound", "shadowed", "unresolved"})
+# PATH is unbounded external input; the report keeps the leading pack entries.
+MAX_PATH_PACK_ENTRIES = 8
 MACHINE_UNAVAILABLE = "unavailable"
 # States the machine-install engine reports from the receipt alone. A fourth
 # value, MACHINE_UNAVAILABLE, is this collector's own: it means the receipt
@@ -1868,6 +1880,115 @@ def machine_comparison(
     return "skew"
 
 
+def real_path(path: Path) -> str:
+    """Compare installs by identity, not by the spelling that reached them.
+
+    A plugin root symlinked into `~/.agents/bin` is one install wearing two
+    paths; comparing the spellings would report it as a split it is not.
+    """
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return str(path)
+
+
+def path_pack_bins(environ: Mapping[str, str]) -> list[dict[str, str]]:
+    """Every `PATH` entry that holds a toolchain, in `PATH` order.
+
+    Order is the whole point: `PATH` answers with its first match, so the head
+    of this list is the install a bare helper name would have reached.
+    Duplicate spellings of one directory collapse; two directories that are the
+    same install by symlink do not, because both spellings are really on
+    `PATH` and the reader is entitled to see that.
+    """
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in environ.get("PATH", "").split(os.pathsep):
+        if not raw or raw in seen:
+            continue
+        seen.add(raw)
+        candidate = Path(raw) / TOOLCHAIN_FILENAME
+        if not candidate.is_file():
+            continue
+        entries.append(
+            {
+                "directory": safe_text(raw, limit=500),
+                "toolchain": safe_text(str(candidate), limit=500),
+            }
+        )
+        if len(entries) == MAX_PATH_PACK_ENTRIES:
+            break
+    return entries
+
+
+def collect_toolchain_resolution(
+    repo: Path,
+    *,
+    home: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Which toolchain the shipped bootstrap reaches, and what `PATH` holds.
+
+    This answers a different question from the install-versus-target line above
+    it: not which release is installed, but which one a skill's helper
+    invocation actually runs, and whether `PATH` disagrees.
+
+    The candidate order mirrors
+    ``templates/.agents/skills/sd-help/references/pack-helper-resolution.md``
+    exactly. The bootstrap's second candidate is working-directory relative;
+    this resolves it against the reported repository, which is the working
+    directory of every skill invocation that reports on that repository.
+
+    `shadowed` is advisory. Once every skill reaches its helpers through the
+    bootstrap, a stale `PATH` entry runs nothing -- but it is still the thing an
+    operator has to remove, and a `PATH` that answers with a different install
+    than the bootstrap is worth naming before it becomes load-bearing again.
+    """
+    env = os.environ if environ is None else environ
+    home_root = Path(home) if home is not None else Path.home()
+    override = env.get("SD_AI_COMMAND_PACK_TOOLCHAIN") or ""
+    candidates: tuple[tuple[str, Path | None], ...] = (
+        # `[ -f "" ]` is false in the bootstrap; an empty override is the same
+        # miss here rather than a probe of the working directory.
+        ("override", Path(override) if override else None),
+        ("checkout", repo / "scripts" / TOOLCHAIN_FILENAME),
+        ("machine", home_root / ".agents" / "bin" / TOOLCHAIN_FILENAME),
+    )
+    resolved: Path | None = None
+    source = "none"
+    for name, candidate in candidates:
+        if candidate is not None and candidate.is_file():
+            resolved, source = candidate, name
+            break
+
+    pack_bins = path_pack_bins(env)
+    if resolved is None:
+        # The bootstrap's own failure branch: no candidate answered, so the
+        # verdict is not about PATH at all.
+        verdict = "unresolved"
+    elif not pack_bins:
+        verdict = "bound"
+    elif real_path(Path(pack_bins[0]["toolchain"])) == real_path(resolved):
+        verdict = "bound"
+    else:
+        verdict = "shadowed"
+
+    return {
+        "toolchain": safe_text(str(resolved), limit=500) if resolved is not None else None,
+        "source": source,
+        # The install root, not the directory holding the script: `scripts/` in
+        # a source checkout and `bin/` under a machine or plugin root both sit
+        # one level below it, so this is the value that names the install.
+        "installRoot": (
+            safe_text(str(resolved.parent.parent), limit=500)
+            if resolved is not None
+            else None
+        ),
+        "pathPackBins": pack_bins,
+        "verdict": verdict,
+    }
+
+
 def collect_machine_scope(
     repo: Path,
     *,
@@ -1884,6 +2005,7 @@ def collect_machine_scope(
     plugin_version, plugin_detail = collect_plugin_version(repo)
     return {
         "schemaVersion": MACHINE_SCOPE_SCHEMA_VERSION,
+        "resolution": collect_toolchain_resolution(repo, home=home, environ=environ),
         "state": receipt["state"],
         "packVersion": receipt["packVersion"],
         "receiptPath": receipt["receiptPath"],
@@ -2951,6 +3073,12 @@ def collect_local(
                 + safe_text(machine_scope.get("detail") or "unknown error", limit=400),
             )
         )
+    # A `shadowed` helper-resolution verdict is deliberately not an anomaly. It
+    # follows the same rule as this section's `skew` comparison: machine scope
+    # describes the machine, not this repository, so it is reported in its own
+    # row and never promoted into a repository finding that would gate
+    # --expect-clean on which other installs happen to sit on the operator's
+    # PATH.
     completed_outside_archive = trellis.get("completedOutsideArchive", [])
     if completed_outside_archive:
         shown = ", ".join(
@@ -3034,6 +3162,37 @@ def format_machine_scope(section: object) -> str:
     if plugin_detail:
         plugin += f" ({plugin_detail})"
     return f"{machine}; plugin {plugin}; {section.get('comparison')}"
+
+
+def format_toolchain_resolution(section: object) -> str:
+    """The resolved toolchain, the `PATH` entries, and the verdict.
+
+    Its own row, never folded into the line above: that line answers which
+    release is installed, and a reader who cannot separate the two questions
+    will read a clean install as proof that no split exists.
+    """
+    if not isinstance(section, dict):
+        return "not collected"
+    resolution = section.get("resolution")
+    if not isinstance(resolution, dict):
+        return "not collected"
+    verdict = str(resolution.get("verdict"))
+    toolchain = resolution.get("toolchain")
+    if not toolchain:
+        return f"{verdict}; no toolchain found (checked override, scripts/, ~/.agents/bin)"
+    bins = resolution.get("pathPackBins")
+    entries = bins if isinstance(bins, list) else []
+    if entries:
+        listed = ", ".join(
+            str(entry.get("directory")) for entry in entries if isinstance(entry, dict)
+        )
+        path_summary = f"PATH pack bins ({len(entries)}, in order): {listed}"
+    else:
+        path_summary = "no pack bin on PATH"
+    return (
+        f"{verdict}; {toolchain} (via {resolution.get('source')}, "
+        f"root {resolution.get('installRoot')}); {path_summary}"
+    )
 
 
 def format_task(task: object) -> str:
@@ -3190,6 +3349,10 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
     target_suffix = f"; target {target}" if target else ""
     print(f"- SD pack: {pack} ({versions.get('packState')}{target_suffix})")
     print(f"- machine scope: {format_machine_scope(report.get('machineScope'))}")
+    print(
+        "- helper resolution: "
+        f"{format_toolchain_resolution(report.get('machineScope'))}"
+    )
     print(f"- Trellis: {versions.get('trellis') or 'unknown'}")
     pr = report["github"].get("currentPr")
     if isinstance(pr, dict):

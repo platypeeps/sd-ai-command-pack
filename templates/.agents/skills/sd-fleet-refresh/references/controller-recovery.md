@@ -9,8 +9,16 @@ need. Normal campaigns do not need it.
 Run the read-only reconciliation report:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py resume \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py resume \
   --repo <absolute-source-root> --campaign <campaign-id> --json
 ```
 
@@ -41,8 +49,16 @@ consumer's own documented gate, reopen only that lane at the stage that
 exhausted:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py resume \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py resume \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --recover-exhausted-consumer <name> --exhausted-action <action-id> \
   --release <campaign-target-version> --json
@@ -68,8 +84,16 @@ owner clears and the checkout is verifiably clean, explicitly reopen only that
 lane:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py resume \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py resume \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --retry-consumer <name> --json
 ```
@@ -97,8 +121,16 @@ When the finding gate returns `pause-corrective-release`:
 4. Iterate with focused source tests and optional partial candidate diagnostics:
 
    ```bash
-   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-     scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-fleet-candidate-check.py --consumer <name>
    ```
 
    Partial candidate diagnostics must never replace the canonical candidate
@@ -113,8 +145,16 @@ evidence, use the released controller's explicit recovery transition only
 after the corrective source version is the current `manifest.json` version:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py resume \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py resume \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --recover-consumer <name> --corrective-release <version> --json
 ```

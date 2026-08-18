@@ -470,21 +470,26 @@ class PackCheckoutStagingTests(unittest.TestCase):
         self.assertEqual(set(self.staged) - {machinepayload.PARTITION_FILE}, admitted)
 
     def test_no_staged_text_still_names_a_repository_root_resource(self) -> None:
-        offenders: dict[str, list[str]] = {}
+        """Through the profile's own gate, not a second copy of its rules.
+
+        Re-deriving the allowance here -- filtering `residue_literals` by the
+        exempt names -- reproduced one of the two mechanisms and missed the
+        other, so a file with a justified verbatim span was reported as
+        residue by the test and not by the payload.
+        """
+
+        offenders: dict[str, str] = {}
         for target, entry in sorted(self.staged.items()):
             if machinestage.family_of(target) in (machinestage.BIN_FAMILY, None):
                 continue
-            body = entry.content.decode("utf-8")
-            exempt = references.exempt_names(references.MACHINE_PROFILE, target)
-            found = sorted(
-                {
-                    match.rstrip(".")
-                    for match in references.RESIDUE_RE.findall(body)
-                    if match.rstrip(".").removeprefix("scripts/") not in exempt
-                }
-            )
-            if found:
-                offenders[target] = found
+            try:
+                references.check_text_residue(
+                    target,
+                    entry.content.decode("utf-8"),
+                    profile=references.MACHINE_PROFILE,
+                )
+            except references.ReferenceRewriteError as error:
+                offenders[target] = str(error)
 
         self.assertEqual(offenders, {})
 
@@ -511,7 +516,22 @@ class PackCheckoutStagingTests(unittest.TestCase):
         manual = self.staged["docs/SD_AI_COMMAND_PACK.md"].content.decode("utf-8")
 
         self.assertIn("`scripts/sd-ai-command-pack-fleet-controller.py`", manual)
-        self.assertIn("bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh", manual)
+
+    def test_the_resolution_bootstrap_survives_the_machine_rewrite(self) -> None:
+        """Its candidates are runtime probes, not relocatable references.
+
+        The middle candidate names a repository-root path on purpose: it asks
+        whether the working directory is a pack source checkout. Rewriting it
+        to the machine root would make candidate 2 and candidate 3 the same
+        probe and lose the source-checkout preference entirely.
+        """
+
+        manual = self.staged["docs/SD_AI_COMMAND_PACK.md"].content.decode("utf-8")
+
+        self.assertIn('"scripts/sd-ai-command-pack-toolchain.sh"', manual)
+        self.assertIn(
+            '"$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"', manual
+        )
 
     def test_every_reference_exemption_still_occurs_in_its_file(self) -> None:
         stale: dict[str, list[str]] = {}

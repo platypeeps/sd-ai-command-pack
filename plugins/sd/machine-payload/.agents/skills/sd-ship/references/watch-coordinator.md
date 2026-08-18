@@ -16,8 +16,16 @@ One probe is one invocation of the existing read-only dependency-PR mode of
 the eligibility script, in full:
 
 ```bash
-bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-  ~/.agents/bin/sd-ai-command-pack-pr-eligibility.py \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-pr-eligibility.py \
   --repo . --dependency-pr-number <N> --remote origin \
   --default-branch <base> --github-repository <owner>/<repo>
 ```

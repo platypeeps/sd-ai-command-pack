@@ -91,8 +91,16 @@ it in the active task/session, and reuse it after interruption. Create or
 idempotently reopen the campaign before preflight:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py plan \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py plan \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> [--consumer <name> ...] [--no-merge] --json
 ```
@@ -105,8 +113,16 @@ mutations itself.
 Drive work only from issued actions:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py next \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py next \
   --repo <absolute-source-root> --campaign <campaign-id> --json
 ```
 
@@ -115,8 +131,16 @@ timeout, and whether it may cause a side effect. Execute it once through the
 owner named below, then record one normalized receipt:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py record \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py record \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> --action-id <full-action-id> \
   [--consumer <name>] --result <result> [receipt evidence] --json
@@ -177,7 +201,15 @@ but defines no ordering or transition policy:
   source checkout** against the consumer:
 
   ```bash
-  node scripts/sd-ai-command-pack-review-preflight.mjs seeded-task \
+  SD_PACK_TOOLCHAIN=""
+  for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+    "scripts/sd-ai-command-pack-toolchain.sh" \
+    "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+    if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+  done
+  [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+  bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs seeded-task \
     --repo <absolute consumer checkout> --task-dir <consumer-relative task dir> --json
   ```
 
@@ -215,38 +247,20 @@ but defines no ordering or transition policy:
 - `candidate-prepare`, `focused-candidate`, and `local-checks`: run the
   manifest-ordered preparation/check commands and the consumer's documented
   full local gate.
-- `pr-publication`: this stage has one order, and it is the order below. Every
-  step that generates content runs before the push, so the pushed head is the
-  reviewed head and nothing is appended to it afterwards.
-
-  1. Stage only the dedicated consumer task artifacts, installer-managed
-     output, receipts/provenance, and deterministic preparation output.
-  2. Fold finish-work into that head with
-     `sd-ai-command-pack-fleet-publish.py`. It makes the work commit (pack +
-     active task + a `repomix-map` pre-computed against the post-archive
-     layout on repomix-indexed consumers), then archives the task and records
-     the journal via the shipped `record-session` wrapper, takes the
-     completion receipt, asserts the delta, and pushes — so the pushed head
-     already carries all bookkeeping. It refuses to run on a tree dirty
-     outside the managed allowlist, transactionally restores the task on any
-     error, asserts the completion delta is `.trellis`-only, and never pushes
-     on an invalid receipt — so the merge stage sees zero head-advance and no
-     successor to reclassify.
-  3. Classify the exact base and pushed head with
-     `sd-ai-command-pack-fleet-review-classify.py`.
-  4. Create or reuse one PR, and record the published head and PR number.
-
-  On a consumer the helper refuses — one carrying
-  `.github/scripts/bookkeeping_ci_scope.py`, including this pack itself — the
-  repo self-releases through `sd-finish-work`. The same ordering constraint
-  still holds: regenerate any committed structural map after `task.py archive`
-  and before the finish-work push, never as a commit appended to a pushed
-  head. A map committed ahead of the archive move names task paths the
-  published head no longer has, and
-  `sd-ai-command-pack-review-preflight.mjs` fails that head on the
-  `generated structural map paths` check.
-
-  When a prior merge action
+- `pr-publication`: commit only the dedicated consumer task artifacts,
+  installer-managed output, receipts/provenance, and deterministic preparation
+  output. Classify the exact base/head with
+  `sd-ai-command-pack-fleet-review-classify.py`, push, and create or reuse one
+  PR. Record the published head and PR number. Fold finish-work into the
+  reviewed head with `sd-ai-command-pack-fleet-publish.py`: it makes the work
+  commit (pack + active task + a pre-computed post-archive `repomix-map` on
+  repomix-indexed consumers), then archives the task and records the journal via
+  the shipped `record-session` wrapper so the pushed head already carries all
+  bookkeeping. It refuses to run on a tree dirty outside the managed allowlist,
+  transactionally restores the task on any error, asserts the completion delta
+  is `.trellis`-only, and never pushes on an invalid receipt — so the merge
+  stage sees zero head-advance and no successor to reclassify. When a prior
+  merge action
   returned here because `sd-finish-work` advanced the PR, do not create another
   commit or push: verify the retained finish-work receipt names the current
   local and remote PR head, reclassify that exact successor, reuse the existing
@@ -343,8 +357,16 @@ For each non-empty batch of verified findings, create a temporary
 schema-version-1 findings file and run:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-finding-classify.py \
   --input <temporary-findings.json> --json
 ```
 

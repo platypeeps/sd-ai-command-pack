@@ -119,3 +119,68 @@ Review of PR #502 found Step 3 and Step 4 contradicted each other: Step 3 kept s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 400: One rule for reaching a pack helper, and a gate that can see every way of breaking it
+
+**Date**: 2026-08-18
+**Task**: One rule for reaching a pack helper, and a gate that can see every way of breaking it
+**Branch**: `task/plugin-path-version-split`
+
+### Summary
+
+A pack skill and the binaries it invoked were resolved by two independent mechanisms, so a skill from one release could silently drive helpers from another. Every shipped skill now locates the toolchain through one bootstrap and reaches every helper through it, sd-status reports the resolved binary beside its install root, and a gate enforces the rule over the authored trees.
+
+### Main Changes
+
+- Replaced three resolution forms across the shipped skills with one bootstrap plus toolchain invocation, and added the reference file that defines the bootstrap once
+- Added sd-status helper-resolution reporting with bound, shadowed, and unresolved verdicts, proven against a deliberately constructed version split and a thin consumer checkout
+- Added check-helper-resolution.py to make check and CI, covering scripts-prefixed, interpreter-direct, bare-name, run-interpreter, missing-bootstrap, and bootstrap-after-use forms
+- Fixed the generator bug that rewrote the resolution reference's own counter-examples into copies of the right answer, via a per-file verbatim_spans table, and threaded the profile key the plugin generator had never passed
+- Carried the change into the source-only sd-fleet-refresh mirror, which no installer writes and no gate watched, and added a parity test so the next source-only skill is covered
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `83d1cb4fdea33845f1d6a16e27dd65e64a940b96` | fix(skills): resolve pack helpers through one bootstrap, never through PATH |
+| `55a9cfbee09623bc7538152befd3b94b8b048c45` | chore(fleet): refresh the candidate ledger to all-pass at 0.71.30 |
+| `cac9aa2637f65a220d1320f5b4d51ebf63e5bbb4` | fix(task): make the task artifacts pass the review-scope gate |
+| `6ac3153fcbc91b0b6f0dd6b47253324c1623acbc` | fix(payload): keep the resolution reference's counter-examples verbatim |
+| `ae91f6ed9d74a98452dffa2a83db882118cec9fc` | test: match the exempt toolchain variable as a whole name |
+| `b359a2a74859e18fda59e1ff1e7c126c73c6f480` | test: treat any word character as an env-var name continuation |
+| `78048da388f0bcb4f352a3b8b805a9d6bb3e0552` | fix(gate): inspect a block that uses the toolchain variable but names no helper |
+| `429be1077770cf52b3db3c74ddd850c44be0ba37` | test: check payload residue through the profile, not a copy of its rules |
+| `4915b10e0c242983c21756dd518e5c2d76e1ff0c` | fix(gate): a bootstrap below its first use is not a bootstrap |
+| `a546f73ffced9785e6b3f9355dd5aa69c2274ca8` | docs(task): record the candidate-readability change as its own work |
+| `6d2ad9e01033ad087614bab2953588973b9b659d` | docs(task): state the ledger criterion as all-pass, not as one digest |
+| `fa1305e16615e0e6da7bed833ab9d80084408123` | fix(gate): match a direct invocation inside an indented block |
+| `5962f8b9edc227d79790847459b81ddc33606f6f` | fix(gate): a long option does not hide a direct invocation |
+| `5cb037cc87560e159addc6984477fd9e8ca49790` | test(gate): stop writing gate fixtures into the working tree |
+| `ea97bca9979cc042161969e35b5b045bdd14176f` | fix(fleet-refresh): carry the bootstrap into the source-only mirror |
+| `9d1fc937013cc6dd24db4b525cd27f4dd11931aa` | test(skills): gate the repository's own skill mirror against its source |
+| `49e5fa947acbdd2065a5a5bf59806595b7112b94` | test(skills): name the mirrors that drop the model pin instead of tolerating it everywhere |
+| `2a2e496216a45224b55c4a2a5acf2b857953e8ce` | fix(gate): stop telling the toolchain to resolve itself |
+| `3f440c2e075408b7ad34206d810338ac3fbfe854` | test(gate): assert the run-interpreter block reports exactly one rule |
+| `89a354df03500119f9ea857dd2a045a4b52acc5e` | fix(gate): read authored files as UTF-8 explicitly |
+| `a492cc274d86fa399b79645141f59ae2a2ae8ce7` | fix(gate): catch the bare helper name the rule was written to remove |
+| `1664aaf3cc3dde3075cafeaf8b95c05a9941db9b` | docs(task): mark the acceptance criteria met |
+| `5b989b94e3a5b64f677e2d63d1ddb9337b777f2b` | chore(task): record the branch before finalization |
+| `aaaf3363c300503dc5b43bc378ce2eea5a76701e` | docs(task): record the non-executable payload helper as its own work |
+
+### Testing
+
+- [OK] make check: EXIT=0, 80 passing suites, 0 failures
+- [OK] pack-helper resolution gate: 73 authored files clean
+- [OK] tests.test_helper_resolution_gate: Ran 15 tests, OK
+- [OK] tests.test_skill_mirror_parity: Ran 2 tests, OK; fails as expected when a mirror is reverted
+- [OK] CI on 89a354df: every job green, Shell coverage included
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

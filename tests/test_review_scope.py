@@ -1697,7 +1697,7 @@ class ReviewScopeTests(InstallTestCase):
             skill = skill_path.read_text(encoding="utf-8")
             self.assertIn("configured remote reviewer", skill)
             self.assertIn("typed deterministic `sd-check`", skill)
-            self.assertIn("scripts/sd-ai-command-pack-check.py --json", skill)
+            self.assertIn("sd-ai-command-pack-check.py --json", skill)
             self.assertNotIn("SD_AI_COMMAND_PACK_FULL_CHECK_PRISM", skill)
             self.assertNotIn("SD_AI_COMMAND_PACK_FULL_CHECK_GITO", skill)
             self.assertNotIn(
@@ -1739,7 +1739,7 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn("multiple-Trellis-task warnings", skill)
             self.assertIn("## Step 7.5: Capture Review Learnings Once", skill)
             self.assertEqual(
-                skill.count("scripts/sd-ai-command-pack-review-learnings.py"),
+                skill.count("sd-ai-command-pack-review-learnings.py"),
                 1,
             )
             self.assertIn('--github-pr "$PR_NUMBER" --dry-run', skill)

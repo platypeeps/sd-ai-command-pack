@@ -87,18 +87,18 @@ it says nothing about which copy a given process will actually execute.
 
 ## Acceptance criteria
 
-- [ ] A skill invoking a pack helper while `PATH` names a different pack version
+- [x] A skill invoking a pack helper while `PATH` names a different pack version
       either executes the matching helper or fails with both versions named.
       Demonstrated against a deliberately constructed split, not only against a
       clean machine.
-- [ ] Zero shipped skills invoke a `sd-ai-command-pack-*` helper by bare name,
+- [x] Zero shipped skills invoke a `sd-ai-command-pack-*` helper by bare name,
       verified by a repository-wide grep that is part of `make check`.
-- [ ] `sd-status` prints the resolved-binary-versus-loaded-skill comparison, and
+- [x] `sd-status` prints the resolved-binary-versus-loaded-skill comparison, and
       a test covers the disagreeing case.
-- [ ] The comparison is correct from a thin consumer checkout, verified against
+- [x] The comparison is correct from a thin consumer checkout, verified against
       at least one real consumer.
-- [ ] `make check` passes.
-- [ ] No consumer checkout and no plugin cache directory is modified.
+- [x] `make check` passes.
+- [x] No consumer checkout and no plugin cache directory is modified.
 
 ## Out of scope
 
@@ -112,6 +112,38 @@ it says nothing about which copy a given process will actually execute.
   unavailable. That is issue `#496` and it is a layout defect, not a version
   split.
 - Consumer pack pins, which are `08-08-fleet-one-path`'s rollout ledger.
+- Testing candidate **readability** rather than existence. The bootstrap takes
+  the first candidate satisfying `[ -f "$candidate" ]`, but `bash
+  "$SD_PACK_TOOLCHAIN"` needs read permission, so a candidate that exists and
+  is unreadable dead-ends instead of falling through to the next one. Raised in
+  review of `#503` and declined there on cost, not correctness: the bootstrap
+  is byte-identical at 84 authored sites by construction, so the predicate
+  cannot be changed in one place — the edit re-touches every site, every
+  generated payload copy, the payload digest, and the fleet candidate ledger.
+  It belongs in its own task, where a one-line change with an 84-site blast
+  radius is the whole subject rather than a rider.
+- `run --` against a payload helper that is not executable. `run` ends in
+  `exec "$RESOLVED_PACK_SCRIPT"`, and the pack's own checkout tracks 30 of its
+  36 `scripts/` entries as mode `100644` — including every `.mjs` and
+  `housekeeping.sh`. The installer sets the bit, so the form works from
+  `~/.agents/bin` and from a consumer, and fails only where the bootstrap
+  resolves the checkout copy: the pack's own repository. Hit while running this
+  task's own pre-archive gate on 2026-08-18:
+
+  ```text
+  scripts/sd-ai-command-pack-toolchain.sh: line 508:
+  .../scripts/sd-ai-command-pack-review-preflight.mjs: Permission denied
+  ```
+
+  Eleven authored sites invoke a non-executable helper this way (six `.mjs`,
+  five `.sh`). Two fixes exist — dispatch by extension inside `run` when the
+  resolved helper is not executable, or track the payload helpers as `100755`
+  the way six of them already are — and both change `templates/scripts/**`,
+  so both restage every payload copy, move the payload digest, and stale the
+  fleet candidate ledger. Same cost profile as the readability item above, and
+  the same disposition: its own task, not a rider on this one. The documented
+  `SD_AI_COMMAND_PACK_TOOLCHAIN` override reaches the machine install in the
+  meantime, which is how this task's gate was run.
 
 ## Evidence
 

@@ -2001,6 +2001,7 @@ SHARED_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
         "references/completion-lifecycle.md",
         "references/environment-blocked-recovery.md",
         "references/examples.md",
+        "references/pack-helper-resolution.md",
         "references/recovery-artifacts.md",
         "references/structured-questions.md",
     ),

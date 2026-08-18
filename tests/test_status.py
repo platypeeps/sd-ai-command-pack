@@ -3521,7 +3521,7 @@ class StatusTests(InstallTestCase):
                 with self.stub_claude(status, listing):
                     section = self.machine_section(status, root, home, state_home)
 
-                self.assertEqual(section["schemaVersion"], 1)
+                self.assertEqual(section["schemaVersion"], 2)
                 self.assertEqual(section["state"], expected_state)
                 self.assertEqual(section["comparison"], expected_comparison)
                 self.assertEqual(section["packVersion"], receipt_version)
@@ -3806,6 +3806,234 @@ class StatusTests(InstallTestCase):
             "not collected; plugin unavailable; unknown",
         )
 
+    def write_toolchain(self, directory: Path) -> Path:
+        """A stand-in toolchain; resolution tests only ask whether it exists."""
+        directory.mkdir(parents=True, exist_ok=True)
+        script = directory / "sd-ai-command-pack-toolchain.sh"
+        script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
+    def test_a_source_checkout_is_bound_when_no_pack_bin_is_on_path(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, _ = self.machine_scratch()
+        checkout = self.write_toolchain(root / "scripts")
+
+        for path_value in ("", str(root / "scripts")):
+            with self.subTest(path=path_value or "<empty>"):
+                resolution = status.collect_toolchain_resolution(
+                    root,
+                    home=home,
+                    environ={"PATH": path_value},
+                )
+
+                # Both are bound for different reasons: no pack bin answers at
+                # all, and a pack bin that answers with the same install.
+                self.assertEqual(resolution["verdict"], "bound")
+                self.assertEqual(resolution["source"], "checkout")
+                self.assertEqual(resolution["toolchain"], str(checkout))
+                self.assertEqual(resolution["installRoot"], str(root))
+
+    def test_a_pack_bin_on_path_from_another_install_is_shadowed(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, _ = self.machine_scratch()
+        self.write_toolchain(root / "scripts")
+        stale = self.write_toolchain(home / "cache/sd/0.0.1/bin")
+        # A non-pack directory ahead of it must not be reported: the row names
+        # the entries that could answer, not every entry on PATH.
+        noise = home / "usr/bin"
+        noise.mkdir(parents=True)
+
+        resolution = status.collect_toolchain_resolution(
+            root,
+            home=home,
+            environ={"PATH": os.pathsep.join([str(noise), str(stale.parent)])},
+        )
+
+        self.assertEqual(resolution["verdict"], "shadowed")
+        self.assertEqual(resolution["installRoot"], str(root))
+        self.assertEqual(
+            resolution["pathPackBins"],
+            [{"directory": str(stale.parent), "toolchain": str(stale)}],
+        )
+
+    def test_a_thin_consumer_resolves_from_the_machine_install(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, _ = self.machine_scratch()
+        # The defect this reporting exists for: a consumer checkout has no
+        # `scripts/` directory at all, so candidate 2 misses and the machine
+        # install answers. It is bound, not unresolved.
+        self.assertFalse((root / "scripts").exists())
+        machine = self.write_toolchain(home / ".agents/bin")
+
+        resolution = status.collect_toolchain_resolution(
+            root,
+            home=home,
+            environ={"PATH": str(machine.parent)},
+        )
+
+        self.assertEqual(resolution["verdict"], "bound")
+        self.assertEqual(resolution["source"], "machine")
+        self.assertEqual(resolution["toolchain"], str(machine))
+        self.assertEqual(resolution["installRoot"], str(home / ".agents"))
+
+        # And with nothing installed anywhere, the verdict is about the missing
+        # toolchain rather than about PATH.
+        empty_home, _ = self.machine_scratch()
+        missing = status.collect_toolchain_resolution(
+            root,
+            home=empty_home,
+            environ={"PATH": ""},
+        )
+
+        self.assertEqual(missing["verdict"], "unresolved")
+        self.assertEqual(missing["source"], "none")
+        self.assertIsNone(missing["toolchain"])
+        self.assertIsNone(missing["installRoot"])
+
+    def test_the_override_wins_and_an_empty_override_falls_through(self) -> None:
+        status = self.load_status_module()
+        root = self.make_status_repo()
+        home, _ = self.machine_scratch()
+        checkout = self.write_toolchain(root / "scripts")
+        override = self.write_toolchain(home / "wip/scripts")
+
+        chosen = status.collect_toolchain_resolution(
+            root,
+            home=home,
+            environ={"PATH": "", "SD_AI_COMMAND_PACK_TOOLCHAIN": str(override)},
+        )
+
+        self.assertEqual(chosen["source"], "override")
+        self.assertEqual(chosen["toolchain"], str(override))
+
+        # `[ -f "" ]` is false in the bootstrap, so an exported-but-empty
+        # override must not shadow the candidates behind it.
+        fell_through = status.collect_toolchain_resolution(
+            root,
+            home=home,
+            environ={"PATH": "", "SD_AI_COMMAND_PACK_TOOLCHAIN": ""},
+        )
+
+        self.assertEqual(fell_through["source"], "checkout")
+        self.assertEqual(fell_through["toolchain"], str(checkout))
+
+    def test_the_helper_resolution_row_names_the_verdict_first(self) -> None:
+        status = self.load_status_module()
+
+        self.assertEqual(
+            status.format_toolchain_resolution(
+                {
+                    "resolution": {
+                        "verdict": "shadowed",
+                        "toolchain": "/m/.agents/bin/sd-ai-command-pack-toolchain.sh",
+                        "source": "machine",
+                        "installRoot": "/m/.agents",
+                        "pathPackBins": [
+                            {"directory": "/cache/0.0.1/bin", "toolchain": "/x"},
+                            {"directory": "/cache/0.0.2/bin", "toolchain": "/y"},
+                        ],
+                    }
+                }
+            ),
+            "shadowed; /m/.agents/bin/sd-ai-command-pack-toolchain.sh "
+            "(via machine, root /m/.agents); PATH pack bins (2, in order): "
+            "/cache/0.0.1/bin, /cache/0.0.2/bin",
+        )
+        self.assertEqual(
+            status.format_toolchain_resolution(
+                {
+                    "resolution": {
+                        "verdict": "bound",
+                        "toolchain": "/repo/scripts/sd-ai-command-pack-toolchain.sh",
+                        "source": "checkout",
+                        "installRoot": "/repo",
+                        "pathPackBins": [],
+                    }
+                }
+            ),
+            "bound; /repo/scripts/sd-ai-command-pack-toolchain.sh "
+            "(via checkout, root /repo); no pack bin on PATH",
+        )
+        self.assertEqual(
+            status.format_toolchain_resolution(
+                {
+                    "resolution": {
+                        "verdict": "unresolved",
+                        "toolchain": None,
+                        "source": "none",
+                        "installRoot": None,
+                        "pathPackBins": [],
+                    }
+                }
+            ),
+            "unresolved; no toolchain found "
+            "(checked override, scripts/, ~/.agents/bin)",
+        )
+        # A fleet consumer row carries no machine scope at all.
+        self.assertEqual(status.format_toolchain_resolution(None), "not collected")
+        self.assertEqual(status.format_toolchain_resolution({}), "not collected")
+
+    def test_a_shadowed_path_stays_in_its_row_and_never_becomes_an_anomaly(
+        self,
+    ) -> None:
+        """Machine scope describes the machine, not this repository.
+
+        Promoting it would make `--expect-clean` in any repository depend on
+        which unrelated installs sit on the operator's `PATH`, and would put a
+        repository gate under a value the repository cannot change. This
+        follows the existing rule for a `skew` comparison, which is likewise
+        reported in its row alone.
+        """
+
+        status = self.load_status_module()
+        root = self.make_status_repo()
+
+        section = {
+            "state": "installed",
+            "resolution": {
+                "verdict": "shadowed",
+                "toolchain": "/repo/scripts/sd-ai-command-pack-toolchain.sh",
+                "source": "checkout",
+                "installRoot": "/repo",
+                "pathPackBins": [{"directory": "/cache/0.0.1/bin", "toolchain": "/x"}],
+            },
+        }
+        with mock.patch.object(status, "collect_machine_scope", return_value=section):
+            report = status.collect_local(
+                root,
+                remote="origin",
+                supplied_default=None,
+                source_branch=None,
+                github_repo=None,
+                network=False,
+                refs_refreshed=False,
+                expect_clean=False,
+                keep_remote_branch=False,
+                dry_run=False,
+                prior_anomalies=(),
+            )
+
+        self.assertEqual(
+            [anomaly for anomaly in report["anomalies"] if "PATH" in anomaly],
+            [],
+        )
+        self.assertEqual(
+            [
+                detail
+                for detail in report["anomalyDetails"]
+                if "toolchain" in str(detail.get("code"))
+            ],
+            [],
+        )
+        # The row is the reporting surface, and it still says so plainly.
+        self.assertIn(
+            "shadowed", status.format_toolchain_resolution(report["machineScope"])
+        )
+
     def test_only_an_invalid_machine_receipt_becomes_a_status_anomaly(self) -> None:
         status = self.load_status_module()
         root = self.make_status_repo()
@@ -3922,7 +4150,7 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(machine.returncode, 0, machine.stdout)
         section = json.loads(machine.stdout)["machineScope"]
-        self.assertEqual(section["schemaVersion"], 1)
+        self.assertEqual(section["schemaVersion"], 2)
         self.assertEqual(section["state"], "installed")
         self.assertEqual(section["packVersion"], "9.9.9")
         self.assertEqual(section["pluginVersion"], "9.9.9")

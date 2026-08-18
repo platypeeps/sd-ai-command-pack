@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -12,6 +14,15 @@ InstallTestCase = _support.InstallTestCase
 
 GUIDE_TEMPLATE = install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
 README = install.ROOT / "README.md"
+
+# The one exempt environment variable, matched as a whole name. A plain
+# substring removal would also consume the prefix of a longer name such as
+# `SD_AI_COMMAND_PACK_TOOLCHAIN_EXTRA`, leaving a tail that no longer contains
+# the forbidden prefix -- so the exemption would silently excuse every variable
+# whose name starts with the exempt one. The continuation class is `\w` rather
+# than the uppercase env-var convention: the test exists to catch a name nobody
+# expected, and a lowercase tail is exactly that kind of name.
+TOOLCHAIN_VARIABLE_RE = re.compile(r"SD_AI_COMMAND_PACK_TOOLCHAIN(?!\w)")
 
 SKILL_SECTIONS = (
     "## When to use",
@@ -141,16 +152,43 @@ class SdlcCommandsTests(InstallTestCase):
                     self.assertIn(pin, skill, f"{name}: missing pin {pin!r}")
 
     def test_skills_declare_no_environment_variables(self) -> None:
+        """No skill takes environment tuning of its own.
+
+        `SD_AI_COMMAND_PACK_TOOLCHAIN` is exempt and is not a counterexample:
+        it is not a tuning surface of any skill but the first candidate of the
+        shared resolution bootstrap, byte-identical in every skill that invokes
+        a helper and pinned by .github/scripts/check-helper-resolution.py. It
+        selects which install answers, never what a workflow does. Any other
+        `SD_AI_COMMAND_PACK_` name is still a violation.
+        """
+
         for name in COMMANDS:
             with self.subTest(skill=name):
                 skill = self._skill_text(name)
-                self.assertNotIn("SD_AI_COMMAND_PACK_", skill)
+                remaining = TOOLCHAIN_VARIABLE_RE.sub("", skill)
+                self.assertNotIn("SD_AI_COMMAND_PACK_", remaining)
+
+    def test_the_exemption_does_not_cover_a_longer_variable_name(self) -> None:
+        """The exemption is one name, not a prefix every name may extend."""
+
+        self.assertEqual(
+            TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN"), "$"
+        )
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_",
+            TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN_EXTRA"),
+        )
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_",
+            TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN_extra"),
+        )
 
     def test_update_deps_delegates_eligibility_and_merge_to_housekeeping(self) -> None:
         skill = self._skill_text("sd-update-deps")
 
         self.assertIn(
-            "bash scripts/sd-ai-command-pack-housekeeping.sh --dependency-pr <number>",
+            'bash "$SD_PACK_TOOLCHAIN" run -- '
+            "sd-ai-command-pack-housekeeping.sh --dependency-pr <number>",
             skill,
         )
         self.assertIn("schema-versioned PR eligibility", skill)
@@ -229,7 +267,7 @@ class SdlcCommandsTests(InstallTestCase):
             "ID | Contract family | Evidence | Severity | Disposition | Fix | Regression",
             "bounded contract-surface sweep",
             "partial candidate diagnostics",
-            "scripts/sd-ai-command-pack-fleet-candidate-check.py",
+            "sd-ai-command-pack-fleet-candidate-check.py",
             "must never replace the canonical candidate ledger",
             "select one corrective version",
             "one canonical full-fleet candidate validation",
@@ -572,7 +610,7 @@ class SdlcCommandsTests(InstallTestCase):
         housekeeping_text = " ".join(housekeeping.split())
         ship_text = " ".join(ship.split())
 
-        validator = "scripts/sd-ai-command-pack-review-preflight.mjs"
+        validator = "sd-ai-command-pack-review-preflight.mjs"
         self.assertEqual(finish.count(validator), 2)
         self.assertLess(finish.index("pre-archive"), finish.index("task.py archive"))
         self.assertIn("final-bundle --mode <completion|planning>", finish)
@@ -598,7 +636,7 @@ class SdlcCommandsTests(InstallTestCase):
         )[0]
 
         for pin in (
-            "scripts/sd-ai-command-pack-check.py --json",
+            "sd-ai-command-pack-check.py --json",
             "schema-version-1 JSON",
             ".sd-ai-command-pack/check.json",
             "state guard passed",
@@ -766,7 +804,7 @@ class SdlcCommandsTests(InstallTestCase):
         step_3 = create_pr.split("## Step 3", 1)[1].split("## Step 4", 1)[0]
         normalized = " ".join(step_3.split())
 
-        preflight = "node scripts/sd-ai-command-pack-review-preflight.mjs"
+        preflight = 'bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs'
         self.assertIn('git diff --check "$BASE_REF"...HEAD', step_3)
         self.assertIn(preflight, step_3)
         self.assertLess(
@@ -776,7 +814,10 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn(
             "Do not treat a later `sd-review scope=pr` run as a substitute", normalized
         )
-        self.assertIn("reinstall sd-ai-command-pack before publishing", normalized)
+        # The bootstrap's failure branch is now the only diagnosis; the
+        # separate command -v guard that could disagree with the call is gone.
+        self.assertIn("Reinstall the command pack.", normalized)
+        self.assertNotIn("command -v sd-ai-command-pack-review-preflight.mjs", normalized)
 
         final_report = create_pr.split("## Final Report", 1)[1]
         self.assertIn("Pre-publication review preflight result", final_report)
@@ -852,8 +893,8 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn("never follow a reference from another reference", normalized)
         self.assertIn("missing, unreadable, empty, escaping, or contradictory", normalized)
         self.assertIn(
-            "bash scripts/sd-ai-command-pack-toolchain.sh run-python -- "
-            "scripts/sd-ai-command-pack-update-spec-kb.py",
+            'bash "$SD_PACK_TOOLCHAIN" run-python -- '
+            "sd-ai-command-pack-update-spec-kb.py",
             normalized,
         )
         for relative in references:

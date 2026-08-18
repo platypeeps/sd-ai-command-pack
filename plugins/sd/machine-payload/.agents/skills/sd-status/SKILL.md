@@ -44,12 +44,20 @@ reinterpret them as shell text.
 2. Run the installed status collector through the shared toolchain resolver:
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-status.py [fleet|REPO_PATH] \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-status.py [fleet|REPO_PATH] \
        [--fleet-manifest PATH] [--json] [--no-network]
    # Or, for explicit local repository selection:
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-status.py --repo PATH \
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-status.py --repo PATH \
        [--fleet-manifest PATH] [--json] [--no-network]
    ```
 
@@ -66,7 +74,10 @@ reinterpret them as shell text.
    unmerged with an open pull request, unmerged without one, or unknown, plus
    the worktree holding it when one does; incomplete, truncated, or stale pull
    request evidence reports unknown and never a false "no pull request"),
-   installed pack and Trellis versions, relevant PR, open PRs/issues, current
+   installed pack and Trellis versions, the helper-resolution row (which
+   toolchain the shared bootstrap reaches, its install root, every `PATH` entry
+   holding a pack toolchain in `PATH` order, and a `bound`, `shadowed`, or
+   `unresolved` verdict), relevant PR, open PRs/issues, current
    and queued Trellis work, completed tasks stranded outside the Trellis
    archive, the user-local autonomous work-loop state, pack recovery-artifact
    classifications, anomalies, selectable follow-ups, every unarchived task, and

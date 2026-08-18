@@ -20,7 +20,9 @@ authority: this skill adds no second merge path with weaker criteria.
 ## Sandbox-safe tool execution
 
 Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
-through `bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+through `bash "$SD_PACK_TOOLCHAIN" run -- <tool> [args...]`, with
+`$SD_PACK_TOOLCHAIN` resolved by the bootstrap in
+[`../sd-help/references/pack-helper-resolution.md`](../sd-help/references/pack-helper-resolution.md).
 The argv-safe wrapper changes only documented cache variables and preserves
 auth/config state. If it is missing or reports a cache-setup failure, stop with
 that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
@@ -81,7 +83,15 @@ variables; every tuning knob is an argument.
       merge attempt to the installed housekeeping owner:
 
       ```bash
-      bash scripts/sd-ai-command-pack-housekeeping.sh --dependency-pr <number>
+      SD_PACK_TOOLCHAIN=""
+      for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+        "scripts/sd-ai-command-pack-toolchain.sh" \
+        "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+        if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+      done
+      [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+      bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh --dependency-pr <number>
       ```
 
       Housekeeping invokes the shared schema-versioned PR eligibility

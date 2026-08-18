@@ -899,11 +899,11 @@ class GeneratedParityTests(InstallTestCase):
             "os: macos-latest",
             "unittest-output.log",
             "skipped=[1-9][0-9]*",
-            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py",
+            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/bookkeeping_ci_scope.py",
             "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
-            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/bookkeeping_ci_scope.py",
+            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/bookkeeping_ci_scope.py",
             "needs: [ci-scope, unittest, lint, security, release-payload-gate, main-push-scope]",
             "RELEASE_PAYLOAD_GATE_RESULT",
             "LINT_RESULT",
@@ -1667,10 +1667,12 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("scripts/sd-ai-command-pack-review-learnings.py", content)
             elif "status" in file.target.name:
                 self.assertIn("Resolve the `sd-status` skill by name", content)
-                self.assertIn("scripts/sd-ai-command-pack-toolchain.sh", content)
+                # The adapter names the resolution order, not a fixed path: a
+                # thin consumer has no scripts/ copy to name.
+                self.assertIn("SD_AI_COMMAND_PACK_TOOLCHAIN", content)
                 self.assertIn("read-only", content)
             elif "Resolve the `sd-review` skill by name" in content:
-                self.assertIn("scripts/sd-ai-command-pack-review.py", content)
+                self.assertIn("sd-ai-command-pack-review.py", content)
                 self.assertIn("never fall back to `sd-review-pr`", content)
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)

@@ -477,7 +477,7 @@ class ScriptLibTests(InstallTestCase):
                 install.ROOT / "templates/.agents/skills" / name / "SKILL.md"
             ).read_text(encoding="utf-8")
             self.assertIn(
-                "scripts/sd-ai-command-pack-toolchain.sh run -- <tool>",
+                'bash "$SD_PACK_TOOLCHAIN" run -- <tool>',
                 content,
                 name,
             )
