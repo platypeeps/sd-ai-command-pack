@@ -48,8 +48,12 @@ supplementary thread query.
      report `probe-failed` with the probe's diagnostic; do not keep polling
      past a non-retryable result.
   2. **Retryable indeterminate** — `status` is indeterminate and `retryable`
-     is true (for example transient thread-listing unavailability). Keep
-     polling within the ceiling.
+     is true: transient thread-listing unavailability, or
+     `merge_state_unsettled`, a `BLOCKED` merge state that changed under the
+     probe's own bounded re-read because GitHub had not finished recomputing
+     mergeability. Keep polling within the ceiling. `merge_state_unsettled`
+     is deliberately weaker than a block, never stronger, so it is classified
+     here and never as `settled-blocked`.
   3. **Pending checks** — classification keys on `checks.items`, not on
      reason codes: any item with `CheckRun.status != "COMPLETED"` or
      `StatusContext.state == "PENDING"` means checks are still running.

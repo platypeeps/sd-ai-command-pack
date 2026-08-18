@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +27,15 @@ COMMAND_TIMEOUT_SECONDS = 60
 GH_TIMEOUT_SECONDS = 120
 MAX_INPUT_BYTES = 64 * 1024
 MAX_THREAD_PAGES = 100
+# GitHub recomputes mergeability asynchronously, so the first read after a push
+# or a draft-to-ready transition can report a BLOCKED that clears itself with no
+# operator action. These two constants are the entire bound on separating that
+# from a real branch-protection block: at most MERGE_STATE_RECHECK_ATTEMPTS
+# extra reads, each preceded by MERGE_STATE_RECHECK_DELAY_SECONDS. A caller that
+# never polls therefore pays at most 6 seconds and 2 extra `gh` calls, and only
+# on the single ambiguous branch in classify_non_clean_merge_state.
+MERGE_STATE_RECHECK_ATTEMPTS = 2
+MERGE_STATE_RECHECK_DELAY_SECONDS = 3.0
 FIELD_SEPARATOR = "\x1f"
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 GITHUB_SLUG_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -63,6 +73,7 @@ class CommandResult:
 
 
 Runner = Callable[[Sequence[str], Path, int], CommandResult]
+Sleeper = Callable[[float], None]
 
 
 def run_command(argv: Sequence[str], cwd: Path, timeout: int) -> CommandResult:
@@ -763,6 +774,57 @@ def collect_threads(
     }
 
 
+@dataclass(frozen=True)
+class MergeStateVerdict:
+    """A non-CLEAN mergeStateStatus diagnosis and the status it justifies.
+
+    ``status`` is ``"blocked"`` for a state a bounded re-read confirms is
+    stable, and ``"indeterminate"`` (with ``retryable``) for one GitHub has not
+    finished recomputing. It is never ``"eligible"``: this type exists so a
+    verdict can be made strictly *less* confident than a blanket block, never
+    more.
+    """
+
+    status: str
+    reason_codes: list[str]
+    message: str
+    retryable: bool = False
+
+
+def recheck_merge_state(
+    repo: Path,
+    slug: str,
+    number: int,
+    runner: Runner,
+    sleeper: Sleeper,
+) -> str | None:
+    """Re-read ``mergeStateStatus`` up to ``MERGE_STATE_RECHECK_ATTEMPTS`` times.
+
+    Returns the last value read, or ``None`` when a re-read is unavailable or
+    lands on a different pull request. Stops early as soon as a read differs
+    from ``BLOCKED``: one changed value already proves the first snapshot was
+    stale, and further reads cannot unprove it. This loop is the whole bound —
+    no deadline, no growing backoff, no caller-supplied count — so the worst
+    case is fixed by the two module constants and cannot be widened from
+    outside.
+    """
+    latest: str | None = None
+    for _attempt in range(MERGE_STATE_RECHECK_ATTEMPTS):
+        sleeper(MERGE_STATE_RECHECK_DELAY_SECONDS)
+        try:
+            fresh, _checks, _blocking, _successful = query_pr(
+                repo, slug, str(number), runner
+            )
+        except EligibilityInputError:
+            return None
+        if fresh["number"] != number:
+            return None
+        latest = fresh["mergeStateStatus"]
+        if latest != "BLOCKED":
+            return latest
+    return latest
+
+
 def classify_non_clean_merge_state(
     pr: Mapping[str, Any],
     blocking_checks: int,
@@ -772,34 +834,50 @@ def classify_non_clean_merge_state(
     slug: str,
     number: int,
     runner: Runner,
+    sleeper: Sleeper,
     evidence: dict[str, Any],
-) -> tuple[list[str], str]:
+) -> MergeStateVerdict:
     """Diagnose a non-CLEAN mergeStateStatus into an actionable reason (finding #2).
 
-    ADDITIVE-ONLY: this never changes the verdict. Every caller still returns
-    ``status="blocked"`` and never reaches ``gh pr merge``; this only replaces
-    the generic ``merge_state_not_clean`` with a specific, actionable reason code
-    and message so a settle-watch stops polling a state that needs a bounded
-    operator action instead of timing out. A missing/unknown signal degrades to
-    the generic block — it never invents eligibility.
+    NEVER INVENTS ELIGIBILITY: every verdict returned here is ``blocked`` or
+    ``indeterminate``, never ``eligible``, and no caller reaches ``gh pr merge``
+    on one. It replaces the generic ``merge_state_not_clean`` with a specific,
+    actionable reason code and message so a settle-watch stops polling a state
+    that needs a bounded operator action instead of timing out. A
+    missing/unknown signal degrades to the generic block.
+
+    One case a single snapshot cannot decide: ``BLOCKED`` with green checks and
+    no unresolved threads. A real branch-protection block and a mergeability
+    snapshot GitHub has not recomputed yet are the same bytes there. That
+    branch — and only that branch — spends the bounded re-read of
+    ``recheck_merge_state`` to separate them, rather than name a cause that
+    needs a human for a state that clears itself. The re-read lives inside the
+    probe on purpose: a caller that never polls must still receive an accurate
+    diagnostic, so the distinguishing work cannot be delegated to a settle-watch
+    that may not exist. Stable across every read keeps the branch-protection
+    diagnosis; a value that changed downgrades to ``indeterminate`` +
+    ``retryable``, which is strictly weaker than the block it replaces.
     """
     mss = pr["mergeStateStatus"]
     mergeable = pr.get("mergeable")
-    generic = (
+    generic = MergeStateVerdict(
+        "blocked",
         ["merge_state_not_clean"],
         f"PR #{number} merge state is {mss}, not CLEAN; skipped auto-merge",
     )
 
     # Merge conflicts are their own actionable class.
     if mergeable == "CONFLICTING" or mss == "DIRTY":
-        return (
+        return MergeStateVerdict(
+            "blocked",
             ["merge_blocked_conflicts"],
             f"PR #{number} has merge conflicts (mergeStateStatus {mss}); "
             "rebase or resolve conflicts, then re-run",
         )
     # Out-of-date branch under strict protection.
     if mss == "BEHIND":
-        return (
+        return MergeStateVerdict(
+            "blocked",
             ["merge_blocked_out_of_date"],
             f"PR #{number} is behind its base (mergeStateStatus BEHIND); "
             "update the branch, then re-run",
@@ -816,17 +894,41 @@ def classify_non_clean_merge_state(
             return generic
         evidence["reviewThreads"] = threads
         if threads["unresolvedCount"] > 0:
-            return (
+            return MergeStateVerdict(
+                "blocked",
                 ["merge_blocked_conversation"],
                 f"PR #{number} is mergeable with checks green but blocked; "
                 f"resolve {threads['unresolvedCount']} unresolved review "
                 "thread(s), then re-run",
             )
-        return (
+        settled = recheck_merge_state(repo, slug, number, runner, sleeper)
+        evidence["mergeStateRecheck"] = {
+            "attempts": MERGE_STATE_RECHECK_ATTEMPTS,
+            "delaySeconds": MERGE_STATE_RECHECK_DELAY_SECONDS,
+            "initialStatus": mss,
+            "settledStatus": settled,
+        }
+        if settled is None:
+            # Unknown → degrade to the generic block, exactly as an unreadable
+            # thread list does. Never the terminal-sounding verdict on no
+            # evidence.
+            return generic
+        if settled != "BLOCKED":
+            return MergeStateVerdict(
+                "indeterminate",
+                ["merge_state_unsettled"],
+                f"PR #{number} reported mergeStateStatus BLOCKED and then "
+                f"{settled} on re-read; GitHub had not recomputed mergeability, "
+                "so this is not a branch-protection verdict; re-run once the "
+                "merge state settles",
+                retryable=True,
+            )
+        return MergeStateVerdict(
+            "blocked",
             ["merge_blocked_review"],
             f"PR #{number} is mergeable with checks green but blocked "
-            "(mergeStateStatus BLOCKED); a required approval or branch-protection "
-            "rule is unsatisfied",
+            "(mergeStateStatus BLOCKED on every read); a required approval or "
+            "branch-protection rule is unsatisfied",
         )
     return generic
 
@@ -880,6 +982,7 @@ def evaluate_dependency_request(
     *,
     runner: Runner,
     now: Callable[[], str],
+    sleeper: Sleeper,
 ) -> dict[str, Any]:
     started_at = now()
     repo_input = Path(str(request["repository"])).expanduser()
@@ -1041,7 +1144,7 @@ def evaluate_dependency_request(
             f"PR #{requested_number} base is {pr['baseRefName']}, expected {request['defaultBranch']}; skipped auto-merge",
         )
     if pr["mergeStateStatus"] != "CLEAN":
-        reason_codes, message = classify_non_clean_merge_state(
+        verdict = classify_non_clean_merge_state(
             pr,
             blocking_checks,
             successful_checks,
@@ -1049,9 +1152,15 @@ def evaluate_dependency_request(
             slug=slug,
             number=requested_number,
             runner=runner,
+            sleeper=sleeper,
             evidence=evidence,
         )
-        return finish("blocked", reason_codes, message)
+        return finish(
+            verdict.status,
+            verdict.reason_codes,
+            verdict.message,
+            retryable=verdict.retryable,
+        )
     if successful_checks == 0:
         return finish(
             "blocked",
@@ -1092,10 +1201,13 @@ def evaluate_request(
     *,
     runner: Runner = run_command,
     now: Callable[[], str] = utc_timestamp,
+    sleeper: Sleeper = time.sleep,
 ) -> dict[str, Any]:
     request = validate_request(raw_request)
     if request["mode"] == "dependency-pr":
-        return evaluate_dependency_request(request, runner=runner, now=now)
+        return evaluate_dependency_request(
+            request, runner=runner, now=now, sleeper=sleeper
+        )
     started_at = now()
     repo_input = Path(request["repository"]).expanduser()
     if not repo_input.is_absolute():
@@ -1388,7 +1500,7 @@ def evaluate_request(
             f"remote branch {request['remote']}/{branch} is at {remote_head}, but local {branch} is at {start_head}; skipped auto-merge",
         )
     if pr["mergeStateStatus"] != "CLEAN":
-        reason_codes, message = classify_non_clean_merge_state(
+        verdict = classify_non_clean_merge_state(
             pr,
             blocking_checks,
             successful_checks,
@@ -1396,9 +1508,15 @@ def evaluate_request(
             slug=slug,
             number=pr_number,
             runner=runner,
+            sleeper=sleeper,
             evidence=evidence,
         )
-        return finish("blocked", reason_codes, message)
+        return finish(
+            verdict.status,
+            verdict.reason_codes,
+            verdict.message,
+            retryable=verdict.retryable,
+        )
     if successful_checks == 0:
         return finish(
             "blocked",

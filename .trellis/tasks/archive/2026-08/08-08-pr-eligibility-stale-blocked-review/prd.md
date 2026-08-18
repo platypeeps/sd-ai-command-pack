@@ -165,20 +165,20 @@ report `eligible`.
 
 ## Acceptance criteria
 
-- [ ] Given two successive reads where the first is `BLOCKED` and the second is
+- [x] Given two successive reads where the first is `BLOCKED` and the second is
       `CLEAN`, the probe does not emit `merge_blocked_review`
-- [ ] Given a `BLOCKED` that is stable across reads with green checks and zero
+- [x] Given a `BLOCKED` that is stable across reads with green checks and zero
       unresolved threads, the probe still reports the branch-protection
       diagnosis distinctly
-- [ ] No path through the change can report `eligible` for a `BLOCKED` state
-- [ ] The distinguishing work is bounded, with the bound stated in the code and
+- [x] No path through the change can report `eligible` for a `BLOCKED` state
+- [x] The distinguishing work is bounded, with the bound stated in the code and
       exercised by a test
-- [ ] A caller that does not poll still receives an accurate, non-misleading
+- [x] A caller that does not poll still receives an accurate, non-misleading
       diagnostic
-- [ ] Open question 1 is answered in `design.md` with the decision and its
+- [x] Open question 1 is answered in `design.md` with the decision and its
       rationale
-- [ ] `scripts/` and `templates/scripts/` `pr-eligibility.py` are byte-identical
-- [ ] If a status or reason code changed, the watch coordinator's
+- [x] `scripts/` and `templates/scripts/` `pr-eligibility.py` are byte-identical
+- [x] If a status or reason code changed, the watch coordinator's
       classification order is updated to match
 
 ## Notes
