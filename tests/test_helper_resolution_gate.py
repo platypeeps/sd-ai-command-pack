@@ -121,6 +121,22 @@ class HelperResolutionGateTests(unittest.TestCase):
 
         self.assertIn("scripts-prefix", [finding.rule for finding in found])
 
+    def test_the_toolchain_is_told_to_bootstrap_not_to_resolve_itself(
+        self,
+    ) -> None:
+        """`run --` is the toolchain's own subcommand, not its resolver."""
+
+        found = self.findings(
+            self.block("bash scripts/sd-ai-command-pack-toolchain.sh doctor")
+        )
+        direct = [
+            finding for finding in found if finding.rule == "direct-invocation"
+        ]
+
+        self.assertEqual(len(direct), 1, found)
+        self.assertIn("run the bootstrap", direct[0].detail)
+        self.assertNotIn("run[-python] --", direct[0].detail)
+
     def test_a_direct_interpreter_invocation_is_reported(self) -> None:
         found = self.findings(
             self.bootstrapped(

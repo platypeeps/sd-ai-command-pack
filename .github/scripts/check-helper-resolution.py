@@ -39,6 +39,7 @@ AUTHORED_TREES: tuple[tuple[str, str], ...] = (
 )
 
 HELPER = r"sd-ai-command-pack-[A-Za-z0-9_-]+\.(?:mjs|py|sh)"
+TOOLCHAIN_HELPER = "sd-ai-command-pack-toolchain.sh"
 HELPER_RE = re.compile(HELPER)
 SCRIPTS_PREFIXED_RE = re.compile(r"scripts/" + HELPER)
 # `^\s*`, not `^`: a fenced block nested under a list item carries the list's
@@ -181,10 +182,20 @@ def check_file(path: pathlib.Path, bootstrap: list[str]) -> list[Finding]:
             line_no = block.start + 1 + offset
             direct = DIRECT_INVOKE_RE.search(logical)
             if direct and "$SD_PACK_TOOLCHAIN" not in direct.group(0):
+                # The toolchain cannot resolve itself: `run --` is one of its
+                # own subcommands, so the ordinary remedy would be circular
+                # advice. Its remedy is the bootstrap, which is what locates
+                # the toolchain in the first place.
+                remedy = (
+                    f"run the bootstrap from {REFERENCE} and invoke "
+                    'bash "$SD_PACK_TOOLCHAIN" <subcommand>'
+                    if direct.group(2) == TOOLCHAIN_HELPER
+                    else 'use bash "$SD_PACK_TOOLCHAIN" run[-python] -- <helper>'
+                )
                 findings.append(Finding(
                     rel, line_no, "direct-invocation",
                     f"{direct.group(1)} invokes {direct.group(2)} directly; "
-                    'use bash "$SD_PACK_TOOLCHAIN" run[-python] -- <helper>',
+                    f"{remedy}",
                 ))
             interpreter = RUN_INTERPRETER_RE.search(logical)
             if interpreter and HELPER_RE.search(logical):
