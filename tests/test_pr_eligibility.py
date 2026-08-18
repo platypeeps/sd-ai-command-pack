@@ -154,7 +154,15 @@ class FixtureRunner:
             "mergeStateStatus": "CLEAN",
             "statusCheckRollup": [check_run("SUCCESS")],
         }
+        # Successive `gh pr view --json ...` reads, consumed in order; the
+        # last entry repeats once exhausted. Empty means "always pr_payload",
+        # which is how GitHub behaves for a settled merge state.
+        self.pr_payload_queue: list[dict[str, Any]] = []
+        self.sleeps: list[float] = []
         self.calls: list[tuple[str, ...]] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
 
     def __call__(
         self, argv: list[str] | tuple[str, ...], cwd: Path, timeout: int
@@ -200,6 +208,13 @@ class FixtureRunner:
                 return eligibility.CommandResult(
                     0, json.dumps({"headRefOid": self.pr_payload["headRefOid"]})
                 )
+            if self.pr_payload_queue:
+                payload = (
+                    self.pr_payload_queue.pop(0)
+                    if len(self.pr_payload_queue) > 1
+                    else self.pr_payload_queue[0]
+                )
+                return eligibility.CommandResult(0, json.dumps(payload))
             return eligibility.CommandResult(0, json.dumps(self.pr_payload))
         if args[:3] == ("gh", "api", "graphql"):
             if self.thread_failure:
@@ -254,6 +269,7 @@ class PrEligibilityTests(unittest.TestCase):
             request,
             runner=runner,
             now=lambda: "2026-07-23T00:00:00Z",
+            sleeper=runner.sleep,
         )
 
     def test_local_branch_eligible_receipt_is_exact_head_and_read_only(self) -> None:
@@ -768,6 +784,114 @@ class PrEligibilityTests(unittest.TestCase):
         # Invariant: neither run is eligible, and the auto-merge path is never
         # entered regardless of how mergeable the PR looks.
         for runner in (conversation, review):
+            self.assertNotIn(
+                ("gh", "pr", "merge"), [call[:3] for call in runner.calls]
+            )
+
+    def test_stale_blocked_snapshot_is_unsettled_not_a_protection_verdict(
+        self,
+    ) -> None:
+        # GitHub recomputes mergeability asynchronously, so the read right after
+        # a push or a draft-to-ready transition can report a BLOCKED that clears
+        # itself. That is indistinguishable from a real branch-protection block
+        # in one snapshot, so the probe re-reads under a fixed bound.
+
+        def blocked_then(second: str) -> FixtureRunner:
+            runner = FixtureRunner(self.repo)
+            stale = {**runner.pr_payload, "mergeStateStatus": "BLOCKED"}
+            stale["mergeable"] = "MERGEABLE"
+            runner.pr_payload = stale
+            runner.pr_payload_queue = [
+                stale,
+                {**stale, "mergeStateStatus": second},
+            ]
+            return runner
+
+        # 1) BLOCKED then CLEAN: the first snapshot was stale. Never
+        #    merge_blocked_review, never eligible — a retryable indeterminate
+        #    that names the real cause.
+        stale = blocked_then("CLEAN")
+        result = self.evaluate(self.local_request(), stale)
+        self.assertEqual(result["status"], "indeterminate")
+        self.assertEqual(result["reasonCodes"], ["merge_state_unsettled"])
+        self.assertTrue(result["retryable"])
+        self.assertIn("had not recomputed mergeability", result["diagnostic"])
+        self.assertNotIn("branch-protection rule is unsatisfied", result["diagnostic"])
+        self.assertEqual(result["mergeStateRecheck"]["settledStatus"], "CLEAN")
+        # Early stop: one changed read already proves staleness.
+        self.assertEqual(stale.sleeps, [eligibility.MERGE_STATE_RECHECK_DELAY_SECONDS])
+
+        # 2) BLOCKED on every read: the branch-protection diagnosis survives,
+        #    and the re-read work is bounded by the module constants.
+        stable = FixtureRunner(self.repo)
+        stable.pr_payload["mergeStateStatus"] = "BLOCKED"
+        stable.pr_payload["mergeable"] = "MERGEABLE"
+        stable_result = self.evaluate(self.local_request(), stable)
+        self.assertEqual(stable_result["status"], "blocked")
+        self.assertEqual(stable_result["reasonCodes"], ["merge_blocked_review"])
+        self.assertFalse(stable_result["retryable"])
+        self.assertEqual(
+            stable.sleeps,
+            [eligibility.MERGE_STATE_RECHECK_DELAY_SECONDS]
+            * eligibility.MERGE_STATE_RECHECK_ATTEMPTS,
+        )
+        full_reads = [
+            call
+            for call in stable.calls
+            if call[:3] == ("gh", "pr", "view") and call[-1] != "headRefOid"
+        ]
+        self.assertEqual(
+            len(full_reads), 1 + eligibility.MERGE_STATE_RECHECK_ATTEMPTS
+        )
+
+        # 3) An unreadable re-read degrades to the generic block: unknown
+        #    evidence never earns the terminal-sounding verdict, and never
+        #    earns eligibility either.
+        unreadable = FixtureRunner(self.repo)
+        unreadable.pr_payload["mergeStateStatus"] = "BLOCKED"
+        unreadable.pr_payload["mergeable"] = "MERGEABLE"
+        original_call = unreadable.__call__
+
+        def fail_second_full_read(
+            argv: list[str] | tuple[str, ...], cwd: Path, timeout: int
+        ) -> Any:
+            args = tuple(argv)
+            if (
+                args[:3] == ("gh", "pr", "view")
+                and args[-1] != "headRefOid"
+                and any(
+                    call[:3] == ("gh", "pr", "view") and call[-1] != "headRefOid"
+                    for call in unreadable.calls
+                )
+            ):
+                unreadable.calls.append(args)
+                return eligibility.CommandResult(1, "")
+            return original_call(argv, cwd, timeout)
+
+        unreadable_result = eligibility.evaluate_request(
+            self.local_request(),
+            runner=fail_second_full_read,
+            now=lambda: "2026-07-23T00:00:00Z",
+            sleeper=unreadable.sleep,
+        )
+        self.assertEqual(unreadable_result["status"], "blocked")
+        self.assertEqual(unreadable_result["reasonCodes"], ["merge_state_not_clean"])
+
+        # 4) A re-read that lands on a different pull request is not evidence
+        #    about this one, so it degrades the same way.
+        moved = FixtureRunner(self.repo)
+        moved.pr_payload["mergeStateStatus"] = "BLOCKED"
+        moved.pr_payload["mergeable"] = "MERGEABLE"
+        moved.pr_payload_queue = [
+            dict(moved.pr_payload),
+            {**moved.pr_payload, "number": 99},
+        ]
+        moved_result = self.evaluate(self.local_request(), moved)
+        self.assertEqual(moved_result["status"], "blocked")
+        self.assertEqual(moved_result["reasonCodes"], ["merge_state_not_clean"])
+
+        # Invariant across every shape above: the gate never merges.
+        for runner in (stale, stable, unreadable, moved):
             self.assertNotIn(
                 ("gh", "pr", "merge"), [call[:3] for call in runner.calls]
             )
