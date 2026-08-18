@@ -44,13 +44,33 @@ to do with the pack the caller came from.
    `scripts/sd-ai-command-pack-review-scope.sh`,
    `scripts/sd-ai-command-pack-update-spec-kb.py`.
 2. Remove what only existed to support them: their receipt entries in
-   `.sd-ai-command-pack/installed-targets.txt`, `tests/test_sd_check_helper_forwarders.py`,
-   the shared `scripts/_sd_pack_forward.py` glue if nothing else uses it, and
-   the `check_scope_heading_mirrors.py` forwarder-recognition branch.
-3. Confirm the pack the consumer is pinned to actually contains `#482` before
-   deleting anything. If its pin predates that fix, the correct order is to
-   refresh the pin first — deleting the forwarders against an older pack would
-   restore the original review-gate failure.
+   `.sd-ai-command-pack/installed-targets.txt`,
+   `tests/test_sd_check_helper_forwarders.py`, the shared
+   `scripts/_sd_pack_forward.py` glue if nothing else uses it, and the
+   `docs/DEVELOPMENT_CYCLE.md` prose explaining why the forwarders exist.
+
+   `tools/check_scope_heading_mirrors.py`'s forwarder-recognition branch stays.
+   Its test synthesizes a forwarder in a temporary directory rather than
+   reading the repository's own, so it does not depend on these five files, and
+   the branch is what stops a future repo-owned file at that path from being
+   mistaken for the scope-guard authority. Deleting a live safeguard because
+   its current example went away is not part of this cleanup.
+3. Establish that the helpers the consumer actually executes carry `#482`
+   before deleting anything.
+
+   The pinned pack **version** does not decide this. `shipped_helper_path`
+   gates on mode, not version — `pin_state(repo) != PIN_STATE_THIN` returns the
+   vendored path, and anything else resolves through the machine install. So a
+   thin consumer runs the machine install's helpers whatever its pin says, and
+   this consumer's `0.71.22` pin is not evidence either way.
+
+   Measured on 2026-08-17: `grep -c shipped_helper_path
+   ~/.agents/bin/sd-ai-command-pack-check.py` is `2`, and calling
+   `shipped_helper_path` against the consumer for all five names resolves every
+   one of them to `~/.agents/bin/`, each `exists=True`. The forwarders are
+   already bypassed; deleting them removes dead files rather than a live
+   resolution path. Re-run that resolution before deleting if the machine
+   install has changed since.
 4. The work happens in that repository, under its own review and merge gates.
    Never write into an existing consumer checkout from the source repository.
 
@@ -75,5 +95,14 @@ to do with the pack the caller came from.
   `error: pack-like file is not listed in installed targets:` line per
   forwarder. The runner refuses to write a partial ledger, so
   `docs/fleet/candidate-validation.json` was left untouched.
+- Auditing the consumer checkout as it stands **passes** —
+  `SD AI command pack install audit passed: 36 targets checked.` — because the
+  consumer's committed `installed-targets.txt` lists all five forwarders at
+  lines 32-36. That is not a contradiction of the lane failure and does not
+  mean the audit is inconsistent. The candidate lane installs the candidate
+  version into a scratch clone first, which rewrites the receipt from the
+  manifest; a thin install writes no `scripts/` targets, so on the next line
+  the same five files are pack-like and unlisted. Reproducing the failure
+  therefore requires the install step, not the audit alone.
 - Until this lands, every payload-changing pull request in
   `sd-ai-command-pack` carries one known-red `make check` finding.
