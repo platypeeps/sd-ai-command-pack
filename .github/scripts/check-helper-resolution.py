@@ -136,7 +136,16 @@ def check_file(path: pathlib.Path, bootstrap: list[str]) -> list[Finding]:
     for block in iter_blocks(text):
         if block.info not in EXEC_INFO_STRINGS:
             continue
-        if not any(HELPER_RE.search(line) for line in block.body):
+        # A block earns inspection by naming a helper *or* by using the
+        # variable the bootstrap defines. Requiring the helper name alone made
+        # the missing-bootstrap check unreachable for a block that only runs
+        # toolchain subcommands -- `bash "$SD_PACK_TOOLCHAIN" doctor`, or
+        # `run -- gh ...` -- which is exactly a block whose variable nothing
+        # else sets.
+        if not any(
+            HELPER_RE.search(line) or "$SD_PACK_TOOLCHAIN" in line
+            for line in block.body
+        ):
             continue
         if block.exempt_reason:
             continue
