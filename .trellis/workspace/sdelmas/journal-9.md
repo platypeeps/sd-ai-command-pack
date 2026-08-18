@@ -300,3 +300,46 @@ Tested the resume trigger on 08-08-developer-identity-not-in-worktrees instead o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 404: Tolerate temp-dir teardown races in the install test helpers
+
+**Date**: 2026-08-18
+**Task**: Tolerate temp-dir teardown races in the install test helpers
+**Branch**: `task/tempdir-cleanup-flake`
+
+### Summary
+
+Ported the se-ai-command-pack teardown-race fix to the four git-hosting temp-tree call sites in the shared install test helpers, added direct coverage for both shutil.rmtree handler shapes, corrected the design's excluded-call-site count, and converged PR #506 through Copilot review.
+
+### Main Changes
+
+- Added remove_tree_tolerating_teardown_race plus a make_temp_root helper that registers it, converting the four helper call sites that host a git repository; suppression is scoped to ENOTEMPTY/EEXIST and installed per call, never process-wide.
+- Added tests/test_install_test_support_cleanup.py: 13 tests covering both handler shapes with a synthetic Errno 39, forced version branches, a real shutil.rmtree losing a race to os.rmdir, and propagation of unrelated OSError and non-OSError exceptions.
+- Corrected design.md's excluded-set figure to the measured 232 call sites across 45 modules and reconciled it against the PRD's earlier dated 216.
+- Addressed both Copilot findings: reworded the leftover-cleanup docstring so it no longer claims the OS reaps leftovers, and guarded the acceptance test's sweep against a KeyError that would mask an earlier failure.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `89a271fc` | test: tolerate temp-dir teardown races in the install test helpers |
+| `17ebcd12` | docs(task): correct the excluded-call-site count in the tempdir design |
+| `510e5f1f` | chore(task): start the tempdir cleanup flake task |
+| `8ba5ec94` | test: address review feedback on the teardown-race helpers |
+| `524237a4` | docs(task): tick the tempdir cleanup flake acceptance criteria |
+
+### Testing
+
+- [OK] python -m unittest tests.test_install_test_support_cleanup: Ran 13 tests, OK
+- [OK] make check: EXIT=0, 99 OK/PASS, 0 FAILED
+- [OK] PR #506 CI: all checks SUCCESS including unittest (ubuntu-latest, 3.10), unittest (ubuntu-latest, 3.13), unittest (macos-latest, 3.13); mergeStateStatus CLEAN
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
