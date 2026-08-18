@@ -45,7 +45,7 @@ SCRIPTS_PREFIXED_RE = re.compile(r"scripts/" + HELPER)
 # indentation on every line, and so does any command inside an `if` or a loop.
 # Anchoring at column zero made the whole rule inapplicable to exactly those
 # blocks -- the ones long enough to need the structure.
-DIRECT_INVOKE_RE = re.compile(r"(?:^\s*|[|&;(]\s*|\$\(\s*)(node|python3|bash)\s+(?:-\w+\s+)*(?:scripts/)?(" + HELPER + r")")
+DIRECT_INVOKE_RE = re.compile(r"(?:^\s*|[|&;(]\s*|\$\(\s*)(node|python3|bash)\s+(?:-{1,2}[\w-]+(?:=\S+)?\s+)*(?:scripts/)?(" + HELPER + r")")
 RUN_INTERPRETER_RE = re.compile(r"\brun(?:-python)?\s+--\s+(node|python3|bash)\b")
 
 EXEC_INFO_STRINGS = frozenset({"bash", "sh", "shell", ""})

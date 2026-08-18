@@ -118,6 +118,21 @@ class HelperResolutionGateTests(unittest.TestCase):
 
         self.assertIn("direct-invocation", [finding.rule for finding in found])
 
+    def test_an_interpreter_flag_does_not_hide_the_invocation(self) -> None:
+        """Long options count: `-\\w+` alone stops at the second dash."""
+
+        for flag in ("--check", "--max-old-space-size=64", "-e"):
+            with self.subTest(flag=flag):
+                found = self.findings(
+                    self.bootstrapped(
+                        f"node {flag} sd-ai-command-pack-review-preflight.mjs"
+                    )
+                )
+
+                self.assertEqual(
+                    [finding.rule for finding in found], ["direct-invocation"]
+                )
+
     def test_an_indented_block_is_inspected_like_any_other(self) -> None:
         """A block nested under a list item is still a block that runs.
 
