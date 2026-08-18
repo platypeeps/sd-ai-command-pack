@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 404
+- **Total Sessions**: 405
 - **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~335 | Active |
+| `journal-9.md` | ~378 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 405 | 2026-08-18 | Parse tracked shell with bash 3.2 before the push | `213e6b09`, `85e489c3`, `dc7b3c05`, `dcd248da`, `dac5bd40` | `task/local-bash32-syntax-gap` |
 | 404 | 2026-08-18 | Tolerate temp-dir teardown races in the install test helpers | `89a271fc`, `17ebcd12`, `510e5f1f`, `8ba5ec94`, `524237a4` | `task/tempdir-cleanup-flake` |
 | 403 | 2026-08-18 | Record the 2026-08-18 resume check on the parked identity task | `de8f75f9` | `task/identity-park-note-evidence` |
 | 402 | 2026-08-18 | Converge the PR #504 review scope and title findings | `58562934`, `c64296de` | `task/trellis-bookkeeping-08-18` |
