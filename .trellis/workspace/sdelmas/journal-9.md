@@ -184,3 +184,82 @@ A pack skill and the binaries it invoked were resolved by two independent mechan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 401: File the run-- helper defect and close the forwarder-retirement task
+
+**Date**: 2026-08-18
+**Task**: File the run-- helper defect and close the forwarder-retirement task
+**Branch**: `task/trellis-bookkeeping-08-18`
+
+### Summary
+
+Filed the deferred 'run -- cannot execute a non-executable helper' defect as its own Trellis task, correcting the cost analysis it inherited: the machine payload derives a file's executable bit from its destination family, so a mode-only fix leaves the payload digest untouched. Then closed 08-17-anomaly-metric-creator-retire-forwarders, whose planning was moot because every acceptance criterion already held on merged branches.
+
+### Main Changes
+
+- New task 08-18-toolchain-run-non-executable-helper: PRD with the failing transcript, two ranked candidate fixes, and the digest-neutrality finding that reorders them
+- Archived 08-17-anomaly-metric-creator-retire-forwarders as completed; its five acceptance criteria were verified against live state rather than taken from the recorded checkboxes
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64043860` | docs(task): file the run-- non-executable helper defect |
+| `d440c4b1` | chore(task): record the branch for the forwarder-retirement closure |
+| `ce9debde` | chore(task): archive 08-17-anomaly-metric-creator-retire-forwarders |
+
+### Testing
+
+- [OK] consumer default branch scripts/ listing: no sd-ai-command-pack-* forwarder and no _sd_pack_forward.py remain
+- [OK] docs/fleet/candidate-validation.json: 8 of 8 consumers passed, anomaly-metric-creator among them
+- [OK] filesystem_payload_digest(manifest.json) equals the ledger digest sha256:a5184b86, so nothing is candidate-stale
+- [OK] review-preflight pre-archive: status valid, pre_archive_valid
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 402: Converge the PR #504 review scope and title findings
+
+**Date**: 2026-08-18
+**Task**: Converge the PR #504 review scope and title findings
+**Branch**: `task/trellis-bookkeeping-08-18`
+
+### Summary
+
+Worked the Copilot review round on PR #504. Spelled out the two toolchain paths the review-scope gate resolves, and rephrased the new task's title so it names the missing property instead of leaning on a resultative. Rebutted the two findings against the recorded journal session, whose title mirrors an already-pushed commit subject and cannot be rewritten without desyncing the record from the history it cites.
+
+### Main Changes
+
+- Spelled out scripts/sd-ai-command-pack-toolchain.sh and templates/scripts/sd-ai-command-pack-toolchain.sh in the new task's PRD; the review-scope gate reads an ellipsis-abbreviated path as a reference to a nonexistent file
+- Retitled 08-18-toolchain-run-non-executable-helper in both prd.md and task.json to 'ships without the executable bit'
+- Replied to and resolved all four Copilot threads: two fixed, two rebutted on append-only-journal grounds
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58562934` | fix(task): spell out the paths the review-scope gate resolves |
+| `c64296de` | docs(task): say the helpers ship without the executable bit |
+
+### Testing
+
+- [OK] make check: EXIT=0, 97 OK/PASS, 0 FAILED
+- [OK] grep -rn 'ships non-executable' .trellis: 0 hits after the retitle; the replacement phrase present at both sites
+- [OK] PR #504 unresolved review threads after the second Copilot round: none
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
