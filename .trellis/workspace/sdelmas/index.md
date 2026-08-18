@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 399
-- **Last Active**: 2026-08-17
+- **Total Sessions**: 400
+- **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~112 | Active |
+| `journal-9.md` | ~174 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 400 | 2026-08-18 | One rule for reaching a pack helper, and a gate that can see every way of breaking it | `83d1cb4fdea33845f1d6a16e27dd65e64a940b96`, `55a9cfbee09623bc7538152befd3b94b8b048c45`, `cac9aa2637f65a220d1320f5b4d51ebf63e5bbb4`, `6ac3153fcbc91b0b6f0dd6b47253324c1623acbc`, `ae91f6ed9d74a98452dffa2a83db882118cec9fc`, `b359a2a74859e18fda59e1ff1e7c126c73c6f480`, `78048da388f0bcb4f352a3b8b805a9d6bb3e0552`, `429be1077770cf52b3db3c74ddd850c44be0ba37`, `4915b10e0c242983c21756dd518e5c2d76e1ff0c`, `a546f73ffced9785e6b3f9355dd5aa69c2274ca8`, `6d2ad9e01033ad087614bab2953588973b9b659d`, `fa1305e16615e0e6da7bed833ab9d80084408123`, `5962f8b9edc227d79790847459b81ddc33606f6f`, `5cb037cc87560e159addc6984477fd9e8ca49790`, `ea97bca9979cc042161969e35b5b045bdd14176f`, `9d1fc937013cc6dd24db4b525cd27f4dd11931aa`, `49e5fa947acbdd2065a5a5bf59806595b7112b94`, `2a2e496216a45224b55c4a2a5acf2b857953e8ce`, `3f440c2e075408b7ad34206d810338ac3fbfe854`, `89a354df03500119f9ea857dd2a045a4b52acc5e`, `a492cc274d86fa399b79645141f59ae2a2ae8ce7`, `1664aaf3cc3dde3075cafeaf8b95c05a9941db9b`, `5b989b94e3a5b64f677e2d63d1ddb9337b777f2b`, `aaaf3363c300503dc5b43bc378ce2eea5a76701e` | `task/plugin-path-version-split` |
 | 399 | 2026-08-17 | Make the plugin-path plan able to pass its own gate | `cd70e0d2621235ee2d934639c2e829ae4364d645` | `task/plugin-path-version-split-design` |
 | 398 | 2026-08-17 | Carry the wider gate scope into design.md | `49c877dda0f231e771fb0f9235c7decbfec6a305` | `task/plugin-path-version-split-design` |
 | 397 | 2026-08-17 | Correct the plugin-path task's scope figures to the whole skill tree | `2d39a97ca06606b6b2c76bf7a4c5be3296f42e49` | `task/plugin-path-version-split-design` |
