@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.71.32 - 2026-08-18
+
+### Fixed
+
+- The pull-request eligibility probe no longer blames branch protection for a
+  merge state GitHub has not finished recomputing.
+  `classify_non_clean_merge_state` diagnosed a non-CLEAN `mergeStateStatus`
+  from one snapshot, and every cause it named is stable except the one it did
+  not name: the read right after a push or a draft-to-ready transition can
+  report a `BLOCKED` that clears itself within about a minute. That case fell
+  through to `merge_blocked_review` -- "a required approval or branch-protection
+  rule is unsatisfied" -- sending an operator to inspect branch protection with
+  nothing wrong with it.
+
+  A genuine protection block and a stale snapshot are the same bytes in one
+  read, so that one branch now spends a bounded re-read to separate them:
+  `MERGE_STATE_RECHECK_ATTEMPTS` (2) extra reads, each preceded by
+  `MERGE_STATE_RECHECK_DELAY_SECONDS` (3.0), stopping early on the first value
+  that differs. A caller that never polls therefore pays at most 6 seconds and
+  2 extra `gh` calls, and only on that branch. A `BLOCKED` stable across every
+  read keeps the branch-protection diagnosis, now worded `on every read`; a
+  value that moved reports the new retryable-indeterminate
+  `merge_state_unsettled` instead, which is strictly weaker than the block it
+  replaces. An unavailable re-read degrades to the existing generic
+  `merge_state_not_clean` rather than earning a verdict on absent evidence.
+
+  The re-read lives inside the probe rather than in a settle-watch because
+  `sd-ai-command-pack-housekeeping.sh` calls the probe once and acts on that
+  single result; a caller that cannot poll must still receive an accurate
+  diagnostic. No path through the change can report `eligible` for a `BLOCKED`
+  state, and the sd-ship watch coordinator's classification order is updated to
+  keep polling on `merge_state_unsettled` rather than settle it as blocked.
+
 ## 0.71.31 - 2026-08-18
 
 ### Fixed
