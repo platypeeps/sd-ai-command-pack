@@ -122,6 +122,28 @@ it says nothing about which copy a given process will actually execute.
   generated payload copy, the payload digest, and the fleet candidate ledger.
   It belongs in its own task, where a one-line change with an 84-site blast
   radius is the whole subject rather than a rider.
+- `run --` against a payload helper that is not executable. `run` ends in
+  `exec "$RESOLVED_PACK_SCRIPT"`, and the pack's own checkout tracks 30 of its
+  36 `scripts/` entries as mode `100644` — including every `.mjs` and
+  `housekeeping.sh`. The installer sets the bit, so the form works from
+  `~/.agents/bin` and from a consumer, and fails only where the bootstrap
+  resolves the checkout copy: the pack's own repository. Hit while running this
+  task's own pre-archive gate on 2026-08-18:
+
+  ```text
+  scripts/sd-ai-command-pack-toolchain.sh: line 508:
+  .../scripts/sd-ai-command-pack-review-preflight.mjs: Permission denied
+  ```
+
+  Eleven authored sites invoke a non-executable helper this way (six `.mjs`,
+  five `.sh`). Two fixes exist — dispatch by extension inside `run` when the
+  resolved helper is not executable, or track the payload helpers as `100755`
+  the way six of them already are — and both change `templates/scripts/**`,
+  so both restage every payload copy, move the payload digest, and stale the
+  fleet candidate ledger. Same cost profile as the readability item above, and
+  the same disposition: its own task, not a rider on this one. The documented
+  `SD_AI_COMMAND_PACK_TOOLCHAIN` override reaches the machine install in the
+  meantime, which is how this task's gate was run.
 
 ## Evidence
 
