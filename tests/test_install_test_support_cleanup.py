@@ -175,9 +175,12 @@ class HelperTempTreeRaceTest(InstallTestCase):
 
     def test_helper_tree_teardown_survives_concurrent_writer(self) -> None:
         leftovers: dict[str, Path] = {}
-        self.addCleanup(
-            lambda: shutil.rmtree(leftovers["root"], ignore_errors=True)
-        )
+        def sweep_leftovers() -> None:
+            root = leftovers.get("root")
+            if root is not None:
+                shutil.rmtree(root, ignore_errors=True)
+
+        self.addCleanup(sweep_leftovers)
         racer = _RmdirRacer(OSError(errno.ENOTEMPTY, "Directory not empty"))
         patcher = mock.patch.object(os, "rmdir", new=racer)
         self.addCleanup(patcher.stop)

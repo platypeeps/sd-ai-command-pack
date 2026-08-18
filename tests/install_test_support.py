@@ -124,8 +124,9 @@ def _rmtree_onerror(
 def remove_tree_tolerating_teardown_race(path: Path | str) -> None:
     """``shutil.rmtree(path)`` that survives a background git process.
 
-    Leftovers from the losing side of the race stay on disk for the OS to reap;
-    the tree is a ``mkdtemp`` throwaway, so nothing else observes them. The
+    Leftovers from the losing side of the race may remain on disk indefinitely;
+    nothing here or in the OS promises to remove them. That is acceptable
+    because the tree is a ``mkdtemp`` throwaway that nothing else observes. The
     suppression is scoped to this one removal: the handler is installed per
     call, never process-wide.
     """
