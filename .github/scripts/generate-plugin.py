@@ -304,10 +304,15 @@ def command_description(root: Path, short: str) -> str:
     return description
 
 
-def rewrite_markdown(text: str) -> str:
-    """Repository-root pack invocations become bare `bin/` commands."""
+def rewrite_markdown(text: str, key: str) -> str:
+    """Repository-root pack invocations become bare `bin/` commands.
 
-    return references.rewrite_text(text, profile=references.PLUGIN_PROFILE)
+    `key` is the plugin-relative destination, which is what the profile's
+    per-file exemptions and verbatim spans are keyed by. Omitting it silently
+    rewrote the files that declare an exception to the rewrite.
+    """
+
+    return references.rewrite_text(text, profile=references.PLUGIN_PROFILE, key=key)
 
 
 def module_relative_path(module: str) -> str:
@@ -437,7 +442,7 @@ def build_files(root: Path) -> dict[str, PluginFile]:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise PluginError(f"template source is not UTF-8: {source}: {exc}") from exc
-        body = rewrite_markdown(text)
+        body = rewrite_markdown(text, destination)
         if kind == "command":
             short = destination[len("commands/") : -len(".md")]
             description = command_description(root, short)

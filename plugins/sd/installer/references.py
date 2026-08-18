@@ -114,6 +114,38 @@ _RESIDUE_PREFIX = "scripts/"
 # The literal is the bootstrap's quoted candidate, not the bare path: quoting
 # is what distinguishes the shell probe from every prose and invocation form,
 # which stay rewritable.
+# The two contrast examples in the pack-helper resolution reference, and the
+# key each payload files that document under.
+#
+# Both are the *wrong* half of a "write A, not B" pair. The rewrite is right
+# about them in every other file and wrong here: stripping `node ` from the
+# first-operand trap, or the `scripts/` prefix from the operand rule, leaves
+# the wrong example byte-identical to the right one directly beneath it. The
+# shipped plugin said "Wrong -- resolves node, leaves the .mjs unresolved"
+# above a line with no `node` in it.
+#
+# `check-helper-resolution.py` does not catch this and is not meant to: it
+# reads executable blocks, and these live in a ```text block and in prose
+# precisely so that they are not executable. The gate and this table divide
+# the work -- the gate stops the wrong form appearing where it would run, and
+# this stops the rewrite editing the one place it is quoted on purpose.
+_RESOLUTION_REFERENCE_SPANS = frozenset(
+    {
+        "run -- node sd-ai-command-pack-review-preflight.mjs",
+        "run-python -- scripts/sd-ai-command-pack-status.py",
+    }
+)
+_RESOLUTION_REFERENCE_REASON = (
+    "contrast examples: the wrong half of a write-A-not-B pair, which the "
+    "rewrite would turn into a second copy of the right half"
+)
+PLUGIN_RESOLUTION_REFERENCE_KEY = (
+    "skills/sd-help/references/pack-helper-resolution.md"
+)
+INSTALLED_RESOLUTION_REFERENCE_KEY = (
+    ".agents/skills/sd-help/references/pack-helper-resolution.md"
+)
+
 PRESERVED_LITERALS: dict[str, str] = {
     '"scripts/sd-ai-command-pack-toolchain.sh"': (
         "resolution bootstrap: a runtime probe for a co-located pack source "
@@ -338,6 +370,23 @@ class RewriteProfile:
     exemptions: Mapping[str, tuple[str, frozenset[str]]] = field(
         default_factory=dict
     )
+    # File key -> (justification, literals this payload must copy byte for byte).
+    #
+    # Distinct from `exemptions`, which declines to rewrite a script *name*
+    # wherever it appears in a file. This declines to rewrite an exact span,
+    # which is what a counter-example needs: a document that teaches "write A,
+    # not B" contains B on purpose, and rewriting B into A leaves two identical
+    # examples and a rule that demonstrates nothing.
+    #
+    # Per file rather than global, unlike `PRESERVED_LITERALS`, because these
+    # spans are wrong everywhere else. `run -- node <helper>.mjs` really is the
+    # first-operand trap and really should be rewritten in any procedure that
+    # contains it; the reference manual is the one file that must keep it
+    # intact in order to name it. A global preserve would silently stop
+    # correcting the mistake across the whole payload.
+    verbatim_spans: Mapping[str, tuple[str, frozenset[str]]] = field(
+        default_factory=dict
+    )
     # Literal -> replacement, applied before the script and doc rules.
     #
     # Globs are here rather than in `SCRIPT_REFERENCE_RE` because they are not
@@ -377,6 +426,12 @@ PLUGIN_PROFILE = RewriteProfile(
         "add the script to the manifest, or record the reference in "
         "CLOSURE_ALLOWLIST with a written justification"
     ),
+    verbatim_spans={
+        PLUGIN_RESOLUTION_REFERENCE_KEY: (
+            _RESOLUTION_REFERENCE_REASON,
+            _RESOLUTION_REFERENCE_SPANS,
+        )
+    },
 )
 
 # The reference manual's relocated form, for text that a resweep reads.
@@ -537,6 +592,12 @@ MACHINE_PROFILE = RewriteProfile(
         "MACHINE_CLOSURE_ALLOWLIST with a written justification"
     ),
     exemptions=MACHINE_REFERENCE_EXEMPTIONS,
+    verbatim_spans={
+        INSTALLED_RESOLUTION_REFERENCE_KEY: (
+            _RESOLUTION_REFERENCE_REASON,
+            _RESOLUTION_REFERENCE_SPANS,
+        )
+    },
 )
 
 
@@ -551,10 +612,42 @@ def exempt_names(profile: RewriteProfile, key: str) -> frozenset[str]:
     return names
 
 
+def verbatim_spans(profile: RewriteProfile, key: str) -> tuple[str, ...]:
+    """Spans this file copies byte for byte, once the reason is justified.
+
+    Longest first, so masking a span can never consume a prefix of a longer
+    one and strand its tail for a later rule to rewrite.
+    """
+
+    justification, spans = profile.verbatim_spans.get(key, ("", frozenset()))
+    if spans and not justification:
+        raise ReferenceRewriteError(
+            f"verbatim spans for {key} have no justification"
+        )
+    return tuple(sorted(spans, key=len, reverse=True))
+
+
+_VERBATIM_SENTINEL = "\x00sd-verbatim-{index}\x00"
+
+
+def _mask_verbatim(text: str, spans: tuple[str, ...]) -> str:
+    for index, span in enumerate(spans):
+        text = text.replace(span, _VERBATIM_SENTINEL.format(index=index))
+    return text
+
+
+def _unmask_verbatim(text: str, spans: tuple[str, ...]) -> str:
+    for index, span in enumerate(spans):
+        text = text.replace(_VERBATIM_SENTINEL.format(index=index), span)
+    return text
+
+
 def rewrite_text(text: str, *, profile: RewriteProfile, key: str = "") -> str:
     """Point every relocated-resource reference at where the payload puts it."""
 
     exempt = exempt_names(profile, key)
+    spans = verbatim_spans(profile, key)
+    text = _mask_verbatim(text, spans)
 
     for literal, replacement in profile.literal_rewrites.items():
         text = text.replace(literal, replacement)
@@ -571,7 +664,7 @@ def rewrite_text(text: str, *, profile: RewriteProfile, key: str = "") -> str:
         rewritten = DOC_REFERENCE_RE.sub(lambda _match: doc_template, rewritten)
     if profile.strip_node_prefix:
         rewritten = NODE_PREFIX_RE.sub(r"\1", rewritten)
-    return _unmask_preserved(rewritten)
+    return _unmask_verbatim(_unmask_preserved(rewritten), spans)
 
 
 def _wrapped_pairs(text: str, directory: str, pattern: re.Pattern[str]) -> list[str]:
@@ -617,6 +710,11 @@ def check_text_residue(key: str, text: str, *, profile: RewriteProfile) -> None:
 
     check_wrapped_references(key, text, profile=profile)
     exempt = exempt_names(profile, key)
+    # A justified verbatim span is text this payload kept on purpose, so it is
+    # not residue. Masking it here rather than widening `exempt` keeps the
+    # distinction the two mechanisms are for: `exempt` frees a name everywhere
+    # in the file, this frees one exact span and nothing else.
+    text = _mask_verbatim(text, verbatim_spans(profile, key))
     found = residue_literals(text)
     residue = sorted(
         literal

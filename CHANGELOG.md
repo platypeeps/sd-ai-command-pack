@@ -55,6 +55,21 @@
   resolution the rule exists to remove. `installer/references.py` now preserves
   that one quoted literal through both the rewrite and the residue gate; every
   prose and invocation form stays rewritable.
+- The plugin and machine payloads no longer rewrite the resolution reference's
+  own counter-examples. Both files document a rule by contrasting the wrong
+  form with the right one, and the rewrite was right about the wrong half
+  everywhere else: stripping `node ` from the `run --` trap, and the `scripts/`
+  prefix from the operand rule, left each "Wrong" line byte-identical to the
+  "Right" line beneath it. `RewriteProfile` gains `verbatim_spans`, which frees
+  one exact span in one payload file rather than a name file-wide, and the
+  plugin generator now passes the destination path so per-file declarations are
+  consulted at all -- it previously rewrote every Markdown file with an empty
+  key, so no exemption of any kind could apply to it. All five copies of
+  `pack-helper-resolution.md` are byte-identical again, and a test asserts it
+  from the filesystem rather than from a list.
+- `sd-update-spec` and the `sd-audit-repo` tooling charter invoked
+  `$SD_PACK_TOOLCHAIN` without saying where it comes from. Both now point at
+  the bootstrap reference, like every other skill that uses the variable.
 
 ## 0.71.29 - 2026-08-16
 

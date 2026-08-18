@@ -36,8 +36,9 @@ DOC_TARGET = "~/.agents/docs/SD_AI_COMMAND_PACK.md"
 
 def machine_profile_with(
     exemptions: dict[str, tuple[str, frozenset[str]]],
+    verbatim_spans: dict[str, tuple[str, frozenset[str]]] | None = None,
 ) -> RewriteProfile:
-    """The machine profile with a test exemption table in place of its own."""
+    """The machine profile with test exemption tables in place of its own."""
 
     return RewriteProfile(
         name=MACHINE_PROFILE.name,
@@ -48,6 +49,7 @@ def machine_profile_with(
         closure_subject=MACHINE_PROFILE.closure_subject,
         closure_advice=MACHINE_PROFILE.closure_advice,
         exemptions=exemptions,
+        verbatim_spans={} if verbatim_spans is None else verbatim_spans,
     )
 
 
@@ -148,6 +150,132 @@ class RewriteTests(unittest.TestCase):
             ReferenceRewriteError, "exemption for manual.md has no justification"
         ):
             references.rewrite_text("text\n", profile=profile, key="manual.md")
+
+
+class VerbatimSpanTests(unittest.TestCase):
+    """Spans a file quotes on purpose, which the rewrite would otherwise edit.
+
+    The case these exist for is a contrast example: text whose whole point is
+    to show the form the rewrite produces *and* the form it does not, so
+    rewriting the second one collapses the pair into two copies of the first.
+    """
+
+    SPAN = f"run -- node {SCRIPT}"
+
+    def profile(self, spans: frozenset[str], justification: str = "why") -> RewriteProfile:
+        return machine_profile_with({}, {"guide.md": (justification, spans)})
+
+    def test_a_declared_span_survives_the_rewrite(self) -> None:
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}))
+        text = f"write `~/.agents/bin/{SCRIPT}`, not `scripts/{SCRIPT}`\n"
+
+        self.assertEqual(
+            references.rewrite_text(text, profile=profile, key="guide.md"), text
+        )
+
+    def test_a_span_frees_only_the_file_that_declares_it(self) -> None:
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}))
+        text = f"bash scripts/{SCRIPT} doctor\n"
+
+        self.assertEqual(
+            references.rewrite_text(text, profile=profile, key="other.md"),
+            f"bash ~/.agents/bin/{SCRIPT} doctor\n",
+        )
+
+    def test_the_rest_of_the_file_is_still_rewritten(self) -> None:
+        """A span frees itself, not every reference beside it."""
+
+        other = "sd-ai-command-pack-status.py"
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}))
+        text = f"quoted `scripts/{SCRIPT}`; run bash scripts/{other}\n"
+
+        self.assertEqual(
+            references.rewrite_text(text, profile=profile, key="guide.md"),
+            f"quoted `scripts/{SCRIPT}`; run bash ~/.agents/bin/{other}\n",
+        )
+
+    def test_a_span_frees_every_occurrence_of_itself(self) -> None:
+        """Masking is by exact text, so a repeated quote is quoted twice.
+
+        The declaration says this text is not a reference; it cannot be one
+        occurrence and not the other without the caller saying which.
+        """
+
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}))
+        text = f"`scripts/{SCRIPT}` here and `scripts/{SCRIPT}` there\n"
+
+        self.assertEqual(
+            references.rewrite_text(text, profile=profile, key="guide.md"), text
+        )
+
+    def test_a_longer_span_wins_over_a_prefix_of_itself(self) -> None:
+        """Masking shortest-first would strand the longer span's tail."""
+
+        short = f"scripts/{SCRIPT}"
+        profile = self.profile(frozenset({short, f"bash {short} doctor"}))
+        text = f"bash {short} doctor\n"
+
+        self.assertEqual(
+            references.rewrite_text(text, profile=profile, key="guide.md"), text
+        )
+
+    def test_a_span_without_a_justification_fails(self) -> None:
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}), justification="")
+
+        with self.assertRaisesRegex(
+            ReferenceRewriteError, "verbatim spans for guide.md have no justification"
+        ):
+            references.rewrite_text("text\n", profile=profile, key="guide.md")
+
+    def test_a_declared_span_is_not_residue(self) -> None:
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}))
+
+        references.check_text_residue(
+            "guide.md", f"not `scripts/{SCRIPT}`\n", profile=profile
+        )
+
+    def test_an_undeclared_file_still_reports_the_same_text(self) -> None:
+        profile = self.profile(frozenset({f"scripts/{SCRIPT}"}))
+
+        with self.assertRaises(ReferenceRewriteError):
+            references.check_text_residue(
+                "other.md", f"not `scripts/{SCRIPT}`\n", profile=profile
+            )
+
+
+class ResolutionReferenceTests(unittest.TestCase):
+    """Every payload copy of the bootstrap reference keeps its contrast pairs.
+
+    The authored file is the single definition the helper-resolution gate
+    reads, so a payload copy that differs is a payload documenting a rule its
+    own examples contradict.
+    """
+
+    RELATIVE = "skills/sd-help/references/pack-helper-resolution.md"
+    AUTHORED = PACK_ROOT / "templates" / ".agents" / RELATIVE
+
+    def copies(self) -> list[Path]:
+        found = sorted(
+            path
+            for path in PACK_ROOT.rglob("pack-helper-resolution.md")
+            if ".git/" not in path.as_posix()
+        )
+        self.assertIn(self.AUTHORED, found)
+        return found
+
+    def test_every_copy_matches_the_authored_source(self) -> None:
+        authored = self.AUTHORED.read_text(encoding="utf-8")
+
+        for path in self.copies():
+            with self.subTest(path=path.relative_to(PACK_ROOT)):
+                self.assertEqual(path.read_text(encoding="utf-8"), authored)
+
+    def test_the_authored_source_still_contrasts_both_forms(self) -> None:
+        authored = self.AUTHORED.read_text(encoding="utf-8")
+
+        for span in references._RESOLUTION_REFERENCE_SPANS:
+            with self.subTest(span=span):
+                self.assertIn(span, authored)
 
 
 class ResidueTests(unittest.TestCase):

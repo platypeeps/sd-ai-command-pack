@@ -85,7 +85,7 @@ any consumer that has no `scripts/` directory, which is every thin consumer.
 Wrong — resolves `node`, leaves the `.mjs` unresolved, then fails:
 
 ```text
-bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs
+bash "$SD_PACK_TOOLCHAIN" run -- node sd-ai-command-pack-review-preflight.mjs
 ```
 
 Right — the helper's shebang supplies the interpreter:
@@ -105,7 +105,7 @@ report it rather than working around it by naming the interpreter.
 ## No `scripts/` prefix on operands
 
 Write `run-python -- sd-ai-command-pack-status.py`, not
-`run-python -- sd-ai-command-pack-status.py`. The resolver strips the
+`run-python -- scripts/sd-ai-command-pack-status.py`. The resolver strips the
 prefix, so both work — but the rule is "no `scripts/` in an executable block",
 with no exception. A reader should not have to decide which `scripts/` token is
 a harmless operand prefix and which is the working-directory-relative bootstrap
