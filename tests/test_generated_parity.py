@@ -1221,6 +1221,30 @@ class GeneratedParityTests(InstallTestCase):
             self.assertEqual(rejected.returncode, 1, rejected.stdout)
             self.assertIn("pack-broken.sh", rejected.stderr)
 
+    def test_bash32_syntax_gate_fails_when_enumeration_fails(self) -> None:
+        # Enumeration runs through git. If git is missing or the directory is
+        # not a work tree, the gate must say so and fail: a run that checks
+        # nothing and exits 0 is the same silent pass the gate exists to catch.
+        script = PACK_ROOT / ".github/scripts/check-bash32-syntax.sh"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copied_script = root / ".github/scripts/check-bash32-syntax.sh"
+            copied_script.parent.mkdir(parents=True)
+            shutil.copy2(script, copied_script)
+
+            outside_work_tree = subprocess.run(
+                ["bash", str(copied_script)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(outside_work_tree.returncode, 1, outside_work_tree.stdout)
+        self.assertIn("git ls-files failed", outside_work_tree.stderr)
+        self.assertNotIn("No tracked shell scripts found", outside_work_tree.stdout)
+
     def test_ci_dependency_and_main_push_guards_are_bounded(self) -> None:
         workflow = (PACK_ROOT / ".github/workflows/tests.yml").read_text(
             encoding="utf-8"

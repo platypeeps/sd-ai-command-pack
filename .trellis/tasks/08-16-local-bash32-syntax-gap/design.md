@@ -72,6 +72,13 @@ A repository-wide shebang scan finds no other tracked shell file outside those
 two patterns, so the enumeration is currently complete and stays complete as
 scripts are added, because nothing is listed inside the gate.
 
+Enumeration failure is fatal, not empty. `git ls-files` writes to a temporary
+file whose exit status is checked, because reading it through a process
+substitution discards that status: a missing git or a directory that is not a
+work tree would then feed the loop nothing, land on `checked -eq 0`, and exit 0.
+A gate that passes because it could not look is the same defect as a gate that
+passes because the interpreter was missing, which requirement 3 already forbids.
+
 `is_shell_file` reads the first line into a variable rather than piping `head`
 into a matcher: under `set -o pipefail` a reader that exits after one line
 turns the pipeline into a failure, which would misclassify large scripts.
