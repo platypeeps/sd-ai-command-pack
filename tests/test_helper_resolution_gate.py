@@ -179,6 +179,12 @@ class HelperResolutionGateTests(unittest.TestCase):
         self.assertEqual([finding.rule for finding in found], ["direct-invocation"])
 
     def test_run_resolves_only_its_first_operand(self) -> None:
+        """One finding, not two: the direct rule does not also fire here.
+
+        `node` follows `-- `, which is none of the anchors the direct rule
+        accepts, so the block is reported once by the rule that describes it.
+        """
+
         found = self.findings(
             self.bootstrapped(
                 'bash "$SD_PACK_TOOLCHAIN" run -- node '
@@ -186,7 +192,7 @@ class HelperResolutionGateTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("run-interpreter", [finding.rule for finding in found])
+        self.assertEqual([finding.rule for finding in found], ["run-interpreter"])
 
     def test_an_exempt_block_is_left_alone(self) -> None:
         markdown = (
