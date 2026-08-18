@@ -343,3 +343,47 @@ Ported the se-ai-command-pack teardown-race fix to the four git-hosting temp-tre
 ### Next Steps
 
 - None - task complete
+
+
+## Session 405: Parse tracked shell with bash 3.2 before the push
+
+**Date**: 2026-08-18
+**Task**: Parse tracked shell with bash 3.2 before the push
+**Branch**: `task/local-bash32-syntax-gap`
+
+### Summary
+
+Added a dedicated bash 3.2 syntax gate to the lint lane so shell that only bash 3.2 rejects fails locally instead of on the macOS CI leg, recorded the design decision the PRD left open, and converged PR #507 through two Copilot rounds.
+
+### Main Changes
+
+- Added .github/scripts/check-bash32-syntax.sh: enumerates tracked shell from git ls-files at run time, version-probes candidate interpreters so only a real bash 3.2 is used, and runs as the last step of the lint target.
+- Made a missing bash 3.2 a visible warning with exit 0 rather than a silent pass, fatal under STRICT=1, matching the existing STRICT=1 make lint convention.
+- Made a failed enumeration fatal on every platform after review found it could exit 0 through checked==0, and moved the guard ahead of interpreter resolution after the Linux CI legs proved the skip branch masked it.
+- Recorded design.md: why the gate is a standalone lint script rather than pinning test_review_scope's interpreter, a check.json row read only by sd-check, or the diff-scoped advisory preflight.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `213e6b09` | fix(lint): parse tracked shell with bash 3.2 before the push |
+| `85e489c3` | docs(task): design and start the local bash 3.2 syntax gate task |
+| `dc7b3c05` | fix(lint): fail the bash 3.2 gate when enumeration itself fails |
+| `dcd248da` | fix(lint): enumerate before resolving the bash 3.2 interpreter |
+| `dac5bd40` | docs(task): tick the bash 3.2 syntax gate acceptance criteria |
+
+### Testing
+
+- [OK] make check: MAKE_CHECK_EXIT=0, 97 OK/PASS, 0 failures
+- [OK] make lint: exit 0, 'bash 3.2 syntax gate: 38 tracked shell scripts accepted by /bin/bash.'
+- [OK] python -m unittest tests.test_generated_parity: Ran 32 tests, OK
+- [OK] PR #507 CI: all checks SUCCESS, mergeStateStatus CLEAN, zero unresolved review threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

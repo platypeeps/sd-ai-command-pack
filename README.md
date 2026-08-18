@@ -755,6 +755,7 @@ if command -v node >/dev/null 2>&1; then
 else
   printf '%s\n' "warning: node not found; skipping JavaScript syntax checks."
 fi
+bash .github/scripts/check-bash32-syntax.sh
 bash .github/scripts/run-tests.sh
 python -m coverage combine
 python -m coverage report --include="install.py,installer/*" --fail-under=100
@@ -776,9 +777,13 @@ JavaScript twins when Node is available locally. The shipped shell scripts
 automation is coverage.py-measured. GitHub workflow YAML is still exercised by
 behavioral tests and syntax/lint gates rather than a coverage number; CI
 also runs `shellcheck -S warning` over every tracked shell script and the git
-hooks. Consumers exempt the vendored pack shell from line review ("reviewed
-upstream"), so upstream lint rigor and focused subprocess tests are the
-compensating controls.
+hooks. `make lint` additionally parses that same tracked set with bash 3.2
+(`/bin/bash` on macOS) via `.github/scripts/check-bash32-syntax.sh`, so a
+construct only bash 3.2 rejects fails locally rather than on the macOS CI leg;
+platforms without bash 3.2 print a visible skip line and `STRICT=1` makes the
+missing interpreter fatal. Consumers exempt the vendored pack shell from line
+review ("reviewed upstream"), so upstream lint rigor and focused subprocess
+tests are the compensating controls.
 
 ### Releasing
 
