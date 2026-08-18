@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import importlib.util
 import io
@@ -22,6 +23,7 @@ import install
 
 __all__ = [
     "contextlib",
+    "errno",
     "hashlib",
     "importlib",
     "io",
@@ -41,6 +43,7 @@ __all__ = [
     "INSTALLER",
     "SECRET_MARKER_PATTERNS",
     "fleet_manifest",
+    "remove_tree_tolerating_teardown_race",
     "InstallTestCase",
 ]
 
@@ -80,6 +83,56 @@ def fleet_manifest(consumers: list[dict[str, object]]) -> dict[str, object]:
         },
         "consumers": consumers,
     }
+
+
+# Errno values a *separate* process racing our teardown can produce. Every temp
+# tree these helpers build hosts a git repository, and git's automatic garbage
+# collection is detached: it can create a file under a directory in the window
+# between shutil.rmtree's scandir (which saw the directory empty) and its rmdir
+# (which now finds it populated). The kernel reports that as ENOTEMPTY -- errno
+# 39 on Linux, 66 on macOS -- and some platforms report EEXIST for the same
+# rmdir refusal, so both are treated as the race.
+_TEARDOWN_RACE_ERRNOS = frozenset({errno.ENOTEMPTY, errno.EEXIST})
+
+
+def _reraise_unless_teardown_race(exc: BaseException) -> None:
+    """Swallow the concurrent-writer race; re-raise everything else.
+
+    Deliberately narrower than ``TemporaryDirectory(ignore_cleanup_errors=True)``,
+    which installs an ignore-everything handler and would hide unrelated
+    teardown failures (a permission bug, a leaked mock patching ``os.unlink``).
+    """
+    if isinstance(exc, OSError) and exc.errno in _TEARDOWN_RACE_ERRNOS:
+        return
+    raise exc
+
+
+def _rmtree_onexc(func: object, path: object, exc: BaseException) -> None:
+    """``shutil.rmtree(onexc=...)`` handler shape, Python 3.12+."""
+    _reraise_unless_teardown_race(exc)
+
+
+def _rmtree_onerror(
+    func: object,
+    path: object,
+    exc_info: tuple[type[BaseException], BaseException, object],
+) -> None:
+    """``shutil.rmtree(onerror=...)`` handler shape, Python 3.10/3.11."""
+    _reraise_unless_teardown_race(exc_info[1])
+
+
+def remove_tree_tolerating_teardown_race(path: Path | str) -> None:
+    """``shutil.rmtree(path)`` that survives a background git process.
+
+    Leftovers from the losing side of the race stay on disk for the OS to reap;
+    the tree is a ``mkdtemp`` throwaway, so nothing else observes them. The
+    suppression is scoped to this one removal: the handler is installed per
+    call, never process-wide.
+    """
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_rmtree_onexc)
+    else:
+        shutil.rmtree(path, onerror=_rmtree_onerror)
 
 
 class InstallTestCase(unittest.TestCase):
@@ -141,11 +194,20 @@ class InstallTestCase(unittest.TestCase):
             install="always",
         )
 
-    def make_repo(self, *platform_dirs: str) -> Path:
-        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
-        self.addCleanup(tempdir.cleanup)
+    def make_temp_root(self, prefix: str) -> Path:
+        """Return a temp directory removed at test cleanup.
 
-        root = Path(tempdir.name)
+        Used instead of ``tempfile.TemporaryDirectory`` because every tree these
+        helpers build hosts a git repository, and removal has to tolerate git's
+        detached auto-gc writing into the tree mid-teardown. Callers see a plain
+        ``Path``, exactly as before.
+        """
+        root = Path(tempfile.mkdtemp(prefix=prefix))
+        self.addCleanup(remove_tree_tolerating_teardown_race, root)
+        return root
+
+    def make_repo(self, *platform_dirs: str) -> Path:
+        root = self.make_temp_root("sd-ai-command-pack-test-")
         (root / ".trellis").mkdir()
         (root / ".trellis" / "config.yaml").write_text("# test\n", encoding="utf-8")
         self.run_git(root, "init")
@@ -157,10 +219,7 @@ class InstallTestCase(unittest.TestCase):
         return root
 
     def make_git_repo_without_trellis(self) -> Path:
-        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-test-")
-        self.addCleanup(tempdir.cleanup)
-
-        root = Path(tempdir.name)
+        root = self.make_temp_root("sd-ai-command-pack-test-")
         self.run_git(root, "init")
         return root
 
@@ -905,11 +964,7 @@ class InstallTestCase(unittest.TestCase):
         the branch head the planning receipt binds to. Single-use (not cached)
         because only the planning-merge integration test needs this shape.
         """
-        tempdir = tempfile.TemporaryDirectory(
-            prefix="sd-ai-command-pack-planning-hk-"
-        )
-        self.addCleanup(tempdir.cleanup)
-        root = Path(tempdir.name)
+        root = self.make_temp_root("sd-ai-command-pack-planning-hk-")
         repo = root / "work"
         remote = root / "origin.git"
         stub_bin = root / "bin"
@@ -1052,9 +1107,7 @@ class InstallTestCase(unittest.TestCase):
             cls._housekeeping_template = cached
         template_root, head_oid = cached
 
-        tempdir = tempfile.TemporaryDirectory(prefix="sd-ai-command-pack-housekeeping-test-")
-        self.addCleanup(tempdir.cleanup)
-        root = Path(tempdir.name) / "repo"
+        root = self.make_temp_root("sd-ai-command-pack-housekeeping-test-") / "repo"
         shutil.copytree(template_root, root)
         repo = root / "work"
         remote = root / "origin.git"
