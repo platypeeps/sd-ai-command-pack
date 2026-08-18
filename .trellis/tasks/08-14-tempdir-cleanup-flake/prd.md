@@ -86,16 +86,16 @@ here; settling it is the second acceptance criterion below.
 
 ## Acceptance Criteria
 
-- [ ] Temporary trees created by the shared helpers in
+- [x] Temporary trees created by the shared helpers in
       `tests/install_test_support.py` tolerate a concurrent writer during
       cleanup.
-- [ ] The chosen scope is stated explicitly in `design.md` — shared helpers
+- [x] The chosen scope is stated explicitly in `design.md` — shared helpers
       only, or all 216 call sites — with the reasoning for excluding whatever
       is excluded, and the residual risk of the excluded set named.
-- [ ] Unit tests drive the cleanup path directly on **both** handler shapes
+- [x] Unit tests drive the cleanup path directly on **both** handler shapes
       (`onexc` for 3.12+, `onerror` for 3.10/3.11) with a synthetic `Errno 39`,
       and assert cleanup returns rather than raises.
-- [ ] Full suite green on the existing CI matrix (3.10 and 3.13), with no test
+- [x] Full suite green on the existing CI matrix (3.10 and 3.13), with no test
       newly skipped.
 
 ### Explicitly not an acceptance criterion
