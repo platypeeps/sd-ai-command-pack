@@ -387,3 +387,45 @@ Added a dedicated bash 3.2 syntax gate to the lint lane so shell that only bash 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 406: Stop the map guard passing when the structure section is absent
+
+**Date**: 2026-08-18
+**Task**: Stop the map guard passing when the structure section is absent
+**Branch**: `task/map-guard-section-absence`
+
+### Summary
+
+Made a sectionless generated structural map unreadable rather than empty in the review preflight, split the success message so a zero-path map cannot read as a completed validation, widened the fence matcher to info-string and tilde fences, and shipped it as 0.71.31 with a regenerated fleet candidate ledger.
+
+### Main Changes
+
+- parseGeneratedStructuralMapEntries now returns parsed false for a map with no Directory Structure section, so the caller warns naming the file instead of falling through to the success path.
+- checkGeneratedStructuralMapPaths counts unreadable maps and prints no pass line when every map was unreadable; a parsed map listing no .trellis/ path reports that none needed checking.
+- GENERATED_MAP_FENCE_LINE accepts three or more backticks or tildes with or without an info string, so a generator emitting a fenced info string cannot have its fence parsed as a tree entry.
+- Shipped as 0.71.31 across the payload mirrors with a CHANGELOG entry, and regenerated docs/fleet/candidate-validation.json through its owner command for the new payload digest.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fa569df1` | fix(preflight): stop the map guard passing when the structure section is absent |
+| `9a836a48` | chore(task): start the map guard section absence task |
+| `a9285bdf` | chore(fleet): refresh the candidate ledger for 0.71.31 |
+| `ffdd23f7` | docs(task): tick the map guard section absence acceptance criteria |
+
+### Testing
+
+- [OK] make check: MAKE_CHECK_EXIT=0, 97 OK/PASS, 0 failures
+- [OK] python -m unittest tests.test_surface_closure: Ran 14 tests, OK
+- [OK] PR #508 CI: all checks SUCCESS, mergeStateStatus CLEAN, Copilot reviewed with zero findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
