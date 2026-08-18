@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -12,6 +14,13 @@ InstallTestCase = _support.InstallTestCase
 
 GUIDE_TEMPLATE = install.ROOT / "templates/docs/SD_AI_COMMAND_PACK.md"
 README = install.ROOT / "README.md"
+
+# The one exempt environment variable, matched as a whole name. A plain
+# substring removal would also consume the prefix of a longer name such as
+# `SD_AI_COMMAND_PACK_TOOLCHAIN_EXTRA`, leaving a tail that no longer contains
+# the forbidden prefix -- so the exemption would silently excuse every variable
+# whose name starts with the exempt one.
+TOOLCHAIN_VARIABLE_RE = re.compile(r"SD_AI_COMMAND_PACK_TOOLCHAIN(?![A-Z0-9_])")
 
 SKILL_SECTIONS = (
     "## When to use",
@@ -154,8 +163,19 @@ class SdlcCommandsTests(InstallTestCase):
         for name in COMMANDS:
             with self.subTest(skill=name):
                 skill = self._skill_text(name)
-                remaining = skill.replace("SD_AI_COMMAND_PACK_TOOLCHAIN", "")
+                remaining = TOOLCHAIN_VARIABLE_RE.sub("", skill)
                 self.assertNotIn("SD_AI_COMMAND_PACK_", remaining)
+
+    def test_the_exemption_does_not_cover_a_longer_variable_name(self) -> None:
+        """The exemption is one name, not a prefix every name may extend."""
+
+        self.assertEqual(
+            TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN"), "$"
+        )
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_",
+            TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN_EXTRA"),
+        )
 
     def test_update_deps_delegates_eligibility_and_merge_to_housekeeping(self) -> None:
         skill = self._skill_text("sd-update-deps")
