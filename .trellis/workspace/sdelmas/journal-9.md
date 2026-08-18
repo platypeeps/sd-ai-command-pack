@@ -263,3 +263,40 @@ Worked the Copilot review round on PR #504. Spelled out the two toolchain paths 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 403: Record the 2026-08-18 resume check on the parked identity task
+
+**Date**: 2026-08-18
+**Task**: Record the 2026-08-18 resume check on the parked identity task
+**Branch**: `task/identity-park-note-evidence`
+
+### Summary
+
+Tested the resume trigger on 08-08-developer-identity-not-in-worktrees instead of assuming it, and recorded the negative result in the park note. The staged suite still skips all nine behavioral tests against the vendored tree, no tag contains the fork commit, and get_developer at upstream main, v0.6.15, and v0.7.0-beta.3 is still the local-file-only form. Upstream has released v0.6.15, one patch ahead of the vendored 0.6.14, which does not carry the fix and belongs to the fleet drift task rather than this one.
+
+### Main Changes
+
+- Appended a dated resume-check section to the parked task's prd.md naming all three negative checks and why reading get_developer at each ref is the one that settles it
+- Recorded upstream v0.6.15 as new information routed to 08-17-fleet-trellis-version-drift rather than widening this task's scope
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `de8f75f9` | docs(task): record the 2026-08-18 resume check on the parked identity task |
+
+### Testing
+
+- [OK] make check: EXIT=0, 98 OK/PASS, 0 FAILED, including 'PASS checked 1724 documentation/prompt/spec file(s) for personal absolute paths'
+- [OK] staged suite against the vendored tree: Ran 9 tests ... OK (skipped=9), so the zero-skip trigger is unmet
+- [OK] get_developer read at upstream main, v0.6.15, and v0.7.0-beta.3: local-file-only form at paths.py:69-94, no worktree fallback
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

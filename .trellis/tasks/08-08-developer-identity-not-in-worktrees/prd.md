@@ -247,3 +247,27 @@ repository through a vendored refresh, after which the staged suite runs with
 **zero skips** and moves into `tests/`. That is the resume trigger — not the fallback probe alone, which
 already passes against unpatched upstream. The acceptance criteria stay unticked
 until then.
+
+### Resume check, 2026-08-18
+
+Still parked. The trigger was tested rather than assumed, three ways, and each
+answer is negative:
+
+- The staged suite against the vendored tree: `Ran 9 tests ... OK (skipped=9)`.
+  The trigger requires zero skips, so the fallback is still absent from
+  `.trellis/scripts/common/paths.py` as vendored.
+- `git tag --contains 0740d1d6` in the Trellis checkout returns nothing. The
+  commit remains reachable only from `chore/task-backlog-2026-08` and its fork
+  remote, exactly as when this task was parked.
+- `get_developer` at upstream `main`, at `v0.6.15`, and at `v0.7.0-beta.3` is
+  still the local-file-only form (`paths.py:69-94`): no worktree fallback and no
+  `TRELLIS_DEVELOPER` branch. Checking the tag alone would not have settled
+  this, because an upstream merge would carry its own commit rather than
+  `0740d1d6`; reading the function at each ref is what rules that out.
+
+The one new fact: **upstream has released `v0.6.15`**, one patch ahead of the
+vendored `0.6.14`. It does not carry this fix, so it does not resume this task —
+but a Trellis release existing that the fleet has not taken is
+`08-17-fleet-trellis-version-drift`'s subject, not this one's.
+
+The resume trigger is unchanged.
