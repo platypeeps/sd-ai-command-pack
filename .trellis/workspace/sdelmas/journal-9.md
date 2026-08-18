@@ -184,3 +184,43 @@ A pack skill and the binaries it invoked were resolved by two independent mechan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 401: File the run-- helper defect and close the forwarder-retirement task
+
+**Date**: 2026-08-18
+**Task**: File the run-- helper defect and close the forwarder-retirement task
+**Branch**: `task/trellis-bookkeeping-08-18`
+
+### Summary
+
+Filed the deferred 'run -- cannot execute a non-executable helper' defect as its own Trellis task, correcting the cost analysis it inherited: the machine payload derives a file's executable bit from its destination family, so a mode-only fix leaves the payload digest untouched. Then closed 08-17-anomaly-metric-creator-retire-forwarders, whose planning was moot because every acceptance criterion already held on merged branches.
+
+### Main Changes
+
+- New task 08-18-toolchain-run-non-executable-helper: PRD with the failing transcript, two ranked candidate fixes, and the digest-neutrality finding that reorders them
+- Archived 08-17-anomaly-metric-creator-retire-forwarders as completed; its five acceptance criteria were verified against live state rather than taken from the recorded checkboxes
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64043860` | docs(task): file the run-- non-executable helper defect |
+| `d440c4b1` | chore(task): record the branch for the forwarder-retirement closure |
+| `ce9debde` | chore(task): archive 08-17-anomaly-metric-creator-retire-forwarders |
+
+### Testing
+
+- [OK] consumer default branch scripts/ listing: no sd-ai-command-pack-* forwarder and no _sd_pack_forward.py remain
+- [OK] docs/fleet/candidate-validation.json: 8 of 8 consumers passed, anomaly-metric-creator among them
+- [OK] filesystem_payload_digest(manifest.json) equals the ledger digest sha256:a5184b86, so nothing is candidate-stale
+- [OK] review-preflight pre-archive: status valid, pre_archive_valid
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
