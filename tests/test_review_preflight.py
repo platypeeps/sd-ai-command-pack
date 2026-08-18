@@ -1048,8 +1048,14 @@ assert.deepEqual(
         self.run_git(root, "add", ".")
         self.run_git(root, "commit", "-m", "install command pack")
         (root / "docs").mkdir(exist_ok=True)
+        # The map needs a readable directory-structure section: a configured
+        # map that exists without one is a format defect the generated-map
+        # guard warns about, which would make "0 warning(s)" unreachable here
+        # for a reason unrelated to scope advisories.
         (root / "docs" / "repomix-map.md").write_text(
-            "# map\n\nregenerated\n", encoding="utf-8"
+            "# map\n\nregenerated\n\n# Directory Structure\n\n"
+            "````\ndocs/\n  repomix-map.md\n````\n",
+            encoding="utf-8",
         )
 
         stub_bin = root.parent / f"{root.name}-bin"
@@ -4425,7 +4431,11 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("no generated structural map", result.stdout)
 
-    def test_generated_map_guard_passes_without_a_structure_section(self) -> None:
+    def test_generated_map_guard_warns_without_a_structure_section(self) -> None:
+        # A map that exists but carries no section used to reach the success
+        # path and print "checked 0 ... all resolve", so a generator that
+        # renamed the heading would disable the guard while still reporting a
+        # pass. It is a pack-side format defect, so it warns rather than fails.
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is not available on PATH")
@@ -4439,6 +4449,92 @@ assert.deepEqual(
 
         result = self.run_review_preflight(node, root)
         self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "docs/repomix-map.md directory structure could not be parsed: "
+            "no `# Directory Structure` section",
+            result.stdout,
+        )
+        self.assertNotIn("all resolve", result.stdout)
+
+    def test_generated_map_parser_skips_fences_carrying_an_info_string(self) -> None:
+        # Repomix opens the listing with a bare four-backtick fence today, so a
+        # fence with a language or info string, or a tilde fence, is not
+        # misparsed in practice yet. Matching only bare backticks would take
+        # such a line as a tree entry; indented, it becomes a `.trellis/` path
+        # reported as stale drift that no regeneration can fix.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        result = subprocess.run(
+            [
+                node,
+                "--input-type=module",
+                "-e",
+                """
+import assert from 'node:assert/strict';
+import {
+  parseGeneratedStructuralMapEntries,
+} from './scripts/sd-ai-command-pack-review-preflight.mjs';
+
+const parsed = parseGeneratedStructuralMapEntries([
+  '# Directory Structure',
+  '',
+  '```text',
+  '.trellis/',
+  '  config.yaml',
+  '  ```text',
+  '```',
+  '',
+  '~~~yaml',
+  'src/',
+  '~~~',
+  '',
+].join('\\n'));
+
+assert.equal(parsed.parsed, true, parsed.reason);
+assert.deepEqual(
+  parsed.entries.map((entry) => entry.path),
+  ['.trellis', '.trellis/config.yaml', 'src'],
+);
+""",
+            ],
+            cwd=PACK_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_generated_map_guard_reports_zero_checked_paths_as_none_to_check(
+        self,
+    ) -> None:
+        # A parsed map with no .trellis entry is a genuine pass, but phrasing it
+        # as "checked 0 ... all resolve" reads as a validation that happened.
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        root = self.make_generated_map_repo(
+            [
+                "# Directory Structure",
+                "",
+                "````",
+                "src/",
+                "  main.py",
+                "````",
+            ]
+        )
+
+        result = self.run_review_preflight(node, root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "generated structural map(s) list no .trellis/ path; "
+            "none needed checking",
+            result.stdout,
+        )
+        self.assertNotIn("checked 0", result.stdout)
 
     def test_generated_map_guard_ignores_missing_paths_outside_trellis(self) -> None:
         # A clean checkout legitimately lacks untracked or ignored files, so

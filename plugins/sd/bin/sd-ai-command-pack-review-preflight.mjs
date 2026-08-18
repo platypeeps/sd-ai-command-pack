@@ -45,6 +45,12 @@ const MAX_TRELLIS_TASK_LINKS = 100;
 const MAX_TRELLIS_TASK_REFERENCE_LENGTH = 255;
 const MAX_TRELLIS_PRIORITY_RATIONALE_LENGTH = 1000;
 const GENERATED_MAP_MISSING_REPORT_LIMIT = 20;
+// Repomix opens its listing with a bare four-backtick fence today, but a
+// fence carrying an info string (```text) or a tilde fence is equally legal
+// markdown. Matching only bare backticks would take such a line as a tree
+// entry and report it as a `.trellis/` path that does not resolve, so treat
+// any line opening with three or more backticks or tildes as a fence.
+const GENERATED_MAP_FENCE_LINE = /^\s*(?:`{3,}|~{3,})/;
 const MAX_BOOKKEEPING_FINDINGS = 100;
 const MAX_BOOKKEEPING_ADVISORIES = 25;
 const MAX_BOOKKEEPING_CHANGED_PATHS = 500;
@@ -3220,7 +3226,15 @@ export function parseGeneratedStructuralMapEntries(text) {
   }
 
   if (start === -1) {
-    return { entries: [], parsed: true, reason: 'no directory-structure section' };
+    // A map that exists but carries no section is unreadable, not empty. Saying
+    // `parsed: true` here let the caller report a completed validation of zero
+    // paths, so a generator that renamed the heading would silently disable the
+    // guard in every consumer while still printing a pass.
+    return {
+      entries: [],
+      parsed: false,
+      reason: 'no `# Directory Structure` section',
+    };
   }
 
   const entries = [];
@@ -3233,7 +3247,7 @@ export function parseGeneratedStructuralMapEntries(text) {
       break;
     }
 
-    if (line.trim() === '' || /^\s*`{3,}\s*$/.test(line)) {
+    if (line.trim() === '' || GENERATED_MAP_FENCE_LINE.test(line)) {
       continue;
     }
 
@@ -3285,12 +3299,17 @@ function checkGeneratedStructuralMapPaths() {
 
   const missing = [];
   let checked = 0;
+  let unreadable = 0;
 
   for (const file of maps) {
     const result = parseGeneratedStructuralMapEntries(readText(file));
 
     if (!result.parsed) {
-      warn(`${file} directory structure could not be parsed: ${result.reason}.`);
+      warn(
+        `${file} directory structure could not be parsed: ${result.reason}; ` +
+          'no path in that map was checked for staleness.',
+      );
+      unreadable += 1;
       continue;
     }
 
@@ -3337,7 +3356,18 @@ function checkGeneratedStructuralMapPaths() {
     return;
   }
 
-  pass(`checked ${checked} generated structural map .trellis/ path(s); all resolve.`);
+  if (checked > 0) {
+    pass(`checked ${checked} generated structural map .trellis/ path(s); all resolve.`);
+    return;
+  }
+
+  if (unreadable > 0) {
+    // Warned above. A pass line here would report a validation that never ran,
+    // which is precisely the failure this guard exists to make loud.
+    return;
+  }
+
+  pass('generated structural map(s) list no .trellis/ path; none needed checking.');
 }
 
 function checkDocumentationPathHygiene() {
