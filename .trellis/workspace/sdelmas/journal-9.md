@@ -429,3 +429,44 @@ Made a sectionless generated structural map unreadable rather than empty in the 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 407: Re-read a BLOCKED merge state before blaming branch protection
+
+**Date**: 2026-08-18
+**Task**: Re-read a BLOCKED merge state before blaming branch protection
+**Branch**: `task/pr-eligibility-stale-blocked-review`
+
+### Summary
+
+Gave the eligibility probe a bounded re-read so a mergeStateStatus GitHub has not finished recomputing is reported as a retryable indeterminate instead of a branch-protection verdict, and shipped it as 0.71.32 with a regenerated fleet candidate ledger.
+
+### Main Changes
+
+- Added recheck_merge_state: at most MERGE_STATE_RECHECK_ATTEMPTS (2) extra reads, each preceded by MERGE_STATE_RECHECK_DELAY_SECONDS (3.0), stopping early on the first value that differs, so a synchronous caller pays at most 6 seconds on the single ambiguous branch.
+- Replaced the reason-code tuple with MergeStateVerdict, which can carry only blocked or indeterminate, so a verdict can be made strictly less confident but never more.
+- A BLOCKED stable across every read keeps merge_blocked_review; a value that moved returns the new retryable merge_state_unsettled; an unavailable re-read degrades to the existing generic block.
+- Updated the sd-ship watch coordinator so rule 2 names merge_state_unsettled and keeps polling rather than settling it as blocked, and shipped the payload as 0.71.32 with a CHANGELOG entry and a regenerated candidate ledger.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3866ecbe` | fix(pr-eligibility): re-read a BLOCKED merge state before blaming protection |
+| `b70b2012` | chore(release): ship the merge-state recheck as 0.71.32 |
+| `3dda6fc3` | docs(task): tick the stale BLOCKED merge-state acceptance criteria |
+
+### Testing
+
+- [OK] make check: MAKE_CHECK_EXIT=0, 97 OK/PASS, 0 failures
+- [OK] all four pr-eligibility.py copies byte-identical: md5 ef6dd06dd9dfd0a0f27670ac60472961
+- [OK] PR #509 CI: all checks SUCCESS, mergeStateStatus CLEAN, Copilot reviewed with zero findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
