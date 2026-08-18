@@ -118,6 +118,23 @@ class HelperResolutionGateTests(unittest.TestCase):
 
         self.assertIn("direct-invocation", [finding.rule for finding in found])
 
+    def test_an_indented_block_is_inspected_like_any_other(self) -> None:
+        """A block nested under a list item is still a block that runs.
+
+        Every line carries the list's indentation, so a rule anchored at
+        column zero would be inapplicable to exactly the blocks long enough to
+        need the surrounding structure.
+        """
+
+        body = "\n".join(
+            "   " + line
+            for line in self.bootstrap
+            + ["node sd-ai-command-pack-review-preflight.mjs pre-archive"]
+        )
+        found = self.findings(f"# skill\n\n1. step\n\n   ```bash\n{body}\n   ```\n")
+
+        self.assertEqual([finding.rule for finding in found], ["direct-invocation"])
+
     def test_run_resolves_only_its_first_operand(self) -> None:
         found = self.findings(
             self.bootstrapped(
