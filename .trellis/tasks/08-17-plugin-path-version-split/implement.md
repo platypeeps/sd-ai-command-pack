@@ -260,6 +260,10 @@ Never write into the consumer. This step reads and runs read-only helpers only.
 
 ### Run on 2026-08-17
 
+The transcripts below are verbatim except for one substitution: the operator's
+home directory is written `$HOME`, because a personal absolute path is a review
+finding. Every other byte is as emitted.
+
 **The constructed split.** The override pointed at the stale plugin cache this
 task was filed for, `~/.claude/plugins/cache/sd-ai-command-pack/sd/0.71.22/bin`,
 against a `0.71.29` install. Coherence is observable rather than argued: naming
@@ -268,7 +272,7 @@ every helper against, and that directory was the `0.71.22` `bin/` —
 
 ```text
 pack helper is missing next to the toolchain:
-/Users/sven/.claude/plugins/cache/sd-ai-command-pack/sd/0.71.22/bin/sd-ai-command-pack-does-not-exist.py
+$HOME/.claude/plugins/cache/sd-ai-command-pack/sd/0.71.22/bin/sd-ai-command-pack-does-not-exist.py
 ```
 
 — and the helper that did run was the old one, not the working checkout's:
@@ -292,7 +296,7 @@ $ bash scripts/sd-ai-command-pack-toolchain.sh run -- ...
 bash: scripts/sd-ai-command-pack-toolchain.sh: No such file or directory
 
 $ <bootstrap>; echo "$SD_PACK_TOOLCHAIN"
-/Users/sven/.agents/bin/sd-ai-command-pack-toolchain.sh
+$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh
 ```
 
 Through it, both a Node helper (`sd-ai-command-pack-review-preflight.mjs`) and a
