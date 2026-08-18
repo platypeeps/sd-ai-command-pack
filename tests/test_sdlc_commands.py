@@ -19,8 +19,10 @@ README = install.ROOT / "README.md"
 # substring removal would also consume the prefix of a longer name such as
 # `SD_AI_COMMAND_PACK_TOOLCHAIN_EXTRA`, leaving a tail that no longer contains
 # the forbidden prefix -- so the exemption would silently excuse every variable
-# whose name starts with the exempt one.
-TOOLCHAIN_VARIABLE_RE = re.compile(r"SD_AI_COMMAND_PACK_TOOLCHAIN(?![A-Z0-9_])")
+# whose name starts with the exempt one. The continuation class is `\w` rather
+# than the uppercase env-var convention: the test exists to catch a name nobody
+# expected, and a lowercase tail is exactly that kind of name.
+TOOLCHAIN_VARIABLE_RE = re.compile(r"SD_AI_COMMAND_PACK_TOOLCHAIN(?!\w)")
 
 SKILL_SECTIONS = (
     "## When to use",
@@ -175,6 +177,10 @@ class SdlcCommandsTests(InstallTestCase):
         self.assertIn(
             "SD_AI_COMMAND_PACK_",
             TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN_EXTRA"),
+        )
+        self.assertIn(
+            "SD_AI_COMMAND_PACK_",
+            TOOLCHAIN_VARIABLE_RE.sub("", "$SD_AI_COMMAND_PACK_TOOLCHAIN_extra"),
         )
 
     def test_update_deps_delegates_eligibility_and_merge_to_housekeeping(self) -> None:
