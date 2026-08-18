@@ -57,7 +57,10 @@ test:
 # parity: the CI lint/security jobs always run the Node and ShellCheck
 # lanes). Mypy covers installer/, the install.py facade, and shipped
 # scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
-# out of the run so duplicate script names cannot collide.
+# out of the run so duplicate script names cannot collide. The bash 3.2 lane
+# parses tracked shell with the interpreter macOS keeps at /bin/bash, so
+# syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
+# a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
 	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
 	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
@@ -79,6 +82,7 @@ lint:
 	else \
 		printf '%s\n' "warning: shellcheck not found; skipping shell lint."; \
 	fi
+	@STRICT="$(STRICT)" bash .github/scripts/check-bash32-syntax.sh
 
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \

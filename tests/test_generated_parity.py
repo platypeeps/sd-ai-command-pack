@@ -27,6 +27,37 @@ SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
 
+def _bash_version_line(path: str) -> str:
+    """Return the first line of ``path --version``, or "" when it fails."""
+    probe = subprocess.run(
+        [path, "--version"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    lines = probe.stdout.splitlines()
+    return lines[0] if lines else ""
+
+
+def _find_bash32() -> str | None:
+    """Return a bash 3.2 interpreter path, or None when the platform has none.
+
+    macOS keeps bash 3.2 at /bin/bash; Linux carries no 3.2 at all, so callers
+    must handle None rather than assume the interpreter exists.
+    """
+    for candidate in (
+        "/bin/bash",
+        "/usr/bin/bash",
+        "/usr/local/bin/bash",
+        "/opt/homebrew/bin/bash",
+    ):
+        if not os.access(candidate, os.X_OK):
+            continue
+        if "version 3.2" in _bash_version_line(candidate):
+            return candidate
+    return None
+
+
 def _load_surface_generator():
     """Load the dev-side surface generator that single-sources adapter
     transform data (alias rewrites, checkout-trust policy, body overrides)."""
@@ -1078,6 +1109,117 @@ class GeneratedParityTests(InstallTestCase):
                 f"stdout={invalid.stdout!r} stderr={invalid.stderr!r}",
             )
             self.assertIn("bad.js", invalid.stderr)
+
+    def test_bash32_syntax_gate_rejects_bash32_only_shell(self) -> None:
+        # A modern PATH bash accepts shell that bash 3.2 — still /bin/bash on
+        # macOS — rejects outright, so the local gates passed and the macOS CI
+        # leg was the first thing to fail. The fixture below carries that exact
+        # construct: an apostrophe in a comment inside a "$( ... )"
+        # substitution.
+        script = PACK_ROOT / ".github/scripts/check-bash32-syntax.sh"
+        fixture = "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                "",
+                'value="$(',
+                "  # bash 3.2 rejects the file over this caller's apostrophe",
+                r"  printf '%s\n' hello",
+                ')"',
+                r'printf "%s\n" "$value"',
+                "",
+            )
+        )
+
+        current = subprocess.run(
+            ["bash", str(script)],
+            cwd=PACK_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(current.returncode, 0, current.stderr)
+
+        bash32 = _find_bash32()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copied_script = root / ".github/scripts/check-bash32-syntax.sh"
+            copied_script.parent.mkdir(parents=True)
+            shutil.copy2(script, copied_script)
+            broken = root / "scripts/pack-broken.sh"
+            broken.parent.mkdir(parents=True)
+            broken.write_text(fixture, encoding="utf-8")
+            subprocess.run(
+                ["git", "init", "-q"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "add", "-f", "."],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+
+            # A platform with no bash 3.2 must say so out loud instead of
+            # passing silently, and STRICT=1 must turn that same state into a
+            # failure. Both branches run on every platform.
+            absent = subprocess.run(
+                ["bash", str(copied_script)],
+                cwd=root,
+                env={**os.environ, "SD_AI_COMMAND_PACK_BASH32": "/nonexistent/bash"},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(absent.returncode, 0, absent.stderr)
+            self.assertIn("no bash 3.2 interpreter found", absent.stdout)
+
+            strict = subprocess.run(
+                ["bash", str(copied_script)],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "SD_AI_COMMAND_PACK_BASH32": "/nonexistent/bash",
+                    "STRICT": "1",
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(strict.returncode, 1, strict.stdout)
+            self.assertIn("STRICT=1", strict.stderr)
+
+            if bash32 is None:
+                # Linux carries no bash 3.2, so the rejection half cannot be
+                # exercised here; the macOS unittest leg owns it. Returning
+                # rather than skipping keeps CI's no-skips rule intact.
+                return
+
+            path_bash = self._real_bash_path
+            self.assertIsNotNone(path_bash)
+            if "version 3.2" not in _bash_version_line(str(path_bash)):
+                # The gap itself: the interpreter on PATH accepts the fixture.
+                accepted = subprocess.run(
+                    [str(path_bash), "-n", str(broken)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            rejected = subprocess.run(
+                ["bash", str(copied_script)],
+                cwd=root,
+                env={**os.environ, "SD_AI_COMMAND_PACK_BASH32": bash32},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(rejected.returncode, 1, rejected.stdout)
+            self.assertIn("pack-broken.sh", rejected.stderr)
 
     def test_ci_dependency_and_main_push_guards_are_bounded(self) -> None:
         workflow = (PACK_ROOT / ".github/workflows/tests.yml").read_text(

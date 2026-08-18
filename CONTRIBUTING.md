@@ -43,6 +43,16 @@ contributor setups. Run `STRICT=1 make lint` to turn those missing-tool
 skips into hard errors for parity with CI, which always runs the Node and
 ShellCheck lanes.
 
+`make lint` also parses every tracked shell script with bash 3.2 — the
+interpreter macOS keeps at `/bin/bash` — through
+`.github/scripts/check-bash32-syntax.sh`, so syntax that only bash 3.2 rejects
+fails before the push instead of on the macOS CI leg minutes later. The script
+list is enumerated from `git ls-files` at run time, never maintained inside the
+gate. A platform with no bash 3.2 (any Linux) prints
+`warning: no bash 3.2 interpreter found` and passes; `STRICT=1` turns that
+missing interpreter into a failure, and `SD_AI_COMMAND_PACK_BASH32` overrides
+the interpreter search with a space-separated candidate list.
+
 `make generate` and the pack-source portion of `make full-check` also run
 `scripts/sd-ai-command-pack-surface-check.py`. The versioned validator derives
 the complete affected graph from `installer/registry.py` and `manifest.json`,

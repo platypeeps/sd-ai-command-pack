@@ -1903,13 +1903,22 @@ leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 > scanned too, so a Python comment in an embedded `<<'PY'` block is subject to
 > the same rule.
 >
-> A developer machine with a modern bash on `PATH` accepts the file, so
-> `make check` passes and the macOS CI leg is the first thing to see it. Catch
-> it locally against the same interpreter CI uses:
+> A developer machine with a modern bash on `PATH` accepts the file, so a
+> gate that parses shell with the `PATH` interpreter passes and the macOS CI
+> leg is the first thing to see it. `make lint` therefore runs
+> `.github/scripts/check-bash32-syntax.sh`, which parses every tracked `*.sh`
+> plus tracked git hooks with a probed bash 3.2 (`/bin/bash` on macOS). Run it
+> directly when iterating on shell:
 >
 > ```bash
-> for f in $(git ls-files '*.sh'); do /bin/bash -n "$f" || echo "BASH32-FAIL $f"; done
+> bash .github/scripts/check-bash32-syntax.sh
 > ```
+>
+> The script list comes from `git ls-files` at run time, so a new script is
+> covered without editing the gate. A platform with no bash 3.2 prints
+> `warning: no bash 3.2 interpreter found` and exits 0 rather than passing
+> silently; `STRICT=1` makes that state fatal, and `SD_AI_COMMAND_PACK_BASH32`
+> overrides the interpreter search.
 
 Add or update tests when changing:
 
