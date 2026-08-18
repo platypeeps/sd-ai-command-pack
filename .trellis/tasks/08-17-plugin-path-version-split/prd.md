@@ -112,6 +112,16 @@ it says nothing about which copy a given process will actually execute.
   unavailable. That is issue `#496` and it is a layout defect, not a version
   split.
 - Consumer pack pins, which are `08-08-fleet-one-path`'s rollout ledger.
+- Testing candidate **readability** rather than existence. The bootstrap takes
+  the first candidate satisfying `[ -f "$candidate" ]`, but `bash
+  "$SD_PACK_TOOLCHAIN"` needs read permission, so a candidate that exists and
+  is unreadable dead-ends instead of falling through to the next one. Raised in
+  review of `#503` and declined there on cost, not correctness: the bootstrap
+  is byte-identical at 84 authored sites by construction, so the predicate
+  cannot be changed in one place — the edit re-touches every site, every
+  generated payload copy, the payload digest, and the fleet candidate ledger.
+  It belongs in its own task, where a one-line change with an 84-site blast
+  radius is the whole subject rather than a rider.
 
 ## Evidence
 
