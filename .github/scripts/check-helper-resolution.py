@@ -78,7 +78,7 @@ class Block(NamedTuple):
 
 def read_canonical_bootstrap() -> list[str]:
     """The bootstrap is defined once, in the reference file skills cite."""
-    text = (REPO_ROOT / REFERENCE).read_text()
+    text = (REPO_ROOT / REFERENCE).read_text(encoding="utf-8")
     for block in iter_blocks(text):
         if block.info == "bash" and any(
             line.startswith("SD_PACK_TOOLCHAIN=") for line in block.body
@@ -137,7 +137,7 @@ def logical_lines(body: list[str]) -> Iterable[tuple[int, str]]:
 def check_file(path: pathlib.Path, bootstrap: list[str]) -> list[Finding]:
     rel = str(path.relative_to(REPO_ROOT))
     findings: list[Finding] = []
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     for block in iter_blocks(text):
         if block.info not in EXEC_INFO_STRINGS:
             continue
