@@ -3855,6 +3855,23 @@ export function validateTrellisBookkeepingMetadata(record, taskDir, archived) {
   if (!isTrellisTimestamp(record.createdAt)) {
     issues.push('createdAt must be a valid date or timestamp');
   }
+  // The planning-phase branch invariant. `task.py start` is what records a
+  // branch, so a `status: planning` record already carrying one means the task
+  // was started without its lifecycle advancing with it. The bundle-scoped
+  // `planning_lifecycle_mutation` rule encodes the same invariant, but only the
+  // bookkeeping/finalization path reaches it -- while the default working-tree
+  // run still reported branch and lifecycle integrity as checked. Conditioned
+  // on the record's own status, not on bundle context, so in_progress, review,
+  // and archived completed records keep their branches.
+  if (
+    record.status === 'planning' &&
+    record.branch !== null &&
+    record.branch !== undefined
+  ) {
+    issues.push(
+      'branch must be null while status is planning; run task.py start before recording a branch',
+    );
+  }
   if (
     record.status === 'completed' &&
     typeof record.completedAt === 'string' &&

@@ -470,3 +470,43 @@ Gave the eligibility probe a bounded re-read so a mergeStateStatus GitHub has no
 ### Next Steps
 
 - None - task complete
+
+
+## Session 408: Enforce the planning branch-null rule the default preflight run reports
+
+**Date**: 2026-08-18
+**Task**: Enforce the planning branch-null rule the default preflight run reports
+**Branch**: `task/preflight-planning-branch-gap`
+
+### Summary
+
+Made the review preflight's default working-tree run enforce the planning-phase branch invariant it already claimed to check, and shipped it as 0.71.33 with a regenerated fleet candidate ledger.
+
+### Main Changes
+
+- validateTrellisBookkeepingMetadata now rejects a status planning record carrying a branch, conditioned on the record's own status rather than on bundle context, so in_progress, review, and archived completed records keep their branches.
+- Added a test that fails the default no-argument run on the offending record naming the file and field, then proves clearing branch alone returns the same tree to a clean run.
+- Made the existing valid-metadata test set status in_progress explicitly on the records that carry branches, so the rule cannot be widened into a status-blind one without that test going red.
+- Shipped as 0.71.33 with a CHANGELOG entry and regenerated docs/fleet/candidate-validation.json for the new payload digest.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7dd5e437` | fix(preflight): enforce the planning branch-null rule the default run reports |
+| `ae3e7010` | chore(release): ship the planning branch-null rule as 0.71.33 |
+
+### Testing
+
+- [OK] make check: MAKE_CHECK_EXIT=0, 96 OK/PASS, 0 failures
+- [OK] blast radius enumerated from the filesystem: ACTIVE task.json=77 planning=77 newly_rejected=0; archived task.json=333 planning-with-branch=0
+- [OK] PR #510 CI: all checks SUCCESS, mergeStateStatus CLEAN, Copilot reviewed with zero findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
