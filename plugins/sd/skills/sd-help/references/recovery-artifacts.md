@@ -48,7 +48,15 @@ A workflow that creates a pack stash or worktree owns its whole success path:
    proceeds leaving an unregistered artifact behind.
 
    ```bash
-   artifact_id="$(bash sd-ai-command-pack-toolchain.sh run-python -- \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   artifact_id="$(bash "$SD_PACK_TOOLCHAIN" run-python -- \
      sd-ai-command-pack-recovery-artifacts.py register \
        --repo . --type stash --object "$oid" --subject "$subject" \
        --created-by "$skill" --run-id "$run_id" --purpose "$why" \
@@ -62,7 +70,15 @@ A workflow that creates a pack stash or worktree owns its whole success path:
    naming the exact artifact:
 
    ```bash
-   bash sd-ai-command-pack-toolchain.sh run-python -- \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
      sd-ai-command-pack-recovery-artifacts.py cleanup \
        --repo . --mode owner --artifact-id "$artifact_id" --json
    ```

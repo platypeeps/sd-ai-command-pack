@@ -17,7 +17,9 @@ tasks on its own.
 ## Sandbox-safe tool execution
 
 Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
-through `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+through `bash "$SD_PACK_TOOLCHAIN" run -- <tool> [args...]`, with
+`$SD_PACK_TOOLCHAIN` resolved by the bootstrap in
+[`../sd-help/references/pack-helper-resolution.md`](../sd-help/references/pack-helper-resolution.md).
 The argv-safe wrapper changes only documented cache variables and preserves
 auth/config state. If it is missing or reports a cache-setup failure, stop with
 that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
@@ -97,8 +99,8 @@ Mode, additive dimensions, and `follow-up` are the only sanctioned routing
 controls, and every run or omission is recorded in Coverage & limits.
 
 1. **Applicability preflight** — run
-   `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python --
-   ~/.agents/bin/sd-ai-command-pack-audit-route.py --repo . --mode <depth>
+   `bash "$SD_PACK_TOOLCHAIN" run-python --
+   sd-ai-command-pack-audit-route.py --repo . --mode <depth>
    --dimension <name>... --json` exactly once. A missing helper, nonzero exit,
    malformed JSON, unknown schema/router version, duplicate or missing charter
    row, or unrecognized state is a classifier failure: use exhaustive coverage

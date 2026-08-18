@@ -477,11 +477,9 @@ class PackCheckoutStagingTests(unittest.TestCase):
             body = entry.content.decode("utf-8")
             exempt = references.exempt_names(references.MACHINE_PROFILE, target)
             found = sorted(
-                {
-                    match.rstrip(".")
-                    for match in references.RESIDUE_RE.findall(body)
-                    if match.rstrip(".").removeprefix("scripts/") not in exempt
-                }
+                literal
+                for literal in references.residue_literals(body)
+                if literal.removeprefix("scripts/") not in exempt
             )
             if found:
                 offenders[target] = found
@@ -511,7 +509,22 @@ class PackCheckoutStagingTests(unittest.TestCase):
         manual = self.staged["docs/SD_AI_COMMAND_PACK.md"].content.decode("utf-8")
 
         self.assertIn("`scripts/sd-ai-command-pack-fleet-controller.py`", manual)
-        self.assertIn("bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh", manual)
+
+    def test_the_resolution_bootstrap_survives_the_machine_rewrite(self) -> None:
+        """Its candidates are runtime probes, not relocatable references.
+
+        The middle candidate names a repository-root path on purpose: it asks
+        whether the working directory is a pack source checkout. Rewriting it
+        to the machine root would make candidate 2 and candidate 3 the same
+        probe and lose the source-checkout preference entirely.
+        """
+
+        manual = self.staged["docs/SD_AI_COMMAND_PACK.md"].content.decode("utf-8")
+
+        self.assertIn('"scripts/sd-ai-command-pack-toolchain.sh"', manual)
+        self.assertIn(
+            '"$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"', manual
+        )
 
     def test_every_reference_exemption_still_occurs_in_its_file(self) -> None:
         stale: dict[str, list[str]] = {}

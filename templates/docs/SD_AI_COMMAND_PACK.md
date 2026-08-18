@@ -598,14 +598,22 @@ source-owned fix.
 Use the script directly from any shell:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-check.py --json
-bash scripts/sd-ai-command-pack-full-check.sh
-bash scripts/sd-ai-command-pack-housekeeping.sh --json # typed cleanup result
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-status.py fleet --json
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-review-learnings.py --include-working-tree
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-check.py --json
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-full-check.sh
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh --json # typed cleanup result
+bash "$SD_PACK_TOOLCHAIN" run-python -- sd-ai-command-pack-status.py
+bash "$SD_PACK_TOOLCHAIN" run-python -- sd-ai-command-pack-status.py fleet --json
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-review-learnings.py --include-working-tree
 ```
 
 `sd-status` is the read-only delivery snapshot for a repository. It reports the
@@ -1479,8 +1487,16 @@ Every verified rollout finding is also classified before watch, merge, or the
 next consumer mutation with the source-only command:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-finding-classify.py \
   --input <temporary-findings.json> --json
 ```
 
@@ -1640,8 +1656,16 @@ nested run metadata, and sanitizes and bounds every retained string before JSON
 or terminal rendering.
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-work-loop.py evidence --repo . \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-work-loop.py evidence --repo . \
   --run-id <run-id> --head <sha> --pr-number <n> --pr-url <url>
 ```
 
@@ -1671,8 +1695,16 @@ merge commit SHA, and default base branch. The local helper deliberately makes
 no network calls:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-work-loop.py reconcile-terminal --repo . \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-work-loop.py reconcile-terminal --repo . \
   --run-id <run-id> \
   --archived-task .trellis/tasks/archive/<month>/<task> \
   --delivery-pr-number <n> --delivery-pr-url <url> \
@@ -1698,9 +1730,17 @@ preserved counters as loop-owned.
 Run the non-mutating toolchain doctor before dependency-sensitive SD workflows:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh doctor
-bash scripts/sd-ai-command-pack-toolchain.sh doctor --json
-bash scripts/sd-ai-command-pack-toolchain.sh run-python \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" doctor
+bash "$SD_PACK_TOOLCHAIN" doctor --json
+bash "$SD_PACK_TOOLCHAIN" run-python \
   --require-module coverage -- -m coverage --version
 ```
 
@@ -1732,8 +1772,16 @@ classes through the shared toolchain. To select a specific safe parent, set one
 absolute external root before running the command:
 
 ```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
 export SD_AI_COMMAND_PACK_CACHE_ROOT="${SD_AI_COMMAND_PACK_CACHE_ROOT:-${TMPDIR:-/tmp}}"
-bash scripts/sd-ai-command-pack-toolchain.sh doctor
+bash "$SD_PACK_TOOLCHAIN" doctor
 ```
 
 The builder validates the parent, then creates a private deterministic
@@ -1752,7 +1800,7 @@ tokens, credential helpers, and unrelated environment variables are never
 rewritten. Reusable pack-created caches remain after successful commands;
 ordinary housekeeping does not delete them. Shared workflows invoke non-Python
 tools as separate argv through
-`bash scripts/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`; use that
+`bash "$SD_PACK_TOOLCHAIN" run -- <tool> [args...]`; use that
 form for ad hoc `gh`, uv, pip, Ruff, or npm calls inside an SD workflow instead
 of bypassing the cache contract.
 
@@ -2220,7 +2268,15 @@ To compare a consumer's installed version with a local pack checkout without
 changing the normal audit exit code, run:
 
 ```bash
-python3 scripts/sd-ai-command-pack-install-audit.py \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- sd-ai-command-pack-install-audit.py \
   --upstream-manifest /path/to/sd-ai-command-pack
 ```
 
@@ -2242,15 +2298,36 @@ even when their recorded hashes match and `--force` is set.
 After installing or refreshing a target repo, a quick smoke test is:
 
 ```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
 cd /path/to/repo
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-install-audit.py
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-install-audit.py
+bash "$SD_PACK_TOOLCHAIN" run-python -- sd-ai-command-pack-update-spec-kb.py --dry-run
+```
+
+A **fat** install additionally vendors the shell helpers into the target's own
+`scripts/` directory, so their syntax can be checked in place. The commands
+below read those vendored files deliberately: the helper names are file
+arguments to `bash -n`, not invocations. A thin consumer has no `scripts/`
+directory and skips this check entirely.
+
+<!-- pack-helper-resolution: exempt - syntax-checks the vendored fat-install
+     scripts/ tree in place; these are file arguments, not helper invocations -->
+
+```bash
+cd /path/to/repo
 bash -n scripts/sd-ai-command-pack-full-check.sh
 bash -n scripts/sd-ai-command-pack-review-full-check.sh
 bash -n scripts/sd-ai-command-pack-shell-lib.sh
 bash -n scripts/sd-ai-command-pack-toolchain.sh
 bash -n scripts/sd-ai-command-pack-review-scope.sh
-python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 ```
 
 ## Claude Code plugin and private marketplace
@@ -2320,7 +2397,15 @@ installer that writes it, so no pack checkout is needed:
 One command updates both halves — the plugin and the machine surfaces:
 
 ```bash
-scripts/sd-ai-command-pack-pack-update.sh
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-pack-update.sh
 ```
 
 It updates the plugin first, resolves the plugin root that update produced,
@@ -2345,6 +2430,22 @@ receipt; `remove` then deletes what the receipt installed and restores those
 originals, and nothing else. `sd-status` reports the machine receipt against
 the installed plugin version, so an update that only half completed shows as
 `skew` and rerunning the update command converges.
+
+`sd-status` also reports a separate helper-resolution row, because "which
+release is installed" and "which release a skill's helper invocation runs" are
+different questions and a clean answer to the first is not evidence about the
+second. The row names the toolchain the shared bootstrap in
+`.agents/skills/sd-help/references/pack-helper-resolution.md` reaches, which of
+its three candidates answered, that install's root, and every `PATH` entry
+holding a pack toolchain in `PATH` order. A `PATH` entry is recognized by
+holding the toolchain file, not by its name, so a differently named install
+root is still seen. The verdict is `bound` when no pack `bin/` is on `PATH` or
+the first one is the same install the bootstrap reached, `shadowed` when the
+first one is a different install, and `unresolved` when no candidate answered.
+`shadowed` is advisory and never blocking: the shipped skills do not consult
+`PATH`, so a stale cache entry runs nothing — it is reported because it is the
+thing to remove, and because a `PATH` that answers differently matters again the
+moment anything starts consulting it.
 
 ## Troubleshooting
 

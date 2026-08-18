@@ -25,7 +25,9 @@ requests, destructive actions, or bypassing any gate.
 ## Sandbox-safe tool execution
 
 Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
-through `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+through `bash "$SD_PACK_TOOLCHAIN" run -- <tool> [args...]`, with
+`$SD_PACK_TOOLCHAIN` resolved by the bootstrap in
+[`../sd-help/references/pack-helper-resolution.md`](../sd-help/references/pack-helper-resolution.md).
 The argv-safe wrapper changes only documented cache variables and preserves
 auth/config state. If it is missing or reports a cache-setup failure, stop with
 that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
@@ -97,7 +99,15 @@ branch, commit, push, or PR changes.
 ## Step 1: Resolve Prerequisites And Branch State
 
 ```bash
-bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh doctor
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" doctor
 gh --version
 gh auth status
 git status -sb
@@ -106,7 +116,7 @@ CURRENT_BRANCH=$(git branch --show-current)
 
 If the toolchain helper is missing, stop and report that the pack should be
 reinstalled. When an ad hoc Python validation needs project modules, invoke it
-through `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python
+through `bash "$SD_PACK_TOOLCHAIN" run-python
 --require-module <name> -- <arguments>` instead of trying multiple Python
 executables.
 
@@ -208,14 +218,17 @@ generated `_example` task-context rows, and task-context references outside
 spec/research files before publication:
 
 ```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
 git diff --check "$BASE_REF"...HEAD
 git diff --check
-if ! command -v sd-ai-command-pack-review-preflight.mjs >/dev/null 2>&1 \
-  && [ ! -f ~/.agents/bin/sd-ai-command-pack-review-preflight.mjs ]; then
-  printf '%s\n' "error: sd-ai-command-pack-review-preflight.mjs is not resolvable on PATH or under scripts/; reinstall sd-ai-command-pack before publishing." >&2
-  exit 1
-fi
-node ~/.agents/bin/sd-ai-command-pack-review-preflight.mjs
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs
 ```
 
 If the preflight exits nonzero, stop before staging, committing, or pushing and
@@ -285,6 +298,14 @@ exact auto-filled body and the NUL-delimited branch diff. The same Step 5 flow
 applies to every invocation, including `sd-ship` Stage 1:
 
 ```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
 if ! gh pr create --base "$BASE_BRANCH" --fill; then
   printf '%s\n' "error: PR creation failed; stop before Step 6." >&2
   exit 1
@@ -321,8 +342,8 @@ if ! gh pr view --json body --jq .body > "$PR_BODY_FILE"; then
 fi
 
 PREPARE_STATUS=0
-bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-  ~/.agents/bin/sd-ai-command-pack-pr-body-scope.py \
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-pr-body-scope.py \
   --prepare-tooling-body \
   --body-file "$PR_BODY_FILE" \
   --changed-files "$CHANGED_FILES_FILE" \

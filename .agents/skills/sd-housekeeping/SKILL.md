@@ -19,7 +19,15 @@ itself to default-branch cleanup and inventory.
 For cleanup-only work, run:
 
 ```bash
-bash scripts/sd-ai-command-pack-housekeeping.sh --json
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh --json
 ```
 
 For an open feature-branch PR, complete the SD finish-work flow first, push any
@@ -27,7 +35,15 @@ task/archive/journal commits, wait for required checks on the new head, then
 run:
 
 ```bash
-bash scripts/sd-ai-command-pack-housekeeping.sh \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh \
   --finish-work-receipt "$FINISH_WORK_RECEIPT" --json
 ```
 

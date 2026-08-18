@@ -38,7 +38,9 @@ for the shared ownership sequence and authoring examples.
 ## Sandbox-safe tool execution
 
 Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
-through `bash sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+through `bash "$SD_PACK_TOOLCHAIN" run -- <tool> [args...]`, with
+`$SD_PACK_TOOLCHAIN` resolved by the bootstrap in
+[`../sd-help/references/pack-helper-resolution.md`](../sd-help/references/pack-helper-resolution.md).
 The argv-safe wrapper changes only documented cache variables and preserves
 auth/config state. If it is missing or reports a cache-setup failure, stop with
 that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
@@ -138,7 +140,15 @@ profile is never an environment variable or platform-adapter surface.
 ## Step 1: Resolve PR And Local State
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh doctor
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" doctor
 gh --version
 gh auth status
 git status -sb
@@ -168,7 +178,7 @@ gh_pr_view_checked --json number,url,isDraft,headRefName,headRefOid,baseRefName,
 
 If the toolchain helper is missing, stop and report that the pack should be
 reinstalled. Route ad hoc Python validations through
-`bash sd-ai-command-pack-toolchain.sh run-python --require-module
+`bash "$SD_PACK_TOOLCHAIN" run-python --require-module
 <name> -- <arguments>` so dependency failures are reported once.
 
 Capture:
@@ -200,7 +210,15 @@ require `classified-head`, `LOCAL_HEAD`, and `HEAD_SHA` to be identical. Then
 from `source-root`, rerun the source classifier against the consumer checkout:
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-fleet-review-classify.py \
   --consumer <consumer> --repo <absolute consumer checkout> \
   --base-commit <base-commit> --remote <release-remote> --json
@@ -229,9 +247,17 @@ finish-work after an external merge has already ended the normal chain. Then
 run housekeeping inside the current command run:
 
 ```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
 PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
 if [ "$PR_STATE" = "MERGED" ]; then
-  bash sd-ai-command-pack-housekeeping.sh
+  bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh
   exit 0
 fi
 ```
@@ -251,7 +277,15 @@ Run the installed typed `sd-check` coordinator before requesting a remote review
 or accepting the integration-only profile:
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-check.py --json
 ```
 
@@ -694,7 +728,15 @@ Only after the Step 7 stop conditions are satisfied, run one read-only,
 PR-scoped learning pass for the completed overall review cycle:
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-review-learnings.py \
   --github-pr "$PR_NUMBER" --dry-run
 ```
@@ -773,7 +815,15 @@ PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq .state)
 If `PR_STATE` is `MERGED`, immediately run:
 
 ```bash
-bash sd-ai-command-pack-housekeeping.sh
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh
 ```
 
 Then include the housekeeping clean-state/anomaly report in the final response.

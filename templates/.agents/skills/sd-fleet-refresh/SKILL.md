@@ -92,8 +92,16 @@ it in the active task/session, and reuse it after interruption. Create or
 idempotently reopen the campaign before preflight:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py plan \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py plan \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> [--consumer <name> ...] [--no-merge] --json
 ```
@@ -106,8 +114,16 @@ mutations itself.
 Drive work only from issued actions:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py next \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py next \
   --repo <absolute-source-root> --campaign <campaign-id> --json
 ```
 
@@ -116,8 +132,16 @@ timeout, and whether it may cause a side effect. Execute it once through the
 owner named below, then record one normalized receipt:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py record \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py record \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> --action-id <full-action-id> \
   [--consumer <name>] --result <result> [receipt evidence] --json
@@ -178,7 +202,15 @@ but defines no ordering or transition policy:
   source checkout** against the consumer:
 
   ```bash
-  node scripts/sd-ai-command-pack-review-preflight.mjs seeded-task \
+  SD_PACK_TOOLCHAIN=""
+  for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+    "scripts/sd-ai-command-pack-toolchain.sh" \
+    "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+    if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+  done
+  [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+  bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs seeded-task \
     --repo <absolute consumer checkout> --task-dir <consumer-relative task dir> --json
   ```
 
@@ -326,8 +358,16 @@ For each non-empty batch of verified findings, create a temporary
 schema-version-1 findings file and run:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-finding-classify.py \
   --input <temporary-findings.json> --json
 ```
 

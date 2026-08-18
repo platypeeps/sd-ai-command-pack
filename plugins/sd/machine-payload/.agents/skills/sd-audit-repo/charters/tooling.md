@@ -59,7 +59,7 @@ of re-deriving the repository inventory.
   missing entries; prefer reading config over executing long builds.
 - When `gh` is available, read recent run history (`gh run list`) for
   rerun patterns and chronically failing jobs. Execute it through
-  `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run -- gh ...`; a missing or
+  `bash "$SD_PACK_TOOLCHAIN" run -- gh ...`; a missing or
   failed cache wrapper makes this optional probe unavailable and is not
   permission to retry bare or redirect `GH_CONFIG_DIR`.
 - Inspect target declarations, package-script definitions, shell entry points,

@@ -78,7 +78,15 @@ positional, explicit, or derived from the current stream.
    `Retro: <topic>`, mapping the retro shape onto the recorder flags:
 
    ```bash
-   bash sd-ai-command-pack-toolchain.sh run-python -- \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
      sd-ai-command-pack-record-session.py \
      --title "Retro: <topic>" \
      --summary "<one line: what broke + root cause>" \

@@ -3387,8 +3387,8 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("name: sd-review-pr", review_pr)
         self.assertIn("# SD PR Review Loop", review_pr)
         self.assertIn("standing permission to reply", review_pr)
-        self.assertIn("sd-ai-command-pack-toolchain.sh doctor", review_pr)
-        self.assertIn("scripts/sd-ai-command-pack-check.py --json", review_pr)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" doctor', review_pr)
+        self.assertIn("sd-ai-command-pack-check.py --json", review_pr)
         self.assertIn("Project checks:", review_pr)
         self.assertIn("Optional AI review:", review_pr)
         self.assertNotIn("bash scripts/sd-ai-command-pack-review-full-check.sh", review_pr)
@@ -3403,7 +3403,7 @@ class InstallCoreTests(InstallTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: sd-review", review)
         self.assertIn("# SD Review", review)
-        self.assertIn("scripts/sd-ai-command-pack-review.py", review)
+        self.assertIn("sd-ai-command-pack-review.py", review)
         self.assertIn("reconciliation-required", review)
         self.assertIn("review.round-extension", review)
         self.assertIn("direct Copilot request", review)
@@ -3428,7 +3428,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("SD_AI_COMMAND_PACK_CREATE_PR_BRANCH_SLUG", create_pr)
         self.assertIn("git switch -c", create_pr)
         self.assertIn("Do not run Prism, Gito", create_pr)
-        self.assertIn("sd-ai-command-pack-toolchain.sh doctor", create_pr)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" doctor', create_pr)
         self.assertIn(
             'gh pr create --base "$BASE_BRANCH" --title "$PR_TITLE" '
             '--body-file "$PR_BODY_FILE"',
@@ -3460,29 +3460,32 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("name: sd-review-learnings", review_learnings)
         self.assertIn("# SD Review Learnings", review_learnings)
         self.assertIn(
-            "scripts/sd-ai-command-pack-review-learnings.py", review_learnings
+            "sd-ai-command-pack-review-learnings.py", review_learnings
         )
-        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", review_learnings)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" run-python', review_learnings)
 
         finish_work = (
             install.ROOT / "templates/.agents/skills/sd-finish-work/SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", finish_work)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" run-python', finish_work)
         self.assertIn("--no-commit", finish_work)
         self.assertIn("git add -- <exact-journal-path>", finish_work)
 
         retro = (install.ROOT / "templates/.agents/skills/sd-retro/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", retro)
-        self.assertIn("scripts/sd-ai-command-pack-record-session.py", retro)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" run-python', retro)
+        self.assertIn("sd-ai-command-pack-record-session.py", retro)
 
         housekeeping = (
             install.ROOT / "templates/.agents/skills/sd-housekeeping/SKILL.md"
         ).read_text(encoding="utf-8")
         self.assertIn("name: sd-housekeeping", housekeeping)
         self.assertIn("# SD Housekeeping", housekeeping)
-        self.assertIn("bash scripts/sd-ai-command-pack-housekeeping.sh", housekeeping)
+        self.assertIn(
+            'bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-housekeeping.sh',
+            housekeeping,
+        )
         self.assertIn("Expected clean state", housekeeping)
         self.assertIn("not general maintenance", housekeeping)
         self.assertIn("Branch: <default>", housekeeping)
@@ -3494,7 +3497,7 @@ class InstallCoreTests(InstallTestCase):
         self.assertIn("references/architecture.md", update_spec)
         self.assertIn("references/obsidian-kb.md", update_spec)
         self.assertIn("routine spec-only run loads no optional reference", update_spec)
-        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", update_spec)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" run-python', update_spec)
         self.assertNotIn("Ensure `.obsidian-kb/`", update_spec)
         self.assertNotIn(
             "Link every relevant existing repo-knowledge file", update_spec
@@ -3517,7 +3520,7 @@ class InstallCoreTests(InstallTestCase):
         fleet_refresh = (
             install.ROOT / "templates/.agents/skills/sd-fleet-refresh/SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("sd-ai-command-pack-toolchain.sh run-python", fleet_refresh)
+        self.assertIn('bash "$SD_PACK_TOOLCHAIN" run-python', fleet_refresh)
 
         for skill_path in (install.ROOT / "templates/.agents/skills").glob(
             "sd-*/SKILL.md"
@@ -3528,7 +3531,7 @@ class InstallCoreTests(InstallTestCase):
                 skill_path.as_posix(),
             )
         self.assertIn(".obsidian-kb", update_spec)
-        self.assertIn("scripts/sd-ai-command-pack-update-spec-kb.py", update_spec)
+        self.assertIn("sd-ai-command-pack-update-spec-kb.py", update_spec)
         self.assertIn("Dashboard - <repo>.md", obsidian_kb)
         self.assertIn("Obsidian vault copy", update_spec)
 

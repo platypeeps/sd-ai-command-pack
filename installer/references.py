@@ -92,6 +92,64 @@ _WRAPPED_DOC_RE = re.compile(rf"docs/[ \t]*\n[ \t]*({re.escape(PACK_DOC_NAME)})"
 
 _RESIDUE_PREFIX = "scripts/"
 
+# Literals every payload keeps verbatim, and why.
+#
+# The pack-helper resolution bootstrap tests three candidate locations in order
+# and takes the first that exists. Its second candidate is a runtime existence
+# probe -- "is the working directory a pack source checkout?" -- not a
+# reference to a resource the payload relocated. Rewriting it is actively
+# wrong in every profile: the plugin would probe for a bare filename in the
+# caller's working directory, and the machine and thin profiles would duplicate
+# the bootstrap's own third candidate while silently deleting the developer
+# case the ordering exists for. The probe is deliberately a path that these
+# payloads do not ship, which is exactly what makes it fall through.
+#
+# It is one literal rather than a per-file exemption because the bootstrap is
+# repeated in every skill that invokes a helper, and a per-file list would go
+# stale the first time a skill is added. Reintroducing the old
+# `bash scripts/sd-ai-command-pack-toolchain.sh` call form is blocked
+# separately by .github/scripts/check-helper-resolution.py, which also pins the
+# bootstrap to a byte-identical copy of the one in
+# templates/.agents/skills/sd-help/references/pack-helper-resolution.md.
+# The literal is the bootstrap's quoted candidate, not the bare path: quoting
+# is what distinguishes the shell probe from every prose and invocation form,
+# which stay rewritable.
+PRESERVED_LITERALS: dict[str, str] = {
+    '"scripts/sd-ai-command-pack-toolchain.sh"': (
+        "resolution bootstrap: a runtime probe for a co-located pack source "
+        "checkout, not a reference to a relocated resource"
+    ),
+}
+_PRESERVED_SENTINEL = "\x00sd-preserved-{index}\x00"
+
+
+def _mask_preserved(text: str) -> str:
+    """Hide preserved literals from the rewrite and the residue scan."""
+
+    for index, literal in enumerate(PRESERVED_LITERALS):
+        text = text.replace(literal, _PRESERVED_SENTINEL.format(index=index))
+    return text
+
+
+def _unmask_preserved(text: str) -> str:
+    for index, literal in enumerate(PRESERVED_LITERALS):
+        text = text.replace(_PRESERVED_SENTINEL.format(index=index), literal)
+    return text
+
+
+def residue_literals(text: str) -> set[str]:
+    """Repository-root pack paths a rewritten text still names.
+
+    The one scan every text-residue caller shares, so a preserved literal
+    cannot be honored by the gate and still reported by a test that
+    re-implements the same regex.
+    """
+
+    return {
+        match.rstrip(".")
+        for match in RESIDUE_RE.findall(_mask_preserved(text))
+    }
+
 
 class ReferenceRewriteError(Exception):
     """A rewrite, residue, or closure violation that fails the payload build."""
@@ -507,13 +565,13 @@ def rewrite_text(text: str, *, profile: RewriteProfile, key: str = "") -> str:
             return match.group(0)
         return profile.script_template.format(name=name)
 
-    rewritten = SCRIPT_REFERENCE_RE.sub(replace_script, text)
+    rewritten = SCRIPT_REFERENCE_RE.sub(replace_script, _mask_preserved(text))
     doc_template = profile.doc_template
     if doc_template is not None and PACK_DOC_REFERENCE not in exempt:
         rewritten = DOC_REFERENCE_RE.sub(lambda _match: doc_template, rewritten)
     if profile.strip_node_prefix:
         rewritten = NODE_PREFIX_RE.sub(r"\1", rewritten)
-    return rewritten
+    return _unmask_preserved(rewritten)
 
 
 def _wrapped_pairs(text: str, directory: str, pattern: re.Pattern[str]) -> list[str]:
@@ -559,7 +617,7 @@ def check_text_residue(key: str, text: str, *, profile: RewriteProfile) -> None:
 
     check_wrapped_references(key, text, profile=profile)
     exempt = exempt_names(profile, key)
-    found = {match.rstrip(".") for match in RESIDUE_RE.findall(text)}
+    found = residue_literals(text)
     residue = sorted(
         literal
         for literal in found
@@ -654,6 +712,8 @@ __all__ = [
     "PACK_DOC_REFERENCE",
     "PLUGIN_CLOSURE_ALLOWLIST",
     "PLUGIN_PROFILE",
+    "PRESERVED_LITERALS",
+    "residue_literals",
     "RESIDUE_RE",
     "SCRIPT_REFERENCE_RE",
     "ReferenceRewriteError",

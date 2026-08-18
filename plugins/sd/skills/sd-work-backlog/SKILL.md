@@ -107,7 +107,15 @@ Start or resume through the helper with the normalized typed selector and stop
 boundary. New runs always use the single `backlog` controller mode.
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-work-loop.py start --repo . \
   --selector <all|needs-design> --until <design|merge> --json
 ```
@@ -186,7 +194,15 @@ Do not search unrelated source content to manufacture a focus match. Rank it
 through:
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-work-loop.py rank --repo . \
   --candidates-file /absolute/path/to/candidates.json --json
 ```
@@ -270,7 +286,15 @@ Refresh an existing `.obsidian-kb` after follow-up task creation and before
 recording the iteration result:
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-update-spec-kb.py --if-present
 ```
 
@@ -285,7 +309,15 @@ receipt file whose absolute path the nested ship reported on its
 `SD_SHIP_MERGE_RESULT_RECEIPT:` line, adding decisions and follow-up pointers:
 
 ```bash
-bash sd-ai-command-pack-toolchain.sh run-python -- \
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-work-loop.py result --repo . \
   --run-id "<run-id>" --task "<task>" \
   --from-receipt "<receipt path from SD_SHIP_MERGE_RESULT_RECEIPT>"

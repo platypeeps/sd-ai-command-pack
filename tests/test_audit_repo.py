@@ -98,7 +98,7 @@ class AuditRepoTests(InstallTestCase):
             "Active task: <task path from task.py current>",
             "one read-only sub-agent per router row in state `run`",
             "scripts/sd-ai-command-pack-audit-route.py",
-            "sd-ai-command-pack-toolchain.sh run-python",
+            'bash "$SD_PACK_TOOLCHAIN" run-python',
             "run|not-applicable|not-selected|failed",
             "not equivalent to exhaustive",
             "Never auto-create Trellis tasks",

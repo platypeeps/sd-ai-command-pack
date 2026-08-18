@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.71.30 - 2026-08-17
+
+### Changed
+
+- Every shipped skill now reaches a pack helper through one resolution rule,
+  defined once in the new
+  `.agents/skills/sd-help/references/pack-helper-resolution.md`. Skills used to
+  write `bash scripts/sd-ai-command-pack-toolchain.sh`, which is
+  working-directory relative and resolved by nothing: a thin consumer has no
+  `scripts/` directory, so the invocation failed before the toolchain's own
+  resolver -- the part that guarantees a run cannot mix two installs -- was ever
+  reached. Each executable block now carries a bootstrap that tries
+  `SD_AI_COMMAND_PACK_TOOLCHAIN`, the checkout's own `scripts/` copy, then the
+  machine install under `$HOME/.agents/bin`, and reports all three when none
+  answers. `PATH` is deliberately absent from that order, because `PATH` is
+  where the version split comes from: a host that prepends a stale plugin cache
+  leaves the oldest surviving entry answering first, with no relation to which
+  pack the running skill text came from.
+
+  84 authored sites changed across `templates/.agents/skills/**`,
+  `templates/docs/SD_AI_COMMAND_PACK.md`, and `.github/command-sources/**`. Two
+  were live defects rather than style: `sd-create-pr` guarded an invocation with
+  a `command -v` probe that accepted a different set of locations than the
+  invocation used, so it could pass while the invocation threw, and `sd-check`
+  required vendored `scripts/` siblings that a thin consumer never has.
+
+### Added
+
+- `.github/scripts/check-helper-resolution.py`, wired into `make check` and CI,
+  fails on a `scripts/`-prefixed helper in an executable block, on `node`,
+  `bash`, or `python3` invoking a helper directly, on a helper named as the
+  second operand of `run --` (which `run` never resolves), and on a block that
+  uses `$SD_PACK_TOOLCHAIN` without a byte-identical copy of the bootstrap --
+  each fenced block runs in its own shell. It enumerates the authored trees from
+  the filesystem and reads the canonical bootstrap out of the reference file, so
+  a skill added later is covered without editing the gate and the rule cannot
+  drift from its definition.
+- `sd-status` reports a helper-resolution row beside the machine-scope line, and
+  deliberately not folded into it: which release is installed and which release
+  a helper invocation runs are different questions. The row names the resolved
+  toolchain, which candidate answered, its install root, every `PATH` entry
+  holding a pack toolchain in `PATH` order, and a verdict of `bound`,
+  `shadowed`, or `unresolved`. A `PATH` entry is recognized by holding the
+  toolchain file rather than by matching a name pattern. `machineScope` moves to
+  schema 2.
+
+### Fixed
+
+- The plugin build no longer mangles the bootstrap. Its rewrite turns a
+  repository-root helper path into a bare PATH-resolved name, which would have
+  silently converted the bootstrap's second candidate -- a probe asking whether
+  the working directory is a pack source checkout -- into exactly the PATH
+  resolution the rule exists to remove. `installer/references.py` now preserves
+  that one quoted literal through both the rewrite and the residue gate; every
+  prose and invocation form stays rewritable.
+
 ## 0.71.29 - 2026-08-16
 
 ### Changed

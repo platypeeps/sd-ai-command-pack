@@ -55,8 +55,9 @@ of re-deriving the repository inventory.
 - Read the composition roots (main modules, installers, CLI entry points)
   and note wiring that duplicates or contradicts the declared layout.
 - Find large components with the pack-owned committed-tree inventory helper:
-  `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python --
-  ~/.agents/bin/sd-ai-command-pack-audit-inventory.py --repo . --json`. Consume its
+  `bash "$SD_PACK_TOOLCHAIN" run-python --
+  sd-ai-command-pack-audit-inventory.py --repo . --json` — see
+  [`../../sd-help/references/pack-helper-resolution.md`](../../sd-help/references/pack-helper-resolution.md) for the bootstrap that sets it. Consume its
   escaped `blob-bytes` rows; do not replace it with a whitespace-delimited
   filename pipeline. Then check whether the largest files aggregate unrelated
   responsibilities.

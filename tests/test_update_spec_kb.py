@@ -58,7 +58,7 @@ class UpdateSpecKbTests(InstallTestCase):
             "references/obsidian-kb.md",
             "routine spec-only run loads no optional reference",
             "never follow a reference from another reference",
-            "scripts/sd-ai-command-pack-update-spec-kb.py",
+            "sd-ai-command-pack-update-spec-kb.py",
             "no infrastructure",
             "not present",
             "not warranted",

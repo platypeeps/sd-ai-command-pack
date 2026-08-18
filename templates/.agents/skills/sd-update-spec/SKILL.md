@@ -40,7 +40,7 @@ ask for a normal bounded spec refresh already requested by the user.
      applicable.
    - Run the normal KB refresh from the repository root without loading an
      optional reference:
-     `bash scripts/sd-ai-command-pack-toolchain.sh run-python -- scripts/sd-ai-command-pack-update-spec-kb.py`.
+     `bash "$SD_PACK_TOOLCHAIN" run-python -- sd-ai-command-pack-update-spec-kb.py`.
      Load [`references/obsidian-kb.md`](references/obsidian-kb.md) only for an
      explicit preview, an occupied/symlinked/conflicting KB path, helper
      failure recovery, or detailed ownership/report interpretation.

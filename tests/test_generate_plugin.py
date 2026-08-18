@@ -908,12 +908,7 @@ class CommittedPluginTreeTests(PluginFixtureCase):
             if not self.generator.plugin_native(relative):
                 continue
             found = sorted(
-                {
-                    match.rstrip(".")
-                    for match in references.RESIDUE_RE.findall(
-                        path.read_text(encoding="utf-8")
-                    )
-                }
+                references.residue_literals(path.read_text(encoding="utf-8"))
             )
             if found:
                 offenders[relative] = found

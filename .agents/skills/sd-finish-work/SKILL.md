@@ -82,7 +82,15 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    canonical read-only gate once before any archive mutation:
 
    ```bash
-   node scripts/sd-ai-command-pack-review-preflight.mjs \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs \
      pre-archive --task-dir <exact-active-task-dir> [--task-dir ...] --json
    ```
 
@@ -108,8 +116,16 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    with the pack wrapper instead of calling `add_session.py` directly:
 
    ```bash
-   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-     scripts/sd-ai-command-pack-record-session.py \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-record-session.py \
      --title "..." --summary "..." --commit "hash1,hash2" \
      --change "main change bullet" --change "..." \
      --test "- [OK] test result line" --test "..." \
@@ -146,8 +162,16 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    the complete local bookkeeping range:
 
    ```bash
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
    FINISH_WORK_RECEIPT="$(mktemp)"
-   node scripts/sd-ai-command-pack-review-preflight.mjs \
+   bash "$SD_PACK_TOOLCHAIN" run -- sd-ai-command-pack-review-preflight.mjs \
      final-bundle --mode <completion|planning> \
      --base <captured-finalization-base-oid> --head "$(git rev-parse HEAD)" \
      --json >"$FINISH_WORK_RECEIPT"

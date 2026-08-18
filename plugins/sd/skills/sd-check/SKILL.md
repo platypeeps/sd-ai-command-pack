@@ -13,15 +13,25 @@ knowledge, or review-provider state.
 
 ## Workflow
 
-1. Resolve the repository root and verify these installed sibling files exist:
-   `sd-ai-command-pack-toolchain.sh`,
-   `sd-ai-command-pack-check.py`, and
-   `sd_ai_command_pack_lib.py`. If any is missing, stop and recommend
-   reinstalling or refreshing the command pack; do not improvise a replacement.
+1. Resolve the repository root. Do not check for vendored helper files under
+   `scripts/`: a thin consumer has none, and their presence or absence says
+   nothing about whether the coordinator is reachable. The bootstrap in
+   [`../sd-help/references/pack-helper-resolution.md`](../sd-help/references/pack-helper-resolution.md)
+   is the only precondition, and its failure branch is the blocker to report —
+   recommend reinstalling or refreshing the command pack, and do not improvise
+   a replacement.
 2. Run the coordinator exactly once through the selected Python toolchain:
 
    ```bash
-   bash sd-ai-command-pack-toolchain.sh run-python -- \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
      sd-ai-command-pack-check.py --json
    ```
 

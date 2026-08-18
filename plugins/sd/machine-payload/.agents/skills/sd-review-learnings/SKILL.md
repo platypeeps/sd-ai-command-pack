@@ -15,7 +15,9 @@ update mode.
 ## Sandbox-safe tool execution
 
 Run every `gh`, `uv`, `pip`, `ruff`, or `npm` command shown in this workflow
-through `bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run -- <tool> [args...]`.
+through `bash "$SD_PACK_TOOLCHAIN" run -- <tool> [args...]`, with
+`$SD_PACK_TOOLCHAIN` resolved by the bootstrap in
+[`../sd-help/references/pack-helper-resolution.md`](../sd-help/references/pack-helper-resolution.md).
 The argv-safe wrapper changes only documented cache variables and preserves
 auth/config state. If it is missing or reports a cache-setup failure, stop with
 that diagnostic; do not retry the tool bare or redirect `GH_CONFIG_DIR`.
@@ -67,8 +69,16 @@ the repo wrapper.
    whether the target is repository-local. Run a local scan first:
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-review-learnings.py --include-working-tree
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-learnings.py --include-working-tree
    ```
 
 2. When the user asks to record or refresh learnings, preview the exact
@@ -76,20 +86,44 @@ the repo wrapper.
    and planned mutation before updating:
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-review-learnings.py --include-working-tree --dry-run
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-learnings.py --include-working-tree --dry-run
    ```
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-review-learnings.py --include-working-tree --update
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-learnings.py --include-working-tree --update
    ```
 
 3. To include recent Copilot review comments, add a window:
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-review-learnings.py --github-days 2 --update
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-learnings.py --github-days 2 --update
    ```
 
    The default `--github-limit 0` inspects the complete UTC time window. A
@@ -98,8 +132,16 @@ the repo wrapper.
    directly instead:
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-review-learnings.py --github-pr 123 --dry-run
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-learnings.py --github-pr 123 --dry-run
    ```
 
    Current, non-outdated unresolved comments remain individual actionable
@@ -131,8 +173,16 @@ the repo wrapper.
    pass the recorded answer only to the same invocation:
 
    ```bash
-   bash ~/.agents/bin/sd-ai-command-pack-toolchain.sh run-python -- \
-     ~/.agents/bin/sd-ai-command-pack-review-learnings.py --include-working-tree \
+   SD_PACK_TOOLCHAIN=""
+   for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+     "scripts/sd-ai-command-pack-toolchain.sh" \
+     "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+     if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+   done
+   [ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-learnings.py --include-working-tree \
      --target /exact/resolved/path.md --update-external \
      --confirmed-external-target /exact/resolved/path.md
    ```

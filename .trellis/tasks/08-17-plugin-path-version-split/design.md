@@ -29,19 +29,49 @@ So the task is not "make every call site version-safe." It is "make the one
 bootstrap correct, and route the handful of calls that bypass the resolver back
 through it."
 
+## Which tree to edit
+
+`AGENTS.md:36` — "Treat `templates/**` as the source of truth for shipped pack
+payloads." The repository's own `.agents/skills/` and `.claude/skills/` are
+**installed artifacts**: `make sync` runs `install.py . --force`, which
+overwrites them from `templates/`. An earlier revision of this design named
+`.agents/skills/` as the edit target, which would have produced a diff that the
+next sync silently reverted.
+
+There are three authored sources and two generated layers:
+
+| Layer | Path | class A | class B | Edit? |
+|---|---|---|---|---|
+| authored | `templates/.agents/skills/**` | 50 | 9 | yes |
+| authored | `templates/docs/SD_AI_COMMAND_PACK.md` | 15 | 8 | yes |
+| authored | `.github/command-sources/*.md` | 2 | 0 | yes |
+| generated | `templates/{.commands,.claude,.gemini,.github}/**` | 2 each | 0 | no — regenerate |
+| generated | repo `.agents/skills/`, `.claude/skills/` | 50, 39 | 9, — | no — `make sync` |
+
+**67 authored class-A sites and 17 authored class-B sites.** The generated
+layers are refreshed by `make generate` and `make sync`; editing them by hand is
+the mistake this section exists to prevent.
+
+`templates/docs/SD_AI_COMMAND_PACK.md` is in scope and is not merely
+documentation: it is installed into every consumer as `docs/SD_AI_COMMAND_PACK.md`
+and its command examples are what an operator copies. Every one of them is
+CWD-relative today, so every one fails in the thin consumer it was installed
+into. Leaving the doc correct-looking while the skills are fixed would leave the
+defect exactly where a human meets it first.
+
 ## The two call classes
 
-Enumerated from `.agents/skills/`, not from the PRD:
-
-| Class | Shape | Sites | Resolution today |
+| Class | Shape | Authored sites | Resolution today |
 |---|---|---|---|
-| A | `bash <scripts-prefixed toolchain> run[-python] -- <helper>` | 50 | operand already correct; **bootstrap** is CWD-relative |
-| B | `node`/`bash` invoking a scripts-prefixed helper directly | 9 | none — bypasses the resolver entirely |
+| A | `bash <scripts-prefixed toolchain> run[-python] -- <helper>` | 67 | operand already correct; **bootstrap** is CWD-relative |
+| B | `node`/`bash` invoking a scripts-prefixed helper directly | 17 | none — bypasses the resolver entirely |
 
-Class B, exhaustively — `sd-fleet-refresh:180`, `sd-review-pr:234`,
-`sd-review-pr:776`, `sd-finish-work:85`, `sd-finish-work:150`,
-`sd-housekeeping:22`, `sd-housekeeping:30`, `sd-update-deps:84`,
-`sd-create-pr:218`.
+Class B in the skills, exhaustively — `sd-fleet-refresh:181`,
+`sd-review-pr:234`, `sd-review-pr:776`, `sd-finish-work:85`,
+`sd-finish-work:150`, `sd-housekeeping:22`, `sd-housekeeping:30`,
+`sd-update-deps:84`, `sd-create-pr:218`, all under
+`templates/.agents/skills/`. The remaining eight are command examples in
+`templates/docs/SD_AI_COMMAND_PACK.md`.
 
 The eleven bare-name occurrences `prd.md` counts are a **different set** from
 class B, not a subset of it — disjoint lines, overlapping only in which skills
@@ -68,18 +98,22 @@ than re-derived:
 
 ```bash
 SD_PACK_TOOLCHAIN=""
-for candidate in \
-  "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
   "scripts/sd-ai-command-pack-toolchain.sh" \
-  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"
-do
-  [ -n "$candidate" ] && [ -f "$candidate" ] && { SD_PACK_TOOLCHAIN="$candidate"; break; }
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
 done
-[ -n "$SD_PACK_TOOLCHAIN" ] || {
-  printf '%s\n' "error: sd-ai-command-pack toolchain not found (checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin); reinstall the command pack" >&2
-  exit 1
-}
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
 ```
+
+**Amended 2026-08-17, during implementation.** An earlier revision of this
+snippet spent two extra lines on `[ -n "$candidate" ] && [ -f "$candidate" ]`
+and a three-line failure branch. `[ -f "" ]` is already false, so the emptiness
+test was redundant, and the loop body is now an `if` rather than an `&&` chain
+because a trailing failed `&&` is the loop body's exit status and would kill a
+caller running under `set -e`. Seven lines instead of ten matters here: the
+snippet is repeated in **54 fenced blocks** across the authored trees, so each
+line costs 54.
 
 Order is the design decision:
 
@@ -171,7 +205,7 @@ What is observable, and what this design commits to:
 - **Disagreement is reported, not resolved.** When the resolved toolchain's
   install differs from the machine install, or a `PATH` entry names a third,
   that is a real observable and belongs in `sd-status` (requirement 3) — not in
-  a per-invocation check that would add a version probe to all 50 sites.
+  a per-invocation check that would add a version probe to all 67 sites.
 
 So requirement 1 is met by making a split *impossible along the executed path*,
 and requirement 3 by making a split *visible* when the environment still has
@@ -194,6 +228,22 @@ longer read `PATH`. It is reported so an operator can see the stale cache
 without reproducing it by hand, which is exactly what requirement 3 asks and
 what the existing `comparison: current` line does not say.
 
+**Amended 2026-08-17, during implementation.** Three refinements, all from
+building it:
+
+- A third verdict, `unresolved`, is required. "No candidate answered" is a
+  different state from `bound` with nothing on `PATH`, and collapsing them
+  would report a machine with no pack install as healthy.
+- A `PATH` entry is recognized by *holding the toolchain file*, not by its name
+  matching a pack `bin/` pattern. The filesystem answers the question a name
+  pattern only guesses at, and it keeps a differently named install root
+  visible.
+- "Renders as advisory" is implemented as the row alone, with no anomaly entry.
+  That follows this section's own framing — machine scope describes the
+  machine, not the reported repository — and matches how the neighbouring
+  `skew` comparison already behaves. An anomaly would have put `--expect-clean`
+  in every repository under the operator's `PATH`.
+
 ## Gate
 
 A repository-wide check in `make check` that fails on the forbidden forms:
@@ -214,9 +264,14 @@ the rule stays "no `scripts/` in an executable block", and the gate says exactly
 what the rule says.
 
 The gate enumerates from the filesystem — every `*.md` under
-`.agents/skills/`, not just `SKILL.md` — rather than from a list of known
-sites, so a skill or reference document added later is covered without editing
-the gate. The wider glob is load-bearing: eight `references/` and `charters/`
+`templates/.agents/skills/`, not just `SKILL.md`, plus
+`templates/docs/SD_AI_COMMAND_PACK.md` and `.github/command-sources/**` —
+rather than from a list of known sites, so a skill, reference document, or
+command source added later is covered without editing the gate.
+
+It scans the **authored** trees only. Running it over the generated copies as
+well would report every defect twice and would fail a tree whose only repair is
+`make generate` or `make sync`, which is a confusing way to say "regenerate". The wider glob is load-bearing: eight `references/` and `charters/`
 files carry 13 of the 50 class-A occurrences and are executed exactly like
 `SKILL.md` text, so a `SKILL.md`-only gate would pass a tree with thirteen live
 defects in it.
@@ -231,7 +286,7 @@ pack checkout is a place someone is deliberately editing helpers, and
 `sd-status` reports the resulting disagreement. The alternative — machine
 install always — makes pack development require an install round-trip per edit.
 
-**50 mechanical edits across 22 files in 16 skills.** Large diff, low risk
+**84 mechanical edits across the three authored trees.** Large diff, low risk
 each, and the
 gate prevents regression. The alternative of leaving class A alone and fixing
 only class B was considered and rejected: class A is the majority of the
