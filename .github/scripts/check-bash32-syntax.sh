@@ -74,6 +74,20 @@ is_shell_file() {
   esac
 }
 
+# Enumerate first and check the status. Reading `git ls-files` through a
+# process substitution would discard its exit status, so a git that is missing
+# or a checkout that is not a work tree would feed the loop nothing, land on
+# `checked -eq 0`, and exit 0 — a silent pass, which is the same defect this
+# gate exists to catch.
+tracked_list="$(mktemp)"
+trap 'rm -f "$tracked_list"' EXIT
+
+if ! git ls-files -z -- '*.sh' .githooks >"$tracked_list"; then
+  printf '%s\n' \
+    "error: git ls-files failed; cannot enumerate tracked shell scripts for the bash 3.2 gate." >&2
+  exit 1
+fi
+
 BASH32="$(resolve_bash32)"
 
 if [ -z "$BASH32" ]; then
@@ -89,20 +103,6 @@ fi
 
 checked=0
 failed=0
-
-# Enumerate first and check the status. Reading `git ls-files` through a
-# process substitution would discard its exit status, so a git that is missing
-# or a checkout that is not a work tree would feed the loop nothing, land on
-# `checked -eq 0`, and exit 0 — a silent pass, which is the same defect this
-# gate exists to catch.
-tracked_list="$(mktemp)"
-trap 'rm -f "$tracked_list"' EXIT
-
-if ! git ls-files -z -- '*.sh' .githooks >"$tracked_list"; then
-  printf '%s\n' \
-    "error: git ls-files failed; cannot enumerate tracked shell scripts for the bash 3.2 gate." >&2
-  exit 1
-fi
 
 while IFS= read -r -d '' path; do
   if ! is_shell_file "$path"; then

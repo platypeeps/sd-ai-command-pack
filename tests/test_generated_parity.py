@@ -1233,9 +1233,14 @@ class GeneratedParityTests(InstallTestCase):
             copied_script.parent.mkdir(parents=True)
             shutil.copy2(script, copied_script)
 
+            # Force the no-bash-3.2 state so the assertion holds on every
+            # platform: enumeration runs before interpreter resolution, so a
+            # Linux runner must report the broken enumeration rather than
+            # exiting 0 through the visible-skip branch.
             outside_work_tree = subprocess.run(
                 ["bash", str(copied_script)],
                 cwd=root,
+                env={**os.environ, "SD_AI_COMMAND_PACK_BASH32": "/nonexistent/bash"},
                 text=True,
                 capture_output=True,
                 check=False,

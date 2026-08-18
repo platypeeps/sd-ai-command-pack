@@ -78,6 +78,9 @@ substitution discards that status: a missing git or a directory that is not a
 work tree would then feed the loop nothing, land on `checked -eq 0`, and exit 0.
 A gate that passes because it could not look is the same defect as a gate that
 passes because the interpreter was missing, which requirement 3 already forbids.
+Enumeration therefore runs *before* interpreter resolution: otherwise a Linux
+runner would exit 0 through the visible-skip branch and never notice that the
+enumeration it was about to rely on is broken.
 
 `is_shell_file` reads the first line into a variable rather than piping `head`
 into a matcher: under `set -o pipefail` a reader that exits after one line
