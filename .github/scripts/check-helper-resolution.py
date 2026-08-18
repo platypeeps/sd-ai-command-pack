@@ -48,6 +48,14 @@ SCRIPTS_PREFIXED_RE = re.compile(r"scripts/" + HELPER)
 # blocks -- the ones long enough to need the structure.
 DIRECT_INVOKE_RE = re.compile(r"(?:^\s*|[|&;(]\s*|\$\(\s*)(node|python3|bash)\s+(?:-{1,2}[\w-]+(?:=\S+)?\s+)*(?:scripts/)?(" + HELPER + r")")
 RUN_INTERPRETER_RE = re.compile(r"\brun(?:-python)?\s+--\s+(node|python3|bash)\b")
+# A helper standing where a command goes, with nothing in front of it: resolved
+# by `PATH`, which names one cached plugin version chosen at session start and
+# never re-checked. This is the form the whole rule exists to remove, and the
+# only one no other pattern here matches -- `scripts/` sits between the anchor
+# and the name, and a direct invocation puts its interpreter there.
+BARE_INVOKE_RE = re.compile(
+    r"(?:^\s*|[|&;(]\s*|\$\(\s*)(?:\./)?(" + HELPER + r")\b"
+)
 
 EXEC_INFO_STRINGS = frozenset({"bash", "sh", "shell", ""})
 EXEMPT_MARKER = "pack-helper-resolution: exempt"
@@ -196,6 +204,14 @@ def check_file(path: pathlib.Path, bootstrap: list[str]) -> list[Finding]:
                     rel, line_no, "direct-invocation",
                     f"{direct.group(1)} invokes {direct.group(2)} directly; "
                     f"{remedy}",
+                ))
+            bare = BARE_INVOKE_RE.search(logical)
+            if bare:
+                findings.append(Finding(
+                    rel, line_no, "bare-invocation",
+                    f"{bare.group(1)} is invoked by bare name, which resolves "
+                    'through PATH; use bash "$SD_PACK_TOOLCHAIN" '
+                    "run[-python] -- <helper>",
                 ))
             interpreter = RUN_INTERPRETER_RE.search(logical)
             if interpreter and HELPER_RE.search(logical):

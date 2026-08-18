@@ -114,6 +114,38 @@ class HelperResolutionGateTests(unittest.TestCase):
             self.findings(self.bootstrapped('bash "$SD_PACK_TOOLCHAIN" doctor')), []
         )
 
+    def test_a_bare_helper_name_is_reported(self) -> None:
+        """The form `PATH` answers, which is the defect the rule exists for.
+
+        No other rule covers it: `scripts/` sits between the anchor and the
+        name, and a direct invocation puts its interpreter there, so a helper
+        standing alone at a command position matched nothing at all.
+        """
+
+        for body in (
+            "sd-ai-command-pack-status.py --json",
+            "sd-ai-command-pack-housekeeping.sh",
+            "./sd-ai-command-pack-housekeeping.sh",
+            "cd repo && sd-ai-command-pack-status.py",
+            "output=$(sd-ai-command-pack-status.py --json)",
+        ):
+            with self.subTest(body=body):
+                found = self.findings(self.block(body))
+
+                self.assertIn("bare-invocation", [f.rule for f in found])
+
+    def test_a_resolved_helper_is_not_a_bare_name(self) -> None:
+        """The rule must not fire on the form it is asking authors to use."""
+
+        found = self.findings(
+            self.bootstrapped(
+                'bash "$SD_PACK_TOOLCHAIN" run-python -- \\\n'
+                "  sd-ai-command-pack-status.py --json"
+            )
+        )
+
+        self.assertEqual(found, [])
+
     def test_a_scripts_prefixed_helper_is_reported(self) -> None:
         found = self.findings(
             self.block("bash scripts/sd-ai-command-pack-toolchain.sh doctor")
