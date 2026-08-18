@@ -1,4 +1,4 @@
-# `run --` cannot execute the payload helpers the pack ships non-executable
+# `run --` cannot execute the payload helpers the pack ships without the executable bit
 
 ## Goal
 
