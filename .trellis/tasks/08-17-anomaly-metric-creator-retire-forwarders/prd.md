@@ -102,7 +102,11 @@ task is about.
       all-pass from the `sd-ai-command-pack` source checkout and writes
       `docs/fleet/candidate-validation.json`.
       `CANDIDATE_EXIT=0`, eight of eight consumers `passed`, ledger written at
-      `packVersion 0.71.30` / `payloadDigest sha256:8f24dea7`.
+      `packVersion 0.71.30` / `payloadDigest sha256:a5184b86`. The first
+      all-pass run recorded `sha256:8f24dea7`; a later payload correction on the
+      same branch changed the digest and the ledger was refreshed again, both
+      times to all-pass. The digest is a property of the payload, not of this
+      task, so the criterion is the all-pass ledger rather than any one value.
 - [x] `make generate` in `sd-ai-command-pack` no longer reports
       `provenance.candidate-stale`.
       `shipped-surface closure: clean; 176 changed path(s), 1164 affected
