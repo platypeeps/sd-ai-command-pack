@@ -13,10 +13,15 @@ The hazard needs a *second process* writing into the tree while `shutil.rmtree`
 walks it. In this repository the only such writer is git's detached auto-gc, and
 it exists only where a test hosts a git repository. All four helper sites do
 (`git init`, `git init --bare`, or a `copytree`-cloned template whose `.git`
-comes with it). Extending the change to every call site would rewrite hundreds
-of lines across ~84 modules to buy tolerance for trees that no background
-process ever touches, and would spread errno suppression across code where an
-`ENOTEMPTY` would be a real bug rather than a race.
+comes with it). Extending the change to every call site would touch the
+remaining 232 call sites across 45 modules, to buy tolerance for trees that no
+background process ever touches, and would spread errno suppression across code
+where an `ENOTEMPTY` would be a real bug rather than a race.
+
+(The 232/45 figures are measured on the implementation branch. `prd.md`'s table
+reports 216 call sites because it was measured earlier, at `a129437c`, and says
+so; the counts moved with the test suite, and neither figure changes the scope
+argument.)
 
 ### Residual risk of the excluded set
 
