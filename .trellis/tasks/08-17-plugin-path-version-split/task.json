@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-17",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/plugin-path-version-split",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
