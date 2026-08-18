@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 407
+- **Total Sessions**: 408
 - **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~462 | Active |
+| `journal-9.md` | ~502 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 408 | 2026-08-18 | Enforce the planning branch-null rule the default preflight run reports | `7dd5e437`, `ae3e7010` | `task/preflight-planning-branch-gap` |
 | 407 | 2026-08-18 | Re-read a BLOCKED merge state before blaming branch protection | `3866ecbe`, `b70b2012`, `3dda6fc3` | `task/pr-eligibility-stale-blocked-review` |
 | 406 | 2026-08-18 | Stop the map guard passing when the structure section is absent | `fa569df1`, `9a836a48`, `a9285bdf`, `ffdd23f7` | `task/map-guard-section-absence` |
 | 405 | 2026-08-18 | Parse tracked shell with bash 3.2 before the push | `213e6b09`, `85e489c3`, `dc7b3c05`, `dcd248da`, `dac5bd40` | `task/local-bash32-syntax-gap` |
