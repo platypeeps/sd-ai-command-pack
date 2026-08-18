@@ -24,15 +24,16 @@ non-executable.
 `install.py` sets the bit when it stages a helper, so `~/.agents/bin` holds
 `-rwxr-xr-x` copies. The rule therefore works from the machine install and from
 any consumer checkout, and fails in exactly one place: the pack's own
-repository, where the bootstrap's second candidate — `scripts/…toolchain.sh` —
+repository, where the bootstrap's second candidate —
+`scripts/sd-ai-command-pack-toolchain.sh` —
 answers first and resolves helpers next to itself.
 
 Hit while running `08-17-plugin-path-version-split`'s own pre-archive gate on
-2026-08-18:
+2026-08-18, with the absolute checkout prefix elided:
 
 ```text
 scripts/sd-ai-command-pack-toolchain.sh: line 508:
-/Users/sven/repos/.../scripts/sd-ai-command-pack-review-preflight.mjs: Permission denied
+<checkout>/scripts/sd-ai-command-pack-review-preflight.mjs: Permission denied
 ```
 
 `run-python` is unaffected: it execs the interpreter with the script as an
@@ -88,7 +89,8 @@ installer path, or payload comparison reads the modes it changes.
 **Dispatch by extension inside `run`.** When the resolved operand is a pack
 helper and is not executable, exec `node` / the selected Python / `bash` by
 extension instead of the file itself, making `run` behave the way `run-python`
-already does. This one *is* a content change to `templates/scripts/…toolchain.sh`,
+already does. This one *is* a content change to
+`templates/scripts/sd-ai-command-pack-toolchain.sh`,
 so it moves the payload digest and does stale the ledger. It also adds logic to
 the single point every helper invocation passes through, and needs a clear
 failure for an extension it does not know.
