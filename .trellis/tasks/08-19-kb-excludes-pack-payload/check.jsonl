@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality bar the deterministic gate enforces; frames what coverage a change to KB selection needs."}
+{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "Defines which CI lanes select which files, so the changed helper is verified in the lane that actually runs it."}
