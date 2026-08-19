@@ -13,8 +13,9 @@ The test has two failure modes, both from the same root cause: it enumerates and
 stats the working tree, while the property it protects is about the git index.
 
 **1. It fails on a correctly set up checkout.** `tests/test_generated_parity.py:1370`
-asserts `.opencode/package.json` does not *exist* (the path is bound at `:1364`). The repository deliberately
-ignores that path, and instructs developers to create it:
+asserts the OpenCode manifest does not *exist* (the path is bound at `:1364`).
+The repository deliberately ignores that path, and instructs developers to
+create it:
 
 ```
 .opencode/.gitignore:1:node_modules       .opencode/node_modules
@@ -22,10 +23,10 @@ ignores that path, and instructs developers to create it:
 .opencode/.gitignore:3:package-lock.json  .opencode/package-lock.json
 ```
 
-`CONTRIBUTING.md` carries both halves — "Do not track `.opencode/package.json`
-or any `.opencode` Bun lockfile" and a `cd .opencode` install step — and
-`test_generated_parity.py:1336-1337` pins those two strings in this same file. So a developer who
-follows the documented setup makes the suite red:
+`CONTRIBUTING.md` carries both halves — a do-not-track line for the manifest and
+any Bun lockfile, and a `cd .opencode` install step — and
+`test_generated_parity.py:1336-1337` pins those two strings in this same file.
+So a developer who follows the documented setup makes the suite red:
 
 ```
 AssertionError: True is not false : .opencode/package.json is only needed when plugins import packages
@@ -60,8 +61,8 @@ the gate protects nothing there and blocks work here.
    from git, not from a filesystem glob, so an ignored path cannot enter it and
    a newly tracked `.opencode` module cannot escape it.
 2. The manifest and lockfile assertions test *trackedness*, not existence. A
-   locally installed `.opencode/package.json`, `package-lock.json`,
-   `node_modules/`, or `bun.lock` must not affect the result.
+   locally installed manifest, `package-lock.json`, `node_modules/`, or
+   `bun.lock` must not affect the result.
 3. The gate keeps its teeth: a tracked `.opencode` module that imports an
    external package still fails the test.
 4. The test passes both on a pristine checkout with no `.opencode` install and on
@@ -89,5 +90,11 @@ the gate protects nothing there and blocks work here.
   string pins at `:1322-1359`.
 - Whether `.opencode` should vendor a manifest at all — the current
   no-external-dependency policy is the thing being protected, not revisited.
-- Other suites that glob the working tree; if the same pattern exists elsewhere it
-  is a separate finding, recorded but not fixed here.
+- Other surfaces that resolve paths against the working tree. One is already
+  recorded: `templates/scripts/sd-ai-command-pack-review-preflight.mjs:3198`
+  validates documentation path references with `(candidate) => exists(candidate)`,
+  so a deliberately git-ignored path reads as a missing one and fails
+  `CI scope`. That is the same defect in shipped payload, it needs a version
+  bump, and it is filed as `08-18-preflight-path-refs-ignore-aware`. The prose
+  above works around it by naming the manifest rather than spelling its path
+  outside a fenced block.
