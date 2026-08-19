@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/fleet-consumer-conversion.md", "reason": "Documents running the install audit from this checkout with --repo pointed at a consumer, which is the working directory the miscited path silently assumed."}
+{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Covers doc gates that fire on paths which no longer exist; the same class of defect as a consumer record citing a helper absent from a thin install."}
