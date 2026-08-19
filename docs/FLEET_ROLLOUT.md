@@ -256,7 +256,11 @@ the refresh reinstalls its residual):
    from the registry's list. Changing a converted consumer's platform set is a
    `--revert-thin` plus a reviewed reconversion, never a fleet sweep.
 3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
-   <repo> --expected-platform ...` command. This audit vouches pack-owned
+   <repo> --expected-platform ...` command from this pack checkout, like step 2
+   and unlike step 4 — the script path is relative to this repository, and
+   `--repo` is what points the audit at the consumer. Record it that way in any
+   consumer-side note: the same relative path resolves to nothing inside a thin
+   install. This audit vouches pack-owned
    receipt targets only — the files recorded in `installed-targets.txt` and
    hashed in `provenance.json`. A consumer that relaxes its ignore policy to
    newly track a Trellis-owned platform adapter does not thereby add that

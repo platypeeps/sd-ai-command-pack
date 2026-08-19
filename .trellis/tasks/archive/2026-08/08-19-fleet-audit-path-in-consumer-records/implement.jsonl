@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Owns the source-only install-audit boundary and policy, which is the working-directory contract the miscited consumer-relative path silently violated."}
+{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Covers doc gates that fire on paths which no longer exist; the same class of defect as a consumer record citing a helper absent from a thin install."}
