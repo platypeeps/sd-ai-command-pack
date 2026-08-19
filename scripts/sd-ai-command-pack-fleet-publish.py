@@ -267,6 +267,8 @@ def check_preconditions(
     slug: str,
     prefixes: Sequence[str],
     exact: Collection[str] = (),
+    preflight: Path | None = None,
+    record_session: Path | None = None,
 ) -> None:
     top = git_out(["rev-parse", "--show-toplevel"], cwd=repo)
     if Path(top).resolve() != repo.resolve():
@@ -286,6 +288,24 @@ def check_preconditions(
             "use sd-finish-work for a folded-bookkeeping release",
             code=3,
         )
+    # Prove both pack helpers are reachable while this run is still a no-op.
+    # Neither is consumed until after the work commit: record-session at the
+    # journal step, the preflight at the receipt step, both downstream of a
+    # branch this helper has already written to -- and there is no resume path
+    # (resolve_task_dir below requires a live task directory the archive has by
+    # then moved). A dependency that can be checked before the first side
+    # effect must be.
+    for label, helper, flag in (
+        ("review preflight", preflight, "--review-preflight"),
+        ("record-session wrapper", record_session, "--record-session"),
+    ):
+        if helper is not None and not helper.is_file():
+            raise PublishError(
+                f"{label} not found at {helper} (fleet-publish resolves pack "
+                f"helpers from the source checkout that owns it; pass {flag} "
+                "to override)",
+                code=3,
+            )
     resolve_task_dir(repo, slug)
     disallowed = [
         path
@@ -465,15 +485,30 @@ def archive_and_journal(
 
 
 def completion_receipt(
-    repo: Path, base: str, head: str, receipt_out: Path
+    repo: Path, base: str, head: str, receipt_out: Path, preflight: Path
 ) -> str:
+    # The preflight is a pack helper, not a consumer file: this script is
+    # source-only (SOURCE_ONLY_ALLOWED_PACK_FILES) and a thin consumer vendors
+    # no scripts/sd-ai-command-pack-* at all, so a consumer-relative path finds
+    # nothing and node exits without stdout -- surfacing as an unparseable
+    # empty receipt rather than the missing file it is. Resolve it beside this
+    # script, exactly as publish() already resolves the record-session wrapper.
+    #
+    # --repo is not redundant with cwd. review-preflight's defaultRootDir()
+    # consults SD_AI_COMMAND_PACK_REPO_ROOT before it falls back to
+    # `git rev-parse --show-toplevel` in the inherited cwd, and the consumer
+    # full check exports that variable. Without an explicit --repo, an ambient
+    # value would silently produce a well-formed receipt describing the pack
+    # checkout while claiming to describe the consumer.
     result = run(
         [
             "node",
-            "scripts/sd-ai-command-pack-review-preflight.mjs",
+            str(preflight),
             "final-bundle",
             "--mode",
             "completion",
+            "--repo",
+            str(repo),
             "--base",
             base,
             "--head",
@@ -516,10 +551,23 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         else Path(__file__).resolve().parent
         / "sd-ai-command-pack-record-session.py"
     )
+    preflight = (
+        Path(args.review_preflight).resolve()
+        if args.review_preflight
+        else Path(__file__).resolve().parent
+        / "sd-ai-command-pack-review-preflight.mjs"
+    )
     receipt_out = Path(args.receipt_out).resolve()
     month = args.archive_month or datetime.now(timezone.utc).strftime("%Y-%m")
 
-    check_preconditions(repo, args.slug, prefixes, exact)
+    check_preconditions(
+        repo,
+        args.slug,
+        prefixes,
+        exact,
+        preflight=preflight,
+        record_session=record_session,
+    )
     base = git_out(["rev-parse", "HEAD"], cwd=repo)
 
     # Before the map: the block can newly ignore .obsidian-kb, and repomix must
@@ -546,7 +594,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         changes=args.change,
         tests=args.test,
     )
-    status = completion_receipt(repo, h1, h3, receipt_out)
+    status = completion_receipt(repo, h1, h3, receipt_out, preflight)
     if status != "valid":
         raise PublishError(
             f"completion receipt status is {status!r}, not 'valid' (not pushed); "
@@ -627,6 +675,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--record-session",
         default=None,
         help="Path to the record-session wrapper (defaults next to this script)",
+    )
+    parser.add_argument(
+        "--review-preflight",
+        default=None,
+        help="Path to the review-preflight helper (defaults next to this script)",
     )
     parser.add_argument(
         "--python", default="python3", help="Interpreter for Trellis scripts"

@@ -557,3 +557,45 @@ Answered the three Step 6 rollout gates, landed the fleet Trellis version-drift 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 410: Resolve fleet-publish pack helpers from the source checkout
+
+**Date**: 2026-08-19
+**Task**: Resolve fleet-publish pack helpers from the source checkout
+**Branch**: `fix/fleet-publish-preflight-resolution`
+
+### Summary
+
+fleet-publish.py shelled to the review preflight with a bare consumer-relative path under cwd=consumer. Every fleet consumer is thin and vendors no scripts/sd-ai-command-pack-*, so node exited without stdout and the missing file surfaced as an unparseable completion receipt, blocking pr-publication for all eight lanes. Resolve both pack helpers from the source checkout that owns the script, pass --repo explicitly so an ambient SD_AI_COMMAND_PACK_REPO_ROOT cannot silently retarget the receipt, and prove both helpers in check_preconditions before the first irreversible side effect.
+
+### Main Changes
+
+- completion_receipt resolves the preflight beside this script and passes --repo <consumer> explicitly; defaultRootDir reads SD_AI_COMMAND_PACK_REPO_ROOT before the cwd fallback, and full-check.sh exports it during the upstream local-checks stage, so an absolute path alone would have produced a well-formed receipt describing the pack checkout
+- check_preconditions proves the review preflight and the record-session wrapper while the run is still a no-op; both are consumed after the work commit and the helper has no resume path, since resolve_task_dir needs the live task directory the archive has moved
+- added --review-preflight, matching the existing --record-session override in shape and help text
+- the end-to-end tests passed only because the fixture stubbed the preflight at the consumer-relative path, which is the defect itself; the stub is now injected through --review-preflight
+- documented in docs/FLEET_ROLLOUT.md that consumer-only does not mean consumer-resident
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c1de1500` | fix(fleet): resolve the publish completion receipt from the pack, not the consumer |
+| `19169ffb` | fix(fleet): prove both pack helpers before the first side effect |
+
+### Testing
+
+- [OK] tests/test_fleet_publish.py: 38 tests, OK (35 baseline + 3 regression tests)
+- [OK] baseline re-run from HEAD in a scratch copy: 35 tests, OK, confirming the two end-to-end failures were fixture breakage introduced here
+- [OK] sd-check: status passed, 7 passed / 0 failed / 1 advisory skip
+- [OK] resolved final-bundle against rwbp-coordinator's existing head: status valid, completion_bundle_valid, headOid a0de85e
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

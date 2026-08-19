@@ -128,6 +128,109 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
         (self.repo / ".claude" / "x").write_text("y\n", encoding="utf-8")
         self._gate()
 
+    # --------------------------------------------------- preflight resolution
+
+    def test_absent_record_session_refuses_before_any_side_effect(self) -> None:
+        # Same hazard as the preflight, one step earlier: record-session is
+        # consumed at the journal step, downstream of the work commit this
+        # helper has already written.
+        self._write_manifest((".claude/skills/x/SKILL.md",))
+        prefixes, exact = publish.derive_allowed_paths(self.repo)
+        present = self.repo / "present-preflight.mjs"
+        present.write_text("//\n", encoding="utf-8")
+        missing = self.repo / "nowhere" / "record-session.py"
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.check_preconditions(
+                self.repo,
+                self.slug,
+                prefixes,
+                exact,
+                preflight=present,
+                record_session=missing,
+            )
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertIn(str(missing), str(ctx.exception))
+        self.assertIn("--record-session", str(ctx.exception))
+        self.assertEqual(
+            subprocess.run(
+                ["git", "rev-list", "--count", "HEAD"],
+                cwd=str(self.repo),
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+            "1",
+        )
+
+    def test_absent_preflight_refuses_before_any_side_effect(self) -> None:
+        # The preflight is consumed at step 4, after the work commit, the
+        # archive move, and the journal are already folded in -- and there is
+        # no resume path, because resolve_task_dir needs the live task
+        # directory the archive has moved by then. Checking it at step 4 is
+        # what turns a wrong path into a stranded consumer, so the gate has to
+        # refuse while the run is still a no-op.
+        self._write_manifest((".claude/skills/x/SKILL.md",))
+        prefixes, exact = publish.derive_allowed_paths(self.repo)
+        missing = self.repo / "nowhere" / "review-preflight.mjs"
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.check_preconditions(
+                self.repo, self.slug, prefixes, exact, preflight=missing
+            )
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertIn(str(missing), str(ctx.exception))
+        # Nothing was committed, and the task was not archived.
+        self.assertEqual(
+            subprocess.run(
+                ["git", "rev-list", "--count", "HEAD"],
+                cwd=str(self.repo),
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+            "1",
+        )
+        self.assertTrue((self.repo / publish.TASK_ROOT / self.slug).is_dir())
+
+    def test_completion_receipt_uses_an_absolute_path_and_explicit_repo(self) -> None:
+        # Two separate regressions guarded together. A consumer-relative path
+        # finds nothing in a thin consumer, which vendors no scripts/ at all.
+        # And an absolute path alone is not enough: review-preflight's
+        # defaultRootDir() reads SD_AI_COMMAND_PACK_REPO_ROOT -- which the
+        # consumer full check exports -- before falling back to the cwd's git
+        # top level, so without --repo the receipt can describe the pack
+        # checkout while claiming to describe the consumer.
+        seen: dict[str, object] = {}
+
+        def fake_run(argv, cwd=None, check=True):  # type: ignore[no-untyped-def]
+            seen["argv"] = list(argv)
+            seen["cwd"] = cwd
+
+            class Result:
+                stdout = '{"status": "valid"}'
+
+            return Result()
+
+        original = publish.run
+        publish.run = fake_run  # type: ignore[assignment]
+        try:
+            preflight = self.repo / "pack" / "review-preflight.mjs"
+            status = publish.completion_receipt(
+                self.repo,
+                "base1",
+                "head1",
+                self.repo / "receipt.json",
+                preflight,
+            )
+        finally:
+            publish.run = original  # type: ignore[assignment]
+
+        self.assertEqual(status, "valid")
+        argv = seen["argv"]
+        assert isinstance(argv, list)
+        self.assertEqual(argv[1], str(preflight))
+        self.assertTrue(Path(argv[1]).is_absolute())
+        self.assertIn("--repo", argv)
+        self.assertEqual(argv[argv.index("--repo") + 1], str(self.repo))
+        self.assertEqual(seen["cwd"], self.repo)
+
     # ------------------------------------------------- manifest-derived allowlist
 
     def test_new_payload_target_passes_without_a_code_edit(self) -> None:
@@ -419,7 +522,11 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
             "subprocess.run(['git', 'commit', '-q', '-m', 'chore: record journal'], check=True)\n",
             encoding="utf-8",
         )
-        # completion_receipt shells to `node scripts/sd-ai-command-pack-review-preflight.mjs`.
+        # completion_receipt shells to the pack's review-preflight. The fake is
+        # handed to publish through --review-preflight, the same way the
+        # record-session fake is: the helper resolves pack helpers from the
+        # source checkout, so dropping a file into the consumer's scripts/ no
+        # longer intercepts anything (and a thin consumer has no scripts/).
         preflight = self.repo / "scripts" / "sd-ai-command-pack-review-preflight.mjs"
         preflight.write_text(
             "process.stdout.write(JSON.stringify({status: 'valid'}));\n",
@@ -467,6 +574,8 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
                 str(receipt),
                 "--record-session",
                 str(self.repo / "scripts" / "fake-record-session.py"),
+                "--review-preflight",
+                str(self.repo / "scripts" / "sd-ai-command-pack-review-preflight.mjs"),
                 "--python",
                 sys.executable,
                 "--archive-month",
@@ -617,6 +726,8 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
                 str(receipt),
                 "--record-session",
                 str(self.repo / "scripts" / "fake-record-session.py"),
+                "--review-preflight",
+                str(self.repo / "scripts" / "sd-ai-command-pack-review-preflight.mjs"),
                 "--python",
                 sys.executable,
                 "--archive-month",
