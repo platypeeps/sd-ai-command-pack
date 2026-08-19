@@ -101,6 +101,7 @@ import {
   findTrellisPlanningPlaceholders,
   findTrellisTaskContextIssues,
   findTrellisTaskContextSeedRows,
+  isAbsentPathMarked,
   isBoundaryRiskReviewPath,
   isPristineTrellisTaskContextScaffold,
   isSourceReviewPath,
@@ -715,6 +716,70 @@ assert.deepEqual(parseNumstat('3\\t4\\t\\0old\\tname.js\\0new\\tname.js\\0'), [
 assert.deepEqual(
   extractDocumentationPathReferences('docs/guide.md', 'See `docs/current.md` and [missing](../missing.md).').map((item) => item.target),
   ['../missing.md', 'docs/current.md'],
+);
+
+// An `[absent: <reason>]` marker exempts the single reference it follows, and
+// an unmarked reference to the same path in the same text still fails. Both
+// live in one fixture so the pair cannot drift apart.
+const markedAndUnmarked = 'A `docs/gone.md` [absent: lives in another repo]\\nB `docs/gone.md`';
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', markedAndUnmarked),
+  [{ file: 'docs/guide.md', kind: 'code-span', line: 2, target: 'docs/gone.md' }],
+);
+// A marker after a markdown-link reference exempts it on the same terms.
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', '[text](docs/gone.md) [absent: reason]'),
+  [],
+);
+// Every malformed or misplaced marker leaves the reference collected. The
+// `[absent:]]` case is the one a `\\S` reason class would wrongly accept with an
+// empty reason; the `\\r` and U+2028/U+2029 cases are JavaScript line
+// terminators a `[^\\]\\n]` class would have admitted, letting a reason close its
+// bracket on what a reader sees as the next line.
+const failClosedMarkers = [
+  '`docs/gone.md` [absent:]',
+  '`docs/gone.md` [absent:   ]',
+  '`docs/gone.md` [absent:]]',
+  '`docs/gone.md` [absent lives elsewhere]',
+  '`docs/gone.md`\\n[absent: reason]',
+  '[absent: reason] `docs/gone.md`',
+  '`docs/gone.md` [absent: unclosed reason',
+  '`docs/gone.md`, [absent: reason]',
+  '`docs/gone.md` [absent: a\\rb]',
+  '`docs/gone.md` [absent: a\\u2028b]',
+  '`docs/gone.md` [absent: a\\u2029b]',
+];
+for (const text of failClosedMarkers) {
+  assert.deepEqual(
+    extractDocumentationPathReferences('docs/guide.md', text).map((item) => item.target),
+    ['docs/gone.md'],
+    `expected no suppression for: ${JSON.stringify(text)}`,
+  );
+}
+// The predicate itself, so the fail-closed cases are provable without routing
+// every one through extraction.
+assert.equal(isAbsentPathMarked('x [absent: reason]', 1), true);
+assert.equal(isAbsentPathMarked('x\\t[absent: reason]', 1), true);
+assert.equal(isAbsentPathMarked('x [absent:]', 1), false);
+assert.equal(isAbsentPathMarked('x [absent:]]', 1), false);
+assert.equal(isAbsentPathMarked('x [absent reason]', 1), false);
+assert.equal(isAbsentPathMarked('x  [absent: reason]', 0), false);
+// `[`docs/gone.md`](docs/gone.md)` yields two references; a marker after the
+// link immediately follows only the link, so the code span accepts that link's
+// end as its anchor when both name the same path.
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', '[`docs/gone.md`](docs/gone.md) [absent: reason]'),
+  [],
+);
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', '[`docs/gone.md`](docs/gone.md)').map((item) => item.kind),
+  ['markdown-link', 'code-span'],
+);
+// Differing targets: one marker must not silence two different paths, so only
+// the link it follows is exempt and the code span stays checked.
+assert.deepEqual(
+  extractDocumentationPathReferences('docs/guide.md', '[`docs/display.md`](docs/target.md) [absent: reason]'),
+  [{ file: 'docs/guide.md', kind: 'code-span', line: 1, target: 'docs/display.md' }],
 );
 const managedReviewLearnings = [
   '# Review Learnings',
@@ -4154,6 +4219,138 @@ assert.deepEqual(
         self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
         self.assertNotIn("install-audit.py:~145", result.stdout)
         self.assertNotIn("review-scope.sh:~315-366", result.stdout)
+
+    def test_review_preflight_absent_marker_does_not_leak_across_files(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/a.md").write_text(
+            "Marked: `docs/definitely-missing.md` [absent: another repository].\n",
+            encoding="utf-8",
+        )
+        (root / "docs/b.md").write_text(
+            "Unmarked: `docs/definitely-missing.md`.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        # The marker is scoped to the one reference it follows, so marking the
+        # path in docs/a.md must not silence the same path in docs/b.md.
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "docs/b.md:1 references missing path docs/definitely-missing.md",
+            result.stdout,
+        )
+        self.assertNotIn("docs/a.md:1 references missing path", result.stdout)
+
+    def test_review_preflight_optional_reference_paths_extend_through_config(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/cite.md").write_text(
+            "Generated: `docs/generated-elsewhere.md`.\n",
+            encoding="utf-8",
+        )
+
+        def run() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        # Without the config entry the path is an ordinary missing reference.
+        before = run()
+        self.assertEqual(before.returncode, 1, before.stdout)
+        self.assertIn(
+            "references missing path docs/generated-elsewhere.md",
+            before.stdout,
+        )
+
+        # The existing assertions cover only the built-in defaults, so this is
+        # the config-extension half of the optionalReferencePaths contract.
+        config_path = root / ".sd-ai-command-pack/review-preflight.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            json.dumps({"optionalReferencePaths": ["docs/generated-elsewhere.md"]}),
+            encoding="utf-8",
+        )
+
+        after = run()
+        self.assertEqual(after.returncode, 0, after.stdout)
+        self.assertNotIn("docs/generated-elsewhere.md", after.stdout)
+
+    def test_absent_markers_in_repo_docs_render_as_literal_text(self) -> None:
+        # Acceptance criterion 5 is a static syntax check, not a rendering run:
+        # it proves each marker stays literal text rather than turning into link
+        # syntax. `[absent: ...]` is a link only if followed by `(` or `[`, or if
+        # a matching link reference definition exists in the same file. This
+        # does not execute a Markdown renderer -- the repository has no Markdown
+        # dependency and the preflight is deliberately dependency-free.
+        repo_root = PACK_ROOT
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z", "*.md"],
+            cwd=repo_root,
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout.split("\0")
+
+        marker = re.compile(r"\[absent:[^\]\r\n]*\]")
+        # A link reference definition is anchored: at most three leading spaces
+        # at the start of a line, then the label, colon, and a destination. The
+        # test matches that shape rather than searching for `]:` anywhere,
+        # because the documents that define this marker quote the forbidden
+        # form mid-sentence -- `implement.md` says "no `[absent: ...]:` link
+        # reference definition exists" -- and a substring search fails on the
+        # sentence stating the rule.
+        definition = re.compile(
+            r"^ {0,3}\[absent:[^\]\r\n]*\]:", re.MULTILINE
+        )
+        checked = 0
+        for name in filter(None, tracked):
+            text = Path(repo_root / name).read_text(encoding="utf-8", errors="replace")
+            if "[absent:" not in text:
+                continue
+            self.assertIsNone(
+                definition.search(text),
+                f"{name}: a link reference definition would make the marker a link",
+            )
+            for match in marker.finditer(text):
+                checked += 1
+                following = text[match.end() : match.end() + 1]
+                self.assertNotIn(
+                    following,
+                    ("(", "["),
+                    f"{name}: marker at offset {match.start()} reads as link syntax",
+                )
+
+        self.assertGreater(checked, 0, "no absent markers found to check")
 
     def test_review_preflight_preserves_archived_deleted_path_references(
         self,

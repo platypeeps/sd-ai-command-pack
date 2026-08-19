@@ -606,6 +606,10 @@ that exercise the generic JavaScript review preflight.
 - A live changed PRD references a missing local path -> fail; the same
   historical reference in an archived task PRD -> remain accepted after that
   path is deleted.
+- A missing-path reference followed on the same line by `[absent: <reason>]`
+  -> pass for that one reference only; a reason that is empty, blank, or
+  unterminated, a marker separated by anything but spaces or tabs, and a marker
+  on another line -> fail closed with the reference still checked.
 
 ### 5. Good/Base/Bad Cases
 
@@ -626,6 +630,13 @@ that exercise the generic JavaScript review preflight.
   does not become a historical migration.
 - Base: an ordinary task omits `meta.priorityProvenance` and retains its current
   metadata behavior; an archived PRD retains a historical path reference.
+- Good: a PRD naming a path the prose exists to call absent marks it at the
+  point of use, so a reader sees the reason without opening a config file.
+- Base: a second reference to that same path, in the same file or another one,
+  stays checked; only the marked occurrence is exempt.
+- Bad: silencing a one-sentence absence by adding the path to
+  `optionalReferencePaths`, which is repository-wide and blinds every future
+  document that names the path because it genuinely rotted.
 - Bad: a newly planned child inherits the author's unrelated feature branch,
   or a changed parent PRD mentions only a longer child-ID prefix match.
 - Bad: provenance supplies only a rationale, repeats the current priority, or
@@ -678,6 +689,13 @@ that exercise the generic JavaScript review preflight.
   and incomplete marker pairs remain checked with accurate line numbers.
 - Real-Git documentation-path coverage proving an active changed PRD fails when
   a referenced path is later deleted while the archived-task equivalent passes.
+- Absent-path marker coverage: a marked and an unmarked reference to the same
+  path in one text, every fail-closed form including an empty reason and a
+  reason carrying `\r` or U+2028/U+2029, both code-formatted-link cases, no
+  leak across files, `optionalReferencePaths` still extending through
+  `.sd-ai-command-pack/review-preflight.json`, and a static syntax check that
+  every marker in tracked documentation renders as literal text rather than
+  link syntax.
 
 ### 7. Wrong vs Correct
 

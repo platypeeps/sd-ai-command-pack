@@ -103,11 +103,55 @@ FAIL .../08-18-preflight-path-refs-ignore-aware/prd.md:38 references missing pat
 The gate rejected the document describing the bug, for the bug, on two
 consecutive attempts.
 
+## What `08-08-preflight-absent-path-prose` delivered, 2026-08-19
+
+That task shipped the point-of-use marker: a documentation reference followed
+on the same line by `[absent: <reason>]` is exempt from the existence probe.
+The reason is required, every malformed or misplaced form leaves the reference
+checked, and the exemption covers only the one reference it follows. It also
+rewrote the `pass()` message to name all three accepted outcomes -- resolved,
+optional by configuration, or marked absent at the point of use -- which is
+requirement 6 below, closed in full.
+
+The marker closes the motivating case: a planning artifact may now spell the
+OpenCode manifest path plainly in prose and mark it, and the gate accepts it in
+a checkout where the file is absent. Requirements 2, 3, and 4 were never at
+risk and remain satisfied -- the marker is a per-match regex test with no
+subprocess and no network, and it changes no other exemption.
+
+### What a tracked declaration would still buy
+
+The marker is per-reference by design, so it is the wrong tool for a path that
+several documents legitimately name. That is the residual scope here:
+
+- A **tracked, repository-wide declaration** of deliberately-absent paths.
+  `optionalReferencePaths` extended through `.sd-ai-command-pack/review-preflight.json`
+  is already exactly that mechanism and that file would be tracked, so the
+  remaining question is not whether one exists but whether the pack should ship
+  a distinct *absent* declaration -- carrying a required reason, the way the
+  marker does -- rather than reusing an array named for optional generated
+  artifacts. Answer that before designing anything.
+- **Fail-closed behavior on a malformed declaration** (requirement 5). The
+  marker fails closed by construction and is asserted so. The config path is
+  not covered by an equivalent test; that gap is real and independent of which
+  declaration shape wins.
+
+Reduced scope, 2026-08-19. Do not re-litigate the ignore-aware design: the
+untracked-ignore-file evidence above still rules `git check-ignore` out.
+
+Also note: `08-18-opencode-parity-ignores-git` was archived on 2026-08-18, so
+the acceptance criterion below asking to revert prose contortions in *that*
+PRD now targets an archived record. Archived tasks are immutable; treat that
+half of the criterion as closed by the marker's availability for future
+documents, not as an edit to make.
+
 ## Requirements
 
-1. A path the project deliberately keeps out of the checkout resolves as valid.
-   The mechanism is a design decision, but it must be **tracked** — an untracked
-   file cannot carry it, per the evidence above.
+1. ~~A path the project deliberately keeps out of the checkout resolves as
+   valid.~~ Delivered 2026-08-19 by the `[absent: <reason>]` marker. What
+   remains is the repository-wide form: a **tracked** declaration for a path
+   several documents name, since an untracked file cannot carry it per the
+   evidence above.
 2. A genuinely missing path — neither present nor declared — still fails, and the
    message is byte-identical to today's.
 3. The `design.md`/`implement.md` and archive exemptions at `:3180-3186` keep
@@ -117,21 +161,26 @@ consecutive attempts.
 5. An unreadable or malformed declaration fails closed rather than treating every
    reference as valid. This is the lesson from the bash 3.2 gate: an empty result
    must never read as "nothing to check".
-6. The `pass()` message at `:3211` describes what the code actually accepts, or
-   the code implements what the message already claims.
+6. ~~The `pass()` message describes what the code actually accepts.~~ Closed
+   2026-08-19: it now names resolved, optional-by-configuration, and
+   marked-absent-at-the-point-of-use. The `:3211` citation predates that
+   change and is not refreshed here, because the line no longer carries the
+   defect.
 
 ## Acceptance criteria
 
-- [ ] A planning artifact naming the OpenCode manifest plainly in prose passes
-      the preflight in a checkout where that file is absent, proven by running
-      the gate with the local install moved aside.
+- [x] A planning artifact naming the OpenCode manifest plainly in prose passes
+      the preflight in a checkout where that file is absent. Delivered by the
+      `[absent: <reason>]` marker on 2026-08-19; a repository-wide declaration
+      would still need its own proof.
 - [ ] A reference to a path that is neither present nor declared still fails, and
       the failure message is byte-identical to today's.
 - [ ] A forced-failure or malformation of the declaration makes the check fail
       closed, asserted by a test rather than by inspection.
-- [ ] The prose contortions in **both** PRDs — this one and
-      `08-18-opencode-parity-ignores-git/prd.md` — are reverted to spell the
-      paths plainly, and the preflight still passes.
+- [ ] The prose contortions in this PRD are reverted to spell the paths
+      plainly, and the preflight still passes. The
+      `08-18-opencode-parity-ignores-git` half is dropped: that task archived on
+      2026-08-18 and its record is immutable.
 - [ ] No design in the accepted plan resolves validity through `git check-ignore`,
       or it carries a written rebuttal of the untracked-ignore-file evidence
       above.

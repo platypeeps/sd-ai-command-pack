@@ -145,6 +145,16 @@ const NON_PRODUCTION_CODE_DIRECTORY_SEGMENTS = new Set([
 const MAX_REVIEW_RISK_PATHS = 5;
 const MAX_CONFIGURED_REVIEW_RISK_SIGNALS = 20;
 const MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH = 120;
+// A documentation reference may be marked as deliberately unresolvable by an
+// `[absent: <reason>]` marker immediately after it on the same line. The reason
+// is required: a suppression with no stated cause is the thing this marker
+// exists to prevent, so the class is `[^\]\s]` rather than `\S` — `\S`
+// matches `]`, which would let `[absent:]]` pass with an empty reason. The
+// surrounding classes exclude every JavaScript line terminator, not just `\n`,
+// so a reason cannot swallow a bare CR or U+2028/U+2029 and close its bracket
+// on what a reader sees as the next line.
+const ABSENT_PATH_MARKER_PATTERN =
+  /^[ \t]*\[absent:[^\]\r\n\u2028\u2029]*[^\]\s][^\]\r\n\u2028\u2029]*\]/;
 const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
 const REVIEW_LEARNINGS_MANAGED_BLOCK_PATTERN =
   /<!-- sd-review-learnings:start -->[\s\S]*?<!-- sd-review-learnings:end -->/g;
@@ -3208,7 +3218,7 @@ function checkDocumentationPathReferences() {
     return;
   }
 
-  pass('documentation path references resolve to existing repo files or documented external/local-only paths.');
+  pass('documentation path references resolve to existing repo files, are optional by configuration, or are marked absent at the point of use.');
 }
 
 // Repomix renders its listing as an indented tree inside a fenced block. Each
@@ -5048,19 +5058,38 @@ function resolvesToLineSuffixedPath(resolved, existsPath) {
   return base !== resolved && existsPath(base);
 }
 
+// True when `[absent: <reason>]` sits at `endOffset`, separated from it by
+// nothing but spaces or tabs. Every malformed or misplaced marker — empty
+// reason, missing colon, unclosed bracket, anything non-blank in between, a
+// marker on the next line or before the reference — fails to match, so the
+// reference stays checked. Exported so the fail-closed cases can be asserted
+// directly rather than only through end-to-end output.
+export function isAbsentPathMarked(text, endOffset) {
+  return ABSENT_PATH_MARKER_PATTERN.test(text.slice(endOffset));
+}
+
 export function extractDocumentationPathReferences(file, text, options = {}) {
   const references = [];
   const markdownLinkPattern = /!?\[[^\]\n]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
   const codeSpanPattern = /`([^`\n]+)`/g;
+  const markdownLinkSpans = [];
 
   for (const match of text.matchAll(markdownLinkPattern)) {
     const target = normalizeDocumentationReference(match[1]);
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+
+    markdownLinkSpans.push({ start, end, target });
 
     if (target && shouldCheckDocumentationPathReference(target, 'markdown-link', options)) {
+      if (isAbsentPathMarked(text, end)) {
+        continue;
+      }
+
       references.push({
         file,
         kind: 'markdown-link',
-        line: lineNumberAt(text, match.index ?? 0),
+        line: lineNumberAt(text, start),
         target,
       });
     }
@@ -5068,12 +5097,32 @@ export function extractDocumentationPathReferences(file, text, options = {}) {
 
   for (const match of text.matchAll(codeSpanPattern)) {
     const target = normalizeDocumentationReference(match[1]);
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
 
     if (target && shouldCheckDocumentationPathReference(target, 'code-span', options)) {
+      // `[`docs/x.md`](docs/x.md)` yields two references, and a marker after the
+      // link immediately follows only the link — the code span ends at its
+      // closing backtick, followed by `](…)`. So a code span wholly inside a
+      // link also accepts a marker at that link's end, but only when the two
+      // name the same path: in `[`docs/display.md`](docs/target.md)` they do
+      // not, and a link-end anchor without the condition would silence a path
+      // the author never marked.
+      const enclosingLink = markdownLinkSpans.find(
+        (span) => span.start <= start && end <= span.end && span.target === target,
+      );
+
+      if (
+        isAbsentPathMarked(text, end)
+        || (enclosingLink && isAbsentPathMarked(text, enclosingLink.end))
+      ) {
+        continue;
+      }
+
       references.push({
         file,
         kind: 'code-span',
-        line: lineNumberAt(text, match.index ?? 0),
+        line: lineNumberAt(text, start),
         target,
       });
     }

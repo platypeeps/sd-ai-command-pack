@@ -725,3 +725,49 @@ The 0.71.33 fleet refresh transcribed the install audit into nine consumer recor
 ### Next Steps
 
 - None - task complete
+
+
+## Session 414: Mark a deliberately absent documentation path at the point of use
+
+**Date**: 2026-08-19
+**Task**: Mark a deliberately absent documentation path at the point of use
+**Branch**: `task/08-08-preflight-absent-path-prose`
+
+### Summary
+
+Added an [absent: <reason>] marker to the review preflight's documentation path-reference check, so a PRD can name a path that is deliberately absent without silencing that path repository-wide. Reverted the two backtick-stripping workarounds on main and the same self-applied degradation in this task's own PRD, shipped the payload release tail, recorded the contract in the quality guidelines, trimmed the sibling 08-18 task, and created the phase-2 successor.
+
+### Main Changes
+
+- Marker recognition in templates/scripts/sd-ai-command-pack-review-preflight.mjs: a reference followed on the same line by [absent: <reason>] is exempt, the reason is required, and every malformed or misplaced form leaves the reference checked
+- Code-formatted links handled: a code span wholly inside a markdown link accepts that link's end as a marker anchor, but only when both resolve to the same path
+- Reverted the 2026-08-08 backtick-stripping workaround in 08-07's PRD and the same self-applied degradation in 08-08's own PRD, with six stale line citations refreshed
+- Payload release tail: make sync, make generate, manifest 0.71.34, CHANGELOG heading, make release-prep last
+- Recorded the marker in .trellis/spec/backend/quality-guidelines.md, trimmed 08-18-preflight-path-refs-ignore-aware to the tracked-declaration residue, and created 08-19-preflight-bare-filename-references carrying the absorbed R1-R4
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `687f7f8d` | feat(preflight): mark a deliberately absent documentation path at the point of use |
+| `88bb2e03` | docs(spec): record the absent-path marker's contract and required coverage |
+| `178289c7` | chore(task): record the branch on the absent-path-prose task |
+| `a3e67c33` | docs(task): record the absent-path verification evidence in the PRD |
+| `746e7aeb` | chore(task): archive 08-08-preflight-absent-path-prose |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs: 0 failure(s), 1 warning(s)
+- [OK] make test: exit 0, 81 test lanes OK, zero FAILED/ERROR
+- [OK] make release-prep: exit 0; candidate ledger packVersion 0.71.34, 8 consumers passed
+- [OK] optionalReferencePaths byte-identical to origin/main (shasum ac9ce046f877d39af221cd4efea207981649b46d)
+- [OK] sd-check: all 8 rows passed; PR #517 CI all green; Copilot reviewed with no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -939,6 +939,18 @@ document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 22 or newer
 and scans regular documentation files only; symlinked docs are skipped
 intentionally so local/generated links do not expand outside the repository.
+A documentation reference that is deliberately unresolvable — a path in another
+repository, a path the prose exists to say is missing, a hypothetical in a
+worked example — can be marked at the point of use with `[absent: <reason>]`
+immediately after it on the same line, as in
+`example/absent-file.md` [absent: illustrative, no such file here]. The reason is
+required, and the marker exempts only the one reference it follows: a second
+reference to the same path, in the same file or elsewhere, still fails. Every
+malformed or misplaced marker leaves the reference checked. Use
+`optionalReferencePaths` instead for paths that are optional everywhere, such as
+generated artifacts; the marker is for a single sentence, not a repository-wide
+rule.
+
 Generated GitHub paths and path-like comment snippets inside the complete
 `sd-review-learnings` managed block are remote provenance, so the local path
 validator masks only that block while preserving line numbers. Human-authored
