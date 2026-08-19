@@ -187,10 +187,13 @@ def is_node_builtin_module(imported: str) -> bool:
 def tracked_opencode_paths(root: Path) -> list[str]:
     """Every ``.opencode`` path in the index, as repo-relative POSIX strings.
 
-    Enumerating from git rather than the filesystem is the point. ``.opencode``
-    deliberately ignores ``node_modules``, ``package.json``, ``package-lock.json``,
-    and ``bun.lock`` so a developer can install the plugins locally, so a glob of
-    the working tree reports vendored dependencies as pack payload. The shipped
+    Enumerating from git rather than the filesystem is the point, and the
+    invariant is *untrackedness*, not ignore coverage. ``CONTRIBUTING.md`` tells
+    developers to ``cd .opencode`` and install, which leaves an untracked
+    manifest, lockfile, and dependency tree in the working tree. Only
+    ``.opencode/node_modules/`` is covered by a tracked ignore rule
+    (``.gitignore``); the rest are simply not committed. Either way a glob of the
+    working tree reports them as pack payload and the index does not. The shipped
     CI gate already enumerates this way (``.github/scripts/check-opencode-js.sh``
     reads ``git ls-files -z``); this is the Python side of the same rule.
 
@@ -1386,10 +1389,9 @@ class GeneratedParityTests(InstallTestCase):
         self,
     ) -> None:
         # Trackedness, never existence. CONTRIBUTING tells developers to
-        # `cd .opencode` and install, and `.opencode/.gitignore` ignores the
-        # manifest, the lockfiles, and node_modules precisely so they may sit
-        # in the working tree untracked. Asserting they do not exist made a
-        # correctly set up checkout fail this suite.
+        # `cd .opencode` and install, which leaves the manifest, the lockfiles,
+        # and node_modules sitting in the working tree untracked. Asserting they
+        # do not exist made a correctly set up checkout fail this suite.
         tracked = set(tracked_opencode_paths(PACK_ROOT))
         for path in (
             ".opencode/package.json",
@@ -1463,9 +1465,12 @@ class GeneratedParityTests(InstallTestCase):
             opencode_root.mkdir()
             for filename in ("plugin.js", "tool.mjs", "helper.cjs", "ignored.ts"):
                 (opencode_root / filename).write_text("", encoding="utf-8")
-            # The real repository's ignore rules, reproduced: an installed
-            # dependency tree carries plenty of .js, and none of it is pack
-            # payload. A working-tree glob returns these; the index does not.
+            # A simulation of the untracked state an install leaves behind --
+            # not a copy of this repository's ignore config, which keeps its
+            # .opencode rules in the top-level .gitignore. Either way an
+            # installed dependency tree carries plenty of .js and none of it is
+            # pack payload: a working-tree glob returns these, the index does
+            # not.
             vendored = opencode_root / "node_modules/@opencode-ai/plugin"
             vendored.mkdir(parents=True)
             (vendored / "index.js").write_text("", encoding="utf-8")
