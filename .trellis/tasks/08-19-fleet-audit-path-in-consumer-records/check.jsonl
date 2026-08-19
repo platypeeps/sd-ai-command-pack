@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality bar the deterministic gate enforces; used to judge whether each per-repository correction is complete on its own."}
+{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Defines what the bookkeeping validator accepts in archived task and journal records, which bounds how these corrections may be applied to already-archived files."}
