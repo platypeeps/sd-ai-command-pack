@@ -1,4 +1,4 @@
-# Fleet publish resolves the completion-receipt preflight from the consumer, not the pack
+# Resolve fleet-publish pack helpers from the source checkout
 
 ## Problem
 

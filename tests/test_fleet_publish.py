@@ -130,6 +130,37 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
 
     # --------------------------------------------------- preflight resolution
 
+    def test_absent_record_session_refuses_before_any_side_effect(self) -> None:
+        # Same hazard as the preflight, one step earlier: record-session is
+        # consumed at the journal step, downstream of the work commit this
+        # helper has already written.
+        self._write_manifest((".claude/skills/x/SKILL.md",))
+        prefixes, exact = publish.derive_allowed_paths(self.repo)
+        present = self.repo / "present-preflight.mjs"
+        present.write_text("//\n", encoding="utf-8")
+        missing = self.repo / "nowhere" / "record-session.py"
+        with self.assertRaises(publish.PublishError) as ctx:
+            publish.check_preconditions(
+                self.repo,
+                self.slug,
+                prefixes,
+                exact,
+                preflight=present,
+                record_session=missing,
+            )
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertIn(str(missing), str(ctx.exception))
+        self.assertIn("--record-session", str(ctx.exception))
+        self.assertEqual(
+            subprocess.run(
+                ["git", "rev-list", "--count", "HEAD"],
+                cwd=str(self.repo),
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+            "1",
+        )
+
     def test_absent_preflight_refuses_before_any_side_effect(self) -> None:
         # The preflight is consumed at step 4, after the work commit, the
         # archive move, and the journal are already folded in -- and there is

@@ -268,6 +268,7 @@ def check_preconditions(
     prefixes: Sequence[str],
     exact: Collection[str] = (),
     preflight: Path | None = None,
+    record_session: Path | None = None,
 ) -> None:
     top = git_out(["rev-parse", "--show-toplevel"], cwd=repo)
     if Path(top).resolve() != repo.resolve():
@@ -287,19 +288,24 @@ def check_preconditions(
             "use sd-finish-work for a folded-bookkeeping release",
             code=3,
         )
-    # Prove the completion receipt is reachable while this run is still a
-    # no-op. It is consumed at step 4, after the work commit, the real archive
-    # move, and the journal are already folded into the branch -- and this
-    # helper has no resume path (resolve_task_dir above requires a live task
-    # directory the archive has by then moved). A dependency that can be
-    # checked before the first side effect must be.
-    if preflight is not None and not preflight.is_file():
-        raise PublishError(
-            f"review preflight not found at {preflight} (fleet-publish resolves "
-            "pack helpers from the source checkout that owns it; pass "
-            "--review-preflight to override)",
-            code=3,
-        )
+    # Prove both pack helpers are reachable while this run is still a no-op.
+    # Neither is consumed until after the work commit: record-session at the
+    # journal step, the preflight at the receipt step, both downstream of a
+    # branch this helper has already written to -- and there is no resume path
+    # (resolve_task_dir below requires a live task directory the archive has by
+    # then moved). A dependency that can be checked before the first side
+    # effect must be.
+    for label, helper, flag in (
+        ("review preflight", preflight, "--review-preflight"),
+        ("record-session wrapper", record_session, "--record-session"),
+    ):
+        if helper is not None and not helper.is_file():
+            raise PublishError(
+                f"{label} not found at {helper} (fleet-publish resolves pack "
+                f"helpers from the source checkout that owns it; pass {flag} "
+                "to override)",
+                code=3,
+            )
     resolve_task_dir(repo, slug)
     disallowed = [
         path
@@ -554,7 +560,14 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
     receipt_out = Path(args.receipt_out).resolve()
     month = args.archive_month or datetime.now(timezone.utc).strftime("%Y-%m")
 
-    check_preconditions(repo, args.slug, prefixes, exact, preflight=preflight)
+    check_preconditions(
+        repo,
+        args.slug,
+        prefixes,
+        exact,
+        preflight=preflight,
+        record_session=record_session,
+    )
     base = git_out(["rev-parse", "HEAD"], cwd=repo)
 
     # Before the map: the block can newly ignore .obsidian-kb, and repomix must

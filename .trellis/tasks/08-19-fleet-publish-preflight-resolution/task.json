@@ -1,7 +1,7 @@
 {
   "id": "fleet-publish-preflight-resolution",
   "name": "fleet-publish-preflight-resolution",
-  "title": "Fleet publish resolves the completion-receipt preflight from the consumer, not the pack",
+  "title": "Resolve fleet-publish pack helpers from the source checkout",
   "description": "fleet-publish.py resolves the review preflight with a bare consumer-relative path under cwd=consumer. No thin consumer vendors scripts/, so the completion receipt reads empty stdout and pr-publication fails for every fleet lane. Resolve it from the running script directory, matching the --record-session precedent in the same file.",
   "status": "in_progress",
   "dev_type": null,
