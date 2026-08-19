@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 409
-- **Last Active**: 2026-08-18
+- **Total Sessions**: 410
+- **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~547 | Active |
+| `journal-9.md` | ~590 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 410 | 2026-08-19 | Resolve fleet-publish pack helpers from the source checkout | `c1de1500`, `19169ffb` | `fix/fleet-publish-preflight-resolution` |
 | 409 | 2026-08-18 | Fleet gates, version-drift planning, and the .opencode parity fix | `41a55927`, `5d3fba24`, `bd24949f`, `e4d52e30`, `894a8117`, `7d053ef8` | `task/opencode-parity-ignores-git` |
 | 408 | 2026-08-18 | Enforce the planning branch-null rule the default preflight run reports | `7dd5e437`, `ae3e7010` | `task/preflight-planning-branch-gap` |
 | 407 | 2026-08-18 | Re-read a BLOCKED merge state before blaming branch protection | `3866ecbe`, `b70b2012`, `3dda6fc3` | `task/pr-eligibility-stale-blocked-review` |
