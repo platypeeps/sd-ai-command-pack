@@ -97,10 +97,13 @@ the untracking, not after it.
   exclude the pack-managed surfaces from what the generator indexes, matching
   the `se-ai-command-pack` shape. One pull request per repository; these are
   separate repositories with separate review gates.
-- In the same per-repository change, rewrite every agent instruction that tells
-  a reader to consult the map so it does not promise a file that a fresh clone
-  will not have. Enumerate those references from the filesystem rather than from
-  the table above, which is a snapshot.
+- Rewrite every agent instruction that tells a reader to consult the map, so it
+  does not promise a file a fresh clone will not have. This ships inside the
+  same per-repository pull request as that repository's untracking, never as a
+  follow-up: a merged untracking without the rewrite leaves the repository
+  instructing its agents to read a file that is not there, which is a worse
+  state than either endpoint. Enumerate those references from the filesystem
+  rather than from the table above, which is a snapshot.
 - Retire the consumer-side gates whose only purpose is defending a tracked map.
   anomaly-metric-creator carries a repomix-map freshness lint under its own
   tools/ directory plus the matching test under its tests/ directory; that
@@ -149,8 +152,8 @@ the untracking, not after it.
   the fleet finding severity gate as `continue-with-follow-ups` with zero
   blockers, and this task is the follow-up it was required to create.
 - Any change to Prism's own thresholds in a consumer repository.
-- Excluding pack-installed payload from the Obsidian KB. That is the operator's
-  second decision from the same 2026-08-19 review and shares this one's survey,
-  but it lands in `scripts/sd-ai-command-pack-update-spec-kb.py`, touches no
-  consumer's tracked tree, and is verified differently. It belongs in its own
-  task.
+- Obsidian KB handling. The same 2026-08-19 review surveyed it: the KB copies
+  pack-installed payload into all eight vaults, and `.obsidian-kb` is a symlink
+  out of the tree, gitignored, with `git ls-files` returning nothing in every
+  consumer. The operator decided to leave that behavior as it is. Do not change
+  `scripts/sd-ai-command-pack-update-spec-kb.py` copy selection under this task.

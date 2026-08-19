@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/fleet-publish-generated-content.md", "reason": "Documents the publish path's dependence on this helper's ignore-block write and its exit-2/exit-3 semantics, which the copy change must not perturb."}
-{"file": ".trellis/spec/backend/fleet-consumer-conversion.md", "reason": "Describes what the installer owns in a consumer, which is the same boundary the receipt draws between pack payload and repository-owned adapter content."}
