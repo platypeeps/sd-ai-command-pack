@@ -310,6 +310,26 @@ requires the live task to pre-exist the finish-work push. The helper therefore
 sd-ai-command-pack repo itself — exiting with the precondition failure code (3).
 The pack self-releases via `sd-finish-work`, never via this helper.
 
+Being consumer-only does not make it consumer-resident. The helper is listed in
+`SOURCE_ONLY_ALLOWED_PACK_FILES` and is never installed into a consumer: it runs
+from the pack checkout with `--repo <consumer>`. It therefore resolves the pack
+helpers it shells to -- the record-session wrapper and the review preflight --
+from the source checkout that owns it, not from the consumer working directory.
+A thin consumer vendors no `scripts/sd-ai-command-pack-*` at all, so a
+consumer-relative lookup finds nothing. `--record-session` and
+`--review-preflight` override the defaults.
+
+The preflight invocation also passes `--repo <consumer>` explicitly. The
+preflight otherwise picks its repository from `SD_AI_COMMAND_PACK_REPO_ROOT`
+before falling back to the working directory's git top level, and the consumer
+full check exports that variable -- so without the explicit argument a receipt
+could describe the pack checkout while claiming to describe the consumer.
+
+Both helpers are proved present by `check_preconditions`, before the work
+commit, the archive move, and the journal. The helper folds those three into one
+head and has no resume path, so a dependency it can check while the run is still
+a no-op is checked there rather than at receipt time.
+
 ## Timing Evidence
 
 Every `sd-fleet-refresh` run records a local, resumable timing baseline with
