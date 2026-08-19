@@ -160,7 +160,7 @@ citing commits in squash-merged repositories is a separate task.
 
 ## Acceptance Criteria
 
-- [ ] All five `08-19-sd-ai-command-pack-0-71-33` PRD criteria and all four
+- [x] All five `08-19-sd-ai-command-pack-0-71-33` PRD criteria and all four
   0.71.33 journal testing notes describe the audit as running from the
   sd-ai-command-pack source checkout against that consumer. Verified positively,
   by reading each of the nine records and confirming two things in every one —
@@ -175,22 +175,45 @@ citing commits in squash-merged repositories is a separate task.
   script would fail it. Scoped to the 0.71.33 records — every consumer
   also carries the same wording in older refresh records written while it was a
   fat install, where the relative path did resolve, and those are out of scope.
-- [ ] `docs/FLEET_ROLLOUT.md` step 3 states the working directory the command
+- [x] `docs/FLEET_ROLLOUT.md` step 3 states the working directory the command
   runs from.
-- [ ] `rwbp-website` cites `60d706506ae14db31bb9966581dbaf8911731765` as the
+- [x] `rwbp-website` cites `60d706506ae14db31bb9966581dbaf8911731765` as the
   0.71.33 refresh commit in both its journal entry and its workspace index, with
   no remaining reference to `7ab13689` or `662d9500`. Verified by
   `git merge-base --is-ancestor <cited hash> main` succeeding for the hash the
   records name — the check that would have caught the original error and both
   proposed replacements.
-- [ ] Six pull requests exist, one per repository: the five consumers and this
+- [x] Six pull requests exist, one per repository: the five consumers and this
   pack. Each is recorded here with its URL and the head commit it carries. They
   are intentionally independent — no consumer correction depends on another, and
   none depends on the `docs/FLEET_ROLLOUT.md` fix — so a repository that fails
   pauses only itself.
-- [ ] Each affected repository's own gate passes on the change, run in that
+- [x] Each affected repository's own gate passes on the change, run in that
   repository. Merging those pull requests is the post-archive handoff, not an
   acceptance criterion.
+
+### Verification evidence
+
+Run 2026-08-19 against the six pull-request heads, reading each record with
+`git show <branch>:<path>` rather than the working tree — the consumer
+checkouts sit on an unrelated branch, and checking them in place is how an
+earlier pass produced four false failures.
+
+- Criterion 1: nine of nine records `PASS` both halves — each names the source
+  checkout and passes `--repo`, and each retains the evidence it already
+  carried (five PRDs: expected platform plus provenance `0.71.33`; four journal
+  notes: `31 targets checked`, provenance `0.71.33`, `vouched file hashes
+  match`). Each journal also carries an older fat-era line
+  (`199 targets checked, provenance 0.71.4`) that the scoping clause excludes.
+- Criterion 2: step 3 reads "command from this pack checkout, like step 2 and
+  unlike step 4".
+- Criterion 3: zero remaining references to `7ab13689` or `662d9500`, and
+  `git merge-base --is-ancestor 60d706506ae14db31bb9966581dbaf8911731765 origin/main`
+  exits 0.
+- Criterion 4: six pull requests, each recorded above with its URL and head.
+- Criterion 5: every gate run in its own repository and quoted in that
+  repository's pull request. Copilot reviewed all six heads clean with zero
+  unresolved threads.
 
 ## The archived-record decision
 
