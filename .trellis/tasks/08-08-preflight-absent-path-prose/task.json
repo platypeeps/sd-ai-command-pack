@@ -12,7 +12,7 @@
   "assignee": "sdelmas",
   "createdAt": "2026-08-08",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/08-08-preflight-absent-path-prose",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
