@@ -16,23 +16,44 @@ five consumer branches were not, because each of those checkouts is parked on
 an unrelated branch owned by another process, and the campaign's own safety
 rule forbids touching a checkout in that state.
 
-Three of the five merged as squashes, so the branch tip is not an ancestor of
-the default branch and `git branch -d` will refuse it. Content preservation was
-verified at the time through the GitHub contents API on each default branch;
-that evidence is what justifies deleting a branch whose commits do not appear
-in `main`.
+Measured 2026-08-19 from the five checkouts, read-only:
+
+| Consumer | Local branch | Remote branch |
+| --- | --- | --- |
+| rwbp-coordinator | present (`170d9ad`) | present |
+| loadsmith | present (`88a8d41`) | present |
+| hoa-manager | present (`a4ca49a`) | already deleted |
+| rwbp-website | present (`d39d640`) | present |
+| mezmo_benchmark | present (`9b36a53`) | already deleted |
+
+So the remote half is already done in two of the five; the work is five local
+deletions and three remote ones.
+
+Several of these pull requests were squash-merged, so a branch tip is not
+necessarily an ancestor of the default branch and `git branch -d` will refuse
+it. Do not take containment from a local `origin/main`: no checkout was fetched
+during this survey, so every local remote-tracking ref there is of unknown
+freshness, and a local ancestry check on all five currently reports
+`NOT-ancestor` for exactly that reason. Establish containment per repository
+from GitHub at execution time. Content preservation was verified during the
+campaign through the GitHub contents API on each default branch; that evidence
+is what justifies deleting a branch whose commits do not appear in `main` as
+commits.
 
 ## Requirements
 
-- Delete the local and remote `chore/fix-install-audit-path-citation` branch in
-  each of the five consumers, after proving per repository that its pull
-  request is `MERGED` and that the branch's content reached the default branch.
+- Delete the local `chore/fix-install-audit-path-citation` branch in each of the
+  five consumers, and the remote one wherever it still exists, after proving per
+  repository that its pull request is `MERGED` and that the branch's content
+  reached the default branch. Re-measure presence rather than trusting the table
+  above; a remote branch may be retired between filing and execution.
 - Enumerate the consumers from `docs/fleet/consumers.json` rather than from the
   list above, which is a snapshot.
 - Skip and report any checkout that is dirty, missing, or held by another
   worktree. Never stash, reset, clean, or force anything in a consumer.
 - Squash-merged branches need the content proof before deletion, not an
-  ancestry check, and the proof must be recorded per repository.
+  ancestry check, and the proof must be recorded per repository. A local
+  ancestry check against an unfetched `origin/main` proves nothing either way.
 
 ## Acceptance criteria
 

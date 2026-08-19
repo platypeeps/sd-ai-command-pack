@@ -2,7 +2,7 @@
   "id": "retire-audit-path-consumer-branches",
   "name": "retire-audit-path-consumer-branches",
   "title": "Retire the audit-path campaign branches left in five consumers",
-  "description": "chore/fix-install-audit-path-citation still exists local and remote in all five consumer checkouts after its PRs merged on 2026-08-19.",
+  "description": "chore/fix-install-audit-path-citation still exists locally in all five consumer checkouts after its PRs merged on 2026-08-19; the remote branch survives in three of them and was already deleted in hoa-manager and mezmo_benchmark.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
