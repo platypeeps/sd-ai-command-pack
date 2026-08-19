@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.71.34 - 2026-08-19
+
+### Added
+
+- A documentation reference can now be marked as deliberately unresolvable
+  where it is written, with `[absent: <reason>]` immediately after it on the
+  same line. `checkDocumentationPathReferences` resolves every eligible
+  reference against the filesystem, and the only escape hatch was
+  `optionalReferencePaths` -- a repository-wide array with no file or line
+  scope, so silencing one path for one sentence silenced it everywhere,
+  including in a future document that names it because it genuinely rotted.
+  A PRD describing current state routinely needs to name a path that is
+  currently absent, and saying so is the point of the sentence.
+
+  The reason is required: the marker's whole purpose is to record why, so
+  `[absent:]` and `[absent: ]` leave the reference checked, as do a missing
+  colon, an unclosed bracket, anything non-blank between the reference and the
+  marker, and a marker on the next line or before the reference. Reasons may
+  not span a line terminator, `\r` and U+2028/U+2029 included. The exemption
+  covers only the one reference it follows: a second reference to the same
+  path, in the same file or elsewhere, still fails. `optionalReferencePaths`
+  is unchanged and remains correct for paths that are optional everywhere,
+  such as generated artifacts.
+
+  The two references on `main` that had been stripped of their code spans on
+  2026-08-08 to unblock CI are restored and marked, which is the degradation
+  this replaces.
+
 ## 0.71.33 - 2026-08-18
 
 ### Fixed

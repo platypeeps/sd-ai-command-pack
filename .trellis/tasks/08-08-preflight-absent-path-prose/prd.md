@@ -18,14 +18,14 @@ real test once those references are restored.
 
 `checkDocumentationPathReferences` resolves every eligible reference in a
 documentation file against the filesystem and fails on a miss
-(`scripts/sd-ai-command-pack-review-preflight.mjs:3204`):
+(`scripts/sd-ai-command-pack-review-preflight.mjs:3214`):
 
 ```js
 fail(`${reference.file}:${reference.line} references missing path ${reference.target}.`);
 ```
 
 The design already recognizes that some references are legitimately unresolvable
-and carves out an exclusion for them (`:3181-3185`):
+and carves out an exclusion for them (`:3191-3195`):
 
 ```js
 // Design/implement artifacts are forward-looking: they reference files
@@ -63,12 +63,9 @@ survived on `main` at all.
 Both are false positives, and the first is self-refuting — the sentence
 containing the path says the file is not here:
 
-> The gate that fires is scripts/check_review_readiness.sh in loadsmith, which
-> is **not** a pack-distributed file — it does not exist under `templates/` in
-> this repository.
-
-(The original wraps that path in a code span. This quotation deliberately does
-not — see below.)
+> The gate that fires is `scripts/check_review_readiness.sh` [absent: loadsmith's, not shipped here]
+> in loadsmith, which is **not** a pack-distributed file — it does not exist
+> under `templates/` in this repository.
 
 The second is a hypothetical path from a scratch-repo experiment documented in
 the PRD, never a real repository file.
@@ -79,10 +76,10 @@ why nobody saw it; this task is why it was wrong in the first place.
 
 ### The only escape hatch is repo-global
 
-`shouldCheckDocumentationPathReference` (`:5085`) consults
-`optionalCandidatePaths` (`:5089`, `:5119`), built from `optionalReferencePaths`
-— a flat array of paths defaulted at `:391-412` and extendable through
-`.sd-ai-command-pack/review-preflight.json` (`:442-456`).
+`shouldCheckDocumentationPathReference` (`:5134`) consults
+`optionalCandidatePaths` (`:5138`, `:5168`), built from `optionalReferencePaths`
+— a flat array of paths defaulted at `:401-422` and extendable through
+`.sd-ai-command-pack/review-preflight.json` (`:436-460`).
 
 That list is repository-wide with no file or line scope. Silencing one path for
 one sentence in one PRD also silences it everywhere, including a future document
@@ -104,7 +101,7 @@ FAIL .trellis/tasks/08-08-preflight-absent-path-prose/prd.md:67 references missi
 ```
 
 The workaround was to remove the backticks. Only two reference kinds are
-collected — `markdown-link` (`:5060-5065`) and `code-span` (`:5073-5078`) — so
+collected — `markdown-link` (`:5087-5095`) and `code-span` (`:5120-5128`) — so
 plain text inside a fenced block or a blockquote is never examined. That is why
 the failure output quoted under "`main` was red" contains the same path
 in full and passes, while the blockquote beneath it did not until its code span
@@ -187,7 +184,7 @@ coherently, and whichever lands second must not re-open what the first closed.
 
 That task covered the eligibility half of the same documentation
 path-reference check: `shouldCheckDocumentationPathReference`
-(`scripts/sd-ai-command-pack-review-preflight.mjs:5085`) validates a reference
+(`scripts/sd-ai-command-pack-review-preflight.mjs:5134`) validates a reference
 only when it is one of eight enumerated top-level files or begins with one of
 26 directory prefixes — a bare filename naming a tracked file (`review.py:555`,
 `manifest.json`, `CHANGELOG.md`) is silently unchecked. On PR #339 preflight
@@ -197,9 +194,11 @@ remote round doing work the deterministic gate should do free.
 Carried as an explicit **phase-2 requirement, sequenced strictly after this
 task's absent-path escape hatch lands**. Sequencing puts it outside this
 task's change: none of the acceptance criteria above mentions bare filenames,
-and the Out of scope section already excludes eligibility. R1-R4 below move to
-a successor task created when this one's work completes, which `implement.md`
-step 6 owns. Recorded here rather than dropped (the tasks are complementary: escape
+and the Out of scope section already excludes eligibility. R1-R4 below moved to
+`08-19-preflight-bare-filename-references`, created on 2026-08-19 once this
+task's work was complete; that task carries them verbatim and names this one as
+its predecessor. They stay below as the record of what was absorbed and where it
+went. Recorded here rather than dropped (the tasks are complementary: escape
 hatch first, widening second — widening eligibility before the escape hatch
 exists would raise the false-failure rate the source's own R3 forbids):
 
