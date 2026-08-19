@@ -771,3 +771,42 @@ Added an [absent: <reason>] marker to the review preflight's documentation path-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 415: File the shipped-script mode-bit and consumer-branch-retirement follow-ups
+
+**Date**: 2026-08-19
+**Task**: File the shipped-script mode-bit and consumer-branch-retirement follow-ups
+**Branch**: `task/08-19-loose-end-task-records`
+
+### Summary
+
+Filed two Trellis tasks for defects that were hand-worked-around during the 08-08 and 08-19 work: shipped scripts tracked non-executable, and the audit-path campaign branches left in five consumers. The adversarial planning pass measured both PRDs against live state and corrected two wrong claims in the second one.
+
+### Main Changes
+
+- Created 08-19-shipped-scripts-tracked-non-executable: 53 of 63 shebang-carrying scripts under scripts/ and templates/scripts/ are tracked 100644 while installed copies are 755, so the toolchain exec path fails on a source checkout
+- Created 08-19-retire-audit-path-consumer-branches for the chore/fix-install-audit-path-citation branches left in five consumers
+- Corrected the second PRD against a read-only survey: the remote branch is already deleted in hoa-manager and mezmo_benchmark, and local ancestry proves nothing because no consumer checkout was fetched
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2bc40482` | docs(task): file the two follow-ups the 08-08 and 08-19 work surfaced |
+| `fdfc7a74` | docs(task): correct the branch-retirement PRD against a live survey |
+
+### Testing
+
+- [OK] node scripts/sd-ai-command-pack-review-preflight.mjs: 0 failure(s), 1 warning(s)
+- [OK] Read-only survey of five consumer checkouts: local branch present in all five, remote present in three
+- [OK] PR #518 Copilot review: 8 of 8 files, no comments, no unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
