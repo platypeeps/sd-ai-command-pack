@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 413
+- **Total Sessions**: 414
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~715 | Active |
+| `journal-9.md` | ~761 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 414 | 2026-08-19 | Mark a deliberately absent documentation path at the point of use | `687f7f8d`, `88bb2e03`, `178289c7`, `a3e67c33`, `746e7aeb` | `task/08-08-preflight-absent-path-prose` |
 | 413 | 2026-08-19 | Correct the fleet install-audit path cited in consumer task records | `972b389b`, `48b42401`, `84b7200b`, `de4da5b5`, `18306cfd` | `task/08-19-fleet-audit-path-in-consumer-records` |
 | 412 | 2026-08-19 | Fold the untracked-map preferred shape into the repomix staleness task | `c80fc26b`, `2c1724e1` | `task/repomix-untracked-shape-clean` |
 | 411 | 2026-08-19 | Record two fleet follow-up tasks in planning | `46a9b0ede2acb41b307f58f4f54bdddf2eb4606c` | `chore/record-fleet-followup-tasks` |
