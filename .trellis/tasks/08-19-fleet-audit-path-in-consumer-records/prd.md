@@ -217,39 +217,48 @@ on the correction stops there and is reported, not forced.
 
 ## Delivery
 
+Six pull requests, one per affected repository, each gated in its own
+repository. Heads are the current heads, after the follow-up wording round
+described below.
+
 | Repository | Pull request | Head | Gate |
 | --- | --- | --- | --- |
-| loadsmith | platypeeps/loadsmith#241 | `3753bc2` | `check_review_readiness.sh --all --skip-build`: passed, 0 warnings |
-| hoa-manager | platypeeps/hoa-manager#274 | `ae4d6ba` | `check-review-preflight.mjs`: passed, 1 tooling-scope warning addressed in the PR body |
-| rwbp-coordinator | platypeeps/rwbp-coordinator#247 | `461278c` | `check-review-churn.mjs`: passed |
-| rwbp-website | platypeeps/rwbp-website#254 | `7a2a72d` | `check-review-preflight.mjs` and `ops-check.mjs`: passed |
-| sd-ai-command-pack | this task's own pull request | — | review preflight: 0 failures, 0 warnings |
-| mezmo_benchmark | **not opened — blocked** | — | see below |
+| loadsmith | platypeeps/loadsmith#241 | `5ae60fa` | `check_review_readiness.sh --all --skip-build`: passed, 0 warnings |
+| hoa-manager | platypeeps/hoa-manager#274 | `148e5f4` | `check-review-preflight.mjs`: passed, 1 tooling-scope warning addressed in the PR body |
+| rwbp-coordinator | platypeeps/rwbp-coordinator#247 | `170d9ad` | `check-review-churn.mjs`: passed |
+| rwbp-website | platypeeps/rwbp-website#254 | `71b96a6` | `check-review-preflight.mjs` and `ops-check.mjs`: passed |
+| mezmo_benchmark | answerbook/mezmo_benchmark#515 | `91e6695` | `check-review-cycle-patterns.py --base HEAD --include-working-tree`: passed |
+| sd-ai-command-pack | platypeeps/sd-ai-command-pack#516 | `972b389` | review preflight: 0 failures, 0 warnings |
 
-### mezmo_benchmark is blocked, not skipped
+### The follow-up wording round
 
-Its correction was written and its gate passed, but the pull request was not
-opened and the change is not published. While this task was working in that
-checkout, a concurrent Trellis `0.6.7 -> 0.6.16-sd.0` update was running in the
-same repository. Two things went wrong together:
+The first four consumer corrections said *where* the audit runs but dropped the
+command itself, leaving a criterion that named no invocation at all. Copilot
+raised that on loadsmith#241; the same wording was then applied to all four so
+the fleet records stay uniform, and mezmo_benchmark was written that way from
+the start. Each record now names the working directory and the command
+together:
 
-1. The checkout moved from `main` to `chore/trellis-0.6.16-sd.0` between the
-   state survey and the branch creation, and the branch for this correction was
-   cut without re-asserting `main` first — so it was cut from the Trellis
-   branch, carrying that update's uncommitted changes with it.
-2. The concurrent process then committed everything in the working tree —
-   its 124 files plus this task's 2 — as a single commit,
-   `1b6878c chore: update Trellis 0.6.7 -> 0.6.16-sd.0`, onto the branch this
-   task had just created.
+> The sd-ai-command-pack install audit passes for ... It runs from the
+> sd-ai-command-pack source checkout, not from this repository:
+> `python3 scripts/sd-ai-command-pack-install-audit.py --repo <this repository>
+> --expected-platform ...`.
 
-Nothing was pushed and nothing was lost: `1b6878c` is reachable from
-`chore/fix-install-audit-path-citation` in that checkout, and no remote branch
-exists. The checkout was left exactly as the concurrent process left it rather
-than being reset, stashed, or cleaned, because the commit holding that other
-work exists nowhere else.
+### mezmo_benchmark was delivered from a rebuilt branch
 
-Resuming requires a checkout no other process is writing to. The correction
-itself is mechanical and reproducible from the same script the other four used.
+Its first branch was cut without re-asserting `main`, while a concurrent
+Trellis `0.6.7 -> 0.6.16-sd.0` update was running in that same checkout. The
+branch therefore came off `chore/trellis-0.6.16-sd.0` carrying that update's
+uncommitted files, and the concurrent process then committed everything in the
+working tree — its 124 files plus this task's 2 — as
+`1b6878c chore: update Trellis 0.6.7 -> 0.6.16-sd.0` onto it.
+
+Nothing was pushed and nothing was lost. The contaminated branch was renamed to
+`chore/trellis-0.6.16-sd.0-recovered`, which keeps `1b6878c` reachable, and a
+fresh `chore/fix-install-audit-path-citation` was cut from `main` with the
+correction re-applied from the same script the other four used. The delivered
+diff is exactly two files and two lines. No reset, stash, clean, or force-push
+was used at any point, because that commit holds work that exists nowhere else.
 
 ## Rollback
 
