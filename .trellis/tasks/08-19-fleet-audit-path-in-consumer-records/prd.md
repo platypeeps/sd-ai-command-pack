@@ -218,17 +218,18 @@ on the correction stops there and is reported, not forced.
 ## Delivery
 
 Six pull requests, one per affected repository, each gated in its own
-repository. Heads are the current heads, after the follow-up wording round
-described below.
+repository. Heads are the heads Copilot reviewed clean, after the two rounds of
+review feedback described below. `rwbp-coordinator` carries no journal note, so
+the second round left it untouched at the head it was already reviewed at.
 
 | Repository | Pull request | Head | Gate |
 | --- | --- | --- | --- |
-| loadsmith | platypeeps/loadsmith#241 | `5ae60fa` | `check_review_readiness.sh --all --skip-build`: passed, 0 warnings |
-| hoa-manager | platypeeps/hoa-manager#274 | `148e5f4` | `check-review-preflight.mjs`: passed, 1 tooling-scope warning addressed in the PR body |
+| loadsmith | platypeeps/loadsmith#241 | `88a8d41` | `check_review_readiness.sh --all --skip-build`: passed, 0 warnings |
+| hoa-manager | platypeeps/hoa-manager#274 | `a4ca49a` | `check-review-preflight.mjs`: passed, 1 tooling-scope warning addressed in the PR body |
 | rwbp-coordinator | platypeeps/rwbp-coordinator#247 | `170d9ad` | `check-review-churn.mjs`: passed |
-| rwbp-website | platypeeps/rwbp-website#254 | `71b96a6` | `check-review-preflight.mjs` and `ops-check.mjs`: passed |
-| mezmo_benchmark | answerbook/mezmo_benchmark#515 | `91e6695` | `check-review-cycle-patterns.py --base HEAD --include-working-tree`: passed |
-| sd-ai-command-pack | platypeeps/sd-ai-command-pack#516 | `972b389` | review preflight: 0 failures, 0 warnings |
+| rwbp-website | platypeeps/rwbp-website#254 | `d39d640` | `check-review-preflight.mjs` and `ops-check.mjs`: passed |
+| mezmo_benchmark | answerbook/mezmo_benchmark#515 | `9b36a53` | `check-review-cycle-patterns.py --base HEAD --include-working-tree`: passed |
+| sd-ai-command-pack | platypeeps/sd-ai-command-pack#516 | `972b389` (the source fix; later commits on this branch are this task's own records, so this row's head advances with them) | review preflight: 0 failures, 0 warnings |
 
 ### The follow-up wording round
 
@@ -243,6 +244,23 @@ together:
 > sd-ai-command-pack source checkout, not from this repository:
 > `python3 scripts/sd-ai-command-pack-install-audit.py --repo <this repository>
 > --expected-platform ...`.
+
+### The placeholder-rendering round
+
+The journal notes carried the invocation as plain prose, leaving the
+`<this repository>` placeholder unescaped. CommonMark parses that as a raw HTML
+open tag — `this` is a legal tag name and `repository` a legal attribute name —
+so a renderer swallows it and shows a command missing its `--repo` argument.
+Copilot raised it on answerbook/mezmo_benchmark#515; all four journal notes
+carried the same defect and all four now wrap the whole invocation in an inline
+code span, matching how the PRD criteria already carried it.
+
+Copilot also asked, on this pack's own pull request, that
+`docs/FLEET_ROLLOUT.md` step 3 stop wrapping its inline code span across a line
+break. That one was rebutted rather than applied: CommonMark
+[§6.1](https://spec.commonmark.org/0.31.2/#code-spans) specifies that line
+endings inside a code span are converted to spaces, and eight such spans already
+exist in `docs/` and render correctly, the oldest since `ba0bd20b`.
 
 ### mezmo_benchmark was delivered from a rebuilt branch
 
