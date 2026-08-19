@@ -7,21 +7,25 @@ another repository, because the prose is explaining that it is missing, or
 because it is a hypothetical in a worked example — without failing the review
 preflight and without suppressing genuine path rot elsewhere.
 
-`main` fails preflight today for exactly this reason, so the fix is not
-hypothetical.
+`main` failed preflight for exactly this reason on 2026-08-08, so the fix is
+not hypothetical. It is green today only because the two offending references
+were stripped of their backticks to unblock CI — the degradation requirement 4
+reverts. Re-read the first acceptance criterion with that in mind: it passes
+today (verified 2026-08-19, `0 failure(s), 0 warning(s)`) and only becomes a
+real test once those references are restored.
 
 ## Problem
 
 `checkDocumentationPathReferences` resolves every eligible reference in a
 documentation file against the filesystem and fails on a miss
-(`scripts/sd-ai-command-pack-review-preflight.mjs:2929-2930`):
+(`scripts/sd-ai-command-pack-review-preflight.mjs:3204`):
 
 ```js
 fail(`${reference.file}:${reference.line} references missing path ${reference.target}.`);
 ```
 
 The design already recognizes that some references are legitimately unresolvable
-and carves out an exclusion for them (`:2905-2911`):
+and carves out an exclusion for them (`:3181-3185`):
 
 ```js
 // Design/implement artifacts are forward-looking: they reference files
@@ -75,10 +79,10 @@ why nobody saw it; this task is why it was wrong in the first place.
 
 ### The only escape hatch is repo-global
 
-`shouldCheckDocumentationPathReference` (`:4443`) consults
-`optionalCandidatePaths` (`:4447`, `:4477`), built from `optionalReferencePaths`
-— a flat array of paths defaulted at `:313-334` and extendable through
-`.sd-ai-command-pack/review-preflight.json` (`:365-375`).
+`shouldCheckDocumentationPathReference` (`:5085`) consults
+`optionalCandidatePaths` (`:5089`, `:5119`), built from `optionalReferencePaths`
+— a flat array of paths defaulted at `:391-412` and extendable through
+`.sd-ai-command-pack/review-preflight.json` (`:442-456`).
 
 That list is repository-wide with no file or line scope. Silencing one path for
 one sentence in one PRD also silences it everywhere, including a future document
@@ -100,9 +104,9 @@ FAIL .trellis/tasks/08-08-preflight-absent-path-prose/prd.md:67 references missi
 ```
 
 The workaround was to remove the backticks. Only two reference kinds are
-collected — `markdown-link` (`:4417-4421`) and `code-span` (`:4430-4434`) — so
+collected — `markdown-link` (`:5060-5065`) and `code-span` (`:5073-5078`) — so
 plain text inside a fenced block or a blockquote is never examined. That is why
-the failure output quoted under "`main` is red right now" contains the same path
+the failure output quoted under "`main` was red" contains the same path
 in full and passes, while the blockquote beneath it did not until its code span
 was removed.
 
@@ -139,7 +143,7 @@ coherently, and whichever lands second must not re-open what the first closed.
 5. Genuine rot still fails. Marking one reference must not weaken the check for
    any other reference to the same path in the same file or elsewhere.
 6. The change lands in `templates/scripts/sd-ai-command-pack-review-preflight.mjs`
-   first with the root mirror synchronized (`AGENTS.md:29-33`).
+   first with the root mirror synchronized (`AGENTS.md:36`).
 
 ## Acceptance criteria
 
@@ -152,9 +156,16 @@ coherently, and whichever lands second must not re-open what the first closed.
 - The two `main` references are fixed with the new marker, not by adding either
   path to `optionalReferencePaths`. Verified by asserting the config array is
   byte-identical to its pre-change value (requirement 4).
-- A rendered-Markdown check: the marked reference still displays the path as a
-  path. A marker that only the preflight can see fails requirement 2, so this
-  criterion is not satisfied by a passing preflight alone.
+- The marker is visible where the path is, and the path still displays as a
+  path. Satisfied by a static syntax check, not by a passing preflight: assert
+  that no marker occurrence is followed by `(` or `[` and that no matching link
+  reference definition exists, so the marker cannot be absorbed into link
+  syntax and renders as literal text. A suppressed reference is a code span or
+  a Markdown link by construction, so its path formatting needs no separate
+  assertion. This criterion deliberately does not execute a Markdown renderer:
+  the repository has no Markdown dependency and the preflight is
+  dependency-free, so adding one buys less than it costs. Amended 2026-08-19
+  during planning review; the original asked for a rendered-Markdown check.
 - `optionalReferencePaths` behaviour is unchanged for both sources: its existing
   tests pass unmodified, *and* a new test loads a path through
   `.sd-ai-command-pack/review-preflight.json` and asserts it is still skipped.
@@ -176,7 +187,7 @@ coherently, and whichever lands second must not re-open what the first closed.
 
 That task covered the eligibility half of the same documentation
 path-reference check: `shouldCheckDocumentationPathReference`
-(`scripts/sd-ai-command-pack-review-preflight.mjs:4443`) validates a reference
+(`scripts/sd-ai-command-pack-review-preflight.mjs:5085`) validates a reference
 only when it is one of eight enumerated top-level files or begins with one of
 26 directory prefixes — a bare filename naming a tracked file (`review.py:555`,
 `manifest.json`, `CHANGELOG.md`) is silently unchecked. On PR #339 preflight
@@ -184,7 +195,11 @@ passed while Copilot flagged two unqualified `review.py` references — a paid
 remote round doing work the deterministic gate should do free.
 
 Carried as an explicit **phase-2 requirement, sequenced strictly after this
-task's absent-path escape hatch lands** (the tasks are complementary: escape
+task's absent-path escape hatch lands**. Sequencing puts it outside this
+task's change: none of the acceptance criteria above mentions bare filenames,
+and the Out of scope section already excludes eligibility. R1-R4 below move to
+a successor task created when this one's work completes, which `implement.md`
+step 6 owns. Recorded here rather than dropped (the tasks are complementary: escape
 hatch first, widening second — widening eligibility before the escape hatch
 exists would raise the false-failure rate the source's own R3 forbids):
 
