@@ -170,6 +170,29 @@ coherently, and whichever lands second must not re-open what the first closed.
   config-extension half of requirement 3.
 - `make check` passes, including template/root mirror verification.
 
+## Verification evidence, 2026-08-19
+
+- `node scripts/sd-ai-command-pack-review-preflight.mjs`: `0 failure(s), 2
+  warning(s)` -- the multi-task-directory and tooling/generated-scope warnings,
+  both dispositioned in the pull request body. Run after the two code spans were
+  restored, so it certifies the fix rather than the workaround.
+- Node harness: 15 marker cases pass, covering the marked/unmarked pair in one
+  fixture, an 11-entry fail-closed array, direct `isAbsentPathMarked`
+  assertions, and both code-formatted-link cases.
+- Python integration: the marker does not leak across files -- a temp repo marks
+  the same missing path in `docs/a.md` [absent: test fixture, never in this repository]
+  and leaves it unmarked in `docs/b.md` [absent: test fixture, never in this repository],
+  and the run exits 1 naming only that second file's first line;
+  `optionalReferencePaths` still skips a path loaded through
+  `.sd-ai-command-pack/review-preflight.json`; every `[absent: ...]` in tracked
+  documentation is literal text, not link syntax.
+- `optionalReferencePaths` is byte-identical to `origin/main`: `shasum` reports
+  `ac9ce046f877d39af221cd4efea207981649b46d` on both sides.
+- `make test`: exit 0, 81 test lanes `OK`, zero `FAILED`/`ERROR`.
+- `make release-prep`: exit 0; `docs/fleet/candidate-validation.json` reports
+  packVersion `0.71.34`, payload digest `sha256:e2ff6258...`, 8 consumers
+  `passed`.
+
 ## Out of scope
 
 - Changing which references are *eligible* for checking. That is
