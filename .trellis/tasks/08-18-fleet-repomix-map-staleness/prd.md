@@ -53,8 +53,9 @@ decision to commit generated output.
 Two repositories already have this shape and neither exhibits the defect:
 
 - `sd-ai-command-pack` itself ships no `docs/repomix-map.md` at all.
-- `se-ai-command-pack` generates one and ignores it at `.gitignore:30`, and its
-  `repomix.config.json` additionally excludes every pack-managed surface
+- `se-ai-command-pack` generates one and ignores it through a rule in that
+  repository's own gitignore file, and its `repomix.config.json` additionally
+  excludes every pack-managed surface
   (`.claude/**`, `.agents/**`, `.gemini/**`, `.opencode/**`,
   `.sd-ai-command-pack/**`, `.github/prompts/**`, `.obsidian-kb/**`, and more).
 
@@ -63,7 +64,7 @@ checkouts from `docs/fleet/consumers.json`:
 
 | Consumer | Map tracked | Pack surfaces in map | Generator posture |
 | --- | --- | --- | --- |
-| se-ai-command-pack | no (`.gitignore:30`) | excluded | `repomix.config.json` ignore list |
+| se-ai-command-pack | no (ignored in its own gitignore) | excluded | `repomix.config.json` ignore list |
 | sd-github-review | no map at all | n/a | no repomix |
 | hoa-manager | yes | yes | explicitly opts them in by name in `INCLUDE_PATTERNS` |
 | mezmo_benchmark | yes | yes | `--no-gitignore --no-dot-ignore`, maps everything |
@@ -131,9 +132,13 @@ the untracking, not after it.
       checkouts from `docs/fleet/consumers.json` and running `git ls-files
       docs/repomix-map.md` in each, expecting zero output everywhere.
 - [ ] No consumer's generated map indexes a pack-managed surface. Verified by
-      regenerating each map and grepping it for `.claude/`, `.agents/`,
-      `.gemini/`, `.opencode/`, `.github/prompts/`, and `.sd-ai-command-pack/`,
-      expecting no directory-structure rows for any of them.
+      regenerating the map in each consumer that generates one, and grepping it
+      for `.claude/`, `.agents/`, `.gemini/`, `.opencode/`, `.github/prompts/`,
+      and `.sd-ai-command-pack/`, expecting no directory-structure rows for any
+      of them. Determine which consumers those are from the presence of a
+      generator in the checkout, not from the table above: `sd-github-review`
+      runs no repomix at all today and has no map to regenerate, so this
+      criterion is vacuous for it rather than failed.
 - [ ] No agent instruction file in any consumer directs a reader to a map path
       that a fresh clone does not contain. Verified by grepping each checkout's
       root-level AGENTS.md and CLAUDE.md and its copilot instructions file for
