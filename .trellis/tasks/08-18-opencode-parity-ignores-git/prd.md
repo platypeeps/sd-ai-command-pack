@@ -14,31 +14,31 @@ stats the working tree, while the property it protects is about the git index.
 
 **1. It fails on a correctly set up checkout.** `tests/test_generated_parity.py:1370`
 asserts the OpenCode manifest does not *exist* (the path is bound at `:1364`).
-The repository deliberately ignores that path, and instructs developers to
-create it:
+`CONTRIBUTING.md:203-211` — tracked, and pinned by this same test file at
+`:1336-1337` — tells developers not to *track* that manifest or a Bun lockfile,
+and gives them the command that creates both:
 
-```
-.opencode/.gitignore:1:node_modules       .opencode/node_modules
-.opencode/.gitignore:2:package.json       .opencode/package.json
-.opencode/.gitignore:3:package-lock.json  .opencode/package-lock.json
-```
+> Do not track the OpenCode manifest or any `.opencode` Bun lockfile in this
+> repo unless the checked-in OpenCode plugins or tools import external npm
+> packages. … `cd .opencode` / `bun install --lockfile-only`
 
-`CONTRIBUTING.md` carries both halves — a do-not-track line for the manifest and
-any Bun lockfile, and a `cd .opencode` install step — and
-`test_generated_parity.py:1336-1337` pins those two strings in this same file.
-So a developer who follows the documented setup makes the suite red:
+(paraphrased; the verbatim text is at `CONTRIBUTING.md:203-211`, and spelling the
+manifest path here would trip the very check this task's sibling
+`08-18-preflight-path-refs-ignore-aware` exists to fix)
+
+Follow that and the suite goes red:
 
 ```
 AssertionError: True is not false : .opencode/package.json is only needed when plugins import packages
 ```
 
-The ignore rule and the assertion contradict each other. Ignoring a path is a
-statement that it may exist untracked; the assertion says it may not exist at
-all.
+"Do not track" and "must not exist" are different claims, and the test asserts
+the second while the documentation states the first.
 
-**2. Behind that, it walks `node_modules`.** `opencode_module_sources`
-(`test_generated_parity.py:187-192`) globs `**/*{suffix}` under `.opencode` with
-no ignore filter, so once assertion 1 stops failing, the scan descends into
+**2. Behind that, it walks `node_modules`.** `.gitignore:136` ignores
+`.opencode/node_modules/` outright, so it is never payload. But
+`opencode_module_sources` (`test_generated_parity.py:187-192`) globs
+`**/*{suffix}` under `.opencode` with no ignore filter, so once assertion 1 stops failing, the scan descends into
 `.opencode/node_modules/` and reports the vendored packages' own imports as pack
 external imports. `assertEqual([], external_imports)` then fails on
 `@opencode-ai/plugin`'s internals — code this repository does not ship and has no
