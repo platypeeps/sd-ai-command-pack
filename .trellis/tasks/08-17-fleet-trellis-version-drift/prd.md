@@ -23,15 +23,20 @@ Measured 2026-08-17 from
 | Consumer | Trellis | Pack pin | Tree |
 |---|---|---|---|
 | rwbp-coordinator | 0.6.7 | 0.71.22 | clean |
-| loadsmith | 0.6.7 | 0.71.22 | **dirty** |
-| hoa-manager | 0.6.7 | 0.71.22 | **dirty** |
+| loadsmith | 0.6.7 | 0.71.22 | dirty |
+| hoa-manager | 0.6.7 | 0.71.22 | dirty |
 | rwbp-website | 0.6.7 | 0.71.22 | clean |
-| mezmo_benchmark | 0.6.7 | 0.71.22 | **dirty** |
+| mezmo_benchmark | 0.6.7 | 0.71.22 | dirty |
 | se-ai-command-pack | 0.6.7 | 0.71.22 | clean |
 | sd-github-review | 0.6.7 | 0.71.26 | clean |
 | anomaly-metric-creator | 0.6.7 | 0.71.22 | clean |
 
 This repository vendors **0.6.14**. All eight consumers are on **0.6.7**.
+
+The `Tree` column is a snapshot of one moment and nothing more. Re-measured
+2026-08-18, all eight were clean; `design.md` carries that table and the rule
+that neither table may be carried into a lane. Cleanliness is decided at the
+moment a lane starts, never from a table in a planning artifact.
 
 Two distinct defects:
 
@@ -43,20 +48,25 @@ pack behavior depends on the vendored version; eight consumers running a
 version this repository stopped testing against is a standing compatibility
 risk, not a cosmetic lag.
 
-**The drift is invisible where operators look.** A thin consumer's fleet row
-reports its pin instead of an installed-versus-target pair, by design — a thin
-consumer has no vendored pack tree to compare. Trellis is not the pack, but it
-inherited that silence: the human `sd-status fleet` report prints
-`pin 0.71.22` and no Trellis version at all, while the JSON carries it. An
-operator reading the human report concludes the fleet is consistent. The report
-is not wrong about the pin; it is silent about a second version that also drifts.
+**The drift is invisible where operators look.** The human `sd-status fleet`
+report prints `pin 0.71.22` and no Trellis version at all, while the JSON
+carries it. An operator reading the human report concludes the fleet is
+consistent. The report is not wrong about the pin; it is silent about a second
+version that also drifts.
+
+This is **not** a consequence of the thin/fat split, as first written here. A
+thin row reports its pin instead of an installed-versus-target pair by design,
+and that part is correct — but `render_fleet:4130-4139` shows the fat branch
+printing `pack <version>` and being equally silent about Trellis. The version
+was simply never added to the row in either mode, which makes the fix
+mode-independent. `design.md` carries the correction.
 
 ## Requirements
 
 1. Every consumer reaches this repository's vendored Trellis version, or carries
    a recorded reason it did not. The ledger is one row per consumer and is the
-   deliverable; a uniform fleet is not, because three checkouts are dirty and
-   owned by other people.
+   deliverable; a uniform fleet is not, because every checkout is owned by
+   someone else and any of them may be dirty when its lane starts.
 2. One PR per consumer, **separate** from that consumer's pack-refresh PR. A
    `trellis update` diff touches `.trellis/scripts/**` and can move behavior;
    the refresh PR's diff is a pin plus provider config that the candidate
@@ -85,8 +95,9 @@ is not wrong about the pin; it is silent about a second version that also drifts
 - [ ] Requirement 3 is closed either by a status-collector change with a test, or
       by a recorded decision naming where the version is observable.
 - [ ] `make check` passes in this repository for any collector change.
-- [ ] No consumer checkout is left dirtier than this task found it, and the three
-      already-dirty consumers are untouched unless their owners clear them.
+- [ ] No consumer checkout is left dirtier than this task found it, and every
+      consumer measured dirty at the start of its own lane is untouched, with
+      that measurement's timestamp recorded in its ledger row.
 
 ## Out of scope
 

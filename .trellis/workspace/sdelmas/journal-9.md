@@ -510,3 +510,50 @@ Made the review preflight's default working-tree run enforce the planning-phase 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 409: Fleet gates, version-drift planning, and the .opencode parity fix
+
+**Date**: 2026-08-18
+**Task**: Fleet gates, version-drift planning, and the .opencode parity fix
+**Branch**: `task/opencode-parity-ignores-git`
+
+### Summary
+
+Answered the three Step 6 rollout gates, landed the fleet Trellis version-drift planning artifacts, and fixed the parity test that enumerated the working tree instead of the git index. The pin rollout stayed blocked on an unresolvable machine scope.
+
+### Main Changes
+
+- Re-measured the fleet: all eight consumers clean and on main, Trellis 0.6.7 against 0.6.14 vendored here, which emptied the dirty set two planning artifacts were built on.
+- Wrote design.md and implement.md for 08-17-fleet-trellis-version-drift and corrected its PRD; the silence about the Trellis version is not thin-specific, the fat row is equally silent.
+- Fixed test_opencode_plugins_do_not_require_local_dependency_manifest to enumerate tracked payload from git ls-files instead of globbing the working tree, matching the shipped CI gate.
+- Filed 08-18-preflight-path-refs-ignore-aware after the review preflight rejected this task's own PRD for naming a deliberately absent path.
+- Corrected a wrong evidence claim across both PRDs and three test comments: the per-directory .opencode ignore file is untracked, so the invariant is untrackedness, not ignore coverage.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `41a55927` | docs(task): plan the fleet Trellis version-drift work |
+| `5d3fba24` | fix(test): enumerate tracked .opencode payload from git, not the working tree |
+| `bd24949f` | docs(task): work around the preflight path check and file its defect |
+| `e4d52e30` | docs(task): correct the .opencode ignore evidence in both PRDs |
+| `894a8117` | docs(test): describe untrackedness, not ignore coverage, in the .opencode comments |
+| `7d053ef8` | chore(task): record the branch on the opencode parity task |
+
+### Testing
+
+- [OK] make check: MAKE_CHECK_EXIT=0, 98 OK/PASS, 0 FAIL/ERROR
+- [OK] tests.test_generated_parity: Ran 33 tests, OK, both with the .opencode install present and with it moved aside
+- [OK] gate retains teeth: an external import on a tracked module fails naming the file, revert restores green
+- [OK] review preflight under the CI condition: PREFLIGHT_EXIT=0
+- [OK] PR 511 required aggregate CI Result: SUCCESS; Copilot final review: no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

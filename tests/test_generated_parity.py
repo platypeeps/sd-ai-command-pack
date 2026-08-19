@@ -184,12 +184,39 @@ def is_node_builtin_module(imported: str) -> bool:
     return imported in NODE_BUILTIN_MODULES or module_root in NODE_BUILTIN_MODULES
 
 
+def tracked_opencode_paths(root: Path) -> list[str]:
+    """Every ``.opencode`` path in the index, as repo-relative POSIX strings.
+
+    Enumerating from git rather than the filesystem is the point, and the
+    invariant is *untrackedness*, not ignore coverage. ``CONTRIBUTING.md`` tells
+    developers to ``cd .opencode`` and install, which leaves an untracked
+    manifest, lockfile, and dependency tree in the working tree. Only
+    ``.opencode/node_modules/`` is covered by a tracked ignore rule
+    (``.gitignore``); the rest are simply not committed. Either way a glob of the
+    working tree reports them as pack payload and the index does not. The shipped
+    CI gate already enumerates this way (``.github/scripts/check-opencode-js.sh``
+    reads ``git ls-files -z``); this is the Python side of the same rule.
+
+    A failed ``git ls-files`` raises. It must never degrade to an empty list: an
+    empty result is indistinguishable from "nothing is tracked", which is the
+    silent pass every caller here is trying to avoid.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", ".opencode"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return [path for path in result.stdout.split("\0") if path]
+
+
 def opencode_module_sources(root: Path) -> list[Path]:
-    opencode_root = root / ".opencode"
-    sources: list[Path] = []
-    for suffix in OPENCODE_MODULE_EXTENSIONS:
-        sources.extend(opencode_root.glob(f"**/*{suffix}"))
-    return sorted(sources)
+    return sorted(
+        root / path
+        for path in tracked_opencode_paths(root)
+        if path.endswith(OPENCODE_MODULE_EXTENSIONS)
+    )
 
 
 def strip_yaml_frontmatter(content: str) -> str:
@@ -1361,21 +1388,21 @@ class GeneratedParityTests(InstallTestCase):
     def test_opencode_plugins_do_not_require_local_dependency_manifest(
         self,
     ) -> None:
-        opencode_package_path = PACK_ROOT / ".opencode/package.json"
-        opencode_lock_paths = (
-            PACK_ROOT / ".opencode/bun.lock",
-            PACK_ROOT / ".opencode/bun.lockb",
-        )
-
-        self.assertFalse(
-            opencode_package_path.exists(),
-            ".opencode/package.json is only needed when plugins import packages",
-        )
-        for lock_path in opencode_lock_paths:
-            self.assertFalse(
-                lock_path.exists(),
-                f"{lock_path.relative_to(PACK_ROOT)} should not be tracked "
-                "without package deps",
+        # Trackedness, never existence. CONTRIBUTING tells developers to
+        # `cd .opencode` and install, which leaves the manifest, the lockfiles,
+        # and node_modules sitting in the working tree untracked. Asserting they
+        # do not exist made a correctly set up checkout fail this suite.
+        tracked = set(tracked_opencode_paths(PACK_ROOT))
+        for path in (
+            ".opencode/package.json",
+            ".opencode/package-lock.json",
+            ".opencode/bun.lock",
+            ".opencode/bun.lockb",
+        ):
+            self.assertNotIn(
+                path,
+                tracked,
+                f"{path} should not be tracked without package deps",
             )
 
         external_imports: list[str] = []
@@ -1438,6 +1465,25 @@ class GeneratedParityTests(InstallTestCase):
             opencode_root.mkdir()
             for filename in ("plugin.js", "tool.mjs", "helper.cjs", "ignored.ts"):
                 (opencode_root / filename).write_text("", encoding="utf-8")
+            # A simulation of the untracked state an install leaves behind --
+            # not a copy of this repository's ignore config, which keeps its
+            # .opencode rules in the top-level .gitignore. Either way an
+            # installed dependency tree carries plenty of .js and none of it is
+            # pack payload: a working-tree glob returns these, the index does
+            # not.
+            vendored = opencode_root / "node_modules/@opencode-ai/plugin"
+            vendored.mkdir(parents=True)
+            (vendored / "index.js").write_text("", encoding="utf-8")
+            (opencode_root / "package.json").write_text("{}\n", encoding="utf-8")
+            (opencode_root / ".gitignore").write_text(
+                "node_modules\npackage.json\n", encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "init", "-q"], cwd=root, check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "add", "."], cwd=root, check=True, capture_output=True
+            )
 
             self.assertEqual(
                 [
@@ -1447,6 +1493,17 @@ class GeneratedParityTests(InstallTestCase):
                 ],
                 opencode_module_sources(root),
             )
+            self.assertNotIn(
+                ".opencode/package.json", tracked_opencode_paths(root)
+            )
+
+    def test_opencode_enumeration_fails_loudly_outside_a_work_tree(self) -> None:
+        # The bash 3.2 gate shipped the same defect: a failed enumeration that
+        # degrades to an empty list lands on "nothing found" and passes. Pin the
+        # raise so a future refactor cannot quietly reintroduce the silent pass.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(subprocess.CalledProcessError):
+                tracked_opencode_paths(Path(temp_dir))
 
     def test_repo_declares_mit_license(self) -> None:
         raw, _ = install.load_manifest()
