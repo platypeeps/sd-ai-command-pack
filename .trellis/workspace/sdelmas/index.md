@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 412
+- **Total Sessions**: 413
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~669 | Active |
+| `journal-9.md` | ~715 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 413 | 2026-08-19 | Correct the fleet install-audit path cited in consumer task records | `972b389b`, `48b42401`, `84b7200b`, `de4da5b5`, `18306cfd` | `task/08-19-fleet-audit-path-in-consumer-records` |
 | 412 | 2026-08-19 | Fold the untracked-map preferred shape into the repomix staleness task | `c80fc26b`, `2c1724e1` | `task/repomix-untracked-shape-clean` |
 | 411 | 2026-08-19 | Record two fleet follow-up tasks in planning | `46a9b0ede2acb41b307f58f4f54bdddf2eb4606c` | `chore/record-fleet-followup-tasks` |
 | 410 | 2026-08-19 | Resolve fleet-publish pack helpers from the source checkout | `c1de1500`, `19169ffb` | `fix/fleet-publish-preflight-resolution` |

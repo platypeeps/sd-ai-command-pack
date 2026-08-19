@@ -678,3 +678,50 @@ Recorded the operator decision that the repomix map and its generated output are
 ### Next Steps
 
 - None - task complete
+
+
+## Session 413: Correct the fleet install-audit path cited in consumer task records
+
+**Date**: 2026-08-19
+**Task**: Correct the fleet install-audit path cited in consumer task records
+**Branch**: `task/08-19-fleet-audit-path-in-consumer-records`
+
+### Summary
+
+The 0.71.33 fleet refresh transcribed the install audit into nine consumer records as a bare relative script path. That path resolves in this pack's source checkout, which is where the audit runs from, but not in a thin-install consumer, where no such script exists. Corrected the source instruction in FLEET_ROLLOUT.md step 3 and all nine records across five consumer repositories, each as a plain maintenance pull request.
+
+### Main Changes
+
+- Stated the working directory in `docs/FLEET_ROLLOUT.md` step 3: the audit command is relative to this repository, like step 2 and unlike step 4, and `--repo` is what points it at the consumer.
+- Corrected five archived 0.71.33 PRD criteria and four journal testing notes across loadsmith, hoa-manager, rwbp-coordinator, rwbp-website, and mezmo_benchmark. Each now names the source checkout as the working directory and carries the full invocation; none had its recorded result altered.
+- Corrected rwbp-website's 0.71.33 refresh commit citation to 60d706506ae14db31bb9966581dbaf8911731765. The two hashes it had cited were both unreachable from main, the pull request having been squash-merged.
+- Routed every correction as a plain maintenance pull request with no Trellis task, journal session, or finish-work bundle. The bundle validators reject exactly this change shape — planning refuses any bundle touching the task archive, completion refuses task changes outside its own archive move — while no consumer gate invokes them.
+- Absorbed two rounds of Copilot review. Round one restored the command itself to wording that had named only its working directory. Round two wrapped the invocation in a code span, because the bare `<this repository>` placeholder parses as a raw HTML open tag and vanishes from the rendered note.
+- Rebutted one finding: CommonMark permits line endings inside inline code spans, and eight such spans already render correctly in this repository's docs.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `972b389b` | docs(fleet): state the working directory the install audit runs from |
+| `48b42401` | docs(task): record all six delivered pull requests, mezmo included |
+| `84b7200b` | docs(task): record the placeholder-rendering round and the reviewed heads |
+| `de4da5b5` | docs(task): mark the acceptance criteria met and record the evidence |
+| `18306cfd` | chore(task): record the branch on the fleet audit path task |
+
+### Testing
+
+- [OK] nine of nine 0.71.33 records verified from their pull-request heads with git show: each names the source checkout and passes --repo, and each retains the result evidence it already carried
+- [OK] rwbp-website cited hash: git merge-base --is-ancestor 60d706506ae14db31bb9966581dbaf8911731765 origin/main exits 0; zero remaining references to the two unreachable hashes
+- [OK] review preflight on this repository: 0 failure(s), 0 warning(s)
+- [OK] each consumer gate run in its own repository: loadsmith review-readiness 0 warnings, hoa-manager review preflight passed, rwbp-coordinator review-churn passed, rwbp-website review preflight 0/0 plus ops-check 0 failures, mezmo_benchmark review-cycle OK
+- [OK] Copilot reviewed all six pull-request heads clean, zero unresolved threads
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
