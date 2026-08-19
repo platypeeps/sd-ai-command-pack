@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 411
+- **Total Sessions**: 412
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~629 | Active |
+| `journal-9.md` | ~669 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 412 | 2026-08-19 | Fold the untracked-map preferred shape into the repomix staleness task | `c80fc26b`, `2c1724e1` | `task/repomix-untracked-shape-clean` |
 | 411 | 2026-08-19 | Record two fleet follow-up tasks in planning | `46a9b0ede2acb41b307f58f4f54bdddf2eb4606c` | `chore/record-fleet-followup-tasks` |
 | 410 | 2026-08-19 | Resolve fleet-publish pack helpers from the source checkout | `c1de1500`, `19169ffb` | `fix/fleet-publish-preflight-resolution` |
 | 409 | 2026-08-18 | Fleet gates, version-drift planning, and the .opencode parity fix | `41a55927`, `5d3fba24`, `bd24949f`, `e4d52e30`, `894a8117`, `7d053ef8` | `task/opencode-parity-ignores-git` |

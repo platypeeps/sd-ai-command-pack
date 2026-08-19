@@ -638,3 +638,43 @@ Committed the 08-18-fleet-repomix-map-staleness and 08-19-fleet-audit-path-in-co
 ### Next Steps
 
 - None - task complete
+
+
+## Session 412: Fold the untracked-map preferred shape into the repomix staleness task
+
+**Date**: 2026-08-19
+**Task**: Fold the untracked-map preferred shape into the repomix staleness task
+**Branch**: `task/repomix-untracked-shape-clean`
+
+### Summary
+
+Recorded the operator decision that the repomix map and its generated output are not tracked code, folding it into 08-18-fleet-repomix-map-staleness as the preferred shape. Obsidian KB handling was surveyed in the same review and deliberately left unchanged. Planning only; no implementation. Maintenance branch: the work commits carry the change and this session records them.
+
+### Main Changes
+
+- Folded the untracked-map decision into 08-18-fleet-repomix-map-staleness with the eight-consumer survey, the objection that five of six map-carrying consumers instruct agents to read the map, and the consequent work on this pack's publish allowlist, generator ordering, tests, and generated-content spec.
+- Made the agent-instruction rewrite ship inside the same per-repository pull request as that repository's untracking, because a merged untracking without it leaves a repository instructing its agents to read a file that is not there.
+- Addressed two remote review findings: replaced bare gitignore line citations that resolved against the wrong repository, and scoped the pack-surface criterion to consumers that actually generate a map, since sd-github-review runs no repomix.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c80fc26b` | docs(task): fold the untracked-map preferred shape into 08-18 |
+| `2c1724e1` | docs(task): address review on the untracked-map PRD |
+
+### Testing
+
+- [OK] bash ~/.agents/bin/sd-ai-command-pack-full-check.sh: exit 0, Findings: 0 total, review preflight 0 failure(s), 0 warning(s).
+- [OK] PR #515 CI: all checks pass, no non-passing rows.
+- [OK] Both remote review threads verified against the files, fixed, replied to, and resolved; zero unresolved threads at merge.
+- [OK] The prior branch's planning bundle was correctly refused with planning_task_deletion; this branch was rebuilt from main with clean history rather than the gate being waived.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
