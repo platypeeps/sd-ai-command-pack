@@ -599,3 +599,42 @@ fleet-publish.py shelled to the review preflight with a bare consumer-relative p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 411: Record two fleet follow-up tasks in planning
+
+**Date**: 2026-08-19
+**Task**: Record two fleet follow-up tasks in planning
+**Branch**: `chore/record-fleet-followup-tasks`
+
+### Summary
+
+Committed the 08-18-fleet-repomix-map-staleness and 08-19-fleet-audit-path-in-consumer-records task directories, both authored during the 0.71.33 fleet rollout and left untracked on main. Both stay in planning; neither is started here. Maintenance branch: the work commit carries the change and this session records it.
+
+### Main Changes
+
+- Committed both task directories so the defects they describe live in the backlog rather than in one session's working tree.
+- Replaced the generated _example scaffold rows in all four context manifests with real spec rows, and filled the second task's empty description from its PRD goal; the review preflight rejects both placeholders.
+- Reworded one requirement in 08-19-fleet-audit-path-in-consumer-records/prd.md that cited a consumer's archived task PRD by a repo-relative path. The guard resolved it against this repository, where it does not exist, which is the same class of defect the task itself records.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46a9b0ede2acb41b307f58f4f54bdddf2eb4606c` | chore(task): record two fleet follow-up tasks in planning |
+
+### Testing
+
+- [OK] bash ~/.agents/bin/sd-ai-command-pack-full-check.sh: exit 0, Findings: 0 total.
+- [OK] python3 scripts/sd-ai-command-pack-check.py --json: aggregate passed, all 8 rows passed.
+- [OK] PR #513 CI: CI Result pass; lint, security, Shell coverage, Release payload gate, CI scope, and all three unittest matrix legs pass.
+- [OK] GitHub Copilot reviewed 8 of 8 changed files and generated no comments; zero review threads.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
