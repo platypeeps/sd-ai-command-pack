@@ -9,7 +9,8 @@
 # 2. Fleet candidate ledger gate: any push from a pack-source checkout is
 #    blocked if docs/fleet/candidate-validation.json is stale/invalid for the
 #    current payload, so the drift surfaces locally instead of reddening CI at
-#    test_surface_closure. Skips silently outside a pack-source checkout.
+#    test_surface_closure. Skips silently outside a pack-source checkout, and
+#    for a push that only deletes refs (see deletions_only below).
 #
 # Install once per clone:  git config core.hooksPath .githooks
 # One-shot emergency bypass:
@@ -31,11 +32,22 @@ status=0
 # makes the ledger pass non-authoritative.
 head_sha="$(git rev-parse HEAD 2>/dev/null || true)"
 nonauthoritative=0
+
+# A push that only deletes refs publishes no payload, so the ledger has nothing
+# to be stale *for*: gating it means a branch cleanup fails on drift that some
+# other push introduced. Track it here rather than in the main-only branch of
+# the loop below, which never sees a feature-branch deletion.
+saw_ref=0
+deletions_only=1
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     nonauthoritative=1
 fi
 
 while read -r _local_ref local_sha remote_ref remote_sha; do
+    saw_ref=1
+    if [ "$local_sha" != "$zero" ]; then
+        deletions_only=0
+    fi
     if [ "$local_sha" != "$zero" ] && [ "$local_sha" != "$head_sha" ]; then
         nonauthoritative=1
     fi
@@ -89,7 +101,8 @@ done
 
 # Fleet candidate ledger gate. Skips silently outside a pack-source checkout
 # (consumer clone / partial fixture): nothing to validate there.
-if [ "${SD_AI_COMMAND_PACK_LEDGER_BYPASS:-0}" != "1" ]; then
+if [ "${SD_AI_COMMAND_PACK_LEDGER_BYPASS:-0}" != "1" ] &&
+   ! { [ "$saw_ref" = "1" ] && [ "$deletions_only" = "1" ]; }; then
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
     checker="$repo_root/scripts/sd-ai-command-pack-fleet-candidate-check.py"
     ledger="$repo_root/docs/fleet/candidate-validation.json"

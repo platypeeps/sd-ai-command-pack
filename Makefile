@@ -85,10 +85,17 @@ lint:
 	fi
 	@STRICT="$(STRICT)" bash .github/scripts/check-bash32-syntax.sh
 
+# A scanner found on PATH is whatever version happens to be installed, while
+# CI runs the requirements-security.txt pin under --require-hashes. When the
+# two differ the gate is not reproducible: a newer scanner invents findings CI
+# never sees, an older one misses findings CI would catch, and either way the
+# local result says nothing about the pipeline. The fallback still runs -- it
+# is better than no audit -- but it announces the skew instead of hiding it.
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \
 		"$(VENV_BIN)/bandit" -q -r --severity-level medium install.py installer scripts templates/scripts; \
 	elif command -v bandit >/dev/null 2>&1; then \
+		printf '%s\n' "warning: $(VENV_BIN)/bandit is missing; using an UNPINNED bandit from PATH ($$(bandit --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
 		bandit -q -r --severity-level medium install.py installer scripts templates/scripts; \
 	else \
 		printf '%s\n' "warning: bandit not found; skipping Python security audit."; \
@@ -96,6 +103,7 @@ audit:
 	@if [ -x "$(VENV_BIN)/zizmor" ]; then \
 		"$(VENV_BIN)/zizmor" --offline .github/workflows/; \
 	elif command -v zizmor >/dev/null 2>&1; then \
+		printf '%s\n' "warning: $(VENV_BIN)/zizmor is missing; using an UNPINNED zizmor from PATH ($$(zizmor --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
 		zizmor --offline .github/workflows/; \
 	else \
 		printf '%s\n' "warning: zizmor not found; skipping workflow security audit."; \
