@@ -1,5 +1,49 @@
 # Review preflight cannot express a deliberately-absent path
 
+## Status update — 2026-08-20 (mechanism shipped; closing on a naming decision)
+
+Re-verified against the working tree at 2cc1e7fe. Two of this task's three open
+criteria are already satisfied by shipped, tested code, and one claim in the
+body below is factually wrong.
+
+- **Point-of-use absent declaration: shipped.** `[absent: <reason>]`, pattern at
+  `scripts/sd-ai-command-pack-review-preflight.mjs:157`, predicate
+  `isAbsentPathMarked` at `:5066`, consumed at `:5084` and `:5111-5115`
+  (commit 687f7f8d).
+- **Repository-wide declaration: shipped and tested.** `optionalReferencePaths`
+  merges from the tracked `.sd-ai-command-pack/review-preflight.json` in
+  `loadConfig` (`:448-470`) and is consulted at `:5167`. End-to-end coverage at
+  `tests/test_review_preflight.py:4296-4306` fails without the entry and passes
+  with it — exactly the mechanism this task's residual scope asked for.
+- **The body's claim that "the config path is not covered by an equivalent
+  test" is wrong.** `test_review_preflight_reports_malformed_config_as_failure`
+  at `tests/test_review_preflight.py:4510-4540` asserts returncode 1 and
+  `"could not be parsed as JSON"`. Verified present 2026-08-20. `loadConfig`
+  also merges only when `Array.isArray(raw[key])` and filters non-strings, so a
+  malformed declaration is dropped and the references stay checked — the path is
+  fail-closed by construction, not merely untested.
+- **The ignore-aware design this task is named for was already rejected here and
+  stays rejected.** No `.gitignore` or allowlist consultation exists anywhere in
+  the preflight: `grep -rn "check-ignore"` hits `full-check.sh`,
+  `review-local.py`, `install-audit.py`, and `check.py` — never this checker.
+
+### The one residual, and the decision taken
+
+All that remained was schema naming: ship a distinct `absentReferencePaths` key
+carrying a required reason, or reuse the existing `optionalReferencePaths`.
+
+**Decision: reuse `optionalReferencePaths`.** It is already tracked, already
+merged fail-closed, and already covered by two tests. A second key would add a
+parallel code path through `loadConfig` and a second way to express one
+intent, for the sole benefit of a reason string that the point-of-use
+`[absent: <reason>]` marker already carries where a reason is actually useful.
+
+This decision is cheap to reverse: adding `absentReferencePaths` later is
+additive to `loadConfig` and breaks no existing declaration.
+
+Remaining: nothing actionable. Archived 2026-08-20.
+
+
 ## Goal
 
 Give the review preflight's documentation path-reference check a way to accept a
