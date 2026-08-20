@@ -105,8 +105,14 @@ def reconciled_unchanged_status(
     that way forever: no reinstall, at any version, would ever repair it,
     because the content had nothing left to change. That is how the fleet ended
     up with a shipped helper installed non-executable and `run --` unable to
-    invoke it. Content equality is not file equality; the mode is part of what
-    the pack ships, so a disagreement is drift and reports as UPDATED.
+    invoke it. Content equality is not file equality.
+
+    What the pack asserts is the executable *bit*, not a mode: `source_is_executable`
+    reduces the source to a boolean, git stores the same boolean as 100755 or
+    100644, and a fresh install's mode is umask-derived (0700, 0755, 0775 --
+    none of them canonical). So only the bit is reconciled. A file the owner
+    narrowed to 0744 is not drift: it is executable, which is what `run --`
+    needs, and widening it to 0754 would hand out access its owner removed.
 
     The chmod is verified rather than assumed: a filesystem that cannot
     represent the bit (a mount without exec permission, a non-POSIX volume)
