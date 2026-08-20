@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path, PurePosixPath
 
 try:
@@ -33,7 +34,14 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import shim
 PACK_ROOT = _support.PACK_ROOT
 GATE = PACK_ROOT / ".github/scripts/check-shipped-script-modes.py"
 TOOLCHAIN = PACK_ROOT / "scripts/sd-ai-command-pack-toolchain.sh"
-LIBRARY_PREFIX = "sd_ai_command_pack_"
+
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+# Imported, not restated, for the same reason the gate imports it: a second
+# literal is a second place the rule can drift from the generators that
+# actually derive the mode from it.
+from installer.machinepayload import LIBRARY_PREFIX  # noqa: E402
 
 # Every shipped helper rejects this and exits before doing any work, so the
 # sweep observes reachability without running 25 tools for real.
@@ -56,12 +64,27 @@ class ShippedHelpersAreReachableTest(unittest.TestCase):
     """`run --` reaches every shipped helper from this repository's own tree."""
 
     def test_every_shipped_helper_runs_through_the_toolchain(self) -> None:
-        names = [
-            PurePosixPath(line).name
+        tracked = [
+            PurePosixPath(line)
             for line in git("ls-files", "templates/scripts").splitlines()
-            if line and not PurePosixPath(line).name.startswith(LIBRARY_PREFIX)
+            if line
+        ]
+        names = [
+            path.name
+            for path in tracked
+            if not path.name.startswith(LIBRARY_PREFIX)
         ]
         self.assertTrue(names, "no shipped helpers enumerated from the index")
+
+        # `run --` takes a helper *name*, not a path, so the sweep must operate
+        # on basenames. That makes basename uniqueness load-bearing: two
+        # tracked files sharing one would silently sweep the same helper twice
+        # and never exercise the other. Assert it rather than assume it.
+        counts = Counter(path.name for path in tracked)
+        duplicates = sorted(name for name, n in counts.items() if n > 1)
+        self.assertEqual(
+            [], duplicates, "shipped helper basenames must be unique for `run --`"
+        )
 
         unreachable: list[str] = []
         for name in names:
