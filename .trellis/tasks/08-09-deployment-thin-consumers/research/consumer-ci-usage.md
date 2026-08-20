@@ -57,7 +57,7 @@ entire consumer footprint.
 | anomaly-metric-creator | lint + **one functional execution** + sync automation |
 
 The single functional execution in the fleet
-(`anomaly-metric-creator` `ci.yml:293`):
+(`anomaly-metric-creator` `ci.yml:293` [absent: consumer repository]):
 
 ```yaml
 uv run --python 3.14 --no-project python scripts/sd-ai-command-pack-pr-body-scope.py
@@ -76,7 +76,7 @@ consumer needs" to "one script, one consumer": `pr-body-scope.py` in
 even that execution is a no-op. The script only enforces when a PR
 body is supplied via `--body-file` or the
 `SD_AI_COMMAND_PACK_PR_BODY_SCOPE_PR_BODY` /
-`SD_AI_COMMAND_PACK_SCOPE_PR_BODY` env vars; the `ci.yml:293` call
+`SD_AI_COMMAND_PACK_SCOPE_PR_BODY` env vars; the `ci.yml:293` [absent: consumer repository] call
 passes none of them, so it prints detected categories and exits 0
 unconditionally. It has never blocked a PR there.
 

@@ -34,6 +34,7 @@ let warnings = [];
 let passes = [];
 let installedTargetsCache;
 let documentationGuardFilesCache;
+let trackedFileBasenamesCache;
 const readTextCache = new Map();
 
 const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
@@ -155,6 +156,22 @@ const MAX_CONFIGURED_REVIEW_RISK_SIGNAL_LENGTH = 120;
 // on what a reader sees as the next line.
 const ABSENT_PATH_MARKER_PATTERN =
   /^[ \t]*\[absent:[^\]\r\n\u2028\u2029]*[^\]\s][^\]\r\n\u2028\u2029]*\]/;
+// Trailing line/column citation suffixes -- `:42`, `:12-34`, `:12:5`,
+// `:1-2,3-4`, `:~145`. Hoisted to a single module constant because both
+// reference eligibility and reference resolution test for it, and a second
+// hand-written copy would drift. Deliberately FLAGLESS: a `g` flag gives a
+// shared literal a persistent `lastIndex`, so alternating callers would see
+// alternating results for identical input.
+const LINE_SUFFIX_PATTERN = /(?::~?\d+(?:-\d+)?(?:,~?\d+(?:-\d+)?)*)+$/;
+// The pack's own file-naming convention in its two forms: hyphens for
+// executables, underscores for importable Python modules. Prose routinely
+// drops the prefix -- `review.py` naming the tracked file whose basename is
+// `sd-ai-command-pack-review.py` -- so a bare name matching no tracked
+// basename is retried against these two spellings. The list is CLOSED on
+// purpose. No substring containment and no edit distance: either would
+// resolve names the author never wrote and leave the check asserting nothing.
+const PACK_NAME_PREFIXES = ['sd-ai-command-pack-', 'sd_ai_command_pack_'];
+const bareReferencePatternCache = new Map();
 const REVIEW_LEARNINGS_PATH_PROVENANCE_FILE = 'docs/review-learnings.md';
 const REVIEW_LEARNINGS_MANAGED_BLOCK_PATTERN =
   /<!-- sd-review-learnings:start -->[\s\S]*?<!-- sd-review-learnings:end -->/g;
@@ -306,6 +323,7 @@ export function runReviewPreflight(options = {}) {
   passes = [];
   installedTargetsCache = undefined;
   documentationGuardFilesCache = undefined;
+  trackedFileBasenamesCache = undefined;
   readTextCache.clear();
   // Load config only after the result buffers are reset so a malformed config
   // file's fail() entry is reported instead of being wiped by the reset.
@@ -392,6 +410,27 @@ function defaultConfig() {
       'package-lock.json',
       'package.json',
     ],
+    // Extensions a bare filename may carry to be treated as a citation rather
+    // than as prose. Consumers may widen the set through
+    // `.sd-ai-command-pack/review-preflight.json`; the merge is a union, so it
+    // can never be narrowed, which is the correct direction for a gate.
+    bareReferenceExtensions: [
+      'md',
+      'mdx',
+      'py',
+      'mjs',
+      'js',
+      'ts',
+      'sh',
+      'json',
+      'jsonl',
+      'toml',
+      'yml',
+      'yaml',
+      'txt',
+      'cfg',
+      'ini',
+    ],
     ignoredReferencePrefixes: [
       '.build/',
       '.claude/',
@@ -455,6 +494,7 @@ function loadConfig(root, explicitPath) {
     'integrationPaths',
     'referencePrefixes',
     'topLevelReferenceFiles',
+    'bareReferenceExtensions',
     'ignoredReferencePrefixes',
     'optionalReferencePaths',
     'copiedTemplateExtraPaths',
@@ -5053,7 +5093,9 @@ function resolvesToLineSuffixedPath(resolved, existsPath) {
   // trailing line/column suffixes (including comma-joined multi-ranges and `~`
   // approximate markers) resolves against its base path. Files literally named
   // with `:digits` were already matched by the direct existence check above.
-  const base = resolved.replace(/(?::~?\d+(?:-\d+)?(?:,~?\d+(?:-\d+)?)*)+$/, '');
+  // LINE_SUFFIX_PATTERN is shared with reference eligibility so the two cannot
+  // disagree about what a line citation looks like.
+  const base = resolved.replace(LINE_SUFFIX_PATTERN, '');
   return base !== resolved && existsPath(base);
 }
 
@@ -5137,6 +5179,15 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
   const optionalCandidatePaths = new Set(options.optionalReferencePaths || config.optionalReferencePaths);
   const ignoredPrefixes = options.ignoredReferencePrefixes || config.ignoredReferencePrefixes;
 
+  // The URI-scheme test runs against the target with any trailing line citation
+  // removed. A bare filename cited as a location — `review.py:555` — otherwise
+  // reads as a scheme: `r` followed by `eview.py` then `:` satisfies
+  // URI_SCHEME_PATTERN, so the whole locator-form class would be discarded
+  // before ever being considered. Stripping only the citation keeps every real
+  // scheme rejected, because a scheme colon survives the strip
+  // (`mailto:notes.py` still matches) and `://` is caught separately.
+  const schemeCandidate = target.replace(LINE_SUFFIX_PATTERN, '');
+
   if (
     !target ||
     target.startsWith('#') ||
@@ -5146,7 +5197,7 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     target.startsWith('@') ||
     target.endsWith('/') ||
     target.includes('://') ||
-    URI_SCHEME_PATTERN.test(target) ||
+    URI_SCHEME_PATTERN.test(schemeCandidate) ||
     /[<>{}\[\]*]/.test(target) ||
     /[\s|]/.test(target)
   ) {
@@ -5176,7 +5227,141 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     return true;
   }
 
-  return referencePrefixes.some((prefix) => normalized.startsWith(prefix));
+  if (referencePrefixes.some((prefix) => normalized.startsWith(prefix))) {
+    return true;
+  }
+
+  // A bare filename — one carrying no `/` — is checked only when it is cited as
+  // a LOCATION rather than used as a name. Exactly three classes are declined
+  // here, and every one of them is decided on the shape of the target alone:
+  //   1. no line/range suffix. Prose uses a filename as a noun far more often
+  //      than as a path, and that class carries the names of things that
+  //      deliberately do not exist — `coverage.py` the packaging tool,
+  //      `MIGRATED.md` from a rejected proposal, `journal-N.md` where `N`
+  //      stands for a number. A noun does not carry a line number.
+  //   2. a `..` segment. The pattern's middle character class contains `.`, so
+  //      `a..b.py` matches it — this guard, not the pattern, rejects traversal.
+  //   3. an extension outside `bareReferenceExtensions`.
+  // This test is pure SHAPE and must stay that way. Whether a tracked file
+  // backs the name is answered afterwards, by resolveDocumentationReference.
+  // An eligibility gate that consulted the basename index would collapse
+  // "eligible" and "resolves" into a single predicate, and an unresolvable
+  // citation could then never be reported at all — which is the entire failing
+  // half of this rule.
+  if (normalized.includes('/')) {
+    return false;
+  }
+
+  const bareName = normalized.replace(LINE_SUFFIX_PATTERN, '');
+  if (bareName === normalized || bareName.includes('..')) {
+    return false;
+  }
+
+  return bareReferencePattern(
+    options.bareReferenceExtensions || config.bareReferenceExtensions,
+  ).test(bareName);
+}
+
+// `^\.?<name>\.<ext>$` over the configured extension set. The leading `\.?` is
+// what admits dotfiles such as `.mcp.json`. Compiled per extension set and
+// memoised, since eligibility runs once per code span across the whole corpus.
+function bareReferencePattern(extensions) {
+  const key = extensions.join('|');
+  const cached = bareReferencePatternCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const alternation = extensions
+    .filter((extension) => typeof extension === 'string' && extension.length > 0)
+    .map((extension) => extension.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  // An empty extension set must match nothing rather than everything.
+  const pattern = alternation
+    ? new RegExp(`^\\.?[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?\\.(?:${alternation})$`)
+    : /^(?!)/;
+
+  bareReferencePatternCache.set(key, pattern);
+  return pattern;
+}
+
+// One `git ls-files -z` for the whole run, grouped basename -> tracked paths.
+// Batched deliberately: resolving one reference at a time would spawn a git
+// process per bare reference — several hundred on this repository's own
+// documentation corpus — and this gate's process cost has already been the
+// subject of its own task. The git index, not a filesystem walk, is the right
+// source: the gate is about references to repository content, so an untracked
+// build artifact sitting in the working tree must not make a stale citation
+// resolve.
+function trackedFileBasenames() {
+  if (trackedFileBasenamesCache !== undefined) {
+    return trackedFileBasenamesCache;
+  }
+
+  const basenames = new Map();
+  const result = runGit(['ls-files', '-z']);
+
+  if (result.status === 0) {
+    for (const entry of result.stdout.split('\0')) {
+      if (!entry) {
+        continue;
+      }
+      const path = normalizePathSeparators(entry);
+      const basename = path.split('/').pop();
+      if (!basename) {
+        continue;
+      }
+      const paths = basenames.get(basename);
+      if (paths) {
+        paths.push(path);
+      } else {
+        basenames.set(basename, [path]);
+      }
+    }
+  }
+
+  trackedFileBasenamesCache = basenames;
+  return basenames;
+}
+
+// Accepts the Map built by trackedFileBasenames() and, so resolution can be
+// asserted without a repository behind it, a plain object standing in for one.
+function trackedPathsForBasename(index, basename) {
+  if (!index) {
+    return null;
+  }
+
+  let paths;
+  if (typeof index.get === 'function') {
+    paths = index.get(basename);
+  } else if (Object.prototype.hasOwnProperty.call(index, basename)) {
+    paths = index[basename];
+  }
+
+  return Array.isArray(paths) && paths.length > 0 ? paths : null;
+}
+
+// Exact basename first, then each pack prefix the name does not already carry.
+// That is the whole transformation set — see PACK_NAME_PREFIXES.
+function resolveBareFilenameReference(target, index) {
+  const name = target.replace(LINE_SUFFIX_PATTERN, '');
+
+  const exact = trackedPathsForBasename(index, name);
+  if (exact) {
+    return exact;
+  }
+
+  for (const prefix of PACK_NAME_PREFIXES) {
+    if (name.startsWith(prefix)) {
+      continue;
+    }
+    const prefixed = trackedPathsForBasename(index, prefix + name);
+    if (prefixed) {
+      return prefixed;
+    }
+  }
+
+  return null;
 }
 
 function normalizeDocumentationReference(raw) {
@@ -5194,7 +5379,12 @@ function normalizeDocumentationReference(raw) {
   return trimmed.split('#')[0].split('::')[0];
 }
 
-function resolveDocumentationReference(file, target, kind, options = {}) {
+// Exported so the resolution rules can be asserted directly. R2 (the prefix set
+// is closed) and R3 (a name matching several tracked paths resolves rather than
+// failing) are claims about RESOLUTION and cannot be reached through the
+// eligibility predicate, which answers on shape alone: a near-miss name is
+// eligible exactly as an unresolvable one is.
+export function resolveDocumentationReference(file, target, kind, options = {}) {
   if (!shouldCheckDocumentationPathReference(target, kind, options)) {
     return null;
   }
@@ -5208,7 +5398,26 @@ function resolveDocumentationReference(file, target, kind, options = {}) {
     return resolved;
   }
 
-  return normalizePathSeparators(target.replace(/^\.\//, ''));
+  const normalized = normalizePathSeparators(target.replace(/^\.\//, ''));
+
+  // Locator-form bare filenames are the class this resolver has to translate:
+  // `review.py:9` names the tracked file whose basename is
+  // `sd-ai-command-pack-review.py`. The basename index is consulted HERE and
+  // nowhere else. A name that resolves to nothing
+  // is handed back unchanged rather than as null, so the caller's existence
+  // probe reports it missing — returning null would silently swallow the one
+  // case this rule exists for.
+  if (!normalized.includes('/') && LINE_SUFFIX_PATTERN.test(normalized)) {
+    const candidates = resolveBareFilenameReference(
+      normalized,
+      options.trackedBasenames || trackedFileBasenames(),
+    );
+    if (candidates) {
+      return candidates[0];
+    }
+  }
+
+  return normalized;
 }
 
 function documentationGuardFiles() {

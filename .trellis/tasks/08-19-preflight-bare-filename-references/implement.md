@@ -53,6 +53,15 @@ by annotation.
 
 ## 1b. Scope confirmation gate — before any checker edit
 
+**RESOLVED 2026-08-20 — operator confirmed the locator-only scope.** Asked
+before any checker edit existed, with the three options and their measured
+consequences on the table (locator-only: 107 newly checked / 4 newly failing;
+the original PRD rule: 160 failures across 43 documents; locator-now-noun-later).
+The operator chose locator-only. Noun-form references stay declined by rule
+(R4) and no follow-up task is opened for them. Proceed to step 2.
+
+The original gate text follows, for the record.
+
 **Blocking.** Confirm with the operator that the locator-only scope is accepted:
 line-cited bare filenames become checked, unsuffixed ones stay declined. It is
 the one place this plan departs from the original PRD's stated rule, every test

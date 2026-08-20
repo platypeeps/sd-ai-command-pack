@@ -939,6 +939,16 @@ document service-user paths under `/home/<user>/` can add those service users to
 `allowedLinuxHomeUsers` in that config. The script requires Node 22 or newer
 and scans regular documentation files only; symlinked docs are skipped
 intentionally so local/generated links do not expand outside the repository.
+A bare filename — one carrying no directory prefix — is validated only when it
+is cited as a location, meaning it carries a line or line-range suffix such as
+`review.py:555`. Such a name is matched by basename against the repository's
+tracked files, retrying the `sd-ai-command-pack-` and `sd_ai_command_pack_`
+prefixes the pack uses for its own scripts and modules; a name matching several
+tracked files resolves rather than failing. A bare filename with no line suffix
+stays unchecked, because prose uses a filename as a noun far more often than as
+a path. `bareReferenceExtensions` in that config widens the extensions a bare
+filename may carry, and a malformed value leaves the built-in set in force.
+
 A documentation reference that is deliberately unresolvable — a path in another
 repository, a path the prose exists to say is missing, a hypothetical in a
 worked example — can be marked at the point of use with `[absent: <reason>]`
