@@ -754,8 +754,13 @@ class RecordSessionTests(InstallTestCase):
         # and seeds a different Testing default (loadsmith's add_session).
         variant = root / ".trellis/scripts/add_session.py"
         source = variant.read_text(encoding="utf-8")
-        self.assertIn("(see git log)", source)
-        source = source.replace("(see git log)", "prefilled subject")
+        # Trellis <=0.6.16-sd.1 carried a "(see git log)" placeholder for a
+        # commit it could not resolve; later versions resolve every subject
+        # before writing and have no placeholder to swap. Only rewrite it when
+        # it is still there -- asserting its presence pins a behaviour that was
+        # deliberately removed, which is what this test exists to tolerate.
+        if "(see git log)" in source:
+            source = source.replace("(see git log)", "prefilled subject")
         # Trellis <=0.6.7 seeds a DEFAULT_TESTING placeholder the variant
         # rewords; >=0.6.14 omits empty sections and has no such constant.
         current_testing_default = (
