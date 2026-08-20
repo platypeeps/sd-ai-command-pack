@@ -104,25 +104,54 @@ code disagreed. Each was checked against the runtime, not against comments:
   resolves or re-scopes (`08-17`, `07-09`) rather than leaving them to describe
   a world that no longer exists.
 
+## Verification evidence — 2026-08-20
+
+Every check named in `implement.md` §9, run after the final edit:
+
+| # | Result |
+|---|---|
+| V1 | `make release-prep` exit 0 — 2728 tests, 0 failures, 0 skips |
+| V2 | `git grep "0\.6\.7\|0\.6\.14" -- templates/scripts tests scripts` → no match |
+| V3 | `git grep "row_re\|_row_replacement" -- templates/scripts scripts` → no match |
+| V4 | `test_record_session_wrapper_delegates_commit_cell_escaping` passes; subject `fix: escape a \| pipe and a C:\tmp path   with   gaps` renders with both metacharacters escaped, whitespace collapsed, and exactly 3 unescaped cell delimiters |
+| V5 | all 9 shipped copies (3 files × 3 mirrors) byte-identical to `templates/scripts/` |
+| V6 | `sd-status fleet` prints `trellis 0.6.16-sd.7` on all 8 consumer rows |
+| V7 | `git grep "unrecognized argument" -- templates/ scripts/ plugins/` → no match |
+| V8 | candidate ledger regenerated; 8/8 consumers passed thin install + audit + checks |
+
+Also: `ruff` and `mypy` clean over 52 source files; shipped-surface closure
+clean (38 changed paths, 1001 affected nodes); review preflight 0 failures.
+
+Baselines before the work: `test_record_session` 13 OK, `test_status` 131 OK.
+After: 13 OK and 132 OK — net +1 in `test_status` (two fallback tests
+repurposed to assert absence, one stale-pointer test added).
+
+One correction found during implementation: a **third** fallback test,
+`test_active_task_parses_prose_when_json_flag_is_ignored`, existed beyond the
+two the spec named, and the shared `make_status_repo` fixture emitted a bare
+path that depended on the removed branch. Both were found by running the suite,
+not by reading the spec — recorded because the spec's test list was incomplete
+and is now corrected.
+
 ## Acceptance criteria
 
-- [ ] `.trellis/spec/tooling/vendored-trellis-compatibility.md` states the
+- [x] `.trellis/spec/tooling/vendored-trellis-compatibility.md` states the
   `0.6.16-sd.7` floor and the semver caveat, and no longer instructs wrappers to
   support `<=0.6.7`.
-- [ ] `git grep -n "0\.6\.7\|0\.6\.14" -- templates/scripts tests scripts`
+- [x] `git grep -n "0\.6\.7\|0\.6\.14" -- templates/scripts tests scripts`
   returns no occurrence that describes a supported runtime (audit and task prose
   may cite them historically).
-- [ ] The record-session wrapper no longer contains a commit-table row regex,
+- [x] The record-session wrapper no longer contains a commit-table row regex,
   and a commit subject containing a backslash, a pipe, and collapsed whitespace
   renders correctly in the journal.
-- [ ] `make test` is green with no skips, `make lint` and `make audit` clean.
-- [ ] The human `sd-status fleet` report prints a Trellis version per row.
-- [ ] `python3 ./.trellis/scripts/task.py create --base-branch <b>` is the
+- [x] `make test` is green with no skips, `make lint` and `make audit` clean.
+- [x] The human `sd-status fleet` report prints a Trellis version per row.
+- [x] `python3 ./.trellis/scripts/task.py create --base-branch <b>` is the
   documented path; no shipped surface tells the reader it will be rejected.
-- [ ] The four copies of each changed script (`templates/scripts/`, `scripts/`,
+- [x] The four copies of each changed script (`templates/scripts/`, `scripts/`,
   `plugins/sd/bin/`, `plugins/sd/machine-payload/scripts/`) stay byte-identical
   via `make generate` + `make sync`.
-- [ ] Shipped payload under `templates/**` changed, so `manifest.json` carries a
+- [x] Shipped payload under `templates/**` changed, so `manifest.json` carries a
   bumped version, `CHANGELOG.md` carries a matching top heading, and
   `docs/fleet/candidate-validation.json` is the all-pass ledger produced by
   `make release-prep` for the exact payload. The `Release payload gate` CI job
