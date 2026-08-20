@@ -182,21 +182,25 @@ but defines no ordering or transition policy:
   scope, preparation/check commands, and finish-work expectation; bind it to
   the refresh branch.
 
-  Immediately after `task.py create`, set the PR target explicitly:
+  Set the PR target as part of task creation:
 
   ```bash
-  python3 ./.trellis/scripts/task.py set-base-branch <task-dir> <default-branch>
+  python3 ./.trellis/scripts/task.py create "<title>" --description "<summary>" \
+    --base-branch <default-branch>
   ```
 
-  Do **not** use `task.py create --base-branch`. That flag ships with the same
-  vendored `task_store.py` revision that fixes the defect, so on exactly the
-  consumers that need it `create` fails with `unrecognized arguments`. The older
-  revision writes `base_branch` as the currently checked-out branch
-  unconditionally, which on this stage is the refresh branch — and the review
-  preflight then rejects the lane at `focused-candidate` under its root-task
-  rule. `set-base-branch` exists in both revisions. Reordering creation before
-  the branch switch is not a substitute: it produces the right answer only by
-  accident of which branch happens to be checked out.
+  Without `--base-branch`, `create` resolves the base from `origin/HEAD` and
+  falls back to the **checked-out branch** — which at this stage is the refresh
+  branch, and the review preflight then rejects the lane at `focused-candidate`
+  under its root-task rule. Passing the flag closes that window rather than
+  repairing it afterwards; `set-base-branch` remains the repair for a task that
+  already exists. Reordering creation before the branch switch is not a
+  substitute: it produces the right answer only by accident of which branch
+  happens to be checked out.
+
+  The flag requires the supported vendored-Trellis floor. A consumer below the
+  floor is a violation to upgrade, not a case to write a fallback for — see
+  `.trellis/spec/tooling/vendored-trellis-compatibility.md`.
 
   Then validate the seeded task mechanically before advancing, from **this
   source checkout** against the consumer:

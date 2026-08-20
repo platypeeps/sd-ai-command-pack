@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.71.35 - 2026-08-20
+
+### Fixed
+
+- A commit subject containing a backslash no longer reaches the session journal
+  unescaped. The record-session wrapper resolved every subject itself and then
+  overwrote each commit-table row with `subject.replace("|", "\|")`, which
+  escapes pipes but leaves backslashes raw, preserves whitespace runs that can
+  break the row, and skips the 500-character truncation. `add_session.py`
+  resolves the same subjects from the same object database and renders them
+  with `escape_markdown_cell`, which handles all four cases, so the wrapper now
+  passes the OIDs and asserts the rows were written rather than re-rendering
+  them. The overwrite dated from a Trellis version that seeded a
+  `(see git log)` placeholder; no such placeholder exists any more.
+
+- The fleet refresh lane no longer creates a task whose `base_branch` is the
+  refresh branch. Two surfaces forbade `task.py create --base-branch` on the
+  grounds that the vendored `task_store.py` rejects it as an unrecognized
+  argument -- true when written, false now, and the prohibition had begun to
+  cost the correctness it was meant to protect: without the flag, `create`
+  falls back to the checked-out branch, which on that lane is exactly the wrong
+  answer. The two-step create-then-repair sequence is replaced by passing the
+  flag, and `set-base-branch` returns to being the repair for an existing task.
+
+### Changed
+
+- The vendored Trellis compatibility contract now states a supported floor --
+  the build `0.6.16-sd.7`, which this repository and all eight fleet consumers
+  run as of 2026-08-20 -- and the wrappers that straddled `0.6.7` and `0.6.14`
+  drop the branches that only served the older runtime. The status collector's
+  three-way `current --json` fallback becomes the single documented call: a
+  non-zero exit or unparseable stdout now means "no active task" instead of
+  falling back to parsing prose.
+
+  The floor is recorded as an identity, not a range. `0.6.16-sd.7` carries a
+  prerelease segment, so under semver it sorts *below* `0.6.16`; the natural
+  `>=0.6.16` spelling would reject every repository in the fleet.
+
+  Not everything that looked like version machinery was one. The wrapper's
+  Testing and Next Steps patching survives, because `add_session.py` applies
+  its bullet prefix unconditionally and would render an already-marked line as
+  `- [OK] [WARN] flaky lane`; so does its retry handling, which covers an
+  uncommitted half-written entry rather than the already-committed record
+  `--idempotency-key` addresses. Both are now documented as deliberate
+  exceptions rather than left to read as leftovers.
+
+- The human `sd-status fleet` report prints each repository's Trellis version
+  beside its pack pin. The JSON payload always carried it, so an operator
+  reading only the human report saw a fleet consistent on a version it had
+  never been shown. `current --json`'s `stale` flag is surfaced the same way: a
+  stale pointer still names a task, and the report now says so.
+
 ## 0.71.34 - 2026-08-19
 
 ### Added

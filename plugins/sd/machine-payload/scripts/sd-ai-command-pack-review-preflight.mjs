@@ -932,9 +932,8 @@ function validateSeededTaskBaseBranch(taskDir, record, evidence, add) {
       `field base_branch ${JSON.stringify(record.base_branch.trim())} must equal the repository `
         + `default branch ${JSON.stringify(defaultBranch.trim())}; repair with `
         + `python3 ./.trellis/scripts/task.py set-base-branch ${taskDir} ${defaultBranch.trim()} `
-        + '-- run it immediately after task.py create, and do not use '
-        + 'task.py create --base-branch, which the older vendored task_store.py '
-        + 'rejects as an unrecognized argument',
+        + '-- or pass task.py create --base-branch when creating the task, '
+        + 'which avoids the mismatch instead of repairing it',
     );
   }
 }

@@ -137,12 +137,24 @@ class StatusTests(InstallTestCase):
         )
         scripts_dir = root / ".trellis/scripts"
         scripts_dir.mkdir(parents=True)
+        # Emit the one documented `current --json` shape: at the supported
+        # vendored-Trellis floor the collector parses that and nothing else.
         (scripts_dir / "task.py").write_text(
+            "import json, sys\n"
             "from pathlib import Path\n"
-            "print(Path('.trellis/tasks/status-fixture'))\n",
+            "task_dir = Path('.trellis/tasks/status-fixture')\n"
+            "if '--json' in sys.argv:\n"
+            "    print(json.dumps({\n"
+            "        'current_task': {'dir': str(task_dir),\n"
+            "                         'id': 'status-fixture'},\n"
+            "        'source': 'file',\n"
+            "        'stale': False,\n"
+            "    }))\n"
+            "else:\n"
+            "    print(task_dir)\n",
             encoding="utf-8",
         )
-        (root / ".trellis/.version").write_text("0.6.7\n", encoding="utf-8")
+        (root / ".trellis/.version").write_text("0.6.16-sd.7\n", encoding="utf-8")
         provenance = root / ".sd-ai-command-pack/provenance.json"
         provenance.parent.mkdir(parents=True)
         provenance.write_text(
@@ -417,7 +429,7 @@ class StatusTests(InstallTestCase):
         )
 
     def test_active_task_resolves_from_current_json_payload(self) -> None:
-        # Trellis >=0.6.14: `task.py current --json` emits a JSON document
+        # At the supported floor `task.py current --json` emits a JSON document
         # and the collector reads current_task.dir from it.
         root = self.make_status_repo()
         (root / ".trellis/scripts/task.py").write_text(
@@ -440,9 +452,11 @@ class StatusTests(InstallTestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
 
-    def test_active_task_parses_prose_when_json_flag_is_ignored(self) -> None:
-        # A Trellis variant that ignores unknown flags prints the bare task
-        # path with exit 0; the collector must interpret that prose output.
+    def test_active_task_absent_when_json_flag_is_ignored(self) -> None:
+        # A variant that ignores unknown flags prints the bare task path with
+        # exit 0. Below the supported floor that prose was parsed as a path;
+        # at the floor it is not the documented interface, so the answer is
+        # "no active task" rather than a guess at the output's shape.
         root = self.make_status_repo()
         (root / ".trellis/scripts/task.py").write_text(
             "print('.trellis/tasks/status-fixture')\n",
@@ -453,11 +467,12 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         report = json.loads(result.stdout)
-        self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+        self.assertIsNone(report["trellis"]["activeTask"])
 
-    def test_active_task_falls_back_when_current_rejects_json_flag(self) -> None:
-        # Trellis <=0.6.7: `task.py current --json` fails with an argparse
-        # error; the collector re-runs bare `current` and parses the path.
+    def test_active_task_absent_when_current_json_fails(self) -> None:
+        # At the supported floor `current --json` is the only interface. A
+        # non-zero exit means no active task -- the collector must not fall
+        # back to parsing the bare-path prose output.
         root = self.make_status_repo()
         (root / ".trellis/scripts/task.py").write_text(
             "import sys\n"
@@ -473,7 +488,33 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         report = json.loads(result.stdout)
-        self.assertEqual(report["trellis"]["activeTask"]["id"], "status-fixture")
+        self.assertIsNone(report["trellis"]["activeTask"])
+
+    def test_active_task_reports_a_stale_pointer(self) -> None:
+        # `stale` is the runtime's own verdict on its pointer; a report that
+        # drops it shows a healthy active task where there is drift.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "import json\n"
+            "print(json.dumps({\n"
+            "    'current_task': {'dir': '.trellis/tasks/status-fixture',\n"
+            "                     'id': 'status-fixture'},\n"
+            "    'source': 'file',\n"
+            "    'stale': True,\n"
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["trellis"]["activeTaskStale"])
+
+        human = self.run_status(root)
+
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn("[stale pointer]", human.stdout)
 
     def test_local_human_output_always_lists_selectable_sections(self) -> None:
         root = self.make_status_repo()

@@ -1,5 +1,31 @@
 # Fleet Trellis version drift: 8 consumers seven patch releases behind
 
+## Status update — 2026-08-20 (both halves resolved)
+
+This task named two distinct defects. Both are now closed; the record below is
+kept for its analysis, not as an open description of the fleet.
+
+**The drift itself: resolved.** Re-measured 2026-08-20 by reading
+`.trellis/.version` in each checkout directly. This repository and all eight
+consumers report `0.6.16-sd.7` — the table further down, showing all eight on
+`0.6.7` against a vendored `0.6.14`, describes a condition that no longer
+exists.
+
+**The invisibility: fixed** by task `08-20-retire-pre-0616-trellis-compat`. The
+human `sd-status fleet` row now prints `trellis <version>` alongside the pack
+pin, so an operator reading the human report is shown the second version that
+drifts instead of inferring consistency from its absence. That was this task's
+R2/R6 leg, delivered there because it is a rendering change of a few lines
+against a payload that already carried the value.
+
+The supported floor is now stated in
+`.trellis/spec/tooling/vendored-trellis-compatibility.md`, which also records
+why the floor is an identity rather than a `>=` range: `0.6.16-sd.7` carries a
+prerelease segment and sorts *below* `0.6.16` under semver, so a range check
+would report the whole converged fleet as non-compliant.
+
+Remaining: nothing actionable. Archive when convenient.
+
 ## Goal
 
 Bring every fleet consumer to the Trellis version this repository vendors, one
