@@ -117,4 +117,3 @@ console.log('\n--- distinct ambiguous names (top 40) ---');
 console.log(uniq(buckets.ambiguous).slice(0, 40).join('\n'));
 console.log('\n--- sample unique-match refs (10) ---');
 for (const r of buckets.unique.slice(0, 10)) console.log(`${r.file}:${r.line} ${r.target}`);
-
