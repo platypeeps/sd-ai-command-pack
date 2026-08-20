@@ -810,3 +810,35 @@ Filed two Trellis tasks for defects that were hand-worked-around during the 08-0
 ### Next Steps
 
 - None - task complete
+
+
+## Session 416: Retire the pre-0.6.16 vendored Trellis compatibility layer
+<!-- trellis-session: v=2 fp=579bae2629601b57 -->
+
+**Date**: 2026-08-20
+**Task**: Retire the pre-0.6.16 vendored Trellis compatibility layer
+**Branch**: `main`
+
+### Summary
+
+The fleet converged on Trellis 0.6.16-sd.7, so the compatibility spec's open-ended 'support <=0.6.7 until the fleet converges' rule was replaced with a stated floor and the branches it makes unreachable were removed. The floor is recorded as an identity, not a range: 0.6.16-sd.7 carries a prerelease segment and sorts below 0.6.16 under semver, so >=0.6.16 would reject the whole fleet. Two removals turned out to be bug fixes. The record-session wrapper was re-rendering commit rows with subject.replace('|', '\\|'), which escapes pipes but leaves backslashes raw and skips truncation; delegating to add_session.py's escape_markdown_cell fixes all four cases. And the ban on 'task.py create --base-branch' had started costing the correctness it protected, since without the flag the fleet lane records the refresh branch as its own base. Three things that looked like version machinery were kept and documented as deliberate exceptions after checking them against the runtime rather than their comments. Copilot raised three findings across three passes; all three were verified against the code first, and one was fixed against its suggested remedy because gating the stale-pointer suffix on a resolved activeTask would have made the signal unreachable rather than correcting it. Shipped as pack 0.71.35, merged as 8cc455ac.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8cc455ac` | Retire the pre-0.6.16 vendored Trellis compatibility layer (#521) |
+| `101b41e7` | docs(task): tick the executed plan and record the merge outcome |
+
+### Testing
+
+- [OK] make release-prep exit 0: 2732 tests, 0 failures, 0 skips
+- [OK] All CI checks passed on final head 9e6570db; Copilot third pass returned no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 07-09-trellis-version-compatibility stays parked: the npm @latest instruction still ships and would install a CLI below the new floor; the fix needs a bootstrap decision that task owns
