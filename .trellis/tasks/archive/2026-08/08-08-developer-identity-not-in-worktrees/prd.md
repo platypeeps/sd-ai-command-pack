@@ -1,5 +1,53 @@
 # The developer identity file is gitignored, so every fresh worktree fails record-session
 
+## Closure — 2026-08-20: FIXED upstream (not declined)
+
+This task is closed as **delivered**, and is recorded separately from its
+sibling `08-17-trellis-identity-message-consistency`, which was closed the same
+day as **will-not-do**. Two different outcomes; do not conflate them.
+
+The resolution half shipped in the vendored Trellis refresh to 0.6.16-sd.7
+(commit 2bc34a9b). `get_developer` now falls back to the main checkout's
+`.developer` when the current checkout is a linked worktree, via
+`main_worktree_root` — `common/paths.py:152-160`, resolver documented at
+`:121-160`.
+
+Verified 2026-08-20 by reproducing this PRD's own repro in a throwaway worktree
+created with `git worktree add --detach HEAD`:
+
+```
+--- .developer present in worktree? ---
+ls: .../wt-identity-probe/.trellis/.developer: No such file or directory
+--- get_developer.py in worktree ---
+sdelmas
+exit=0
+```
+
+The file is still absent — it is still gitignored, by design, since it carries a
+personal identity and no tracked file should. But the command no longer fails.
+That satisfies this task's goal: "make a newly created Git worktree usable for
+session recording without a manual file copy, while keeping the developer
+identity out of version control."
+
+**Do not copy `.developer` into worktrees.** The resolver's docstring is
+explicit that the main checkout's file is *read, never copied*, because a copy
+goes stale and shadows later changes made in the main checkout. Any future
+tooling that provisions worktrees should rely on the fallback, not seed the file.
+
+Also shipped in the same refresh, from this task's neighbourhood:
+`_safe_developer_name` (`common/paths.py:83`) now rejects empty and
+traversal-shaped names, and `TRELLIS_DEVELOPER` precedence is honored ahead of
+both files (`:145-147`).
+
+What is NOT fixed, and was deliberately declined: the *reporting* half — five
+disagreeing diagnoses across nine gates, four with no hint, and no way to tell an
+absent identity from an unusable one. See
+`.trellis/tasks/archive/2026-08/08-17-trellis-identity-message-consistency/prd.md`.
+
+Remaining: nothing actionable. Archived 2026-08-20.
+
+
+
 ## Goal
 
 Make a newly created Git worktree usable for session recording without a manual

@@ -50,7 +50,18 @@ Each entry must resolve to exactly one of: a filed task in the Trellis fork
     Upstream should carry `--description` in every runnable example once
     entry 11 makes it required.
 
-13. Developer identity in linked worktrees — upgrade-delivered but
+13. Developer identity in linked worktrees — **RESOLVED 2026-08-20: released
+    and verified.** Shipped in the vendored refresh to 0.6.16-sd.7 (2bc34a9b).
+    Reproduced this entry's own failure case in a throwaway worktree with no
+    `.developer`: `python3 ./.trellis/scripts/get_developer.py` printed
+    `sdelmas`, exit 0. The fallback at `common/paths.py:152-160` is live. Pack
+    task `08-08-developer-identity-not-in-worktrees` archived the same day with
+    `meta.closure = fixed-upstream`. Note: the main checkout's file is *read,
+    never copied* — do not seed `.developer` into worktrees. The stale text
+    below ("untagged and not on `fork/main`") described the state on 2026-08-17.
+    Original entry:
+
+    Developer identity in linked worktrees — upgrade-delivered but
     **unreleased**. `.trellis/.developer` is gitignored, so a fresh worktree has
     no identity and every identity-dependent script fails there. Upstream
     already resolves it through the main working tree
@@ -63,7 +74,21 @@ Each entry must resolve to exactly one of: a filed task in the Trellis fork
     the repo gate fails on any skip) which skips entirely against vendored
     0.6.14 and passes 9/0 against a copy of upstream's scripts. Resume when a
     refresh makes it run with zero skips.
-14. Identity reporting disagrees across eight gates — Trellis fork task to file,
+14. Identity reporting disagrees across eight gates — **RESOLVED 2026-08-20 as a
+    recorded keep-workaround decision** (the third resolution form this
+    register's acceptance criteria allow). The repository owner declined the
+    work: pack task `08-17-trellis-identity-message-consistency` is archived
+    with `meta.closure = wont-do`. No Trellis-fork task will be filed and the
+    patch named below was never written. The defect is real and stays in the
+    tree — five disagreeing diagnoses across nine gates, four with no hint, and
+    no way to distinguish an absent identity from an unusable one. Declined on
+    cost: a ~400-500 line refactor across seven upstream files, with a breaking
+    change to `regression.test.ts` (~:12846), which asserts
+    `expect(payload.error).toBe("No developer set")` by exact equality. Reopen
+    criteria and full rationale are in that task's archived `prd.md`. Original
+    entry:
+
+    Identity reporting disagrees across eight gates — Trellis fork task to file,
     specified in pack task `08-17-trellis-identity-message-consistency`, which
     stays **open, not parked**: the patch, its staged tests, and this entry's
     update are all executable in this repository; only the uptake waits on the
@@ -91,6 +116,11 @@ Each entry must resolve to exactly one of: a filed task in the Trellis fork
 ## Evidence
 
 2026-08-08 consolidation; source PRDs copied at drop time from git HEAD.
+
+2026-08-20: entry 13 resolved (released in 0.6.16-sd.7, verified in a
+throwaway worktree); entry 14 resolved as a keep-workaround decision after the
+owner declined the upstream refactor. Two entries down; the register stays open
+on the remainder.
 
 2026-08-17: entries 13 and 14 added from
 `08-08-developer-identity-not-in-worktrees` and its split successor

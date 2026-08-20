@@ -1,5 +1,48 @@
 # Retire the audit-path campaign branches left in five consumers
 
+## Status update — 2026-08-20 (already done; closing)
+
+The work this task describes is complete, and was complete before the task was
+picked up. Re-measured 2026-08-20 against live state rather than against the
+snapshot below.
+
+- **Local branches: gone.** `git branch --list chore/fix-install-audit-path-citation`
+  returns empty in all five consumer checkouts.
+- **Remote branches: gone.** `git ls-remote --heads origin <branch>` returns
+  empty in all five. The snapshot further down, which reports live remotes in
+  rwbp-coordinator, loadsmith, and rwbp-website, describes a condition that no
+  longer exists.
+- **No unlanded work.** All five PRs are MERGED (#247, #241, #274, #254, #515,
+  merged 2026-08-19T22:03Z). Three heads compare as `diverged` against main --
+  a squash-merge artifact, not divergent content. Every touched file was
+  SHA-compared at head against main through the GitHub contents API and is
+  identical: `.trellis/tasks/archive/2026-08/08-19-sd-ai-command-pack-0-71-33/prd.md`
+  and `.trellis/workspace/sdelmas/journal-3.md`.
+- **The stated blocker is stale.** This PRD claims each checkout is parked on an
+  unrelated branch owned by another process. All five are on `main` and clean.
+
+### What the acceptance criteria could not see
+
+The criteria in this document **already pass** — and would have passed at
+authoring time — because both commands they name are blind to the only residue
+that actually remains: five stale remote-tracking refs
+(`refs/remotes/origin/chore/fix-install-audit-path-citation`), left because no
+checkout has fetched since the remotes were deleted. `git branch --list` and
+`git ls-remote --heads origin` cannot observe a remote-tracking ref, so a
+criteria set built from them reports success over a dirty cache.
+
+Clearing them is `git fetch --prune` in each checkout — a local cache drop, not
+a branch deletion, destroying nothing. Left undone deliberately: it is routine
+housekeeping that the next fleet fetch performs as a side effect, and it is not
+worth a campaign of its own.
+
+Lesson for future cleanup tasks: an acceptance criterion that enumerates from
+the same view the cleanup operates on cannot detect residue outside that view.
+Prefer `git for-each-ref` over `git branch --list` when the question is "is
+every trace of this branch gone."
+
+Remaining: nothing actionable. Archived 2026-08-20.
+
 ## Goal
 
 Delete the merged `chore/fix-install-audit-path-citation` branch, local and

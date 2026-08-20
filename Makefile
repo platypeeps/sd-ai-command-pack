@@ -52,6 +52,7 @@ test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-coverage.sh
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-docs.sh
 	"$(VENV_PYTHON)" .github/scripts/check-helper-resolution.py
+	"$(VENV_PYTHON)" .github/scripts/check-shipped-script-modes.py
 
 # Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
 # parity: the CI lint/security jobs always run the Node and ShellCheck
@@ -62,8 +63,8 @@ test:
 # syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
 # a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \

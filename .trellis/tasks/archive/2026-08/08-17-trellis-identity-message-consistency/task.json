@@ -3,7 +3,7 @@
   "name": "trellis-identity-message-consistency",
   "title": "Trellis identity reporting: one diagnosis across every site",
   "description": "Reporting half split out of 08-08-developer-identity-not-in-worktrees on 2026-08-17. Eight sites report an unresolved developer identity in four media (stderr prose, a JSON error/hint object parsed by an upstream regression test, lines inside two returned context documents, and a raised ValueError); they disagree about the leading diagnosis, four carry no hint at all, and none can distinguish an unusable identity file from an absent one. Needs one shared diagnosis with medium-appropriate rendering, plus deletion of add_session.py's dead branch. Vendored Trellis code, so upstream-handoff-first: the patch, the staged tests, and the register entry are executable in this repository now; only the uptake waits on a Trellis release and a vendored refresh.",
-  "status": "planning",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "sdelmas",
   "assignee": "sdelmas",
   "createdAt": "2026-08-17",
-  "completedAt": null,
+  "completedAt": "2026-08-20",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
@@ -22,5 +22,8 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {
+    "closure": "wont-do",
+    "closureReason": "declined 2026-08-20: real defect, ~400-500 line upstream fork refactor not worth the cost; see prd.md Closure section"
+  }
 }
