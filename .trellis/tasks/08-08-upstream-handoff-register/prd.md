@@ -100,7 +100,7 @@ Each entry must resolve to exactly one of: a filed task in the Trellis fork
     gates span four media: stderr prose, a JSON contract with an upstream
     regression test, two separate returned context documents, and a raised
     `ValueError`. Upstream's `[worktree-identity]` suite
-    (`regression.test.ts:12526-12723`) already pins some of that wording. Needs
+    (`regression.test.ts:12526-12723` [absent: upstream Trellis repository]) already pins some of that wording. Needs
     one resolution carrying a reason plus one shared diagnosis, rendered per
     medium. The patch is that task's Step 1 and is not written yet.
 

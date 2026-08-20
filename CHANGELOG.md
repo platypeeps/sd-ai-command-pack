@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.71.37 - 2026-08-20
+
+### Added
+
+- The documentation path-reference gate now checks a bare filename when it is
+  cited as a *location* -- a name carrying a line or line-range suffix such as
+  `review.py:555`. 667 bare references were skipped outright, so a document
+  could name a file that does not exist and nothing objected. The naive
+  widening (any bare filename must name a tracked file) produces 160 failures
+  across 43 documents; restricting it to locator form yields 107 newly-checked
+  references and exposed exactly 4 genuine dangling citations, now annotated.
+  A filename with no line suffix stays unchecked, because prose uses a
+  filename as a noun far more often than as a path.
+
+  Resolution matches by basename against `git ls-files`, retrying the
+  `sd-ai-command-pack-` and `sd_ai_command_pack_` prefixes the pack uses for
+  its own scripts, and treats a name matching several tracked files as
+  resolved rather than failed -- the mirror between `templates/scripts/` and
+  `scripts/` would otherwise fail every helper the pack documents.
+  `bareReferenceExtensions` widens the extensions a bare filename may carry,
+  and a malformed value leaves the built-in set in force.
+
+  The basename index is consulted at resolution, never at eligibility:
+  `shouldCheckDocumentationPathReference` stays a pure test of shape, because
+  an eligibility gate that knew whether a file was tracked could never fail,
+  and the rule's whole value is its failing half.
+
 ## 0.71.36 - 2026-08-20
 
 ### Fixed

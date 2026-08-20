@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-20T20:43:24Z",
-  "packVersion": "0.71.36",
-  "payloadDigest": "sha256:26f61ad0a989af64330f7863c0dde17c2cd49dfdf3b015cd66400855140023cb",
+  "validatedAt": "2026-08-20T22:59:27Z",
+  "packVersion": "0.71.37",
+  "payloadDigest": "sha256:6b55a0602833b585df6912bdce2cb0a198a17dcc493de01d6c0d5375f6192feb",
   "fleetManifestDigest": "sha256:67d6949a1f929b43e8b7f3706503c0b3433817de7e713ff3c82498ba00c2ec3f",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
@@ -68,7 +68,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "7f7856918a195cf745bd8668eba320ab9d73bf61",
+      "baseCommit": "a914df73cf7c41523052481b67f97d0545555e1b",
       "status": "passed",
       "prepares": [
         [

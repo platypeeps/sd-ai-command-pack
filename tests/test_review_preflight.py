@@ -111,6 +111,7 @@ import {
   parseJournalSessionsFromText,
   parseTrellisTaskArtifactPath,
   parseWorkspaceIndexSessionsFromText,
+  resolveDocumentationReference,
   reviewRiskCategories,
   reviewRiskMatrix,
   shouldCheckDocumentationPathReference,
@@ -821,6 +822,97 @@ assert.equal(shouldCheckDocumentationPathReference('docs/review-learnings.md'), 
 assert.equal(shouldCheckDocumentationPathReference('package.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('https://example.com/docs.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('obsidian://open?vault=Repo'), false);
+
+// Bare-filename references. Each assertion below is written as a PAIR whose
+// other half fails against a checker without this rule: nothing bare was
+// eligible before it, so every `false` expectation here passed vacuously and
+// on its own would assert only the absence of a rule.
+//
+// A bare filename is checked when it is cited as a LOCATION -- carrying a line
+// or range suffix -- and declined when it is used as a name. Prose uses a
+// filename as a noun far more often than as a path.
+assert.equal(shouldCheckDocumentationPathReference('review.py:555'), true);
+assert.equal(shouldCheckDocumentationPathReference('review.py'), false);
+assert.equal(shouldCheckDocumentationPathReference('coverage.py'), false);
+assert.equal(shouldCheckDocumentationPathReference('notes.md:12-34'), true);
+// `..` is rejected by an explicit guard, not by the filename pattern: the
+// pattern's middle character class contains `.`, so `a..b.py` matches it. The
+// `a.b.py:1` half is what proves the guard is doing the work.
+assert.equal(shouldCheckDocumentationPathReference('a.b.py:1'), true);
+assert.equal(shouldCheckDocumentationPathReference('a..b.py:1'), false);
+// An extension outside `bareReferenceExtensions` is declined.
+assert.equal(shouldCheckDocumentationPathReference('thing.py:1'), true);
+assert.equal(shouldCheckDocumentationPathReference('thing.zzz:1'), false);
+// The optional leading dot of the filename pattern is what admits dotfiles.
+assert.equal(shouldCheckDocumentationPathReference('.mcp.json:3'), true);
+// Eligibility is INDEX-FREE. A name that resolves to no tracked file is still
+// eligible; it is reported missing later, at resolution. This assertion exists
+// to stop a refactor from folding the basename index into eligibility, which
+// would make "eligible" and "resolves" the same predicate and leave nothing
+// able to fail.
+assert.equal(shouldCheckDocumentationPathReference('nope-xyz.py:9'), true);
+// A real URI scheme stays rejected. `review.py:555` satisfies the scheme
+// pattern by accident (`r` + `eview.py` + `:`), so the scheme test runs against
+// the target with its line citation removed -- a scheme colon survives that
+// strip, a line citation does not.
+assert.equal(shouldCheckDocumentationPathReference('mailto:notes.py'), false);
+assert.equal(shouldCheckDocumentationPathReference('mailto:notes.py:3'), false);
+assert.equal(shouldCheckDocumentationPathReference('https://example.com/a.py:3'), false);
+// A widened `bareReferenceExtensions` takes effect, and the built-in set is
+// what applies when it is not widened.
+assert.equal(shouldCheckDocumentationPathReference('notes.rst:3'), false);
+assert.equal(
+  shouldCheckDocumentationPathReference('notes.rst:3', 'code-span', {
+    bareReferenceExtensions: ['md', 'py', 'rst'],
+  }),
+  true,
+);
+
+// Resolution, against the exported resolver with a literal basename index.
+// These claims cannot be made at eligibility: a near-miss name is eligible by
+// shape exactly as `nope-xyz.py:9` is, so only the resolver can falsify them.
+const packIndex = { 'sd-ai-command-pack-review.py': ['scripts/sd-ai-command-pack-review.py'] };
+// The pack's prose drops the `sd-ai-command-pack-` prefix when naming its own
+// scripts, so resolution retries the bare name against that convention.
+assert.equal(
+  resolveDocumentationReference('docs/guide.md', 'review.py:9', 'code-span', { trackedBasenames: packIndex }),
+  'scripts/sd-ai-command-pack-review.py',
+);
+// The prefix set is CLOSED. A name reachable only by substring containment, and
+// a name reachable only through an invented third prefix, both resolve to
+// nothing -- they come back unchanged so the caller reports them missing.
+assert.equal(
+  resolveDocumentationReference('docs/guide.md', 'ai-command-pack-review.py:9', 'code-span', { trackedBasenames: packIndex }),
+  'ai-command-pack-review.py:9',
+);
+assert.equal(
+  resolveDocumentationReference('docs/guide.md', 'review.py:9', 'code-span', {
+    trackedBasenames: { 'zz-review.py': ['tools/zz-review.py'] },
+  }),
+  'review.py:9',
+);
+// A name already carrying a pack prefix is not prefixed a second time.
+assert.equal(
+  resolveDocumentationReference('docs/guide.md', 'sd-ai-command-pack-review.py:9', 'code-span', {
+    trackedBasenames: { 'sd-ai-command-pack-sd-ai-command-pack-review.py': ['scripts/doubled.py'] },
+  }),
+  'sd-ai-command-pack-review.py:9',
+);
+// A name matching several genuinely distinct tracked files resolves rather than
+// being reported missing. `prd.md` and `SKILL.md` are structural names that
+// identify no particular file, and failing on them would be wrong.
+assert.equal(
+  resolveDocumentationReference('docs/guide.md', 'prd.md:4', 'code-span', {
+    trackedBasenames: { 'prd.md': ['.trellis/tasks/a/prd.md', '.trellis/tasks/b/prd.md'] },
+  }),
+  '.trellis/tasks/a/prd.md',
+);
+// A bare filename with no line suffix is never resolved through the index, so
+// an unmeasured consumer corpus cannot go red on prose nouns.
+assert.equal(
+  resolveDocumentationReference('docs/guide.md', 'review.py', 'code-span', { trackedBasenames: packIndex }),
+  null,
+);
 assert.equal(thrownValueMessage(new Error('error detail')), 'error detail');
 assert.equal(thrownValueMessage('string detail'), 'string detail');
 const journal = parseJournalSessionsFromText('.trellis/workspace/dev/journal-1.md', [
@@ -4219,6 +4311,357 @@ assert.deepEqual(
         self.assertNotIn("full-check.sh:1-2,3-4,5-6", result.stdout)
         self.assertNotIn("install-audit.py:~145", result.stdout)
         self.assertNotIn("review-scope.sh:~315-366", result.stdout)
+
+    def commit_bare_reference_target(self, root: Path, *paths: str) -> None:
+        """Stage and commit fixture files so bare filenames can resolve.
+
+        STAGING IS LOAD-BEARING. Bare-filename resolution reads `git ls-files`
+        -- the index -- not the working tree, and neither make_repo nor
+        run_install stages anything. Drop the add/commit and every positive
+        assertion below stops proving anything: the reference resolves to
+        nothing, and the negative assertions pass vacuously.
+        """
+        self.run_git(root, "add", *paths)
+        # make_repo runs `git init` and stops there, so a fixture repository
+        # has no committer identity. A developer machine hides that behind a
+        # global ~/.gitconfig; a CI runner has none and the commit dies with
+        # "Author identity unknown". Set it here rather than relying on the
+        # ambient environment, matching the other fixtures in this suite.
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "commit", "-m", "seed bare-reference fixture")
+
+    def run_preflight_in(
+        self,
+        node: str,
+        root: Path,
+        env: "dict[str, str] | None" = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            env=env,
+        )
+
+    def test_review_preflight_checks_locator_form_bare_filename_references(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/target-note.md").write_text("# Target\n", encoding="utf-8")
+        self.commit_bare_reference_target(root, "docs/target-note.md")
+
+        # A bare filename cited as a LOCATION resolves through the basename
+        # index. A bare filename used as a NOUN stays unchecked even when it
+        # names nothing -- that decline is what keeps a consumer corpus this
+        # project has never measured from going red on ordinary prose.
+        (root / "docs/cite.md").write_text(
+            "Locator: `target-note.md:4`.\n"
+            "Noun: `no-such-thing-zzz.md`.\n"
+            "Noun: `coverage.py`.\n",
+            encoding="utf-8",
+        )
+
+        passing = self.run_preflight_in(node, root)
+        self.assertEqual(passing.returncode, 0, passing.stdout)
+
+        # The failing half: the same shape, resolving to nothing.
+        (root / "docs/cite.md").write_text(
+            "Broken locator: `no-such-thing-zzz.md:9`.\n",
+            encoding="utf-8",
+        )
+
+        failing = self.run_preflight_in(node, root)
+        self.assertEqual(failing.returncode, 1, failing.stdout)
+        self.assertIn(
+            "docs/cite.md:1 references missing path no-such-thing-zzz.md:9",
+            failing.stdout,
+        )
+
+    def test_review_preflight_resolves_bare_filenames_from_the_git_index(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Two files with the same shape, differing only in whether git knows
+        # about them. The gate is about references to repository CONTENT, so
+        # resolution reads the index; a filesystem walk would resolve both and
+        # let an untracked build artifact make a stale citation pass.
+        (root / "docs/tracked-note.md").write_text("# Tracked\n", encoding="utf-8")
+        self.commit_bare_reference_target(root, "docs/tracked-note.md")
+        (root / "docs/untracked-note.md").write_text("# Untracked\n", encoding="utf-8")
+
+        (root / "docs/cite.md").write_text(
+            "Tracked: `tracked-note.md:2`.\n"
+            "Untracked: `untracked-note.md:2`.\n",
+            encoding="utf-8",
+        )
+
+        resolved = self.run_preflight_in(node, root)
+        self.assertEqual(resolved.returncode, 1, resolved.stdout)
+        self.assertNotIn("references missing path tracked-note.md:2", resolved.stdout)
+        self.assertIn(
+            "references missing path untracked-note.md:2",
+            resolved.stdout,
+        )
+
+    def test_review_preflight_resolves_bare_filenames_through_pack_prefixes(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # The pack's own prose drops the `sd-ai-command-pack-` prefix when
+        # naming its scripts, so a bare name that matches no tracked basename is
+        # retried against that convention. The prefix list is closed: a name
+        # reachable only by substring must stay unresolved.
+        (root / "scripts/sd-ai-command-pack-thing.py").write_text(
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+        self.commit_bare_reference_target(root, "scripts/sd-ai-command-pack-thing.py")
+
+        (root / "docs/cite.md").write_text(
+            "Shorthand: `thing.py:4`.\n",
+            encoding="utf-8",
+        )
+        shorthand = self.run_preflight_in(node, root)
+        self.assertEqual(shorthand.returncode, 0, shorthand.stdout)
+
+        (root / "docs/cite.md").write_text(
+            "Substring only: `command-pack-thing.py:4`.\n",
+            encoding="utf-8",
+        )
+        substring = self.run_preflight_in(node, root)
+        self.assertEqual(substring.returncode, 1, substring.stdout)
+        self.assertIn(
+            "references missing path command-pack-thing.py:4",
+            substring.stdout,
+        )
+
+    def test_review_preflight_prefers_a_present_candidate_for_a_bare_filename(
+        self,
+    ) -> None:
+        """A basename naming several tracked paths resolves to one that exists.
+
+        Taking the first candidate blindly lets a sort order decide the whole
+        reference: if that path is absent from the working tree while a
+        sibling is present, a resolvable citation is reported missing. The
+        mirror between `templates/scripts/` and `scripts/` is the common case
+        where one basename has more than one tracked path.
+        """
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/mirrored.md").write_text("# Mirrored\n", encoding="utf-8")
+        (root / "templates/docs").mkdir(parents=True, exist_ok=True)
+        (root / "templates/docs/mirrored.md").write_text(
+            "# Mirrored\n", encoding="utf-8"
+        )
+        self.commit_bare_reference_target(
+            root, "docs/mirrored.md", "templates/docs/mirrored.md"
+        )
+
+        # Delete whichever candidate sorts first, leaving the other in place.
+        # Both remain in the index; only one is present on disk.
+        first = sorted(["docs/mirrored.md", "templates/docs/mirrored.md"])[0]
+        (root / first).unlink()
+
+        (root / "docs/cite.md").write_text(
+            "See `mirrored.md:3`.\n",
+            encoding="utf-8",
+        )
+        resolved = self.run_preflight_in(node, root)
+        self.assertEqual(resolved.returncode, 0, resolved.stdout)
+        self.assertNotIn("mirrored.md:3", resolved.stdout)
+
+    def test_review_preflight_resolves_bare_filenames_from_the_index_not_a_walk(
+        self,
+    ) -> None:
+        """An untracked file never satisfies a bare reference.
+
+        Resolution reads `git ls-files`. If someone swapped that for a
+        directory walk the suite would stay green everywhere else, because in
+        every other fixture the tracked files are also present on disk. This
+        is the one case where the two sources disagree.
+        """
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Present on disk, deliberately never staged.
+        (root / "scripts/sd-ai-command-pack-untracked.py").write_text(
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        (root / "docs/cite.md").write_text(
+            "Shorthand: `untracked.py:4`.\n",
+            encoding="utf-8",
+        )
+        walked = self.run_preflight_in(node, root)
+        self.assertEqual(walked.returncode, 1, walked.stdout)
+        self.assertIn("references missing path untracked.py:4", walked.stdout)
+
+    def test_review_preflight_absent_marker_covers_bare_filename_references(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # The point-of-use marker is the mechanism for a locator-form reference
+        # that is deliberately unresolvable -- a file in another repository, or
+        # a surface the prose exists to record the deletion of.
+        (root / "docs/cite.md").write_text(
+            "Consumer workflow: `ci.yml:293` [absent: consumer repository].\n",
+            encoding="utf-8",
+        )
+
+        marked = self.run_preflight_in(node, root)
+        self.assertEqual(marked.returncode, 0, marked.stdout)
+
+    def test_review_preflight_queries_the_git_index_once_for_bare_references(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("git is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/target-note.md").write_text("# Target\n", encoding="utf-8")
+        self.commit_bare_reference_target(root, "docs/target-note.md")
+
+        # Many bare references across several documents. A resolver that asked
+        # git per reference would spawn one process for each of these -- several
+        # hundred on this repository's own corpus -- which is the failure mode
+        # the batched, memoised index exists to prevent.
+        for index in range(4):
+            (root / f"docs/cite-{index}.md").write_text(
+                "".join(
+                    f"Ref {line}: `target-note.md:{line}`.\n" for line in range(1, 11)
+                ),
+                encoding="utf-8",
+            )
+
+        shim_dir = self.make_temp_root("sd-ai-command-pack-gitshim-")
+        log_path = shim_dir / "git-invocations.log"
+        shim = shim_dir / "git"
+        shim.write_text(
+            "#!/usr/bin/env bash\n"
+            f'printf "%s\\n" "$*" >> "{log_path}"\n'
+            f'exec "{git}" "$@"\n',
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = f"{shim_dir}{os.pathsep}{env.get('PATH', '')}"
+
+        counted = self.run_preflight_in(node, root, env=env)
+        self.assertEqual(counted.returncode, 0, counted.stdout)
+
+        invocations = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(
+            [line for line in invocations if line == "ls-files -z"],
+            ["ls-files -z"],
+            f"expected exactly one batched index query, got: {invocations}",
+        )
+
+    def test_review_preflight_bare_reference_extensions_extend_through_config(
+        self,
+    ) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/cite.md").write_text(
+            "Notes: `notes.rst:3`.\n",
+            encoding="utf-8",
+        )
+
+        config_path = root / ".sd-ai-command-pack/review-preflight.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # `rst` is outside the built-in extension set, so the citation is prose
+        # as far as the gate is concerned.
+        before = self.run_preflight_in(node, root)
+        self.assertEqual(before.returncode, 0, before.stdout)
+
+        # A well-formed array widens the set. Without this half, the merge-list
+        # wiring could be omitted entirely and the fail-closed test below would
+        # still pass -- a key that is never merged also never merges a
+        # malformed value.
+        config_path.write_text(
+            json.dumps({"bareReferenceExtensions": ["rst"]}),
+            encoding="utf-8",
+        )
+        widened = self.run_preflight_in(node, root)
+        self.assertEqual(widened.returncode, 1, widened.stdout)
+        self.assertIn("references missing path notes.rst:3", widened.stdout)
+
+        # Fail closed: a malformed value leaves the built-in set in force rather
+        # than reading as "nothing to check". The built-in set still governs, so
+        # an unresolvable `.py` locator is reported.
+        (root / "docs/cite.md").write_text(
+            "Notes: `notes.rst:3` and `no-such-thing-zzz.py:9`.\n",
+            encoding="utf-8",
+        )
+        config_path.write_text(
+            json.dumps({"bareReferenceExtensions": "py"}),
+            encoding="utf-8",
+        )
+        malformed = self.run_preflight_in(node, root)
+        self.assertEqual(malformed.returncode, 1, malformed.stdout)
+        self.assertIn(
+            "references missing path no-such-thing-zzz.py:9",
+            malformed.stdout,
+        )
+        self.assertNotIn("references missing path notes.rst:3", malformed.stdout)
 
     def test_review_preflight_absent_marker_does_not_leak_across_files(
         self,

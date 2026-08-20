@@ -345,7 +345,7 @@ exists to prevent, which a stage-only diff cannot reach.
 
 Step 7 said to add `run_codex_review` without specifying its behavior when the
 CLI is absent. Both existing builtin runners treat a missing executable as an
-overall failure (`review-local.sh:535-538` prism, `:596-599` gito). Copying that
+overall failure (`review-local.sh:535-538` [absent: surface deleted by 07-24-remove-retired-review-surfaces] prism, `:596-599` gito). Copying that
 shape while adding `codex` to the default tool set would fail the default run on
 every machine without the Codex CLI — the same regression as C-2, reintroduced
 through the shell instead of the Python.
