@@ -16,7 +16,7 @@ this straight before Step 0, because every rule below follows from it.
 | Repo | Role | What this task does to it |
 |---|---|---|
 | `~/repos/ai/Trellis` (fork, branch `main` @ `2749d3b4`, `0.6.16-sd.7`) | where the behavior belongs | **read only.** Never write. It is externally owned and currently dirty. |
-| `/Users/sven/repos/platypeeps/sd-ai-command-pack` (this repo) | where the task, the patch, the staged tests, and the handoff live | commits the patch file, the staged suite, and the register update |
+| `<pack-repo>` (this repo) | where the task, the patch, the staged tests, and the handoff live | commits the patch file, the staged suite, and the register update |
 | `$SCRATCH` (a `mktemp -d`) | where the edits are actually made and tested | created, edited, applied to, `rm -rf`'d |
 | `.trellis/scripts/` (here) | vendored copy of the fork's tree | **read only.** The PRD forbids editing it. |
 
@@ -36,7 +36,7 @@ writing a line of code; a site that moved is a finding worth recording in the
 handoff, not a silent adjustment.
 
 ```bash
-cd /Users/sven/repos/platypeeps/sd-ai-command-pack
+cd "$PACK_REPO"   # this repository
 FORK=~/repos/ai/Trellis
 T="$FORK/packages/cli/src/templates/trellis/scripts"
 
@@ -84,7 +84,7 @@ Everything else in that case is `toContain`.
 ## Step 1 — build the working copies
 
 ```bash
-REPO=/Users/sven/repos/platypeeps/sd-ai-command-pack
+REPO="$PACK_REPO"   # this repository
 SCRATCH="$(mktemp -d)"
 cp -R "$REPO/.trellis/scripts" "$SCRATCH/scripts"        # or "$T" if P1 was non-empty
 find "$SCRATCH/scripts" -name __pycache__ -type d -prune -exec rm -rf {} +
@@ -236,7 +236,7 @@ Fixture notes:
 ## Step 5 — run the suite where the behavior exists
 
 ```bash
-REPO=/Users/sven/repos/platypeeps/sd-ai-command-pack
+REPO="$PACK_REPO"   # this repository
 STAGED="$REPO/.trellis/tasks/08-17-trellis-identity-message-consistency/research/staged_test_identity_reporting.py"
 PATCH="$REPO/.trellis/tasks/08-08-upstream-handoff-register/research/2026-08-17-trellis-identity-reporting.patch"
 
@@ -310,7 +310,7 @@ being noted and worked around.
 ## Validation
 
 ```bash
-cd /Users/sven/repos/platypeeps/sd-ai-command-pack
+cd "$PACK_REPO"   # this repository
 STAGED=.trellis/tasks/08-17-trellis-identity-message-consistency/research/staged_test_identity_reporting.py
 .venv/bin/python "$STAGED" -v                   # every behavior test skipped, with reasons
 git status --short -- .trellis/scripts          # MUST be empty

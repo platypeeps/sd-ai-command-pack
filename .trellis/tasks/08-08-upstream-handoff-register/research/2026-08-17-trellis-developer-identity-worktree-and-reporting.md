@@ -55,7 +55,7 @@ refresh yet. Task `08-08` is parked on exactly that release chain.
 
 ### Evidence: the staged suite, run against both trees
 
-`.trellis/tasks/08-08-developer-identity-not-in-worktrees/research/staged_test_worktree_identity.py`
+`.trellis/tasks/archive/2026-08/08-08-developer-identity-not-in-worktrees/research/staged_test_worktree_identity.py`
 (this repo) gates every behavioral test on a throwaway-fixture probe rather than
 a symbol name, and resolves its scripts directory from
 `SD_DEVELOPER_IDENTITY_SCRIPTS`. It sits in `research/` rather than `tests/`
