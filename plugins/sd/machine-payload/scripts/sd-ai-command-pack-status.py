@@ -740,12 +740,16 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
                 tasks.append(task)
 
     active: dict[str, Any] | None = None
+    active_stale = False
+    active_source = ""
+    active_path_text = ""
     task_script = repo / ".trellis/scripts/task.py"
     if task_script.is_file():
-        # Trellis >=0.6.14 offers machine-readable `current --json`; older
-        # vendored copies reject the flag with a nonzero argparse exit, so
-        # fall back to the bare-path prose output they print instead.
-        active_path_text = ""
+        # `current --json` is the one documented interface at the supported
+        # vendored-Trellis floor (see
+        # .trellis/spec/tooling/vendored-trellis-compatibility.md). A non-zero
+        # exit or unparseable stdout means no active task; it is not a reason
+        # to fall back to parsing prose.
         result = run_command(
             [sys.executable, str(task_script), "current", "--json"], cwd=repo
         )
@@ -758,17 +762,10 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
                 current_task = payload.get("current_task")
                 if isinstance(current_task, dict):
                     active_path_text = str(current_task.get("dir") or "").strip()
-            else:
-                # A variant that ignores unknown flags prints the bare path
-                # with exit 0; keep interpreting that prose output.
-                active_path_text = result.stdout.strip()
-        else:
-            result = run_command(
-                [sys.executable, str(task_script), "current"], cwd=repo
-            )
-            active_path_text = (
-                result.stdout.strip() if result.returncode == 0 else ""
-            )
+                # A pointer the runtime itself reports as stale is drift worth
+                # surfacing, not a detail to drop on the floor.
+                active_stale = bool(payload.get("stale"))
+                active_source = safe_text(payload.get("source") or "")
         if active_path_text:
             candidate_path = Path(active_path_text)
             if not candidate_path.is_absolute():
@@ -819,6 +816,14 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
     )
     return {
         "activeTask": active,
+        "activeTaskStale": active_stale,
+        "activeTaskSource": active_source,
+        # Sanitized at the payload boundary, not at capture: the raw text is
+        # what `Path()` above has to resolve, but what reaches the report is
+        # another repo's `task.py` output, and a `dir` carrying a newline
+        # would otherwise break the human line in two. The limit is generous
+        # enough for any real task directory and still bounded.
+        "activeTaskPointer": safe_text(active_path_text, limit=512),
         "inProgress": in_progress,
         "planned": planned,
         "completedOutsideArchive": completed_outside_archive,
@@ -3468,7 +3473,20 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
         )
     else:
         print("- open issues: unavailable")
-    print(f"- current Trellis task: {format_task(trellis.get('activeTask'))}")
+    # The runtime calls a pointer stale when its directory is gone, so the
+    # common stale case resolves to no task record at all. Suffixing "none
+    # active" with "[stale pointer]" would read as a contradiction, and
+    # dropping the suffix would hide the drift entirely -- so name the
+    # pointer instead, which is the only thing left to act on.
+    active_task = trellis.get("activeTask")
+    if isinstance(active_task, dict):
+        stale_suffix = " [stale pointer]" if trellis.get("activeTaskStale") else ""
+        print(f"- current Trellis task: {format_task(active_task)}{stale_suffix}")
+    elif trellis.get("activeTaskStale"):
+        pointer = trellis.get("activeTaskPointer") or "unknown"
+        print(f"- current Trellis task: none active [stale pointer to {pointer}]")
+    else:
+        print("- current Trellis task: none active")
     print(f"- in-progress Trellis tasks: {len(trellis.get('inProgress', []))}")
     planned = trellis.get("planned", [])
     print(f"- planned Trellis tasks: {len(planned)}")
@@ -4137,11 +4155,17 @@ def render_fleet(report: Mapping[str, Any]) -> None:
             )
         else:
             pack_label = f"pack {versions.get('sdAiCommandPack') or 'none'}"
+        # Trellis drifts independently of the pack pin, and the JSON has always
+        # carried it while this row did not -- an operator reading only the
+        # human report concluded the fleet was consistent on a version it had
+        # never been shown.
+        trellis_label = f"trellis {versions.get('trellis') or 'unknown'}"
         print(
             f"- {prefix}: {git['workingTree']['state']}; "
             f"{git.get('branch') or 'detached'}; "
             f"{report['refsFreshness']}:{git['syncState']}; "
             f"{pack_label}; "
+            f"{trellis_label}; "
             f"stashes {stash_label}; "
             f"PRs {pr_count}; "
             f"tasks {len(trellis.get('inProgress', []))}/{len(trellis.get('planned', []))}"

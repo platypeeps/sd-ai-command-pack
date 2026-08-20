@@ -3,56 +3,128 @@
 Scope/trigger: any pack wrapper that shells out to the vendored Trellis
 scripts (`.trellis/scripts/task.py`, `add_session.py`), and any future
 Trellis version bump. Established during the 0.6.7 → 0.6.14 upgrade
-(task 08-08-trellis-upgrade, pack 0.64.29).
+(task 08-08-trellis-upgrade, pack 0.64.29). Rewritten at the 0.6.16-sd.7
+convergence (task 08-20-retire-pre-0616-trellis-compat).
 
-## Version-spread reality
+## Supported floor
 
-The pack repo and each fleet consumer upgrade Trellis independently. A pack
-wrapper MUST work against both the current vendored version and <=0.6.7
-consumers until the fleet converges. Never assume the pack repo's Trellis
-version when the wrapper runs with `--repo`/fleet scope.
+Pack wrappers target the vendored Trellis build **`0.6.16-sd.7`**, the value in
+`.trellis/.version`. A checkout below the floor is a violation to be upgraded,
+not a configuration to be supported. Wrappers MUST NOT carry branches for older
+vendored runtimes.
 
-## Signatures (vendored task.py, 0.6.14)
+This replaces the previous open-ended rule ("MUST work against both the current
+vendored version and <=0.6.7 consumers until the fleet converges"), which named
+no condition under which a compatibility branch could ever be deleted, so every
+one of them accumulated. Measured 2026-08-20: this repository and all eight
+fleet consumers report `0.6.16-sd.7`.
+
+**The floor is an identity, not a range.** `0.6.16-sd.7` carries a prerelease
+segment, so under semver it sorts *below* `0.6.16`. A plausible-looking check
+for `>=0.6.16` therefore rejects every repository in the fleet. Compare the
+recorded build string; never evaluate a range. Nothing in the pack compares
+Trellis versions programmatically today, and that is the intended state.
+
+## Signatures (vendored task.py / add_session.py, 0.6.16-sd.7)
 
 - `task.py current` → bare task path on stdout (empty when none), exit 0.
 - `task.py current --json` → one JSON object:
   `{"current_task": {"dir","id","title","status","parent","children",
   "branch","base_branch"} | null, "source": str, "stale": bool}`.
-- `task.py list --json` → machine-readable list (no pack consumer yet).
-- <=0.6.7 rejects `--json` with an argparse error, exit 2.
+  `stale` is `resolved is None or not resolved.is_dir()`
+  (`common/active_task.py:590`) — the pointer's *directory is gone*. So
+  `stale: true` normally arrives with a `current_task.dir` that cannot be
+  read, and a consumer that only reports stale-ness alongside a resolved
+  record will never report it at all. Report the pointer.
+- `task.py list --json` → `{"tasks": [{"dir","id","title","status",
+  "display_status","priority","assignee","parent","children","package"}]}`,
+  active tasks only. No pack consumer; see the status collector note below.
+- `task.py create` accepts `--base-branch`. Without it, the base resolves from
+  `origin/HEAD` and falls back to the **checked-out branch**, which is wrong on
+  any lane that creates a task after switching to a work branch.
+- `task.py set-meta <dir> <key> <value>` writes into the `meta` object. A key
+  that collides with a first-class field (`description`, `title`, …) creates a
+  shadow copy in `meta` and reports success while the real field is unchanged.
+  There is no `set-description`; repair such a field in `task.json` directly and
+  re-run `task.py validate`.
+- `add_session.py resolve_commit_subject` peels with `^{commit}` and returns
+  `EMPTY_SUBJECT` (`"(empty subject)"`) for a commit with an empty message;
+  `None` only when git cannot resolve the object at all.
+- `add_session.py build_commit_evidence` fails before any mutation on an
+  unresolvable OID — there is no placeholder path.
+- `add_session.py escape_markdown_cell` collapses whitespace, then escapes `\`
+  and `|`. Subjects truncate at `MAX_SUBJECT_LEN = 500`.
+- `add_session.py --commit-subject <oid>=<subject>` overrides resolution for an
+  OID that cannot be resolved locally.
 
 ## Wrapper contract (status collector pattern)
 
 `scripts/sd-ai-command-pack-status.py` (template-first source under
-`templates/scripts/`) resolves the active task as:
+`templates/scripts/`) resolves the active task by running `current --json` and
+parsing the one documented shape. A non-zero exit or unparseable stdout means
+**no active task** — not a reason to fall back to parsing prose.
 
-1. Run `current --json`; on exit 0 parse JSON and read `current_task.dir`.
-2. Exit 0 but non-JSON stdout → treat stdout as the bare path (variant that
-   ignores unknown flags).
-3. Nonzero exit → re-run bare `current` and parse the path.
+The three-way fallback this section used to prescribe (parse JSON, else treat
+stdout as a bare path, else re-run bare `current`) existed only for `<=0.6.7`
+and was removed at the floor.
 
-Tests: `tests/test_status.py`
-`test_active_task_resolves_from_current_json_payload` and
-`test_active_task_falls_back_when_current_rejects_json_flag`.
+Test: `tests/test_status.py` `test_active_task_resolves_from_current_json_payload`.
+
+The collector still enumerates `.trellis/tasks/*/task.json` from the filesystem
+rather than calling `list --json`. That walk is not a version workaround: it
+carries explicit symlink hardening and avoids one subprocess per repository in
+fleet scope. `list --json` covers every field it reads, so the swap remains
+available; it has been considered and declined rather than overlooked.
 
 ## Journal sections (add_session.py)
 
-- <=0.6.7 always scaffolds `### Testing` / `### Next Steps` (with
-  placeholder defaults such as `DEFAULT_TESTING`).
-- >=0.6.14 omits any section with no content and has no `DEFAULT_TESTING`
-  constant.
-- The record-session wrapper therefore uses insert-or-replace
-  (`replace_or_insert_section`) and must never fail on a missing section
-  heading. Section order on insert: Testing before Next Steps.
+`_render_bullet_section` applies its `bullet_prefix` **unconditionally**, and
+Testing renders with `bullet_prefix="- [OK] "`. So delegating the record-session
+wrapper's Testing lines to `--test` would produce `- [OK] [WARN] flaky lane` for
+a line already carrying a status marker, and `- [OK] - already bulleted` for a
+pre-bulleted line. `--next-step` has the same shape with `- `.
 
-## Upgrade procedure (validated 0.6.14 path)
+The wrapper therefore keeps its own marker-aware normalization and its
+insert-or-replace patcher (`replace_or_insert_section`), and must never fail on
+a missing section heading — a section with no content is omitted entirely from
+the rendered entry. Section order on insert: Testing before Next Steps.
+
+This is a deliberate exception, not leftover compatibility code: it survives the
+floor because no native equivalent exists.
+
+## Distribution: the runtime is a fork, not the npm package
+
+The vendored runtime is built from the fork `github.com:sdelmas/Trellis`
+(`packages/cli/package.json` version `0.6.16-sd.7`). It shares the npm *name*
+`@mindfoldhq/trellis` but is **never published**: npm `latest` is `0.6.15`, and
+no `-sd` tag exists upstream.
+
+Two consequences, both load-bearing:
+
+- Any procedure written as `npx @mindfoldhq/trellis@<version>` or
+  `npm install -g @mindfoldhq/trellis@latest` reaches upstream, not the fork,
+  and so cannot produce or validate the vendored tree.
+- A CLI installed from npm is **below this floor**. Running `trellis update`
+  from it downgrades a converged repository's `.trellis/scripts/**`. Treat an
+  unexpected downgrade in a refresh diff as this cause first.
+
+The pack itself does not ship `.trellis/scripts/**` — `manifest.json` sets
+`requiresTrellis: true`, a boolean precondition with no version component, and
+the consumer's own CLI writes that tree. So the pack cannot correct a
+below-floor consumer by installing; the consumer's CLI has to be the fork.
+
+The consumer-facing install instructions still say
+`npm install -g @mindfoldhq/trellis@latest`. That is a known, filed defect —
+see parked task `07-09-trellis-version-compatibility` — not an endorsement.
+
+## Upgrade procedure (validated 0.6.14 → 0.6.16-sd.7 path)
 
 1. Official `trellis update` only — never a manual scripts file swap; the
    hash manifest `.trellis/.template-hashes.json` (gitignored, local)
    drives conflict classification and platform scope.
-2. Gate before `--force`: dry-run classification + a same-version rescan
-   (`npx @mindfoldhq/trellis@<current> update --dry-run` in a clone proves
-   pristine-vs-modified), and a sandbox-clone apply for the expected
+2. Run it from a **built fork checkout**, not from npm (see above). Gate before
+   `--force` with dry-run classification plus a same-version rescan in a clone
+   to prove pristine-vs-modified, and a sandbox-clone apply for the expected
    surface (copy the gitignored hash manifest into the clone first).
 3. Protected gitignored files (`.trellis/.developer`, `.current-task`)
    are invisible to `git status`; verify via recorded presence/hash.
@@ -118,11 +190,25 @@ independence — the answer does not depend on the files' contents or readabilit
 
 ## Wrong vs correct
 
-- WRONG: `result = run([task_py, "current"])` then parse stdout as a path
-  with no version awareness — silently misses structured fields and breaks
-  when prose changes.
-- CORRECT: `--json` first with the two fallbacks above; parse only
-  documented fields; tolerate `current_task: null`.
+- WRONG: `result = run([task_py, "current"])` then parse stdout as a path —
+  silently misses structured fields and breaks when prose changes.
+- CORRECT: `current --json`; parse only documented fields; tolerate
+  `current_task: null`. A non-zero exit or unparseable stdout means no active
+  task — do not fall back to prose parsing.
 - WRONG: asserting a journal section heading exists after `add_session.py`
   runs.
 - CORRECT: insert-or-replace the section.
+- WRONG: re-rendering a commit-table cell in the wrapper after
+  `add_session.py` has written it (`subject.replace("|", "\\|")`) — that
+  escapes pipes but leaves backslashes raw, preserves whitespace runs that can
+  break the row, and skips the 500-character truncation.
+- CORRECT: pass the OIDs and let `escape_markdown_cell` render them. Assert the
+  requested OIDs are present; do not rewrite their cells.
+- WRONG: `task.py create` followed by `set-base-branch` to correct the base on
+  a lane that already switched branches — a window exists in which `task.json`
+  records the work branch as its base.
+- CORRECT: `task.py create --base-branch <default-branch>`. `set-base-branch`
+  remains the repair for an already-created task.
+- WRONG: `task.py set-meta <dir> description "..."` to fix a task description —
+  reports success, writes `meta.description`, leaves the real field stale.
+- CORRECT: edit `task.json` directly, then `task.py validate`.

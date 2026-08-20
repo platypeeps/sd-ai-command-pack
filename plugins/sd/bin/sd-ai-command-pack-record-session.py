@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """Record a Trellis session journal entry without template placeholders.
 
-Older Trellis ``add_session.py`` versions seed ``(Add test results)`` and
-``(see git log)`` placeholders and may auto-commit them, while the pack's
-review preflight rejects placeholders in completed sessions. Current Trellis
-templates should use explicit fallback text, but this wrapper still closes
-the legacy gap in one shot: it resolves each commit's subject from git
-(failing fast on unknown hashes), passes the Main Changes body through
-``--content-file``, patches the Testing section and commit table in the
-freshly written entry, verifies no placeholders remain, and only then
-commits the journal. If a previous run appended the session but failed later
-while staging or committing, a retry patches the modified latest session
-instead of calling ``add_session.py`` again and duplicating the entry. It also
-passes the current git branch explicitly when the caller does not provide
-``--branch`` so stale Trellis task metadata cannot override the checked-out
-branch in older ``add_session.py`` versions.
+``add_session.py`` renders Testing and Next Steps through a bullet helper that
+applies its prefix unconditionally, stamping ``- [OK] `` onto every item. A
+line that already carries a status marker would become
+``- [OK] [WARN] flaky lane``, and a pre-bulleted line ``- [OK] - already
+bulleted``. This wrapper therefore normalizes those lines itself and patches
+the two sections into the freshly written entry, rather than passing ``--test``
+/ ``--next-step`` through.
 
-Trellis versions drift across repos: some seed placeholder commit cells
-and ``- [OK] (Add test results)``, while newer variants may resolve subjects
-or use non-placeholder Testing defaults. The patcher therefore anchors on the
-hash-keyed table row and on the section headings, not on any specific
-placeholder text.
+Everything the runtime does correctly is delegated to it: the commit table is
+rendered by ``add_session.py`` from the OIDs alone, including subject
+resolution and cell escaping. This wrapper passes the Main Changes body through
+``--content-file``, asserts the requested commits were recorded, verifies no
+placeholders remain, and only then commits the journal.
+
+If a previous run appended the session but failed later while staging or
+committing, a retry patches the modified latest session instead of calling
+``add_session.py`` again and duplicating the entry. (This is a different case
+from ``add_session.py --idempotency-key``, which makes an already-*committed*
+identical record a no-op; the entry this handles was never committed.)
+
+The current git branch is passed explicitly when the caller does not provide
+``--branch``, keeping the recorded branch tied to the checkout that did the
+work as a stated invariant rather than an inherited default.
+
+Supported vendored-Trellis floor: see
+``.trellis/spec/tooling/vendored-trellis-compatibility.md``.
 
 Exit codes:
 
@@ -205,9 +211,9 @@ def existing_session_journals(journals: list[Path], title: str) -> list[Path]:
 def replace_section(block: str, heading: str, lines: list[str]) -> str | None:
     """Replace the body under `heading` in the session block; None if absent.
 
-    Trellis <=0.6.7 always scaffolds every section heading; >=0.6.14 omits a
-    section entirely when it has no content, so absence is an expected layout
-    difference handled by ``replace_or_insert_section``, not an error here.
+    A section with no content is omitted entirely from the rendered entry, so
+    absence is an expected layout difference handled by
+    ``replace_or_insert_section``, not an error here.
     """
     head = f"{heading}\n"
     start = block.find(head)
@@ -245,7 +251,7 @@ def replace_or_insert_section(
 def patch_last_session(
     journal: Path,
     title: str,
-    subjects: dict[str, str],
+    hashes: list[str],
     tests: list[str],
     next_steps: list[str],
 ) -> str | None:
@@ -263,30 +269,26 @@ def patch_last_session(
         return f"could not find the session block start in {journal}"
     block = text[block_start:]
 
-    for commit_hash, subject in subjects.items():
-        # Trellis versions differ in what they seed: some write
-        # `(see git log)` placeholder cells, others resolve subjects
-        # themselves. Overwrite the hash-anchored row either way with the
-        # subject this wrapper resolved from git.
-        cell = subject.replace("|", "\\|")
-        row = f"| `{commit_hash}` | {cell} |"
-        row_re = re.compile(
-            r"^\| `" + re.escape(commit_hash) + r"` \| .* \|$", re.MULTILINE
-        )
+    # `add_session.py` resolves every subject from the same object database
+    # this wrapper probes and renders the cell with `escape_markdown_cell`,
+    # which collapses whitespace and escapes backslashes as well as pipes.
+    # Rewriting the row here would only re-render it less correctly, so the
+    # wrapper asserts the runtime recorded what it asked for and leaves the
+    # rendering alone.
+    #
+    # Anchor to the start of a table row rather than searching the block for
+    # the bare hash: a `--change` bullet naming the same OID would otherwise
+    # satisfy the check for a row the runtime never wrote, which is exactly
+    # the failure this assertion exists to catch.
+    for commit_hash in hashes:
+        row_re = re.compile(rf"^\|\s*`{re.escape(commit_hash)}`\s*\|", re.MULTILINE)
         if not row_re.search(block):
             return f"missing commit table row for {commit_hash} in {journal}"
 
-        def _row_replacement(_match: re.Match[str], replacement: str = row) -> str:
-            # A callable replacement keeps backslashes in the resolved
-            # subject literal instead of letting re.sub expand them as
-            # escapes; the default argument binds this iteration's row.
-            return replacement
-
-        block = row_re.sub(_row_replacement, block, count=1)
-
-    # Trellis >=0.6.14 omits sections that were scaffolded empty by <=0.6.7,
-    # so insert the section when the heading is absent instead of failing.
-    # Canonical order (both versions): Testing before Status, Next Steps
+    # The runtime omits a section it has no content for, and this wrapper
+    # never passes --test, so the heading is normally absent and gets
+    # inserted. On a retry the previous run's heading is already there and is
+    # replaced instead. Canonical order: Testing before Status, Next Steps
     # after Status — anchor the Testing insert accordingly.
     block = replace_or_insert_section(
         block, "### Testing", tests, before="### Status"
@@ -295,10 +297,9 @@ def patch_last_session(
     if next_steps:
         block = replace_or_insert_section(block, "### Next Steps", next_steps)
     elif "### Next Steps\n" not in block:
-        # Preserve the documented default: Trellis <=0.6.7 scaffolded this
-        # section with its own placeholder (left untouched above), but
-        # >=0.6.14 omits it entirely, so recreate the 0.6.7 default text to
-        # keep journal entries version-consistent.
+        # The runtime omits this section when it has no content. Journal
+        # entries carry it either way, so write the documented default rather
+        # than leaving readers to infer completion from an absent heading.
         block = replace_or_insert_section(
             block, "### Next Steps", ["- None - task complete"]
         )
@@ -446,13 +447,14 @@ def main(argv: list[str]) -> int:
             print(f"error: duplicate commit hash: {commit_hash}", file=sys.stderr)
             return 2
         seen_hashes.add(commit_hash)
-    subjects: dict[str, str] = {}
+    # `add_session.py` also refuses an unresolvable OID before writing
+    # anything, so this probe no longer supplies the subject -- it preserves
+    # this wrapper's exit-code contract, where a bad argument exits 2 rather
+    # than surfacing the runtime's failure as a generic 1.
     for commit_hash in hashes:
-        subject = commit_subject(commit_hash)
-        if subject is None:
+        if commit_subject(commit_hash) is None:
             print(f"error: unknown commit hash: {commit_hash}", file=sys.stderr)
             return 2
-        subjects[commit_hash] = subject
 
     def as_bullet(line: str) -> str:
         stripped = line.strip()
@@ -504,9 +506,9 @@ def main(argv: list[str]) -> int:
             ]
             if hashes:
                 command.extend(["--commit", ",".join(hashes)])
-            # Older Trellis add_session.py prefers task.json.branch over git's
-            # current branch. Supplying the current branch as an explicit arg keeps
-            # recorded sessions tied to the checkout that actually did the work.
+            # resolve_session_branch already prefers the checkout over stale
+            # task.json metadata. Passing it explicitly keeps that tie a stated
+            # invariant of this wrapper rather than an inherited default.
             branch = args.branch or current_git_branch()
             if branch:
                 command.extend(["--branch", branch])
@@ -555,7 +557,7 @@ def main(argv: list[str]) -> int:
         return 1
 
     error = patch_last_session(
-        journals[0], args.title, subjects, tests, next_steps
+        journals[0], args.title, hashes, tests, next_steps
     )
     if error:
         print(f"error: {error}", file=sys.stderr)

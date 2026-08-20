@@ -39,9 +39,49 @@ for the full contract.
 Disposition: unpark the bounded scope in R5/R6 below. The full compatibility
 contract (R1-R4) stays parked until a concrete incompatibility appears.
 
+## Trigger Status — 2026-08-20
+
+The trigger now fires **fully**, with the concrete incompatibility R1 has been
+waiting for. Surfaced by task `08-20-retire-pre-0616-trellis-compat`; recorded
+here, not fixed there.
+
+Measured 2026-08-20:
+
+- `.trellis/.version` is `0.6.16-sd.7` in this repository and in all eight fleet
+  consumers.
+- That build comes from the fork `github.com:sdelmas/Trellis`
+  (`packages/cli/package.json` = `0.6.16-sd.7`). It shares the npm *name*
+  `@mindfoldhq/trellis` but is **never published**: `npm view
+  @mindfoldhq/trellis version` returns `0.6.15`, and no `-sd` tag exists.
+- So `npm install -g @mindfoldhq/trellis@latest` — the instruction this task's
+  R5 is about — installs a CLI **below** the vendored build every repository in
+  the fleet runs.
+
+The incompatibility is not cosmetic. The pack does not ship
+`.trellis/scripts/**` (`manifest.json` sets `requiresTrellis: true`, a boolean
+with no version component); the consumer's own CLI writes that tree. A
+consumer who follows the documented instruction and then runs `trellis update`
+**downgrades** their vendored runtime below the supported floor now recorded in
+`.trellis/spec/tooling/vendored-trellis-compatibility.md`.
+
+This answers R1 and constrains R2: the contract cannot be a published-version
+range, because the supported build is not published. It also sharpens R4 — the
+floor must be an *identity* comparison, since `0.6.16-sd.7` carries a prerelease
+segment and sorts below `0.6.16` under semver, so a `>=0.6.16` gate would reject
+the entire converged fleet.
+
+R5's four occurrences are all still live. Note the stale citation corrected:
+the asserted string is at `tests/install_test_support.py:641`, not `:457`.
+
+Deliberately **not** unparked here. The fix needs a decision this task owns —
+what the supported bootstrap path *is* for a fork-distributed runtime — and that
+decision is user-facing across `README.md` and shipped consumer docs. Recording
+the evidence is what `08-20` scoped itself to do.
+
 ## Requirements
 
-Still parked (R1-R4) — need a concrete incompatibility:
+Still parked (R1-R4) — R1's evidence now exists (see Trigger Status
+— 2026-08-20); R2-R4 need the bootstrap decision:
 
 - R1: Identify the exact Trellis behavior or file contract that is incompatible.
 - R2: Decide where the compatibility contract belongs: manifest metadata,
@@ -53,9 +93,12 @@ Still parked (R1-R4) — need a concrete incompatibility:
 
 Unparked 2026-07-28 (R5-R6) — bounded by finding A-113, no version-range gate:
 
-- R5: Stop shipping a floating upstream pin. Replace `@latest` with the version
-  the repo actually vendors — `@0.6.7`, from `.trellis/.version:1` — at all four
-  tracked occurrences, not just the two the audit cited. A caret range (`@^0.6`)
+- R5: Stop shipping a floating upstream pin. Replace `@latest` at all four
+  tracked occurrences, not just the two the audit cited. **Superseded in part
+  by Trigger Status — 2026-08-20:** the vendored build is now `0.6.16-sd.7`,
+  not `0.6.7`, and it is not published to npm at all, so "pin to the version
+  the repo vendors" has no npm spelling. R5 now requires the bootstrap decision
+  (what a consumer should actually install), not a string substitution. A caret range (`@^0.6`)
   is the speculative compatibility range R4 forbids: nothing in this repo
   demonstrates that 0.6.8 or 0.6.9 is compatible. If the exact pin is judged too
   brittle for consumers, that is a deliberate override of R4 and the rationale
@@ -64,7 +107,7 @@ Unparked 2026-07-28 (R5-R6) — bounded by finding A-113, no version-range gate:
   - `templates/docs/SD_AI_COMMAND_PACK.md:9` (cited by A-113),
   - `docs/SD_AI_COMMAND_PACK.md:9` — the source twin of the shipped doc; leaving
     it behind breaks generated parity, and
-  - `tests/install_test_support.py:457` — asserts the literal string, so it fails
+  - `tests/install_test_support.py:641` — asserts the literal string, so it fails
     the moment the docs change.
 
   Changing the documented install instruction to match what the repo already
@@ -99,8 +142,9 @@ Full contract (remains parked until R1 has evidence):
 
 ## Notes
 
-- Trigger partially fired 2026-07-28: see the Trigger Status section. R5/R6 are
-  actionable now; R1-R4 stay parked.
+- Trigger partially fired 2026-07-28, then fully 2026-08-20: see both Trigger
+  Status sections. R1 now has its evidence; R2-R5 need the bootstrap decision;
+  R6 remains available independently.
 - Audit source: `.trellis/audit/report-2026-07-28.md` — finding A-113
   (P3 · S · Plausible · dependencies). Ledger entry A-113 tracks this task as
   its owner.

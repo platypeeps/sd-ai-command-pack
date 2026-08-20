@@ -253,10 +253,7 @@ class RecordSessionTests(InstallTestCase):
             "\n"
             "### Commits\n"
             "| Commit | Subject |\n"
-            "| `abc123` | (see git log) |\n"
-            "\n"
-            "### Testing\n"
-            "- [OK] (Add test results)\n"
+            "| `abc123` | feat: atomic journal |\n"
         )
         journal.write_text(original, encoding="utf-8")
 
@@ -264,7 +261,7 @@ class RecordSessionTests(InstallTestCase):
             error = recorder.patch_last_session(
                 journal,
                 "Atomic session",
-                {"abc123": "feat: atomic journal"},
+                ["abc123"],
                 ["- [OK] unit tests"],
                 [],
             )
@@ -272,6 +269,47 @@ class RecordSessionTests(InstallTestCase):
         self.assertEqual(error, f"cannot write {journal}: blocked")
         self.assertEqual(journal.read_text(encoding="utf-8"), original)
         self.assertEqual(list(journal.parent.glob(".*.tmp")), [])
+
+    def test_record_session_patch_requires_a_real_commit_table_row(self) -> None:
+        """Prose naming the OID must not stand in for the row itself.
+
+        The assertion exists to catch the runtime failing to write a commit
+        row. A `--change` bullet mentioning the same hash in a code span is
+        the case where a bare substring search would report success for
+        exactly the failure it is there to detect.
+        """
+        recorder = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            "sd_record_session_row_anchor",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-recorder-row-")
+        self.addCleanup(tempdir.cleanup)
+        journal = Path(tempdir.name) / "journal-1.md"
+        journal.write_text(
+            "# Journal\n"
+            "\n"
+            "## Session 1: Anchored session\n"
+            "\n"
+            "### Summary\n"
+            "Started.\n"
+            "\n"
+            "### Main Changes\n"
+            "- reverted `abc123` after the build broke\n"
+            "\n"
+            "### Commits\n"
+            "| Commit | Subject |\n",
+            encoding="utf-8",
+        )
+
+        error = recorder.patch_last_session(
+            journal,
+            "Anchored session",
+            ["abc123"],
+            ["- [OK] unit tests"],
+            [],
+        )
+
+        self.assertEqual(error, f"missing commit table row for abc123 in {journal}")
 
     def test_record_session_wrapper_reuses_uncommitted_retry_entry(self) -> None:
         root = self.make_repo()
@@ -742,38 +780,21 @@ class RecordSessionTests(InstallTestCase):
         entry = journals[0].read_text(encoding="utf-8")
         self.assertIn(f"| `{commit_hash}` | (empty subject) |", entry)
 
-    def test_record_session_wrapper_tolerates_prefilled_trellis_variant(
+    def test_record_session_wrapper_delegates_commit_cell_escaping(
         self,
     ) -> None:
+        """The runtime renders the commit cell; the wrapper must not redo it.
+
+        The wrapper used to overwrite each row with
+        ``subject.replace("|", "\\|")``, which escapes pipes but leaves
+        backslashes raw and preserves whitespace runs that can break the row.
+        ``escape_markdown_cell`` collapses whitespace and escapes both, so the
+        subject below is the case the removal fixes.
+        """
         root = self.make_repo()
         result = self.run_install(root)
         self.assertEqual(result.returncode, 0, result.stdout)
         self._seed_trellis_session_tooling(root)
-
-        # Emulate the Trellis variant that resolves commit subjects itself
-        # and seeds a different Testing default (loadsmith's add_session).
-        variant = root / ".trellis/scripts/add_session.py"
-        source = variant.read_text(encoding="utf-8")
-        # Trellis <=0.6.16-sd.1 carried a "(see git log)" placeholder for a
-        # commit it could not resolve; later versions resolve every subject
-        # before writing and have no placeholder to swap. Only rewrite it when
-        # it is still there -- asserting its presence pins a behaviour that was
-        # deliberately removed, which is what this test exists to tolerate.
-        if "(see git log)" in source:
-            source = source.replace("(see git log)", "prefilled subject")
-        # Trellis <=0.6.7 seeds a DEFAULT_TESTING placeholder the variant
-        # rewords; >=0.6.14 omits empty sections and has no such constant.
-        current_testing_default = (
-            'DEFAULT_TESTING = "- Validation was not recorded for this session."'
-        )
-        variant_testing_default = (
-            'DEFAULT_TESTING = "- Validation not recorded for this session."'
-        )
-        if current_testing_default in source:
-            source = source.replace(
-                current_testing_default, variant_testing_default
-            )
-        variant.write_text(source, encoding="utf-8")
 
         def run(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run(
@@ -792,18 +813,19 @@ class RecordSessionTests(InstallTestCase):
         run("git", "add", "-A")
         run("git", "commit", "-q", "-m", "chore: seed trellis tooling")
 
+        subject = "fix: escape a | pipe and a C:\\tmp path   with   gaps"
         (root / "feature.txt").write_text("feature\n", encoding="utf-8")
         run("git", "add", "feature.txt")
-        run("git", "commit", "-q", "-m", "feat: add feature file")
+        run("git", "commit", "-q", "-m", subject)
         commit_hash = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
 
         result = run(
             sys.executable,
             "scripts/sd-ai-command-pack-record-session.py",
             "--title",
-            "Variant session",
+            "Escaping session",
             "--summary",
-            "Recorded against a subject-resolving Trellis.",
+            "Recorded a subject needing cell escaping.",
             "--commit",
             commit_hash,
             "--change",
@@ -818,10 +840,16 @@ class RecordSessionTests(InstallTestCase):
         )
         self.assertEqual(len(journals), 1)
         entry = journals[0].read_text(encoding="utf-8")
-        self.assertIn("feat: add feature file", entry)
-        self.assertNotIn("prefilled subject", entry)
+        row = next(
+            line for line in entry.splitlines() if commit_hash in line
+        )
+        # Both metacharacters escaped, whitespace collapsed, and the row still
+        # has exactly the two cells the table declares.
+        self.assertIn("\\|", row)
+        self.assertIn("C:\\\\tmp", row)
+        self.assertNotIn("   ", row)
+        self.assertEqual(row.count("|") - row.count("\\|"), 3)
         self.assertIn("- [OK] unit suite green", entry)
-        self.assertNotIn("Validation not recorded", entry)
         last_message = run("git", "log", "-1", "--format=%s").stdout.strip()
         self.assertEqual(last_message, "chore: record journal")
 
