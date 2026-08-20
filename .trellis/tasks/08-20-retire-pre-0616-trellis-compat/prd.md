@@ -216,3 +216,25 @@ Counts after the review round: `test_record_session` 14 OK (was 13),
   work fires. R7 records the evidence there; the fix is not attempted here.
 - Adopting `task.py list --json` in the status collector. Considered and
   declined — see `design.md`.
+
+## Outcome — 2026-08-20
+
+Merged as `8cc455ac` (squash of PR #521, four commits). All CI checks passed on
+the final head `9e6570db`; Copilot reviewed three times and its third pass
+returned no comments.
+
+Three review findings were raised and all three were checked against the
+runtime before acting. Two were fixed as reported; one was fixed *against* the
+suggested remedy, because gating the stale suffix on a resolved `activeTask`
+would have made the signal unreachable rather than correcting it. That is
+recorded in full under "Review round" above, along with the part of the third
+finding that was rebutted.
+
+Shipped as pack `0.71.35`. The eight fleet consumers pick it up on their next
+refresh; nothing in this task required a coordinated rollout, since the floor
+it declares is the version they already run.
+
+Left open deliberately: `07-09-trellis-version-compatibility` stays parked. The
+`npm install -g @mindfoldhq/trellis@latest` instruction still ships and would
+install a CLI below this floor. R7 recorded the evidence there; the fix needs a
+bootstrap decision that task owns.
