@@ -4322,6 +4322,13 @@ assert.deepEqual(
         nothing, and the negative assertions pass vacuously.
         """
         self.run_git(root, "add", *paths)
+        # make_repo runs `git init` and stops there, so a fixture repository
+        # has no committer identity. A developer machine hides that behind a
+        # global ~/.gitconfig; a CI runner has none and the commit dies with
+        # "Author identity unknown". Set it here rather than relying on the
+        # ambient environment, matching the other fixtures in this suite.
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
         self.run_git(root, "commit", "-m", "seed bare-reference fixture")
 
     def run_preflight_in(
