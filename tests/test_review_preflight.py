@@ -4460,6 +4460,79 @@ assert.deepEqual(
             substring.stdout,
         )
 
+    def test_review_preflight_prefers_a_present_candidate_for_a_bare_filename(
+        self,
+    ) -> None:
+        """A basename naming several tracked paths resolves to one that exists.
+
+        Taking the first candidate blindly lets a sort order decide the whole
+        reference: if that path is absent from the working tree while a
+        sibling is present, a resolvable citation is reported missing. The
+        mirror between `templates/scripts/` and `scripts/` is the common case
+        where one basename has more than one tracked path.
+        """
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/mirrored.md").write_text("# Mirrored\n", encoding="utf-8")
+        (root / "templates/docs").mkdir(parents=True, exist_ok=True)
+        (root / "templates/docs/mirrored.md").write_text(
+            "# Mirrored\n", encoding="utf-8"
+        )
+        self.commit_bare_reference_target(
+            root, "docs/mirrored.md", "templates/docs/mirrored.md"
+        )
+
+        # Delete whichever candidate sorts first, leaving the other in place.
+        # Both remain in the index; only one is present on disk.
+        first = sorted(["docs/mirrored.md", "templates/docs/mirrored.md"])[0]
+        (root / first).unlink()
+
+        (root / "docs/cite.md").write_text(
+            "See `mirrored.md:3`.\n",
+            encoding="utf-8",
+        )
+        resolved = self.run_preflight_in(node, root)
+        self.assertEqual(resolved.returncode, 0, resolved.stdout)
+        self.assertNotIn("mirrored.md:3", resolved.stdout)
+
+    def test_review_preflight_resolves_bare_filenames_from_the_index_not_a_walk(
+        self,
+    ) -> None:
+        """An untracked file never satisfies a bare reference.
+
+        Resolution reads `git ls-files`. If someone swapped that for a
+        directory walk the suite would stay green everywhere else, because in
+        every other fixture the tracked files are also present on disk. This
+        is the one case where the two sources disagree.
+        """
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        # Present on disk, deliberately never staged.
+        (root / "scripts/sd-ai-command-pack-untracked.py").write_text(
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        (root / "docs/cite.md").write_text(
+            "Shorthand: `untracked.py:4`.\n",
+            encoding="utf-8",
+        )
+        walked = self.run_preflight_in(node, root)
+        self.assertEqual(walked.returncode, 1, walked.stdout)
+        self.assertIn("references missing path untracked.py:4", walked.stdout)
+
     def test_review_preflight_absent_marker_covers_bare_filename_references(
         self,
     ) -> None:

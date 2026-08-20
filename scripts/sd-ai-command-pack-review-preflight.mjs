@@ -5052,8 +5052,13 @@ export function findMissingDocumentationPathReferences(file, text, existsPath, o
   const missing = [];
   const seen = new Set();
 
+  // Handed to the resolver so that a bare filename matching several tracked
+  // paths can pick one that is actually present instead of whichever sorted
+  // first. Built once rather than per reference.
+  const resolveOptions = { ...options, existsPath };
+
   for (const reference of extractDocumentationPathReferences(file, text, options)) {
-    const resolved = resolveDocumentationReference(file, reference.target, reference.kind, options);
+    const resolved = resolveDocumentationReference(file, reference.target, reference.kind, resolveOptions);
 
     if (!resolved) {
       continue;
@@ -5413,6 +5418,20 @@ export function resolveDocumentationReference(file, target, kind, options = {}) 
       options.trackedBasenames || trackedFileBasenames(),
     );
     if (candidates) {
+      // A basename can name several tracked paths -- the `templates/scripts/`
+      // and `scripts/` mirror is the common case. Taking the first blindly
+      // makes the caller's existence probe decide the whole reference on a
+      // sort order: if that one path is absent from the working tree while a
+      // sibling is present, a resolvable citation is reported missing. Prefer
+      // a candidate that exists, and fall back to the first so a name that
+      // resolves to nothing present still fails rather than silently passing.
+      const probe = options.existsPath;
+      if (candidates.length > 1 && typeof probe === 'function') {
+        const present = candidates.find((candidate) => probe(candidate));
+        if (present) {
+          return present;
+        }
+      }
       return candidates[0];
     }
   }
