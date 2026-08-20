@@ -270,6 +270,47 @@ class RecordSessionTests(InstallTestCase):
         self.assertEqual(journal.read_text(encoding="utf-8"), original)
         self.assertEqual(list(journal.parent.glob(".*.tmp")), [])
 
+    def test_record_session_patch_requires_a_real_commit_table_row(self) -> None:
+        """Prose naming the OID must not stand in for the row itself.
+
+        The assertion exists to catch the runtime failing to write a commit
+        row. A `--change` bullet mentioning the same hash in a code span is
+        the case where a bare substring search would report success for
+        exactly the failure it is there to detect.
+        """
+        recorder = self.load_module_from_path(
+            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            "sd_record_session_row_anchor",
+        )
+        tempdir = tempfile.TemporaryDirectory(prefix="sd-recorder-row-")
+        self.addCleanup(tempdir.cleanup)
+        journal = Path(tempdir.name) / "journal-1.md"
+        journal.write_text(
+            "# Journal\n"
+            "\n"
+            "## Session 1: Anchored session\n"
+            "\n"
+            "### Summary\n"
+            "Started.\n"
+            "\n"
+            "### Main Changes\n"
+            "- reverted `abc123` after the build broke\n"
+            "\n"
+            "### Commits\n"
+            "| Commit | Subject |\n",
+            encoding="utf-8",
+        )
+
+        error = recorder.patch_last_session(
+            journal,
+            "Anchored session",
+            ["abc123"],
+            ["- [OK] unit tests"],
+            [],
+        )
+
+        self.assertEqual(error, f"missing commit table row for abc123 in {journal}")
+
     def test_record_session_wrapper_reuses_uncommitted_retry_entry(self) -> None:
         root = self.make_repo()
         result = self.run_install(root)

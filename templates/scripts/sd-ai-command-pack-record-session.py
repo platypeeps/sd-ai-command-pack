@@ -275,8 +275,14 @@ def patch_last_session(
     # Rewriting the row here would only re-render it less correctly, so the
     # wrapper asserts the runtime recorded what it asked for and leaves the
     # rendering alone.
+    #
+    # Anchor to the start of a table row rather than searching the block for
+    # the bare hash: a `--change` bullet naming the same OID would otherwise
+    # satisfy the check for a row the runtime never wrote, which is exactly
+    # the failure this assertion exists to catch.
     for commit_hash in hashes:
-        if f"`{commit_hash}`" not in block:
+        row_re = re.compile(rf"^\|\s*`{re.escape(commit_hash)}`\s*\|", re.MULTILINE)
+        if not row_re.search(block):
             return f"missing commit table row for {commit_hash} in {journal}"
 
     # The runtime omits a section it has no content for, and this wrapper

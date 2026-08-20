@@ -516,6 +516,55 @@ class StatusTests(InstallTestCase):
         self.assertEqual(human.returncode, 0, human.stdout)
         self.assertIn("[stale pointer]", human.stdout)
 
+    def test_a_dangling_stale_pointer_names_what_it_points_at(self) -> None:
+        # The runtime calls a pointer stale when its directory is gone
+        # (`_active_from_ref`: `stale = resolved is None or not
+        # resolved.is_dir()`), so this -- not a resolvable record -- is the
+        # ordinary stale case. "none active [stale pointer]" would read as a
+        # contradiction, and a bare "none active" would hide the drift.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "import json\n"
+            "print(json.dumps({\n"
+            "    'current_task': {'dir': '.trellis/tasks/vanished',\n"
+            "                     'id': 'vanished'},\n"
+            "    'source': 'file',\n"
+            "    'stale': True,\n"
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["trellis"]["activeTaskStale"])
+        self.assertIsNone(report["trellis"]["activeTask"])
+
+        human = self.run_status(root)
+
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn(
+            "current Trellis task: none active "
+            "[stale pointer to .trellis/tasks/vanished]",
+            human.stdout,
+        )
+
+    def test_no_active_task_reports_none_without_a_stale_suffix(self) -> None:
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "import json\n"
+            "print(json.dumps({'current_task': None,\n"
+            "                  'source': 'file', 'stale': False}))\n",
+            encoding="utf-8",
+        )
+
+        human = self.run_status(root)
+
+        self.assertEqual(human.returncode, 0, human.stdout)
+        self.assertIn("- current Trellis task: none active\n", human.stdout)
+        self.assertNotIn("stale pointer", human.stdout)
+
     def test_local_human_output_always_lists_selectable_sections(self) -> None:
         root = self.make_status_repo()
 

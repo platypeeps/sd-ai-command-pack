@@ -31,6 +31,11 @@ Trellis versions programmatically today, and that is the intended state.
 - `task.py current --json` → one JSON object:
   `{"current_task": {"dir","id","title","status","parent","children",
   "branch","base_branch"} | null, "source": str, "stale": bool}`.
+  `stale` is `resolved is None or not resolved.is_dir()`
+  (`common/active_task.py:590`) — the pointer's *directory is gone*. So
+  `stale: true` normally arrives with a `current_task.dir` that cannot be
+  read, and a consumer that only reports stale-ness alongside a resolved
+  record will never report it at all. Report the pointer.
 - `task.py list --json` → `{"tasks": [{"dir","id","title","status",
   "display_status","priority","assignee","parent","children","package"}]}`,
   active tasks only. No pack consumer; see the status collector note below.

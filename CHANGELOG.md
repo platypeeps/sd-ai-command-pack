@@ -49,8 +49,12 @@
 - The human `sd-status fleet` report prints each repository's Trellis version
   beside its pack pin. The JSON payload always carried it, so an operator
   reading only the human report saw a fleet consistent on a version it had
-  never been shown. `current --json`'s `stale` flag is surfaced the same way: a
-  stale pointer still names a task, and the report now says so.
+  never been shown. `current --json`'s `stale` flag is surfaced the same way.
+  The runtime calls a pointer stale when its directory is gone, so the ordinary
+  stale case resolves to no task record at all; rather than suffix "none
+  active" with a contradiction or drop the signal, the report names the
+  pointer -- `none active [stale pointer to .trellis/tasks/<slug>]` -- which is
+  the only thing left to act on.
 
 ## 0.71.34 - 2026-08-19
 

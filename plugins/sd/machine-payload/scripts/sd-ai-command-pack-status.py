@@ -742,6 +742,7 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
     active: dict[str, Any] | None = None
     active_stale = False
     active_source = ""
+    active_path_text = ""
     task_script = repo / ".trellis/scripts/task.py"
     if task_script.is_file():
         # `current --json` is the one documented interface at the supported
@@ -749,7 +750,6 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
         # .trellis/spec/tooling/vendored-trellis-compatibility.md). A non-zero
         # exit or unparseable stdout means no active task; it is not a reason
         # to fall back to parsing prose.
-        active_path_text = ""
         result = run_command(
             [sys.executable, str(task_script), "current", "--json"], cwd=repo
         )
@@ -818,6 +818,7 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
         "activeTask": active,
         "activeTaskStale": active_stale,
         "activeTaskSource": active_source,
+        "activeTaskPointer": active_path_text,
         "inProgress": in_progress,
         "planned": planned,
         "completedOutsideArchive": completed_outside_archive,
@@ -3467,13 +3468,20 @@ def render_local(report: Mapping[str, Any], *, dry_run: bool) -> None:
         )
     else:
         print("- open issues: unavailable")
-    # A stale pointer still names a task, so the label has to say so; without
-    # it the report reads as a healthy active task.
-    stale_suffix = " [stale pointer]" if trellis.get("activeTaskStale") else ""
-    print(
-        f"- current Trellis task: {format_task(trellis.get('activeTask'))}"
-        f"{stale_suffix}"
-    )
+    # The runtime calls a pointer stale when its directory is gone, so the
+    # common stale case resolves to no task record at all. Suffixing "none
+    # active" with "[stale pointer]" would read as a contradiction, and
+    # dropping the suffix would hide the drift entirely -- so name the
+    # pointer instead, which is the only thing left to act on.
+    active_task = trellis.get("activeTask")
+    if isinstance(active_task, dict):
+        stale_suffix = " [stale pointer]" if trellis.get("activeTaskStale") else ""
+        print(f"- current Trellis task: {format_task(active_task)}{stale_suffix}")
+    elif trellis.get("activeTaskStale"):
+        pointer = trellis.get("activeTaskPointer") or "unknown"
+        print(f"- current Trellis task: none active [stale pointer to {pointer}]")
+    else:
+        print("- current Trellis task: none active")
     print(f"- in-progress Trellis tasks: {len(trellis.get('inProgress', []))}")
     planned = trellis.get("planned", [])
     print(f"- planned Trellis tasks: {len(planned)}")

@@ -133,6 +133,40 @@ path that depended on the removed branch. Both were found by running the suite,
 not by reading the spec — recorded because the spec's test list was incomplete
 and is now corrected.
 
+## Review round — 2026-08-20 (PR #521)
+
+Copilot raised two findings against the first push. Both were checked against
+the runtime and both were real; one of the two suggested fixes was not.
+
+**F1 — `none active [stale pointer]` is a contradiction.** Confirmed, and worse
+than reported. `common/active_task.py:590` computes
+`stale = resolved is None or not resolved.is_dir()`, so a stale pointer means
+the directory is *gone* — which means `task_record()` finds no `task.json` and
+`activeTask` is `None` in essentially every real stale case. The suffix was
+therefore almost always attached to "none active".
+
+The suggested fix — gate the suffix on `activeTask` being present — would have
+silenced the signal permanently, deleting R6's stale half. Fixed the other way:
+the collector now carries `activeTaskPointer`, and an unresolved stale pointer
+renders as `none active [stale pointer to .trellis/tasks/<slug>]`.
+
+This also exposed a hole in the task's own test: `test_active_task_reports_a_
+stale_pointer` used a fixture whose directory *existed*, so it exercised the
+one shape that does not normally occur. Two tests added — the dangling case and
+the plain no-active-task case.
+
+**F2 — the commit-row assertion was a bare substring search.** Confirmed. The
+check existed to catch the runtime failing to write a row; a `--change` bullet
+naming the same OID in a code span would satisfy it for exactly that failure.
+Now anchored to `^\|\s*`<hash>`\s*\|` (MULTILINE), matching the row the runtime
+renders at `add_session.py:973`. Regression test added.
+
+The `stale` semantics are now recorded in the compatibility spec, since the
+wrong fix was the one that follows from reading the field name alone.
+
+Counts after the review round: `test_record_session` 14 OK (was 13),
+`test_status` 134 OK (was 132).
+
 ## Acceptance criteria
 
 - [x] `.trellis/spec/tooling/vendored-trellis-compatibility.md` states the
