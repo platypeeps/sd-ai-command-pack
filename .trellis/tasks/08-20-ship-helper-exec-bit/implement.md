@@ -337,11 +337,18 @@ E and E2 are split because a single strict assertion cannot survive the bump:
 ### F — the diff is modes and nothing else
 
 ```
-git diff --numstat  <base>...HEAD -- scripts templates/scripts .sd-ai-command-pack/bin
+git diff --numstat <base>...HEAD -- scripts templates/scripts .sd-ai-command-pack/bin \
+  | awk '$1!="0" || $2!="0"'
 git diff --summary  <base>...HEAD -- scripts templates/scripts .sd-ai-command-pack/bin
 ```
 
-Pass = `--numstat` **empty** (it omits pure mode changes entirely, so any line
+Pass = the **filtered** numstat is empty. NOTE, corrected 2026-08-20: an
+earlier draft of this check claimed `--numstat` omits pure mode changes so any
+line is a content edit. **That is false.** Verified against 50 staged mode
+changes: `git diff --cached --numstat` emits one `0\t0\t<path>` row per
+mode-only change, so an unfiltered "expect empty" test fails on a CORRECT
+implementation. The `awk` filter keeps only rows with a nonzero add or delete
+count, which is the content-edit signal this check actually wants. Any line
 is a content edit), and `--summary` showing **only**
 `mode change 100644 => 100755` lines.
 
@@ -365,11 +372,14 @@ Pass = no line that is not a `mode change 100644 => 100755`, outside
 ### F2 — the 14 authored `run --` sites are unchanged
 
 ```
-git diff --numstat <base>...HEAD -- templates/.agents/skills templates/docs .github/command-sources
+git diff --numstat <base>...HEAD -- templates/.agents/skills templates/docs .github/command-sources \
+  | awk '$1!="0" || $2!="0"'
 grep -rn -- 'run -- sd-ai-command-pack-' templates/.agents/skills templates/docs .github/command-sources | wc -l
 ```
 
-Pass = the numstat is **empty** and the count is **14**, unchanged from the
+Pass = the **filtered** numstat is empty (see the note on check F — an
+unfiltered numstat emits a `0\t0` row per mode change) and the count is **14**,
+unchanged from the
 baseline. This is the discharging step for the acceptance criterion "The 14
 authored `run --` sites are unchanged"; without it that criterion had no check
 behind it.

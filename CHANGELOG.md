@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.71.36 - 2026-08-20
+
+### Fixed
+
+- Shipped pack helpers are tracked executable, so
+  `sd-ai-command-pack-toolchain.sh run -- <helper>` works in the pack's own
+  checkout. `run` ends in `exec "$RUN_COMMAND"`, and 21 of the 25 shipped
+  non-library helpers were tracked `100644`, so the documented way to reach
+  them died with `Permission denied` on a fresh clone. The mode had two
+  independent derivations: `installer/machinepayload.py` and
+  `.github/scripts/generate-plugin.py` derive it from the destination family
+  and the `sd_ai_command_pack_` library prefix -- which is why every installed
+  copy is already `755` -- while `installer/fileops.py` carries the template's
+  own mode forward, making this repository the single tree where the wrong bit
+  was authoritative and the single tree `run --` resolves against. Nothing
+  caught it because the resolver tests chmod their own fixtures and the
+  source-drift gate compares bytes, which is blind to modes by construction.
+  This change moves 50 tracked modes across `templates/scripts/`, `scripts/`,
+  and `.sd-ai-command-pack/bin/`; no shipped script's content changes. The four
+  `sd_ai_command_pack_*` modules stay `100644`, matching the rule the
+  generators already implement.
+
+### Added
+
+- `.github/scripts/check-shipped-script-modes.py` fails when a shipped script
+  is tracked with the wrong mode, in both directions: a shebang-carrying file
+  that is not `100755`, or an importable `sd_ai_command_pack_*` module that is.
+  It enumerates from `git ls-files -s` and classifies by the blob's first two
+  bytes, so a helper added later is covered without editing the gate, and it
+  reads the index rather than the filesystem because a checkout with
+  `core.fileMode` disabled lets the two disagree. A mode is invisible in diff
+  review, which is why this is a gate and not a matter of care.
+
+### Changed
+
+- A **fresh** install now writes
+  `.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py` executable
+  where it previously wrote it `644`. That target sits outside every payload
+  family, so it is installed from the template's own mode; it is committed in
+  consumer repositories and the usage guide tells readers to call it directly
+  from their own guards, so shipping it non-executable was the same defect one
+  tree over. **Existing installs are untouched** -- the installer returns
+  `UNCHANGED` before any `chmod` when the bytes already match, so a consumer
+  keeps its current mode until something rewrites the file.
+
 ## 0.71.35 - 2026-08-20
 
 ### Fixed
