@@ -1,5 +1,59 @@
 # `run --` cannot execute the payload helpers the pack ships without the executable bit
 
+## Closure — 2026-08-20: SUPERSEDED by 08-20-ship-helper-exec-bit
+
+Not fixed and not declined. This task described the functional half (21 of 25 helpers die with Permission denied under `run --`) of a single defect with
+one root cause, and has been absorbed whole into
+`.trellis/tasks/08-20-ship-helper-exec-bit/`, which carries every acceptance
+criterion from both records forward. The defect is still live at closure time.
+
+Root cause, established 2026-08-20: the pack has two independent executable-bit
+derivations. `installer/fileops.py:427` carries the template's mode forward on
+the repo-install path, while `installer/machinepayload.py:99-100` derives the
+bit from the destination family and the `sd_ai_command_pack_` prefix, ignoring
+source mode entirely. The machine payload therefore ships 755 everywhere except
+the pack's own checkout — the one place `run --` resolves.
+
+### Corrections carried into the successor
+
+Three claims in the body below are wrong and are corrected in the successor's
+`design.md`; do not implement from this record.
+
+1. **A mode-only change DOES move the fleet ledger.** The absorbed record cites
+   the machine-payload digest to argue otherwise. The fleet candidate digest is
+   a different function that reads the filesystem mode
+   (`scripts/sd_ai_command_pack_fleet_lib.py:792-795`, folded in at `:778`).
+   Measured: `sha256:c4f9c344…` today, `sha256:d458b3d6…` after the chmod. A
+   second mode-reading digest exists at `.github/scripts/release_identity.py:244`
+   (`executable=mode == "100755"`) and also moves. The cost asymmetry used to
+   prefer this fix over the dispatch fix never existed; the successor re-argues
+   the choice on correctness grounds instead.
+2. **`make sync` will NOT propagate the chmod.** `installer/fileops.py:465-474`
+   returns `UNCHANGED` as soon as destination bytes match, and returns before
+   any chmod; the mode is applied only by `atomic_write_bytes` (`:120`) on a
+   real write. Since this change moves no bytes, `scripts/` would stay 644. Both
+   trees must be chmod'd explicitly. That the installer never repairs a drifted
+   destination mode is a latent defect of its own, recorded as out of scope.
+3. **The baseline is 49, not 51.** 30 under `scripts/` plus 23 under
+   `templates/scripts/`, minus the four `sd_ai_command_pack_` library files
+   across both trees.
+
+Also corrected: there are now 14 authored `run --` sites, not 11.
+
+### The trap this record did not know about
+
+No repository-wide chmod. `.github/workflows/tests.yml:147-155` asserts that
+`.github/scripts/bookkeeping_ci_scope.py` is not `100644`, and it **fails
+open** — making it 100755 would not redden CI, it would permanently and
+silently disable fast-lane selection while CI stays green. 12 of the 77
+repo-wide non-executable shebang files live under `.github/scripts/`. The
+successor scopes the change to two trees and treats any `.github/scripts/**`
+change as an explicit non-goal.
+
+Superseded 2026-08-20. Track the work at `08-20-ship-helper-exec-bit`.
+
+
+
 ## Goal
 
 Make the pack's one documented way to reach a helper work in the pack's own
