@@ -818,7 +818,12 @@ def collect_trellis(repo: Path) -> dict[str, Any]:
         "activeTask": active,
         "activeTaskStale": active_stale,
         "activeTaskSource": active_source,
-        "activeTaskPointer": active_path_text,
+        # Sanitized at the payload boundary, not at capture: the raw text is
+        # what `Path()` above has to resolve, but what reaches the report is
+        # another repo's `task.py` output, and a `dir` carrying a newline
+        # would otherwise break the human line in two. The limit is generous
+        # enough for any real task directory and still bounded.
+        "activeTaskPointer": safe_text(active_path_text, limit=512),
         "inProgress": in_progress,
         "planned": planned,
         "completedOutsideArchive": completed_outside_archive,

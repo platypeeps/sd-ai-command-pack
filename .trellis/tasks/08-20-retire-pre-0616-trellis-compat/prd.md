@@ -164,6 +164,19 @@ renders at `add_session.py:973`. Regression test added.
 The `stale` semantics are now recorded in the compatibility spec, since the
 wrong fix was the one that follows from reading the field name alone.
 
+**F3 (second round, suppressed comment) — `activeTaskPointer` unsanitized.**
+Half right, and the half that is right was worth taking. The asymmetry with
+`activeTaskSource` (which goes through `safe_text`) is real: the pointer is
+another repository's `task.py` output, and a `dir` carrying a newline would
+split the human line in two and let the tail impersonate a report field. The
+"in fleet mode" attribution is wrong -- the pointer is read only in the local
+human report; `render_fleet` never touches it.
+
+Sanitized at the payload boundary rather than at capture, because the raw text
+is what `Path()` has to resolve. `limit=512` rather than no truncation: an
+unbounded value is how a garbage pointer becomes a screenful, and 512 is past
+any real task directory.
+
 Counts after the review round: `test_record_session` 14 OK (was 13),
 `test_status` 134 OK (was 132).
 

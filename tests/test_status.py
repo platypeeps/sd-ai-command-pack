@@ -550,6 +550,40 @@ class StatusTests(InstallTestCase):
             human.stdout,
         )
 
+    def test_a_stale_pointer_cannot_break_the_report_across_lines(self) -> None:
+        # The pointer is another repo's `task.py` output, not ours. A `dir`
+        # carrying a newline would split the human line in two and let the
+        # tail impersonate a report field.
+        root = self.make_status_repo()
+        (root / ".trellis/scripts/task.py").write_text(
+            "import json\n"
+            "print(json.dumps({\n"
+            "    'current_task': {'dir': 'tasks/a\\nb- forged: value',\n"
+            "                     'id': 'forged'},\n"
+            "    'source': 'file',\n"
+            "    'stale': True,\n"
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_status(root, "--json")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        pointer = json.loads(result.stdout)["trellis"]["activeTaskPointer"]
+        self.assertNotIn("\n", pointer)
+
+        human = self.run_status(root)
+
+        self.assertEqual(human.returncode, 0, human.stdout)
+        line = next(
+            entry
+            for entry in human.stdout.splitlines()
+            if entry.startswith("- current Trellis task:")
+        )
+        self.assertIn("stale pointer to", line)
+        self.assertIn("forged: value", line)
+        self.assertNotIn("- forged: value", human.stdout.replace(line, ""))
+
     def test_no_active_task_reports_none_without_a_stale_suffix(self) -> None:
         root = self.make_status_repo()
         (root / ".trellis/scripts/task.py").write_text(
