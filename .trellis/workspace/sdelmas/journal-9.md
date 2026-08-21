@@ -943,3 +943,26 @@ Also closed the copilot_code_review ruleset campaign. The last two operations on
 ### Status
 
 [OK] **Completed**
+
+
+## Session 421: Preflight .claude/ blind spot and the sd-audit-repo charter root
+<!-- trellis-session: v=2 fp=5753b9702ec2faa1 -->
+
+**Date**: 2026-08-21
+**Task**: Preflight .claude/ blind spot and the sd-audit-repo charter root
+**Branch**: `main`
+
+### Summary
+
+Removed the .claude/ entry from ignoredReferencePrefixes, which contradicted referencePrefixes and made every .claude/ citation unreadable to the gate; exempted only the gitignored .claude/settings.local.json, pinned both directions with assertions confirmed failing against the pre-change checker, and repaired the five newly-visible citations. Shipped 0.71.43. se-ai-command-pack's single citation fixed separately in that repo (PR #261, merged as 2abef1b). Then measured the sd-audit-repo charter fallback: kept the arm (it is the one that works in a vendored checkout) but renamed its root from the repository's to the payload's, since all six thin consumers have zero repo-relative charters and rewrite_text leaves the path unrewritten. Shipped 0.71.44; Copilot caught an unsatisfiable acceptance grep on the way.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `22d29df7` | fix(preflight): check .claude/ path citations (#532) |
+| `c2c96b58` | fix(audit-repo): name the charter root as the payload's, not the repository's (#533) |
+
+### Status
+
+[OK] **Completed**
