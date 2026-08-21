@@ -21,13 +21,14 @@ pack-managed repo's active branch ruleset while preserving `deletion` and
 it is not a pack consumer, so its ruleset was the only Copilot path it had.
 That premise was retracted the same day; see below.
 
-## Status: applied 2026-08-21, one repository outstanding
+## Status: complete, 2026-08-21
 
-The change has since been applied. Nine of the ten `main` rulesets in scope
-were updated and verified by re-reading each from the server: all now report
-`active` with rules exactly `deletion, non_fast_forward`. Five of the six
-dormant duplicates were deleted. (Scope grew from nine to ten when
-people-profiles stopped being an exemption — see below.)
+The change has been applied everywhere. All ten `main` rulesets in scope were
+updated and verified by re-reading each from the server: every one reports
+`active` with rules exactly `deletion, non_fast_forward`. All six duplicates
+were deleted. (Scope grew from nine to ten when people-profiles stopped being
+an exemption — see below.) A closing sweep over all ten repositories found
+zero rulesets carrying `copilot_code_review`.
 
 Note for anyone repeating this: the update verb is `PUT`, not `PATCH` — GitHub
 answers `PATCH /repos/{owner}/{repo}/rulesets/{id}` with a 404. `PUT` replaces
@@ -36,12 +37,14 @@ the whole ruleset object, so the payload must carry `name`, `target`,
 array. Every snapshot below was checked first and carried zero bypass actors
 and zero ref excludes, so nothing was dropped in the replacement.
 
-**Outstanding: `answerbook/mezmo_benchmark`.** Both its `main` ruleset
-(17617454) and its dormant duplicate (19498731) still carry
-`copilot_code_review`. The account running this holds `push` but not `admin` on
-that repository, and ruleset writes require admin; GitHub returns 404 rather
-than 403. Someone with admin in the `answerbook` organization has to apply the
-same two operations there.
+**`answerbook/mezmo_benchmark` — was outstanding, now done.** It lagged the
+other nine because the account driving the change held `push` but not `admin`
+there, and ruleset writes require admin; GitHub answers those 404 rather than
+403, so the permissions gap and a wrong verb are indistinguishable from the
+response alone. Applied through the GitHub web UI by a repository admin rather
+than through the API. Verified by re-reading: 17617454 is `active` with rules
+exactly `deletion, non_fast_forward`, the duplicate 19498731 no longer exists,
+and the repository lists one ruleset.
 
 **`platypeeps/people-profiles`: exemption retracted, change applied.** The
 exemption rested on the repository not being a pack consumer. It was onboarded
@@ -80,8 +83,6 @@ copilot_code_review`):
 Duplicate rulesets named `Code Quality Copilot review for default branch`,
 rule set `copilot_code_review` only. All were `enforcement=disabled` except
 people-profiles', which was `active`:
-
-All but the last were deleted; `answerbook/mezmo_benchmark`'s survives.
 
 | Repo | Ruleset ID |
 | --- | --- |
