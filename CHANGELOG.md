@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.71.44 - 2026-08-21
+
+### Fixed
+
+- `sd-audit-repo` told the agent the charter directory resolves "either inside
+  the installed skill payload or at `.agents/skills/sd-audit-repo/charters/`
+  relative to the repository root". The second half holds only in a vendored
+  install. Every consumer in the fleet is thin, none carries a repo-relative
+  charter directory, and the thin conversion does not rewrite this path —
+  directory-shaped `.agents/` tokens are not in the rewrite map. The arm is
+  kept, because in a vendored checkout it is the arm that works (the Claude
+  adapter copy of the skill carries no `charters/` of its own), but the root is
+  now named as the payload's root rather than the repository's, and the text
+  says outright that a missing repo-root path is not a blocker in a thin
+  install. Same family as 0.71.42, and fixed the same way: drop the false
+  qualifier rather than add a conversion-time substitution.
+
 ## 0.71.43 - 2026-08-21
 
 ### Fixed
