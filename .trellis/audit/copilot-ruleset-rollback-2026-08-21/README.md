@@ -17,15 +17,17 @@ deliberately suppresses a new review request and records `0` remote rounds.
 The planned change removes the `copilot_code_review` rule from each
 pack-managed repo's active branch ruleset while preserving `deletion` and
 `non_fast_forward`, and deletes the dormant duplicate rulesets.
-`platypeeps/people-profiles` is deliberately excluded: it is not a pack
-consumer, so its ruleset is the only Copilot path it has.
+`platypeeps/people-profiles` was initially excluded on the stated grounds that
+it is not a pack consumer, so its ruleset was the only Copilot path it had.
+That premise was retracted the same day; see below.
 
 ## Status: applied 2026-08-21, one repository outstanding
 
-The change has since been applied. Eight of the nine `main` rulesets were
-updated and verified by re-reading each from the server: all now report
-`active` with rules exactly `deletion, non_fast_forward`. Four of the five
-dormant duplicates were deleted.
+The change has since been applied. Nine of the ten `main` rulesets in scope
+were updated and verified by re-reading each from the server: all now report
+`active` with rules exactly `deletion, non_fast_forward`. Five of the six
+dormant duplicates were deleted. (Scope grew from nine to ten when
+people-profiles stopped being an exemption — see below.)
 
 Note for anyone repeating this: the update verb is `PUT`, not `PATCH` — GitHub
 answers `PATCH /repos/{owner}/{repo}/rulesets/{id}` with a 404. `PUT` replaces
@@ -41,8 +43,21 @@ that repository, and ruleset writes require admin; GitHub returns 404 rather
 than 403. Someone with admin in the `answerbook` organization has to apply the
 same two operations there.
 
-`platypeeps/people-profiles` was left untouched by design and still carries the
-rule in both of its rulesets.
+**`platypeeps/people-profiles`: exemption retracted, change applied.** The
+exemption rested on the repository not being a pack consumer. It was onboarded
+to the fleet on 2026-08-21 — refreshed to 0.71.41, converted to a thin install,
+and registered at priority 80 in the `final` cohort — so `sd-review-pr` now
+owns review invocation there and the ruleset became the same duplicate request
+it is everywhere else. Its dormant duplicate was the worse case in the fleet:
+alone among the six it was `enforcement=active`, and it carried
+`review_on_push=true` and `review_draft_pull_requests=true`, reviewing on every
+push and on drafts — exactly what the fleet integration-only profile
+suppresses.
+
+The same two operations were applied. Ruleset 19745583 (`main`) was `PUT`
+without `copilot_code_review` and re-read from the server: `active`, rules
+exactly `deletion, non_fast_forward`. Duplicate 19745586 was deleted, and the
+repository now lists one ruleset.
 
 ## Scope at capture time
 
@@ -59,10 +74,12 @@ copilot_code_review`):
 | platypeeps/sd-github-review | 19520648 | false |
 | platypeeps/se-ai-command-pack | 19131581 | false |
 | platypeeps/sd-ai-command-pack | 18446633 | false |
+| platypeeps/people-profiles | 19745583 | false |
 | answerbook/mezmo_benchmark | 17617454 | true |
 
-Dormant duplicate rulesets named `Code Quality Copilot review for default
-branch`, all `enforcement=disabled`, rule set `copilot_code_review` only:
+Duplicate rulesets named `Code Quality Copilot review for default branch`,
+rule set `copilot_code_review` only. All were `enforcement=disabled` except
+people-profiles', which was `active`:
 
 All but the last were deleted; `answerbook/mezmo_benchmark`'s survives.
 
@@ -72,11 +89,8 @@ All but the last were deleted; `answerbook/mezmo_benchmark`'s survives.
 | platypeeps/hoa-manager | 19420797 |
 | platypeeps/rwbp-coordinator | 19498427 |
 | platypeeps/rwbp-website | 19431677 |
+| platypeeps/people-profiles | 19745586 |
 | answerbook/mezmo_benchmark | 19498731 |
-
-Excluded from the change, snapshot kept for completeness:
-`platypeeps/people-profiles` rulesets 19745583 (`main`) and 19745586 (`Code
-Quality Copilot review for default branch`, `enforcement=active`).
 
 ## File naming
 

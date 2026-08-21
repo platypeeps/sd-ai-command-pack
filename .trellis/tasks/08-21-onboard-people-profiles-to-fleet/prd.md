@@ -110,30 +110,33 @@ which is exactly what the fleet integration-only profile suppresses.
 
 ## Acceptance Criteria
 
-- [ ] `python3 install.py <pack-checkout> --status --json` run against
-      people-profiles reports `installedVersion` 0.71.40 and `state: current`.
+- [x] `python3 install.py <pack-checkout> --status --json` run against
+      people-profiles reports `installedVersion` 0.71.41 and `state: current`.
+      (0.71.41, not the 0.71.40 planned here: the conversion surfaced a pack
+      defect in the `sd-review` adapter prose, whose fix shipped as 0.71.41
+      before the refresh ran. See implement.md Step 3.5.)
       It does **not** report the install mode — measured against hoa-manager, a
       thin consumer, the JSON carries no `mode` key at all — so mode is
       asserted from the receipt below, not from this command.
-- [ ] `.sd-ai-command-pack/provenance.json` records `"mode": "thin"`, and the
+- [x] `.sd-ai-command-pack/provenance.json` records `"mode": "thin"`, and the
       committed machine-scope payload under `scripts/` is gone from the
       repository.
-- [ ] The resweep verdict for this consumer is `clear`, and the verdict
+- [x] The resweep verdict for this consumer is `clear`, and the verdict
       document used for the conversion is the one produced against the tree
       that was actually converted.
-- [ ] All four repo-authored citations name the kept resolver path as a plain
+- [x] All four repo-authored citations name the kept resolver path as a plain
       path rather than a `scripts/sd-ai-command-pack-*` literal.
-- [ ] people-profiles appears in `docs/fleet/consumers.json` with `"mode":
+- [x] people-profiles appears in `docs/fleet/consumers.json` with `"mode":
       "thin"`, a `github` slug, a `pathHint`, its platform list, and a
       `rolloutPriority`; and it is named in exactly one `rolloutPolicy` cohort.
-- [ ] `docs/fleet/candidate-validation.json` is regenerated and
+- [x] `docs/fleet/candidate-validation.json` is regenerated and
       `scripts/sd-ai-command-pack-fleet-candidate-check.py --check-ledger`
       exits 0.
-- [ ] `make check` passes in the pack repository.
-- [ ] The whole-tree review preflight reports zero failures in people-profiles.
-- [ ] Neither people-profiles ruleset carries `copilot_code_review`, and the
+- [x] `make check` passes in the pack repository.
+- [x] The whole-tree review preflight reports zero failures in people-profiles.
+- [x] Neither people-profiles ruleset carries `copilot_code_review`, and the
       `deletion` and `non_fast_forward` rules on its `main` ruleset survive.
-- [ ] A live sweep of every repository in the fleet finds `copilot_code_review`
+- [x] A live sweep of every repository in the fleet finds `copilot_code_review`
       only where it is intentionally retained, with the retained set stated.
 
 ## Out Of Scope
