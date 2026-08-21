@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 416
-- **Last Active**: 2026-08-20
+- **Total Sessions**: 417
+- **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~844 | Active |
+| `journal-9.md` | ~867 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 417 | 2026-08-21 | fleet-publish acceptance-criteria tick: merge, consumer annotation, copilot ruleset survey | `b3eec90e`, `ce62b4be` | `main` |
 | 416 | 2026-08-20 | Retire the pre-0.6.16 vendored Trellis compatibility layer | `8cc455ac`, `101b41e7` | `main` |
 | 415 | 2026-08-19 | File the shipped-script mode-bit and consumer-branch-retirement follow-ups | `2bc40482`, `fdfc7a74` | `task/08-19-loose-end-task-records` |
 | 414 | 2026-08-19 | Mark a deliberately absent documentation path at the point of use | `687f7f8d`, `88bb2e03`, `178289c7`, `a3e67c33`, `746e7aeb` | `task/08-08-preflight-absent-path-prose` |

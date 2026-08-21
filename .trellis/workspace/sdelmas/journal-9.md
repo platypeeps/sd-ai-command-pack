@@ -842,3 +842,26 @@ The fleet converged on Trellis 0.6.16-sd.7, so the compatibility spec's open-end
 ### Next Steps
 
 - 07-09-trellis-version-compatibility stays parked: the npm @latest instruction still ships and would install a CLI below the new floor; the fix needs a bootstrap decision that task owns
+
+
+## Session 417: fleet-publish acceptance-criteria tick: merge, consumer annotation, copilot ruleset survey
+<!-- trellis-session: v=2 fp=7751c80e0932be26 -->
+
+**Date**: 2026-08-21
+**Task**: fleet-publish acceptance-criteria tick: merge, consumer annotation, copilot ruleset survey
+**Branch**: `main`
+
+### Summary
+
+Merged the fleet-publish acceptance-criteria tick (#528) plus the two consumer annotation PRs (anomaly-metric-creator #396, hoa-manager #280), so a publish run now ticks only the criteria it actually proved and the two already-merged 0.71.38 refreshes carry a recorded annotate-not-tick decision instead of retroactive ticks. Surveyed automatic Copilot invocation across the fleet: nine pack-managed repos plus people-profiles carry a copilot_code_review rule inside their active main ruleset, three of them with review_on_push=true, which duplicates sd-review-pr's own request and defeats the fleet integration-only profile's zero-round suppression. Captured a verbatim rollback snapshot of all sixteen rulesets under .trellis/audit/; the removal itself is deferred pending a Bash permission rule for gh api ruleset mutations.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b3eec90e` | fix(fleet-publish): tick acceptance criteria the run actually proved (#528) |
+| `ce62b4be` | chore(audit): snapshot copilot_code_review rulesets before fleet removal |
+
+### Status
+
+[OK] **Completed**
