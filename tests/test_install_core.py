@@ -1538,6 +1538,91 @@ class InstallCoreTests(InstallTestCase):
         receipt = root / ".sd-ai-command-pack/installed-targets.txt"
         self.assertEqual(receipt.stat().st_mode & 0o777, expected_file_mode)
 
+    def test_reinstall_repairs_a_drifted_executable_bit(self) -> None:
+        """A shipped helper stripped of its exec bit is repaired by reinstall.
+
+        Byte-identical content is not the same as an identical file. Before
+        this, a destination whose exec bit had drifted was reported unchanged
+        and left broken permanently: no version of the pack could ever fix it,
+        because the content it would have rewritten was already correct.
+        """
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        helper = root / "scripts/sd-ai-command-pack-record-session.py"
+        content = helper.read_bytes()
+        os.chmod(helper, helper.stat().st_mode & ~0o111)
+        self.assertFalse(os.access(helper, os.X_OK))
+
+        # Dry run names the drift without touching the file.
+        result = self.run_install_inproc(root, "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("updated     scripts/sd-ai-command-pack-record-session.py", result.stdout)
+        self.assertFalse(os.access(helper, os.X_OK))
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("updated     scripts/sd-ai-command-pack-record-session.py", result.stdout)
+        self.assertTrue(os.access(helper, os.X_OK))
+        self.assertEqual(helper.read_bytes(), content)
+
+        # Repaired, not churning: the next run reports it unchanged.
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("unchanged   scripts/sd-ai-command-pack-record-session.py", result.stdout)
+
+    def test_reinstall_preserves_restrictive_modes_while_repairing_exec(self) -> None:
+        """Repairing the exec bit must not hand out broader access than it found."""
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        helper = root / "scripts/sd-ai-command-pack-record-session.py"
+        os.chmod(helper, 0o600)
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(helper.stat().st_mode & 0o777, 0o700)
+
+    def test_reinstall_strips_an_exec_bit_the_pack_does_not_ship(self) -> None:
+        """Drift is repaired in both directions, not only the missing-bit one."""
+        root = self.make_repo()
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        doc = root / "docs/SD_AI_COMMAND_PACK.md"
+        os.chmod(doc, doc.stat().st_mode | 0o111)
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("updated     docs/SD_AI_COMMAND_PACK.md", result.stdout)
+        self.assertFalse(os.access(doc, os.X_OK))
+
+    def test_mode_reconciliation_failure_branches(self) -> None:
+        root = self.make_repo()
+        target = root / "helper.py"
+        target.write_text("print('hi')\n", encoding="utf-8")
+        os.chmod(target, 0o644)
+
+        with mock.patch.object(
+            install.fileops.os, "chmod", side_effect=OSError("read-only file system")
+        ):
+            with self.assertRaisesRegex(SystemExit, "cannot set mode on"):
+                install.fileops.reconciled_unchanged_status(
+                    target, executable=True, dry_run=False
+                )
+
+        # A filesystem that silently drops the bit must report unchanged, or
+        # every subsequent run would claim to have updated the file again.
+        with mock.patch.object(install.fileops.os, "chmod"):
+            self.assertIs(
+                install.fileops.reconciled_unchanged_status(
+                    target, executable=True, dry_run=False
+                ),
+                install.InstallStatus.UNCHANGED,
+            )
+
     def test_force_refresh_normalizes_downgraded_file_modes(self) -> None:
         root = self.make_repo()
         result = self.run_install_inproc(root)

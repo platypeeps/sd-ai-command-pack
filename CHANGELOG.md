@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.71.38 - 2026-08-20
+## 0.71.39 - 2026-08-20
 
 ### Fixed
 
@@ -22,6 +22,27 @@
   any spend, and every other over-limit attempt -- including a bookkeeping
   claim without evidence and any attempt beyond the fixed grant -- is still
   refused until the structured decision is recorded. (#485)
+
+## 0.71.38 - 2026-08-20
+
+### Fixed
+
+- Reinstalling now repairs an installed file whose executable bit has drifted
+  from what the pack ships. Byte-identical content short-circuited straight to
+  `unchanged`, so a destination that had lost its exec bit was stuck that way
+  permanently: no reinstall, at any version, would fix it, because the content
+  it would have rewritten was already correct. That is how 0.71.36's exec-bit
+  fix failed to reach the fleet -- every consumer would have pulled the
+  corrected pack and kept the broken mode. Content equality is not file
+  equality; the mode is part of what the pack ships, so a disagreement is drift
+  and now reports as `updated`.
+
+  Repair runs in both directions and preserves the installed file's read
+  permissions: an exec bit is granted exactly where read is already granted, so
+  a deliberately restricted mode (`0600`) becomes `0700`, not `0755`. A dry run
+  names the drift without touching the file. The chmod is verified rather than
+  assumed, so a filesystem that cannot represent the bit reports `unchanged`
+  instead of claiming an update on every run forever.
 
 ## 0.71.37 - 2026-08-20
 
