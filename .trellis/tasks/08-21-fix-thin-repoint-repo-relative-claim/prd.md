@@ -72,17 +72,17 @@ fat consumer converts, and there had not been one in a long time.
 
 ## Acceptance Criteria
 
-- [ ] Neither `.github/command-sources/sd-review-learnings.md` nor
+- [x] Neither `.github/command-sources/sd-review-learnings.md` nor
       `.github/command-sources/sd-housekeeping.md` claims the path is relative
       to the repository root.
-- [ ] `.github/command-sources/sd-audit-repo.md` is unchanged.
-- [ ] `make generate` propagates the change to all generated mirrors, and no
+- [x] `.github/command-sources/sd-audit-repo.md` is unchanged.
+- [x] `make generate` propagates the change to all generated mirrors, and no
       mirror still carries the clause for these two commands.
-- [ ] `make check` passes.
-- [ ] The whole-tree review preflight reports zero failures in this repository.
-- [ ] The version is bumped past 0.71.41 with a matching `CHANGELOG.md` entry,
-      and the release prep is clean.
-- [ ] A converted-text check confirms the shipped thin rewrite of both prompt
+- [x] `make check` passes.
+- [x] The whole-tree review preflight reports zero failures in this repository.
+- [x] The version is bumped past 0.71.41 with a matching `CHANGELOG.md` entry,
+      and the release prep is clean. Shipped as 0.71.42 in #531.
+- [x] A converted-text check confirms the shipped thin rewrite of both prompt
       surfaces no longer contradicts itself.
 
 ## Out Of Scope
