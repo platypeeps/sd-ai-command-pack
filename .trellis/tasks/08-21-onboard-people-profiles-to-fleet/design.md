@@ -96,11 +96,11 @@ because the kept resolver path does not exist in the repository at 0.55.0 —
 `.sd-ai-command-pack/bin/` is absent today. A rewrite that lands first cites a
 file that is not there, which is the trap FLEET_ROLLOUT names explicitly.
 
-## The untracked `.bak` obstacle
+## The `.bak` files are not an obstacle
 
 The resweep requires a clean worktree, because "converting a dirty tree mixes
 the conversion's deletions with the consumer's uncommitted work." The
-repository carries five untracked leftovers:
+repository carries 15 `.bak` leftovers, 5 of them under `scripts/`:
 
 ```
 scripts/sd-ai-command-pack-housekeeping.sh.bak
@@ -110,18 +110,23 @@ scripts/sd-ai-command-pack-pr-eligibility.py.bak
 scripts/sd-ai-command-pack-review-scope.sh.bak
 ```
 
-Every one is named after a pack script, and `install.py --backup` is documented
+Every one is named after a pack surface, and `install.py --backup` is documented
 as saving "a `.bak` copy next to each overwritten or deleted file" — so these
-are the residue of an earlier `--force --backup` refresh, not hand edits. That
-identification matters twice. It tells us what they are, and it warns that the
-refresh in Step 1 can manufacture up to 86 more of them if it passes `--backup`,
-re-dirtying the tree immediately before the step that requires it clean. The
-refresh therefore runs without `--backup`; git history is the backup.
+are the residue of an earlier `--force --backup` refresh, not hand edits.
 
-They remain untracked, so no commit removes them, and they remain somebody
-else's files. The design decision is to **surface and ask** rather than delete.
-If they may go, deleting them is sufficient; if they must be kept, moving them
-outside the repository also satisfies the resweep.
+They block nothing. `.gitignore` matches `*.bak`, `git ls-files '*.bak'` returns
+none, and `git status --porcelain` is empty. The resweep's cleanliness test is
+literally that command — `sd-ai-command-pack-thin-resweep.py:1871` sets
+`worktreeClean` from `not git(repo, "status", "--porcelain").strip()` — so it
+sees a clean tree. An earlier draft of this design claimed the opposite and
+made deleting them a precondition; that was wrong, and measuring it is what
+found the error.
+
+The design decision is therefore to **leave them**. They are somebody else's
+files, they are invisible to git, and removing them would satisfy a gate that
+is already satisfied. The refresh still runs without `--backup` — git history
+is the backup, and more ignored clutter is not worth the trade — but that is a
+tidiness argument now, not a gating one.
 
 ## Registry row
 

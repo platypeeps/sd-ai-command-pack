@@ -68,15 +68,18 @@ which is exactly what the fleet integration-only profile suppresses.
   requires `--resweep-verdict` pointing at a `clear` document. A `blocked`
   verdict means conversion stops and the blockers get resolved first; one
   blocker blocks as hard as ninety.
-- **The resweep requires a clean worktree.** The repository carries five
-  untracked `scripts/*.bak` files, every one named after a pack script.
-  `install.py --backup` is documented as saving "a `.bak` copy next to each
-  overwritten or deleted file", so these are almost certainly the output of an
-  earlier `--force --backup` refresh rather than hand-made edits. They are still
-  untracked and still not this task's to delete silently: surface them and get a
-  decision. The same mechanism is a live hazard for the refresh itself — it must
-  not pass `--backup`, or it re-dirties the tree with up to 86 new `.bak` files
-  immediately before the step that demands a clean one.
+- **The resweep requires a clean worktree, and the tree is already clean.**
+  The repository carries 15 `.bak` files on disk, 5 of them under `scripts/`,
+  every one named after a pack surface — the residue of an earlier
+  `--force --backup` refresh, since `install.py --backup` saves "a `.bak` copy
+  next to each overwritten or deleted file". They do **not** block anything:
+  `.gitignore` matches `*.bak`, none is tracked, and `git status --porcelain`
+  is empty. The resweep's gate is that same command, so it sees a clean tree.
+  Leave them alone; deleting another person's files to satisfy a gate that is
+  already satisfied buys nothing. The refresh still should not pass `--backup`,
+  for the ordinary reason that git history is the backup and 86 more ignored
+  files are 86 more things to wonder about later — not because they would
+  dirty the tree.
 - **Establish drift before forcing over it.** `--force` overwrites files that
   differ from the pack templates. Whether people-profiles actually carries such
   drift is unmeasured; run `--dry-run` first and reach for `--force` only for

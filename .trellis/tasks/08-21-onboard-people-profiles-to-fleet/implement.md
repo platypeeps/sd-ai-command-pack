@@ -4,22 +4,25 @@ Two repositories, referred to below as **PACK**
 (`~/repos/platypeeps/sd-ai-command-pack`) and **PP**
 (`~/repos/platypeeps/people-profiles`).
 
-## Step 0 — resolve the untracked `.bak` files
+## Step 0 - confirm the worktree is clean  *(done; not a blocker)*
 
-Blocking, and not mine to decide. Five untracked `scripts/*.bak` files make the
-worktree dirty, and the resweep refuses a dirty tree.
+This step was planned as a blocking cleanup of five `scripts/*.bak` files, on
+the belief that they dirtied the tree. Measured, that belief was wrong:
 
-They are all named after pack scripts, and `install.py --backup` saves "a `.bak`
-copy next to each overwritten or deleted file" — so they are the residue of an
-earlier `--force --backup` refresh, not hand edits. Say so when surfacing them;
-it is the difference between "delete these strays" and "delete another person's
-work".
+```
+$ git -C <PP> status --porcelain          # empty
+$ git -C <PP> check-ignore -v scripts/sd-ai-command-pack-review-preflight.mjs.bak
+.gitignore:11:*.bak     scripts/sd-ai-command-pack-review-preflight.mjs.bak
+$ git -C <PP> ls-files '*.bak' | wc -l    # 0
+```
 
-Surface the list and get a decision: delete, or move outside the repository. Do
-not remove them unilaterally. Nothing after Step 3 can run until this is
-settled, but Steps 1–3 can proceed while it is open.
+15 `.bak` files sit on disk (5 under `scripts/`), all matched by `*.bak` in
+`.gitignore`, none tracked. The resweep's gate is
+`not git(repo, "status", "--porcelain").strip()`
+(`sd-ai-command-pack-thin-resweep.py:1871`), which respects `.gitignore` - so it
+already sees a clean tree. Leave the files where they are.
 
-**Gate:** `git -C <PP> status --porcelain` is empty.
+**Gate:** `git -C <PP> status --porcelain` is empty. **Met.**
 
 ## Step 1 — refresh PP to 0.71.40
 
@@ -35,10 +38,11 @@ Reach for `--force` only if that last `--status` still reports work outstanding:
 `--force` overwrites files that differ from the pack templates, and whether this
 repository carries such drift is unmeasured. Let the dry run answer it.
 
-**Never pass `--backup` here.** It writes a `.bak` beside every overwritten
-file, which against an 86-file update means re-dirtying the tree with dozens of
-new untracked files immediately before Step 4 demands a clean one. It is also
-where the existing five came from. Git history is the backup.
+**Do not pass `--backup` here.** It writes a `.bak` beside every overwritten
+file, which against an 86-file update means dozens more ignored strays on top of
+the 15 already there - and it is where those 15 came from. Git history is the
+backup. (This does not affect Step 4's gate: `.bak` is gitignored, so backups
+would not dirty the tree. The reason is clutter, not cleanliness.)
 
 The refresh retires 16 withdrawn surfaces. Confirm they are gone rather than
 merely unreferenced; a refresh that leaves them produces the stale-forwarder
