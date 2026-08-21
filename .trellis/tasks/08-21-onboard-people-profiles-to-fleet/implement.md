@@ -103,6 +103,26 @@ node ~/.agents/bin/sd-ai-command-pack-review-preflight.mjs
 matches that are themselves the rewritten resolver invocations; preflight
 reports 0 failures. Commit, PR, merge.
 
+### Step 2 outcome (measured)
+
+Two references, not four. The resweep classified the other two -- 
+`.trellis/spec/backend/quality-guidelines.md:44` and the archived
+`review-risk-disposition.md:13` -- as **advisories**, not blockers, so they were
+left alone rather than rewritten for tidiness.
+
+`hook-guidelines.md:18` now names the kept resolver as a plain path and passes
+the script name to `--resolve`. That plain-path citation is what the file-scoped
+exemption keys on (`sd-ai-command-pack-thin-resweep.py:485`: "a file that names
+the kept resolver has adopted the resolver contract, so a bare pack basename in
+it is a key rather than a path"). Without it, the `--resolve NAME` argument
+would itself have blocked -- the trap FLEET_ROLLOUT.md:639 names.
+
+`.gitignore:163` was regenerated with `--rewrite-ignore-block`, not hand-edited.
+Diffed: one line, nothing else.
+
+Result: `blockers 0`, `packDefects 1`. The remaining item is the pack defect
+from Step 3.5 and clears only when this consumer is refreshed onto 0.71.41.
+
 ## Step 3 — register PP in the fleet registry as `fat`
 
 In PACK, add to `docs/fleet/consumers.json`:
