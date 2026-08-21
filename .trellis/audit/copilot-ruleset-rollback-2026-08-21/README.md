@@ -20,9 +20,29 @@ pack-managed repo's active branch ruleset while preserving `deletion` and
 `platypeeps/people-profiles` is deliberately excluded: it is not a pack
 consumer, so its ruleset is the only Copilot path it has.
 
-**Status as of this snapshot: nothing has been changed.** Every ruleset below
-is still live exactly as captured. The change was blocked pending a Bash
-permission rule for `gh api -X PATCH` / `-X DELETE` on `repos/*/rulesets/*`.
+## Status: applied 2026-08-21, one repository outstanding
+
+The change has since been applied. Eight of the nine `main` rulesets were
+updated and verified by re-reading each from the server: all now report
+`active` with rules exactly `deletion, non_fast_forward`. Four of the five
+dormant duplicates were deleted.
+
+Note for anyone repeating this: the update verb is `PUT`, not `PATCH` — GitHub
+answers `PATCH /repos/{owner}/{repo}/rulesets/{id}` with a 404. `PUT` replaces
+the whole ruleset object, so the payload must carry `name`, `target`,
+`enforcement`, `conditions`, and `bypass_actors` alongside the filtered `rules`
+array. Every snapshot below was checked first and carried zero bypass actors
+and zero ref excludes, so nothing was dropped in the replacement.
+
+**Outstanding: `answerbook/mezmo_benchmark`.** Both its `main` ruleset
+(17617454) and its dormant duplicate (19498731) still carry
+`copilot_code_review`. The account running this holds `push` but not `admin` on
+that repository, and ruleset writes require admin; GitHub returns 404 rather
+than 403. Someone with admin in the `answerbook` organization has to apply the
+same two operations there.
+
+`platypeeps/people-profiles` was left untouched by design and still carries the
+rule in both of its rulesets.
 
 ## Scope at capture time
 
@@ -43,6 +63,8 @@ copilot_code_review`):
 
 Dormant duplicate rulesets named `Code Quality Copilot review for default
 branch`, all `enforcement=disabled`, rule set `copilot_code_review` only:
+
+All but the last were deleted; `answerbook/mezmo_benchmark`'s survives.
 
 | Repo | Ruleset ID |
 | --- | --- |
