@@ -1,0 +1,274 @@
+# Implementation — onboard people-profiles to the fleet
+
+Two repositories, referred to below as **PACK**
+(`~/repos/platypeeps/sd-ai-command-pack`) and **PP**
+(`~/repos/platypeeps/people-profiles`).
+
+## Step 0 — resolve the untracked `.bak` files
+
+Blocking, and not mine to decide. Five untracked `scripts/*.bak` files make the
+worktree dirty, and the resweep refuses a dirty tree.
+
+They are all named after pack scripts, and `install.py --backup` saves "a `.bak`
+copy next to each overwritten or deleted file" — so they are the residue of an
+earlier `--force --backup` refresh, not hand edits. Say so when surfacing them;
+it is the difference between "delete these strays" and "delete another person's
+work".
+
+Surface the list and get a decision: delete, or move outside the repository. Do
+not remove them unilaterally. Nothing after Step 3 can run until this is
+settled, but Steps 1–3 can proceed while it is open.
+
+**Gate:** `git -C <PP> status --porcelain` is empty.
+
+## Step 1 — refresh PP to 0.71.40
+
+```bash
+cd <PACK>
+python3 install.py <PP> --status --json      # expect state=refresh-required, 0.55.0 → 0.71.40
+python3 install.py <PP> --dry-run            # what a plain refresh would do
+python3 install.py <PP>                      # refresh
+python3 install.py <PP> --status --json      # expect state=current, installedVersion 0.71.40
+```
+
+Reach for `--force` only if that last `--status` still reports work outstanding:
+`--force` overwrites files that differ from the pack templates, and whether this
+repository carries such drift is unmeasured. Let the dry run answer it.
+
+**Never pass `--backup` here.** It writes a `.bak` beside every overwritten
+file, which against an 86-file update means re-dirtying the tree with dozens of
+new untracked files immediately before Step 4 demands a clean one. It is also
+where the existing five came from. Git history is the backup.
+
+The refresh retires 16 withdrawn surfaces. Confirm they are gone rather than
+merely unreferenced; a refresh that leaves them produces the stale-forwarder
+residue other consumers had to clean up later.
+
+**Validate in PP:**
+
+```bash
+python3 scripts/validate_repo.py
+python3 -m unittest discover -s tests
+```
+
+**Gate:** both exit 0. If the retirements broke something repo-authored, fix
+the cause in PP — do not skip the retirement.
+
+Commit in PP on a branch, open a PR, let CI and Copilot run, merge.
+
+## Step 2 — rewrite the three citations
+
+Only after Step 1 is merged: `.sd-ai-command-pack/bin/` does not exist at
+0.55.0, and a citation that lands first names a file that is not there.
+
+Files, one reference each:
+
+- `.trellis/spec/backend/quality-guidelines.md`
+- `.trellis/spec/frontend/hook-guidelines.md`
+- `.trellis/tasks/archive/2026-07/07-25-repository-setup/research/review-risk-disposition.md`
+
+Replace each `scripts/sd-ai-command-pack-*` literal with
+`.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py` cited **as a
+plain path**, using `--resolve NAME` where the prose names a specific helper.
+The literal must be visible to the tokenizer — no hand-escaped regex, no
+interpolation.
+
+**Validate:**
+
+```bash
+cd <PP>
+git grep -nE "scripts/sd-ai-command-pack-[a-z0-9-]+" -- . | grep -v '^\.agents/\|^\.claude/\|^\.codex/\|^\.gemini/\|^\.opencode/'
+node ~/.agents/bin/sd-ai-command-pack-review-preflight.mjs
+```
+
+**Gate:** the first command returns nothing outside pack-owned trees; preflight
+reports 0 failures. Commit, PR, merge.
+
+## Step 3 — register PP in the fleet registry as `fat`
+
+In PACK, add to `docs/fleet/consumers.json`:
+
+```json
+{
+  "name": "people-profiles",
+  "github": "platypeeps/people-profiles",
+  "pathHint": "~/repos/platypeeps/people-profiles",
+  "platforms": ["claude", "gemini", "github", "opencode"],
+  "rolloutPriority": 80,
+  "candidateTimeoutSeconds": 180,
+  "candidateChecks": [
+    ["python3", "scripts/validate_repo.py"],
+    ["python3", "-m", "unittest", "discover", "-s", "tests"]
+  ],
+  "mode": "fat"
+}
+```
+
+and add `"people-profiles"` to the `final` cohort in `rolloutPolicy`.
+
+Both checks are carried because the repository's own `check.json` declares both;
+`candidateChecks` is the one candidate field the parser requires to be non-empty,
+and `candidatePrepare` is omitted because this consumer needs no prepare step.
+
+`fat` is deliberate and temporary — it is the shape the repository is actually
+in, and Step 5 flips it.
+
+```bash
+cd <PACK>
+.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py    # regenerate ledger (~60s)
+.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py --check-ledger
+```
+
+**Gate:** `--check-ledger` exits 0, and the resweep now resolves the name:
+
+```bash
+.venv/bin/python scripts/sd-ai-command-pack-thin-resweep.py people-profiles
+```
+
+must no longer print `is not a registered consumer`.
+
+## Step 4 — resweep to a verdict
+
+```bash
+cd <PACK>
+.venv/bin/python scripts/sd-ai-command-pack-thin-resweep.py people-profiles \
+    --json --out /tmp/pp-thin-verdict.json
+```
+
+**Gate:** the verdict reads `clear`.
+
+If it reads `blocked`, stop and work the blockers — glob patterns in prose and
+change-classifier fixture lists are the expected residue, and a resolver cannot
+rewrite a glob. One blocker blocks as hard as ninety. Do not weaken the rule and
+do not hand-edit the verdict; re-run the resweep after each fix, because the
+verdict carries a `classifierDigest` binding it to the inputs that produced it.
+
+## Step 5 — convert
+
+Both trees clean before this runs. It writes to both.
+
+```bash
+cd <PACK>
+python3 install.py <PP> --thin \
+    --resweep-verdict /tmp/pp-thin-verdict.json \
+    --consumer people-profiles
+```
+
+This deletes the machine-scope payload in PP and calls `flip_registry_mode()`,
+rewriting `mode` to `thin` in PACK's `docs/fleet/consumers.json`.
+
+**Validate:**
+
+```bash
+python3 install.py <PP> --status --json    # version/state only — it carries no mode key
+python3 -c "import json;print(json.load(open('<PP>/.sd-ai-command-pack/provenance.json')).get('mode'))"
+ls <PP>/scripts/                            # machine-scope pack scripts gone; validate_repo.py remains
+```
+
+The receipt is the authority on mode, not `--status`: measured against
+hoa-manager, a thin consumer, the `--status --json` document has no `mode` key
+at all. Asserting mode from `--status` would be asserting nothing.
+
+**Gate:** provenance records `thin`; `scripts/validate_repo.py` survives; PP's
+own tests still pass.
+
+Then regenerate the ledger again — the mode flip moved the manifest digest:
+
+```bash
+cd <PACK>
+.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py
+.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py --check-ledger
+```
+
+Commit PP's conversion (PR) and PACK's registry + ledger (PR) separately.
+
+**Rollback if this goes wrong:** `install.py <PP> --revert-thin --consumer
+people-profiles` restores the payload and rewrites the receipts as fat.
+
+## Step 6 — pack gates
+
+```bash
+cd <PACK>
+make check
+node scripts/sd-ai-command-pack-review-preflight.mjs
+```
+
+**Gate:** `make check` exits 0; preflight 0 failures. A registry change with no
+shipped-payload change should not need a version bump — if the release gate
+disagrees, it has detected a payload change and that needs explaining, not
+bumping past.
+
+## Step 7 — align the Copilot ruleset
+
+Only now, when the premise actually holds. Both people-profiles rulesets carry
+`copilot_code_review`; snapshots are already committed at
+`.trellis/audit/copilot-ruleset-rollback-2026-08-21/`.
+
+```bash
+D=<PACK>/.trellis/audit/copilot-ruleset-rollback-2026-08-21
+jq -c '{name, target, enforcement, conditions, bypass_actors: (.bypass_actors // []),
+        rules: [.rules[] | select(.type != "copilot_code_review")]}' \
+   "$D/platypeeps_people-profiles__19745583.json" > /tmp/pp-put.json
+gh api -X PUT repos/platypeeps/people-profiles/rulesets/19745583 --input /tmp/pp-put.json
+gh api -X DELETE repos/platypeeps/people-profiles/rulesets/19745586
+```
+
+`PUT`, not `PATCH` — `PATCH` answers 404. `PUT` replaces the whole object, so
+the payload carries `name`, `target`, `enforcement`, `conditions`, and
+`bypass_actors`; verify the snapshot's `bypass_actors` and `conditions.ref_name.exclude`
+are empty first, as they were for the other nine.
+
+**Gate:** re-read from the server —
+
+```bash
+gh api repos/platypeeps/people-profiles/rulesets/19745583 --jq '[.rules[].type]'
+```
+
+must be exactly `["deletion","non_fast_forward"]`, and the repo must list one
+ruleset.
+
+Update the audit README: people-profiles is no longer an intentional exemption.
+
+## Step 8 — fleet-wide verification
+
+Enumerate from the API, not from memory:
+
+```bash
+for r in $(gh api 'orgs/platypeeps/repos?per_page=100' --jq '.[].full_name') answerbook/mezmo_benchmark; do
+  for id in $(gh api "repos/$r/rulesets?includes_parents=true" --jq '.[].id' 2>/dev/null); do
+    gh api "repos/$r/rulesets/$id" 2>/dev/null \
+      | jq -e '[.rules[]?.type]|index("copilot_code_review")' >/dev/null 2>&1 && echo "$r $id"
+  done
+done
+```
+
+**Gate:** the only survivor is `answerbook/mezmo_benchmark` (both rulesets),
+which is out of scope and recorded as outstanding.
+
+Then confirm registration took:
+
+```bash
+cd <PACK>
+python3 -c "
+import json; d=json.load(open('docs/fleet/consumers.json'))
+c=[x for x in d['consumers'] if x['name']=='people-profiles'][0]
+print(c['mode'], c['rolloutPriority'], c['github'])
+print([co['name'] for co in d['rolloutPolicy']['cohorts'] if 'people-profiles' in co['consumers']])
+"
+```
+
+**Gate:** prints `thin 80 platypeeps/people-profiles` and exactly one cohort.
+
+## Review gates
+
+- After Step 1 and Step 2: PP PR, CI green, Copilot review addressed.
+- After Step 5: two PRs (PP conversion, PACK registry+ledger), both green.
+- Before Step 7: confirm PP is genuinely a consumer — Step 8's registry check —
+  because the ruleset change is justified only by that premise.
+
+## Rollback points
+
+Steps 1, 2, 3 are plain reverts. Step 5 has `--revert-thin`. Step 7 restores
+from the committed snapshots. There is no point at which a partial state is
+unrecoverable, provided each step is committed separately — which is why they
+are.
