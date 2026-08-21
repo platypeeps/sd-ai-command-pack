@@ -433,11 +433,14 @@ function defaultConfig() {
     ],
     ignoredReferencePrefixes: [
       '.build/',
-      '.claude/',
       '.local/',
       'node_modules/',
     ],
     optionalReferencePaths: [
+      // Per-checkout machine state, gitignored at `.gitignore:66`. Absent in a
+      // clean clone, so a citation of it is not a dangling path. The rest of
+      // `.claude/` is an authored tree and is checked.
+      '.claude/settings.local.json',
       '.sd-ai-command-pack/installed-targets.txt',
       '.sd-ai-command-pack/local-only.txt',
       '.sd-ai-command-pack/manifest.json',

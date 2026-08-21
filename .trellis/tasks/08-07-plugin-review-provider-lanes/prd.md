@@ -309,8 +309,9 @@ provider:
 
    Neither is a plan, and neither is confined to one file.
    `git grep -l "command -v codex" origin/main` returns 15 tracked paths: the
-   two skills above, `.claude/skills/sd-review-local/SKILL.md`, the
-   `.claude/commands/sd/review-local.md` adapter, four `templates/` twin
+   two skills above, `.claude/skills/sd-review-local/SKILL.md` [absent: provider lane never built; path proposed, not present],
+   the `.claude/commands/sd/review-local.md` [absent: provider lane never built; path proposed, not present] adapter, four
+   `templates/` twin
    mirrors, `docs/SD_AI_COMMAND_PACK.md`, `.trellis/spec/frontend/adapter-
    guidelines.md`, `.github/scripts/generate-command-surfaces.py`, three test
    files, and one archived task's `design.md`. Whoever changes this gating

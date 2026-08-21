@@ -814,6 +814,14 @@ assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/manifest
 assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/pr-body-scope.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/review-preflight.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/.developer'), false);
+// `.claude/` is an authored adapter tree, not a generated or machine-local one,
+// so its citations are checked. The pair matters: the `settings.local.json`
+// expectation passes vacuously against a checker that ignores the whole tree,
+// and only the `settings.json` line distinguishes "exempt because machine-local"
+// from "exempt because the tree is ignored".
+assert.equal(shouldCheckDocumentationPathReference('.claude/skills/sd-work-backlog/SKILL.md'), true);
+assert.equal(shouldCheckDocumentationPathReference('.claude/settings.json'), true);
+assert.equal(shouldCheckDocumentationPathReference('.claude/settings.local.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/.template-hashes.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/audit/ledger.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('docs/TRELLIS_REVIEW_PR_PACK.md'), false);
