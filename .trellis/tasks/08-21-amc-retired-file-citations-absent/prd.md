@@ -51,7 +51,7 @@ reintroducing those files.
 
 ## Acceptance Criteria
 
-- [ ] The whole-tree review preflight on anomaly-metric-creator's default branch reports zero failures. Invoked with no arguments — passing `--base` silently scans nothing and reports a clean run against an empty set.
-- [ ] Both retired-file citations survive in the prose, each carrying an `[absent: <reason>]` marker whose reason names the retirement rather than restating that the file is missing.
-- [ ] The before/after FAIL-set diff shows exactly the two known findings removed and no other change.
-- [ ] No other repository is touched. This defect is local to one consumer's documentation and is not a pack payload change.
+- [x] The whole-tree review preflight on anomaly-metric-creator's default branch reports zero failures. Invoked with no arguments — passing `--base` silently scans nothing and reports a clean run against an empty set.
+- [x] Both retired-file citations survive in the prose, each carrying an `[absent: <reason>]` marker whose reason names the retirement rather than restating that the file is missing.
+- [x] The before/after FAIL-set diff shows exactly the two known findings removed and no other change.
+- [x] No other repository is touched. This defect is local to one consumer's documentation and is not a pack payload change.
