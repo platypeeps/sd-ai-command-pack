@@ -887,3 +887,27 @@ Cleared anomaly-metric-creator's two review-preflight failures by marking its ci
 ### Status
 
 [OK] **Completed**
+
+
+## Session 419: Onboard people-profiles to the sd-ai-command-pack fleet
+<!-- trellis-session: v=2 fp=09ca2b7d4dac53bc -->
+
+**Date**: 2026-08-21
+**Task**: Onboard people-profiles to the sd-ai-command-pack fleet
+**Branch**: `main`
+
+### Summary
+
+Brought platypeeps/people-profiles from an unregistered, sixteen-versions-behind fat install to a registered thin fleet consumer at 0.71.41, priority 80 in the final cohort. Four PRs: sd-ai-command-pack#529 (pack fix + registration), people-profiles#6 (refresh 0.55.0->0.71.41 + resolver adoption), people-profiles#7 (thin conversion, 171 deletions), sd-ai-command-pack#530 (registry flip to thin + ledger regen). Along the way the conversion surfaced a fleet-wide pack defect -- the sd-review adapter named sd-ai-command-pack-review.py bare, and the adapter survives thin conversion while the script does not, so hoa-manager, loadsmith and anomaly-metric-creator each carry a dangling citation their own resweeps cannot see. Shipped as 0.71.41. A second defect of the same family is recorded but unfixed: installer/thin.py planned_repoints swaps the path but leaves the clause 'at that path relative to the repository root' behind, confirmed in four already-thin consumers. Both were invisible for the same reason -- they only surface when a fat consumer converts, and there had not been one in a long time. Also retracted the people-profiles Copilot ruleset exemption: it was predicated on the repo not being a consumer, and its duplicate ruleset was the fleet's worst case (the only enforcement=active one, with review_on_push and review_draft_pull_requests both true). Two planning premises were measured wrong and corrected in place: the .bak files never blocked anything (gitignored, and the resweep's gate is git status --porcelain), and only one of the three prose citations actually blocked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c8f03d51` | fix(sd-review): stop naming the machine-scope script in adapter prose (#529) |
+| `858be878` | chore(fleet): flip people-profiles to thin and regenerate the candidate ledger (#530) |
+| `544cb863` | docs(task): retract the people-profiles ruleset exemption |
+
+### Status
+
+[OK] **Completed**
