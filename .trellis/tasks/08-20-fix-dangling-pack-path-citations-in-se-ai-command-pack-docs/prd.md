@@ -37,10 +37,19 @@ in a local gate on a machine that has the pack installed.
 
 ## Acceptance Criteria
 
-- [ ] `node <resolved preflight> ` reports 0 failures in a clean
+- [x] `node <resolved preflight> ` reports 0 failures in a clean
       `se-ai-command-pack` checkout on a machine with the pack installed.
-- [ ] No sd-ai-command-pack rule, allowlist, or extension set was relaxed to
-      achieve it.
+      Merged as platypeeps/se-ai-command-pack#259, squash `4d02baa`; that
+      branch now reports 0 failures and 0 warnings. The count was 28 on the
+      clean base, not the 29 recorded above -- one had resolved in the
+      interim.
+- [x] No sd-ai-command-pack rule, allowlist, or extension set was relaxed to
+      achieve it. The 25 citations in `quality-guidelines.md` are kept
+      byte-identical and carry `[absent:]` markers; an initial attempt to
+      repoint them to `~/.agents/...` was reverted because that file's own
+      header keeps them verbatim -- the line numbers refer to the
+      pre-conversion file, and the surrounding prose calls the target
+      "vendored", which the machine install is not.
 
 ## Notes
 
