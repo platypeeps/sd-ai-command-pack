@@ -149,9 +149,18 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    ```
 
    Do not stage the whole workspace or combine unrelated dirty files with this
-   commit. If the wrapper script is missing, fall back to
-   `add_session.py` and fill the `(Add details)`, `(Add test results)`, and
-   `(see git log)` placeholders manually before pushing. If the recorder reports
+   commit. If the wrapper script is missing, fall back to `add_session.py`,
+   supplying `--summary` plus repeatable `--change` and `--test` bullets up
+   front, on the first invocation — the recorder omits any section it was
+   given no content for rather than writing placeholders, so a missing
+   section means the flag was not passed. Do not re-run the recorder to add
+   the missing section after it has committed: changed bullets change the
+   record fingerprint, so a second invocation appends a new session entry
+   instead of repairing the first. Amend the recorded entry in place instead:
+   edit the journal file and its index row, then amend the recorder's commit
+   before pushing. (`--idempotency-key` is only for resuming an interrupted
+   run with identical inputs — it makes an identical committed request a
+   no-op and cannot repair or extend a recorded entry.) If the recorder reports
    an `environment_blocked` git-metadata fragment instead, report its exact
    boundary and checkpoint and re-run only that bounded step once the boundary
    clears — never widen it into a merge, archive, force operation, or cleanup.

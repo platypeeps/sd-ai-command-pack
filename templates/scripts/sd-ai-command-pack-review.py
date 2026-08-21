@@ -54,6 +54,16 @@ REMOTE_VALUES = frozenset({"auto", "cheap", "deep", "copilot", "none"})
 FIX_VALUES = frozenset({"auto", "ask", "none"})
 REMOTE_DISPOSITION_VALUES = frozenset({"rebutted"})
 LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
+# Extra rounds granted past remoteIntegration roundLimit for an
+# evidence-backed successor-head re-entry (`--successor bookkeeping` with
+# `--bookkeeping-evidence`, under automatic local provider selection). The
+# re-entry reviews a different head than the rounds that spent the base
+# budget. Local planning validates the evidence against the exact target
+# before any provider is selected only on its local=auto bookkeeping branch,
+# so the grant is confined to that path and a falsely claimed re-entry fails
+# before any spend; an explicit --local override keeps the unextended limit.
+# The grant stays a small fixed bound so the limit keeps capping paid calls.
+BOOKKEEPING_REENTRY_ROUNDS = 2
 CAPABILITY_STATES = frozenset(
     {"ready", "absent", "invalid", "incompatible", "unavailable", "skipped"}
 )
@@ -1832,10 +1842,21 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     if args.local not in LOCAL_VALUES and not SAFE_ID_RE.fullmatch(args.local):
         raise ReviewError("local provider selection must be auto, all, none, or a safe provider id")
     config, remote_config = load_review_configuration(repo)
+    round_limit = int(remote_config["roundLimit"])
+    # The grant requires the one local-planning path that validates the
+    # evidence payload (build_plan validates only under local=auto with the
+    # bookkeeping successor). An explicit --local override skips that branch,
+    # and --family-evidence can flip the effective successor to
+    # repeated-family inside the local stage, which also skips it; either
+    # keeps the unextended limit.
     if (
-        args.attempt > int(remote_config["roundLimit"])
-        and not args.round_extension_authorized
+        args.successor == "bookkeeping"
+        and args.bookkeeping_evidence
+        and args.local == "auto"
+        and not args.family_evidence
     ):
+        round_limit += BOOKKEEPING_REENTRY_ROUNDS
+    if args.attempt > round_limit and not args.round_extension_authorized:
         raise ReviewError(
             "attempt exceeds remoteIntegration roundLimit; record the structured "
             "review.round-extension decision before continuing"

@@ -2458,6 +2458,108 @@ class ReviewControllerTests(InstallTestCase):
             code, report = controller.run(authorized)
         self.assertEqual((code, report["status"]), (0, "ready"))
 
+    def test_bookkeeping_reentry_has_its_own_bounded_round_budget(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        evidence = root / "bookkeeping-evidence.json"
+        evidence.write_text("{}", encoding="utf-8")
+
+        def reentry_args(attempt: str) -> object:
+            return controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "branch",
+                    "--base",
+                    "origin/main",
+                    "--attempt",
+                    attempt,
+                    "--successor",
+                    "bookkeeping",
+                    "--bookkeeping-evidence",
+                    str(evidence),
+                ]
+            )
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller,
+            "_run_local",
+            return_value=self.local_report(
+                controller,
+                {
+                    "head": self.git_output(root, "rev-parse", "HEAD"),
+                    "repository": {"owner": "platypeeps", "name": "example"},
+                },
+            ),
+        ), mock.patch.object(
+            controller,
+            "_artifact_root",
+            return_value=self.artifact_root(root),
+        ):
+            code, report = controller.run(reentry_args("7"))
+        self.assertEqual((code, report["status"]), (0, "ready"))
+
+        # Beyond the fixed re-entry grant the decision is still required.
+        with mock.patch.object(controller, "_run_check") as check:
+            with self.assertRaisesRegex(controller.ReviewError, "roundLimit"):
+                controller.run(reentry_args("8"))
+        check.assert_not_called()
+
+        # The grant needs the evidence flag, not just the successor class.
+        no_evidence = controller.parse_args(
+            [
+                "--repo",
+                str(root),
+                "--scope",
+                "branch",
+                "--attempt",
+                "6",
+                "--successor",
+                "bookkeeping",
+            ]
+        )
+        with mock.patch.object(controller, "_run_check") as check:
+            with self.assertRaisesRegex(controller.ReviewError, "roundLimit"):
+                controller.run(no_evidence)
+        check.assert_not_called()
+
+        # An explicit --local override skips the planning branch that
+        # validates the evidence, and --family-evidence can flip the
+        # effective successor to repeated-family inside the local stage,
+        # which also skips it; each keeps the unextended limit even with the
+        # successor class and an evidence path present.
+        for extra in (
+            ["--local", "none"],
+            ["--local", "all"],
+            ["--family-evidence", str(evidence)],
+        ):
+            overridden = controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "branch",
+                    "--attempt",
+                    "6",
+                    "--successor",
+                    "bookkeeping",
+                    "--bookkeeping-evidence",
+                    str(evidence),
+                    *extra,
+                ]
+            )
+            with mock.patch.object(controller, "_run_check") as check:
+                with self.assertRaisesRegex(
+                    controller.ReviewError, "roundLimit"
+                ):
+                    controller.run(overridden)
+            check.assert_not_called()
+
     def test_controller_does_not_expose_an_unbound_head_override(self) -> None:
         controller = self.load_controller()
         with mock.patch.object(controller.sys, "stderr"), self.assertRaises(SystemExit):
