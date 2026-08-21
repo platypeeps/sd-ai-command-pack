@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.71.38 - 2026-08-20
+
+### Fixed
+
+- The `sd-finish-work` fallback guidance told the caller to fill
+  `(Add details)`, `(Add test results)`, and `(see git log)` placeholders
+  that the current recorder never writes -- `add_session.py` now omits any
+  section it was given no content for, so an agent following the old text
+  searched for strings that never appear and could read the absence as a
+  recorder failure. The skill now tells the fallback caller to supply
+  `--summary`, `--change`, and `--test` content up front and treats a
+  missing section as a missing flag. (#484)
+- An evidence-backed successor-head re-entry (`--successor bookkeeping`
+  with matching `--bookkeeping-evidence`) now carries its own fixed budget
+  of two rounds past `remoteIntegration roundLimit`, so the Stage 2b
+  re-entry that every completed `sd-ship` chain performs no longer forces a
+  `review.round-extension` decision that carries no information. The
+  evidence is validated against the exact target in the local stage before
+  any provider is selected, a falsely claimed re-entry still fails before
+  any spend, and every other over-limit attempt -- including a bookkeeping
+  claim without evidence and any attempt beyond the fixed grant -- is still
+  refused until the structured decision is recorded. (#485)
+
 ## 0.71.37 - 2026-08-20
 
 ### Added

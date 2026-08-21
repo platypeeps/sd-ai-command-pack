@@ -54,6 +54,14 @@ REMOTE_VALUES = frozenset({"auto", "cheap", "deep", "copilot", "none"})
 FIX_VALUES = frozenset({"auto", "ask", "none"})
 REMOTE_DISPOSITION_VALUES = frozenset({"rebutted"})
 LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
+# Extra rounds granted past remoteIntegration roundLimit for an
+# evidence-backed successor-head re-entry (`--successor bookkeeping` with
+# `--bookkeeping-evidence`). The re-entry reviews a different head than the
+# rounds that spent the base budget, and the evidence is validated against
+# the exact target downstream in the local stage before any provider is
+# selected, so a falsely claimed re-entry fails before any spend. The grant
+# stays a small fixed bound so the limit keeps capping paid remote calls.
+BOOKKEEPING_REENTRY_ROUNDS = 2
 CAPABILITY_STATES = frozenset(
     {"ready", "absent", "invalid", "incompatible", "unavailable", "skipped"}
 )
@@ -1832,10 +1840,10 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     if args.local not in LOCAL_VALUES and not SAFE_ID_RE.fullmatch(args.local):
         raise ReviewError("local provider selection must be auto, all, none, or a safe provider id")
     config, remote_config = load_review_configuration(repo)
-    if (
-        args.attempt > int(remote_config["roundLimit"])
-        and not args.round_extension_authorized
-    ):
+    round_limit = int(remote_config["roundLimit"])
+    if args.successor == "bookkeeping" and args.bookkeeping_evidence:
+        round_limit += BOOKKEEPING_REENTRY_ROUNDS
+    if args.attempt > round_limit and not args.round_extension_authorized:
         raise ReviewError(
             "attempt exceeds remoteIntegration roundLimit; record the structured "
             "review.round-extension decision before continuing"
