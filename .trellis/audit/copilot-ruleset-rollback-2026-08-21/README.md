@@ -85,13 +85,22 @@ Quality Copilot review for default branch`, `enforcement=active`).
 
 ## Restoring
 
-To put back the `copilot_code_review` rule on a single ruleset, PATCH the
-`rules` array from its snapshot:
+To put back the `copilot_code_review` rule on a single ruleset, `PUT` the
+snapshot's own rule set back. Use `PUT`, not `PATCH`: `PATCH` on a ruleset
+answers 404. Because `PUT` replaces the whole object, send the identifying
+fields alongside the rules rather than the `rules` array on its own:
 
 ```bash
-jq -c '{rules: .rules}' <owner>_<repo>__<id>.json > payload.json
-gh api -X PATCH "repos/<owner>/<repo>/rulesets/<id>" --input payload.json
+jq -c '{name, target, enforcement, conditions,
+        bypass_actors: (.bypass_actors // []), rules}' \
+  <owner>_<repo>__<id>.json > payload.json
+gh api -X PUT "repos/<owner>/<repo>/rulesets/<id>" --input payload.json
 ```
+
+Ruleset writes require `admin` on the repository. Without it GitHub answers
+404, not 403, so a permissions problem and a wrong verb look identical — check
+`gh api repos/<owner>/<repo> --jq .permissions.admin` before concluding which
+one you have hit.
 
 To recreate a deleted ruleset, POST the snapshot with the server-owned fields
 stripped:
