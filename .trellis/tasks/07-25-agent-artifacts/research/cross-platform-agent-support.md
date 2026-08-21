@@ -45,7 +45,8 @@ recommendation recorded here. A tailored twin lives in the SE repo task
   Transpiling one canonical MD source is mostly renames + frontmatter dialect mapping,
   plus TOML (codex) and JSON (kiro) transforms.
 - Trellis already demonstrates 5-platform agent generation from neutral sources in this
-  checkout (`.trellis/agents/` -> `.claude/.codex/.gemini/.opencode/.github` agent dirs).
+  checkout (`.trellis/agents/` -> per-platform agent dirs for Claude, Codex, Gemini,
+  OpenCode, and GitHub).
 
 ## Implications for SD (the recommendation)
 

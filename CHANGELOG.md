@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.71.43 - 2026-08-21
+
+### Fixed
+
+- The review preflight never checked a `.claude/` path citation. The prefix was
+  listed both in `referencePrefixes`, which declares a tree checkable, and in
+  `ignoredReferencePrefixes`, which skips one; the ignore won, so every
+  `.claude/` citation in every consumer was passed unread. Its three neighbours
+  in that list are generated or never-committed trees; `.claude/` is an
+  authored adapter tree the installer writes into, and the class the gate could
+  not see — a dangling `.claude/skills/sd-*/SKILL.md` — had to be found by hand
+  in review. The ignore entry is removed and the behaviour is now pinned by a
+  test in both directions. Measured fleet-wide impact before shipping: six
+  newly-visible citations across seven repositories, none of them a dangling
+  path in shipped surface.
+- `.claude/settings.local.json` is exempted by name in `optionalReferencePaths`,
+  with the reason in the source: it is per-checkout machine state, gitignored at
+  `.gitignore:66`, so its absence in a clean clone is normal rather than a
+  dangling citation. This is the narrow half of the old blanket ignore, and the
+  only part of it that was right.
+
 ## 0.71.42 - 2026-08-21
 
 ### Fixed

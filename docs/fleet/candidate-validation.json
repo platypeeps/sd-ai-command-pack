@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-21T18:15:36Z",
-  "packVersion": "0.71.42",
-  "payloadDigest": "sha256:f7d48b2725127ee0cf2942eb9f7af9480d962b3bcc5ff5f4a12ec6b289c5375d",
+  "validatedAt": "2026-08-21T20:28:09Z",
+  "packVersion": "0.71.43",
+  "payloadDigest": "sha256:b2dd5a8079c509ce030a5775fff41bba691a26cabf3dd1b28b35b90bf9018aa1",
   "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
@@ -28,7 +28,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "f389d669d0a911c5f9fee977a13f39bb9564fd69",
+      "baseCommit": "b3e26acb43b2727d5fce70dac340a6be707c9797",
       "status": "passed",
       "prepares": [
         [
@@ -114,7 +114,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "5f82410a5c008dd0cf7adfcf4b076b6243a82d4a",
+      "baseCommit": "4d02baaaac532b1fc6871638462bde317c374025",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -129,7 +129,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "c449afceacd63de4ed2c75bb243f1116b98fe640",
+      "baseCommit": "3a53755c61ba0cf52317732bbabe49f2f9db2916",
       "status": "passed",
       "prepares": [
         [

@@ -8,7 +8,8 @@ consumer remediation.
 
 ## Requirements
 
-- Treat `.claude/hooks/statusline.py` as Trellis-owned, not a shipped
+- Treat `.claude/hooks/statusline.py` [absent: upstream Claude Code path, not a file in this repository] as
+  Trellis-owned, not a shipped
   `sd-ai-command-pack` template; do not add an independent pack copy.
 - Prepare a paste-ready Trellis handoff that changes the Windows stream loop
   from stdout/stderr to stdin/stdout/stderr and updates the comment to cover
