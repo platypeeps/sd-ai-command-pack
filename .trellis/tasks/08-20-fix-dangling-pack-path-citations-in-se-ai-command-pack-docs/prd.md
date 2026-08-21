@@ -33,7 +33,7 @@ in a local gate on a machine that has the pack installed.
   correct: a repository-relative path citation that resolves to nothing is a
   dangling citation.
 - Concentrated in `.trellis/spec/backend/quality-guidelines.md` (~26 of the 29)
-  plus `.trellis/tasks/08-10-upstream-pack-workflow-drift/prd.md`.
+  plus se-ai-command-pack's own `08-10-upstream-pack-workflow-drift` task PRD.
 
 ## Acceptance Criteria
 
