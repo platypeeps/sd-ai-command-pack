@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-21T04:17:17Z",
-  "packVersion": "0.71.40",
-  "payloadDigest": "sha256:8af8be2d9ee44b0afa6be77e9a1b81120eb19e9333864252ada400a17cff598a",
-  "fleetManifestDigest": "sha256:67d6949a1f929b43e8b7f3706503c0b3433817de7e713ff3c82498ba00c2ec3f",
+  "validatedAt": "2026-08-21T16:13:34Z",
+  "packVersion": "0.71.41",
+  "payloadDigest": "sha256:13c144bf9171c32aa4d322a44424a926b9737ea92e53d9483963f8e7074a15f2",
+  "fleetManifestDigest": "sha256:5f232047b3902c27b93d81ff8b370d68cda59470167e09b007c17ef6a94d7c93",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
@@ -49,7 +49,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "05d6df8b97b5322bcbca3ecf334eed748ffb654e",
+      "baseCommit": "e991e4d335b0eac7ac7267168b632616ce51433b",
       "status": "passed",
       "prepares": [
         [
@@ -156,9 +156,34 @@
       "reasons": []
     },
     {
+      "name": "people-profiles",
+      "github": "platypeeps/people-profiles",
+      "baseCommit": "175a8c28654b82dc9c4b0bf7287ffa3e7821f4b9",
+      "status": "blocked",
+      "prepares": [],
+      "checks": [
+        [
+          "python3",
+          "scripts/validate_repo.py"
+        ],
+        [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-v"
+        ]
+      ],
+      "reasons": [
+        "1 consumer-authored reference(s) to removed paths"
+      ]
+    },
+    {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "6500951ff74cc3ec4ec19b62b59caeddbcc92f7a",
+      "baseCommit": "2f490512e799553bf6dc0e450649348a49b0a98f",
       "status": "passed",
       "prepares": [
         [

@@ -158,6 +158,7 @@ Priority 80 is unoccupied — the existing ladder runs 10, 20, 30, 40, 50, 60,
   "platforms": ["claude", "gemini", "github", "opencode"],
   "rolloutPriority": 80,
   "candidateTimeoutSeconds": 300,
+  "candidatePrepare": [],
   "candidateChecks": [
     ["python3", "scripts/validate_repo.py"],
     ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]
@@ -174,10 +175,14 @@ candidate pass validation while its own suite is broken. Both targets are
 repo-authored and survive conversion, so they stay runnable after the repo goes
 thin — a machine-scope script would not.
 
-`candidateChecks` is also the one candidate field the registry parser requires
-to be non-empty (`_parse_candidate_commands(..., allow_empty=False)`), whereas
-`candidatePrepare` is optional (`allow_empty=True`) and this consumer needs no
-prepare step.
+`candidateChecks` is the one candidate field the registry parser requires to be
+non-empty (`_parse_candidate_commands(..., allow_empty=False)`), whereas
+`candidatePrepare` may be empty (`allow_empty=True`). "May be empty" is not
+"may be omitted": `sd-ai-command-pack-surface-check.py` rejects a row without
+the key -- "consumer people-profiles must list candidatePrepare" -- and
+se-ai-command-pack, the one existing consumer with no prepare step, carries
+`"candidatePrepare": []` explicitly. This row does the same, in the same key
+position.
 
 `candidateTimeoutSeconds` is **per command**, not a budget for the whole run --
 `sd-ai-command-pack-fleet-candidate-check.py` passes it to each `run_command`

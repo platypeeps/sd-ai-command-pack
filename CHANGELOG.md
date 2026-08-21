@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.71.41 - 2026-08-21
+
+### Fixed
+
+- The `sd-review` adapter prose named `sd-ai-command-pack-review.py` as a bare
+  filename while telling the agent to reach it only through the toolchain
+  bootstrap. The adapter surfaces that carry that sentence survive a thin
+  conversion; the machine-scope script it names does not, so every thin
+  consumer was left citing a file its own conversion had deleted --
+  hoa-manager, loadsmith and anomaly-metric-creator all carry it today. It went
+  unnoticed because a resweep only sees names it is about to remove, and by the
+  time a consumer is thin there is nothing left to match. It surfaced when
+  people-profiles became the first fat consumer swept since the sentence
+  landed. The prose now names the typed review coordinator instead; the script
+  name stays in `sd-review/SKILL.md`, the authority the adapter defers to.
+
 ## 0.71.40 - 2026-08-20
 
 ### Fixed

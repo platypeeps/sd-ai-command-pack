@@ -1900,7 +1900,14 @@ class GeneratedParityTests(InstallTestCase):
                 self.assertIn("SD_AI_COMMAND_PACK_TOOLCHAIN", content)
                 self.assertIn("read-only", content)
             elif "Resolve the `sd-review` skill by name" in content:
-                self.assertIn("sd-ai-command-pack-review.py", content)
+                # Same rule as sd-status above: the adapter names the
+                # resolution order, not the script. These adapter surfaces
+                # survive a thin conversion and the machine-scope script does
+                # not, so naming it left every thin consumer citing a file its
+                # own conversion had deleted. sd-review/SKILL.md is the
+                # authority that names it.
+                self.assertIn("SD_AI_COMMAND_PACK_TOOLCHAIN", content)
+                self.assertNotIn("sd-ai-command-pack-review.py", content)
                 self.assertIn("never fall back to `sd-review-pr`", content)
             else:
                 self.assertIn("Resolve the `sd-review-pr` skill by name", content)

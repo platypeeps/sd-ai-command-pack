@@ -28,8 +28,8 @@
         "name": "final",
         "strategy": "sequential",
         "consumers": [
-          "anomaly-metric-creator",
-          "people-profiles"
+          "people-profiles",
+          "anomaly-metric-creator"
         ]
       }
     ]
@@ -245,6 +245,7 @@
       ],
       "rolloutPriority": 80,
       "candidateTimeoutSeconds": 300,
+      "candidatePrepare": [],
       "candidateChecks": [
         [
           "python3",

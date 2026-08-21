@@ -115,6 +115,7 @@ In PACK, add to `docs/fleet/consumers.json`:
   "platforms": ["claude", "gemini", "github", "opencode"],
   "rolloutPriority": 80,
   "candidateTimeoutSeconds": 300,
+  "candidatePrepare": [],
   "candidateChecks": [
     ["python3", "scripts/validate_repo.py"],
     ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]
@@ -145,6 +146,48 @@ cd <PACK>
 ```
 
 must no longer print `is not a registered consumer`.
+
+## Step 3.5 - fix the pack defect the resweep found  *(unplanned; done)*
+
+The first resweep came back `blocked` with three items, not the one the plan
+expected:
+
+```
+blockers 1, packDefects 2, scheduled 174, advisories 5
+  blocker     .trellis/spec/frontend/hook-guidelines.md:18
+  packDefect  .github/prompts/sd-review.prompt.md:43
+  packDefect  .gitignore:163
+```
+
+`packDefects` non-empty forces `blocked` (`sd-ai-command-pack-thin-resweep.py:1941`)
+and the tool has no override, so the pack-owned one had to be fixed before this
+consumer could convert.
+
+The `sd-review` adapter prose named `sd-ai-command-pack-review.py` as a bare
+filename. `unambiguous_basenames()` matches it because it is owned by exactly
+one removed path, carries the pack name, and collides with no survivor. The
+adapter surface survives conversion; the script does not. hoa-manager,
+loadsmith and anomaly-metric-creator all carry the same dangling citation
+already -- it was invisible to their resweeps because a thin consumer has
+nothing left to remove, so nothing to match against.
+
+Fixed at the authored source, not the copies: `.github/command-sources/sd-review.md`
+feeds all twelve surfaces through `make generate`. The prose now names the
+typed review coordinator; `sd-review/SKILL.md` remains the authority that names
+the script. This follows the precedent already set for `sd-status`, whose test
+carries the comment "the adapter names the resolution order, not a fixed path:
+a thin consumer has no `scripts/` copy to name".
+
+Two tests encoded the old shape and were updated to the new one:
+`test_generated_parity` asserted the adapter names the script (now asserts the
+resolution order and its absence), and `test_fleet_preflight` pins the roster
+by hand and needed the new consumer in four places.
+
+Shipped as 0.71.41. **people-profiles must then be refreshed onto 0.71.41** --
+the fix reaches it only through its own payload.
+
+**Gate:** `make check` exits 0, preflight 0 failures, and a re-run resweep
+reports `packDefects 0`.
 
 ## Step 4 — resweep to a verdict
 
