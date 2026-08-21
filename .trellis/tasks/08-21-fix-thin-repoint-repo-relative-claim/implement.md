@@ -44,15 +44,25 @@ make sync        # installs those into this repo's own .claude/ .github/ .openco
 
 Both, in that order. `make generate` does not touch this repository's own
 adapter directories — they are an install of the templates, and `make sync`
-is what performs it. Running only the first leaves 6 of the 16 mirrors stale.
-If `make generate` fails reporting stale mirrors, run `make sync` first and
-retry; that is what the 0.71.41 release needed.
+is what performs it. Running only the first leaves 8 of the 22 mirrors stale,
+and `make generate` exits non-zero saying so, one `mirror.stale` line per file.
+That is expected on the first pass, not a failure of this change: run
+`make sync`, then `make generate` again.
 
-Then confirm the repo-wide state, matching the **defect phrase** specifically:
+Expect the ledger to go stale in the same pass — the payload digest moves with
+the surfaces — so `docs/fleet/candidate-validation.json` needs regenerating
+before `make generate` will pass:
 
 ```bash
-grep -rln "at that path relative to the repository root" . --include=*.md \
-  | grep -v '^./.git/'
+.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py   # ~60s
+```
+
+Then confirm the repo-wide state, matching the **defect phrase** specifically
+and across all file types — the Gemini adapters are TOML, and an `--include=*.md`
+sweep reports a clean repository while six TOML surfaces still carry it:
+
+```bash
+grep -rln "at that path relative to the repository root" . | grep -v '^./.git/'
 ```
 
 Expected, and only these three: `.trellis/workspace/sdelmas/journal-9.md`

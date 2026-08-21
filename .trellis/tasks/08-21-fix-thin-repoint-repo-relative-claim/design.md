@@ -80,8 +80,11 @@ claim rather than to teach the rewrite a new substitution.
 
 ## Blast radius
 
-Two authored sources, 8 generated mirrors each: 18 files carry the clause in
-this repository today, 16 of them generated.
+Two authored sources, 11 generated mirrors each: 24 files carry the clause in
+this repository, 22 of them generated. An earlier count said 18/16 by grepping
+only `*.md`, which silently dropped the Gemini TOML family — the `.gemini`
+adapters carry the same prose inside a TOML string. Measured from the changed
+set after regeneration, not from the grep that missed them.
 
 Propagation is two commands, not one. `make generate` runs
 `generate-command-surfaces.py`, which writes the `templates/…` copies, plus
@@ -89,7 +92,10 @@ Propagation is two commands, not one. `make generate` runs
 directories — `.claude/commands/sd/`, `.github/prompts/`, `.opencode/commands/`
 — are an *install* of those templates into this checkout, written by
 `make sync` (`install.py . --force`). Editing a source and running only
-`make generate` leaves this repo's own adapters stale.
+`make generate` leaves this repo's own adapters stale — 8 of the 22, across
+`.claude`, `.gemini`, `.github/prompts`, and `.opencode`. `make generate`
+itself fails loudly in that state rather than passing quietly: `surface-check`
+reports `mirror.stale` per file and names `make sync` as the preparation.
 
 `prepare-release.py` runs both in that order (generate, partition, plugin,
 provider-config, then the self-sync install), so `make release-prep` closes any
