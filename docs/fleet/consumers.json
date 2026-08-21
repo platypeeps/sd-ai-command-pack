@@ -261,7 +261,7 @@
           "-v"
         ]
       ],
-      "mode": "fat"
+      "mode": "thin"
     },
     {
       "name": "anomaly-metric-creator",
