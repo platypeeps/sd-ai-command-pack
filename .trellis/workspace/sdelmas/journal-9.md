@@ -911,3 +911,35 @@ Brought platypeeps/people-profiles from an unregistered, sixteen-versions-behind
 ### Status
 
 [OK] **Completed**
+
+
+## Session 420: Address the three open follow-ups: repoint prose defect, sd-github-review docs, se-ai-command-pack docs
+<!-- trellis-session: v=2 fp=85ebeb08f4613022 -->
+
+**Date**: 2026-08-21
+**Task**: Address the three open follow-ups: repoint prose defect, sd-github-review docs, se-ai-command-pack docs
+**Branch**: `main`
+
+### Summary
+
+Cleared all three items left open after the people-profiles onboarding.
+
+(1) The second adapter-survives-conversion defect. sd-housekeeping and sd-review-learnings claimed their script sat at a path "relative to the repository root" while the thin rewrite repointed it to ~/.agents/bin, contradicting itself in 12 sites across 6 consumers. Fixed at the authored source rather than by another THIN_PROFILE literal_rewrite, which would have been a byte-matched second copy of the sentence. Shipped as 0.71.42 in #531. Copilot then caught the adjacent clause, and verifying it turned up something stronger: sd-review already states the pack's policy -- "Do not probe PATH: a PATH entry can name a different install than the one the running skill text came from" -- so those two adapters were instructing the resolution the documented bootstrap rules out. Both now resolve at the given path only.
+
+(2) sd-github-review's 11 pre-existing preflight failures. Three cd /Users/... lines became cd "$(git rev-parse --show-toplevel)"; two machine citations took the ~/.agents/bin form the same document already endorses; five named a consumer source the design proposes and that "appears in no code path"; one quoted task.json's own wrong citation in order to correct it. Merged as #110. Copilot correctly objected that the marker landed inside the quotation, and the marker could not move outside it because the checker allows only spaces or tabs between citation and marker -- so the path was lifted out of the quote instead.
+
+(3) se-ai-command-pack's 28. The first attempt repointed all 25 quality-guidelines.md citations to their machine equivalents, which was wrong: that file's header keeps them verbatim because the line numbers refer to the pre-conversion file, and the surrounding prose calls the target "vendored", which ~/.agents/bin is not. The repoint would have introduced exactly the defect item (1) removes. Reverted and marked [absent:] instead. Copilot then found a .claude/skills citation the preflight skips by construction; enumerating the four path shapes the header names found ten unmarked, not one. Merged as #259.
+
+Also closed the copilot_code_review ruleset campaign. The last two operations on answerbook/mezmo_benchmark were applied by a repository admin through the GitHub web UI, and a sweep over all ten repositories in scope now finds zero rulesets carrying the rule, so sd-review-pr is the single owner of remote-review invocation fleet-wide.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3250e555` | fix(adapters): stop calling a repointed path repository-relative (#531) |
+| `3a53755` | docs(trellis): clear the 11 pre-existing review-preflight failures (#110) |
+| `4d02baa` | docs(trellis): mark the pre-conversion pack citations absent (#259) |
+
+### Status
+
+[OK] **Completed**
