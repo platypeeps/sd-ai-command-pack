@@ -508,6 +508,12 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
             "dst = pathlib.Path('.trellis/tasks/archive') / slug\n"
             "dst.parent.mkdir(parents=True, exist_ok=True)\n"
             "subprocess.run(['git', 'mv', str(src), str(dst)], check=True)\n"
+            # Real task.py archive stages the Trellis-owned task paths before it
+            # commits (_auto_commit_archive -> safe_git_add). git mv alone
+            # records the index content of the old path, so a worktree edit made
+            # just before the archive -- which is exactly where the acceptance
+            # criteria tick lands -- would be dropped by a fake that skipped this.
+            "subprocess.run(['git', 'add', '-A'], check=True)\n"
             "subprocess.run(['git', 'commit', '-q', '-m', 'chore(task): archive ' + slug], check=True)\n",
             encoding="utf-8",
         )
@@ -813,6 +819,262 @@ class FleetPublishFailureSafetyTests(unittest.TestCase):
             "refreshed",
         )
 
+    # ------------------------------------------------- acceptance criteria ticking
+
+    CRITERIA_PRD = """# demo
+
+## Acceptance Criteria
+
+- [ ] <!-- verify: tracked-mode path=src/app.py mode=100644 --> The app file is tracked 100644.
+- [ ] <!-- verify: tracked-mode path=src/app.py mode=100755 --> The app file is tracked 100755.
+- [ ] <!-- verify: lane-evidence id=check-command --> The declared check command passes.
+- [ ] <!-- verify: no-such-verifier --> Something nobody implemented.
+- [ ] An untagged criterion nothing can settle.
+
+## Post-archive handoff
+
+Owned by the campaign.
+"""
+
+    def _write_criteria_prd(self, text: str | None = None) -> Path:
+        prd = self.repo / publish.TASK_ROOT / self.slug / "prd.md"
+        prd.write_text(text if text is not None else self.CRITERIA_PRD, encoding="utf-8")
+        return prd
+
+    def _criterion(self, **overrides: object) -> publish.Criterion:
+        fields: dict[str, object] = {
+            "line": 0,
+            "ticked": False,
+            "tag": None,
+            "attrs": {},
+            "prose": "criterion",
+        }
+        fields.update(overrides)
+        return publish.Criterion(**fields)  # type: ignore[arg-type]
+
+    def _verify_context(self, **evidence: tuple[bool, str]) -> publish.VerifyContext:
+        return publish.VerifyContext(
+            repo=self.repo,
+            python_bin=sys.executable,
+            evidence=dict(evidence),
+            work_commit="0" * 40,
+        )
+
+    def _tick(self, **evidence: tuple[bool, str]) -> dict[str, object]:
+        return publish.tick_acceptance_criteria(
+            self.repo,
+            self.slug,
+            python_bin=sys.executable,
+            evidence=dict(evidence),
+            work_commit_sha="0" * 40,
+        )
+
+    def test_criteria_parse_stops_at_the_next_section(self) -> None:
+        # Swallowing "## Post-archive handoff" would put the disposition block
+        # inside a section that is explicitly not owned by the criteria.
+        parsed = publish.parse_acceptance_criteria(self.CRITERIA_PRD)
+        assert parsed is not None
+        self.assertEqual(len(parsed.records), 5)
+        lines = self.CRITERIA_PRD.splitlines()
+        self.assertEqual(lines[parsed.end], "## Post-archive handoff")
+
+    def test_criteria_parse_returns_none_without_the_heading(self) -> None:
+        # A lightweight consumer task need not carry criteria; that is not an error.
+        self.assertIsNone(publish.parse_acceptance_criteria("# demo\n\nnothing\n"))
+
+    def test_criteria_tick_flips_only_the_criterion_the_run_proved(self) -> None:
+        self._write_criteria_prd()
+        result = self._tick()
+        body = (self.repo / publish.TASK_ROOT / self.slug / "prd.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(result["ticked"], 1)
+        self.assertIn("- [x] <!-- verify: tracked-mode path=src/app.py mode=100644 -->", body)
+        self.assertIn("- [ ] <!-- verify: tracked-mode path=src/app.py mode=100755 -->", body)
+
+    def test_criteria_left_unticked_are_each_named_with_a_reason(self) -> None:
+        # Every fail-closed route reports: wrong mode, missing lane evidence,
+        # unknown verifier, no tag at all.
+        self._write_criteria_prd()
+        result = self._tick()
+        reasons = {item["prose"]: item["reason"] for item in result["unchecked"]}
+        self.assertEqual(len(reasons), 4)
+        self.assertIn("tracked 100644, tag expects 100755", reasons["The app file is tracked 100755."])
+        self.assertIn("no --criterion-evidence", reasons["The declared check command passes."])
+        self.assertIn("unknown verifier `no-such-verifier`", reasons["Something nobody implemented."])
+        self.assertIn("no `verify:` tag", reasons["An untagged criterion nothing can settle."])
+        body = (self.repo / publish.TASK_ROOT / self.slug / "prd.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(publish.DISPOSITION_START, body)
+        for prose in reasons:
+            self.assertIn(prose, body.split(publish.DISPOSITION_START)[1])
+
+    def test_criteria_unknown_verifier_never_ticks(self) -> None:
+        # The anti-guessing rule. An unrecognised tag must not fall through to
+        # "nothing objected, so tick it".
+        self._write_criteria_prd(
+            "# demo\n\n## Acceptance Criteria\n\n"
+            "- [ ] <!-- verify: invented-later --> Prose that sounds satisfied.\n"
+        )
+        result = self._tick()
+        self.assertEqual(result["ticked"], 0)
+        self.assertIn(
+            "- [ ] <!-- verify: invented-later -->",
+            (self.repo / publish.TASK_ROOT / self.slug / "prd.md").read_text(
+                encoding="utf-8"
+            ),
+        )
+
+    def test_criteria_lane_evidence_ticks_only_when_supplied(self) -> None:
+        self._write_criteria_prd()
+        result = self._tick(**{"check-command": (True, "self-test passed")})
+        body = (self.repo / publish.TASK_ROOT / self.slug / "prd.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(result["ticked"], 2)
+        self.assertIn("- [x] <!-- verify: lane-evidence id=check-command -->", body)
+
+    def test_criteria_lane_evidence_supplied_unverified_stays_unticked(self) -> None:
+        self._write_criteria_prd()
+        result = self._tick(**{"check-command": (False, "self-test failed")})
+        reasons = {item["prose"]: item["reason"] for item in result["unchecked"]}
+        self.assertEqual(reasons["The declared check command passes."], "self-test failed")
+
+    def test_criteria_rewrite_is_idempotent_across_a_retry(self) -> None:
+        # The tick runs before task.py archive, which aborts with no rollback.
+        # A retry re-enters with the boxes already flipped and a block on disk.
+        self._write_criteria_prd()
+        first = self._tick()
+        prd = self.repo / publish.TASK_ROOT / self.slug / "prd.md"
+        after_first = prd.read_text(encoding="utf-8")
+        second = self._tick()
+        self.assertEqual(prd.read_text(encoding="utf-8"), after_first)
+        self.assertEqual(after_first.count(publish.DISPOSITION_START), 1)
+        self.assertEqual(len(second["unchecked"]), len(first["unchecked"]))
+
+    def test_criteria_already_ticked_boxes_are_never_unticked(self) -> None:
+        # A hand-ticked box may reflect evidence this helper cannot see;
+        # removing it would be its own false claim.
+        self._write_criteria_prd(
+            "# demo\n\n## Acceptance Criteria\n\n"
+            "- [x] <!-- verify: tracked-mode path=src/app.py mode=100755 --> Wrong mode, ticked anyway.\n"
+        )
+        result = self._tick()
+        self.assertEqual(result["unchecked"], [])
+        self.assertIn(
+            "- [x] <!-- verify: tracked-mode path=src/app.py mode=100755 -->",
+            (self.repo / publish.TASK_ROOT / self.slug / "prd.md").read_text(
+                encoding="utf-8"
+            ),
+        )
+
+    def test_criteria_absent_section_is_a_reported_no_op(self) -> None:
+        self._write_criteria_prd("# demo\n\nNo criteria here.\n")
+        result = self._tick()
+        self.assertEqual(result["state"], "no-criteria-section")
+        self.assertEqual(
+            (self.repo / publish.TASK_ROOT / self.slug / "prd.md").read_text(
+                encoding="utf-8"
+            ),
+            "# demo\n\nNo criteria here.\n",
+        )
+
+    def test_verifier_install_audit_refuses_a_tag_without_a_release(self) -> None:
+        # publish takes no release argument, so an exit-0 audit would otherwise
+        # tick a sentence naming a version nothing compared.
+        verified, note = publish.CRITERION_VERIFIERS["install-audit"](
+            self._criterion(),
+            self._verify_context(),
+        )
+        self.assertFalse(verified)
+        self.assertIn("release=", note)
+
+    def test_verifier_tracked_mode_refuses_an_untracked_path(self) -> None:
+        verified, note = publish.CRITERION_VERIFIERS["tracked-mode"](
+            self._criterion(attrs={"path": "src/never-added.py"}),
+            self._verify_context(),
+        )
+        self.assertFalse(verified)
+        self.assertIn("not tracked", note)
+
+    def test_criterion_evidence_rejects_a_malformed_value(self) -> None:
+        # A typo must not read as "this stage could not verify its criterion".
+        for value in ("bogus", "id=maybe"):
+            with self.assertRaises(publish.PublishError):
+                publish.parse_criterion_evidence([value])
+
+    @unittest.skipUnless(shutil.which("node"), "node required for completion receipt")
+    def test_publish_lands_the_criteria_tick_inside_the_archive_commit(self) -> None:
+        """The ordering regression, pinned where it bites.
+
+        Calling ``tick_acceptance_criteria()`` directly passes wherever the call
+        site sits. Only an assertion about which commit carries ``prd.md``
+        catches a move before ``work_commit()`` (task bookkeeping leaks into the
+        installer diff) or after the archive commit (a fourth commit the
+        completion receipt rejects).
+        """
+
+        self._make_repomix('printf "# regenerated\\n" > docs/repomix-map.md\n')
+        self._install_publish_fakes()
+        self._write_criteria_prd()
+
+        aux = tempfile.TemporaryDirectory(prefix="sd-fleet-publish-aux-")
+        self.addCleanup(aux.cleanup)
+        work_message = Path(aux.name) / "work.txt"
+        work_message.write_text("chore: fold finish-work into head\n", encoding="utf-8")
+        receipt = Path(aux.name) / "receipt.json"
+        args = publish.build_parser().parse_args(
+            [
+                str(self.repo),
+                self.slug,
+                "--branch",
+                "main",
+                "--title",
+                "Demo publish",
+                "--summary",
+                "Fold finish-work.",
+                "--change",
+                "folded finish-work",
+                "--test",
+                "unit: acceptance criteria tick",
+                "--work-message-file",
+                str(work_message),
+                "--receipt-out",
+                str(receipt),
+                "--record-session",
+                str(self.repo / "scripts" / "fake-record-session.py"),
+                "--review-preflight",
+                str(self.repo / "scripts" / "sd-ai-command-pack-review-preflight.mjs"),
+                "--python",
+                sys.executable,
+                "--archive-month",
+                "2026-01",
+                "--criterion-evidence",
+                "check-command=verified:self-test passed",
+                "--no-push",
+            ]
+        )
+        result = publish.publish(args)
+
+        self.assertEqual(result["receipt"], "valid")
+        archived = f".trellis/tasks/archive/{self.slug}/prd.md"
+        in_archive_commit = publish.git_out(
+            ["show", "--name-only", "--format=", str(result["h3"]) + "^"],
+            cwd=self.repo,
+        ).splitlines()
+        self.assertIn(archived, in_archive_commit)
+        body = (self.repo / archived).read_text(encoding="utf-8")
+        self.assertIn("- [x] <!-- verify: tracked-mode path=src/app.py mode=100644 -->", body)
+        self.assertIn("- [x] <!-- verify: lane-evidence id=check-command -->", body)
+        self.assertIn(publish.DISPOSITION_START, body)
+        self.assertEqual(len(result["uncheckedCriteria"]), 3)
+        # publish() asserts the H1..H3 delta is .trellis-only internally; the
+        # rewrite must not have pushed prd.md into the work commit.
+        in_work_commit = publish.git_out(
+            ["show", "--name-only", "--format=", str(result["h1"])], cwd=self.repo
+        ).splitlines()
+        self.assertNotIn(archived, in_work_commit)
 
 if __name__ == "__main__":
     unittest.main()

@@ -182,6 +182,33 @@ but defines no ordering or transition policy:
   scope, preparation/check commands, and finish-work expectation; bind it to
   the refresh branch.
 
+  Tag every acceptance criterion with the evidence that would settle it, so the
+  publish stage can tick what the run actually proved instead of leaving an
+  archive that reports verified work as unverified:
+
+  ```text
+  - [ ] <!-- verify: install-audit release=<version> platforms=<a,b,c> --> The install audit passes ...
+  - [ ] <!-- verify: tracked-mode path=<repo-relative path> mode=100755 --> ... is tracked 100755 ...
+  - [ ] <!-- verify: bundle-shape --> Published as one PR whose head carries work, archive, and journal.
+  - [ ] <!-- verify: lane-evidence id=check-command --> The declared check command passes.
+  - [ ] <!-- verify: lane-evidence id=deterministic-gate --> The deterministic gate passes or its findings are dispositioned with zero blockers.
+  ```
+
+  The comment is invisible in rendered Markdown, so the criterion reads exactly
+  as authored. Put the asserted version and platform set in the tag: the publish
+  helper takes no release argument, so a criterion naming a version it cannot
+  read is left unticked rather than ticked on an exit code alone.
+
+  `install-audit`, `tracked-mode`, and `bundle-shape` are proved by the helper
+  from the consumer tree. `lane-evidence` is not — it carries a result from a
+  stage that ran earlier, and the operator supplies it at `pr-publication`.
+
+  An untagged criterion, an unknown tag id, and a `lane-evidence` id with no
+  supplied result are all left unticked and named in a generated disposition
+  block. That is deliberate: an archive that silently reports unverified work as
+  verified is worse than the defect this replaces, so the verifier never infers
+  a criterion's meaning from its prose.
+
   Set the PR target as part of task creation:
 
   ```bash
@@ -261,7 +288,15 @@ but defines no ordering or transition policy:
   commit (pack + active task + a pre-computed post-archive `repomix-map` on
   repomix-indexed consumers), then archives the task and records the journal via
   the shipped `record-session` wrapper so the pushed head already carries all
-  bookkeeping. It refuses to run on a tree dirty outside the managed allowlist,
+  bookkeeping. Immediately before the archive it ticks the acceptance criteria
+  it can prove and reports the rest; pass one
+  `--criterion-evidence <id>=verified|unverified[:<note>]` for each
+  `lane-evidence` tag in the PRD, taking the verdict from the stage that
+  produced it — `check-command` from `local-checks`, `deterministic-gate` from
+  the finding severity gate. A malformed value is rejected outright, because a
+  typo that read as "unverified" would be indistinguishable from a stage that
+  legitimately could not verify. The unticked set comes back as
+  `uncheckedCriteria` in the helper's result. It refuses to run on a tree dirty outside the managed allowlist,
   transactionally restores the task on any error, asserts the completion delta
   is `.trellis`-only, and never pushes on an invalid receipt — so the merge
   stage sees zero head-advance and no successor to reclassify. When a prior

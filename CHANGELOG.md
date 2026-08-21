@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.71.40 - 2026-08-20
+
+### Fixed
+
+- A fleet refresh archived its Trellis task with every acceptance criterion
+  still unticked. Nothing in the publish path ever ticked them and nothing
+  asked the operator to, so a merged archive reported verified work as
+  unverified — two consumers carry that in history from the 0.71.38 rollout.
+  `sd-ai-command-pack-fleet-publish.py` now ticks the criteria it can prove,
+  immediately before `task.py archive` so the rewrite lands in the archive
+  commit and the completion bundle keeps its shape. Criteria carry a
+  `<!-- verify: ... -->` tag naming the evidence that would settle them; the
+  verifier keys off the tag and never off the prose, so a rewording cannot
+  silently change what gets asserted. `install-audit`, `tracked-mode`, and
+  `bundle-shape` are proved from the consumer tree, and the asserted release
+  and platform set ride on the tag because the helper takes no release
+  argument. Everything else is supplied through the new repeatable
+  `--criterion-evidence <id>=verified|unverified[:<note>]`, whose malformed
+  values are rejected outright rather than read as "unverified". An untagged
+  criterion, an unknown tag id, and a missing lane result all stay visibly
+  unticked and are named in a generated disposition block and in the helper's
+  `uncheckedCriteria` result; an already-ticked box is never unticked. See
+  `.trellis/spec/tooling/fleet-publish-acceptance-criteria.md`.
+
 ## 0.71.39 - 2026-08-20
 
 ### Fixed
