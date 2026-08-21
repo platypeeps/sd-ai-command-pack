@@ -105,7 +105,7 @@ reports 0 failures. Commit, PR, merge.
 
 ### Step 2 outcome (measured)
 
-Two references, not four. The resweep classified the other two -- 
+Two references, not four. The resweep classified the other two --
 `.trellis/spec/backend/quality-guidelines.md:44` and the archived
 `review-risk-disposition.md:13` -- as **advisories**, not blockers, so they were
 left alone rather than rewritten for tidiness.
