@@ -28,6 +28,7 @@
         "name": "final",
         "strategy": "sequential",
         "consumers": [
+          "people-profiles",
           "anomaly-metric-creator"
         ]
       }
@@ -231,6 +232,36 @@
         ]
       ],
       "mode": "thin"
+    },
+    {
+      "name": "people-profiles",
+      "github": "platypeeps/people-profiles",
+      "pathHint": "~/repos/platypeeps/people-profiles",
+      "platforms": [
+        "claude",
+        "gemini",
+        "github",
+        "opencode"
+      ],
+      "rolloutPriority": 80,
+      "candidateTimeoutSeconds": 300,
+      "candidatePrepare": [],
+      "candidateChecks": [
+        [
+          "python3",
+          "scripts/validate_repo.py"
+        ],
+        [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-v"
+        ]
+      ],
+      "mode": "fat"
     },
     {
       "name": "anomaly-metric-creator",

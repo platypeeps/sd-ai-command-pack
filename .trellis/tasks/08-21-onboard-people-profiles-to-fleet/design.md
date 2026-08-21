@@ -157,26 +157,39 @@ Priority 80 is unoccupied — the existing ladder runs 10, 20, 30, 40, 50, 60,
   "pathHint": "~/repos/platypeeps/people-profiles",
   "platforms": ["claude", "gemini", "github", "opencode"],
   "rolloutPriority": 80,
-  "candidateTimeoutSeconds": 180,
+  "candidateTimeoutSeconds": 300,
+  "candidatePrepare": [],
   "candidateChecks": [
     ["python3", "scripts/validate_repo.py"],
-    ["python3", "-m", "unittest", "discover", "-s", "tests"]
+    ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]
   ],
   "mode": "fat"
 }
 ```
 
-`candidateChecks` mirrors the repository's own `.sd-ai-command-pack/check.json`,
-which declares both `repository-validation` (`python3 scripts/validate_repo.py`)
-and `unit-tests`. Both are carried: dropping the unit tests would let a
+`candidateChecks` mirrors the repository's own `.sd-ai-command-pack/check.json`
+argv-for-argv, including the `-v` on the unit-tests command: it declares both
+`repository-validation` (`python3 scripts/validate_repo.py`) and `unit-tests`
+(`python3 -m unittest discover -s tests -v`). Both are carried: dropping the unit tests would let a
 candidate pass validation while its own suite is broken. Both targets are
 repo-authored and survive conversion, so they stay runnable after the repo goes
 thin — a machine-scope script would not.
 
-`candidateChecks` is also the one candidate field the registry parser requires
-to be non-empty (`_parse_candidate_commands(..., allow_empty=False)`), whereas
-`candidatePrepare` is optional (`allow_empty=True`) and this consumer needs no
-prepare step.
+`candidateChecks` is the one candidate field the registry parser requires to be
+non-empty (`_parse_candidate_commands(..., allow_empty=False)`), whereas
+`candidatePrepare` may be empty (`allow_empty=True`). "May be empty" is not
+"may be omitted": `sd-ai-command-pack-surface-check.py` rejects a row without
+the key -- "consumer people-profiles must list candidatePrepare" -- and
+se-ai-command-pack, the one existing consumer with no prepare step, carries
+`"candidatePrepare": []` explicitly. This row does the same, in the same key
+position.
+
+`candidateTimeoutSeconds` is **per command**, not a budget for the whole run --
+`sd-ai-command-pack-fleet-candidate-check.py` passes it to each `run_command`
+separately at lines 792 and 812. 300 matches the ceiling `check.json` itself
+declares for the slower of the two checks, and matches the two other consumers
+that carry two checks. Both commands measured well under it (validation
+immediate, 18 tests in 3.0s), so this is headroom rather than a live constraint.
 
 **Cohort: `final`.** Not `canary`. A consumer being onboarded has never been
 driven by a refresh lane, and `canary` is sequential-first: a failure there

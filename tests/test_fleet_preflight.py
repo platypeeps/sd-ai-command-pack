@@ -142,6 +142,7 @@ class FleetPreflightTests(InstallTestCase):
                 "platypeeps/anomaly-metric-creator",
                 "platypeeps/hoa-manager",
                 "platypeeps/loadsmith",
+                "platypeeps/people-profiles",
                 "platypeeps/rwbp-coordinator",
                 "platypeeps/rwbp-website",
                 "platypeeps/sd-github-review",
@@ -162,6 +163,7 @@ class FleetPreflightTests(InstallTestCase):
             "platypeeps/anomaly-metric-creator": expected_map_prepare,
             "platypeeps/hoa-manager": expected_map_prepare,
             "platypeeps/loadsmith": expected_map_prepare,
+            "platypeeps/people-profiles": (),
             "platypeeps/rwbp-coordinator": expected_map_prepare,
             "platypeeps/rwbp-website": expected_map_prepare,
             "platypeeps/sd-github-review": (("npm", "ci"),),
@@ -201,12 +203,13 @@ class FleetPreflightTests(InstallTestCase):
                 "mezmo_benchmark",
                 "se-ai-command-pack",
                 "sd-github-review",
+                "people-profiles",
                 "anomaly-metric-creator",
             ],
         )
         self.assertEqual(
             [consumer.rollout_priority for consumer in consumers],
-            [10, 20, 30, 40, 50, 60, 70, 90],
+            [10, 20, 30, 40, 50, 60, 70, 80, 90],
         )
 
         rollout_policy = fleet.fleet_lib.load_fleet_rollout_policy(
@@ -226,7 +229,7 @@ class FleetPreflightTests(InstallTestCase):
                     "se-ai-command-pack",
                     "sd-github-review",
                 ),
-                ("anomaly-metric-creator",),
+                ("people-profiles", "anomaly-metric-creator"),
             ],
         )
         self.assertEqual(rollout_policy.cohorts[1].max_concurrency, 2)
