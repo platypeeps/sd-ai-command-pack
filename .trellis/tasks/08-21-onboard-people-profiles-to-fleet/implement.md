@@ -114,10 +114,10 @@ In PACK, add to `docs/fleet/consumers.json`:
   "pathHint": "~/repos/platypeeps/people-profiles",
   "platforms": ["claude", "gemini", "github", "opencode"],
   "rolloutPriority": 80,
-  "candidateTimeoutSeconds": 180,
+  "candidateTimeoutSeconds": 300,
   "candidateChecks": [
     ["python3", "scripts/validate_repo.py"],
-    ["python3", "-m", "unittest", "discover", "-s", "tests"]
+    ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]
   ],
   "mode": "fat"
 }
