@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.71.45 - 2026-08-21
+
+### Fixed
+
+- `.gemini/settings.local.json` now carries the same `optionalReferencePaths`
+  exemption 0.71.43 gave its Claude twin. Both are per-checkout machine state,
+  gitignored the same way (`.gitignore:66` and `:104`), and both prefixes are
+  checked; only one was exempt. These two are the whole set — no other checked
+  prefix has a machine-local settings file — so the asymmetry is now closed
+  rather than narrowed.
+
+### Changed
+
+- Pinned the thin conversion's rewrite scope with a test, and corrected how
+  0.71.44 described it. That entry said directory-shaped `.agents/` tokens are
+  "not in the rewrite map", implying a file-versus-directory distinction. The
+  actual rule is simpler and broader: the conversion repoints `scripts/<name>`
+  to `~/.agents/bin/<name>`, and anything already written as `.agents/…` passes
+  through untouched — bin, skills, or docs, file or directory alike. That is
+  deliberate, since such a citation is already true of the canonical layout and
+  repointing it would move a reference that resolves. No behaviour changes; the
+  rule was simply never stated or asserted, which is how the `.claude/` ignore
+  survived a year.
+
 ## 0.71.44 - 2026-08-21
 
 ### Fixed

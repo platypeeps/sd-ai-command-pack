@@ -822,6 +822,10 @@ assert.equal(shouldCheckDocumentationPathReference('.trellis/.developer'), false
 assert.equal(shouldCheckDocumentationPathReference('.claude/skills/sd-work-backlog/SKILL.md'), true);
 assert.equal(shouldCheckDocumentationPathReference('.claude/settings.json'), true);
 assert.equal(shouldCheckDocumentationPathReference('.claude/settings.local.json'), false);
+// `.gemini/` carries the same machine-local settings file, gitignored at the
+// same place in the same way. Paired for the same reason as the Claude twin.
+assert.equal(shouldCheckDocumentationPathReference('.gemini/settings.json'), true);
+assert.equal(shouldCheckDocumentationPathReference('.gemini/settings.local.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/.template-hashes.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/audit/ledger.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('docs/TRELLIS_REVIEW_PR_PACK.md'), false);

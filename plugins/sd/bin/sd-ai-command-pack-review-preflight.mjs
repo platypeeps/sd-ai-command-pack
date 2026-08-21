@@ -441,6 +441,10 @@ function defaultConfig() {
       // clean clone, so a citation of it is not a dangling path. The rest of
       // `.claude/` is an authored tree and is checked.
       '.claude/settings.local.json',
+      // Same shape as its Claude twin, gitignored at `.gitignore:104`. These
+      // two are the whole set: no other checked prefix has a machine-local
+      // settings file.
+      '.gemini/settings.local.json',
       '.sd-ai-command-pack/installed-targets.txt',
       '.sd-ai-command-pack/local-only.txt',
       '.sd-ai-command-pack/manifest.json',
