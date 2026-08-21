@@ -1845,12 +1845,15 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     round_limit = int(remote_config["roundLimit"])
     # The grant requires the one local-planning path that validates the
     # evidence payload (build_plan validates only under local=auto with the
-    # bookkeeping successor); an explicit --local override skips that branch,
-    # so it keeps the unextended limit.
+    # bookkeeping successor). An explicit --local override skips that branch,
+    # and --family-evidence can flip the effective successor to
+    # repeated-family inside the local stage, which also skips it; either
+    # keeps the unextended limit.
     if (
         args.successor == "bookkeeping"
         and args.bookkeeping_evidence
         and args.local == "auto"
+        and not args.family_evidence
     ):
         round_limit += BOOKKEEPING_REENTRY_ROUNDS
     if args.attempt > round_limit and not args.round_extension_authorized:

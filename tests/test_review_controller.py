@@ -2529,9 +2529,15 @@ class ReviewControllerTests(InstallTestCase):
         check.assert_not_called()
 
         # An explicit --local override skips the planning branch that
-        # validates the evidence, so it keeps the unextended limit even with
-        # the successor class and an evidence path present.
-        for override in ("none", "all"):
+        # validates the evidence, and --family-evidence can flip the
+        # effective successor to repeated-family inside the local stage,
+        # which also skips it; each keeps the unextended limit even with the
+        # successor class and an evidence path present.
+        for extra in (
+            ["--local", "none"],
+            ["--local", "all"],
+            ["--family-evidence", str(evidence)],
+        ):
             overridden = controller.parse_args(
                 [
                     "--repo",
@@ -2544,8 +2550,7 @@ class ReviewControllerTests(InstallTestCase):
                     "bookkeeping",
                     "--bookkeeping-evidence",
                     str(evidence),
-                    "--local",
-                    override,
+                    *extra,
                 ]
             )
             with mock.patch.object(controller, "_run_check") as check:

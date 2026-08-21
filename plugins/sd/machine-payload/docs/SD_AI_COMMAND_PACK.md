@@ -990,11 +990,11 @@ integers. Unknown keys, unsafe paths, and out-of-range values are invalid in
 both the controller and the local-stage parser, so one configuration digest
 binds local and remote policy. An evidence-backed successor-head re-entry
 (`--successor bookkeeping` with matching `--bookkeeping-evidence`, under
-automatic local provider selection — an explicit `--local` override skips
-the planning branch that validates the evidence and keeps the unextended
-limit) is granted two extra rounds past `roundLimit` without a
-`review.round-extension` decision; every other over-limit attempt is still
-refused until that decision is recorded.
+automatic local provider selection — an explicit `--local` override or a
+combined `--family-evidence` payload skips the planning branch that
+validates the evidence and keeps the unextended limit) is granted two extra
+rounds past `roundLimit` without a `review.round-extension` decision; every
+other over-limit attempt is still refused until that decision is recorded.
 
 For PR scope the setup descriptor must be regular strict JSON, contract major
 1, checkout-free and noninteractive, support the requested route and `route`
