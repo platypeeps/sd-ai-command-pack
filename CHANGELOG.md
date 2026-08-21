@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- `make audit` reported success on a machine with no scanner installed:
+  both the bandit and the zizmor blocks fell through to a warning and an
+  `if` that exits 0, so a security gate that audited nothing was
+  indistinguishable from one that found nothing. `STRICT=1` now makes a
+  missing scanner fatal, matching the node and shellcheck lanes that
+  already had that branch.
 - The `sd-finish-work` fallback guidance told the caller to fill
   `(Add details)`, `(Add test results)`, and `(see git log)` placeholders
   that the current recorder never writes -- `add_session.py` now omits any

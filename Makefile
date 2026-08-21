@@ -91,12 +91,20 @@ lint:
 # never sees, an older one misses findings CI would catch, and either way the
 # local result says nothing about the pipeline. The fallback still runs -- it
 # is better than no audit -- but it announces the skew instead of hiding it.
+#
+# A scanner that is missing entirely is a silent pass: the `if` exits 0 and
+# `make audit` reports success having audited nothing. STRICT=1 makes that
+# fatal, matching the node and shellcheck lanes above, so a CI lane or a
+# release gate can demand the audit actually ran.
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \
 		"$(VENV_BIN)/bandit" -q -r --severity-level medium install.py installer scripts templates/scripts; \
 	elif command -v bandit >/dev/null 2>&1; then \
 		printf '%s\n' "warning: $(VENV_BIN)/bandit is missing; using an UNPINNED bandit from PATH ($$(bandit --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
 		bandit -q -r --severity-level medium install.py installer scripts templates/scripts; \
+	elif [ "$(STRICT)" = "1" ]; then \
+		printf '%s\n' "error: bandit not found and STRICT=1; the Python security audit is required." >&2; \
+		exit 1; \
 	else \
 		printf '%s\n' "warning: bandit not found; skipping Python security audit."; \
 	fi
@@ -105,6 +113,9 @@ audit:
 	elif command -v zizmor >/dev/null 2>&1; then \
 		printf '%s\n' "warning: $(VENV_BIN)/zizmor is missing; using an UNPINNED zizmor from PATH ($$(zizmor --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
 		zizmor --offline .github/workflows/; \
+	elif [ "$(STRICT)" = "1" ]; then \
+		printf '%s\n' "error: zizmor not found and STRICT=1; the workflow security audit is required." >&2; \
+		exit 1; \
 	else \
 		printf '%s\n' "warning: zizmor not found; skipping workflow security audit."; \
 	fi
