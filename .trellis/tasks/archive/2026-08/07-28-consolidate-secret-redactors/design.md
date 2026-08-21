@@ -42,8 +42,8 @@ and `sk-` (`[redacted]BCDEF0123456789`).
 And the lib pattern is genuinely blind where the PRD says it is:
 
 ```
-IN  : auth failed for github_pat_11ABCDE_xyzXYZ0123456789 in remote
-  lib.sub   : auth failed for github_pat_11ABCDE_xyzXYZ0123456789 in remote
+IN  : auth failed for github_pat_11ABCDE_xyz123 in remote
+  lib.sub   : auth failed for github_pat_11ABCDE_xyz123 in remote
 ```
 
 `gh[pousr]_` cannot match `github_pat_` — `[pousr]` excludes the `i` — and no
