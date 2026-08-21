@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.71.45 - 2026-08-21
+
+### Fixed
+
+- `.gemini/settings.local.json` now carries the same `optionalReferencePaths`
+  exemption 0.71.43 gave its Claude twin. Both are per-checkout machine state,
+  gitignored the same way (`.gitignore:66` and `:104`), and both prefixes are
+  checked; only one was exempt. These two are the whole set — no other checked
+  prefix has a machine-local settings file — so the asymmetry is now closed
+  rather than narrowed.
+- An `optionalReferencePaths` entry cited as a location kept its line suffix
+  through the exemption lookup, so it was not recognised as the same file:
+  `.claude/settings.local.json:5` resolved, found the machine-local file
+  missing, and failed. The lookup now also tries the citation with its line
+  suffix stripped. This affected every optional entry, not only the settings
+  files, and was pre-existing — the new Gemini exemption merely landed on it.
+
+### Changed
+
+- Pinned the thin conversion's rewrite scope with a test, and corrected how
+  0.71.44 described it. That entry said directory-shaped `.agents/` tokens are
+  "not in the rewrite map", implying a file-versus-directory distinction. The
+  actual rule cuts elsewhere: the conversion repoints `scripts/<name>` to
+  `~/.agents/bin/<name>`, and a concrete path already written under `.agents/`
+  passes through untouched — bin, skills, or docs, file or directory alike,
+  since such a citation is already true of the canonical layout and repointing
+  it would move a reference that resolves. Glob text is the deliberate
+  exception: `literal_rewrites` replaces the exact `.agents/skills/sd-*/SKILL.md`
+  and `**/skills/sd-*/**` strings, because a thin checkout has no pack tree for
+  those globs to select and the resweep calls a glob broken when nothing it
+  selects survives. No behaviour changes; the rule was simply never stated or
+  asserted, which is how the `.claude/` ignore survived a year.
+
 ## 0.71.44 - 2026-08-21
 
 ### Fixed

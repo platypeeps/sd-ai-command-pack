@@ -536,6 +536,48 @@ class ThinProfileTests(unittest.TestCase):
         )
         self.assertNotIn("scripts/sd-ai-command-pack-housekeeping.sh", rewritten)
 
+    def test_paths_already_written_under_agents_survive_untouched(self) -> None:
+        """The conversion repoints one spelling, not every pack-owned path.
+
+        `scripts/<name>` becomes `~/.agents/bin/<name>`; a concrete path
+        already written under `.agents/` passes through unchanged, whether it
+        names a file or a directory and whichever tree it sits in. That is
+        deliberate: such a citation is already true of the canonical layout,
+        and repointing it would move a reference that resolves.
+
+        The exception is glob text, not paths: `literal_rewrites` deliberately
+        replaces the exact `.agents/skills/sd-*/SKILL.md` and `**/skills/sd-*/**`
+        strings, because a thin checkout has no pack tree for those globs to
+        select and the resweep calls a glob broken when nothing it selects
+        survives. Those two are covered by their own tests; this one covers
+        the concrete-path rule they are the exception to.
+
+        Asserted because the rule was previously unstated -- the `.claude/`
+        ignore in the review preflight survived a year for exactly that reason
+        -- and because a future rewrite rule that swept concrete `.agents/`
+        paths would break these silently.
+        """
+        for reference in (
+            "`.agents/bin/sd-ai-command-pack-check.py`",
+            "`.agents/skills/sd-help/SKILL.md`",
+            "`.agents/skills/sd-update-spec/references/`",
+            "`.agents/docs/SD_AI_COMMAND_PACK.md`",
+        ):
+            for key in (
+                ".claude/commands/sd/audit-repo.md",
+                "docs/SD_AI_COMMAND_PACK.md",
+                ".agents/skills/sd-help/SKILL.md",
+            ):
+                with self.subTest(reference=reference, key=key):
+                    self.assertEqual(
+                        references.rewrite_text(
+                            f"see {reference} here",
+                            profile=references.THIN_PROFILE,
+                            key=key,
+                        ),
+                        f"see {reference} here",
+                    )
+
     def test_the_doc_reference_avoids_the_removed_path_as_a_suffix(self) -> None:
         """The machine payload's own doc form would be reported as a citation.
 

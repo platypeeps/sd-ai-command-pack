@@ -822,6 +822,18 @@ assert.equal(shouldCheckDocumentationPathReference('.trellis/.developer'), false
 assert.equal(shouldCheckDocumentationPathReference('.claude/skills/sd-work-backlog/SKILL.md'), true);
 assert.equal(shouldCheckDocumentationPathReference('.claude/settings.json'), true);
 assert.equal(shouldCheckDocumentationPathReference('.claude/settings.local.json'), false);
+// `.gemini/` carries the same machine-local settings file, gitignored at the
+// same place in the same way. Paired for the same reason as the Claude twin.
+assert.equal(shouldCheckDocumentationPathReference('.gemini/settings.json'), true);
+assert.equal(shouldCheckDocumentationPathReference('.gemini/settings.local.json'), false);
+// An optional path cited as a location is the same file. Before this, every
+// entry in `optionalReferencePaths` lost its exemption the moment it carried a
+// line citation, so the anchored form is pinned for both twins and for an
+// unrelated entry, and a colon that is not a line suffix still checks.
+assert.equal(shouldCheckDocumentationPathReference('.gemini/settings.local.json:12'), false);
+assert.equal(shouldCheckDocumentationPathReference('.claude/settings.local.json:5'), false);
+assert.equal(shouldCheckDocumentationPathReference('.sd-ai-command-pack/manifest.json:3'), false);
+assert.equal(shouldCheckDocumentationPathReference('.gemini/settings.json:4'), true);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/.template-hashes.json'), false);
 assert.equal(shouldCheckDocumentationPathReference('.trellis/audit/ledger.md'), false);
 assert.equal(shouldCheckDocumentationPathReference('docs/TRELLIS_REVIEW_PR_PACK.md'), false);

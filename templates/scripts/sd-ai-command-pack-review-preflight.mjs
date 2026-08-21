@@ -441,6 +441,10 @@ function defaultConfig() {
       // clean clone, so a citation of it is not a dangling path. The rest of
       // `.claude/` is an authored tree and is checked.
       '.claude/settings.local.json',
+      // Same shape as its Claude twin, gitignored at `.gitignore:104`. These
+      // two are the whole set: no other checked prefix has a machine-local
+      // settings file.
+      '.gemini/settings.local.json',
       '.sd-ai-command-pack/installed-targets.txt',
       '.sd-ai-command-pack/local-only.txt',
       '.sd-ai-command-pack/manifest.json',
@@ -5223,7 +5227,17 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     return false;
   }
 
-  if (optionalCandidatePaths.has(normalized)) {
+  // Strip a trailing line citation before the lookup: `optionalReferencePaths`
+  // holds bare paths, and a locator form of the same path is the same file.
+  // Without this every optional entry loses its exemption the moment it is
+  // cited as a location -- `.claude/settings.local.json:5` resolved, found the
+  // machine-local file missing, and failed. The strip is safe because
+  // LINE_SUFFIX_PATTERN matches only a numeric suffix, so a colon inside a
+  // name (`docs/guide:section.md`) survives it.
+  if (
+    optionalCandidatePaths.has(normalized) ||
+    optionalCandidatePaths.has(normalized.replace(LINE_SUFFIX_PATTERN, ''))
+  ) {
     return false;
   }
 
