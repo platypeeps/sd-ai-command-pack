@@ -5227,7 +5227,17 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     return false;
   }
 
-  if (optionalCandidatePaths.has(normalized)) {
+  // Strip a trailing line citation before the lookup: `optionalReferencePaths`
+  // holds bare paths, and a locator form of the same path is the same file.
+  // Without this every optional entry loses its exemption the moment it is
+  // cited as a location -- `.claude/settings.local.json:5` resolved, found the
+  // machine-local file missing, and failed. The strip is safe because
+  // LINE_SUFFIX_PATTERN matches only a numeric suffix, so a colon inside a
+  // name (`docs/guide:section.md`) survives it.
+  if (
+    optionalCandidatePaths.has(normalized) ||
+    optionalCandidatePaths.has(normalized.replace(LINE_SUFFIX_PATTERN, ''))
+  ) {
     return false;
   }
 
