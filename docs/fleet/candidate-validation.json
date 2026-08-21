@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-21T16:13:34Z",
+  "validatedAt": "2026-08-21T17:06:35Z",
   "packVersion": "0.71.41",
   "payloadDigest": "sha256:13c144bf9171c32aa4d322a44424a926b9737ea92e53d9483963f8e7074a15f2",
-  "fleetManifestDigest": "sha256:5f232047b3902c27b93d81ff8b370d68cda59470167e09b007c17ef6a94d7c93",
+  "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
@@ -158,8 +158,8 @@
     {
       "name": "people-profiles",
       "github": "platypeeps/people-profiles",
-      "baseCommit": "175a8c28654b82dc9c4b0bf7287ffa3e7821f4b9",
-      "status": "blocked",
+      "baseCommit": "3cc74a0e2d2799f8ccb2edd048683e2cb0e47145",
+      "status": "passed",
       "prepares": [],
       "checks": [
         [
@@ -176,9 +176,7 @@
           "-v"
         ]
       ],
-      "reasons": [
-        "1 consumer-authored reference(s) to removed paths"
-      ]
+      "reasons": []
     },
     {
       "name": "anomaly-metric-creator",
