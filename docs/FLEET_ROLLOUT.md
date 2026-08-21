@@ -16,7 +16,7 @@ count here is a snapshot, not a contract.
 A `fat` consumer is judged by installed-versus-target tree drift. A `thin`
 consumer vendors no tree, so fleet status reports its pin — `present` with a
 version, `absent`, or `unreadable` — and compares it to the machine install.
-Because at least one consumer is thin, the report also collects one machine-scope
+When any consumer is thin, the report also collects one machine-scope
 inventory per run and raises skew rows for pin versus machine install, machine
 install versus target, and plugin versus machine receipt. Skew rows are built
 before the human list is truncated, so a long advisory list never hides one.
