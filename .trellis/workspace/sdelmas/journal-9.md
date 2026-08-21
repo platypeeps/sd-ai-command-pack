@@ -865,3 +865,25 @@ Merged the fleet-publish acceptance-criteria tick (#528) plus the two consumer a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 418: Mark retired-file citations absent in anomaly-metric-creator docs
+<!-- trellis-session: v=2 fp=df19c708c606bd53 -->
+
+**Date**: 2026-08-21
+**Task**: Mark retired-file citations absent in anomaly-metric-creator docs
+**Branch**: `main`
+
+### Summary
+
+Cleared anomaly-metric-creator's two review-preflight failures by marking its citations of two deliberately deleted forwarder files with the checker's [absent: <reason>] affordance rather than deleting the sentences. The paths did not resolve because the removal succeeded, and the section exists to stop someone reintroducing those files. Each marker sits immediately after its reference, since ABSENT_PATH_MARKER_PATTERN is anchored at the reference end and admits only spaces and tabs before the bracket. Landed as anomaly-metric-creator PR #397, squash-merged at 2f490512e; verified on that repository's merged default branch with a sorted FAIL-set diff showing exactly the two known findings removed and nothing else changed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `555e6190` | docs(task): record the amc retired-file citation fix as complete |
+
+### Status
+
+[OK] **Completed**
