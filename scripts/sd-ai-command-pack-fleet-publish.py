@@ -53,12 +53,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Collection, Iterator, Sequence
+from typing import Callable, Collection, Iterator, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -99,6 +101,24 @@ DEFAULT_ALLOWED_EXACT = (
     # rewrites it before the work commit, and an operator who already ran
     # housekeeping arrives here with it dirty.
     ".gitignore",
+)
+
+# Acceptance-criteria ticking. A refresh PRD's criteria are prose authored per
+# consumer, so the verifier keys off a structured tag and NEVER off matching the
+# sentence: inferring "this criterion means check the exec bit" from free text
+# is how a rewording silently changes what gets asserted. An untagged criterion,
+# an unknown tag id, and a tag whose evidence is missing all stay unticked.
+#
+# The comment form is invisible in rendered Markdown, so the archived PRD reads
+# exactly as authored.
+ACCEPTANCE_HEADING = "## Acceptance Criteria"
+DISPOSITION_START = "<!-- sd-ai-command-pack:criteria-disposition:start -->"
+DISPOSITION_END = "<!-- sd-ai-command-pack:criteria-disposition:end -->"
+CRITERION_RE = re.compile(r"^(?P<indent>\s*)- \[(?P<state>[ xX])\] (?P<body>.*)$")
+VERIFY_TAG_RE = re.compile(r"<!--\s*verify:\s*(?P<id>[a-z0-9-]+)(?P<attrs>[^>]*?)-->")
+ATTR_RE = re.compile(r"(?P<key>[a-z0-9-]+)=(?P<value>\S+)")
+PROVENANCE_RE = re.compile(
+    r"Installed payload provenance: version (?P<version>[^;\s]+)"
 )
 
 
@@ -431,6 +451,353 @@ def work_commit(repo: Path, message_file: Path) -> str:
     return git_out(["rev-parse", "HEAD"], cwd=repo)
 
 
+@dataclasses.dataclass(frozen=True)
+class Criterion:
+    """One ``- [ ]`` / ``- [x]`` line inside the acceptance-criteria section."""
+
+    line: int
+    ticked: bool
+    tag: str | None
+    attrs: dict[str, str]
+    prose: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CriteriaSection:
+    """The parsed section: its line span and the criteria inside it."""
+
+    start: int
+    end: int
+    records: list[Criterion]
+
+
+@dataclasses.dataclass(frozen=True)
+class VerifyContext:
+    """What a verifier is allowed to consult.
+
+    Deliberately narrow. A verifier that could reach the whole argument
+    namespace would be able to tick a criterion from an operator-supplied
+    string that no stage ever checked.
+    """
+
+    repo: Path
+    python_bin: str
+    evidence: dict[str, tuple[bool, str]]
+    work_commit: str
+
+
+def parse_acceptance_criteria(text: str) -> CriteriaSection | None:
+    """Split the ``## Acceptance Criteria`` section into per-criterion records.
+
+    Returns ``None`` when the heading is absent. That is a valid PRD -- a
+    lightweight consumer task need not carry criteria -- and failing a publish
+    over a section that was never required would be the wrong trade.
+    """
+
+    lines = text.splitlines()
+    start: int | None = None
+    for index, line in enumerate(lines):
+        if line.strip() == ACCEPTANCE_HEADING:
+            start = index + 1
+            break
+    if start is None:
+        return None
+    # Stop at the next section. The refresh PRD carries "## Post-archive
+    # handoff" directly after the criteria, and swallowing it would put the
+    # disposition block inside the wrong section.
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    records: list[Criterion] = []
+    for index in range(start, end):
+        match = CRITERION_RE.match(lines[index])
+        if match is None:
+            continue
+        body = match.group("body")
+        tag = VERIFY_TAG_RE.search(body)
+        records.append(
+            Criterion(
+                line=index,
+                ticked=match.group("state") in {"x", "X"},
+                tag=tag.group("id") if tag else None,
+                attrs=dict(ATTR_RE.findall(tag.group("attrs"))) if tag else {},
+                prose=VERIFY_TAG_RE.sub("", body).strip(),
+            )
+        )
+    return CriteriaSection(start=start, end=end, records=records)
+
+
+def _split_attr(value: str | None) -> list[str]:
+    return [item for item in (value or "").split(",") if item]
+
+
+def _verify_install_audit(
+    record: Criterion, ctx: VerifyContext
+) -> tuple[bool, str]:
+    helper = SCRIPT_DIR / "sd-ai-command-pack-install-audit.py"
+    if not helper.is_file():
+        return False, f"install-audit helper not found at {helper}"
+    attrs = record.attrs
+    release = attrs.get("release")
+    if not release:
+        # The criterion names a version; this helper takes no release argument,
+        # so without the tag a passing exit code would tick a sentence whose
+        # version was never compared to anything.
+        return False, "tag omits release=, so the asserted version is unverifiable"
+    argv = [ctx.python_bin, str(helper), "--repo", str(ctx.repo)]
+    for platform in _split_attr(attrs.get("platforms")):
+        argv.extend(["--expected-platform", platform])
+    result = run(argv, cwd=ctx.repo, check=False)
+    if result.returncode != 0:
+        return False, f"install audit exited {result.returncode}"
+    found = PROVENANCE_RE.search(result.stdout or "")
+    if found is None:
+        return False, "install audit reported no provenance version"
+    if found.group("version") != release:
+        return (
+            False,
+            f"install audit reports {found.group('version')}, tag expects {release}",
+        )
+    return True, f"install audit passed; provenance {release}"
+
+
+def _verify_tracked_mode(
+    record: Criterion, ctx: VerifyContext
+) -> tuple[bool, str]:
+    attrs = record.attrs
+    path = attrs.get("path")
+    if not path:
+        return False, "tag omits path="
+    expected = attrs.get("mode", "100755")
+    # Route git through the shared lib helper, not run(["git", ...]): the
+    # git-invocation boundary test rejects an argv literal here. git_run is the
+    # wrong helper for a verifier -- it raises on nonzero, which would abort a
+    # publish over a criterion that should merely have stayed unticked.
+    result = run_git_minimal(
+        ["ls-files", "-s", "--", path],
+        cwd=ctx.repo,
+        timeout=None,
+        stderr=subprocess.STDOUT,
+    )
+    if result.returncode != 0:
+        return False, f"git ls-files exited {result.returncode} for {path}"
+    line = (result.stdout or "").strip()
+    if not line:
+        return False, f"{path} is not tracked"
+    mode = line.split(None, 1)[0]
+    if mode != expected:
+        return False, f"{path} is tracked {mode}, tag expects {expected}"
+    return True, f"{path} is tracked {mode}"
+
+
+def _verify_bundle_shape(
+    record: Criterion, ctx: VerifyContext
+) -> tuple[bool, str]:
+    """The work commit exists and the completion bundle is being formed.
+
+    This reads as asserting the future, because the archive and journal commits
+    do not exist yet. It is safe because publish is all-or-nothing: if the
+    bundle does not form, the completion receipt is not ``valid`` and publish
+    raises before the push. A tick that would have been a lie never reaches a
+    remote, let alone merged history.
+    """
+
+    return True, f"work commit {ctx.work_commit} created; bundle forming"
+
+
+def _verify_lane_evidence(
+    record: Criterion, ctx: VerifyContext
+) -> tuple[bool, str]:
+    key = record.attrs.get("id")
+    if not key:
+        return False, "tag omits id="
+    entry = ctx.evidence.get(key)
+    if entry is None:
+        return False, f"no --criterion-evidence supplied for {key!r}"
+    verified, note = entry
+    if note:
+        return verified, note
+    return verified, f"lane evidence {key!r} supplied as " + (
+        "verified" if verified else "unverified"
+    )
+
+
+CRITERION_VERIFIERS: dict[
+    str, Callable[[Criterion, VerifyContext], tuple[bool, str]]
+] = {
+    "install-audit": _verify_install_audit,
+    "tracked-mode": _verify_tracked_mode,
+    "bundle-shape": _verify_bundle_shape,
+    "lane-evidence": _verify_lane_evidence,
+}
+
+
+def parse_criterion_evidence(
+    values: Sequence[str],
+) -> dict[str, tuple[bool, str]]:
+    """Parse ``--criterion-evidence id=verified|unverified[:note]`` values.
+
+    Malformed input is rejected here rather than at use time: a typo that
+    silently produced "no evidence supplied" would look identical to a stage
+    that legitimately could not verify its criterion.
+    """
+
+    evidence: dict[str, tuple[bool, str]] = {}
+    for value in values:
+        key, separator, remainder = value.partition("=")
+        if not separator or not key.strip():
+            raise PublishError(
+                f"--criterion-evidence {value!r} is not id=verified|unverified"
+                "[:note]",
+                code=2,
+            )
+        verdict, _, note = remainder.partition(":")
+        if verdict not in {"verified", "unverified"}:
+            raise PublishError(
+                f"--criterion-evidence {value!r} has verdict {verdict!r}; "
+                "expected 'verified' or 'unverified'",
+                code=2,
+            )
+        evidence[key.strip()] = (verdict == "verified", note.strip())
+    return evidence
+
+
+def _strip_disposition_block(lines: list[str]) -> list[str]:
+    """Remove a previously written block so the rewrite is idempotent.
+
+    The tick runs *before* ``task.py archive``, and that call aborts loudly with
+    no rollback. A retry therefore re-enters with the boxes already flipped and
+    a block already on disk; appending would stack one block per attempt.
+    """
+
+    start = end = None
+    for index, line in enumerate(lines):
+        if line.strip() == DISPOSITION_START:
+            start = index
+        elif line.strip() == DISPOSITION_END and start is not None:
+            end = index
+            break
+    if start is None or end is None:
+        return lines
+    # Consume the blank lines this function's own writer put around the block.
+    # Leaving them behind grows the file by two lines per retry, which is the
+    # same append-per-attempt bug one level down.
+    while start > 0 and not lines[start - 1].strip():
+        start -= 1
+    while end + 1 < len(lines) and not lines[end + 1].strip():
+        end += 1
+    return lines[:start] + lines[end + 1 :]
+
+
+def _render_disposition_block(unchecked: Sequence[dict[str, str]]) -> list[str]:
+    lines = [DISPOSITION_START]
+    if unchecked:
+        lines.append(
+            "> **Not verified by the publish run.** These criteria stay unticked:"
+        )
+        lines.append(">")
+        for item in unchecked:
+            lines.append(f"> - {item['prose']} — {item['reason']}")
+    else:
+        lines.append(
+            "> Every acceptance criterion was verified by the publish run."
+        )
+    lines.append(DISPOSITION_END)
+    return lines
+
+
+def tick_acceptance_criteria(
+    repo: Path,
+    slug: str,
+    *,
+    python_bin: str,
+    evidence: dict[str, tuple[bool, str]],
+    work_commit_sha: str,
+) -> dict[str, object]:
+    """Tick criteria this run proved; leave the rest visibly unticked.
+
+    Must be called before ``task.py archive`` -- that command moves the task
+    directory *and* commits it, so this is the last point at which the edit
+    still lands inside the archive commit. Writing it earlier would put task
+    bookkeeping in the work commit; writing it later needs a fourth commit that
+    the completion receipt rejects.
+    """
+
+    prd = repo / TASK_ROOT / slug / "prd.md"
+    if not prd.is_file():
+        return {"state": "absent", "unchecked": [], "detail": "prd.md not found"}
+    text = prd.read_text(encoding="utf-8")
+    parsed = parse_acceptance_criteria(text)
+    if parsed is None:
+        return {
+            "state": "no-criteria-section",
+            "unchecked": [],
+            "detail": f"{ACCEPTANCE_HEADING} is not present",
+        }
+    ctx = VerifyContext(
+        repo=repo,
+        python_bin=python_bin,
+        evidence=evidence,
+        work_commit=work_commit_sha,
+    )
+    lines = text.splitlines()
+    unchecked: list[dict[str, str]] = []
+    ticked = 0
+    for record in parsed.records:
+        if record.ticked:
+            # Never untick. A box ticked by hand may reflect evidence this
+            # helper cannot see; removing it would be its own false claim.
+            continue
+        if record.tag is None:
+            unchecked.append(
+                {"prose": record.prose, "reason": "no `verify:` tag"}
+            )
+            continue
+        verifier = CRITERION_VERIFIERS.get(record.tag)
+        if verifier is None:
+            unchecked.append(
+                {
+                    "prose": record.prose,
+                    "reason": f"unknown verifier `{record.tag}`",
+                }
+            )
+            continue
+        verified, note = verifier(record, ctx)
+        if not verified:
+            unchecked.append({"prose": record.prose, "reason": note})
+            continue
+        lines[record.line] = lines[record.line].replace("- [ ]", "- [x]", 1)
+        ticked += 1
+
+    lines = _strip_disposition_block(lines)
+    reparsed = parse_acceptance_criteria("\n".join(lines))
+    assert reparsed is not None
+    insert_at = reparsed.end
+    # Normalize the blank lines on both sides of the insertion point to exactly
+    # one. Without this the first pass and a retry disagree by a blank line --
+    # the same append-per-attempt drift as a duplicated block, one line at a
+    # time -- because the source already separates the list from the next
+    # section and the strip above consumes that separator on re-entry.
+    while insert_at > 0 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    tail = insert_at
+    while tail < len(lines) and not lines[tail].strip():
+        tail += 1
+    block = _render_disposition_block(unchecked)
+    # Keep one blank line on each side so the block renders as its own
+    # paragraph rather than joining the last list item.
+    lines = lines[:insert_at] + [""] + block + [""] + lines[tail:]
+    prd.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    return {
+        "state": "rewritten",
+        "ticked": ticked,
+        "unchecked": unchecked,
+        "detail": f"{ticked} criterion(s) ticked, {len(unchecked)} left unticked",
+    }
+
+
 def archive_and_journal(
     repo: Path,
     slug: str,
@@ -442,7 +809,18 @@ def archive_and_journal(
     commit: str,
     changes: Sequence[str],
     tests: Sequence[str],
-) -> str:
+    criterion_evidence: dict[str, tuple[bool, str]] | None = None,
+) -> tuple[str, dict[str, object]]:
+    # Tick before the archive, not after: task.py archive moves the task
+    # directory AND commits it (--no-commit is opt-out), so this is the last
+    # point at which the rewrite still lands inside the archive commit.
+    criteria = tick_acceptance_criteria(
+        repo,
+        slug,
+        python_bin=python_bin,
+        evidence=criterion_evidence or {},
+        work_commit_sha=commit,
+    )
     # Loud abort, no rollback: a consumer runs its own (unpatched) task.py, so a
     # transient .git/index.lock can make the archive move on disk but fail to
     # commit. We do NOT attempt a rollback — task.py's archive also flips task
@@ -481,7 +859,7 @@ def archive_and_journal(
     for test in tests:
         session_cmd.extend(["--test", test])
     run(session_cmd, cwd=repo)
-    return git_out(["rev-parse", "HEAD"], cwd=repo)
+    return git_out(["rev-parse", "HEAD"], cwd=repo), criteria
 
 
 def completion_receipt(
@@ -583,7 +961,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         )
 
     h1 = work_commit(repo, Path(args.work_message_file).resolve())
-    h3 = archive_and_journal(
+    h3, criteria = archive_and_journal(
         repo,
         args.slug,
         python_bin=args.python,
@@ -593,6 +971,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         commit=h1,
         changes=args.change,
         tests=args.test,
+        criterion_evidence=parse_criterion_evidence(args.criterion_evidence),
     )
     status = completion_receipt(repo, h1, h3, receipt_out, preflight)
     if status != "valid":
@@ -619,6 +998,8 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         "ignoreBlock": ignore_block,
         "pushed": pushed,
         "receiptPath": str(receipt_out),
+        "acceptanceCriteria": criteria,
+        "uncheckedCriteria": criteria.get("unchecked", []),
     }
 
 
@@ -680,6 +1061,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--review-preflight",
         default=None,
         help="Path to the review-preflight helper (defaults next to this script)",
+    )
+    parser.add_argument(
+        "--criterion-evidence",
+        action="append",
+        default=[],
+        help=(
+            "Evidence for a lane-evidence acceptance criterion, as "
+            "id=verified|unverified[:note] (repeatable). Supplies the result "
+            "of a stage this helper cannot re-derive; anything without a "
+            "matching value stays unticked."
+        ),
     )
     parser.add_argument(
         "--python", default="python3", help="Interpreter for Trellis scripts"
