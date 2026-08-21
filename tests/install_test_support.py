@@ -207,11 +207,25 @@ class InstallTestCase(unittest.TestCase):
         self.addCleanup(remove_tree_tolerating_teardown_race, root)
         return root
 
+    def configure_git_identity(self, root: Path) -> None:
+        """Give a fixture repository a committer identity.
+
+        Git derives one from the hostname and $USER when it can, which is why a
+        fixture that never set one still commits fine on a developer machine.
+        On a CI runner that derivation is disabled, so the same fixture dies
+        with "Author identity unknown" -- a failure that only ever reproduces
+        in the pipeline. Every repo-creating helper here sets it up front so a
+        new fixture cannot inherit that trap.
+        """
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+
     def make_repo(self, *platform_dirs: str) -> Path:
         root = self.make_temp_root("sd-ai-command-pack-test-")
         (root / ".trellis").mkdir()
         (root / ".trellis" / "config.yaml").write_text("# test\n", encoding="utf-8")
         self.run_git(root, "init")
+        self.configure_git_identity(root)
         for platform_dir in platform_dirs:
             (root / platform_dir).mkdir(parents=True, exist_ok=True)
             platform = platform_dir.removeprefix(".")
@@ -222,6 +236,7 @@ class InstallTestCase(unittest.TestCase):
     def make_git_repo_without_trellis(self) -> Path:
         root = self.make_temp_root("sd-ai-command-pack-test-")
         self.run_git(root, "init")
+        self.configure_git_identity(root)
         return root
 
     def write_trellis_stub(self, bin_dir: Path, log_path: Path, *, exit_code: int = 0) -> None:
@@ -793,8 +808,7 @@ class InstallTestCase(unittest.TestCase):
             self.run_git(git_dir, "config", "gc.auto", "0")
             self.run_git(git_dir, "config", "receive.autoGc", "false")
             self.run_git(git_dir, "config", "maintenance.auto", "false")
-        self.run_git(repo, "config", "user.email", "test@example.com")
-        self.run_git(repo, "config", "user.name", "Test User")
+        self.configure_git_identity(repo)
         (repo / ".trellis/scripts").mkdir(parents=True)
         (repo / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
         (repo / ".trellis/scripts/get_context.py").write_text(
@@ -989,8 +1003,7 @@ class InstallTestCase(unittest.TestCase):
             self.run_git(git_dir, "config", "gc.auto", "0")
             self.run_git(git_dir, "config", "receive.autoGc", "false")
             self.run_git(git_dir, "config", "maintenance.auto", "false")
-        self.run_git(repo, "config", "user.email", "test@example.com")
-        self.run_git(repo, "config", "user.name", "Test User")
+        self.configure_git_identity(repo)
         (repo / ".trellis/scripts").mkdir(parents=True)
         (repo / ".trellis/config.yaml").write_text("# test\n", encoding="utf-8")
         (repo / ".trellis/scripts/get_context.py").write_text(

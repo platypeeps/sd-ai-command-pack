@@ -92,6 +92,54 @@ def source_is_executable(source: Path) -> bool:
     return bool(source.stat().st_mode & 0o111)
 
 
+def reconciled_unchanged_status(
+    destination: Path,
+    *,
+    executable: bool,
+    dry_run: bool,
+) -> InstallStatus:
+    """UNCHANGED, unless the installed mode disagrees with the pack's.
+
+    Byte-identical content used to short-circuit straight to UNCHANGED, which
+    left a destination whose executable bit had drifted from the source stuck
+    that way forever: no reinstall, at any version, would ever repair it,
+    because the content had nothing left to change. That is how the fleet ended
+    up with a shipped helper installed non-executable and `run --` unable to
+    invoke it. Content equality is not file equality.
+
+    What the pack asserts is the executable *bit*, not a mode: `source_is_executable`
+    reduces the source to a boolean, git stores the same boolean as 100755 or
+    100644, and a fresh install's mode is umask-derived (0700, 0755, 0775 --
+    none of them canonical). So only the bit is reconciled. A file the owner
+    narrowed to 0744 is not drift: it is executable, which is what `run --`
+    needs, and widening it to 0754 would hand out access its owner removed.
+
+    The chmod is verified rather than assumed: a filesystem that cannot
+    represent the bit (a mount without exec permission, a non-POSIX volume)
+    would otherwise report UPDATED on every single run forever.
+    """
+    current_mode = destination.stat().st_mode
+    if bool(current_mode & 0o111) == executable:
+        return InstallStatus.UNCHANGED
+    if dry_run:
+        return InstallStatus.UPDATED
+    if executable:
+        # Grant execute exactly where read is already granted, so a deliberate
+        # group/other restriction on the installed file survives the repair.
+        new_mode = current_mode | ((current_mode & 0o444) >> 2)
+    else:
+        new_mode = current_mode & ~0o111
+    try:
+        os.chmod(destination, new_mode)
+    except OSError as error:
+        raise SystemExit(
+            f"error: cannot set mode on {destination}: {error}"
+        ) from None
+    if bool(destination.stat().st_mode & 0o111) != executable:
+        return InstallStatus.UNCHANGED
+    return InstallStatus.UPDATED
+
+
 def source_digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -414,9 +462,18 @@ def install_file(
                     source_content=new_content,
                     source_executable=executable,
                 )
+            # Annotated: the narrowed literal type would reject the widening
+            # that mode reconciliation performs.
+            status: InstallStatus = planned_result.status
+            if status is InstallStatus.UNCHANGED:
+                status = reconciled_unchanged_status(
+                    destination,
+                    executable=executable,
+                    dry_run=dry_run,
+                )
             return InstallResult(
                 file,
-                planned_result.status,
+                status,
                 source_digest=digest,
                 source_content=new_content,
                 source_executable=executable,
@@ -467,7 +524,11 @@ def install_file(
         if current == new_content:
             return InstallResult(
                 file,
-                InstallStatus.UNCHANGED,
+                reconciled_unchanged_status(
+                    destination,
+                    executable=executable,
+                    dry_run=dry_run,
+                ),
                 source_digest=digest,
                 source_content=new_content,
                 source_executable=executable,
@@ -1102,6 +1163,7 @@ __all__ = [
     "run_diff_check",
     "selected_files",
     "sha256_file",
+    "reconciled_unchanged_status",
     "source_is_executable",
     "trellis_gitignore_block",
     "unlink_target_file",

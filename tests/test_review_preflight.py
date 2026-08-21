@@ -4263,6 +4263,16 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("validated against the working tree", result.stdout)
 
+        # Deleting a branch publishes no payload, so a stale ledger must not
+        # block the cleanup -- otherwise drift introduced by some other push
+        # holds the deletion hostage and the bypass becomes routine.
+        result = run(
+            "git", "push", "-q", "origin", "--delete", "feature",
+            env={"FAKE_LEDGER_RC": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("stale or invalid", result.stdout)
+
     def test_review_preflight_accepts_line_suffixed_doc_references(self) -> None:
         node = shutil.which("node")
         if node is None:
