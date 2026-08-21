@@ -156,10 +156,11 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    section means the flag was not passed. Do not re-run the recorder to add
    the missing section after it has committed: changed bullets change the
    record fingerprint, so a second invocation appends a new session entry
-   instead of repairing the first. Amend the recorded entry in place instead
-   (edit the journal file and its index row, then amend the recorder's
-   commit before pushing), or pass the original `--idempotency-key` when the
-   recorder's own retry mechanism applies. If the recorder reports
+   instead of repairing the first. Amend the recorded entry in place instead:
+   edit the journal file and its index row, then amend the recorder's commit
+   before pushing. (`--idempotency-key` is only for resuming an interrupted
+   run with identical inputs — it makes an identical committed request a
+   no-op and cannot repair or extend a recorded entry.) If the recorder reports
    an `environment_blocked` git-metadata fragment instead, report its exact
    boundary and checkpoint and re-run only that bounded step once the boundary
    clears — never widen it into a merge, archive, force operation, or cleanup.
