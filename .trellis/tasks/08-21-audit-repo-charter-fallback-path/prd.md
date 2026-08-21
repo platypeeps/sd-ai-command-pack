@@ -59,9 +59,19 @@ a byte-matched second copy of the same prose.
 
 ## Acceptance Criteria
 
-- [ ] No surface claims the charter directory is at a repository-relative path
-      unconditionally: `grep -rn "charters/\` relative to the repository root"`
-      returns nothing.
+- [ ] No shipped surface claims the charter directory is at a
+      repository-relative path unconditionally. Scope the sweep to command
+      surfaces — `CHANGELOG.md` quotes the old phrase as history and this PRD
+      quotes it to define the check, so a whole-repo grep matches itself and
+      can never pass:
+
+      ```bash
+      grep -rn 'charters/` relative to the repository root' \
+        --include=*.md --include=*.toml . \
+        | grep -v node_modules | grep -v CHANGELOG | grep -v '\.trellis/'
+      ```
+
+      Expect no output.
 - [ ] All shipped copies carry the new wording (source, `plugins/sd/commands/`,
       the Gemini TOML adapter, the OpenCode adapter, and the four
       `templates/` twins).
