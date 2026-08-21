@@ -966,3 +966,25 @@ Removed the .claude/ entry from ignoredReferencePrefixes, which contradicted ref
 ### Status
 
 [OK] **Completed**
+
+
+## Session 422: Cleared loadsmith's dangling pack-path citations; measured the rwbp repos
+<!-- trellis-session: v=2 fp=bc39e1f79f48e018 -->
+
+**Date**: 2026-08-21
+**Task**: Cleared loadsmith's dangling pack-path citations; measured the rwbp repos
+**Branch**: `main`
+
+### Summary
+
+loadsmith's 24 preflight failures were one class: six 08-07-* PRDs citing pack paths repo-relative in a thin install. Marked [absent:] rather than repointed, because the citations carry line numbers into evidence tables and the machine copy's lines drift independently. Verified mechanically that every changed line differs by exactly one marker. Merged as loadsmith 53372d4; preflight 24 -> 0. Separately measured rwbp-coordinator and rwbp-website (found at ~/repos/rwbp, not ~/repos/platypeeps): both already 0 failures under the new .claude/ rule, so the fleet-wide delta of six is fully accounted for and no work was needed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb29c4a2` | chore: record journal |
+
+### Status
+
+[OK] **Completed**

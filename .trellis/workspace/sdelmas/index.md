@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 421
+- **Total Sessions**: 422
 - **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~968 | Active |
+| `journal-9.md` | ~990 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 422 | 2026-08-21 | Cleared loadsmith's dangling pack-path citations; measured the rwbp repos | `cb29c4a2` | `main` |
 | 421 | 2026-08-21 | Preflight .claude/ blind spot and the sd-audit-repo charter root | `22d29df7`, `c2c96b58` | `main` |
 | 420 | 2026-08-21 | Address the three open follow-ups: repoint prose defect, sd-github-review docs, se-ai-command-pack docs | `3250e555`, `3a53755`, `4d02baa` | `main` |
 | 419 | 2026-08-21 | Onboard people-profiles to the sd-ai-command-pack fleet | `c8f03d51`, `858be878`, `544cb863` | `main` |
