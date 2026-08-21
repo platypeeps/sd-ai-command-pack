@@ -47,4 +47,27 @@ consumers' history, and hand-ticking is demonstrably not a reliable control.
 - [ ] A fleet refresh published through the helper lands an archive whose acceptance criteria reflect what the run actually verified.
 - [ ] A criterion the run could not verify is still visibly unticked, and the publish path says so rather than failing silently.
 - [ ] Regression coverage proves both halves: a verified criterion is ticked, an unverifiable one is not.
-- [ ] The two consumers already carrying empty boxes in merged history are either corrected or consciously left, with the choice recorded here.
+- [x] The two consumers already carrying empty boxes in merged history are either corrected or consciously left, with the choice recorded here.
+
+## Decision: the two consumers are consciously left, and annotated
+
+anomaly-metric-creator PR 395 and hoa-manager PR 279 keep their five empty
+boxes. Ticking them now would assert that *those runs* verified those criteria.
+What can be re-derived today is only that the current state satisfies them — the
+install audit passes, the tracked mode is `100755` — which is a different claim.
+An archive records what a run checked, not what happens to be true afterwards,
+and rewriting one to assert verification after the fact is this exact defect
+pointed at its own cleanup.
+
+Each archived PRD instead carries one dated paragraph stating that the boxes
+were left unticked, why they are not being ticked retroactively, and that the
+gap is fixed forward here. Landed as anomaly-metric-creator PR 396 and
+hoa-manager PR 280.
+
+Verified before pushing, by diffing sorted preflight FAIL sets against the same
+base rather than reading totals: hoa-manager 0 failures before and after;
+anomaly-metric-creator 2 before and the same 2 after, both pre-existing dangling
+path references inside that consumer's own development-cycle documentation
+(lines 236 and 251) and untouched by this change. Named without a path on
+purpose: the file lives in the consumer, not here, and citing it as a
+repo-relative path fails the pack's documentation path-reference gate. The five `- [ ]` boxes are byte-identical on both sides.
