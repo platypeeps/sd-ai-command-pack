@@ -2528,6 +2528,33 @@ class ReviewControllerTests(InstallTestCase):
                 controller.run(no_evidence)
         check.assert_not_called()
 
+        # An explicit --local override skips the planning branch that
+        # validates the evidence, so it keeps the unextended limit even with
+        # the successor class and an evidence path present.
+        for override in ("none", "all"):
+            overridden = controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "branch",
+                    "--attempt",
+                    "6",
+                    "--successor",
+                    "bookkeeping",
+                    "--bookkeeping-evidence",
+                    str(evidence),
+                    "--local",
+                    override,
+                ]
+            )
+            with mock.patch.object(controller, "_run_check") as check:
+                with self.assertRaisesRegex(
+                    controller.ReviewError, "roundLimit"
+                ):
+                    controller.run(overridden)
+            check.assert_not_called()
+
     def test_controller_does_not_expose_an_unbound_head_override(self) -> None:
         controller = self.load_controller()
         with mock.patch.object(controller.sys, "stderr"), self.assertRaises(SystemExit):

@@ -120,11 +120,13 @@ inline thread. After the user approves `review.round-extension`, add
 `--round-extension-authorized` to the approved over-limit attempt; never infer
 that authorization from ordinary review arguments. One case needs no
 extension decision: an evidence-backed successor-head re-entry
-(`--successor bookkeeping` with matching `--bookkeeping-evidence`) carries
-its own small fixed budget of two rounds past `roundLimit`, because it
-reviews a different head than the rounds that spent the base budget.
-Attempts beyond that grant, and every over-limit attempt without valid
-bookkeeping evidence, still require the decision.
+(`--successor bookkeeping` with matching `--bookkeeping-evidence`, under
+automatic local provider selection) carries its own small fixed budget of
+two rounds past `roundLimit`, because it reviews a different head than the
+rounds that spent the base budget. An explicit `--local` override skips the
+planning branch that validates the evidence, so it keeps the unextended
+limit. Attempts beyond that grant, and every over-limit attempt without
+valid bookkeeping evidence, still require the decision.
 
 A local provider finding you have verified false takes the matching
 `--local-disposition '<stable-id>=rebutted'` pair. The bar is the same as the

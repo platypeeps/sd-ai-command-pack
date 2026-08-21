@@ -1,15 +1,15 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-21T00:09:33Z",
+  "validatedAt": "2026-08-21T00:41:08Z",
   "packVersion": "0.71.38",
-  "payloadDigest": "sha256:404be06f0c79f3c52c716d350c8c51bceb61ffe92eb1ee086646ed382d756825",
+  "payloadDigest": "sha256:7ee6d4ab4cba4dc02216cbb8ba809a2be185e129366d3f3e97490a28551a29ec",
   "fleetManifestDigest": "sha256:67d6949a1f929b43e8b7f3706503c0b3433817de7e713ff3c82498ba00c2ec3f",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "47d9055941270990580207e4a10e4b4dbb9a0fb5",
+      "baseCommit": "7c02392e38c2d7d9b6677a7663baff7adeb9cc71",
       "status": "passed",
       "prepares": [
         [
@@ -129,7 +129,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "40df292ab1b7916f0cfc5c1384e51cbe1391fe58",
+      "baseCommit": "c376f9c2a4f6e24539206fc11f51720afe2541f8",
       "status": "passed",
       "prepares": [
         [
