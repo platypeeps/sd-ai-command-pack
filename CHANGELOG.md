@@ -16,6 +16,14 @@
   as the 0.71.41 `sd-review` fix -- prose that survives conversion describing
   something that does not -- and invisible for the same reason, since a thin
   consumer's resweep has nothing left to remove and reports clear.
+- The same two adapters offered `PATH` as an alternative way to resolve that
+  script, which `sd-review` explicitly forbids in the same repository: "a
+  `PATH` entry can name a different install than the one the running skill text
+  came from." Two commands were instructing the resolution the pack's own
+  policy rules out, and the backticked token was a path rather than a bare
+  command name, so the `PATH` arm could not have resolved it as written. Both
+  now resolve at the given path only, and carry the same warning `sd-review`
+  does.
 
 ## 0.71.41 - 2026-08-21
 
