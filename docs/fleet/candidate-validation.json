@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-21T17:06:35Z",
-  "packVersion": "0.71.41",
-  "payloadDigest": "sha256:13c144bf9171c32aa4d322a44424a926b9737ea92e53d9483963f8e7074a15f2",
+  "validatedAt": "2026-08-21T17:53:12Z",
+  "packVersion": "0.71.42",
+  "payloadDigest": "sha256:2e8c4e6de0757c374919a3df2dd97a713b0398ec4dd7c3b306b667c777b537e6",
   "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
@@ -158,7 +158,7 @@
     {
       "name": "people-profiles",
       "github": "platypeeps/people-profiles",
-      "baseCommit": "3cc74a0e2d2799f8ccb2edd048683e2cb0e47145",
+      "baseCommit": "fd116717d86ed817715a6f97bd307e6883b079da",
       "status": "passed",
       "prepares": [],
       "checks": [

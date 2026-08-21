@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.71.42 - 2026-08-21
+
+### Fixed
+
+- The `sd-housekeeping` and `sd-review-learnings` adapters told the agent a
+  script was reachable "at that path relative to the repository root". The thin
+  conversion rewrites that path to `~/.agents/bin/<name>` and leaves the prose
+  alone, so a converted consumer carried a sentence calling an absolute `$HOME`
+  path repository-relative, in the same clause that printed it. Twelve sites
+  across six thin consumers. The clause is now dropped rather than rewritten
+  during conversion: "at that path" is true in both install shapes, and a
+  conversion-time substitution would be a byte-matched second copy of the
+  sentence that stops matching the moment the source is rewrapped. Same family
+  as the 0.71.41 `sd-review` fix -- prose that survives conversion describing
+  something that does not -- and invisible for the same reason, since a thin
+  consumer's resweep has nothing left to remove and reports clear.
+
 ## 0.71.41 - 2026-08-21
 
 ### Fixed
