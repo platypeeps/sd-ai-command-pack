@@ -49,7 +49,7 @@ rewriting the history it records.
 
 ## Acceptance Criteria
 
-- [ ] `node ~/.agents/bin/sd-ai-command-pack-review-preflight.mjs` reports 0 failures on a clean sd-github-review default branch.
-- [ ] No personal absolute path remains in any tracked `.trellis/` document in that repository.
-- [ ] Every corrected citation resolves, and each one still supports the claim its surrounding prose makes.
-- [ ] The change lands in sd-github-review, not here; this task tracks the obligation, and closes when that repository's PR merges.
+- [x] `node ~/.agents/bin/sd-ai-command-pack-review-preflight.mjs` reports 0 failures on a clean sd-github-review default branch.
+- [x] No personal absolute path remains in any tracked `.trellis/` document in that repository.
+- [x] Every corrected citation resolves, and each one still supports the claim its surrounding prose makes.
+- [x] The change lands in sd-github-review, not here; this task tracks the obligation, and closes when that repository's PR merges. Merged as platypeeps/sd-github-review#110, squash `3a53755`; that branch now reports 0 failures and 0 warnings.
