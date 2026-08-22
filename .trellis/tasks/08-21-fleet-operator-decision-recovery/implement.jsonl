@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/08-21-fleet-operator-decision-recovery/prd.md", "reason": "The three existing terminal-lane recovery guards with their line numbers, and why operator-decision matches none of them. The new path must be evidence-bound on the same terms."}
+{"file": ".trellis/spec/tooling/review-attempt-state.md", "reason": "The pack's existing precedent for per-attempt state and the phase-rewind trap — reviving a terminal lane is the same class of rewind."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "How the refusal path must behave when the new revival is attempted on a lane whose result is not operator-decision."}

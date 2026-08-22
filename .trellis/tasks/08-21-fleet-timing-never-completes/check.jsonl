@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/08-21-fleet-timing-never-completes/prd.md", "reason": "Seven acceptance criteria including the ones a shallow test misses: the never-instrumented lane, the early-return-between-start-and-end case, and that the 21 existing run files still load."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "What to check the new failure message against: it must name consumer, stage, and attempt rather than report a bare condition."}

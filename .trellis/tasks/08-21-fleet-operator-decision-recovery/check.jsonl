@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/08-21-fleet-operator-decision-recovery/prd.md", "reason": "Seven acceptance criteria, including that a revived lane makes the campaign non-complete with validate passing either side, and that declining to proceed stays recordable."}
+{"file": ".trellis/spec/tooling/review-attempt-state.md", "reason": "The rewind hazards to check the revival against — what must recompute versus replay when a terminal lane re-enters."}
