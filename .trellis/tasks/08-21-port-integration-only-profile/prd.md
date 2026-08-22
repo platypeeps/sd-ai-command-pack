@@ -85,6 +85,15 @@ integration-only review against a live consumer PR head, with the classifier
 output and the returned `review-result` recorded in this directory. That cannot
 run in CI and was not run. Do not tick it from a dry run or from inspection.
 
+**Deferred by operator decision, 2026-08-22.** PR #535 was merged with this
+criterion outstanding. At merge time all nine fleet consumers were checked and
+none had an open PR, so there was no live head to review against, and creating
+one meant an outward-facing push to another repository purely to satisfy a
+test. The verification moved to
+[`08-22-verify-ported-integration-only-path`](../08-22-verify-ported-integration-only-path/prd.md),
+which runs it on the next fleet refresh. **This task stays `in_progress` and
+must not be archived until that task ticks this criterion.**
+
 The rest:
 
 | Criterion | Evidence |
