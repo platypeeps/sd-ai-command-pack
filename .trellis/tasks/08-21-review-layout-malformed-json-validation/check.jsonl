@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/08-21-review-layout-malformed-json-validation/research/resolver-malformed-input-verdict.md", "reason": "The exact seven receipt shapes and the exception each produced before the change. The new tests must cover these and assert LayoutError, not an incidental type; the four AttributeError rows are the regression this task exists to close."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "What to check the new failure paths against: error type, message content, and exit code, so a malformed receipt is reported and not merely caught."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Acceptance criterion 2 is a filesystem sweep over all five shipped copies; this indexes the gates that verify shipped-helper parity in CI."}

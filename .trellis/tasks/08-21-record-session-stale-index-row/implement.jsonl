@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/08-21-record-session-stale-index-row/design.md", "reason": "Why the refresh sits above the --no-commit return and not beside git add, and the checked import shape — .trellis/scripts is a package and add_session.py needs that directory on sys.path or it raises ModuleNotFoundError for 'common'."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "The failure posture every new path must follow: a derived bookkeeping row that cannot be written is reported and skipped, never fatal, and must not change the run's exit code."}
+{"file": ".trellis/spec/tooling/index.md", "reason": "Routing table for the shipped-helper gates that fire on this change — all four copies must end byte-identical, and the coverage gate re-checks it in make check."}
