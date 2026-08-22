@@ -1,5 +1,20 @@
 # Reduce review tooling process spawns
 
+> **R1/R2/R4 are resolved-by-removal (decided 2026-08-21).** Those requirements
+> memoize base-ref discovery and export it readonly *inside*
+> `scripts/sd-ai-command-pack-full-check.sh`, a file that
+> `08-21-retire-full-check-family` deletes across all four trees. Optimizing a
+> file scheduled for deletion is wasted work, and landing the optimization
+> first would simply be discarded. Mark R1/R2/R4 resolved-by-removal when that
+> task lands.
+>
+> **The surviving scope is the `review-preflight.mjs` work**, which is
+> unaffected by the deletion. Re-scope this task to that remainder before
+> starting it, and re-measure the acceptance criteria that currently quantify
+> spawn reduction "in both full-check and review-preflight" against
+> review-preflight alone.
+
+
 ## Goal
 
 The per-change review path stops paying redundant process spawns: review-preflight

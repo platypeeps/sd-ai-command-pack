@@ -1,5 +1,14 @@
 # Phase-0 dead-surface cleanup
 
+> **Ownership of `review-full-check.sh` confirmed to this task (2026-08-21).**
+> `08-09-retire-review-pr-surface` also listed that deletion in its scope. The
+> overlap was resolved in this task's favor: it keeps `review-full-check.sh`
+> and its `templates/` twin, and the retirement tree
+> (`08-21-retire-full-check-family`) ceded them. That task owns
+> `full-check.sh` only. No coordination is needed beyond not deleting the file
+> twice.
+
+
 ## Problem
 
 The 2026-08-08 KISS audit found dead and contradictory surfaces that cost

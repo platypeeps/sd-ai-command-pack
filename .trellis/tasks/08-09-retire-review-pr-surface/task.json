@@ -18,7 +18,11 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "08-21-port-integration-only-profile",
+    "08-21-delete-review-pr-surface",
+    "08-21-retire-full-check-family"
+  ],
   "parent": "07-22-integrate-routed-review-backends",
   "relatedFiles": [],
   "notes": "",
