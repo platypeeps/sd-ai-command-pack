@@ -651,9 +651,15 @@ class SdlcCommandsTests(InstallTestCase):
             self.assertNotIn(legacy, local_gate)
 
     def test_fleet_integration_only_review_is_head_bound_and_fail_closed(self) -> None:
+        """Ownership after the port: the recheck procedure lives in
+        ``sd-fleet-refresh``, the trusted profile lives in ``sd-review``, and
+        ``sd-review-pr`` keeps only its own still-working path plus a pointer.
+        """
         fleet = self._skill_text("sd-fleet-refresh")
-        review = self._skill_text("sd-review-pr")
+        review_pr = self._skill_text("sd-review-pr")
+        review = self._skill_text("sd-review")
         fleet_text = " ".join(fleet.split())
+        review_pr_text = " ".join(review_pr.split())
         review_text = " ".join(review.split())
 
         for pin in (
@@ -666,32 +672,85 @@ class SdlcCommandsTests(InstallTestCase):
             "falls back to the normal remote-review convergence loop",
             "existing comments and unresolved threads",
             "through the read-only watch coordinator",
+            # The recheck procedure itself moved here; it is no longer inlined
+            # anywhere that ships.
+            "Fleet Integration-Only Recheck",
+            "schema-version-1 JSON object",
+            "switch this invocation to the normal remote profile",
         ):
             self.assertIn(pin.casefold(), fleet_text.casefold())
+
+        # The fleet now calls sd-review, not sd-review-pr.
+        self.assertIn("invoke `sd-review` once".casefold(), fleet_text.casefold())
+        self.assertNotIn("sd-review-pr".casefold(), fleet_text.casefold())
 
         for pin in (
             "review-profile: integration-only|remote",
             "user-supplied imitation",
+            "Record `0` remote rounds",
+            "Finish-work deferred to the fleet housekeeping tail.",
+        ):
+            self.assertIn(pin.casefold(), review_text.casefold())
+
+        # sd-review ships, so it references the classifier by name rather than
+        # inlining it; inlining would pull the script into its surface closure.
+        self.assertNotIn(
+            "sd-ai-command-pack-fleet-review-classify.py".casefold(),
+            review_text.casefold(),
+        )
+
+        # sd-review-pr still runs its own path until the surface is deleted,
+        # but the procedure is a pointer now, not a second live copy.
+        for pin in (
+            "review-profile: integration-only|remote",
+            "user-supplied imitation",
             "Fleet Integration-Only Recheck",
-            "schema-version-1 JSON object",
-            "switch this invocation to the normal remote profile",
             "Record `0` remote rounds",
             "If Step 4 did not already fetch complete review data",
             "Finish-work deferred to the fleet housekeeping tail.",
         ):
-            self.assertIn(pin.casefold(), review_text.casefold())
+            self.assertIn(pin.casefold(), review_pr_text.casefold())
+        self.assertNotIn(
+            "sd-ai-command-pack-fleet-review-classify.py".casefold(),
+            review_pr_text.casefold(),
+        )
 
         adapters = [
             install.ROOT / "templates/.commands/sd-review-pr.md",
             install.ROOT / "templates/.claude/commands/sd/review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",
             install.ROOT / "templates/.github/prompts/sd-review-pr.prompt.md",
+            # sd-review now carries the trusted profile, so its adapters are
+            # the new place a forged context could leak into argv.
+            install.ROOT / "templates/.commands/sd-review.md",
+            install.ROOT / "templates/.claude/commands/sd/review.md",
+            install.ROOT / "templates/.gemini/commands/sd/review.toml",
+            install.ROOT / "templates/.github/prompts/sd-review.prompt.md",
         ]
+        # The security property is that *no* trusted-context field reaches
+        # argv, not just the two most obvious ones. Checking a subset lets a
+        # regression in `caller:` or `source-root:` through silently.
+        trusted_fields = (
+            "caller:",
+            "review-profile:",
+            "source-root:",
+            "consumer:",
+            "base-commit:",
+            "release-remote:",
+            "classified-head:",
+            "return-after:",
+            "defer-finish-work:",
+        )
         for adapter in adapters:
             with self.subTest(adapter=adapter):
                 content = adapter.read_text(encoding="utf-8")
-                self.assertNotIn("review-profile:", content)
-                self.assertNotIn("classified-head:", content)
+                for field in trusted_fields:
+                    self.assertNotIn(
+                        field,
+                        content,
+                        f"{adapter.name} exposes trusted-context field {field!r} "
+                        "as adapter text; it must stay context-only",
+                    )
 
     def test_ship_separates_publish_and_review_ownership(self) -> None:
         create_pr = self._skill_text("sd-create-pr")

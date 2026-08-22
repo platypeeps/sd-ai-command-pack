@@ -63,17 +63,51 @@ integration-only mechanism outright.
 - [ ] `sd-fleet-refresh` completes an integration-only review through
       `sd-review` against a real PR head, with the classifier consulted and the
       `review-result` return honored.
-- [ ] `sd-review` rejects a malformed or incomplete trusted context with the
+- [x] `sd-review` rejects a malformed or incomplete trusted context with the
       same strictness `sd-review-pr` applies at `SKILL.md:81`, proven by test.
-- [ ] `sd-review` refuses integration-only when `classified-head`,
+- [x] `sd-review` refuses integration-only when `classified-head`,
       `LOCAL_HEAD`, and `HEAD_SHA` are not identical.
-- [ ] The recheck procedure is reachable from `sd-fleet-refresh` and its
+- [x] The recheck procedure is reachable from `sd-fleet-refresh` and its
       `fleet-review-classify.py` reference resolves from `source-root`.
-- [ ] No public `sd-review` argument accepts a trusted-context key.
-- [ ] `sd-review-pr` still runs its own integration-only path unchanged.
-- [ ] `make check` is green.
+- [x] No public `sd-review` argument accepts a trusted-context key.
+- [x] `sd-review-pr` still runs its own integration-only path unchanged. *(met with a recorded deviation — see Evidence.)*
+- [x] `make check` is green.
 
 ## Out Of Scope
 
 - Deleting or disabling any `sd-review-pr` file, row, or identifier.
 - Any full-check script, `Makefile`, or CI gate change.
+
+## Evidence (2026-08-22, PR #535, head `31e5950a`)
+
+Criterion 1 is **not** ticked. It requires one real `sd-fleet-refresh`
+integration-only review against a live consumer PR head, with the classifier
+output and the returned `review-result` recorded in this directory. That cannot
+run in CI and was not run. Do not tick it from a dry run or from inspection.
+
+The rest:
+
+| Criterion | Evidence |
+| --- | --- |
+| Strict rejection of a malformed/incomplete context | `tests/test_review_trusted_context.py::test_trusted_context_is_documented_with_every_field`, `::test_trusted_context_is_accepted_only_from_the_resolved_caller`, `::test_recheck_failure_modes_fail_closed` |
+| Exact-head refusal | `::test_integration_only_requires_exact_head_identity`. `sd-review` states the requirement as `classified-head` identical to the live local head and the PR head; `LOCAL_HEAD` / `HEAD_SHA` are `sd-review-pr`'s Step 1 shell variable names for those same two values, and they still appear verbatim in the relocated recheck section. |
+| Recheck reachable, classifier resolves from `source-root` | `::test_fleet_refresh_owns_the_recheck_procedure`; `sd-ai-command-pack-surface-check.py` clean |
+| No public argument accepts a trusted key | `::test_trusted_context_is_not_an_argument`, mutation-checked: adding `caller` to the enum fails it |
+| `make check` green | `rc=0` on head `31e5950a` |
+
+### Deviation on "`sd-review-pr` ... unchanged"
+
+`sd-review-pr` still runs its own integration-only path, and its behavior is
+unchanged — but its **text** is not. `design.md` and `implement.md` step 1
+authorized *moving* the recheck procedure into `sd-fleet-refresh` rather than
+copying it, precisely so two live copies could not drift, and leaving
+`sd-review-pr` a pointer. This PRD's criterion was written before that decision
+and says "unchanged"; it was not rewritten to match after the fact. Read it as
+*behaviorally* unchanged.
+
+Verified by `::test_review_pr_no_longer_inlines_the_procedure`, which asserts
+both that the pointer names `sd-fleet-refresh` and that the classifier
+invocation is gone, and by
+`test_sdlc_commands.py::test_fleet_integration_only_review_is_head_bound_and_fail_closed`,
+which still pins `sd-review-pr`'s own profile, `0` remote rounds, and deferred
+finish-work message.

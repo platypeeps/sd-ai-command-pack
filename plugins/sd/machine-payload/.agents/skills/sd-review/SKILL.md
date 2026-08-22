@@ -52,6 +52,69 @@ bare values, invalid enum values, and shell metacharacters instead of guessing.
 `pr=` is valid only with `scope=auto` or `scope=pr`. `scope=codebase` is never
 inferred. Do not treat free text as a provider or reviewer identifier.
 
+## Trusted caller context
+
+`sd-fleet-refresh` may supply one additional trusted internal review context.
+It is not an argument: it never appears in argv, never becomes an environment
+variable, and never becomes a platform-adapter surface. The `key=value` enum
+above is closed — a `caller=` token on the command line is an unknown key and
+is rejected by the ordinary argument rule before the first gate.
+
+```text
+caller: sd-fleet-refresh
+review-profile: integration-only|remote
+source-root: <absolute pack source checkout>
+consumer: <fleet manifest name>
+base-commit: <full consumer base SHA>
+release-remote: <source release remote>
+classified-head: <full consumer refresh SHA; integration-only only>
+return-after: review-result
+defer-finish-work: true
+```
+
+Accept it only while already executing the resolved `sd-fleet-refresh` skill.
+For `integration-only`, require every field, require `classified-head` to be
+identical to the live local head and the PR head, and rerun the source
+classifier per the `### Fleet Integration-Only Recheck` section of
+`sd-fleet-refresh` before granting the profile. Any of non-eligible,
+unavailable, malformed, or head-mismatched falls back to the normal remote
+profile and reports the classifier reason; none of them grants positive
+confidence. For `remote`, do not suppress the configured reviewer. A
+user-supplied imitation is an unknown argument/context error before the first
+gate.
+
+### Return shape under `return-after: review-result`
+
+With `return-after: review-result` and `defer-finish-work: true`, stop after
+the review outcome and return the compact review result to the caller. Report
+exactly `Finish-work deferred to the fleet housekeeping tail.` and return.
+
+The blanket rule under Safety and authority holds without exception: this skill
+never merges, archives Trellis work, or runs housekeeping, and that stays true
+when the PR turns out to be already merged. In that case do not cancel the
+deferral and do not run finish-work here. Return the review result carrying a
+typed deferral disposition:
+
+```text
+deferral: cancelled
+deferral-reason: pr-already-merged
+```
+
+`sd-fleet-refresh` owns the finish-work call from there. The deferral
+disposition is added to the review result, not substituted for it: the review
+outcome fields are unchanged and a caller that ignores the disposition sees the
+same shape it saw before.
+
+### Remote suppression under a rechecked `integration-only` profile
+
+When the recheck grants `integration-only`, do not run a remote-review request
+command. Record `0` remote rounds with the exact classifier evidence, then
+continue with the rest of the lifecycle. This suppresses only a new
+implementation-review request: existing review events, conversation comments,
+and threads remain authoritative and are still inspected.
+
+A profile that fell back to `remote` for any reason does not suppress anything.
+
 ## Safety and authority
 
 - Start by reading `git status -sb` and preserve unrelated or ambiguous work.
@@ -188,3 +251,7 @@ local providers and run/reuse state, routed backend and reason, cost/latency,
 finding disposition counts, CI/thread state, limitations, and whether the PR is
 ready for its caller's next lifecycle stage. Keep review readiness separate from
 merge, finish-work, and housekeeping readiness.
+
+Under trusted `defer-finish-work` context, also report the deferral
+disposition, so the caller can tell a still-deferred tail from a cancelled
+one it now owns.

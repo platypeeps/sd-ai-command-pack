@@ -306,7 +306,7 @@ but defines no ordering or transition policy:
   PR, and record the new publication epoch. A corrective recovery may instead
   reuse this stage to append and validate missing task evidence before pushing
   a replacement head; neither path replays the earlier merge action.
-- `review`: invoke `sd-review-pr` once with trusted `caller: sd-fleet-refresh`,
+- `review`: invoke `sd-review` once with trusted `caller: sd-fleet-refresh`,
   `return-after: review-result`, and `defer-finish-work: true`. Supply either
   the exact-head `integration-only` context or the normal `remote` profile.
   Existing comments and unresolved threads are always inspected. Classifier
@@ -353,6 +353,37 @@ Call `next` again only after every issued action has a receipt. It may issue
 sequential canaries or a bounded `canStart` wave up to `maxConcurrency`, and it
 issues at most one manifest-ordered merge candidate. Each lane owns one
 existing checkout, branch, and PR. Terminal consumers are never restarted.
+
+### Fleet Integration-Only Recheck
+
+When trusted `review-profile: integration-only` context is active, first
+require `classified-head`, `LOCAL_HEAD`, and `HEAD_SHA` to be identical. Then
+from `source-root`, rerun the source classifier against the consumer checkout:
+
+```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-review-classify.py \
+  --consumer <consumer> --repo <absolute consumer checkout> \
+  --base-commit <base-commit> --remote <release-remote> --json
+```
+
+Accept integration-only classification only when the command exits `0`, emits
+one valid schema-version-1 JSON object, reports `eligible: true`, and its
+consumer, repository, base commit, and head commit match the trusted context
+and live repository. Record its release tag, payload digest, changed paths,
+and installed platforms for the final report. If the trusted context was
+validly supplied but this recheck is non-eligible, unavailable, malformed, or
+head-mismatched, switch this invocation to the normal remote profile and report
+the classifier reason. Do not stop or ask merely because the safe fallback
+requires remote review.
 
 ## Timing evidence
 

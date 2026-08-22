@@ -910,10 +910,13 @@ release verdict.
      --base-commit SHA [--remote REMOTE] [--json]` is a source-only, read-only
      classifier. Exit `0` means `integration-only`; exit `1` means
      `remote-review-required`.
-   - The trusted fleet invocation of `sd-review-pr` carries consumer, source
+   - The trusted fleet invocation of `sd-review` carries consumer, source
      root, full base SHA, release remote, and classified full head SHA as
      internal orchestration context. It is not a public adapter argument or an
-     environment variable.
+     environment variable. `sd-review`'s `key=value` enum stays closed, so a
+     `caller=` token on the command line is an unknown key rejected before the
+     first gate. `sd-review-pr` accepts the same context until that surface is
+     removed.
 3. **Contracts**:
    - Reuse the release-identity guard, canonical fleet consumer/path/platform
      data, and authoritative `install.py --check --json` inspection with a
@@ -927,11 +930,16 @@ release verdict.
    - JSON schema version 1 records eligibility, exact base/head, release
      identity, installed version/platforms, sorted changed/allowed/disallowed
      paths, and bounded deterministic reasons.
-   - `sd-review-pr` reruns classification and requires classified, local, and
-     PR heads to match before suppressing a new configured remote-review
-     request. It still runs local gates, advisory disposition, existing review
-     and thread inspection, CI, learning, watch, and housekeeping. A changed
-     head must be reclassified.
+   - The recheck procedure lives in `sd-fleet-refresh`, which owns the profile
+     end to end; no shipping surface inlines the classifier, so it stays out of
+     every payload closure. `sd-review` reruns classification through it and
+     requires classified, local, and PR heads to match before suppressing a new
+     configured remote-review request. It still runs local gates, advisory
+     disposition, existing review and thread inspection, CI, learning, and
+     watch. It does not run housekeeping or finish-work: under
+     `defer-finish-work` it returns a typed deferral disposition and
+     `sd-fleet-refresh` owns the call, including when the PR turns out to be
+     already merged. A changed head must be reclassified.
    - Public `remote-review` forces the normal profile. No public
      `integration-only` switch exists.
 4. **Validation & Error Matrix**:

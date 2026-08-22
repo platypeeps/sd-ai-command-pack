@@ -70,6 +70,17 @@ must be read as *same for the review outcome*, with deferral disposition added
 rather than substituted. If B proves to change observable fleet behavior, fall
 back to A and record why.
 
+**Decision (2026-08-22): B.** Settled at the implement.md review gate before
+step 4. `sd-review/SKILL.md`'s "Do not merge, archive Trellis work, or run
+housekeeping from this skill." is left byte-identical and is pinned by a test.
+`sd-review` returns a typed deferral disposition inside `review-result` and
+never calls finish-work; `sd-fleet-refresh` owns the cancellation. Chosen over
+A because the line is a blanket invariant every other caller of `sd-review`
+relies on, and narrowing it for one trusted caller would make every other
+caller re-derive when it applies. Revisit only if the manual step-5 run against
+a live consumer PR shows B changing observable fleet behavior; the fallback is
+A, recorded in the same commit that makes it.
+
 ### Recheck relocation
 
 The `:206-232` block moves verbatim into

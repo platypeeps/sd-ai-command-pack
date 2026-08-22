@@ -308,26 +308,16 @@ BIN_LITERAL_ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
 # (payload-relative Markdown path, bare command) -> justification for a
 # reference the payload cannot satisfy from its relocated script directory.
 # One dict per payload because the two name the same authored file
-# differently; the shared justification is one fact, and both entries retire
-# together when the skill text is fixed.
-_FLEET_REVIEW_CLASSIFY_JUSTIFICATION = (
-    "fleet-operator path: the fleet scripts have no manifest rows, so this "
-    "reference is already absent from vendored consumer installs today; a "
-    "follow-up task fixes the skill text and retires this entry"
-)
-_FLEET_REVIEW_CLASSIFY = "sd-ai-command-pack-fleet-review-classify.py"
+# differently (`skills/...` here, `.agents/skills/...` for the machine stage),
+# so an entry added to one is not covered by the other.
+#
+# Both were emptied when `sd-review-pr` stopped inlining the fleet review
+# classifier: the recheck procedure moved into `sd-fleet-refresh`, which has no
+# manifest rows and therefore never enters a payload closure. Adding an entry
+# back means a shipped surface gained a reference to a source-only script.
+PLUGIN_CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {}
 
-PLUGIN_CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {
-    ("skills/sd-review-pr/SKILL.md", _FLEET_REVIEW_CLASSIFY): (
-        _FLEET_REVIEW_CLASSIFY_JUSTIFICATION
-    ),
-}
-
-MACHINE_CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {
-    (".agents/skills/sd-review-pr/SKILL.md", _FLEET_REVIEW_CLASSIFY): (
-        _FLEET_REVIEW_CLASSIFY_JUSTIFICATION
-    ),
-}
+MACHINE_CLOSURE_ALLOWLIST: dict[tuple[str, str], str] = {}
 
 # payload-relative text file -> (justification, script names that are not
 # references to a relocated copy and therefore keep their repository path).
