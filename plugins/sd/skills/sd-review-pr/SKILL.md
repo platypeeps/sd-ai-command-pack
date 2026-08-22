@@ -206,9 +206,9 @@ continuing; do not request remote review on stale remote code.
 ### Fleet Integration-Only Recheck
 
 The recheck procedure now lives in `sd-fleet-refresh`, which owns the fleet
-integration-only profile end to end. See its `### Fleet Integration-Only
-Recheck` section. This pointer stays until the `sd-review-pr` surface is
-removed.
+integration-only profile end to end. See its
+`### Fleet Integration-Only Recheck` section. This pointer stays until the
+`sd-review-pr` surface is removed.
 
 If the PR is draft, do not mark it ready until the typed deterministic
 `sd-check` result has passed unless the user explicitly asked to mark it ready. This

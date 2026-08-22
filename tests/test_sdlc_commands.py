@@ -727,11 +727,30 @@ class SdlcCommandsTests(InstallTestCase):
             install.ROOT / "templates/.gemini/commands/sd/review.toml",
             install.ROOT / "templates/.github/prompts/sd-review.prompt.md",
         ]
+        # The security property is that *no* trusted-context field reaches
+        # argv, not just the two most obvious ones. Checking a subset lets a
+        # regression in `caller:` or `source-root:` through silently.
+        trusted_fields = (
+            "caller:",
+            "review-profile:",
+            "source-root:",
+            "consumer:",
+            "base-commit:",
+            "release-remote:",
+            "classified-head:",
+            "return-after:",
+            "defer-finish-work:",
+        )
         for adapter in adapters:
             with self.subTest(adapter=adapter):
                 content = adapter.read_text(encoding="utf-8")
-                self.assertNotIn("review-profile:", content)
-                self.assertNotIn("classified-head:", content)
+                for field in trusted_fields:
+                    self.assertNotIn(
+                        field,
+                        content,
+                        f"{adapter.name} exposes trusted-context field {field!r} "
+                        "as adapter text; it must stay context-only",
+                    )
 
     def test_ship_separates_publish_and_review_ownership(self) -> None:
         create_pr = self._skill_text("sd-create-pr")
