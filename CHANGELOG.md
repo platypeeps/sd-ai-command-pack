@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.71.46 - 2026-08-22
+
+### Changed
+
+- The fleet integration-only review profile now runs on `sd-review` instead of
+  `sd-review-pr`. `sd-fleet-refresh` invokes `sd-review` for its `review`
+  action with the same trusted context (`caller: sd-fleet-refresh`,
+  `return-after: review-result`, `defer-finish-work: true`), and `sd-review`
+  gained the trusted-caller contract: exact-head identity between
+  `classified-head`, the live local head, and the PR head; fail-closed
+  fallback to the normal remote profile on any non-eligible, unavailable,
+  malformed, or head-mismatched recheck; and `0` recorded remote rounds when
+  the profile is granted. The trusted context is not an argument — the
+  `key=value` enum stays closed, so a `caller=` argv token remains an unknown
+  key.
+- `sd-review` defers finish-work rather than cancelling it. Where
+  `sd-review-pr` cancels the deferral and runs finish-work itself when the PR
+  turns out to be already merged, `sd-review` returns a typed deferral
+  disposition (`deferral: cancelled`, `deferral-reason: pr-already-merged`)
+  and leaves the call to `sd-fleet-refresh`. This keeps "Do not merge, archive
+  Trellis work, or run housekeeping from this skill." absolute rather than
+  narrowing it for one trusted caller. The disposition is added to the review
+  result, not substituted for it.
+- The `Fleet Integration-Only Recheck` procedure moved from `sd-review-pr`
+  into `sd-fleet-refresh`, which owns the profile end to end. It was moved
+  rather than copied, so there is no second live copy to drift.
+  `sd-review-pr` keeps a pointer and still runs its own path.
+- `PLUGIN_CLOSURE_ALLOWLIST` and `MACHINE_CLOSURE_ALLOWLIST` are both empty.
+  Their only entries exempted `sd-review-pr`'s inlined reference to the
+  source-only `sd-ai-command-pack-fleet-review-classify.py`; the relocation
+  removed the reference, so the exemptions retired with it. The two dicts key
+  the same authored file differently (`skills/...` versus
+  `.agents/skills/...`), so both had to be cleared.
+
 ## 0.71.45 - 2026-08-21
 
 ### Fixed

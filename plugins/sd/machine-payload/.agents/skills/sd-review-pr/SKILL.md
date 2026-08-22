@@ -205,34 +205,10 @@ continuing; do not request remote review on stale remote code.
 
 ### Fleet Integration-Only Recheck
 
-When trusted `review-profile: integration-only` context is active, first
-require `classified-head`, `LOCAL_HEAD`, and `HEAD_SHA` to be identical. Then
-from `source-root`, rerun the source classifier against the consumer checkout:
-
-```bash
-SD_PACK_TOOLCHAIN=""
-for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
-  "scripts/sd-ai-command-pack-toolchain.sh" \
-  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
-  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
-done
-[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
-
-bash "$SD_PACK_TOOLCHAIN" run-python -- \
-  sd-ai-command-pack-fleet-review-classify.py \
-  --consumer <consumer> --repo <absolute consumer checkout> \
-  --base-commit <base-commit> --remote <release-remote> --json
-```
-
-Accept integration-only classification only when the command exits `0`, emits
-one valid schema-version-1 JSON object, reports `eligible: true`, and its
-consumer, repository, base commit, and head commit match the trusted context
-and live repository. Record its release tag, payload digest, changed paths,
-and installed platforms for the final report. If the trusted context was
-validly supplied but this recheck is non-eligible, unavailable, malformed, or
-head-mismatched, switch this invocation to the normal remote profile and report
-the classifier reason. Do not stop or ask merely because the safe fallback
-requires remote review.
+The recheck procedure now lives in `sd-fleet-refresh`, which owns the fleet
+integration-only profile end to end. See its `### Fleet Integration-Only
+Recheck` section. This pointer stays until the `sd-review-pr` surface is
+removed.
 
 If the PR is draft, do not mark it ready until the typed deterministic
 `sd-check` result has passed unless the user explicitly asked to mark it ready. This
