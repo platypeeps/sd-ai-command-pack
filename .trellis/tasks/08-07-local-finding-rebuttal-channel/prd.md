@@ -1,4 +1,4 @@
-# PARKED: Verified-false local review findings have no rebuttal channel
+# PARKED (criteria all met 2026-08-24; unpark on PR #536 merge): Verified-false local review findings have no rebuttal channel
 
 ## Goal
 
@@ -106,11 +106,27 @@ so the backlog read as though the rebuttal channel did not exist.
       Asserted by `tests/test_review_stage.py:510`
       `test_rebuttal_does_not_carry_to_a_different_head` and `:458`
       `test_local_disposition_rejects_an_id_matching_no_finding`.
-- [ ] A test covers the PR #353 case: a Markdown-only diff whose fenced blocks
+- [x] A test covers the PR #353 case: a Markdown-only diff whose fenced blocks
       quote source
-      — **still open.** No test in `tests/` references the fenced-block case;
-      searched for `353`, `fence`, `fenced`, zero hits. The generic rebuttal
-      tests above cover the *mechanism* but not this originating scenario.
+      — closed 2026-08-24 by
+      `tests/test_review_stage.py::test_markdown_only_diff_misread_as_source_is_clearable_by_rebuttal`,
+      with the provider fixture mode `markdown-fenced-quotes` reproducing the
+      three findings at the three fences. It asserts the scenario's premise (no
+      `.py` under review at all), that all three are rebuttable per finding,
+      that the gate opens once every one is dispositioned, and that each survives
+      **with its path, line and summary intact** — not merely as three entries.
+      A mutation that keeps ids and drops the evidence kills it.
+
+      Its sibling
+      `test_the_hallucinated_typo_from_pr_353_takes_the_miscited_ground` covers
+      the fourth finding, the `'descision'` hallucination at `prd.md:140`, on
+      the `miscited` ground that did not exist when this task was filed.
+
+      **Scope note.** What is pinned is the pack's half: findings on a diff with
+      no source file in it are dispositionable and auditable. Making the provider
+      stop reading a quoted fence as the diff's own source is not something this
+      repository can assert, and Open Question 1 above — whether to fix it at the
+      provider level — stays open.
 - [x] Open question 2 is answered in `design.md`
       — answered in the successor's design instead, since this task has no
       `design.md`:
@@ -124,7 +140,14 @@ so the backlog read as though the rebuttal channel did not exist.
 
 ### What remains here
 
-Only the PR #353 regression test. Everything else in this task is live.
+**Nothing.** All five criteria are met as of 2026-08-24; the regression test
+landed with `08-24-local-gate-advisory-severity` (PR #536), which is where the
+`miscited` ground its sibling test needs also lives. Ready to unpark and
+archive once that PR merges.
+
+Open Question 1 — fixing the fenced-code misread at the provider level — is
+**not** an acceptance criterion here and is not closed by the above. File it
+separately if it is still wanted.
 
 **The severity half of the problem is not this task's** — it moved to
 `08-24-local-gate-advisory-severity`, which carries the second failure mode
