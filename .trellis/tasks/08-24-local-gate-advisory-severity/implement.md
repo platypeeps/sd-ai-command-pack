@@ -112,7 +112,7 @@ Found by the Phase 2.2b trace, which is the only reason it was found at all.
 
 ## Phase 5 — release and consumer verification
 
-- [ ] **5.1** Cut the pack release. The candidate ledger is **already
+- [x] **5.1** Cut the pack release — **0.71.47**. The candidate ledger is **already
       refreshed**: `docs/fleet/candidate-validation.json` payloadDigest went
       stale with the shipped-surface change, and the pre-push hook — not
       `release-prep` — is what gates on it. Ran
@@ -121,6 +121,16 @@ Found by the Phase 2.2b trace, which is the only reason it was found at all.
       `platypeeps/sd-github-review` among them (19.2s, 1 preparation, 3 checks).
       So the candidate is fleet-validated ahead of the release, which is more
       than the surface check was asking for.
+
+      **Correction: the ledger is not the only release act a PR must carry.**
+      CI's `Release payload gate` failed on the first push with *"shipped
+      payload changed without manifest version bump"* — the repository requires
+      the bump in the PR that changes the payload, not at merge time. Bumped
+      0.71.46 -> 0.71.47, retitled the CHANGELOG heading to match, propagated
+      through `make generate` + `make sync`, and re-ran the fleet candidate
+      check at the new version (9 of 9 passed again). All four source-drift
+      gates now pass locally: surface closure, template twins, version and
+      changelog, candidate ledger.
 - [ ] **5.2** Refresh into `sd-github-review` and set the ceiling there.
 - [ ] **5.3** Replay the PR #70 sequence. **Blocked today**: that consumer's
       `prism` credential returns `401 invalid_api_key`, which the harness reports

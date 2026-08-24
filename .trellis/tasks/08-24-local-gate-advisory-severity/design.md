@@ -1,7 +1,7 @@
 # Design — advisory severity ceiling and the miscited disposition
 
 **Task:** `08-24-local-gate-advisory-severity`
-**Baseline:** `manifest.json` 0.71.46; `templates/scripts/sd-ai-command-pack-review-local.py`
+**Baseline:** `manifest.json` 0.71.46 (shipped as **0.71.47**); `templates/scripts/sd-ai-command-pack-review-local.py`
 (85278 bytes). All line numbers below are that file unless another is named.
 
 ---
