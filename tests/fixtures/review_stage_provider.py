@@ -64,6 +64,44 @@ elif mode == "finding-alt":
             }
         )
     )
+elif mode.startswith("severity-"):
+    # Severity-parameterised findings for the advisory-ceiling gate. The
+    # summary differs per mode so the derived stable id differs too, which
+    # keeps a receipt cached under one mode from being reused under another.
+    label = mode.removeprefix("severity-")
+    finding = {
+        "path": "src/app.py",
+        "line": 2,
+        "summary": f"{label} observation",
+        "family": "boundary-validation",
+    }
+    if label != "unspecified":
+        finding["severity"] = label
+    print(json.dumps({"status": "findings", "findings": [finding]}))
+elif mode == "mixed-severity":
+    print(
+        json.dumps(
+            {
+                "status": "findings",
+                "findings": [
+                    {
+                        "path": "src/app.py",
+                        "line": 2,
+                        "severity": "low",
+                        "summary": "mixed advisory observation",
+                        "family": "boundary-validation",
+                    },
+                    {
+                        "path": "src/app.py",
+                        "line": 3,
+                        "severity": "high",
+                        "summary": "mixed real defect",
+                        "family": "boundary-validation",
+                    },
+                ],
+            }
+        )
+    )
 elif mode == "finding-whitespace":
     print(
         json.dumps(

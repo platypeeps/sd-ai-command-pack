@@ -84,12 +84,70 @@ and with no rebuttal channel it blocks the merge.
 
 ## Acceptance Criteria
 
-- [ ] A local finding can be dispositioned `rebutted` by stable ID
-- [ ] A rebutted local finding clears the gate and stays visible in the receipt
-- [ ] The disposition is bound to the exact head and does not carry forward
+**Reconciled 2026-08-24 against the shipped code, not against PR #402's
+description.** Three of five shipped; the record had left all five unchecked,
+so the backlog read as though the rebuttal channel did not exist.
+
+- [x] A local finding can be dispositioned `rebutted` by stable ID
+      — `--local-disposition` at
+      `templates/scripts/sd-ai-command-pack-review-local.py:2237`, parsed by
+      `_parse_local_dispositions` (`:1862`), applied by
+      `_apply_local_dispositions` (`:1880`).
+- [x] A rebutted local finding clears the gate and stays visible in the receipt
+      — `_remote_gate` (`:1945`) gates on the outstanding count only; the
+      finding is dispositioned, never deleted. Asserted by
+      `tests/test_review_stage.py:423`
+      `test_rebutted_local_finding_clears_the_gate_but_stays_visible`, which
+      checks the gate opens *and* that the finding survives with
+      `disposition == "rebutted"`.
+- [x] The disposition is bound to the exact head and does not carry forward
+      — `_apply_local_dispositions` raises on an id matching no finding at the
+      current head rather than no-opping, so a stale id cannot open the gate.
+      Asserted by `tests/test_review_stage.py:510`
+      `test_rebuttal_does_not_carry_to_a_different_head` and `:458`
+      `test_local_disposition_rejects_an_id_matching_no_finding`.
 - [ ] A test covers the PR #353 case: a Markdown-only diff whose fenced blocks
       quote source
-- [ ] Open question 2 is answered in `design.md`
+      — **still open.** No test in `tests/` references the fenced-block case;
+      searched for `353`, `fence`, `fenced`, zero hits. The generic rebuttal
+      tests above cover the *mechanism* but not this originating scenario.
+- [x] Open question 2 is answered in `design.md`
+      — answered in the successor's design instead, since this task has no
+      `design.md`:
+      `08-24-local-gate-advisory-severity/design.md` §2.4. The answer is **no**.
+      The pack does not verify a citation by reading the checkout at gate time,
+      because that makes the gate depend on worktree state the receipt cannot
+      pin, and a receipt must be replayable from its own contents. Instead the
+      caller asserts `miscited` and supplies the path and line; both the
+      caller's citation and the finding's own are recorded, so the assertion is
+      auditable. Same trust posture `rebutted` already has.
+
+### What remains here
+
+Only the PR #353 regression test. Everything else in this task is live.
+
+**The severity half of the problem is not this task's** — it moved to
+`08-24-local-gate-advisory-severity`, which carries the second failure mode
+recorded below (non-convergence) plus the PR #99 miscitation evidence.
+
+### Naming trap, recorded so nobody re-derives it
+
+The shipped mechanism is **not** called `_local_outstanding`, as the section
+below states, and the trap has two halves.
+
+In `templates/scripts/sd-ai-command-pack-review-local.py` — the file that owns
+the gate — that symbol does not exist. The rebuttal gate landed as an
+`outstanding` count computed in `_redispose_receipt` and read by `_remote_gate`.
+Grepping the local stage for `_local_outstanding` reports the fix absent when it
+is present, which is exactly the mistake a downstream consumer made on
+2026-08-09.
+
+But a **repo-wide** grep does find `_local_outstanding` — in
+`templates/scripts/sd-ai-command-pack-review.py`, where it is the *controller's*
+routing gate reading the count the local stage computed. Same name, different
+file, different job. Corrected 2026-08-24; the earlier note here said the symbol
+did not exist at all, which sends the next reader looking in the right file for
+the wrong reason.
 
 ## Notes
 

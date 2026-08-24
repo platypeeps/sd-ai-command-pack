@@ -109,31 +109,66 @@ round avoidance as a side effect.
 
 ## Acceptance criteria
 
-- [ ] `policy.localAdvisorySeverityCeiling` is accepted in
+Ticked 2026-08-24 against the shipped code and a named test, not against a
+description. Test names are in `tests/test_review_stage.py`.
+
+- [x] `policy.localAdvisorySeverityCeiling` is accepted in
       `.sd-ai-command-pack/review.json` for `low` and `medium` only, rejected
       with a bounded error for `high`, for `unspecified`, and for any value
       outside the severity vocabulary, and absent by default. Note `high` and
       `unspecified` are *in* the vocabulary and still rejected — the first
       because accepting it would let a policy author lower the floor, the second
       because rank 0 is the "provider told us nothing" sentinel.
-- [ ] A finding at or below the ceiling does not block. Asserted by a test.
-- [ ] A `high` finding blocks with the ceiling set to its maximum permitted
+      — `ADVISORY_CEILING_VALUES` and the `_parse_config` policy block;
+      `test_advisory_ceiling_rejects_high_and_unspecified_and_nonsense`.
+- [x] A finding at or below the ceiling does not block. Asserted by a test.
+      — `test_advisory_ceiling_releases_a_finding_at_or_below_it`, which also
+      checks the released finding is still recorded `outstanding` rather than
+      quietly dispositioned.
+- [x] A `high` finding blocks with the ceiling set to its maximum permitted
       value — the floor is not lowerable. Asserted by a test.
-- [ ] A finding with `severity: "unspecified"` blocks with any ceiling set.
+      — `test_advisory_ceiling_does_not_release_a_high_finding`. The explicit
+      `rank >= high` floor needs a second test to pin it, because at the
+      permitted ceilings it is arithmetically redundant: see
+      `test_advisory_predicate_keeps_a_floor_a_wider_vocabulary_cannot_lower`.
+- [x] A finding with `severity: "unspecified"` blocks with any ceiling set.
       Asserted by a test.
-- [ ] `--local-disposition <id>=miscited` is accepted, requires the caller to
+      — `test_advisory_ceiling_never_releases_an_unclassified_finding`, which
+      covers the `unspecified` sentinel and an invented severity in one place,
+      since both rank 0 and both must block for the same reason.
+- [x] `--local-disposition <id>=miscited` is accepted, requires the caller to
       supply the cited path and line, and is recorded in the receipt distinctly
       from `rebutted`.
-- [ ] A `high` finding dispositioned `miscited` does not block, while a `high`
+      — `test_miscited_is_recorded_with_its_citation_and_not_as_rebutted`; the
+      grammar's rejection cases are in
+      `test_miscited_grammar_requires_a_usable_citation`.
+- [x] A `high` finding dispositioned `miscited` does not block, while a `high`
       finding with no disposition does. Asserted by one test that runs both.
-- [ ] `remoteGate` distinguishes "no findings" from "released by ceiling" from
+      — `test_miscited_releases_a_high_finding_that_otherwise_blocks`.
+- [x] `remoteGate` distinguishes "no findings" from "released by ceiling" from
       "released by disposition"; the receipt carries counters for each.
-- [ ] With no `localAdvisorySeverityCeiling` configured, every existing review
+      — `local-stage-terminal` / `local-advisory-released` /
+      `local-findings-dispositioned`, with `outstanding`, `advisory` and
+      `dispositioned` in the receipt's `disposition` block. Precedence asserted
+      by `test_disposition_reason_outranks_advisory_release`; the counters by
+      `test_one_advisory_finding_does_not_release_a_blocking_sibling`.
+- [x] With no `localAdvisorySeverityCeiling` configured, every existing review
       test passes unchanged.
-- [ ] `sd-review`'s public control list documents `--local-disposition`'s new
+      — no existing test was edited. `test_no_ceiling_blocks_on_a_low_finding`
+      pins omission explicitly, and mutation M3 (defaulting the absent ceiling
+      to `medium`) kills it.
+- [x] `sd-review`'s public control list documents `--local-disposition`'s new
       ground and the policy field.
+      — plus two corrections the same pass forced: the local-completion rule now
+      reads `remoteGate.state` instead of requiring a "clean" receipt, which
+      would have made this feature inert in exactly the topology it targets;
+      and `--attempt-id` is now documented as the optional control it is.
 - [ ] The PR #70 three-round sequence, replayed against the new gate, terminates
       without a human `review.round-extension` decision.
+      — **not met, and not inferable from the tests above.** Needs a release, a
+      consumer refresh, and working provider credentials; that consumer's prism
+      key returns `401 invalid_api_key` today, which degrades the gate to
+      `eligible-with-limitations` — a green that would prove nothing. Phase 5.
 
 ## Out of scope
 
@@ -151,7 +186,10 @@ functionality is live; reconciling that record is step 0 of this task's plan.
 Consumer evidence for both halves is `platypeeps/sd-ai-command-pack#406` and the
 consumer task `sd-github-review!08-09-review-gate-advisory-convergence`.
 
-**Note for anyone grepping**: the shipped rebuttal mechanism is *not* named
-`_local_outstanding`, as the predecessor PRD says. It landed as an `outstanding`
-count computed in `_redispose_receipt` and read by `_remote_gate`. Searching for
-the upstream symbol reports the fix absent when it is present.
+**Note for anyone grepping**: in the local stage the shipped rebuttal mechanism
+is *not* named `_local_outstanding`, as the predecessor PRD says. It landed as
+an `outstanding` count computed in `_redispose_receipt` and read by
+`_remote_gate`. Searching the local stage for the upstream symbol reports the
+fix absent when it is present. A repo-wide grep does find `_local_outstanding`,
+but in `sd-ai-command-pack-review.py`, where it is the controller's routing gate
+consuming that same count — same name, different file, different job.

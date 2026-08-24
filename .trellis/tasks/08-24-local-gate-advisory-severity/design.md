@@ -234,17 +234,74 @@ and `security` to `high` and every advisory category to `medium` or `low`, so
 `docs`/`maintainability`/`testing`/`performance`/`style` and holds the rest.
 That mapping is per-repository and must be read before adopting, not assumed.
 
-**Open risk, must be settled in Phase 2 — the confidence claim.**
-`sd-ai-command-pack-review.py:1044` computes `confidence = 90 if outcome ==
-"clean" else 0`, and the local receipt sets `confidence.granted = outcome ==
-"clean"` (`:2129`). A receipt released by the ceiling still has
-`outcome: "findings"`, so it carries **zero confidence** even though the gate
-says eligible. Whether anything downstream refuses to proceed on zero confidence
-is not established here and must be traced before Phase 2 is called done. Two
-outcomes are acceptable: nothing consumes it (record that, with the trace), or
-something does, in which case the confidence rule needs the same three-way split
-as the gate. What is not acceptable is shipping a gate that opens while the
-receipt attached to it claims no confidence, with nobody having looked.
+**Open risk — the confidence claim. SETTLED 2026-08-24, and it found a
+different defect than the one it was looking for.**
+
+The trace, on the shipped code:
+
+- The local receipt sets `confidence.granted = outcome == "clean"`
+  (`review-local.py:2308`). Its only reader is `_remote_summary` (`:2348`),
+  which copies it into the report verbatim. **Nothing branches on it.**
+- `review.py:1044` computes `confidence = 90 if outcome == "clean" else 0` into
+  the router summary. Also never read as a condition.
+- The one `confidence.get("granted") is False` test in the pack
+  (`review-learnings.py:1657`) reads `confidenceCredit` on a *planning signal* —
+  an unrelated structure that happens to share the word.
+
+So no code refuses to proceed on zero confidence, and a ceiling-released receipt
+carrying `outcome: "findings"` with zero confidence breaks nothing mechanical.
+That much matches the "nothing consumes it" branch.
+
+**But the clean/not-clean distinction does have a consumer, and it is prose.**
+`sd-review/SKILL.md` said: *"A router classified `absent` may complete locally
+only when routing is optional and the local receipt is clean."* That is the
+governing rule for exactly the topology this task targets — a consumer whose
+remote lane is `absent` by design. Under it, the gate would have said `eligible`
+and the agent still could not have completed, because the receipt is not clean.
+The feature would have shipped inert. The rule now reads `remoteGate.state`,
+and names the three eligible reasons.
+
+**Second finding from the same trace, unrelated to confidence.**
+`_router_local_summary` bucketed local finding dispositions with a terminal
+`else: raise ReviewError("local receipt finding disposition is invalid")`, and
+`miscited` was in no bucket — so a receipt carrying one is refused outright, not
+miscounted. Fixed by adding it to the `rebutted` bucket (terminal, no
+fix-commit evidence), where `resolved` already sits for the same reason.
+
+**Reachability, measured rather than assumed** — the first write-up of this
+said "any receipt carrying one", which is wrong. `_router_local_summary`
+returns `None` for `outcome not in {clean, unavailable, failed, cancelled,
+skipped}`, so an ordinary `findings` receipt never reaches the loop, and
+`_aggregate_outcome` gives `findings` precedence over every other status. The
+reachable shape is a provider that emits findings and then exits non-zero: the
+attempt's status is `failed`, the aggregate is `failed`, and the findings list
+is still non-empty. Probed across all six outcomes to confirm.
+`tests/test_review_controller.py::test_router_summary_buckets_miscited_instead_of_rejecting_the_receipt`
+pins both the bucket and the narrow reachability; reverting the bucket kills
+that test and nothing else.
+
+**Third finding, and it needed no code change — which is the problem.**
+The controller's own routing gate reads `disposition["outstanding"] != 0`
+(`_local_outstanding`, called at `:2055`). Because the ceiling removes advisory
+findings from `outstanding`, that gate now opens for a released receipt with no
+edit at all, which is the behaviour we want. But the comment beside it asserts
+"Every provider finding carries a caller disposition", which a ceiling-released
+receipt falsifies. Comment corrected; had it not been, the next reader would
+conclude the gate was still counting something it is not.
+
+*(Also: `_local_outstanding` **does** exist — in the controller. The note in
+this task and its predecessor saying the symbol does not exist was about
+`review-local.py`, where it indeed does not. Grepping the whole repo finds it
+and finds the wrong file.)*
+
+**Correction to §4's mutation contract.** M2 (`rank >= high` → `rank > high`)
+does **not** kill T4, and the claim above that "the test at T4 pins it" was
+wrong. With the accepted ceilings `low`/`medium`, a `high` finding is already
+refused by `3 <= 2`, so T4 passes with the floor deleted. Pinning it requires
+calling `_is_advisory` directly with a ceiling the config layer refuses —
+T4b, `test_advisory_predicate_keeps_a_floor_a_wider_vocabulary_cannot_lower`.
+Measured: M1 kills T6/T7 only, M2 kills T4b only, M3 kills T8 and T4b, M4 kills
+T9 only.
 
 **Risk that survives.** A provider that inflates every finding to `high` defeats
 the ceiling entirely. That is the intended failure direction — it fails closed,

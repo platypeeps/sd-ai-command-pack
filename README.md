@@ -285,8 +285,10 @@ coordinator persists
 dispatch intent before mutation, reconciles the router's durable
 `sd-github-review/receipt` Check Run, observes only the backend-declared GitHub
 channels, and binds readiness to the exact PR head. When routing is optional
-and the framework is not configured, a clean local review completes visibly as
-local-only with zero remote confidence. Explicit or required routing and
+and the framework is not configured, a local review the gate calls eligible
+completes visibly as local-only with zero remote confidence — clean, fully
+dispositioned, or released by an opt-in advisory severity ceiling the repository
+declares. Explicit or required routing and
 invalid, incompatible, unavailable, failed, or ambiguous states fail closed;
 there is no direct Copilot or custom reviewer fallback.
 

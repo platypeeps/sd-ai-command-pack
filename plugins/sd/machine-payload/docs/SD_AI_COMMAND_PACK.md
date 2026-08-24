@@ -996,6 +996,25 @@ validates the evidence and keeps the unextended limit) is granted two extra
 rounds past `roundLimit` without a `review.round-extension` decision; every
 other over-limit attempt is still refused until that decision is recorded.
 
+The optional `policy.localAdvisorySeverityCeiling` field is the repository's
+declaration of which severities are observations rather than defects. It accepts
+`low` or `medium` only. `high` is refused so a policy author cannot lower the
+blocking floor to nothing; `unspecified` is refused because rank 0 means the
+provider classified nothing, and a severity outside the vocabulary ranks 0 too,
+so a provider cannot label its way out by inventing one. Omitting the key is
+strict and is the default, and the value flows into `configurationDigest` and
+`policyDigest` like any other policy change, so adopting it changes the receipt
+identity rather than silently reinterpreting cached receipts.
+
+**Read the meaning per repository before adopting it.** The ceiling is a rank
+comparison; what a given rank *means* comes from whatever assigns severity in
+that repository — for a prism lane, `.prism/rules.json` `severityOverrides`.
+Two repositories can set `"medium"` and release entirely different categories.
+Severities merge by **maximum** across providers, so adding a provider that
+rates a finding lower cannot lower it, and a provider that rates everything
+`high` defeats the ceiling entirely. That last case fails closed, into today's
+behaviour.
+
 For PR scope the setup descriptor must be regular strict JSON, contract major
 1, checkout-free and noninteractive, support the requested route and `route`
 operation, pin an immutable `platypeeps/sd-github-review` action commit, and
@@ -1012,9 +1031,16 @@ bound GraphQL review-thread, review, conversation, and CI observation. A
 successful request alone is not review completion: the declared channel must
 materialize on the exact head.
 
-When integration is optional and the descriptor is absent, only a clean local
-receipt may complete, with `router-not-configured` and
-`zero-remote-confidence` limitations. Explicit or required routing, invalid or
+When integration is optional and the descriptor is absent, only a local receipt
+whose `remoteGate.state` is `eligible` may complete, with
+`router-not-configured` and `zero-remote-confidence` limitations. Three receipts
+qualify, and the gate reason says which: `local-stage-terminal` (nothing was
+found), `local-findings-dispositioned` (every finding was rebutted or marked
+miscited), and `local-advisory-released` (the findings that remain are at or
+below the repository's configured advisory ceiling). A released receipt is still
+`outcome: "findings"` and still carries zero confidence — the release is a
+policy decision the repository made in advance, not a claim the providers found
+nothing — so read the gate rather than the outcome. Explicit or required routing, invalid or
 incompatible setup, provider failure, malformed receipts, stale heads, and
 ambiguous dispatch fail closed. The successor never calls `sd-review-pr` or
 GitHub's reviewer API directly.
