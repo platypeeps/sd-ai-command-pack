@@ -1,4 +1,4 @@
-# PARKED (criteria all met 2026-08-24; unpark on PR #536 merge): Verified-false local review findings have no rebuttal channel
+# CLOSED (all five criteria met; PR #536 merged 2026-08-24 as 7b5262f3): Verified-false local review findings have no rebuttal channel
 
 ## Goal
 
@@ -142,8 +142,8 @@ so the backlog read as though the rebuttal channel did not exist.
 
 **Nothing.** All five criteria are met as of 2026-08-24; the regression test
 landed with `08-24-local-gate-advisory-severity` (PR #536), which is where the
-`miscited` ground its sibling test needs also lives. Ready to unpark and
-archive once that PR merges.
+`miscited` ground its sibling test needs also lives. That PR merged as
+`7b5262f3`, so this task is closed and archived.
 
 Open Question 1 — fixing the fenced-code misread at the provider level — is
 **not** an acceptance criterion here and is not closed by the above. File it
