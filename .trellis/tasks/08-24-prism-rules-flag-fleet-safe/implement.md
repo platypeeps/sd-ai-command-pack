@@ -1,5 +1,14 @@
 # Implementation — prism rules flag, made fleet-safe
 
+> **HOLD, 2026-08-24 — do not begin Phase 1.** Ten of the eleven consumer
+> repositories are being worked on by other sessions. The fleet edit touches
+> `.prism/rules.json` in each of them and must not race that work. Wait for the
+> operator's explicit go-ahead before the first edit or `task.py start`.
+>
+> The enumeration table in `prd.md` is a 2026-08-24 snapshot and will be stale
+> by the time the hold lifts. Step 1.1 already re-enumerates from the
+> filesystem; treat any difference as the table being wrong, not the scan.
+
 ## Phase 1 — fleet edit (prerequisite)
 
 Requirement 1. This lands before any pack change reaches a release.
