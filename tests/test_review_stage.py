@@ -59,6 +59,7 @@ class ReviewStageTests(InstallTestCase):
         documentation: str = "cheapest",
         metadata: str = "cheapest",
         required: list[str] | None = None,
+        ceiling: str | None = None,
     ) -> Path:
         helper = self.provider_script(root)
         log = root.parent / "provider.log"
@@ -106,6 +107,14 @@ class ReviewStageTests(InstallTestCase):
                         "documentation": documentation,
                         "metadata": metadata,
                         "requiredProviders": required or [],
+                        # Written only when asked for. Emitting it as an
+                        # explicit null would change the policy digest of every
+                        # test that does not use it.
+                        **(
+                            {"localAdvisorySeverityCeiling": ceiling}
+                            if ceiling is not None
+                            else {}
+                        ),
                     },
                 }
             )
@@ -1381,6 +1390,430 @@ class ReviewStageTests(InstallTestCase):
         dirty_report = self.report(dirty)
         self.assertEqual(dirty.returncode, 2, dirty.stdout)
         self.assertIn("clean worktree", dirty_report["diagnostic"])
+
+
+    # --- advisory severity ceiling and the miscited disposition ---------------
+
+    def test_advisory_ceiling_reaches_the_plan_and_changes_the_policy_digest(
+        self,
+    ) -> None:
+        """T1: the ceiling is carried on the plan, so it is inside policyDigest.
+
+        Asserting only that the digest changed would prove nothing -- the
+        configuration file changed too, and configurationDigest is already in
+        the plan. What is checked instead is that the ceiling is the *only*
+        added plan key, which fails if the value never reaches the plan.
+        """
+
+        strict_root = self.make_repo()
+        self.write_config(strict_root)
+        strict_plan = self.report(
+            self.run_stage(strict_root, "digest-strict", "--local", "prism")
+        )["receipt"]["plan"]
+
+        ceiling_root = self.make_repo()
+        self.write_config(ceiling_root, ceiling="medium")
+        ceiling_plan = self.report(
+            self.run_stage(ceiling_root, "digest-ceiling", "--local", "prism")
+        )["receipt"]["plan"]
+
+        self.assertNotIn("localAdvisorySeverityCeiling", strict_plan)
+        self.assertEqual(ceiling_plan["localAdvisorySeverityCeiling"], "medium")
+        self.assertEqual(
+            set(ceiling_plan) ^ set(strict_plan), {"localAdvisorySeverityCeiling"}
+        )
+        self.assertNotEqual(ceiling_plan["policyDigest"], strict_plan["policyDigest"])
+
+    def test_advisory_ceiling_rejects_high_and_unspecified_and_nonsense(self) -> None:
+        """T2, T3: the two vocabulary members that are still refused, plus junk.
+
+        ``high`` is refused because accepting it would let a policy author lower
+        the blocking floor to nothing; ``unspecified`` because rank 0 means the
+        provider classified nothing, which is the last thing a ceiling should
+        release.
+        """
+
+        for index, value in enumerate(("high", "unspecified", "nonsense", "")):
+            with self.subTest(ceiling=value):
+                root = self.make_repo()
+                self.write_config(root, ceiling=value)
+                result = self.run_stage(root, f"bad-ceiling-{index}", "--local", "prism")
+
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn(
+                    "localAdvisorySeverityCeiling", self.report(result)["diagnostic"]
+                )
+
+    def test_advisory_ceiling_does_not_release_a_high_finding(self) -> None:
+        """T4: the floor is not lowerable by the highest permitted ceiling."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"), ceiling="medium")
+
+        result = self.run_stage(root, "high-blocked", "--local", "prism")
+        receipt = self.report(result)["receipt"]
+
+        self.assertEqual(receipt["findings"][0]["severity"], "high")
+        self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["remoteGate"]["reason"], "actionable-local-findings")
+        self.assertEqual(receipt["disposition"]["outstanding"], 1)
+        self.assertEqual(receipt["disposition"]["advisory"], 0)
+
+    def test_advisory_predicate_keeps_a_floor_a_wider_vocabulary_cannot_lower(
+        self,
+    ) -> None:
+        """T4b: pins the `rank >= high` floor, which T4 cannot reach.
+
+        The floor is redundant while the accepted ceilings are `low`/`medium` --
+        `3 <= 2` already refuses a high finding. So the end-to-end test above
+        passes with the floor deleted, and only a direct call with a ceiling the
+        config layer refuses can pin it. It exists for whoever widens
+        ``ADVISORY_CEILING_VALUES`` later; delete it and that change silently
+        opens the gate on every high-severity defect.
+        """
+
+        module = self.load_module_from_path(self.SCRIPT, "sd_review_local_predicate")
+
+        self.assertFalse(module._is_advisory({"severity": "high"}, "high"))
+        self.assertTrue(module._is_advisory({"severity": "medium"}, "high"))
+        self.assertFalse(module._is_advisory({"severity": "high"}, "medium"))
+        self.assertFalse(module._is_advisory({"severity": "low"}, None))
+
+    def test_advisory_ceiling_releases_a_finding_at_or_below_it(self) -> None:
+        """T5: the case the whole task exists for."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("severity-low", "clean"), ceiling="medium")
+
+        receipt = self.report(
+            self.run_stage(root, "low-released", "--local", "prism")
+        )["receipt"]
+
+        self.assertEqual(receipt["findings"][0]["severity"], "low")
+        self.assertEqual(receipt["remoteGate"]["state"], "eligible")
+        self.assertEqual(receipt["remoteGate"]["reason"], "local-advisory-released")
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(receipt["disposition"]["advisory"], 1)
+        # Released, not deleted and not silently dispositioned: the finding is
+        # still outstanding, and the receipt still says so.
+        self.assertEqual(receipt["findings"][0]["disposition"], "outstanding")
+
+    def test_advisory_ceiling_never_releases_an_unclassified_finding(self) -> None:
+        """T6, T7: rank 0 blocks, whether it is the sentinel or an unknown word.
+
+        A provider that omits ``severity`` -- or invents one -- must not get a
+        cheaper gate than one that classifies honestly, or omission becomes the
+        escape.
+        """
+
+        for mode, expected in (
+            ("severity-unspecified", "unspecified"),
+            ("severity-bizarre", "bizarre"),
+        ):
+            with self.subTest(mode=mode):
+                root = self.make_repo()
+                self.write_config(root, modes=(mode, "clean"), ceiling="medium")
+                receipt = self.report(
+                    self.run_stage(root, "rank-zero", "--local", "prism")
+                )["receipt"]
+
+                self.assertEqual(receipt["findings"][0]["severity"], expected)
+                self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+                self.assertEqual(receipt["disposition"]["outstanding"], 1)
+                self.assertEqual(receipt["disposition"]["advisory"], 0)
+
+    def test_no_ceiling_blocks_on_a_low_finding(self) -> None:
+        """T8: omission is strict -- exactly today's behaviour."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("severity-low", "clean"))
+
+        receipt = self.report(
+            self.run_stage(root, "strict-low", "--local", "prism")
+        )["receipt"]
+
+        self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["remoteGate"]["reason"], "actionable-local-findings")
+        self.assertEqual(receipt["disposition"]["outstanding"], 1)
+        self.assertEqual(receipt["disposition"]["advisory"], 0)
+
+    def test_miscited_is_recorded_with_its_citation_and_not_as_rebutted(self) -> None:
+        """T9: the ground is distinct, and the caller's evidence is stored."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        blocked = self.report(self.run_stage(root, "miscite", "--local", "prism"))
+        identifier = blocked["receipt"]["findings"][0]["id"]
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "miscite",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=miscited@src/other.py:41",
+            )
+        )["receipt"]
+        finding = receipt["findings"][0]
+
+        self.assertEqual(finding["disposition"], "miscited")
+        self.assertEqual(
+            finding["dispositionCitation"], {"path": "src/other.py", "line": 41}
+        )
+        # Both locations survive: what the provider claimed, and what the caller
+        # checked. That is what makes the assertion auditable rather than a
+        # blanket suppression.
+        self.assertEqual(finding["path"], "src/app.py")
+        self.assertEqual(finding["line"], 2)
+        self.assertEqual(
+            receipt["disposition"]["localDispositions"], {identifier: "miscited"}
+        )
+
+    def test_miscited_releases_a_high_finding_that_otherwise_blocks(self) -> None:
+        """T10: one test, both halves -- the ground works and the gate is real."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+
+        blocked = self.report(self.run_stage(root, "high-miscite", "--local", "prism"))
+        self.assertEqual(blocked["receipt"]["remoteGate"]["state"], "blocked")
+        identifier = blocked["receipt"]["findings"][0]["id"]
+
+        cleared = self.report(
+            self.run_stage(
+                root,
+                "high-miscite",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=miscited@src/app.py:99",
+            )
+        )["receipt"]
+
+        self.assertEqual(cleared["remoteGate"]["state"], "eligible")
+        self.assertEqual(
+            cleared["remoteGate"]["reason"], "local-findings-dispositioned"
+        )
+        self.assertEqual(cleared["disposition"]["outstanding"], 0)
+        self.assertEqual(cleared["disposition"]["dispositioned"], 1)
+
+    def test_miscited_grammar_requires_a_usable_citation(self) -> None:
+        """T11, plus the `=`-in-path trap that rpartition would misreport."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        self.run_stage(root, "miscite-grammar", "--local", "prism")
+
+        cases = (
+            ("abc=miscited", "<path>:<line>"),
+            ("abc=miscited@", "<path>:<line>"),
+            ("abc=miscited@src/app.py", "<path>:<line>"),
+            ("abc=miscited@src/app.py:", "<path>:<line>"),
+            ("abc=miscited@src/app.py:zero", "<path>:<line>"),
+            # str.isdigit accepts characters int() refuses: superscript two
+            # escaped as an uncaught ValueError, and the fullwidth digits
+            # parsed silently to a line the caller never wrote.
+            ("abc=miscited@src/app.py:\u00b2", "<path>:<line>"),
+            ("abc=miscited@src/app.py:\uff11\uff12\uff13", "<path>:<line>"),
+            ("abc=miscited@src/app.py:" + "9" * 5000, "<path>:<line>"),
+            ("abc=miscited@:3", "<path>:<line>"),
+            ("abc=miscited@src/app.py:0", "line is out of range"),
+            ("abc=miscited@../secret.py:3", "unsafe or unbounded"),
+            ("abc=miscited@/etc/passwd:3", "unsafe or unbounded"),
+            ("abc=miscited@a=b.py:3", "cannot contain '='"),
+            ("abc=rebutted@src/app.py:3", "only miscited accepts a citation"),
+        )
+        for index, (token, expected) in enumerate(cases):
+            with self.subTest(token=token):
+                result = self.run_stage(
+                    root,
+                    f"miscite-bad-{index}",
+                    "--local",
+                    "prism",
+                    "--local-disposition",
+                    token,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
+                # The contract is a bounded input error, not merely a non-zero
+                # exit: a traceback is a different failure wearing the same
+                # code. run_stage merges stderr into stdout, so this sees it.
+                self.assertNotIn("Traceback", result.stdout)
+
+    def test_one_advisory_finding_does_not_release_a_blocking_sibling(self) -> None:
+        """T12: the counts are per-finding, not a whole-receipt verdict."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"), ceiling="medium")
+
+        receipt = self.report(
+            self.run_stage(root, "mixed", "--local", "prism")
+        )["receipt"]
+
+        self.assertEqual(len(receipt["findings"]), 2)
+        self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["disposition"]["outstanding"], 1)
+        self.assertEqual(receipt["disposition"]["advisory"], 1)
+
+    def test_disposition_reason_outranks_advisory_release(self) -> None:
+        """T13: report the strongest claim the receipt supports."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"), ceiling="medium")
+        blocked = self.report(self.run_stage(root, "precedence", "--local", "prism"))
+        high = next(
+            item
+            for item in blocked["receipt"]["findings"]
+            if item["severity"] == "high"
+        )
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "precedence",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{high['id']}=rebutted",
+            )
+        )["receipt"]
+
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(receipt["disposition"]["advisory"], 1)
+        self.assertEqual(receipt["disposition"]["dispositioned"], 1)
+        self.assertEqual(receipt["remoteGate"]["state"], "eligible")
+        self.assertEqual(
+            receipt["remoteGate"]["reason"], "local-findings-dispositioned"
+        )
+
+
+
+    # --- PR #353: a Markdown-only diff whose fences quote source -------------
+
+    def test_markdown_only_diff_misread_as_source_is_clearable_by_rebuttal(
+        self,
+    ) -> None:
+        """The originating case for the local rebuttal channel, as a regression.
+
+        PR #353 added four `.trellis/tasks/` artifacts and no code file at all.
+        The provider returned three findings, at the three fenced blocks where
+        the PRD *quoted* source as evidence of the defects it was filing -- it
+        read the quotations as the diff's own code and re-reported the documented
+        defects as new ones. That generalizes: every defect-filing PRD quotes the
+        defect it documents, so the whole task-filing workflow is a
+        false-positive generator under that reader.
+
+        What is pinned here is the pack's half of the problem, which is the half
+        the pack owns: findings on a diff with no source file in it are
+        rebuttable per finding, the gate opens once every one is dispositioned,
+        and each rebuttal stays in the receipt to be audited. Making the provider
+        stop misreading a fence is not something this repository can assert.
+        """
+
+        root = self.make_repo(changed_path="docs/prd.md")
+        self.write_config(root, modes=("markdown-fenced-quotes", "clean"))
+
+        blocked = self.report(self.run_stage(root, "fenced", "--local", "prism"))
+        receipt = blocked["receipt"]
+
+        # The scenario's premise: no source file is under review at all.
+        self.assertNotIn(
+            ".py", {Path(row["path"]).suffix for row in receipt["target"]["paths"]}
+        )
+        self.assertEqual(len(receipt["findings"]), 3)
+        self.assertEqual(
+            {item["path"] for item in receipt["findings"]}, {"docs/prd.md"}
+        )
+        self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["disposition"]["outstanding"], 3)
+
+        identifiers = [item["id"] for item in receipt["findings"]]
+        cleared = self.report(
+            self.run_stage(
+                root,
+                "fenced",
+                "--local",
+                "prism",
+                *[
+                    token
+                    for identifier in identifiers
+                    for token in ("--local-disposition", f"{identifier}=rebutted")
+                ],
+            )
+        )["receipt"]
+
+        self.assertEqual(cleared["remoteGate"]["state"], "eligible")
+        self.assertEqual(
+            cleared["remoteGate"]["reason"], "local-findings-dispositioned"
+        )
+        self.assertEqual(cleared["disposition"]["outstanding"], 0)
+        self.assertEqual(cleared["disposition"]["dispositioned"], 3)
+        # All three survive *as evidence*, which is more than surviving as
+        # three entries: a channel that kept the ids and dropped the location
+        # and summary would clear the gate and leave the next reader nothing to
+        # audit. Compare the full evidence rows, not the count.
+        def evidence(receipt):
+            return sorted(
+                (item["id"], item["path"], item["line"], item["summary"])
+                for item in receipt["findings"]
+            )
+
+        self.assertEqual(evidence(cleared), evidence(receipt))
+        self.assertEqual(
+            {item["disposition"] for item in cleared["findings"]}, {"rebutted"}
+        )
+        self.assertEqual(
+            cleared["disposition"]["localDispositions"],
+            {identifier: "rebutted" for identifier in identifiers},
+        )
+
+    def test_the_hallucinated_typo_from_pr_353_takes_the_miscited_ground(
+        self,
+    ) -> None:
+        """The fourth finding, and the ground that fits it better than rebuttal.
+
+        Retagging the fences to `text` cleared the three above and produced a
+        new one: *"Typographical error: 'descision' should be 'decision'"* at
+        `prd.md:140`. Line 140 read `decision`, spelled correctly, and `grep -rn
+        descision` returned nothing in the file, the PR, or the repository.
+
+        `rebutted` would clear it, but it asserts the wrong thing -- the claim is
+        not merely false, it names a location whose text does not contain what it
+        describes. That is what `miscited` is for, and the citation the caller
+        supplies is exactly the line they checked.
+        """
+
+        root = self.make_repo(changed_path="docs/prd.md")
+        self.write_config(root, modes=("markdown-hallucinated-typo", "clean"))
+
+        blocked = self.report(self.run_stage(root, "typo", "--local", "prism"))
+        finding = blocked["receipt"]["findings"][0]
+        self.assertEqual(blocked["receipt"]["remoteGate"]["state"], "blocked")
+        self.assertEqual(finding["line"], 140)
+
+        cleared = self.report(
+            self.run_stage(
+                root,
+                "typo",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{finding['id']}=miscited@docs/prd.md:140",
+            )
+        )["receipt"]
+        dispositioned = cleared["findings"][0]
+
+        self.assertEqual(cleared["remoteGate"]["state"], "eligible")
+        self.assertEqual(dispositioned["disposition"], "miscited")
+        # Provider's cited location and the caller's agree here, which is the
+        # point: the caller read that exact line and the described text is not
+        # on it. Both are recorded either way, so a reader can check.
+        self.assertEqual(
+            dispositioned["dispositionCitation"], {"path": "docs/prd.md", "line": 140}
+        )
+        self.assertEqual(dispositioned["line"], 140)
+
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ LOCAL_VALUES = frozenset({"auto", "all", "none"})
 REMOTE_VALUES = frozenset({"auto", "cheap", "deep", "copilot", "none"})
 FIX_VALUES = frozenset({"auto", "ask", "none"})
 REMOTE_DISPOSITION_VALUES = frozenset({"rebutted"})
-LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
+LOCAL_DISPOSITION_VALUES = frozenset({"rebutted", "miscited"})
 # Extra rounds granted past remoteIntegration roundLimit for an
 # evidence-backed successor-head re-entry (`--successor bookkeeping` with
 # `--bookkeeping-evidence`, under automatic local provider selection). The
@@ -188,27 +188,48 @@ def _receipt_latency(receipt: Mapping[str, Any]) -> int | None:
 
 
 def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
-    """Validate ``<stable-id>=rebutted`` pairs for the local review stage.
+    """Validate local review dispositions and return the value part verbatim.
 
-    Deliberately the same grammar and the same single accepted value as the
-    remote channel below: a caller who has verified a finding is false should
-    not have to learn two vocabularies depending on which provider raised it.
+    Two grounds: ``<stable-id>=rebutted``, and ``<stable-id>=miscited@<path>:<line>``
+    for a finding that does not describe the code at the location it names.
+    ``rebutted`` is deliberately the same grammar and value as the remote
+    channel below -- a caller who has verified a finding is false should not
+    have to learn two vocabularies depending on which provider raised it.
+
+    Only the shape is checked here. The citation is returned unparsed and
+    forwarded verbatim so this stays a pass-through; the local stage owns the
+    authoritative validation and is the single place that grammar lives.
     """
 
     dispositions: dict[str, str] = {}
     for value in values:
-        identifier, separator, disposition = value.rpartition("=")
+        identifier, separator, remainder = value.rpartition("=")
+        disposition, marker, citation = remainder.partition("@")
         if (
             not separator
             or not identifier
             or len(identifier) > 240
             or any(ord(character) < 32 for character in identifier)
             or disposition not in LOCAL_DISPOSITION_VALUES
+            or (disposition == "miscited" and not citation)
+            or (disposition != "miscited" and marker)
         ):
-            raise ReviewError("local dispositions must use <stable-id>=rebutted")
+            # rpartition splits on the LAST "=", so a citation path containing
+            # "=" is cut in the wrong place and arrives above as nonsense.
+            # Diagnose that on its own terms rather than reporting it as an
+            # unsupported disposition. Inspected only on the failure path, so a
+            # legitimate id containing "=" never reaches it.
+            _, _, tail = value.partition("=")
+            verb, tail_marker, rest = tail.partition("@")
+            if tail_marker and verb == "miscited" and "=" in rest:
+                raise ReviewError("a miscited citation path cannot contain '='")
+            raise ReviewError(
+                "local dispositions must use <stable-id>=rebutted or "
+                "<stable-id>=miscited@<path>:<line>"
+            )
         if identifier in dispositions:
             raise ReviewError("local disposition ids must be unique")
-        dispositions[identifier] = disposition
+        dispositions[identifier] = remainder
     return dispositions
 
 
@@ -838,8 +859,11 @@ def _local_outstanding(local: Mapping[str, Any]) -> int | None:
 
     Provider evidence is immutable, so a receipt whose findings are all
     rebutted keeps ``outcome == "findings"``; the caller-owned disposition
-    block is the only place a rebuttal lands. An unreadable receipt returns
-    ``None`` so callers gate as if findings were still outstanding.
+    block is the only place a rebuttal lands. The count also excludes findings
+    the local stage classified advisory under a configured
+    ``localAdvisorySeverityCeiling``, so this gate inherits that policy rather
+    than restating it. An unreadable receipt returns ``None`` so callers gate as
+    if findings were still outstanding.
     """
 
     receipt = local.get("receipt")
@@ -1033,9 +1057,12 @@ def _router_local_summary(
             unresolved += 1
         elif disposition == "fixed":
             fixed += 1
-        elif disposition in {"rebutted", "resolved"}:
-            # Router v1 has one terminal non-fix bucket; local `resolved`
-            # carries no fix-commit evidence, so it belongs with rebuttals.
+        elif disposition in {"rebutted", "resolved", "miscited"}:
+            # Router v1 has one terminal non-fix bucket; local `resolved` and
+            # `miscited` carry no fix-commit evidence, so they belong with
+            # rebuttals. Omitting `miscited` here does not merely miscount it --
+            # the else branch raises, so a receipt carrying one would be
+            # rejected outright by the router.
             rebutted += 1
         else:
             raise ReviewError("local receipt finding disposition is invalid")
@@ -2034,10 +2061,12 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 status="findings",
                 diagnostic="local review findings require disposition before remote routing",
             )
-        # Every provider finding carries a caller disposition. The receipt keeps
-        # its ``findings`` outcome because provider evidence is never rewritten,
-        # so routing reads the disposition count and the stage continues exactly
-        # as a clean one does.
+        # Nothing actionable is left outstanding: every provider finding either
+        # carries a caller disposition, or sits at or below the repository's
+        # configured advisory severity ceiling, which the local stage excludes
+        # from this count. The receipt keeps its ``findings`` outcome because
+        # provider evidence is never rewritten, so routing reads the disposition
+        # count and the stage continues exactly as a clean one does.
         local_status = "clean"
     if local_status == "blocked":
         local_diagnostic = local.get("diagnostic")

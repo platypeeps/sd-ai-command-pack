@@ -1512,6 +1512,182 @@ class ReviewControllerTests(InstallTestCase):
             {"outstanding": 0, "localDispositions": {"id-1": "rebutted"}},
         )
 
+    def test_miscited_pair_reaches_the_stage_intact_and_the_router_accepts_it(
+        self,
+    ) -> None:
+        """The citation survives the controller, and the router buckets the value.
+
+        Two failures this pins, both across the file boundary from where the
+        `miscited` ground is implemented. The controller parses each pair and
+        **re-serializes** it before forwarding, so a citation is exactly the kind
+        of thing that gets silently dropped in transit. And the router's local
+        finding loop ends in `else: raise` -- a disposition it does not know is
+        not miscounted, it is refused, so the whole receipt would be rejected.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+        pair = "id-1=miscited@src/other.py:41"
+
+        def review_args(*dispositions: str):
+            return controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "branch",
+                    "--remote",
+                    "none",
+                    "--artifact-root",
+                    str(artifacts),
+                    "--json",
+                    *[
+                        item
+                        for value in dispositions
+                        for item in ("--local-disposition", value)
+                    ],
+                ]
+            )
+
+        captured: list[list[str]] = []
+
+        def json_process(command, **_kwargs):
+            captured.append(command)
+            if Path(command[1]).name.endswith("check.py"):
+                return 0, {"schemaVersion": 1, "status": "passed"}
+            miscited = pair in command
+            return 0, {
+                "schemaVersion": 1,
+                "outcome": "findings",
+                "status": "findings",
+                "receipt": {
+                    "schemaVersion": 1,
+                    "receiptId": "local-receipt",
+                    "target": {"head": head, "contentDigest": "1" * 64},
+                    "plan": {
+                        "configurationDigest": "2" * 64,
+                        "policyId": "first-substantive-head",
+                    },
+                    "outcome": "findings",
+                    "attempts": [
+                        {
+                            "provider": {
+                                "id": "prism",
+                                "costTier": "low",
+                                "qualityTier": "standard",
+                            },
+                            "durationMs": 12,
+                        }
+                    ],
+                    "findings": [
+                        {
+                            "id": "id-1",
+                            "disposition": "miscited" if miscited else "outstanding",
+                        }
+                    ],
+                    "disposition": {
+                        "outstanding": 0 if miscited else 1,
+                        "localDispositions": {"id-1": "miscited"} if miscited else {},
+                    },
+                },
+            }
+
+        with mock.patch.object(
+            controller,
+            "_json_process",
+            side_effect=json_process,
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            first_code, _ = controller.run(review_args())
+            second_code, second_report = controller.run(review_args(pair))
+
+        self.assertEqual(first_code, 1)
+        self.assertEqual((second_code, second_report["status"]), (0, "ready"))
+        stage_commands = [
+            command
+            for command in captured
+            if Path(command[1]).name.endswith("review-local.py")
+        ]
+        # Verbatim, citation included -- not "id-1=miscited" with the evidence
+        # dropped on the way through.
+        self.assertIn(pair, stage_commands[1])
+
+    def test_router_summary_buckets_miscited_instead_of_rejecting_the_receipt(
+        self,
+    ) -> None:
+        """`_router_local_summary`'s disposition loop ends in `else: raise`.
+
+        A disposition it does not know is not miscounted, it is refused -- the
+        whole receipt is rejected. Reachability is narrow but real: the loop is
+        skipped for `outcome: "findings"`, so an ordinary findings receipt never
+        gets there, but a provider that emits findings and then exits non-zero
+        produces a `failed` receipt that still lists them, and that shape does
+        reach it. `miscited` belongs in the `rebutted` bucket for the same
+        reason `resolved` does: terminal, with no fix-commit evidence.
+        """
+
+        controller = self.load_controller()
+        head = "a" * 40
+
+        def report(outcome: str, disposition: str) -> dict:
+            return {
+                "receipt": {
+                    "receiptId": "local-receipt",
+                    "target": {"head": head, "contentDigest": "1" * 64},
+                    "plan": {
+                        "configurationDigest": "2" * 64,
+                        "policyId": "first-substantive-head",
+                    },
+                    "outcome": outcome,
+                    "attempts": [
+                        {
+                            "provider": {
+                                "id": "prism",
+                                "costTier": "low",
+                                "qualityTier": "standard",
+                            },
+                            "durationMs": 12,
+                        }
+                    ],
+                    "findings": [{"id": "id-1", "disposition": disposition}],
+                }
+            }
+
+        def summarize(outcome: str, disposition: str):
+            return controller._router_local_summary(
+                report(outcome, disposition),
+                repository={"owner": "platypeeps", "name": "sd-github-review"},
+                pr_number=1,
+                head=head,
+            )
+
+        for outcome in ("failed", "unavailable", "cancelled", "skipped"):
+            with self.subTest(outcome=outcome):
+                self.assertEqual(
+                    summarize(outcome, "miscited")["dispositionCounts"],
+                    {"total": 1, "unresolved": 0, "fixed": 0, "rebutted": 1},
+                )
+        # The narrow reachability itself, so a future change that starts
+        # summarizing findings receipts does not pass this file silently.
+        self.assertIsNone(summarize("findings", "miscited"))
+
+    def test_controller_rejects_a_malformed_miscited_pair_before_the_stage(
+        self,
+    ) -> None:
+        controller = self.load_controller()
+
+        for token, expected in (
+            ("id-1=miscited", "<path>:<line>"),
+            ("id-1=miscited@a=b.py:3", "cannot contain '='"),
+            ("id-1=rebutted@src/app.py:3", "<stable-id>=rebutted or"),
+            ("id-1=dismissed", "<stable-id>=rebutted or"),
+        ):
+            with self.subTest(token=token):
+                with self.assertRaises(controller.ReviewError) as caught:
+                    controller._parse_local_dispositions([token])
+                self.assertIn(expected, str(caught.exception))
+
     def branch_review_args(self, controller, root: Path, artifacts: Path, *extra: str):
         """A repeatable `scope=branch` invocation against one attempt.
 

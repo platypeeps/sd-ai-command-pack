@@ -1020,8 +1020,10 @@ Correct: consume the typed sd-check result and configure argv-only project rows
   outstanding findings, or indeterminate state blocks remote routing.
 - Discover routing from strict repository policy, a regular non-symlink v1
   descriptor, and matching live workflow metadata. Optional absence may finish
-  only after a clean local receipt; explicit/required, invalid, incompatible,
-  unavailable, or ambiguous routing fails closed.
+  only after a local receipt whose `remoteGate.state` is `eligible` — clean,
+  fully dispositioned, or released by the repository's advisory severity
+  ceiling; explicit/required, invalid, incompatible, unavailable, or ambiguous
+  routing fails closed.
 - Persist request intent before one argv-array `gh workflow run`. Query the
   durable receipt before dispatch and reconcile an uncertain outcome from the
   same logical dispatch ID. Never request Copilot directly, execute receipt
@@ -1053,8 +1055,10 @@ Correct: consume the typed sd-check result and configure argv-only project rows
   routes one canonical request, observes a matching durable receipt and
   exact-head declared channels, then becomes ready.
 - Base: a branch without a PR runs deterministic and local review only; a PR in
-  optional router-absent mode completes only from a clean local receipt and
-  reports zero remote confidence.
+  optional router-absent mode completes only from a local receipt the gate calls
+  `eligible` and reports zero remote confidence. Read the gate, not the outcome:
+  a receipt released by disposition or by ceiling is still `outcome: "findings"`
+  and still reports zero confidence, deliberately.
 - Bad: a successful reviewer-request API call is treated as completed review,
   an unavailable local provider is hidden by remote routing, or uncertain
   dispatch is retried directly.

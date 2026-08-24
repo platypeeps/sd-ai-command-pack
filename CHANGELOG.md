@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.71.47 - 2026-08-24
+
+### Added
+
+- The local review gate can release advisory findings by severity. A repository
+  may set `"policy": {"localAdvisorySeverityCeiling": "low" | "medium"}` in
+  `.sd-ai-command-pack/review.json`; an outstanding local finding at or below
+  that severity no longer blocks `remoteGate`, which reports
+  `local-advisory-released`. **Omitting the key is strict and is the default**,
+  so adoption is opt-in per repository and every existing consumer keeps
+  byte-identical behaviour until it opts in. Rollback is deleting the key — no
+  pack downgrade, no reinstall.
+
+  `high` and `unspecified` are refused at parse time even though both are
+  members of the severity vocabulary: accepting `high` would let a policy
+  author lower the blocking floor to nothing, and `unspecified` (rank 0) means
+  the provider classified nothing, which is the last thing a ceiling should
+  release. A severity outside the vocabulary also ranks 0 and stays blocking,
+  so a provider cannot label its way out by inventing one.
+
+  This exists because per-finding rebuttal alone does not converge. Across nine
+  measured rounds on two consumers, successive provider invocations returned
+  almost entirely disjoint observation sets — rounds 1 and 2 of one PR shared no
+  finding at all — so rebutting a round's findings only produces a different
+  round. The loop is unbounded in rounds, not in findings per round.
+
+- `--local-disposition '<stable-id>=miscited@<path>:<line>'` dispositions a
+  finding that does not describe the code at the location it names. Distinct
+  from `rebutted`, which asserts the finding is false, and from a finding that
+  is real but low severity. The citation is required and is the caller's own
+  evidence; both it and the provider's cited location are kept in the receipt,
+  so the assertion is auditable. The pack does not read the checkout to confirm
+  it — a receipt has to be replayable from its own contents — which is the same
+  trust posture `rebutted` already has. A citation path may not contain `=`.
+
+### Changed
+
+- `remoteGate` now distinguishes why it opened: `local-stage-terminal` (nothing
+  was found), `local-findings-dispositioned` (rebutted or miscited), and
+  `local-advisory-released` (ceiling). The strongest claim the receipt supports
+  wins, so a reader is never told "clean" about a receipt that was released.
+  The receipt's `disposition` block carries `advisory` and `dispositioned`
+  counters alongside `outstanding`.
+- `sd-review`'s local-completion rule now reads `remoteGate.state`, not the
+  outcome. A released receipt is still `outcome: "findings"` and still carries
+  zero confidence — deliberately, since the release is a policy decision made
+  in advance rather than a claim that nothing was found — so a rule keyed on
+  "clean" would have refused exactly the case the ceiling exists to allow.
+
 ## 0.71.46 - 2026-08-22
 
 ### Changed

@@ -19,7 +19,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Mapping, MutableMapping, Sequence, overload
+from typing import (
+    Any,
+    Literal,
+    Mapping,
+    MutableMapping,
+    NoReturn,
+    Sequence,
+    overload,
+)
 from urllib.parse import urlsplit
 
 from sd_ai_command_pack_lib import (
@@ -40,6 +48,10 @@ MAX_ARGV = 64
 MAX_ARG_LENGTH = 4096
 MAX_EXPANDED_ARGV_BYTES = 128 * 1024
 MAX_FINDINGS = 1_000
+# A caller-supplied miscitation line is bounded so a receipt cannot record an
+# arbitrarily large integer for a location nobody can reach in a real file.
+MAX_CITATION_LINE = 10_000_000
+ASCII_DIGITS = frozenset("0123456789")
 MAX_FAMILY_AUDITS = 32
 MAX_FAMILY_EXTENSIONS = 32
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
@@ -69,12 +81,14 @@ TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
 FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
 FINDING_FAMILY_IDS = REVIEW_FINDING_FAMILY_IDS
 FINDING_DISPOSITIONS = frozenset(
-    {"outstanding", "fix", "fixed", "rebutted", "resolved"}
+    {"outstanding", "fix", "fixed", "rebutted", "resolved", "miscited"}
 )
-# The caller-supplied disposition vocabulary, deliberately the same single
-# value the remote channel accepts. Rebutting records a verified judgement
-# that a reported finding is not real; it never deletes the finding.
-LOCAL_DISPOSITION_VALUES = frozenset({"rebutted"})
+# The caller-supplied disposition vocabulary. ``rebutted`` records a verified
+# judgement that a reported finding is not real; ``miscited`` records that the
+# finding may describe something real but does not describe the code at the
+# location it names, and so carries a citation the caller checked. Neither ever
+# deletes the finding.
+LOCAL_DISPOSITION_VALUES = frozenset({"rebutted", "miscited"})
 FAMILY_AUDIT_DIMENSIONS = {
     "task-metadata": (
         "identity-fields",
@@ -152,8 +166,14 @@ POLICY_KEYS = frozenset(
         "documentation",
         "metadata",
         "requiredProviders",
+        "localAdvisorySeverityCeiling",
     }
 )
+# Severities a repository may declare advisory. Deliberately excludes "high"
+# -- accepting it would let a policy author lower the blocking floor to
+# nothing -- and "unspecified", whose rank 0 means the provider told us
+# nothing, which is the last classification that should open a gate.
+ADVISORY_CEILING_VALUES = ("low", "medium")
 REMOTE_INTEGRATION_KEYS = frozenset(
     {
         "requirement",
@@ -523,6 +543,12 @@ def load_config(
     if unknown:
         raise ReviewInputError(
             f"policy requiredProviders contains unknown provider {unknown[0]}"
+        )
+    ceiling = policy.get("localAdvisorySeverityCeiling")
+    if ceiling is not None and ceiling not in ADVISORY_CEILING_VALUES:
+        raise ReviewInputError(
+            "policy localAdvisorySeverityCeiling must be "
+            + " or ".join(ADVISORY_CEILING_VALUES)
         )
     normalized_policy = {
         **policy,
@@ -1306,6 +1332,14 @@ def build_plan(
         "fixPolicy": fix_policy,
         "configurationDigest": configuration_digest,
     }
+    # Carried on the plan only when configured, never as an explicit null. The
+    # plan is digested into policyDigest and policyDigest into the receipt
+    # identity, so emitting the key unconditionally would change every existing
+    # repository's digests to record that it had not opted in -- invalidating
+    # cached receipts fleet-wide for a feature nobody turned on.
+    ceiling = policy.get("localAdvisorySeverityCeiling")
+    if ceiling is not None:
+        plan["localAdvisorySeverityCeiling"] = ceiling
     plan["policyDigest"] = _digest(plan)
     return plan
 
@@ -1859,10 +1893,23 @@ def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
     return "failed"
 
 
-def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
-    dispositions: dict[str, str] = {}
+def _parse_local_dispositions(values: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """Parse ``<stable-id>=rebutted`` and ``<stable-id>=miscited@<path>:<line>``.
+
+    ``miscited`` carries an evidence obligation ``rebutted`` does not: the
+    caller states where they looked. The pack records that citation beside the
+    finding's own and never verifies it by reading the checkout -- doing so
+    would make the gate depend on worktree state the receipt cannot pin, and a
+    receipt has to be replayable from its own contents.
+    """
+
+    dispositions: dict[str, dict[str, Any]] = {}
     for value in values:
-        identifier, separator, disposition = value.rpartition("=")
+        # rpartition splits on the LAST "=" so that an id containing "=" keeps
+        # parsing exactly as it does today. The citation therefore rides inside
+        # the value, and the id grammar below is unchanged.
+        identifier, separator, remainder = value.rpartition("=")
+        disposition, marker, citation = remainder.partition("@")
         if (
             not separator
             or not identifier
@@ -1870,22 +1917,87 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
             or any(ord(character) < 32 for character in identifier)
             or disposition not in LOCAL_DISPOSITION_VALUES
         ):
-            raise ReviewInputError("local dispositions must use <stable-id>=rebutted")
+            _reject_local_disposition(value)
+        if disposition == "miscited":
+            if not marker:
+                raise ReviewInputError(
+                    "miscited requires a citation as <path>:<line>"
+                )
+            record = _parse_miscited_citation(citation)
+        elif marker:
+            raise ReviewInputError("only miscited accepts a citation")
+        else:
+            record = {"disposition": disposition}
         if identifier in dispositions:
             raise ReviewInputError("local disposition ids must be unique")
-        dispositions[identifier] = disposition
+        dispositions[identifier] = record
     return dispositions
+
+
+def _reject_local_disposition(value: str) -> NoReturn:
+    """Raise for an unparseable ``--local-disposition``, diagnosing the `=` trap.
+
+    A citation path containing "=" is cut in the wrong place by the rpartition
+    above, so it arrives at the vocabulary check as nonsense and would otherwise
+    be reported as an unsupported disposition. The value is only inspected here,
+    on the failure path, so a legitimate id containing "=" never reaches it.
+    """
+
+    _, _, tail = value.partition("=")
+    verb, marker, rest = tail.partition("@")
+    if marker and verb == "miscited" and "=" in rest:
+        raise ReviewInputError("a miscited citation path cannot contain '='")
+    raise ReviewInputError(
+        "local dispositions must use <stable-id>=rebutted or "
+        "<stable-id>=miscited@<path>:<line>"
+    )
+
+
+def _parse_miscited_citation(citation: str) -> dict[str, Any]:
+    """Split ``<path>:<line>`` into the record stored beside the finding."""
+
+    path, colon, line = citation.rpartition(":")
+    # ASCII digits only. ``str.isdigit`` is true for characters ``int`` refuses
+    # -- "\u00b2" among them -- so accepting its whole class hands the bounded
+    # ReviewInputError contract to an uncaught ValueError from ``int`` below.
+    if (
+        not colon
+        or not path
+        or not line
+        # CPython refuses int() on more than 4300 digits with a plain
+        # ValueError, so the length bound is part of the contract too.
+        or len(line) > len(str(MAX_CITATION_LINE))
+        or not set(line) <= ASCII_DIGITS
+    ):
+        raise ReviewInputError("miscited requires a citation as <path>:<line>")
+    if (
+        len(path) > 500
+        or PurePosixPath(path).is_absolute()
+        or ".." in PurePosixPath(path).parts
+        or any(ord(character) < 32 for character in path)
+    ):
+        raise ReviewInputError("miscited citation path is unsafe or unbounded")
+    number = int(line)
+    if not 0 < number <= MAX_CITATION_LINE:
+        raise ReviewInputError("miscited citation line is out of range")
+    return {"disposition": "miscited", "path": str(PurePosixPath(path)), "line": number}
 
 
 def _apply_local_dispositions(
     findings: Sequence[MutableMapping[str, Any]],
-    dispositions: Mapping[str, str],
+    dispositions: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, str]:
-    """Record caller rebuttals against findings already present in the receipt.
+    """Record caller dispositions against findings already present in the receipt.
 
     An id that matches no finding is an error rather than a no-op: it is almost
     always a stale id copied from an earlier head, and silently accepting it
     would open the gate for a finding nobody actually reviewed.
+
+    The value written to ``disposition`` is the bare vocabulary member, never
+    the raw argument: ``FINDING_DISPOSITIONS`` is validated elsewhere, so
+    storing ``miscited@path:3`` there would produce a receipt that fails its own
+    check. A miscitation's evidence goes in its own field, beside the location
+    the provider claimed, so a reader can compare the two.
     """
 
     if not dispositions:
@@ -1898,15 +2010,22 @@ def _apply_local_dispositions(
             + ", ".join(unknown[:8])
         )
     applied: dict[str, str] = {}
-    for identifier, disposition in dispositions.items():
-        known[identifier]["disposition"] = disposition
+    for identifier, record in dispositions.items():
+        disposition = str(record["disposition"])
+        finding = known[identifier]
+        finding["disposition"] = disposition
+        if disposition == "miscited":
+            finding["dispositionCitation"] = {
+                "path": record["path"],
+                "line": record["line"],
+            }
         applied[identifier] = disposition
     return applied
 
 
 def _redispose_receipt(
     receipt: MutableMapping[str, Any],
-    dispositions: Mapping[str, str],
+    dispositions: Mapping[str, Mapping[str, Any]],
     local_policy: str,
 ) -> None:
     """Apply rebuttals to a stored receipt and recompute what they affect.
@@ -1919,19 +2038,22 @@ def _redispose_receipt(
     if not isinstance(findings, list):
         raise ReviewInputError("stored local review receipt has no findings list")
     applied = _apply_local_dispositions(findings, dispositions)
-    outstanding = sum(
-        1
-        for item in findings
-        if isinstance(item, Mapping) and item.get("disposition") == "outstanding"
+    plan = receipt.get("plan")
+    ceiling = (
+        plan.get("localAdvisorySeverityCeiling")
+        if isinstance(plan, Mapping)
+        else None
     )
+    outstanding, advisory, dispositioned = _disposition_counts(findings, ceiling)
     disposition = receipt.get("disposition")
     if not isinstance(disposition, dict):
         raise ReviewInputError("stored local review receipt has no disposition block")
     disposition["outstanding"] = outstanding
+    disposition["advisory"] = advisory
+    disposition["dispositioned"] = dispositioned
     recorded = dict(disposition.get("localDispositions") or {})
     recorded.update(applied)
     disposition["localDispositions"] = recorded
-    plan = receipt.get("plan")
     family_gate = plan.get("familyGate", {}) if isinstance(plan, Mapping) else {}
     receipt["remoteGate"] = _remote_gate(
         str(receipt.get("outcome")),
@@ -1939,7 +2061,61 @@ def _redispose_receipt(
         local_policy,
         family_gate,
         findings_present=bool(findings),
+        advisory=advisory,
+        dispositioned=dispositioned,
     )
+
+
+def _is_advisory(finding: Mapping[str, Any], ceiling: str | None) -> bool:
+    """Is this finding advisory under the repository's configured ceiling?
+
+    The provider supplies a key; policy supplies the meaning. ``severity`` is
+    only ever a lookup key into a classification the reviewed repository owns,
+    never a decision in itself -- otherwise a provider could open the gate by
+    labelling its own finding ``low``.
+    """
+
+    if ceiling is None:
+        return False
+    severity = str(finding.get("severity") or "unspecified")
+    rank = FINDING_SEVERITY_RANK.get(severity, 0)
+    # Rank 0 is "unspecified" and anything outside the vocabulary. A provider
+    # that omits or garbles its classification gets the strict gate, so
+    # omission is never an escape.
+    if rank == 0:
+        return False
+    # The floor no policy can lower. Redundant while ADVISORY_CEILING_VALUES
+    # stops at "medium", and deliberately kept so that widening that tuple
+    # later cannot silently make "high" releasable.
+    if rank >= FINDING_SEVERITY_RANK["high"]:
+        return False
+    return rank <= FINDING_SEVERITY_RANK[ceiling]
+
+
+def _disposition_counts(
+    findings: Sequence[Mapping[str, Any]],
+    ceiling: str | None,
+) -> tuple[int, int, int]:
+    """Split findings into (blocking, advisory, dispositioned).
+
+    ``blocking`` keeps the exact meaning the old single ``outstanding`` count
+    had whenever no ceiling is configured, which is what makes "absent means
+    today's behaviour" checkable by running the existing suite unchanged.
+    """
+
+    blocking = advisory = dispositioned = 0
+    for item in findings:
+        if not isinstance(item, Mapping):
+            continue
+        disposition = item.get("disposition")
+        if disposition in LOCAL_DISPOSITION_VALUES:
+            dispositioned += 1
+        elif disposition == "outstanding":
+            if _is_advisory(item, ceiling):
+                advisory += 1
+            else:
+                blocking += 1
+    return blocking, advisory, dispositioned
 
 
 def _remote_gate(
@@ -1949,10 +2125,14 @@ def _remote_gate(
     family_gate: Mapping[str, Any],
     *,
     findings_present: bool = True,
+    advisory: int = 0,
+    dispositioned: int = 0,
 ) -> dict[str, Any]:
     # A provider that reports ``findings`` but lists none has given evidence
-    # nobody can inspect or rebut, so it still blocks. Otherwise the count of
-    # findings left outstanding is what decides: rebutted ones do not gate.
+    # nobody can inspect, rebut, or classify by severity, so it still blocks --
+    # and it blocks ahead of every release path below. Otherwise the count of
+    # findings left outstanding is what decides: rebutted ones do not gate, and
+    # neither do ones the repository's policy classifies as advisory.
     if outstanding or (outcome == "findings" and not findings_present):
         return {"state": "blocked", "reason": "actionable-local-findings"}
     family_state = family_gate.get("state")
@@ -1967,6 +2147,12 @@ def _remote_gate(
             if local_policy == "required"
             else "local-review-limited",
         }
+    # Report the strongest claim the receipt actually supports, so a reader is
+    # never told "clean" about a receipt that was released rather than empty.
+    if dispositioned:
+        return {"state": "eligible", "reason": "local-findings-dispositioned"}
+    if advisory:
+        return {"state": "eligible", "reason": "local-advisory-released"}
     return {"state": "eligible", "reason": "local-stage-terminal"}
 
 
@@ -2010,7 +2196,7 @@ def execute(
     local_policy: str,
     fix_policy: str,
     allow_reuse: bool,
-    dispositions: Mapping[str, str] | None = None,
+    dispositions: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     supplied = dict(dispositions or {})
     identity = _receipt_identity(target, plan)
@@ -2097,7 +2283,8 @@ def execute(
     attempts.sort(key=lambda item: str(item["provider"]["id"]))
     findings = _normalize_findings(attempts)
     applied = _apply_local_dispositions(findings, supplied)
-    outstanding = sum(1 for item in findings if item["disposition"] == "outstanding")
+    ceiling = plan.get("localAdvisorySeverityCeiling")
+    outstanding, advisory, dispositioned = _disposition_counts(findings, ceiling)
     outcome = _aggregate_outcome(attempts)
     limitations = [
         f"{item['provider']['id']}:{item['status']}"
@@ -2115,6 +2302,8 @@ def execute(
         "findings": findings,
         "disposition": {
             "outstanding": outstanding,
+            "advisory": advisory,
+            "dispositioned": dispositioned,
             "fixPolicy": fix_policy,
             "maximumFixCommitsBeforeRemote": 1,
             "localDispositions": applied,
@@ -2125,6 +2314,8 @@ def execute(
             local_policy,
             plan["familyGate"],
             findings_present=bool(findings),
+            advisory=advisory,
+            dispositioned=dispositioned,
         ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),

@@ -64,6 +64,88 @@ elif mode == "finding-alt":
             }
         )
     )
+elif mode.startswith("severity-"):
+    # Severity-parameterised findings for the advisory-ceiling gate. The
+    # summary differs per mode so the derived stable id differs too, which
+    # keeps a receipt cached under one mode from being reused under another.
+    label = mode.removeprefix("severity-")
+    finding = {
+        "path": "src/app.py",
+        "line": 2,
+        "summary": f"{label} observation",
+        "family": "boundary-validation",
+    }
+    if label != "unspecified":
+        finding["severity"] = label
+    print(json.dumps({"status": "findings", "findings": [finding]}))
+elif mode == "markdown-fenced-quotes":
+    # PR #353: a Markdown-only diff whose fenced blocks quote source. The
+    # provider read the quotations as the diff's own code and re-reported the
+    # very defects the document was filing. Three findings, at the three fences.
+    print(
+        json.dumps(
+            {
+                "status": "findings",
+                "findings": [
+                    {
+                        "path": "docs/prd.md",
+                        "line": line,
+                        "severity": "high",
+                        "summary": summary,
+                        "family": "boundary-validation",
+                    }
+                    for line, summary in (
+                        (21, "session id is not validated before use"),
+                        (54, "duplicate entry is appended without a check"),
+                        (94, "journal write is not atomic"),
+                    )
+                ],
+            }
+        )
+    )
+elif mode == "markdown-hallucinated-typo":
+    # PR #353 again, after the fences were retagged to `text`: a fourth finding
+    # citing a misspelling that is not at the cited line, or anywhere else.
+    print(
+        json.dumps(
+            {
+                "status": "findings",
+                "findings": [
+                    {
+                        "path": "docs/prd.md",
+                        "line": 140,
+                        "severity": "low",
+                        "summary": "Typographical error: 'descision' should be 'decision'",
+                        "family": "contract-documentation-drift",
+                    }
+                ],
+            }
+        )
+    )
+elif mode == "mixed-severity":
+    print(
+        json.dumps(
+            {
+                "status": "findings",
+                "findings": [
+                    {
+                        "path": "src/app.py",
+                        "line": 2,
+                        "severity": "low",
+                        "summary": "mixed advisory observation",
+                        "family": "boundary-validation",
+                    },
+                    {
+                        "path": "src/app.py",
+                        "line": 3,
+                        "severity": "high",
+                        "summary": "mixed real defect",
+                        "family": "boundary-validation",
+                    },
+                ],
+            }
+        )
+    )
 elif mode == "finding-whitespace":
     print(
         json.dumps(

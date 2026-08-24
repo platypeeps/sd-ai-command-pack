@@ -125,9 +125,17 @@ A profile that fell back to `remote` for any reason does not suppress anything.
 - PR scope requires a clean tree and exact local/remote head agreement. Commit
   and push only verified review fixes that belong to the current PR.
 - A router classified `absent` may complete locally only when routing is
-  optional and the local receipt is clean. `required`, explicit remote intents,
-  invalid, incompatible, unavailable, failed, or uncertain dispatch states fail
-  closed. Never use a direct reviewer fallback.
+  optional and the local stage's `remoteGate.state` is `eligible`. That covers
+  a clean receipt (`local-stage-terminal`), one whose findings were all
+  dispositioned (`local-findings-dispositioned`), and one whose remaining
+  findings are all at or below a configured advisory ceiling
+  (`local-advisory-released`). Read the gate, not the outcome: a released
+  receipt is still `outcome: "findings"` and still carries zero confidence, by
+  design — the release is a policy decision the repository made in advance, not
+  a claim that nothing was found. `eligible-with-limitations` is not eligible
+  here. `required`, explicit remote intents, invalid, incompatible,
+  unavailable, failed, or uncertain dispatch states fail closed. Never use a
+  direct reviewer fallback.
 - Unavailable, failed, cancelled, skipped, malformed, stale, or
   reconciliation-required evidence grants no positive confidence.
 - The user grants standing permission to reply to and resolve a review thread
@@ -161,7 +169,13 @@ bash "$SD_PACK_TOOLCHAIN" run-python -- \
 ```
 
 Add `--pr-number <number>` only for a validated `pr=` control. Preserve the
-same controls and attempt while resuming an unchanged head. The controller's
+same controls and attempt while resuming an unchanged head.
+
+`--attempt-id <safe-id>` is optional and is normally left off: omitted, the
+controller derives one from the target identity, so the same target resumes the
+same attempt without you tracking a name. Supply it only when two attempts
+against one identity must stay separate. The prose below refers to it because
+changing it is the mistake to avoid, not because it is a routine control. The controller's
 private state and durable receipt make a resume idempotent; do not delete state
 or increment the attempt merely because a receipt is delayed.
 
@@ -202,10 +216,38 @@ and the pair applies to one attempt at one head; a later head needs its own
 deliberate rebuttal. An id matching no finding at that head is an error, not a
 silent no-op.
 
-Two provider misreads are common enough to name, and both are rebuttals rather
-than fixes: fenced code blocks quoted inside a Markdown document read as if they
-were the diff's own source, and a cited defect that is simply not present at the
-cited line. Verify against the checkout either way.
+A finding that describes something real but not at the location it names takes
+the second ground instead:
+
+```text
+--local-disposition '<stable-id>=miscited@<path>:<line>'
+```
+
+The citation is required, and it is your evidence, not the provider's: name the
+path and line you actually read. Both locations are kept in the receipt — what
+the provider claimed and what you checked — so the assertion stays auditable.
+The pack does not open the checkout to confirm it; a receipt has to be
+replayable from its own contents, so this carries the same trust posture as a
+rebuttal and the same obligation to have looked. A citation path may not
+contain `=`.
+
+Two provider misreads are common enough to name, and neither is a fix: fenced
+code blocks quoted inside a Markdown document read as if they were the diff's
+own source — that is a rebuttal — and a cited defect that is simply not present
+at the cited line, which is `miscited`. Verify against the checkout either way.
+
+A repository may also declare a severity at or below which a still-outstanding
+local finding does not block, in `.sd-ai-command-pack/review.json`:
+
+```jsonc
+"policy": { "localAdvisorySeverityCeiling": "medium" }
+```
+
+Only `low` and `medium` are accepted. `high` is refused so a policy author
+cannot lower the blocking floor to nothing, and `unspecified` is refused because
+it means the provider classified nothing. Omitting the key is strict and is the
+default. Released findings are reported, not deleted, and still deserve reading;
+what changes is that they no longer force another round.
 
 ## Interpret the typed result
 
