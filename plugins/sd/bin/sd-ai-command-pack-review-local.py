@@ -51,6 +51,7 @@ MAX_FINDINGS = 1_000
 # A caller-supplied miscitation line is bounded so a receipt cannot record an
 # arbitrarily large integer for a location nobody can reach in a real file.
 MAX_CITATION_LINE = 10_000_000
+ASCII_DIGITS = frozenset("0123456789")
 MAX_FAMILY_AUDITS = 32
 MAX_FAMILY_EXTENSIONS = 32
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
@@ -1956,7 +1957,18 @@ def _parse_miscited_citation(citation: str) -> dict[str, Any]:
     """Split ``<path>:<line>`` into the record stored beside the finding."""
 
     path, colon, line = citation.rpartition(":")
-    if not colon or not path or not line.isdigit():
+    # ASCII digits only. ``str.isdigit`` is true for characters ``int`` refuses
+    # -- "\u00b2" among them -- so accepting its whole class hands the bounded
+    # ReviewInputError contract to an uncaught ValueError from ``int`` below.
+    if (
+        not colon
+        or not path
+        or not line
+        # CPython refuses int() on more than 4300 digits with a plain
+        # ValueError, so the length bound is part of the contract too.
+        or len(line) > len(str(MAX_CITATION_LINE))
+        or not set(line) <= ASCII_DIGITS
+    ):
         raise ReviewInputError("miscited requires a citation as <path>:<line>")
     if (
         len(path) > 500

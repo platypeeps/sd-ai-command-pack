@@ -110,6 +110,48 @@ Found by the Phase 2.2b trace, which is the only reason it was found at all.
       supplies the meaning of the ceiling, and that mapping must be read per
       repository rather than assumed.
 
+## Phase 4b — automated review response (not in the original plan)
+
+Copilot's review of PR #536 raised four items. One is a real defect this change
+introduced; two are pre-existing and were recorded rather than widened into
+scope; one was a missing PR-body section.
+
+- [x] **4b.1** `_parse_miscited_citation` gated the line on `str.isdigit()`,
+      which accepts characters `int()` refuses. `"\u00b2".isdigit()` is true and
+      `int("\u00b2")` raises a bare `ValueError`; `main()` catches only `OSError`
+      and `ReviewInputError`, so the parser's bounded-error contract leaked a
+      traceback. Fullwidth digits were the quieter half: they parsed *silently*
+      to a line the caller never wrote. Restricted to ASCII digits with a length
+      bound, since CPython also refuses `int()` past 4300 digits with a bare
+      `ValueError`. Three subcases added to
+      `test_miscited_grammar_requires_a_usable_citation`, plus an assertion that
+      no traceback reaches the merged output — non-zero exit alone does not
+      distinguish a bounded error from a crash. Restoring `isdigit()` kills all
+      three.
+- [x] **4b.2** Added the `Tooling/generated scope:` section the repository's
+      PR-body scope preflight requires.
+- [ ] **4b.3** **Follow-up, not this task.** `_aggregate_outcome` ranks
+      `findings` above `failed`, so a receipt where one provider returns findings
+      and another fails carries `outcome: "findings"`, and `_remote_gate`'s
+      `outcome in TERMINAL_FAILURES` branch never runs: the failed provider
+      lands in `limitations` while the gate reports plain `eligible` instead of
+      `eligible-with-limitations`. Verified identical on `main` — reachable
+      today whenever every finding is rebutted — so it is pre-existing.
+- [ ] **4b.4** **Follow-up, not this task.** The controller normalizes
+      `findings` to `clean` on `outstanding == 0` without consulting
+      `remoteGate.state`, so a `sibling-audit-required` family gate is not
+      honoured. Wider than Copilot stated: `grep -n "remoteGate\|familyGate"`
+      over `templates/scripts/sd-ai-command-pack-review.py` returns **nothing**,
+      so the controller has never read either. A whole missing channel, not a
+      missed condition.
+
+      **What this task does change about 4b.3 and 4b.4 is their reachability.**
+      Before the ceiling, `outstanding == 0` on a `findings` receipt required
+      the caller to disposition every finding by hand. A ceiling reaches that
+      state with no caller act at all, so both paths open without anyone
+      deciding to open them. That is an argument for filing them promptly, not
+      for this PR having caused them.
+
 ## Phase 5 — release and consumer verification
 
 - [x] **5.1** Cut the pack release — **0.71.47**. The candidate ledger is **already

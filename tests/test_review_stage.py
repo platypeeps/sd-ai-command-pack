@@ -1611,6 +1611,12 @@ class ReviewStageTests(InstallTestCase):
             ("abc=miscited@src/app.py", "<path>:<line>"),
             ("abc=miscited@src/app.py:", "<path>:<line>"),
             ("abc=miscited@src/app.py:zero", "<path>:<line>"),
+            # str.isdigit accepts characters int() refuses: superscript two
+            # escaped as an uncaught ValueError, and the fullwidth digits
+            # parsed silently to a line the caller never wrote.
+            ("abc=miscited@src/app.py:\u00b2", "<path>:<line>"),
+            ("abc=miscited@src/app.py:\uff11\uff12\uff13", "<path>:<line>"),
+            ("abc=miscited@src/app.py:" + "9" * 5000, "<path>:<line>"),
             ("abc=miscited@:3", "<path>:<line>"),
             ("abc=miscited@src/app.py:0", "line is out of range"),
             ("abc=miscited@../secret.py:3", "unsafe or unbounded"),
@@ -1630,6 +1636,10 @@ class ReviewStageTests(InstallTestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected, result.stdout)
+                # The contract is a bounded input error, not merely a non-zero
+                # exit: a traceback is a different failure wearing the same
+                # code. run_stage merges stderr into stdout, so this sees it.
+                self.assertNotIn("Traceback", result.stdout)
 
     def test_one_advisory_finding_does_not_release_a_blocking_sibling(self) -> None:
         """T12: the counts are per-finding, not a whole-receipt verdict."""
