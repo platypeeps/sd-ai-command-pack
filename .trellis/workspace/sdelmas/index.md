@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 423
-- **Last Active**: 2026-08-21
+- **Total Sessions**: 424
+- **Last Active**: 2026-08-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1012 | Active |
+| `journal-9.md` | ~1042 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 424 | 2026-08-24 | Pack-driven prism reviews now pass --rules, and severityOverrides is retired fleet-wide | - | `task/prism-rules-flag-fleet-safe` |
 | 423 | 2026-08-21 | Unblocked the dependabot lock guard; closed the Gemini exemption and the locator-form gap | `0db7a890` | `main` |
 | 422 | 2026-08-21 | Cleared loadsmith's dangling pack-path citations; measured the rwbp repos | `cb29c4a2` | `main` |
 | 421 | 2026-08-21 | Preflight .claude/ blind spot and the sd-audit-repo charter root | `22d29df7`, `c2c96b58` | `main` |
