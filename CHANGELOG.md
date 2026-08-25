@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.71.48 - 2026-08-24
+
+### Fixed
+
+- Pack-driven prism reviews now pass `--rules`. Since the prism adapter shipped,
+  the argv builder emitted `prism review range|codebase … --format json` and
+  nothing else, so a repository's `.prism/rules.json` — its `focus` categories
+  and its `required` checks — was ignored by every review the pack ran. Every
+  repository with a pack install ships one of these files. Consumers should
+  expect **new findings** after adopting this release: the required checks are
+  being evaluated for the first time, and that is the fix working rather than a
+  regression.
+
+  The flag is only passed when the file exists, so a consumer without one sees a
+  byte-identical command line.
+
+### Changed
+
+- `.prism/rules.json` no longer requires — or ships with — a `severityOverrides`
+  block, and `.prism/rules.schema.json` no longer lists it under `required`. The
+  key is still a permitted property, so an existing file stays valid.
+
+  prism applies `severityOverrides` client-side *after* the model answers,
+  rewriting each finding's severity from its category
+  (`ApplySeverityOverrides`, `internal/review/rules.go:82`). That replaces the
+  per-finding judgement the local advisory gate discriminates on with a lookup
+  table: with the block the pack shipped, every `correctness` finding is `high`
+  and therefore blocking, however small. Measured on a real 23-file branch, the
+  `high` set was exactly `correctness 14 + security 3 + bug 2` and the advisory
+  set exactly `docs 4 + maintainability 7 + testing 4 + style 3` — both sides
+  exact, no finding anywhere off its category's mapped severity.
+
+- The review stage **refuses to pass a rules file that still carries
+  `severityOverrides`**, and records why. It does not fail the review: it falls
+  back to the no-rules behaviour that shipped before this release, so a consumer
+  who has not yet removed the key sees no change at all. Remove the key to have
+  `focus` and `required` applied.
+
+  This is deliberate sequencing rather than a migration warning. A consumer that
+  keeps the block gets today's behaviour; one that removes it gets its rules
+  honoured. Neither gets a gate whose blocking decisions are made by category.
+
+### Added
+
+- Review receipts record what happened to the rules file. Every attempt in
+  `receipt.attempts[]` now carries a `rules` object with a `status` of
+  `applied`, `absent`, `unreadable`, `refused`, or `not-applicable` for adapters
+  that do not consult one, plus a `reason` for the two failure cases.
+
+  Nothing previously recorded this. `invocation.json` carries the provider
+  *plan*, not the command line, so a rules file being silently ignored was
+  indistinguishable from no rules file at all — which is how the missing
+  `--rules` flag survived unnoticed across every consumer.
+
+### Upgrade notes
+
+- Roll out **without** `install.py --force`. `.prism/rules.json` is
+  `if-not-exists` precisely so local `required` checks survive an update, and
+  `--force` overrides that. Consumers still holding a byte-exact previously
+  shipped default are corrected automatically by the installer's provider-config
+  history and report `refreshed`; consumers with local edits report `preserved`
+  and need the `severityOverrides` key removed by hand.
+
 ## 0.71.47 - 2026-08-24
 
 ### Added
