@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.71.50 - 2026-08-25
+
+### Fixed
+
+- Restored the authored formatting of `templates/.prism/rules.schema.json`.
+  Removing `severityOverrides` in 0.71.49 was done by round-tripping the file
+  through `json.dumps`, which expanded two inline arrays that had been written
+  compact. Semantically identical, but it would have landed as gratuitous churn
+  in every consumer diff of the 0.71.49 rollout, on top of the six lines that
+  are the actual change. Caught by installing into one consumer before rolling
+  to nine.
+
 ## 0.71.49 - 2026-08-25
 
 ### Fixed
