@@ -1,0 +1,225 @@
+# Implementation — prism rules flag, made fleet-safe
+
+> **Reordered 2026-08-24, at the start of implementation.** The first plan ran
+> the fleet edit as Phase 1, before any pack change. That is impossible:
+> `.prism/rules.schema.json` lists `severityOverrides` under `required`, and the
+> schema is `install: always`, so it reaches a consumer only through a pack
+> release. Stripping the key first leaves every repository holding a file
+> invalid against the schema beside it — the state `sd-github-review` has been
+> in, unobserved, since 2026-08-24. Phases below are in execution order.
+>
+> An earlier revision kept the old numbers with a "runs later" note. That
+> produced two contradictions — a pre-release fleet scan that could not pass,
+> and a post-release receipt check expecting `applied` while the guard was still
+> refusing — so the numbers were changed instead of annotated.
+
+## Phase 0 — pack templates
+
+Requirement 1b. The schema has to stop forbidding the end state before anything
+else can reach it.
+
+- [x] **0.1** `templates/.prism/rules.schema.json`: drop `severityOverrides`
+      from `required`. Leave it in `properties` — `additionalProperties: false`
+      means deleting the property would forbid the key outright rather than
+      merely stop requiring it. This task's position is that the key is a bad
+      idea, not that it is unrepresentable.
+- [x] **0.2** `templates/.prism/rules.json`: remove the `severityOverrides`
+      block, and amend the `description` sentence instructing the reader to keep
+      `focus` and `severityOverrides` category names in sync.
+- [x] **0.3** Regenerate the mirrors and `plugins/sd/machine-payload/`
+      derivatives. `tests/test_generated_parity.py:334` and
+      `tests/test_review_scope.py:1583` both reference these two paths and will
+      catch a partial regeneration.
+- [x] **0.4** Confirm the schema change only widens what validates: every
+      consumer's current `rules.json` — block still present — still passes.
+      Dropping a `required` entry cannot invalidate anything, so a failure here
+      means the wrong edit was made.
+
+## Phase 1 — pack change
+
+- [x] **1.1** Add `_prism_rules(repo)` to
+      `templates/scripts/sd-ai-command-pack-review-local.py`. **The source is
+      `templates/scripts/`, not `plugins/sd/bin/`** — the file exists in four
+      places and the other three are generated. Editing `plugins/sd/bin/`
+      directly produces a stage that passes syntax checks and does nothing,
+      because `run_stage` executes the installed copy. Four outcomes per the
+      design table. Read through the existing `_read_json(..., limit=…)` helper,
+      not `json.load` — this is consumer-controlled input.
+- [x] **1.2** Thread the decision: extra parameter on `_expand_argv`, appended
+      in the three `adapter == "prism"` branches only (`:1420`–`:1445`); extra
+      `rules=` keyword on `_run_provider`, merged into the attempt `base` dict.
+- [x] **1.3** Compute the decision once at the call site (`:2231`), above the
+      dict comprehension. It depends only on `repo`.
+- [x] **1.4** Propagate with `make generate && make sync`, then confirm all
+      four copies agree:
+      `find . -name 'sd-ai-command-pack-review-local.py' -not -path './.git/*'`
+      hashed — `templates/scripts/`, `scripts/`, `plugins/sd/bin/` and
+      `plugins/sd/machine-payload/scripts/` must be identical. Acceptance
+      criterion 6, first half.
+
+## Phase 2 — tests
+
+- [x] **2.1** `_expand_argv` carries `--rules .prism/rules.json` for
+      `branch_delta`, `codebase` and `worktree`. Acceptance criterion 2.
+- [x] **2.2** `_expand_argv` carries no `--rules` when the file is absent, and
+      the argv is otherwise byte-identical to today's. This is the
+      no-behaviour-change guarantee for consumers without a rules file.
+- [x] **2.3** A rules file containing `severityOverrides` produces no `--rules`,
+      `record["status"] == "refused"`, and the review still completes.
+      Acceptance criterion 3.
+- [x] **2.4** Unreadable and non-object rules files produce `unreadable`, not an
+      exception and not a failed review.
+- [x] **2.5** `gito` and `argv` adapter argv are unchanged by the new parameter.
+- [ ] **2.6** Full suite plus `pack.install-audit`. Acceptance criterion 6.
+
+## Phase 3 — release and rollout
+
+- [x] **3.1** Version bump, changelog. The entry must say that consumers
+      shipping `.prism/rules.json` will see their `focus` and `required` applied
+      **for the first time** once they strip `severityOverrides`, and that new
+      findings are the expected outcome rather than a regression.
+- [x] **3.2** Roll to consumers. This is what delivers the new schema, which is
+      `install: always`. `rules.json` is `install: if-not-exists` and is not
+      touched by the rollout — that is Phase 4's job.
+- [x] **3.3** Spot-check two receipts. Expect `rules.status == "refused"`, not
+      `"applied"`: every consumer still carries the block at this point, so the
+      guard is doing its job and behaviour is unchanged from before the release.
+      An `"applied"` here would mean the guard is not working.
+
+**Rollback point.** Everything so far is revertible from the pack alone; no
+consumer file has been edited. Behaviour across the fleet is identical to before
+the release, by construction.
+
+## Phase 4 — fleet edit
+
+Requirement 1. Six repositories by hand; two more are handled by the rollout
+and two are already clean. Ten in total, not eleven — see the correction in
+`prd.md`. See design, "Most of the fleet edit is already
+automated".
+
+- [x] **4.0** Confirm the rollout in Phase 3 did **not** use `install.py
+      --force`. Force overrides `if-not-exists` and would overwrite consumer
+      rules files wholesale, destroying per-repository `required` checks —
+      eleven of them in `hoa-manager`, twelve in `rwbp-coordinator`. Observed
+      directly: `make sync` is `install.py . --force` and it rewrote this
+      repository's own `.prism/rules.json`.
+- [x] **4.0b** Confirm `loadsmith` and `people-profiles` came back `refreshed`
+      rather than `preserved`. They held the previous shipped default
+      `cea5089e` byte-for-byte, which is now on the history `digests` list. If
+      they read `preserved`, the history regeneration did not ship and the
+      remaining steps are hiding a broken mechanism.
+
+- [x] **4.1** Re-enumerate from the filesystem, not from `prd.md`:
+      ```bash
+      for f in ~/repos/*/*/.prism/rules.json; do
+        python3 -c 'import json,sys
+      d=json.load(open(sys.argv[1]))
+      print(sys.argv[1]) if "severityOverrides" in d else None' "$f"
+      done
+      ```
+      The table in `prd.md` is a snapshot from 2026-08-24; treat any difference
+      as the enumeration being right and the table being stale.
+- [x] **4.2** For each repository named: remove the `severityOverrides` key, and
+      amend `description` where it references it — nine of the ten say "keeps
+      focus and severityOverrides separate; keep their category names in sync",
+      which becomes an instruction about a block that no longer exists.
+      `hoa-manager`'s description does not mention it and stays as it is. Leave
+      `$schema`, `focus` and `required` byte-identical: `required` differs across
+      consumers and is the one thing in these files deliberately authored per
+      repository.
+- [x] **4.3** One commit per repository, on a branch, in that repository. Do not
+      push. `git add` the rules file by path — several of these repositories have
+      untracked work from other sessions and `git add -A` would sweep it in. The
+      commit message states what the block did (client-side severity overwrite
+      after the model answers, `internal/review/rules.go:82`) rather than that it
+      was removed.
+- [x] **4.4** Re-run 4.1. Expect no output, and check
+      `templates/.prism/rules.json` too. Acceptance criterion 1. The count of
+      repositories edited by hand in 4.2 plus those refreshed in 4.0b plus those
+      already clean must equal the ten the scan finds — if it does not, a
+      repository was missed rather than handled.
+- [x] **4.5** Validate every consumer's `rules.json` against the
+      `rules.schema.json` beside it. All ten pass, including
+      `sd-github-review`, which failed before this release. Acceptance criterion 0.
+
+## Phase 5 — live verification
+
+Unit tests prove the flag is constructed. They cannot prove prism reads it, so
+this phase is not optional.
+
+- [x] **5.1** Run a real review in a consumer **other than**
+      `sd-github-review` — that repository has a `prism-chunked` `argv` provider
+      and would exercise a path the fleet does not use. Pick one running pack
+      defaults: `loadsmith`, `hoa-manager`, `rwbp-website`, `people-profiles`.
+- [x] **5.2** Probe run. Acceptance criterion 5. Plant a marker string in a
+      scratch diff, point `--rules` at a scratch rules file whose `required`
+      block demands a finding for that marker, disable prism's response cache
+      for the run, and confirm the finding appears. Repeat without `--rules` and
+      confirm it does not. Do **not** substitute a category check: prism
+      hardcodes the same eight categories at `internal/review/prompt.go:28` that
+      every consumer lists under `focus`, so that test passes unconditionally.
+      The cache must be off — prism's cache key excludes the rules file, so a
+      replay returns the no-rules answer while looking like a rules run.
+- [x] **5.3** Confirm `attempt.json` now carries `rules.status == "applied"`,
+      and in a scratch copy with `severityOverrides` re-added, `"refused"` with
+      the key named. Acceptance criterion 4.
+- [x] **5.4** Confirm the severity distribution is not a category lookup: at
+      least one category appears at two different severities across the run. If
+      every finding sits at its category's old mapped severity, either the fleet
+      edit missed this repository or the overrides come from somewhere else —
+      stop and find out which. Acceptance criterion 7.
+
+## Phase 5 results, 2026-08-24
+
+All four checks ran. Evidence, in the order it was obtained:
+
+**Bare prism A/B.** A scratch repository with a marker string in the diff and a
+rules file whose `required` block demands a finding titled with that marker,
+cache disabled. Without `--rules`: three findings, marker absent. With
+`--rules`: three findings, marker present. First direct evidence that a prism
+rules file changes what the model returns.
+
+**Through the pack stage, and the trap in between.** The first stage attempt was
+contaminated: the probe committed `.prism/rules.json` inside the reviewed range,
+so the model read the required check as *source under review* and emitted the
+marker whether or not the file was loaded. Rebuilt with the rules file in the
+base commit and only `app.py` in the diff:
+
+```
+rules without severityOverrides -> rules.status "applied"  -> marker present
+rules with    severityOverrides -> rules.status "refused"  -> marker absent
+```
+
+Same repository, same code diff, cache off, only the rules file differing. That
+is acceptance criterion 5, and it also exercises criterion 3 end to end — the
+guard does not merely record a refusal, it withholds the flag.
+
+**Receipt records from a live consumer review** (`loadsmith`, branch delta):
+`prism` reported `{"path": ".prism/rules.json", "status": "applied"}` and `gito`
+reported `{"adapter": "gito", "status": "not-applicable"}`. Criterion 4.
+
+**Severity spread.** The applied probe run returned `low`, `high`, `high` across
+its findings — severity varying independently of category, which is what
+criterion 7 asks for. Note this is scratch-repository evidence rather than a
+consumer review: the consumer branch deltas are the adoption commit itself and
+came back clean with zero findings, so they could not exercise the check.
+
+An aside worth keeping: in the contaminated run, prism flagged the probe rule
+itself — "Suspicious mandatory probe/instrumentation rule injected into rules
+file". The model noticed the injection while reviewing it.
+
+## Rollback
+
+Phase 1 is a single commit touching one file and its mirror; revert restores
+today's argv exactly, since the no-rules-file path is asserted byte-identical in
+2.2. Phase 0 only widens the schema and removes a template default, so reverting
+it cannot invalidate a consumer file that was valid. Phase 4 is per-repository
+and independently revertible; a rules file without `severityOverrides` is inert
+against a pack that has not shipped Phase 1.
+
+## Deliberately not here
+
+- **4b.5**, `_disposition_counts` not writing the advisory classification back
+  to `receipt.findings[]`. No ordering dependency either way.
+- Chunking, and the four stock-prism defects on `~/repos/ai/prism` branch
+  `fix/chunking-rules-maxtokens`.

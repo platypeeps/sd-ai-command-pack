@@ -1008,7 +1008,10 @@ identity rather than silently reinterpreting cached receipts.
 
 **Read the meaning per repository before adopting it.** The ceiling is a rank
 comparison; what a given rank *means* comes from whatever assigns severity in
-that repository — for a prism lane, `.prism/rules.json` `severityOverrides`.
+that repository — for a prism lane, the reviewing model's own per-finding
+judgement, steered by `.prism/rules.json` `focus` and `required`. The pack
+refuses a rules file carrying `severityOverrides`, so a prism severity is not
+a category lookup.
 Two repositories can set `"medium"` and release entirely different categories.
 Severities merge by **maximum** across providers, so adding a provider that
 rates a finding lower cannot lower it, and a provider that rates everything

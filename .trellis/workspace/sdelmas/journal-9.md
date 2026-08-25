@@ -1010,3 +1010,45 @@ se-ai-command-pack #260 failed five checks on one guard: dependabot bumped ruff 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 424: Pack-driven prism reviews now pass --rules, and severityOverrides is retired fleet-wide
+<!-- trellis-session: v=2 fp=159b50c46308eefc -->
+
+**Date**: 2026-08-24
+**Task**: Pack-driven prism reviews now pass --rules, and severityOverrides is retired fleet-wide
+**Branch**: `task/prism-rules-flag-fleet-safe`
+
+### Summary
+
+The pack built prism argv without --rules, so every consumer's .prism/rules.json focus and required checks were inert. Fixing that naively would have been a regression: ten repositories shipped a severityOverrides block, which prism applies client-side after the model answers and which replaces per-finding severity with a category lookup, so turning rules on would have converted eight unconfigured repos to category severity in one release. Order mattered. The schema marked severityOverrides required with additionalProperties false, so the pack moved first: schema, template rules, and a runner guard that refuses a rules file carrying the key and records why. That guard made 0.71.48 a no-change window rather than a regression window. Then the fleet: two repos auto-refreshed through the installer's own digest rule, six were hand-edited, two were already clean, and every custom required list survived. Proved for the first time that a rules file reaches the model - a marker probe with prism's cache disabled emitted the canary only when --rules was passed, and a stage-level A/B on identical diffs showed applied producing the marker and refused suppressing it. The first probe was contaminated by committing the rules file into the reviewed range; that is recorded in the task rather than quietly replaced.
+
+### Main Changes
+
+- Runner passes --rules .prism/rules.json to prism, refuses a file carrying severityOverrides, and records applied/absent/unreadable/refused in the receipt for every provider
+- Schema no longer requires severityOverrides; the key stays in properties because additionalProperties false would otherwise forbid it
+- Template rules.json drops the block and says why in its description
+- Ten consumer repositories stripped severityOverrides; every custom required list intact
+- Receipt reason for an unreadable rules file is a fixed bounded string, since the parse error interpolates the absolute host path into a published artifact
+- Spec and SD_AI_COMMAND_PACK.md corrected: a prism lane's severity is the model's judgement, not a category lookup
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] make test exit 0
+- [OK] make check exit 0
+- [OK] realpath-deduped fleet scan: consumers still shipping severityOverrides NONE; consumers failing their own schema NONE
+- [PARTIAL] criterion 7 (severity is not a category lookup) rests on scratch-repo evidence; every consumer branch delta was its own adoption commit and returned zero findings
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Open the pack PR and the nine consumer PRs
+- Follow-up 4b.5: _disposition_counts never writes the advisory classification back to receipt.findings[]

@@ -1571,6 +1571,19 @@ Correct: review every non-empty local layer, then review the committed range on 
   `429` or slow-down response.
 - Distributed Prism rules must satisfy `.prism/rules.schema.json`; unknown
   root or required-item properties are rejected.
+- The runner passes `--rules .prism/rules.json` to Prism whenever the repo
+  carries a readable rules object. Without the flag Prism never sees `focus`
+  or `required`, so shipping a rules file is not the same as applying one.
+- A rules file carrying `severityOverrides` is refused, not passed. Prism
+  applies that block client-side after the model answers, replacing the
+  reviewer's per-finding judgement with a category lookup. Refusal degrades to
+  an unflagged review rather than failing the run.
+- The rules decision is computed once per run, not once per provider, and is
+  recorded in the receipt for every provider — `applied`, `absent`,
+  `unreadable`, or `refused` for Prism, `not-applicable` for others.
+- Receipt records are published artifacts: the `unreadable` reason is a fixed
+  bounded string, never the underlying parse error, which interpolates the
+  absolute host path.
 
 ### 4. Validation & Error Matrix
 
@@ -1582,6 +1595,14 @@ Correct: review every non-empty local layer, then review the committed range on 
 - Gito exit `124` -> fail without retry.
 - Gito explicit rate-limit response within the attempt budget -> retry with
   bounded backoff.
+- Rules file absent -> no `--rules` flag; record `absent`.
+- Rules file present, readable, no `severityOverrides` -> pass `--rules`;
+  record `applied`.
+- Rules file present with `severityOverrides` -> omit `--rules`; record
+  `refused` with the reason; the review still completes.
+- Rules file oversized, malformed, or not a JSON object -> omit `--rules`;
+  record `unreadable` with a path-free reason.
+- Non-Prism adapter -> argv untouched; record `not-applicable`.
 
 ### 5. Good / Base / Bad Cases
 
@@ -1600,6 +1621,10 @@ Correct: review every non-empty local layer, then review the committed range on 
 - Unit-test Prism's recognized empty-response fallback, unrelated-error
   rejection, and configured failure budget.
 - Validate root and template Prism rules against the strict schema.
+- Unit-test each rules disposition: flag present with a clean rules file, argv
+  unchanged without one, `severityOverrides` refused while the review still
+  completes, unreadable and non-object degradation, and Gito argv left alone.
+- Assert the `unreadable` reason contains no path separator.
 - Preserve root/template byte parity for every shipped runtime, skill, doc,
   and schema changed by this contract.
 

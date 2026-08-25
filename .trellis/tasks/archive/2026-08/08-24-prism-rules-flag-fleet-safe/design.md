@@ -1,0 +1,230 @@
+# Design — prism rules flag, made fleet-safe
+
+## Shape of the change
+
+One new pure function in `sd-ai-command-pack-review-local.py`, one extra
+parameter threaded to `_expand_argv`, one extra key in two artifacts, and a
+fleet edit across ten repositories that must land first.
+
+## Ordering
+
+**Revised 2026-08-24, at the start of implementation.** The original plan made
+the fleet edit a standalone prerequisite that ran before any pack change. That
+is not possible: `.prism/rules.schema.json` lists `severityOverrides` in
+`required`, and the schema is `install: always`, so it reaches a consumer only
+through a pack release. Stripping the key first would leave every repository
+holding a file invalid against the schema sitting next to it — which is exactly
+the state `sd-github-review` has been in, unobserved, since 2026-08-24.
+
+So the pack moves first:
+
+1. **Pack templates** (implement Phase 0): schema drops `severityOverrides`
+   from `required`; the `templates/.prism/rules.json` block goes.
+2. **Pack change and tests** (Phases 1–2): `--rules`, the guard, the receipt
+   record.
+3. **Release and rollout** (Phase 3): the new schema reaches consumers because
+   it is `install: always`. Receipts read `rules.status == "refused"` here, and
+   that is the expected value — every consumer still carries the block.
+4. **Fleet** (Phase 4): strip the block from ten `rules.json` files and amend
+   the `description` sentence that references it. Durable, because `rules.json`
+   is `install: if-not-exists`.
+5. **Verify live** (Phase 5).
+
+The guard is what makes this order safe. Between steps 1 and 3 every consumer
+still carries `severityOverrides`, so the pack refuses to pass `--rules` and
+each repository keeps exactly today's behaviour until its own file is cleaned.
+The window is not a regression window; it is a no-change window. That property
+was the guard's original justification and it is now also the sequencing
+argument.
+
+The guard does not only enable the ordering, it survives it. If the fleet edit
+misses a repository — or one is added later from a copied
+template — the guard degrades that repository to today's behaviour rather than
+to the broken one. Guard and fleet edit are belt and braces on purpose; the
+fleet has already shown that these files propagate by copying: the `focus`
+array is byte-identical across all ten, and the files vary only in `required`
+and, in two of them, `description`. That is what copy-then-edit looks like.
+
+## Rules resolution
+
+```
+_prism_rules(repo: Path) -> RulesDecision
+```
+
+`RulesDecision` carries `argv_extension: list[str]` and `record: dict`. Four
+outcomes, all of them recorded, none of them fatal:
+
+| condition | argv extension | `record["status"]` |
+| --- | --- | --- |
+| file absent | `[]` | `absent` |
+| unreadable / not JSON / not an object | `[]` | `unreadable` |
+| object contains `severityOverrides` | `[]` | `refused` |
+| otherwise | `["--rules", ".prism/rules.json"]` | `applied` |
+
+The `refused` and `unreadable` records carry a `reason` naming the file and, for
+`refused`, the key. A review that runs without rules is exactly today's
+behaviour, so no outcome here fails the review — degrading to the status quo is
+always available and always better than not reviewing.
+
+The path stays **relative**. `_run_provider` sets `cwd=repo` on the
+`subprocess.Popen` call (`sd-ai-command-pack-review-local.py:1736`), so prism resolves
+`.prism/rules.json` against the repository under review. A relative path also
+keeps the argv stable across machines, which matters because the argv is
+persisted into `invocation.json` and compared for receipt reuse.
+
+Size limit on the read: the file is consumer-controlled input parsed by the
+pack, so it goes through the existing `_read_json(..., limit=…)` helper rather
+than a bare `json.load`.
+
+## Threading
+
+`_expand_argv` already receives `repo`, but it must not do the file read itself:
+it is called once per provider inside a dict comprehension
+(`sd-ai-command-pack-review-local.py:2231`), and the decision has to reach
+`_run_provider` too. So the decision is computed once at the call site and
+passed in.
+
+- `_expand_argv(provider, target, attempt_dir, context_path, repo, rules)` —
+  appends `rules.argv_extension` to the three `adapter == "prism"` branches
+  only. `gito` and `argv` are untouched; the `argv` adapter already has
+  `{repo}` available and any consumer wanting rules there passes them itself,
+  which is what `sd-github-review`'s `prism-chunked` provider does today.
+- `_run_provider(..., rules=rules.record)` — merges the record into the attempt
+  base dict as `"rules"`, so it lands in `attempt.json` beside `provider` and
+  `diagnostic`.
+
+Computed once per run, not once per provider: the decision depends only on
+`repo`.
+
+## Observability
+
+**Corrected 2026-08-24, during implementation.** An earlier draft said
+`invocation.json` already persists the argv, so the new record only had to
+explain failures. It does not. `invocation.json` carries `{schemaVersion,
+attemptId, target, plan}`, and `plan` is the provider *selection*, not the
+command line — `commands` is built separately and never written down. Nothing in
+any artifact records what was actually executed.
+
+So `attempt.json`'s new `rules` key is the whole of the observability, not half
+of it. It has to answer both "were rules applied" and "if not, why", because
+nothing else answers either. That the receipt could not distinguish *no rules
+file* from *rules file silently ignored* is precisely why the defect survived
+unnoticed across ten repositories.
+
+The record is written for every provider, not only prism. A reader comparing two
+attempts should not need to know which adapters consult a rules file; non-prism
+adapters record `not-applicable` with their adapter name.
+
+No receipt schema exists to version, and no consumer reads `attempt.json`
+positionally, so an added key is additive.
+
+## Mirrors
+
+`plugins/sd/bin/` and `plugins/sd/machine-payload/scripts/` are byte-identical.
+Edit one, sync the other in the same commit, and let `pack.install-audit`
+confirm it. This is mechanical and has bitten before; it is a checklist item in
+`implement.md`, not a design question.
+
+## The two pack-managed files, and why they differ
+
+`manifest.json` gives `.prism/rules.json` `install: if-not-exists` and
+`.prism/rules.schema.json` `install: always`. That asymmetry is correct and the
+plan depends on it: the rules file is consumer policy and must survive updates,
+the schema is pack contract and must not drift. It also means the two halves of
+this change have to travel by different routes — the schema centrally, the rules
+files one repository at a time — and neither route can carry the other.
+
+`templates/.prism/rules.json` seeds new installs and still contains the
+identical block. Fixing it is not optional cleanup: it is the difference between
+this task closing and this task closing until the next repository is created.
+
+## Most of the fleet edit is already automated
+
+`plugins/sd/installer/providerhistory.py` exists for exactly this situation. An
+`if-not-exists` target whose current bytes match a digest the pack previously
+shipped "are not a local decision, so replacing them restores the pack's intent
+rather than discarding the consumer's"; bytes matching nothing ever shipped stay
+`preserved`. The distinct `REFRESHED` status keeps the two cases legible in a
+receipt.
+
+`templates/.prism/rules.json` is tracked in that history. Once the old default's
+digest is on the `digests` list and the new one is `current`, a normal rollout
+refreshes every consumer still holding an untouched default — no manual edit, no
+risk of discarding customisation, because by construction there is none.
+
+Measured 2026-08-24, after the template change:
+
+- **2 refresh automatically** — `loadsmith` and `people-profiles`, both holding
+  `cea5089e`, the previous shipped default byte-for-byte.
+- **6 need a manual edit** — `mezmo_benchmark`, `anomaly-metric-creator`,
+  `hoa-manager`, `se-ai-command-pack`, `rwbp-coordinator`, `rwbp-website`.
+  (An earlier count said seven and listed "both anomaly-metric-creator
+  clones"; there is one clone reached by two paths.) Each has custom `required` entries, so each is a local
+  decision the installer must not overwrite.
+- **2 are already clean** — `sd-ai-command-pack` via `make sync`, and
+  `sd-github-review` from the parent task.
+
+This is why the rollout must not use `install.py --force`. Force overrides
+`if-not-exists` — observed directly: `make sync` runs `install.py . --force` and
+rewrote this repository's own `.prism/rules.json`. That is correct for a
+dogfood install and would be destructive against `hoa-manager`'s eleven custom
+`required` checks or `rwbp-coordinator`'s twelve.
+
+## The fleet edit
+
+Nine repositories, one key removed from one file each. Mechanically trivial, and
+the risk is entirely in it being *incomplete* rather than in it being wrong. The
+acceptance check therefore enumerates from the filesystem —
+`~/repos/*/*/.prism/rules.json` — rather than from the table in `prd.md`. A
+check built from the list I already have cannot find the repository I did not
+know about. It must also resolve `os.path.realpath` and deduplicate: that glob
+traverses a symlink between two paths for one repository, and the duplicate row
+reads as corroboration because the hashes agree.
+
+Each edit is a commit in its own repository. Nine of the ten have their own
+review gates, and this change makes those gates *less* likely to block, so the
+sequencing is safe in either direction per-repository.
+
+## Proving the rules actually loaded
+
+`BuildRulesPromptSection` (`prism internal/review/rules.go:52`) renders `focus`
+and `required` into the prompt, so the plumbing exists. Observing it from the
+outside is the hard part, and the obvious check does not work.
+
+**The category set proves nothing.** `prism internal/review/prompt.go:28`
+hardcodes `bug, security, performance, correctness, style, maintainability,
+testing, docs` into every prompt regardless of rules, and every consumer's
+`focus` array is that exact list. "All findings' categories fall inside `focus`"
+is therefore true of every prism run ever made, with or without a rules file.
+The consumer-side write-up in `sd-github-review` originally offered this as
+evidence and has been corrected.
+
+**A/B against the same diff does not work either**, for two reasons: the
+finding set is not deterministic across runs, and prism's response cache key
+excludes the rules file, so a cached replay returns the no-rules answer while
+looking like a rules run.
+
+**What does work is a probe.** A scratch rules file carrying a `required` check
+that demands a specific, otherwise-impossible finding — keyed to a marker string
+planted in the diff under review — with the response cache disabled for the run.
+The finding appears only if the required text reached the model. This tests the
+one link unit tests cannot: file on disk to prompt to provider.
+
+## Rejected alternatives
+
+**Have the pack strip `severityOverrides` in-memory and pass a rewritten rules
+file from a temp directory.** Removes the fleet edit and the ordering
+constraint. Rejected: it makes the file on disk stop describing what actually
+runs, which is a worse version of the bug being fixed — the consumer would read
+their own rules file and be wrong about their gate. The whole defect is that
+what the file says and what the review does have drifted apart.
+
+**Refuse the review outright when `severityOverrides` is present.** Rejected: it
+fails ten repositories' reviews for a condition the pack can safely ignore, and
+turns a config nit into an outage. Degrading to today's behaviour is strictly
+better.
+
+**Ship chunking in the same change.** Rejected as scope. `--rules` is a
+one-flag correctness fix against a defect that is measurable today; chunking is
+a design decision about whether the pack owns a diff-splitting strategy, and
+folding them together means neither gets reviewed on its own merits.
