@@ -533,8 +533,12 @@ class InstallTestCase(unittest.TestCase):
         rules = json.loads(rules_path.read_text(encoding="utf-8"))
 
         self.assertIsInstance(rules, dict, f"{rules_path}: root must be an object")
-        required_rule_keys = {"focus", "severityOverrides", "required"}
-        optional_rule_keys = {"$schema", "description"}
+        required_rule_keys = {"focus", "required"}
+        # `severityOverrides` is still a permitted property -- the schema keeps
+        # it so an existing consumer file stays representable -- but the pack no
+        # longer requires or ships one. prism applies it after the model answers,
+        # replacing per-finding severity with a category lookup.
+        optional_rule_keys = {"$schema", "description", "severityOverrides"}
         self.assertEqual(
             set(rules) - required_rule_keys - optional_rule_keys,
             set(),
@@ -564,38 +568,36 @@ class InstallTestCase(unittest.TestCase):
         for expected in ("bug", "performance"):
             self.assertIn(expected, focus, f"{rules_path}: focus must include {expected}")
 
-        severity_overrides = rules["severityOverrides"]
-        self.assertIsInstance(
-            severity_overrides,
-            dict,
-            f"{rules_path}: severityOverrides must be an object",
-        )
-        self.assertGreater(
-            len(severity_overrides),
-            0,
-            f"{rules_path}: severityOverrides must not be empty",
-        )
-        for category, severity in severity_overrides.items():
+        # Shape only, and only when present. The previous version also asserted
+        # that every focus category carried an override and that bug mapped to
+        # high -- assertions that enforced the policy this pack is retiring.
+        if "severityOverrides" in rules:
+            severity_overrides = rules["severityOverrides"]
             self.assertIsInstance(
-                category,
-                str,
-                f"{rules_path}: severityOverrides key must be a string",
+                severity_overrides,
+                dict,
+                f"{rules_path}: severityOverrides must be an object",
             )
-            self.assertTrue(
-                category,
-                f"{rules_path}: severityOverrides key must not be empty",
+            self.assertGreater(
+                len(severity_overrides),
+                0,
+                f"{rules_path}: severityOverrides must not be empty",
             )
-            self.assertIn(
-                severity,
-                {"low", "medium", "high"},
-                f"{rules_path}: severity for {category!r} is invalid",
-            )
-        self.assertTrue(
-            set(focus).issubset(severity_overrides),
-            f"{rules_path}: every focus category must have a severity override",
-        )
-        self.assertEqual(severity_overrides.get("bug"), "high")
-        self.assertEqual(severity_overrides.get("performance"), "medium")
+            for category, severity in severity_overrides.items():
+                self.assertIsInstance(
+                    category,
+                    str,
+                    f"{rules_path}: severityOverrides key must be a string",
+                )
+                self.assertTrue(
+                    category,
+                    f"{rules_path}: severityOverrides key must not be empty",
+                )
+                self.assertIn(
+                    severity,
+                    {"low", "medium", "high"},
+                    f"{rules_path}: severity for {category!r} is invalid",
+                )
 
         required = rules["required"]
         self.assertIsInstance(

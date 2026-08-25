@@ -109,7 +109,9 @@ boundary is explicit rather than accidental.
 
 ## Requirements
 
-1. **Strip `severityOverrides` from all ten consumers.** Not "advise against",
+1. **Strip `severityOverrides` from all ten consumers** — by hand where the
+   file carries local customisation, and via the installer's existing
+   `if-not-exists` refresh path where it does not. Not "advise against",
    not "document" — the block is removed from the file. `focus` and `required`
    stay as they are; they are what the consumer actually wants applied. The
    `description` field is amended where it references the removed key, because
@@ -164,7 +166,9 @@ boundary is explicit rather than accidental.
       Enumerated from the filesystem across all eleven. `sd-github-review`
       fails this today; it must pass when the task closes.
 - [ ] **1. No consumer ships `severityOverrides`, and neither does the
-      template.** `templates/.prism/rules.json` is checked alongside the
+      template.** Repositories edited by hand, plus those the rollout
+      refreshed, plus those already clean, must account for every repository
+      the scan finds. `templates/.prism/rules.json` is checked alongside the
       consumers — it is the source they were copied from. Enumerated from the
       filesystem, not from a list in this document:
       `for f in ~/repos/*/*/.prism/rules.json; do python3 -c 'import json,sys;

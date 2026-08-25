@@ -130,6 +130,37 @@ files one repository at a time — and neither route can carry the other.
 identical block. Fixing it is not optional cleanup: it is the difference between
 this task closing and this task closing until the next repository is created.
 
+## Most of the fleet edit is already automated
+
+`plugins/sd/installer/providerhistory.py` exists for exactly this situation. An
+`if-not-exists` target whose current bytes match a digest the pack previously
+shipped "are not a local decision, so replacing them restores the pack's intent
+rather than discarding the consumer's"; bytes matching nothing ever shipped stay
+`preserved`. The distinct `REFRESHED` status keeps the two cases legible in a
+receipt.
+
+`templates/.prism/rules.json` is tracked in that history. Once the old default's
+digest is on the `digests` list and the new one is `current`, a normal rollout
+refreshes every consumer still holding an untouched default — no manual edit, no
+risk of discarding customisation, because by construction there is none.
+
+Measured 2026-08-24, after the template change:
+
+- **2 refresh automatically** — `loadsmith` and `people-profiles`, both holding
+  `cea5089e`, the previous shipped default byte-for-byte.
+- **7 need a manual edit** — `mezmo_benchmark`, both `anomaly-metric-creator`
+  clones, `hoa-manager`, `se-ai-command-pack`, `rwbp-coordinator`,
+  `rwbp-website`. Each has custom `required` entries, so each is a local
+  decision the installer must not overwrite.
+- **2 are already clean** — `sd-ai-command-pack` via `make sync`, and
+  `sd-github-review` from the parent task.
+
+This is why the rollout must not use `install.py --force`. Force overrides
+`if-not-exists` — observed directly: `make sync` runs `install.py . --force` and
+rewrote this repository's own `.prism/rules.json`. That is correct for a
+dogfood install and would be destructive against `hoa-manager`'s eleven custom
+`required` checks or `rwbp-coordinator`'s twelve.
+
 ## The fleet edit
 
 Ten repositories, one key removed from one file each. Mechanically trivial, and

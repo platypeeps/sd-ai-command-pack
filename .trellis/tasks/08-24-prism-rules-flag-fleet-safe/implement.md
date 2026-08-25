@@ -86,7 +86,21 @@ the release, by construction.
 
 ## Phase 4 — fleet edit
 
-Requirement 1. Ten repositories, one key each.
+Requirement 1. Seven repositories by hand; two more are handled by the rollout
+and two are already clean. See design, "Most of the fleet edit is already
+automated".
+
+- [ ] **4.0** Confirm the rollout in Phase 3 did **not** use `install.py
+      --force`. Force overrides `if-not-exists` and would overwrite consumer
+      rules files wholesale, destroying per-repository `required` checks —
+      eleven of them in `hoa-manager`, twelve in `rwbp-coordinator`. Observed
+      directly: `make sync` is `install.py . --force` and it rewrote this
+      repository's own `.prism/rules.json`.
+- [ ] **4.0b** Confirm `loadsmith` and `people-profiles` came back `refreshed`
+      rather than `preserved`. They held the previous shipped default
+      `cea5089e` byte-for-byte, which is now on the history `digests` list. If
+      they read `preserved`, the history regeneration did not ship and the
+      remaining steps are hiding a broken mechanism.
 
 - [ ] **4.1** Re-enumerate from the filesystem, not from `prd.md`:
       ```bash
@@ -113,7 +127,10 @@ Requirement 1. Ten repositories, one key each.
       after the model answers, `internal/review/rules.go:82`) rather than that it
       was removed.
 - [ ] **4.4** Re-run 4.1. Expect no output, and check
-      `templates/.prism/rules.json` too. Acceptance criterion 1.
+      `templates/.prism/rules.json` too. Acceptance criterion 1. The count of
+      repositories edited by hand in 4.2 plus those refreshed in 4.0b plus those
+      already clean must equal the eleven the scan finds — if it does not, a
+      repository was missed rather than handled.
 - [ ] **4.5** Validate every consumer's `rules.json` against the
       `rules.schema.json` beside it. All eleven pass, including
       `sd-github-review`, which fails today. Acceptance criterion 0.
