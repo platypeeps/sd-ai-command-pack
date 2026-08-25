@@ -129,7 +129,9 @@ actually looked at.
 
 ## Notes
 
-Filed 2026-08-25 from the consumer side. Not planned — `design.md` and
-`implement.md` are unwritten, and requirement 2 is a real open question: passing
-`--what` may be sufficient, or the stage may need to refuse when the working tree
-cannot be bound to the planned head. Settle that before `task.py start`.
+Filed 2026-08-25 from the consumer side. Planned 2026-08-25: `design.md` and
+`implement.md` are written, and requirement 2 is settled by experiment — passing
+`--what` is *not* sufficient, because gito resolves the diff from refs but reads
+file content from the working tree. The stage refuses instead, and the refusal is
+scoped to providers that declare the defect; `prism` was tested and does not.
+See `design.md` for the experiment table.

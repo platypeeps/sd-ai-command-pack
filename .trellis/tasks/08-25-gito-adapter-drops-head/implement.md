@@ -59,10 +59,12 @@ today (`sha256` prefix `969c17addc6f`). Never hand-edit a generated copy.
 ## External evidence (PRD acceptance criterion 4)
 
 Cannot be asserted from inside the pack. After the change is installed on the
-machine, replay `sd-github-review` PR #70 from a tree that is **not** the head
-and confirm the stage now refuses by name rather than returning findings. Then
-replay from a worktree at the head and confirm findings are confined to the
-range. The refusal is the new expected result for the first half — the PRD's
+machine, replay `sd-github-review` PR #70 **with gito selected as the provider**
+from a tree that is **not** the head, and confirm the stage now refuses by name
+rather than returning findings. Then replay from a worktree at the head and
+confirm findings are confined to the range. The refusal is provider-scoped, so
+the same replay under `prism` is expected *not* to refuse — that is the
+regression guard, not a failure of this step. The refusal is the new expected result for the first half — the PRD's
 criterion 4 was written before the experiment and says "returns findings
 confined to the range"; that wording only holds for the second half, and the
 PRD's acceptance criteria have been amended to say so.
