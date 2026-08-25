@@ -80,12 +80,48 @@ profile, is not the whole of the pack's fleet machinery —
 `candidatePrepare`/`candidateChecks`, and a rollout policy the controller
 consumes.
 
-**Open question, deliberately unsettled here:** whether the `sd-fleet-refresh`
-lane executes the review-scope check at all. Qualifying heads take
-integration-only review, which may not reach it. If the lane never runs the
-check, the defect is confined to hand-rolled adoption and the fix is smaller
-than requirement 1 assumes. Settle this before design — it is the difference
-between a controller bug and an operator-path gap.
+**That open question is now settled: the controller lane never runs the check.**
+Three findings, each grepped rather than reasoned:
+
+1. No consumer's `candidateChecks` in `docs/fleet/consumers.json` invokes
+   `sd-ai-command-pack-review-scope.sh` or `sd-ai-command-pack-full-check.sh`.
+   All nine declare narrow repo-local commands.
+2. The only scope check ever executed inside a fleet lane was **hoa-manager's
+   repo-local mirror**, which that consumer declared as its own candidate check
+   (`["node", "scripts/check-review-preflight.mjs"]`).
+3. Even that mirror could not fail on the scope body inside the lane.
+   `LANE_STAGES` in `scripts/sd-ai-command-pack-fleet-controller.py` orders
+   `local-checks` **before** `pr-publication`, so no PR exists when candidate
+   checks run. The mirror's body resolver found nothing and, in `auto` mode,
+   warned instead of failing.
+
+So the PR #292 failure came from GitHub Actions **after** publication, not from
+the fleet lane. The controller does not trip its own gate, because it never
+invokes it.
+
+## What survives
+
+The defect narrows to two paths:
+
+- an operator running `check:full` by hand on an adoption branch, which is the
+  repro in **Evidence** and still fails at exit 1;
+- a consumer whose own CI enforces the check on the published PR.
+
+As of 2026-08-25 the second path is **empty across the fleet**:
+`platypeeps/hoa-manager#293` deleted the only mirror. That is a statement about
+today's fleet, not a guarantee — nothing stops a consumer from adding one, and
+the pack-owned templates still tell them the section is required (requirement 3).
+
+This materially shrinks requirement 1. "Emit the section during adoption" no
+longer has a controller bug to fix: the controller would be adding a section
+nothing in its own lane checks. The remaining honest options are to exempt the
+adoption diff in the scope check itself, or to accept that the check is a
+manual-path tool and say so in the templates. Re-open requirement 1 against
+these facts before design.
+
+Also verified while settling this: hoa-manager's `candidateChecks` entry still
+resolves — `scripts/check-review-preflight.mjs` still exists after #293, which
+removed one function from it rather than the file. No fleet-registry breakage.
 
 ## How it was found
 
