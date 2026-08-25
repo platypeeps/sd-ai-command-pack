@@ -231,6 +231,30 @@ replayable from its own contents, so this carries the same trust posture as a
 rebuttal and the same obligation to have looked. A citation path may not
 contain `=`.
 
+A finding you have checked and found **true**, which the repository has
+deliberately decided not to act on, takes the third ground:
+
+```text
+--local-disposition '<stable-id>=accepted@<reason>'
+```
+
+The reason is required and it is the whole of the bound. The other two grounds
+can be wrong and a reader can go and look; an acceptance concedes the finding
+is accurate, so there is nothing left to check and what the receipt carries
+instead is your stated basis. Use it for a deliberate design decision, or an
+observation whose consequence is not worth a change. A finding you have not
+checked is outstanding, not accepted, and a finding you believe untrue is a
+rebuttal — calling it accepted concedes a defect that is not there.
+
+This ground can dispose of anything, including a real defect, and it is not
+prevented from doing so. What it is instead is loud: `accepted` is counted
+apart from `dispositioned` in the receipt, and it outranks every other claim in
+`remoteGate.reason`, so a receipt released by a waiver says
+`local-findings-accepted` even when it also carried rebuttals. That visibility
+is deliberate — the ground exists so that an honest "no" stops being written as
+a false rebuttal, not so that findings become cheaper to clear. A reason may
+not contain `=`.
+
 Two provider misreads are common enough to name, and neither is a fix: fenced
 code blocks quoted inside a Markdown document read as if they were the diff's
 own source — that is a rebuttal — and a cited defect that is simply not present

@@ -1842,7 +1842,9 @@ class ReviewStageTests(InstallTestCase):
             ("abc=miscited@../secret.py:3", "unsafe or unbounded"),
             ("abc=miscited@/etc/passwd:3", "unsafe or unbounded"),
             ("abc=miscited@a=b.py:3", "cannot contain '='"),
-            ("abc=rebutted@src/app.py:3", "only miscited accepts a citation"),
+            # 0.71.51 gave `accepted` an @ payload too, so the old
+            # "only miscited accepts a citation" wording became false.
+            ("abc=rebutted@src/app.py:3", "only miscited and accepted accept"),
         )
         for index, (token, expected) in enumerate(cases):
             with self.subTest(token=token):
@@ -1907,6 +1909,241 @@ class ReviewStageTests(InstallTestCase):
             receipt["remoteGate"]["reason"], "local-findings-dispositioned"
         )
 
+
+
+    # --- accepted: the ground for a finding that is true and stands ---------
+
+    def test_accepted_releases_a_high_finding_that_otherwise_blocks(self) -> None:
+        """T14: one test, both halves -- the ground works and the gate is real.
+
+        Paired deliberately. A release asserted on its own cannot tell a
+        working disposition from a gate that never blocked.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+
+        blocked = self.report(self.run_stage(root, "high-accept", "--local", "prism"))
+        self.assertEqual(blocked["receipt"]["remoteGate"]["state"], "blocked")
+        self.assertEqual(
+            blocked["receipt"]["remoteGate"]["reason"], "actionable-local-findings"
+        )
+        identifier = blocked["receipt"]["findings"][0]["id"]
+        # A high finding is never advisory -- _is_advisory refuses rank >= high
+        # regardless of ceiling -- so nothing but the disposition can open this.
+        self.assertEqual(blocked["receipt"]["findings"][0]["severity"], "high")
+
+        cleared = self.report(
+            self.run_stage(
+                root,
+                "high-accept",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=accepted@deliberate: the grant is narrowed on purpose",
+            )
+        )["receipt"]
+
+        self.assertEqual(cleared["remoteGate"]["state"], "eligible")
+        self.assertEqual(cleared["disposition"]["outstanding"], 0)
+        self.assertEqual(cleared["disposition"]["accepted"], 1)
+
+    def test_accepted_is_not_an_alias_of_rebutted_or_miscited(self) -> None:
+        """T15: fails if `accepted` were wired as either existing ground.
+
+        The whole point of the ground is that a reader can tell a waived
+        finding from a refuted one. Every assertion here is one way that
+        distinction could be lost.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        blocked = self.report(self.run_stage(root, "accept-alias", "--local", "prism"))
+        identifier = blocked["receipt"]["findings"][0]["id"]
+        reason = "trivial impact, understood, not worth a change"
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "accept-alias",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=accepted@{reason}",
+            )
+        )["receipt"]
+        finding = receipt["findings"][0]
+
+        self.assertEqual(finding["disposition"], "accepted")
+        self.assertEqual(finding["dispositionReason"], reason)
+        # Not miscited: an acceptance concedes the citation is correct, so
+        # borrowing the citation field would erase that distinction.
+        self.assertNotIn("dispositionCitation", finding)
+        # Not rebutted: the counts are separate integers precisely so a reader
+        # cannot mistake a waiver for a refutation.
+        self.assertEqual(receipt["disposition"]["accepted"], 1)
+        self.assertEqual(receipt["disposition"]["dispositioned"], 0)
+        # The per-finding ground survives here too, which is what lets a reader
+        # attribute the waiver without walking the findings array.
+        self.assertEqual(
+            receipt["disposition"]["localDispositions"], {identifier: "accepted"}
+        )
+        # The provider's own claim is untouched. An acceptance never edits the
+        # finding it accepts.
+        self.assertEqual(finding["path"], "src/app.py")
+        self.assertEqual(finding["line"], 2)
+
+    def test_accepted_outranks_every_other_eligible_claim(self) -> None:
+        """T16: the weakest release ground is the one a reader must be told.
+
+        A rebuttal says the finding was not real; an advisory release says
+        policy did not care; an acceptance says it is real, it stands, and
+        someone signed for it. If the ladder reported the better news, a reader
+        consulting `remoteGate.reason` alone would never learn a waiver
+        happened -- which is the silent acceptance this ground exists to avoid.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"), ceiling="medium")
+        blocked = self.report(self.run_stage(root, "accept-rank", "--local", "prism"))
+        high = next(
+            item
+            for item in blocked["receipt"]["findings"]
+            if item["severity"] == "high"
+        )
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "accept-rank",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{high['id']}=accepted@known and accepted",
+            )
+        )["receipt"]
+
+        # An advisory finding is present and released, and it must not be the
+        # claim the gate reports.
+        self.assertEqual(receipt["disposition"]["advisory"], 1)
+        self.assertEqual(receipt["disposition"]["accepted"], 1)
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(receipt["remoteGate"]["state"], "eligible")
+        self.assertEqual(
+            receipt["remoteGate"]["reason"], "local-findings-accepted"
+        )
+
+    def test_accepted_outranks_a_dispositioned_sibling(self) -> None:
+        """T17: an acceptance is not masked by a rebuttal in the same receipt.
+
+        This is the shape the motivating replay actually has -- four findings
+        dispositioned and three accepted -- so the masking case is the real one,
+        not a contrived one.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"))
+        blocked = self.report(self.run_stage(root, "accept-mask", "--local", "prism"))
+        findings = blocked["receipt"]["findings"]
+        high = next(item for item in findings if item["severity"] == "high")
+        other = next(item for item in findings if item["id"] != high["id"])
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "accept-mask",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{high['id']}=accepted@real, and it stands",
+                "--local-disposition",
+                f"{other['id']}=rebutted",
+            )
+        )["receipt"]
+
+        self.assertEqual(receipt["disposition"]["accepted"], 1)
+        self.assertEqual(receipt["disposition"]["dispositioned"], 1)
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(
+            receipt["remoteGate"]["reason"], "local-findings-accepted"
+        )
+
+    def test_family_evidence_still_rejects_an_accepted_disposition(self) -> None:
+        """T19: the family-evidence grammar stays closed to the new ground.
+
+        `accepted` is a LOCAL_DISPOSITION_VALUES member and deliberately not a
+        FINDING_DISPOSITIONS one. That set has exactly one consumer --
+        `_parse_family_finding` -- and a waiver has no defined meaning on that
+        path: `--family-evidence` drives the family gate, and an accepted
+        finding carrying `actionable: true` would validate and reach it with
+        nothing deciding what it means.
+
+        Pinned rather than left implicit, because the two sets look like they
+        ought to agree and the obvious tidying edit is to add the member to
+        both.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("clean", "clean"))
+        finding = self.family_finding(root, "remote-one", 1, "boundary-validation")
+        finding["disposition"] = "accepted"
+        evidence = self.write_family_evidence(
+            root, current_round=1, findings=[finding]
+        )
+
+        result = self.run_stage(
+            root,
+            "family-accepted",
+            "--family-evidence",
+            str(evidence),
+            "--plan-only",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("family finding disposition is unsupported", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_accepted_grammar_requires_a_bounded_reason(self) -> None:
+        """T18: the bound is enforced, not documented.
+
+        `accepted` is the one ground whose claim cannot be checked against the
+        checkout -- the finding is true by admission -- so the required reason
+        is the whole of what makes it attributable. An optional reason is not a
+        bound, and a reason that arrives mangled is worse than one refused.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        self.run_stage(root, "accept-grammar", "--local", "prism")
+
+        cases = (
+            ("abc=accepted", "accepted requires a reason"),
+            ("abc=accepted@", "accepted requires a reason"),
+            ("abc=accepted@" + "x" * 501, "reason is unsafe or unbounded"),
+            ("abc=accepted@why\tnot", "reason is unsafe or unbounded"),
+            ("abc=accepted@why\nnot", "reason is unsafe or unbounded"),
+            # rpartition splits on the LAST "=", so a reason containing one
+            # moves the split point and the id silently absorbs
+            # "...=accepted@<prefix>". Without its own diagnostic this surfaces
+            # as an unrelated complaint about a mangled id, which is what a
+            # plain typo would produce.
+            ("abc=accepted@a=b", "an accepted reason cannot contain '='"),
+        )
+        for index, (token, expected) in enumerate(cases):
+            with self.subTest(token=token):
+                result = self.run_stage(
+                    root,
+                    f"accept-bad-{index}",
+                    "--local",
+                    "prism",
+                    "--local-disposition",
+                    token,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
+                # A bounded input error, not merely a non-zero exit: a
+                # traceback is a different failure wearing the same code.
+                self.assertNotIn("Traceback", result.stdout)
 
 
     # --- PR #353: a Markdown-only diff whose fences quote source -------------
