@@ -45,10 +45,10 @@ Observed 2026-08-25 while replaying `sd-github-review` PR #70
 The receipt recorded the correct target — `remoteSummary.base` `c3ec5f64…`,
 `familyGate.exactHead` `2880186…` — while gito reviewed `c3ec5f64..main`.
 **Fourteen of the fifteen findings cited files that are not in the 23-file PR #70
-diff at all**, several in paths created months after that head
-(`docs/RELEASE_CHECKLIST.md`, `package.json`,
-`.trellis/tasks/08-09-review-gate-advisory-convergence/design.md`). Only one
-finding fell inside the range.
+diff at all**, several in paths created months after that head — among them
+`docs/RELEASE_CHECKLIST.md` [absent: consumer repo, not this one] and
+`.trellis/tasks/08-09-review-gate-advisory-convergence/design.md` [absent: consumer repo, not this one].
+Only one finding fell inside the range.
 
 Rerunning the identical command from a detached worktree whose tree *was* the
 head returned 5 findings, all in range — matching the shape the consumer's PRD
