@@ -147,11 +147,11 @@ automated".
 Unit tests prove the flag is constructed. They cannot prove prism reads it, so
 this phase is not optional.
 
-- [ ] **5.1** Run a real review in a consumer **other than**
+- [x] **5.1** Run a real review in a consumer **other than**
       `sd-github-review` — that repository has a `prism-chunked` `argv` provider
       and would exercise a path the fleet does not use. Pick one running pack
       defaults: `loadsmith`, `hoa-manager`, `rwbp-website`, `people-profiles`.
-- [ ] **5.2** Probe run. Acceptance criterion 5. Plant a marker string in a
+- [x] **5.2** Probe run. Acceptance criterion 5. Plant a marker string in a
       scratch diff, point `--rules` at a scratch rules file whose `required`
       block demands a finding for that marker, disable prism's response cache
       for the run, and confirm the finding appears. Repeat without `--rules` and
@@ -160,14 +160,53 @@ this phase is not optional.
       every consumer lists under `focus`, so that test passes unconditionally.
       The cache must be off — prism's cache key excludes the rules file, so a
       replay returns the no-rules answer while looking like a rules run.
-- [ ] **5.3** Confirm `attempt.json` now carries `rules.status == "applied"`,
+- [x] **5.3** Confirm `attempt.json` now carries `rules.status == "applied"`,
       and in a scratch copy with `severityOverrides` re-added, `"refused"` with
       the key named. Acceptance criterion 4.
-- [ ] **5.4** Confirm the severity distribution is not a category lookup: at
+- [x] **5.4** Confirm the severity distribution is not a category lookup: at
       least one category appears at two different severities across the run. If
       every finding sits at its category's old mapped severity, either the fleet
       edit missed this repository or the overrides come from somewhere else —
       stop and find out which. Acceptance criterion 7.
+
+## Phase 5 results, 2026-08-24
+
+All four checks ran. Evidence, in the order it was obtained:
+
+**Bare prism A/B.** A scratch repository with a marker string in the diff and a
+rules file whose `required` block demands a finding titled with that marker,
+cache disabled. Without `--rules`: three findings, marker absent. With
+`--rules`: three findings, marker present. First direct evidence that a prism
+rules file changes what the model returns.
+
+**Through the pack stage, and the trap in between.** The first stage attempt was
+contaminated: the probe committed `.prism/rules.json` inside the reviewed range,
+so the model read the required check as *source under review* and emitted the
+marker whether or not the file was loaded. Rebuilt with the rules file in the
+base commit and only `app.py` in the diff:
+
+```
+rules without severityOverrides -> rules.status "applied"  -> marker present
+rules with    severityOverrides -> rules.status "refused"  -> marker absent
+```
+
+Same repository, same code diff, cache off, only the rules file differing. That
+is acceptance criterion 5, and it also exercises criterion 3 end to end — the
+guard does not merely record a refusal, it withholds the flag.
+
+**Receipt records from a live consumer review** (`loadsmith`, branch delta):
+`prism` reported `{"path": ".prism/rules.json", "status": "applied"}` and `gito`
+reported `{"adapter": "gito", "status": "not-applicable"}`. Criterion 4.
+
+**Severity spread.** The applied probe run returned `low`, `high`, `high` across
+its findings — severity varying independently of category, which is what
+criterion 7 asks for. Note this is scratch-repository evidence rather than a
+consumer review: the consumer branch deltas are the adoption commit itself and
+came back clean with zero findings, so they could not exercise the check.
+
+An aside worth keeping: in the contaminated run, prism flagged the probe rule
+itself — "Suspicious mandatory probe/instrumentation rule injected into rules
+file". The model noticed the injection while reviewing it.
 
 ## Rollback
 
