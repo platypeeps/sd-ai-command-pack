@@ -51,6 +51,10 @@ MAX_FINDINGS = 1_000
 # A caller-supplied miscitation line is bounded so a receipt cannot record an
 # arbitrarily large integer for a location nobody can reach in a real file.
 MAX_CITATION_LINE = 10_000_000
+# Matches the miscited path bound. An accepted reason is free text a human
+# will read out of the receipt while auditing a waiver, so it is bounded for
+# the reader's sake rather than the parser's.
+MAX_ACCEPTED_REASON = 500
 ASCII_DIGITS = frozenset("0123456789")
 MAX_FAMILY_AUDITS = 32
 MAX_FAMILY_EXTENSIONS = 32
@@ -86,9 +90,15 @@ FINDING_DISPOSITIONS = frozenset(
 # The caller-supplied disposition vocabulary. ``rebutted`` records a verified
 # judgement that a reported finding is not real; ``miscited`` records that the
 # finding may describe something real but does not describe the code at the
-# location it names, and so carries a citation the caller checked. Neither ever
-# deletes the finding.
-LOCAL_DISPOSITION_VALUES = frozenset({"rebutted", "miscited"})
+# location it names, and so carries a citation the caller checked. ``accepted``
+# is the third ground and the only one that concedes the finding: the claim is
+# true, the repository has decided against acting on it, and the caller signs
+# for that with a required reason. None of the three ever deletes the finding.
+#
+# ``accepted`` deliberately does NOT join ``FINDING_DISPOSITIONS``. That set has
+# one use -- ``_parse_family_finding`` -- and validates ``--family-evidence``
+# payloads, a different input path with no defined meaning for a waiver.
+LOCAL_DISPOSITION_VALUES = frozenset({"rebutted", "miscited", "accepted"})
 FAMILY_AUDIT_DIMENSIONS = {
     "task-metadata": (
         "identity-fields",
@@ -2029,8 +2039,14 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, dict[str, Any]
                     "miscited requires a citation as <path>:<line>"
                 )
             record = _parse_miscited_citation(citation)
+        elif disposition == "accepted":
+            if not marker:
+                raise ReviewInputError("accepted requires a reason as @<reason>")
+            record = _parse_accepted_reason(citation)
         elif marker:
-            raise ReviewInputError("only miscited accepts a citation")
+            raise ReviewInputError(
+                "only miscited and accepted accept an @ payload"
+            )
         else:
             record = {"disposition": disposition}
         if identifier in dispositions:
@@ -2052,10 +2068,37 @@ def _reject_local_disposition(value: str) -> NoReturn:
     verb, marker, rest = tail.partition("@")
     if marker and verb == "miscited" and "=" in rest:
         raise ReviewInputError("a miscited citation path cannot contain '='")
+    if marker and verb == "accepted" and "=" in rest:
+        raise ReviewInputError("an accepted reason cannot contain '='")
     raise ReviewInputError(
-        "local dispositions must use <stable-id>=rebutted or "
-        "<stable-id>=miscited@<path>:<line>"
+        "local dispositions must use <stable-id>=rebutted, "
+        "<stable-id>=miscited@<path>:<line>, or <stable-id>=accepted@<reason>"
     )
+
+
+def _parse_accepted_reason(reason: str) -> dict[str, Any]:
+    """Bound the one ground whose claim cannot be checked at all.
+
+    ``rebutted`` asserts the finding is untrue in the checkout and ``miscited``
+    asserts the cited location does not hold it. Both can be wrong, and a
+    reader can go and look. An acceptance concedes the finding is true, so
+    there is nothing left to check and the reason is the whole of what makes
+    the waiver attributable -- which is why it is required rather than
+    optional. Free text is trivially satisfiable and this does not pretend
+    otherwise: the point is that the receipt carries a signed statement where
+    it would otherwise carry a fabricated rebuttal.
+
+    A reason containing "=" never reaches here. ``rpartition`` upstream splits
+    on the last one, so it is diagnosed in ``_reject_local_disposition``.
+    """
+
+    if not reason:
+        raise ReviewInputError("accepted requires a reason as @<reason>")
+    if len(reason) > MAX_ACCEPTED_REASON or any(
+        ord(character) < 32 for character in reason
+    ):
+        raise ReviewInputError("accepted reason is unsafe or unbounded")
+    return {"disposition": "accepted", "reason": reason}
 
 
 def _parse_miscited_citation(citation: str) -> dict[str, Any]:
@@ -2124,6 +2167,12 @@ def _apply_local_dispositions(
                 "path": record["path"],
                 "line": record["line"],
             }
+        elif disposition == "accepted":
+            # Its own key, not a reuse of dispositionCitation. Sharing the
+            # field would make an acceptance structurally indistinguishable
+            # from a miscitation, which is the distinction this ground exists
+            # to draw.
+            finding["dispositionReason"] = record["reason"]
         applied[identifier] = disposition
     return applied
 
@@ -2149,13 +2198,16 @@ def _redispose_receipt(
         if isinstance(plan, Mapping)
         else None
     )
-    outstanding, advisory, dispositioned = _disposition_counts(findings, ceiling)
+    outstanding, advisory, dispositioned, accepted = _disposition_counts(
+        findings, ceiling
+    )
     disposition = receipt.get("disposition")
     if not isinstance(disposition, dict):
         raise ReviewInputError("stored local review receipt has no disposition block")
     disposition["outstanding"] = outstanding
     disposition["advisory"] = advisory
     disposition["dispositioned"] = dispositioned
+    disposition["accepted"] = accepted
     recorded = dict(disposition.get("localDispositions") or {})
     recorded.update(applied)
     disposition["localDispositions"] = recorded
@@ -2168,6 +2220,7 @@ def _redispose_receipt(
         findings_present=bool(findings),
         advisory=advisory,
         dispositioned=dispositioned,
+        accepted=accepted,
     )
 
 
@@ -2200,27 +2253,38 @@ def _is_advisory(finding: Mapping[str, Any], ceiling: str | None) -> bool:
 def _disposition_counts(
     findings: Sequence[Mapping[str, Any]],
     ceiling: str | None,
-) -> tuple[int, int, int]:
-    """Split findings into (blocking, advisory, dispositioned).
+) -> tuple[int, int, int, int]:
+    """Split findings into (blocking, advisory, dispositioned, accepted).
 
     ``blocking`` keeps the exact meaning the old single ``outstanding`` count
     had whenever no ceiling is configured, which is what makes "absent means
     today's behaviour" checkable by running the existing suite unchanged.
+
+    ``accepted`` is counted apart from ``dispositioned`` rather than folded in
+    with it. A rebuttal says the finding was not real; an acceptance says it is
+    real and stands. Summing them would leave a reader unable to tell a receipt
+    that refuted its findings from one that waived them.
     """
 
-    blocking = advisory = dispositioned = 0
+    blocking = advisory = dispositioned = accepted = 0
     for item in findings:
         if not isinstance(item, Mapping):
             continue
         disposition = item.get("disposition")
-        if disposition in LOCAL_DISPOSITION_VALUES:
+        # Tested ahead of the membership branch below, which now contains
+        # "accepted" as well: reverse these two and every waiver is silently
+        # folded into ``dispositioned``, with all four counts still summing
+        # correctly and nothing else looking wrong.
+        if disposition == "accepted":
+            accepted += 1
+        elif disposition in LOCAL_DISPOSITION_VALUES:
             dispositioned += 1
         elif disposition == "outstanding":
             if _is_advisory(item, ceiling):
                 advisory += 1
             else:
                 blocking += 1
-    return blocking, advisory, dispositioned
+    return blocking, advisory, dispositioned, accepted
 
 
 def _remote_gate(
@@ -2232,6 +2296,7 @@ def _remote_gate(
     findings_present: bool = True,
     advisory: int = 0,
     dispositioned: int = 0,
+    accepted: int = 0,
 ) -> dict[str, Any]:
     # A provider that reports ``findings`` but lists none has given evidence
     # nobody can inspect, rebut, or classify by severity, so it still blocks --
@@ -2254,6 +2319,16 @@ def _remote_gate(
         }
     # Report the strongest claim the receipt actually supports, so a reader is
     # never told "clean" about a receipt that was released rather than empty.
+    #
+    # An acceptance ranks ahead of every other claim, because the rung that
+    # matters most is the weakest release ground -- the one carrying risk. A
+    # rebuttal says the finding was not real. An advisory release says policy
+    # did not care. An acceptance says it is real, it stands, and someone
+    # signed for it. Ranked behind the others, a waiver in a receipt that also
+    # rebutted something would be invisible to a reader who consults this
+    # reason alone.
+    if accepted:
+        return {"state": "eligible", "reason": "local-findings-accepted"}
     if dispositioned:
         return {"state": "eligible", "reason": "local-findings-dispositioned"}
     if advisory:
@@ -2397,7 +2472,9 @@ def execute(
     findings = _normalize_findings(attempts)
     applied = _apply_local_dispositions(findings, supplied)
     ceiling = plan.get("localAdvisorySeverityCeiling")
-    outstanding, advisory, dispositioned = _disposition_counts(findings, ceiling)
+    outstanding, advisory, dispositioned, accepted = _disposition_counts(
+        findings, ceiling
+    )
     outcome = _aggregate_outcome(attempts)
     limitations = [
         f"{item['provider']['id']}:{item['status']}"
@@ -2417,6 +2494,7 @@ def execute(
             "outstanding": outstanding,
             "advisory": advisory,
             "dispositioned": dispositioned,
+            "accepted": accepted,
             "fixPolicy": fix_policy,
             "maximumFixCommitsBeforeRemote": 1,
             "localDispositions": applied,
@@ -2429,6 +2507,7 @@ def execute(
             findings_present=bool(findings),
             advisory=advisory,
             dispositioned=dispositioned,
+            accepted=accepted,
         ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),

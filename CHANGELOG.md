@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.71.51 - 2026-08-25
+
+### Added
+
+- A third `--local-disposition` ground, `accepted`, for a finding that is
+  accurate and that the repository has deliberately decided not to act on.
+  The vocabulary previously had a ground for "this finding is wrong"
+  (`rebutted`) and one for "this finding is pointed at the wrong place"
+  (`miscited`), and none for "this finding is right, and the answer is still
+  no." An accurate finding the repository had accepted therefore had no honest
+  disposition: calling it `rebutted` filed a false classification, and leaving
+  it undispositioned blocked the merge with no exit but a human
+  round-extension. Grammar is `<stable-id>=accepted@<reason>`; the reason is
+  required, bounded at 500 characters, and stored on the finding as
+  `dispositionReason`.
+- The bound on that ground is attributability, not prevention, and the choice
+  is deliberate. `accepted` grants no power an operator lacked: the pack never
+  reads the checkout to verify a disposition, so both existing grounds were
+  already assertions taken on trust, and anyone wanting to wave a real defect
+  through could already write `rebutted`. What changes is the incentive — the
+  honest answer now has a name, so a decision that would have been recorded as
+  a fabricated rebuttal is recorded as a signed statement instead. No cap was
+  added; a cap would block honest batches while doing nothing about one
+  dishonest waiver.
+- Waivers are counted apart from rebuttals. The receipt's `disposition` block
+  gains an `accepted` integer, kept separate from `dispositioned` so a reader
+  can tell a receipt that refuted its findings from one that waived them, and
+  `accepted` takes the first rung of the `remoteGate` eligible ladder,
+  reporting `local-findings-accepted` ahead of `local-findings-dispositioned`.
+  Ranked any lower, a waiver in a receipt that also rebutted something would
+  have been invisible to a reader consulting `remoteGate.reason` alone — which
+  is the silent acceptance the ground exists to avoid.
+- `accepted` is a local disposition only and deliberately absent from
+  `FINDING_DISPOSITIONS`, whose sole consumer validates `--family-evidence`
+  payloads. A waiver has no defined meaning on that path, and an accepted
+  family finding carrying `actionable: true` would have validated and reached
+  the family gate with nothing deciding what it meant. A test pins the
+  rejection, because the two sets look like they ought to agree and the obvious
+  tidying edit is to add the member to both.
+
+- The ground is admitted by the coordinator as well as the stage. The
+  controller keeps its own copy of `LOCAL_DISPOSITION_VALUES` and gates on it,
+  so a ground added to the stage alone is refused before it reaches the stage
+  and is unreachable through the documented entry point. Its router also
+  buckets every receipt disposition and raises on one it does not know, which
+  would have rejected an accepted receipt outright rather than miscounting it
+  -- a trap the surrounding comment already described for `miscited`. Both are
+  now covered by a controller-level test asserting the pair is forwarded
+  verbatim, since a stage-only suite passes either way.
+
+### Changed
+
+- The `--local-disposition` grammar error for an `@` payload on a ground that
+  takes none now reads "only miscited and accepted accept an @ payload". The
+  previous wording named `miscited` alone and became false.
+
 ## 0.71.50 - 2026-08-25
 
 ### Fixed

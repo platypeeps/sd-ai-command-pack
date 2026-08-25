@@ -1036,11 +1036,15 @@ materialize on the exact head.
 
 When integration is optional and the descriptor is absent, only a local receipt
 whose `remoteGate.state` is `eligible` may complete, with
-`router-not-configured` and `zero-remote-confidence` limitations. Three receipts
+`router-not-configured` and `zero-remote-confidence` limitations. Four receipts
 qualify, and the gate reason says which: `local-stage-terminal` (nothing was
 found), `local-findings-dispositioned` (every finding was rebutted or marked
-miscited), and `local-advisory-released` (the findings that remain are at or
-below the repository's configured advisory ceiling). A released receipt is still
+miscited), `local-advisory-released` (the findings that remain are at or
+below the repository's configured advisory ceiling), and
+`local-findings-accepted` (a finding is accurate and the repository has
+deliberately accepted it). The last is reported ahead of the other three when
+more than one applies, because a waiver is the release ground carrying risk and
+is the one a reader most needs told. A released receipt is still
 `outcome: "findings"` and still carries zero confidence — the release is a
 policy decision the repository made in advance, not a claim the providers found
 nothing — so read the gate rather than the outcome. Explicit or required routing, invalid or

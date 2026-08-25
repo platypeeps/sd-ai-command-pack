@@ -53,7 +53,7 @@ LOCAL_VALUES = frozenset({"auto", "all", "none"})
 REMOTE_VALUES = frozenset({"auto", "cheap", "deep", "copilot", "none"})
 FIX_VALUES = frozenset({"auto", "ask", "none"})
 REMOTE_DISPOSITION_VALUES = frozenset({"rebutted"})
-LOCAL_DISPOSITION_VALUES = frozenset({"rebutted", "miscited"})
+LOCAL_DISPOSITION_VALUES = frozenset({"rebutted", "miscited", "accepted"})
 # Extra rounds granted past remoteIntegration roundLimit for an
 # evidence-backed successor-head re-entry (`--successor bookkeeping` with
 # `--bookkeeping-evidence`, under automatic local provider selection). The
@@ -190,11 +190,18 @@ def _receipt_latency(receipt: Mapping[str, Any]) -> int | None:
 def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
     """Validate local review dispositions and return the value part verbatim.
 
-    Two grounds: ``<stable-id>=rebutted``, and ``<stable-id>=miscited@<path>:<line>``
-    for a finding that does not describe the code at the location it names.
-    ``rebutted`` is deliberately the same grammar and value as the remote
-    channel below -- a caller who has verified a finding is false should not
-    have to learn two vocabularies depending on which provider raised it.
+    Three grounds: ``<stable-id>=rebutted``; ``<stable-id>=miscited@<path>:<line>``
+    for a finding that does not describe the code at the location it names; and
+    ``<stable-id>=accepted@<reason>`` for one that is accurate and that the
+    repository has deliberately decided not to act on. ``rebutted`` is
+    deliberately the same grammar and value as the remote channel below -- a
+    caller who has verified a finding is false should not have to learn two
+    vocabularies depending on which provider raised it.
+
+    This vocabulary is a second copy of the stage's, and it gates: a value the
+    controller does not know is refused here and never reaches the stage that
+    owns the real grammar. Adding a ground to the stage alone leaves it
+    unreachable through the documented entry point.
 
     Only the shape is checked here. The citation is returned unparsed and
     forwarded verbatim so this stays a pass-through; the local stage owns the
@@ -211,8 +218,8 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
             or len(identifier) > 240
             or any(ord(character) < 32 for character in identifier)
             or disposition not in LOCAL_DISPOSITION_VALUES
-            or (disposition == "miscited" and not citation)
-            or (disposition != "miscited" and marker)
+            or (disposition in {"miscited", "accepted"} and not citation)
+            or (disposition not in {"miscited", "accepted"} and marker)
         ):
             # rpartition splits on the LAST "=", so a citation path containing
             # "=" is cut in the wrong place and arrives above as nonsense.
@@ -223,9 +230,11 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
             verb, tail_marker, rest = tail.partition("@")
             if tail_marker and verb == "miscited" and "=" in rest:
                 raise ReviewError("a miscited citation path cannot contain '='")
+            if tail_marker and verb == "accepted" and "=" in rest:
+                raise ReviewError("an accepted reason cannot contain '='")
             raise ReviewError(
-                "local dispositions must use <stable-id>=rebutted or "
-                "<stable-id>=miscited@<path>:<line>"
+                "local dispositions must use <stable-id>=rebutted, "
+                "<stable-id>=miscited@<path>:<line>, or <stable-id>=accepted@<reason>"
             )
         if identifier in dispositions:
             raise ReviewError("local disposition ids must be unique")
@@ -1057,12 +1066,15 @@ def _router_local_summary(
             unresolved += 1
         elif disposition == "fixed":
             fixed += 1
-        elif disposition in {"rebutted", "resolved", "miscited"}:
-            # Router v1 has one terminal non-fix bucket; local `resolved` and
-            # `miscited` carry no fix-commit evidence, so they belong with
-            # rebuttals. Omitting `miscited` here does not merely miscount it --
-            # the else branch raises, so a receipt carrying one would be
-            # rejected outright by the router.
+        elif disposition in {"rebutted", "resolved", "miscited", "accepted"}:
+            # Router v1 has one terminal non-fix bucket; local `resolved`,
+            # `miscited`, and `accepted` carry no fix-commit evidence, so they
+            # belong with rebuttals. Omitting one here does not merely miscount
+            # it -- the else branch raises, so a receipt carrying it would be
+            # rejected outright by the router. `accepted` is bucketed with
+            # rebuttals only because v1 has nowhere else to put it; the receipt
+            # keeps them apart, and a v2 router that distinguishes a waiver
+            # from a refutation should split this.
             rebutted += 1
         else:
             raise ReviewError("local receipt finding disposition is invalid")

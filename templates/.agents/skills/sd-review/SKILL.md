@@ -127,9 +127,12 @@ A profile that fell back to `remote` for any reason does not suppress anything.
 - A router classified `absent` may complete locally only when routing is
   optional and the local stage's `remoteGate.state` is `eligible`. That covers
   a clean receipt (`local-stage-terminal`), one whose findings were all
-  dispositioned (`local-findings-dispositioned`), and one whose remaining
-  findings are all at or below a configured advisory ceiling
-  (`local-advisory-released`). Read the gate, not the outcome: a released
+  dispositioned (`local-findings-dispositioned`), one whose remaining findings
+  are all at or below a configured advisory ceiling
+  (`local-advisory-released`), and one released by an accepted finding
+  (`local-findings-accepted`). The last outranks the other three: a receipt
+  that both rebutted and accepted findings reports the acceptance, because the
+  waiver is the part carrying risk. Read the gate, not the outcome: a released
   receipt is still `outcome: "findings"` and still carries zero confidence, by
   design — the release is a policy decision the repository made in advance, not
   a claim that nothing was found. `eligible-with-limitations` is not eligible
@@ -230,6 +233,30 @@ The pack does not open the checkout to confirm it; a receipt has to be
 replayable from its own contents, so this carries the same trust posture as a
 rebuttal and the same obligation to have looked. A citation path may not
 contain `=`.
+
+A finding you have checked and found **true**, which the repository has
+deliberately decided not to act on, takes the third ground:
+
+```text
+--local-disposition '<stable-id>=accepted@<reason>'
+```
+
+The reason is required and it is the whole of the bound. The other two grounds
+can be wrong and a reader can go and look; an acceptance concedes the finding
+is accurate, so there is nothing left to check and what the receipt carries
+instead is your stated basis. Use it for a deliberate design decision, or an
+observation whose consequence is not worth a change. A finding you have not
+checked is outstanding, not accepted, and a finding you believe untrue is a
+rebuttal — calling it accepted concedes a defect that is not there.
+
+This ground can dispose of anything, including a real defect, and it is not
+prevented from doing so. What it is instead is loud: `accepted` is counted
+apart from `dispositioned` in the receipt, and it outranks every other claim in
+`remoteGate.reason`, so a receipt released by a waiver says
+`local-findings-accepted` even when it also carried rebuttals. That visibility
+is deliberate — the ground exists so that an honest "no" stops being written as
+a false rebuttal, not so that findings become cheaper to clear. A reason may
+not contain `=`.
 
 Two provider misreads are common enough to name, and neither is a fix: fenced
 code blocks quoted inside a Markdown document read as if they were the diff's
