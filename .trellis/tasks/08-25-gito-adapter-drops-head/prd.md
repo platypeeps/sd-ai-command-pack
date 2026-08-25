@@ -54,6 +54,17 @@ Rerunning the identical command from a detached worktree whose tree *was* the
 head returned 5 findings, all in range — matching the shape the consumer's PRD
 records for its earlier gito replay of the same range.
 
+gito states the mechanism in its own log line, captured in the receipt's
+`attempts[].diagnostic`:
+
+```
+INFO: Making merge-base diff: INDEX vs d4e08e7d469c943ec66dad0792d6365679cf97cd
+```
+
+`INDEX` is the working tree. The base is the only ref it was given, and the
+other side of the comparison is whatever happens to be checked out — so the
+defect is observable from the provider's output without inspecting the argv.
+
 ## Why it matters
 
 The failure is silent and severity-free: the stage exits normally, the receipt
