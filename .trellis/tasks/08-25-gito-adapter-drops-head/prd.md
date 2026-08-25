@@ -7,8 +7,9 @@ supplies its own head from the working tree, so the range actually reviewed is
 
 ## Evidence
 
-`templates/scripts/sd-ai-command-pack-review-local.py`, in `_provider_argv`,
-builds the delta invocation as:
+`templates/scripts/sd-ai-command-pack-review-local.py`, in `_expand_argv`
+(an earlier draft of this PRD called it `_provider_argv`; no such symbol
+exists), builds the delta invocation as:
 
 ```python
 elif provider.adapter == "gito":
@@ -21,6 +22,11 @@ elif provider.adapter == "gito":
 
 `target["head"]` is in scope at that point — the `argv` adapter branch directly
 below substitutes it as `{head}` — and is simply not passed.
+
+Note the `else` covers two canonical scopes, not one: `CANONICAL_SCOPES` is
+`{"worktree", "branch_delta", "codebase"}`, and only `branch_delta` is wrong.
+For `worktree` (from `--scope changes`) the subject of review *is* the
+uncommitted tree, so comparing the index against the base is correct there.
 
 gito's own CLI documents both halves of the range:
 
@@ -87,24 +93,45 @@ actually looked at.
 2. A receipt whose plan names a head cannot be satisfied by provider output taken
    against a different head — either the head reaches the provider, or the stage
    refuses.
-3. The codebase-scope branch keeps its current behaviour; only the delta branch
-   is wrong.
+3. The `codebase` and `worktree` scopes keep their current behaviour. Only
+   `branch_delta` is wrong. "The delta branch" in the code is one `else`
+   covering both `worktree` and `branch_delta`, so a fix keyed off "not
+   codebase" would break `worktree`.
 
 ## Acceptance criteria
 
-- [ ] `_provider_argv` passes the resolved head to gito for delta scopes,
+- [ ] `_expand_argv` passes the resolved head to gito for `branch_delta`,
       asserted by a test on the constructed argv that fails against today's code.
 - [ ] The same test pins the base argument, so a fix that swaps the two —
       reviewing `head..base` — fails rather than passing on argv length alone.
-- [ ] The codebase-scope argv is asserted unchanged in the same test file, so the
+- [ ] The `codebase` argv is asserted unchanged in the same test file, so the
       fix cannot silently alter the `--all` path.
-- [ ] External evidence: a replay of `sd-github-review` PR #70 from a working
-      tree that is *not* the head returns findings confined to the range. This is
-      what the defect broke, and it cannot be asserted from inside the pack.
+- [ ] The `worktree` argv is asserted to carry **no** `--what`, so the fix
+      cannot regress `--scope changes` into reviewing the committed head.
+- [ ] The refusal is asserted in-pack and is provider-scoped: a `branch`/`pr`
+      run selecting gito against a clean tree whose `HEAD` is not the requested
+      head raises `ReviewInputError` with a message naming both oids, and the
+      same run selecting prism only still succeeds. The second half is the
+      regression guard for a capability prism was measured to have; without it,
+      a later collapse of the check into `resolve_target` passes its own tests
+      while silently removing that capability.
+- [ ] External evidence, in two halves. From a working tree that is *not* the
+      head, the stage **refuses by name** rather than returning findings — see
+      `design.md`, which establishes that gito reads file content from the
+      working tree, so a correct review of an unheld head is not available from
+      this provider. From a worktree that *is* the head, a replay of
+      `sd-github-review` PR #70 returns findings confined to the range. Neither
+      half can be asserted from inside the pack.
+
+      This criterion originally read "returns findings confined to the range"
+      for the not-the-head case. That was written before the experiment and was
+      unsatisfiable as stated.
 
 ## Notes
 
-Filed 2026-08-25 from the consumer side. Not planned — `design.md` and
-`implement.md` are unwritten, and requirement 2 is a real open question: passing
-`--what` may be sufficient, or the stage may need to refuse when the working tree
-cannot be bound to the planned head. Settle that before `task.py start`.
+Filed 2026-08-25 from the consumer side. Planned 2026-08-25: `design.md` and
+`implement.md` are written, and requirement 2 is settled by experiment — passing
+`--what` is *not* sufficient, because gito resolves the diff from refs but reads
+file content from the working tree. The stage refuses instead, and the refusal is
+scoped to providers that declare the defect; `prism` was tested and does not.
+See `design.md` for the experiment table.
