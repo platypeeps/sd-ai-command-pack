@@ -101,8 +101,8 @@ into that state in one release.
 Stock prism sends the whole diff as a single request; `SplitIntoChunks` is
 unreachable without a `chunkMaxBytes` config key that stock does not have.
 `sd-github-review` works around this caller-side with a `prism-chunked` `argv`
-provider (that repository's `scripts/prism-chunked-review.py`, not a path in
-this one) declared in its own `review.json`.
+provider — a chunked-review script under that repository's own scripts
+directory, not a path in this one — declared in its own `review.json`.
 That workaround is per-consumer and stays per-consumer for now: it is not a
 correctness defect in the pack, and folding a chunking script into the payload
 is a larger decision than this task should make. Recorded here so the scope
