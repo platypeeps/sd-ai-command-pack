@@ -35,9 +35,9 @@ The three that block:
 
 | finding | why no ground fits |
 | --- | --- |
-| `examples/sd-review.yml:70` — the token grants write to a third-party container | True. It is a deliberate, documented decision; the surrounding comment narrows the grant specifically so the container cannot write durable receipts. |
-| `examples/sd-review.yml:109` — empty API key vars for non-selected providers | True. Trivial impact, understood, not worth a change. |
-| `scripts/consumer-installer.mjs:185` — `JSON.stringify` key-order sensitivity | Mechanism is real. Consequence is one redundant idempotent rewrite. |
+| sd-github-review's workflow example, at the reviewer job's `permissions` block — the token grants write to a third-party container | True. It is a deliberate, documented decision; the surrounding comment narrows the grant specifically so the container cannot write durable receipts. |
+| sd-github-review's workflow example, in the provider `env` block — empty API key vars for non-selected providers | True. Trivial impact, understood, not worth a change. |
+| sd-github-review's consumer installer, where the settings block is re-serialized — `JSON.stringify` key-order sensitivity | Mechanism is real. Consequence is one redundant idempotent rewrite. |
 
 That is criterion 6 of the upstream task, and it is the only one still unmet.
 
