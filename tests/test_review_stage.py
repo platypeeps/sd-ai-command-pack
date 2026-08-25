@@ -574,6 +574,120 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("gito review --vs", invocation_log)
         self.assertNotIn("--filter", invocation_log)
 
+    # --- .prism/rules.json handling -------------------------------------
+
+    def write_prism_rules(self, root, payload) -> None:
+        """Write .prism/rules.json and commit it, or write raw bytes verbatim."""
+        rules = root / ".prism/rules.json"
+        rules.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(payload, str):
+            rules.write_text(payload, encoding="utf-8")
+        else:
+            rules.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".prism/rules.json")
+        self.run_git(root, "commit", "-m", "add prism rules")
+
+    def prism_rules_record(self, report):
+        for row in report["receipt"]["attempts"]:
+            if row["provider"]["id"] == "prism":
+                return row["rules"]
+        self.fail("no prism attempt in receipt")
+
+    def test_prism_rules_are_passed_when_the_file_exists(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        self.write_prism_rules(root, {"focus": ["bug"], "required": []})
+
+        report = self.report(self.run_stage(root, "rules-applied"))
+
+        self.assertIn("--rules .prism/rules.json", log.read_text(encoding="utf-8"))
+        self.assertEqual(
+            self.prism_rules_record(report),
+            {"status": "applied", "path": ".prism/rules.json"},
+        )
+
+    def test_prism_argv_is_unchanged_when_no_rules_file_exists(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+
+        report = self.report(self.run_stage(root, "rules-absent"))
+
+        invocation_log = log.read_text(encoding="utf-8")
+        self.assertNotIn("--rules", invocation_log)
+        self.assertIn("prism review range", invocation_log)
+        self.assertEqual(
+            self.prism_rules_record(report),
+            {"status": "absent", "path": ".prism/rules.json"},
+        )
+
+    def test_prism_rules_carrying_severity_overrides_are_refused(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        self.write_prism_rules(
+            root,
+            {
+                "focus": ["bug"],
+                "required": [],
+                "severityOverrides": {"bug": "high"},
+            },
+        )
+
+        result = self.run_stage(root, "rules-refused")
+        report = self.report(result)
+
+        # Refusing the rules file must not fail the review: running without
+        # rules is the behaviour that shipped before the flag existed.
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+        self.assertNotIn("--rules", log.read_text(encoding="utf-8"))
+        record = self.prism_rules_record(report)
+        self.assertEqual(record["status"], "refused")
+        self.assertEqual(record["path"], ".prism/rules.json")
+        self.assertIn("severityOverrides", record["reason"])
+
+    def test_unreadable_prism_rules_degrade_rather_than_raise(self) -> None:
+        for label, payload in (
+            ("not-json", "{ this is not json"),
+            ("not-an-object", "[1, 2, 3]\n"),
+        ):
+            with self.subTest(label):
+                root = self.make_repo()
+                log = self.write_builtin_config(root)
+                self.write_prism_rules(root, payload)
+
+                result = self.run_stage(root, f"rules-{label}")
+                report = self.report(result)
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertNotIn("--rules", log.read_text(encoding="utf-8"))
+                record = self.prism_rules_record(report)
+                self.assertEqual(record["status"], "unreadable")
+                self.assertTrue(record["reason"])
+
+    def test_gito_argv_is_untouched_by_the_rules_decision(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        self.write_prism_rules(root, {"focus": ["bug"], "required": []})
+
+        report = self.report(self.run_stage(root, "rules-gito"))
+
+        gito_lines = [
+            line
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.startswith("gito ")
+        ]
+        self.assertTrue(gito_lines)
+        for line in gito_lines:
+            self.assertNotIn("--rules", line)
+        gito = [
+            row
+            for row in report["receipt"]["attempts"]
+            if row["provider"]["id"] == "gito"
+        ]
+        self.assertEqual(
+            gito[0]["rules"], {"status": "not-applicable", "adapter": "gito"}
+        )
+
     def test_builtin_adapter_rejects_unstructured_success_output(self) -> None:
         root = self.make_repo()
         self.write_builtin_config(root, prism_mode="invalid")

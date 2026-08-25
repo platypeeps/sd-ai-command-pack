@@ -1407,12 +1407,78 @@ def _atomic_json(path: Path, value: object) -> None:
             pass
 
 
+PRISM_RULES_PATH = ".prism/rules.json"
+PRISM_RULES_LIMIT = 256 * 1024
+
+
+@dataclass(frozen=True)
+class RulesDecision:
+    """Whether prism gets a --rules flag, and the receipt record explaining it."""
+
+    argv_extension: tuple[str, ...]
+    record: dict[str, Any]
+
+
+def _prism_rules(repo: Path) -> RulesDecision:
+    """Resolve the repository's prism rules file into argv plus a receipt record.
+
+    Every outcome is recorded and none is fatal. A review that runs without
+    rules is exactly the behaviour that shipped before this flag existed, so
+    degrading to it is always available and always better than not reviewing.
+    """
+
+    path = repo / PRISM_RULES_PATH
+    if not path.is_file():
+        return RulesDecision((), {"status": "absent", "path": PRISM_RULES_PATH})
+    try:
+        value = _read_json(path, limit=PRISM_RULES_LIMIT, label="prism rules")
+    except ReviewInputError as error:
+        return RulesDecision(
+            (),
+            {"status": "unreadable", "path": PRISM_RULES_PATH, "reason": str(error)},
+        )
+    if not isinstance(value, dict):
+        return RulesDecision(
+            (),
+            {
+                "status": "unreadable",
+                "path": PRISM_RULES_PATH,
+                "reason": "prism rules root must be an object",
+            },
+        )
+    if "severityOverrides" in value:
+        # prism applies severityOverrides client-side after the model answers,
+        # rewriting each finding's severity from its category. That replaces the
+        # per-finding judgement the advisory gate discriminates on, so the pack
+        # declines to hand prism a rules file carrying one rather than quietly
+        # letting a category lookup decide what blocks.
+        return RulesDecision(
+            (),
+            {
+                "status": "refused",
+                "path": PRISM_RULES_PATH,
+                "reason": (
+                    "prism rules carry severityOverrides, which replaces "
+                    "per-finding severity with a category lookup; remove the key "
+                    "to have focus and required checks applied"
+                ),
+            },
+        )
+    # Relative on purpose: _run_provider sets cwd=repo, and a relative path keeps
+    # the argv stable across machines, which matters because it is persisted into
+    # invocation.json and compared when a receipt is reused.
+    return RulesDecision(
+        ("--rules", PRISM_RULES_PATH), {"status": "applied", "path": PRISM_RULES_PATH}
+    )
+
+
 def _expand_argv(
     provider: Provider,
     target: Mapping[str, Any],
     attempt_dir: Path,
     context_path: Path,
     repo: Path,
+    rules: RulesDecision,
 ) -> list[str]:
     paths = [str(row["path"]) for row in target["paths"] if isinstance(row, dict)]
     path_csv = ",".join(paths)
@@ -1443,6 +1509,7 @@ def _expand_argv(
                 "--format",
                 "json",
             ]
+        result += list(rules.argv_extension)
     elif provider.adapter == "gito":
         output = str(attempt_dir / "provider-output")
         if scope == "codebase":
@@ -1687,6 +1754,7 @@ def _run_provider(
     repo: Path,
     run_dir: Path,
     environment: Mapping[str, str],
+    rules: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     attempt_dir = run_dir / provider.identifier
     attempt_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -1694,6 +1762,9 @@ def _run_provider(
     base = {
         "provider": _provider_row(provider),
         "startedAt": started,
+        # Recorded for every provider, not just prism: a reader comparing two
+        # attempts should not have to know which adapters consult a rules file.
+        "rules": dict(rules) if rules is not None else {"status": "absent"},
         "artifact": str(attempt_dir.relative_to(run_dir.parent.parent)),
     }
     _atomic_json(attempt_dir / "attempt.json", {**base, "status": "running"})
@@ -2227,6 +2298,8 @@ def execute(
         provider for provider in providers if provider.identifier in selected_ids
     ]
     context_path = run_dir / "review-context.json"
+    # Once per run, not once per provider: the decision depends only on `repo`.
+    rules_decision = _prism_rules(repo)
     commands = {
         provider.identifier: _expand_argv(
             provider,
@@ -2234,6 +2307,7 @@ def execute(
             run_dir / provider.identifier,
             context_path,
             repo,
+            rules_decision,
         )
         for provider in selected
     }
@@ -2274,6 +2348,11 @@ def execute(
                     repo=repo,
                     run_dir=run_dir,
                     environment=environment,
+                    rules=(
+                        rules_decision.record
+                        if provider.adapter == "prism"
+                        else {"status": "not-applicable", "adapter": provider.adapter}
+                    ),
                 )
                 for provider in selected
             ]

@@ -18,52 +18,58 @@
 Requirement 1b. The schema has to stop forbidding the end state before anything
 else can reach it.
 
-- [ ] **0.1** `templates/.prism/rules.schema.json`: drop `severityOverrides`
+- [x] **0.1** `templates/.prism/rules.schema.json`: drop `severityOverrides`
       from `required`. Leave it in `properties` — `additionalProperties: false`
       means deleting the property would forbid the key outright rather than
       merely stop requiring it. This task's position is that the key is a bad
       idea, not that it is unrepresentable.
-- [ ] **0.2** `templates/.prism/rules.json`: remove the `severityOverrides`
+- [x] **0.2** `templates/.prism/rules.json`: remove the `severityOverrides`
       block, and amend the `description` sentence instructing the reader to keep
       `focus` and `severityOverrides` category names in sync.
-- [ ] **0.3** Regenerate the mirrors and `plugins/sd/machine-payload/`
+- [x] **0.3** Regenerate the mirrors and `plugins/sd/machine-payload/`
       derivatives. `tests/test_generated_parity.py:334` and
       `tests/test_review_scope.py:1583` both reference these two paths and will
       catch a partial regeneration.
-- [ ] **0.4** Confirm the schema change only widens what validates: every
+- [x] **0.4** Confirm the schema change only widens what validates: every
       consumer's current `rules.json` — block still present — still passes.
       Dropping a `required` entry cannot invalidate anything, so a failure here
       means the wrong edit was made.
 
 ## Phase 1 — pack change
 
-- [ ] **1.1** Add `_prism_rules(repo)` to
-      `plugins/sd/bin/sd-ai-command-pack-review-local.py`. Four outcomes per the
+- [x] **1.1** Add `_prism_rules(repo)` to
+      `templates/scripts/sd-ai-command-pack-review-local.py`. **The source is
+      `templates/scripts/`, not `plugins/sd/bin/`** — the file exists in four
+      places and the other three are generated. Editing `plugins/sd/bin/`
+      directly produces a stage that passes syntax checks and does nothing,
+      because `run_stage` executes the installed copy. Four outcomes per the
       design table. Read through the existing `_read_json(..., limit=…)` helper,
       not `json.load` — this is consumer-controlled input.
-- [ ] **1.2** Thread the decision: extra parameter on `_expand_argv`, appended
+- [x] **1.2** Thread the decision: extra parameter on `_expand_argv`, appended
       in the three `adapter == "prism"` branches only (`:1420`–`:1445`); extra
       `rules=` keyword on `_run_provider`, merged into the attempt `base` dict.
-- [ ] **1.3** Compute the decision once at the call site (`:2231`), above the
+- [x] **1.3** Compute the decision once at the call site (`:2231`), above the
       dict comprehension. It depends only on `repo`.
-- [ ] **1.4** Sync `plugins/sd/machine-payload/scripts/` from
-      `plugins/sd/bin/`. Verify with
-      `diff -q plugins/sd/bin/sd-ai-command-pack-review-local.py plugins/sd/machine-payload/scripts/sd-ai-command-pack-review-local.py`
-      — must print nothing. Acceptance criterion 6, first half.
+- [x] **1.4** Propagate with `make generate && make sync`, then confirm all
+      four copies agree:
+      `find . -name 'sd-ai-command-pack-review-local.py' -not -path './.git/*'`
+      hashed — `templates/scripts/`, `scripts/`, `plugins/sd/bin/` and
+      `plugins/sd/machine-payload/scripts/` must be identical. Acceptance
+      criterion 6, first half.
 
 ## Phase 2 — tests
 
-- [ ] **2.1** `_expand_argv` carries `--rules .prism/rules.json` for
+- [x] **2.1** `_expand_argv` carries `--rules .prism/rules.json` for
       `branch_delta`, `codebase` and `worktree`. Acceptance criterion 2.
-- [ ] **2.2** `_expand_argv` carries no `--rules` when the file is absent, and
+- [x] **2.2** `_expand_argv` carries no `--rules` when the file is absent, and
       the argv is otherwise byte-identical to today's. This is the
       no-behaviour-change guarantee for consumers without a rules file.
-- [ ] **2.3** A rules file containing `severityOverrides` produces no `--rules`,
+- [x] **2.3** A rules file containing `severityOverrides` produces no `--rules`,
       `record["status"] == "refused"`, and the review still completes.
       Acceptance criterion 3.
-- [ ] **2.4** Unreadable and non-object rules files produce `unreadable`, not an
+- [x] **2.4** Unreadable and non-object rules files produce `unreadable`, not an
       exception and not a failed review.
-- [ ] **2.5** `gito` and `argv` adapter argv are unchanged by the new parameter.
+- [x] **2.5** `gito` and `argv` adapter argv are unchanged by the new parameter.
 - [ ] **2.6** Full suite plus `pack.install-audit`. Acceptance criterion 6.
 
 ## Phase 3 — release and rollout

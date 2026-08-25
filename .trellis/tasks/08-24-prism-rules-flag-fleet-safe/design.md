@@ -98,14 +98,22 @@ Computed once per run, not once per provider: the decision depends only on
 
 ## Observability
 
-Two artifacts, deliberately:
+**Corrected 2026-08-24, during implementation.** An earlier draft said
+`invocation.json` already persists the argv, so the new record only had to
+explain failures. It does not. `invocation.json` carries `{schemaVersion,
+attemptId, target, plan}`, and `plan` is the provider *selection*, not the
+command line — `commands` is built separately and never written down. Nothing in
+any artifact records what was actually executed.
 
-- `invocation.json` already persists the full `plan` argv, so `--rules` presence
-  is visible there the moment it is passed. That covers "were rules applied".
-- `attempt.json` gains `rules`, which covers "and if not, why". This is the half
-  that was missing: nothing in a receipt today distinguishes *no rules file*
-  from *rules file silently ignored*, and that indistinguishability is precisely
-  why the defect survived unnoticed across eleven repositories.
+So `attempt.json`'s new `rules` key is the whole of the observability, not half
+of it. It has to answer both "were rules applied" and "if not, why", because
+nothing else answers either. That the receipt could not distinguish *no rules
+file* from *rules file silently ignored* is precisely why the defect survived
+unnoticed across eleven repositories.
+
+The record is written for every provider, not only prism. A reader comparing two
+attempts should not need to know which adapters consult a rules file; non-prism
+adapters record `not-applicable` with their adapter name.
 
 No receipt schema exists to version, and no consumer reads `attempt.json`
 positionally, so an added key is additive.
