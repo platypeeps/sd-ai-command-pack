@@ -1432,10 +1432,17 @@ def _prism_rules(repo: Path) -> RulesDecision:
         return RulesDecision((), {"status": "absent", "path": PRISM_RULES_PATH})
     try:
         value = _read_json(path, limit=PRISM_RULES_LIMIT, label="prism rules")
-    except ReviewInputError as error:
+    except ReviewInputError:
+        # Deliberately not the underlying message: _read_json interpolates the
+        # absolute path, and this record is published in a review receipt. The
+        # path is already reported, relative, in the `path` field.
         return RulesDecision(
             (),
-            {"status": "unreadable", "path": PRISM_RULES_PATH, "reason": str(error)},
+            {
+                "status": "unreadable",
+                "path": PRISM_RULES_PATH,
+                "reason": "prism rules are missing, oversized, or not valid JSON",
+            },
         )
     if not isinstance(value, dict):
         return RulesDecision(

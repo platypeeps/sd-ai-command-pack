@@ -663,6 +663,9 @@ class ReviewStageTests(InstallTestCase):
                 record = self.prism_rules_record(report)
                 self.assertEqual(record["status"], "unreadable")
                 self.assertTrue(record["reason"])
+                # The receipt is published; it must not carry host paths.
+                self.assertNotIn("/", record["reason"])
+                self.assertEqual(record["path"], ".prism/rules.json")
 
     def test_gito_argv_is_untouched_by_the_rules_decision(self) -> None:
         root = self.make_repo()
