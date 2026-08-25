@@ -8,13 +8,37 @@ fleet edit across ten repositories that must land first.
 
 ## Ordering
 
-The fleet edit is a prerequisite, not a parallel track. Requirement 1 before
-requirement 2, because the pack change is what makes `severityOverrides`
-load-bearing. Until every consumer's file is clean, shipping `--rules` converts
-nine unconfigured repositories into category-lookup severity in one release.
+**Revised 2026-08-24, at the start of implementation.** The original plan made
+the fleet edit a standalone prerequisite that ran before any pack change. That
+is not possible: `.prism/rules.schema.json` lists `severityOverrides` in
+`required`, and the schema is `install: always`, so it reaches a consumer only
+through a pack release. Stripping the key first would leave every repository
+holding a file invalid against the schema sitting next to it — which is exactly
+the state `sd-github-review` has been in, unobserved, since 2026-08-24.
 
-The guard (requirement 3) does not remove the ordering constraint, it survives
-it. If the fleet edit misses a repository — or one is added later from a copied
+So the pack moves first:
+
+1. **Pack templates** (implement Phase 0): schema drops `severityOverrides`
+   from `required`; the `templates/.prism/rules.json` block goes.
+2. **Pack change and tests** (Phases 1–2): `--rules`, the guard, the receipt
+   record.
+3. **Release and rollout** (Phase 3): the new schema reaches consumers because
+   it is `install: always`. Receipts read `rules.status == "refused"` here, and
+   that is the expected value — every consumer still carries the block.
+4. **Fleet** (Phase 4): strip the block from ten `rules.json` files and amend
+   the `description` sentence that references it. Durable, because `rules.json`
+   is `install: if-not-exists`.
+5. **Verify live** (Phase 5).
+
+The guard is what makes this order safe. Between steps 1 and 3 every consumer
+still carries `severityOverrides`, so the pack refuses to pass `--rules` and
+each repository keeps exactly today's behaviour until its own file is cleaned.
+The window is not a regression window; it is a no-change window. That property
+was the guard's original justification and it is now also the sequencing
+argument.
+
+The guard does not only enable the ordering, it survives it. If the fleet edit
+misses a repository — or one is added later from a copied
 template — the guard degrades that repository to today's behaviour rather than
 to the broken one. Guard and fleet edit are belt and braces on purpose; the
 fleet has already shown that these files propagate by copying: the `focus`
@@ -92,6 +116,19 @@ positionally, so an added key is additive.
 Edit one, sync the other in the same commit, and let `pack.install-audit`
 confirm it. This is mechanical and has bitten before; it is a checklist item in
 `implement.md`, not a design question.
+
+## The two pack-managed files, and why they differ
+
+`manifest.json` gives `.prism/rules.json` `install: if-not-exists` and
+`.prism/rules.schema.json` `install: always`. That asymmetry is correct and the
+plan depends on it: the rules file is consumer policy and must survive updates,
+the schema is pack contract and must not drift. It also means the two halves of
+this change have to travel by different routes — the schema centrally, the rules
+files one repository at a time — and neither route can carry the other.
+
+`templates/.prism/rules.json` seeds new installs and still contains the
+identical block. Fixing it is not optional cleanup: it is the difference between
+this task closing and this task closing until the next repository is created.
 
 ## The fleet edit
 

@@ -6,12 +6,14 @@ Make pack-driven prism reviews honour the repository's own `.prism/rules.json`,
 without that change silently replacing per-finding severity judgement with a
 category lookup across the whole consumer fleet.
 
-Two defects, and they must land in one order. The pack never passes `--rules`,
+Three defects, and they must land in one order. The pack never passes `--rules`,
 so every consumer's focus categories and required checks have been ignored by
 every pack-driven review since the prism adapter shipped. Ten of eleven
 consumers also ship a `severityOverrides` block that prism applies *after* the
 model answers, rewriting each finding's severity from its category. Fixing the
-first defect alone activates the second in ten repositories at once.
+first defect alone activates the second in ten repositories at once. And the
+schema shipped beside those files marks the offending key **required**, so
+removing it is itself a pack change before it is a fleet change.
 
 ## Background
 
@@ -51,7 +53,33 @@ The eleventh, `sd-github-review`, had the block removed on 2026-08-24 under task
 `08-09-review-gate-advisory-convergence` after it was shown to be destroying the
 gate's only discrimination axis.
 
-### Why severityOverrides has to go first
+### The schema requires the key that has to go
+
+`.prism/rules.schema.json` lists `severityOverrides` in its `required` array and
+sets `additionalProperties: false`. Removing the key from a rules file makes
+that file invalid against the schema shipped beside it. Three consequences, all
+verified 2026-08-24:
+
+- **`sd-github-review` is already invalid.** The block was removed there on
+  2026-08-24 under `08-09-review-gate-advisory-convergence`; a required-key
+  check reports `missing required keys: ['severityOverrides']`. Nothing
+  validates the file at review time — the schema is editor-facing, and
+  `pack.install-audit` checks that the file is installed, not what is in it —
+  so the invalidity went unobserved. That is the same failure shape as the
+  original defect: a file that describes the review and a review that does not
+  read it.
+- **The schema is pack-managed with `install: always`.** Editing it in a
+  consumer is pointless; the next pack update overwrites it. The fix belongs in
+  `templates/.prism/rules.schema.json`, which means the pack has to move before
+  the fleet can.
+- **`rules.json` is `install: if-not-exists`.** Consumer edits to it *are*
+  durable. The fleet strip will not be undone by a pack update.
+
+And `templates/.prism/rules.json` still carries the identical
+`severityOverrides` block, so every repository installed from here on arrives
+with the defect. That template is the copying source the hash pattern implied.
+
+### Why severityOverrides has to go before `--rules` does
 
 `ApplySeverityOverrides` (`internal/review/rules.go:82`, called from
 `engine.go:166` and `engine.go:396`) runs client-side, after the model has
@@ -81,10 +109,19 @@ boundary is explicit rather than accidental.
 
 ## Requirements
 
-1. **Strip `severityOverrides` from all ten consumers before the pack change
-   ships.** Not "advise against", not "document" — the block is removed from the
-   file. Rules files otherwise stay as they are; `focus` and `required` are what
-   the consumer actually wants applied.
+1. **Strip `severityOverrides` from all ten consumers.** Not "advise against",
+   not "document" — the block is removed from the file. `focus` and `required`
+   stay as they are; they are what the consumer actually wants applied. The
+   `description` field is amended where it references the removed key, because
+   nine of the ten currently instruct the reader to "keep their category names
+   in sync" with a block that will not exist.
+1b. **The schema stops requiring it, and the template stops shipping it.**
+   `templates/.prism/rules.schema.json` drops `severityOverrides` from
+   `required`; `templates/.prism/rules.json` drops the block. Without the first,
+   every stripped file is schema-invalid. Without the second, the next
+   repository installed arrives carrying the defect. The schema is
+   `install: always`, so it reaches consumers only through a pack release —
+   which is why the pack now moves before the fleet, not after.
 2. **The pack passes `--rules` to prism when the consumer's rules file exists.**
    The path resolves against the repository under review, not the pack install
    and not the process working directory. When no rules file exists the argv is
@@ -113,13 +150,22 @@ boundary is explicit rather than accidental.
   mirrors. Both move together or the install audit fails.
 - Ten of the eleven consumers are separate git repositories with their own
   review gates. The rules-file edit is a fleet change, not a single commit.
+- `.prism/rules.schema.json` is `install: always` and `.prism/rules.json` is
+  `install: if-not-exists` (`manifest.json`). The first cannot be fixed
+  per-consumer; the second cannot be fixed centrally.
 - The prism binary in use is stock (`~/repos/ai/prism`, patch retired
   2026-08-24). `--rules` is present in stock `addReviewFlags`, so requirement 2
   needs no upstream change.
 
 ## Acceptance Criteria
 
-- [ ] **1. No consumer ships `severityOverrides`.** Enumerated from the
+- [ ] **0. Every consumer's `rules.json` validates against the
+      `rules.schema.json` installed beside it**, before and after the strip.
+      Enumerated from the filesystem across all eleven. `sd-github-review`
+      fails this today; it must pass when the task closes.
+- [ ] **1. No consumer ships `severityOverrides`, and neither does the
+      template.** `templates/.prism/rules.json` is checked alongside the
+      consumers — it is the source they were copied from. Enumerated from the
       filesystem, not from a list in this document:
       `for f in ~/repos/*/*/.prism/rules.json; do python3 -c 'import json,sys;
       d=json.load(open(sys.argv[1])); print(sys.argv[1]) if "severityOverrides"
