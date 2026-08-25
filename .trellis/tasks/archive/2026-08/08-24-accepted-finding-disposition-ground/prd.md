@@ -79,29 +79,65 @@ That is criterion 6 of the upstream task, and it is the only one still unmet.
 
 ## Acceptance criteria
 
-- [ ] A `high` finding with a good citation, whose claim is true, can be
+- [x] A `high` finding with a good citation, whose claim is true, can be
       dispositioned as accepted and stops blocking — asserted by a test, and
       paired in the same test with the same finding blocking when no
       disposition is supplied, so the release cannot be confused with the gate
       being weak.
-- [ ] The accepted ground is distinct from `rebutted` and `miscited` in both
+      — `tests/test_review_stage.py:1916`
+      `test_accepted_releases_a_high_finding_that_otherwise_blocks`. The pairing
+      is genuine: the test asserts `remoteGate.state == "blocked"`,
+      `reason == "actionable-local-findings"` and `severity == "high"` *before*
+      the disposition, then `eligible` / `outstanding: 0` / `accepted: 1` after.
+- [x] The accepted ground is distinct from `rebutted` and `miscited` in both
       the CLI grammar and the receipt, asserted by a test that would fail if
       accepted were implemented as an alias of `rebutted`.
-- [ ] Whatever bound requirement 4 selects is enforced, not documented — a
+      — `tests/test_review_stage.py:1951`
+      `test_accepted_is_not_an_alias_of_rebutted_or_miscited`.
+- [x] Whatever bound requirement 4 selects is enforced, not documented — a
       disposition that omits it is refused with a bounded error, not a
       traceback.
-- [ ] `sd-review`'s public control list documents the new ground alongside
+      — `tests/test_review_stage.py:2106`
+      `test_accepted_grammar_requires_a_bounded_reason`. The bound requirement 4
+      selected is a required, non-empty reason capped at `MAX_ACCEPTED_REASON`
+      (500), plus a distinct `accepted` count and a distinct
+      `local-findings-accepted` gate reason. Recorded in `design.md`.
+- [x] `sd-review`'s public control list documents the new ground alongside
       `--local-disposition '<id>=rebutted'` and
       `'<id>=miscited@<path>:<line>'`.
-- [ ] The `sd-github-review` PR #70 replay reaches `remoteGate: eligible` with
-      the three accepted findings dispositioned on the new ground and no human
+      — `plugins/sd/skills/sd-review/SKILL.md:241` documents
+      `--local-disposition '<stable-id>=accepted@<reason>'`, alongside rebutted
+      (:213) and miscited (:226).
+- [x] The `sd-github-review` PR #70 replay reaches `remoteGate: eligible` with
+      the accepted findings dispositioned on the new ground and no human
       round-extension — which closes criterion 6 of
       `08-09-review-gate-advisory-convergence`. This is the acceptance test that
       motivated the task, and it runs in a different repository, so record it as
       external evidence rather than as a unit test here.
+      — **MET 2026-08-25**, recorded in that task's PRD (now archived at
+      `.trellis/tasks/archive/2026-08/08-09-review-gate-advisory-convergence/`
+      in the consumer repo): `remoteGate: {"state": "eligible", "reason":
+      "local-findings-accepted"}`, `outstanding: 0`, `accepted: 2`,
+      `advisory: 3`, one provider attempt, no round-extension. Receipt
+      `01bc26a47bed8804…`.
+      **The criterion said "three accepted findings"; the replay accepted two.**
+      The three is not wrong about anything that happened — it is the
+      `outstanding: 3` of the *second* replay, which is the state this task was
+      filed from. Between that replay and the third, 0.71.50 forbade
+      `severityOverrides`, and one of the three was released by the advisory
+      ceiling instead of needing a disposition. Two remained, both verified
+      individually, both true, both fixed on `main` in PR #150, and both
+      accepted on the frozen replay head with the fix named in the reason. The
+      criterion's substance — eligible, on the new ground, no round-extension —
+      is met; only its count was written before the ceiling change moved it.
 
 ## Notes
 
-- `design.md` and `implement.md` are not written yet. This task is filed, not
-  planned; requirement 4 is a real open design question and should be settled in
-  `design.md` before `task.py start`.
+- Filed 2026-08-24 with `design.md` and `implement.md` unwritten and requirement
+  4 open. Both were written before `task.py start`, and requirement 4 was
+  settled there — bound by attributability rather than prevention. Shipped in
+  0.71.51.
+- Verified and archived 2026-08-25. Criteria 1–4 re-run at archive time:
+  `.venv/bin/python -m unittest tests.test_review_stage -k accepted -v` →
+  `Ran 6 tests in 5.296s / OK`. Criterion 5 is external and was verified by
+  reading the consumer task's own record, not by re-running the replay.
