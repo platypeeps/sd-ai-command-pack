@@ -40,6 +40,16 @@
   rejection, because the two sets look like they ought to agree and the obvious
   tidying edit is to add the member to both.
 
+- The ground is admitted by the coordinator as well as the stage. The
+  controller keeps its own copy of `LOCAL_DISPOSITION_VALUES` and gates on it,
+  so a ground added to the stage alone is refused before it reaches the stage
+  and is unreachable through the documented entry point. Its router also
+  buckets every receipt disposition and raises on one it does not know, which
+  would have rejected an accepted receipt outright rather than miscounting it
+  -- a trap the surrounding comment already described for `miscited`. Both are
+  now covered by a controller-level test asserting the pair is forwarded
+  verbatim, since a stage-only suite passes either way.
+
 ### Changed
 
 - The `--local-disposition` grammar error for an `@` payload on a ground that

@@ -1412,6 +1412,100 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual((code, report["status"]), (1, "blocked"))
         dispatch.assert_not_called()
 
+    def test_accepted_disposition_reaches_the_stage_through_the_controller(
+        self,
+    ) -> None:
+        """The controller keeps its own copy of the vocabulary, and it gates.
+
+        This is the test that was missing when `accepted` was added: the stage
+        suite calls the stage directly, so every stage test passed while the
+        documented entry point still refused the ground and it never reached
+        the stage at all. Asserted on the forwarded argv rather than on an
+        outcome, because forwarding is the thing the controller owns.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        artifacts = self.artifact_root(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+        pair = "id-1=accepted@deliberate, and documented"
+
+        args = controller.parse_args(
+            [
+                "--repo",
+                str(root),
+                "--scope",
+                "branch",
+                "--remote",
+                "none",
+                "--artifact-root",
+                str(artifacts),
+                "--json",
+                "--local-disposition",
+                pair,
+            ]
+        )
+
+        captured: list[list[str]] = []
+
+        def json_process(command, **_kwargs):
+            captured.append(command)
+            if Path(command[1]).name.endswith("check.py"):
+                return 0, {"schemaVersion": 1, "status": "passed"}
+            return 0, {
+                "schemaVersion": 1,
+                "outcome": "findings",
+                "status": "findings",
+                "receipt": {
+                    "schemaVersion": 1,
+                    "receiptId": "local-receipt",
+                    "target": {"head": head, "contentDigest": "1" * 64},
+                    "plan": {
+                        "configurationDigest": "2" * 64,
+                        "policyId": "first-substantive-head",
+                    },
+                    "outcome": "findings",
+                    "attempts": [
+                        {
+                            "provider": {
+                                "id": "prism",
+                                "costTier": "low",
+                                "qualityTier": "standard",
+                            },
+                            "durationMs": 12,
+                        }
+                    ],
+                    # A receipt carrying `accepted` must survive the router's
+                    # disposition bucketing too -- its else branch raises, so
+                    # an unbucketed ground is rejected outright rather than
+                    # miscounted.
+                    "findings": [{"id": "id-1", "disposition": "accepted"}],
+                    "disposition": {
+                        "outstanding": 0,
+                        "accepted": 1,
+                        "localDispositions": {"id-1": "accepted"},
+                    },
+                },
+            }
+
+        with mock.patch.object(
+            controller, "_json_process", side_effect=json_process
+        ), mock.patch.object(controller, "_default_branch", return_value="main"):
+            code, report = controller.run(args)
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        stage_commands = [
+            command
+            for command in captured
+            if Path(command[1]).name.endswith("review-local.py")
+        ]
+        self.assertEqual(len(stage_commands), 1)
+        self.assertIn("--local-disposition", stage_commands[0])
+        # The reason rides through verbatim. The controller validates shape
+        # only and the stage owns the grammar, so a controller that "helpfully"
+        # reformatted the payload would break the ground it just admitted.
+        self.assertIn(pair, stage_commands[0])
+
     def test_local_disposition_rerun_reaches_the_stage_and_records_rebuttals(
         self,
     ) -> None:
@@ -1680,8 +1774,11 @@ class ReviewControllerTests(InstallTestCase):
         for token, expected in (
             ("id-1=miscited", "<path>:<line>"),
             ("id-1=miscited@a=b.py:3", "cannot contain '='"),
-            ("id-1=rebutted@src/app.py:3", "<stable-id>=rebutted or"),
-            ("id-1=dismissed", "<stable-id>=rebutted or"),
+            # 0.71.51 added a third ground, so the generic message now lists
+            # three and the trailing "or" moved. Matched on the part that does
+            # not move rather than re-pinning a sentence that grows.
+            ("id-1=rebutted@src/app.py:3", "local dispositions must use"),
+            ("id-1=dismissed", "local dispositions must use"),
         ):
             with self.subTest(token=token):
                 with self.assertRaises(controller.ReviewError) as caught:
