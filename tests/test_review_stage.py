@@ -26,6 +26,29 @@ class ReviewStageTests(InstallTestCase):
 
     SCRIPT = PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-local.py"
 
+    def runner_refused_rules_keys(self) -> dict:
+        """Read ``REFUSED_RULES_KEYS`` out of the script without importing it.
+
+        The stage is exercised as a subprocess everywhere else in this module,
+        and importing it here to read one constant would run its module body
+        under the test process. Parsing the source is the cheaper honesty: it
+        reads what ships, and it fails loudly if the constant is renamed or
+        stops being a literal rather than silently reporting an empty set.
+        """
+        import ast
+
+        tree = ast.parse(self.SCRIPT.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "REFUSED_RULES_KEYS" in names:
+                return ast.literal_eval(node.value)
+        raise AssertionError(
+            "REFUSED_RULES_KEYS is not a module-level literal in "
+            f"{self.SCRIPT.name}; the schema/runner binding test cannot read it"
+        )
+
     def make_repo(self, *, changed_path: str = "src/app.py") -> Path:
         temporary = tempfile.TemporaryDirectory(prefix="sd-review-stage-")
         self.addCleanup(temporary.cleanup)
@@ -648,6 +671,52 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(record["status"], "refused")
         self.assertEqual(record["path"], ".prism/rules.json")
         self.assertIn("severityOverrides", record["reason"])
+
+    def test_the_shipped_schema_admits_no_key_the_runner_refuses(self) -> None:
+        """The schema and the refusal list must describe the same file.
+
+        A key the schema admits and the runner refuses is the worst of both:
+        the author's file passes every check available to them and then fails
+        at review time, with nothing in between to catch it. Asserting the
+        intersection is empty binds the two sides, so neither can be edited
+        alone -- which is how they drifted apart in the first place, when
+        0.71.48 retired ``severityOverrides`` from the runner and left it
+        standing in the schema.
+
+        Read from the shipped schema and from the script's own constant rather
+        than from a literal, so the test tracks whatever those files say.
+        """
+        schema = json.loads(
+            (PACK_ROOT / "templates/.prism/rules.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        refused = set(self.runner_refused_rules_keys())
+
+        self.assertTrue(refused, "the runner refuses nothing; the test is vacuous")
+        admitted = set(schema["properties"])
+        self.assertEqual(
+            admitted & refused,
+            set(),
+            "the schema admits a key the runner refuses",
+        )
+        # additionalProperties is what turns "not listed" into "forbidden".
+        # Without it the deletion above would leave the key merely undescribed.
+        self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(set(schema.get("required", [])) & refused, set())
+
+    def test_every_refused_key_carries_its_own_receipt_reason(self) -> None:
+        """A shared reason string would misdescribe the second key added.
+
+        The reason is published in the receipt and is the only thing telling an
+        author what to remove, so it has to name the key that was actually
+        found.
+        """
+        for key, reason in self.runner_refused_rules_keys().items():
+            with self.subTest(key):
+                self.assertIn(key, reason)
+                self.assertNotIn("/", reason)
+                self.assertNotIn("\\", reason)
 
     def test_unreadable_prism_rules_degrade_rather_than_raise(self) -> None:
         for label, payload in (

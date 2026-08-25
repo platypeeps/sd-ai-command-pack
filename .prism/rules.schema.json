@@ -2,7 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SD AI Command Pack Prism Rules",
   "type": "object",
-  "required": ["focus", "required"],
+  "required": [
+    "focus",
+    "required"
+  ],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -19,17 +22,14 @@
       },
       "uniqueItems": true
     },
-    "severityOverrides": {
-      "type": "object",
-      "additionalProperties": {
-        "enum": ["low", "medium", "high"]
-      }
-    },
     "required": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "text"],
+        "required": [
+          "id",
+          "text"
+        ],
         "additionalProperties": false,
         "properties": {
           "id": {

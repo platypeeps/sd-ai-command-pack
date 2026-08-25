@@ -1410,6 +1410,25 @@ def _atomic_json(path: Path, value: object) -> None:
 PRISM_RULES_PATH = ".prism/rules.json"
 PRISM_RULES_LIMIT = 256 * 1024
 
+# Keys the pack refuses to hand prism, each with the reason published in the
+# receipt. The shipped rules schema must not admit any of these: a key that
+# validates and is then refused gives an author a file that passes every check
+# available to them and fails only at review time. The two sides are bound by
+# test rather than by convention -- see
+# test_the_shipped_schema_admits_no_key_the_runner_refuses.
+#
+# A reason per key rather than one shared string, because the explanation is
+# what makes the refusal actionable and no two keys will be refused for the same
+# reason. These are published artifacts: keep them fixed and bounded, and never
+# interpolate anything host-specific.
+REFUSED_RULES_KEYS = {
+    "severityOverrides": (
+        "prism rules carry severityOverrides, which replaces per-finding "
+        "severity with a category lookup; remove the key to have focus and "
+        "required checks applied"
+    ),
+}
+
 
 @dataclass(frozen=True)
 class RulesDecision:
@@ -1466,22 +1485,17 @@ def _prism_rules(repo: Path) -> RulesDecision:
                 "reason": "prism rules root must be an object",
             },
         )
-    if "severityOverrides" in value:
-        # prism applies severityOverrides client-side after the model answers,
-        # rewriting each finding's severity from its category. That replaces the
-        # per-finding judgement the advisory gate discriminates on, so the pack
-        # declines to hand prism a rules file carrying one rather than quietly
-        # letting a category lookup decide what blocks.
+    refused = next((key for key in REFUSED_RULES_KEYS if key in value), None)
+    if refused is not None:
+        # Refusing is louder than sanitizing. Dropping the key and passing the
+        # rest would hand prism a rules file the author never wrote, and the
+        # receipt would report `applied` over rules that were silently edited.
         return RulesDecision(
             (),
             {
                 "status": "refused",
                 "path": PRISM_RULES_PATH,
-                "reason": (
-                    "prism rules carry severityOverrides, which replaces "
-                    "per-finding severity with a category lookup; remove the key "
-                    "to have focus and required checks applied"
-                ),
+                "reason": REFUSED_RULES_KEYS[refused],
             },
         )
     # Relative on purpose: _run_provider sets cwd=repo, and a relative path keeps
