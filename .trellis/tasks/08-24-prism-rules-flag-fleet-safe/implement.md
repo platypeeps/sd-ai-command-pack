@@ -74,14 +74,14 @@ else can reach it.
 
 ## Phase 3 — release and rollout
 
-- [ ] **3.1** Version bump, changelog. The entry must say that consumers
+- [x] **3.1** Version bump, changelog. The entry must say that consumers
       shipping `.prism/rules.json` will see their `focus` and `required` applied
       **for the first time** once they strip `severityOverrides`, and that new
       findings are the expected outcome rather than a regression.
-- [ ] **3.2** Roll to consumers. This is what delivers the new schema, which is
+- [x] **3.2** Roll to consumers. This is what delivers the new schema, which is
       `install: always`. `rules.json` is `install: if-not-exists` and is not
       touched by the rollout — that is Phase 4's job.
-- [ ] **3.3** Spot-check two receipts. Expect `rules.status == "refused"`, not
+- [x] **3.3** Spot-check two receipts. Expect `rules.status == "refused"`, not
       `"applied"`: every consumer still carries the block at this point, so the
       guard is doing its job and behaviour is unchanged from before the release.
       An `"applied"` here would mean the guard is not working.
@@ -92,23 +92,24 @@ the release, by construction.
 
 ## Phase 4 — fleet edit
 
-Requirement 1. Seven repositories by hand; two more are handled by the rollout
-and two are already clean. See design, "Most of the fleet edit is already
+Requirement 1. Six repositories by hand; two more are handled by the rollout
+and two are already clean. Ten in total, not eleven — see the correction in
+`prd.md`. See design, "Most of the fleet edit is already
 automated".
 
-- [ ] **4.0** Confirm the rollout in Phase 3 did **not** use `install.py
+- [x] **4.0** Confirm the rollout in Phase 3 did **not** use `install.py
       --force`. Force overrides `if-not-exists` and would overwrite consumer
       rules files wholesale, destroying per-repository `required` checks —
       eleven of them in `hoa-manager`, twelve in `rwbp-coordinator`. Observed
       directly: `make sync` is `install.py . --force` and it rewrote this
       repository's own `.prism/rules.json`.
-- [ ] **4.0b** Confirm `loadsmith` and `people-profiles` came back `refreshed`
+- [x] **4.0b** Confirm `loadsmith` and `people-profiles` came back `refreshed`
       rather than `preserved`. They held the previous shipped default
       `cea5089e` byte-for-byte, which is now on the history `digests` list. If
       they read `preserved`, the history regeneration did not ship and the
       remaining steps are hiding a broken mechanism.
 
-- [ ] **4.1** Re-enumerate from the filesystem, not from `prd.md`:
+- [x] **4.1** Re-enumerate from the filesystem, not from `prd.md`:
       ```bash
       for f in ~/repos/*/*/.prism/rules.json; do
         python3 -c 'import json,sys
@@ -118,7 +119,7 @@ automated".
       ```
       The table in `prd.md` is a snapshot from 2026-08-24; treat any difference
       as the enumeration being right and the table being stale.
-- [ ] **4.2** For each repository named: remove the `severityOverrides` key, and
+- [x] **4.2** For each repository named: remove the `severityOverrides` key, and
       amend `description` where it references it — nine of the ten say "keeps
       focus and severityOverrides separate; keep their category names in sync",
       which becomes an instruction about a block that no longer exists.
@@ -126,20 +127,20 @@ automated".
       `$schema`, `focus` and `required` byte-identical: `required` differs across
       consumers and is the one thing in these files deliberately authored per
       repository.
-- [ ] **4.3** One commit per repository, on a branch, in that repository. Do not
+- [x] **4.3** One commit per repository, on a branch, in that repository. Do not
       push. `git add` the rules file by path — several of these repositories have
       untracked work from other sessions and `git add -A` would sweep it in. The
       commit message states what the block did (client-side severity overwrite
       after the model answers, `internal/review/rules.go:82`) rather than that it
       was removed.
-- [ ] **4.4** Re-run 4.1. Expect no output, and check
+- [x] **4.4** Re-run 4.1. Expect no output, and check
       `templates/.prism/rules.json` too. Acceptance criterion 1. The count of
       repositories edited by hand in 4.2 plus those refreshed in 4.0b plus those
-      already clean must equal the eleven the scan finds — if it does not, a
+      already clean must equal the ten the scan finds — if it does not, a
       repository was missed rather than handled.
-- [ ] **4.5** Validate every consumer's `rules.json` against the
-      `rules.schema.json` beside it. All eleven pass, including
-      `sd-github-review`, which fails today. Acceptance criterion 0.
+- [x] **4.5** Validate every consumer's `rules.json` against the
+      `rules.schema.json` beside it. All ten pass, including
+      `sd-github-review`, which failed before this release. Acceptance criterion 0.
 
 ## Phase 5 — live verification
 

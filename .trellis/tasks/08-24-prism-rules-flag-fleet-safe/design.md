@@ -42,7 +42,7 @@ misses a repository — or one is added later from a copied
 template — the guard degrades that repository to today's behaviour rather than
 to the broken one. Guard and fleet edit are belt and braces on purpose; the
 fleet has already shown that these files propagate by copying: the `focus`
-array is byte-identical across all eleven, and the files vary only in `required`
+array is byte-identical across all ten, and the files vary only in `required`
 and, in two of them, `description`. That is what copy-then-edit looks like.
 
 ## Rules resolution
@@ -109,7 +109,7 @@ So `attempt.json`'s new `rules` key is the whole of the observability, not half
 of it. It has to answer both "were rules applied" and "if not, why", because
 nothing else answers either. That the receipt could not distinguish *no rules
 file* from *rules file silently ignored* is precisely why the defect survived
-unnoticed across eleven repositories.
+unnoticed across ten repositories.
 
 The record is written for every provider, not only prism. A reader comparing two
 attempts should not need to know which adapters consult a rules file; non-prism
@@ -156,9 +156,10 @@ Measured 2026-08-24, after the template change:
 
 - **2 refresh automatically** — `loadsmith` and `people-profiles`, both holding
   `cea5089e`, the previous shipped default byte-for-byte.
-- **7 need a manual edit** — `mezmo_benchmark`, both `anomaly-metric-creator`
-  clones, `hoa-manager`, `se-ai-command-pack`, `rwbp-coordinator`,
-  `rwbp-website`. Each has custom `required` entries, so each is a local
+- **6 need a manual edit** — `mezmo_benchmark`, `anomaly-metric-creator`,
+  `hoa-manager`, `se-ai-command-pack`, `rwbp-coordinator`, `rwbp-website`.
+  (An earlier count said seven and listed "both anomaly-metric-creator
+  clones"; there is one clone reached by two paths.) Each has custom `required` entries, so each is a local
   decision the installer must not overwrite.
 - **2 are already clean** — `sd-ai-command-pack` via `make sync`, and
   `sd-github-review` from the parent task.
@@ -171,12 +172,14 @@ dogfood install and would be destructive against `hoa-manager`'s eleven custom
 
 ## The fleet edit
 
-Ten repositories, one key removed from one file each. Mechanically trivial, and
+Nine repositories, one key removed from one file each. Mechanically trivial, and
 the risk is entirely in it being *incomplete* rather than in it being wrong. The
 acceptance check therefore enumerates from the filesystem —
 `~/repos/*/*/.prism/rules.json` — rather than from the table in `prd.md`. A
 check built from the list I already have cannot find the repository I did not
-know about.
+know about. It must also resolve `os.path.realpath` and deduplicate: that glob
+traverses a symlink between two paths for one repository, and the duplicate row
+reads as corroboration because the hashes agree.
 
 Each edit is a commit in its own repository. Nine of the ten have their own
 review gates, and this change makes those gates *less* likely to block, so the

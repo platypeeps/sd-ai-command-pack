@@ -8,10 +8,10 @@ category lookup across the whole consumer fleet.
 
 Three defects, and they must land in one order. The pack never passes `--rules`,
 so every consumer's focus categories and required checks have been ignored by
-every pack-driven review since the prism adapter shipped. Ten of eleven
-consumers also ship a `severityOverrides` block that prism applies *after* the
+every pack-driven review since the prism adapter shipped. Nine of ten
+consumers also shipped a `severityOverrides` block that prism applies *after* the
 model answers, rewriting each finding's severity from its category. Fixing the
-first defect alone activates the second in ten repositories at once. And the
+first defect alone activates the second in nine repositories at once. And the
 schema shipped beside those files marks the offending key **required**, so
 removing it is itself a pack change before it is a fleet change.
 
@@ -20,7 +20,7 @@ removing it is itself a pack change before it is a fleet change.
 ### What the enumeration found
 
 Every repository with a `.sd-ai-command-pack/` install also ships
-`.prism/rules.json`. Nine of the eleven ship no `review.json`, so they run the
+`.prism/rules.json`. Eight of the ten ship no `review.json`, so they run the
 pack's `_default_config()` providers — builtin `prism`, 300s timeout, argv built
 by `_expand_argv` in `plugins/sd/bin/sd-ai-command-pack-review-local.py:1420`.
 That builder emits `prism review range|codebase … --format json` and nothing
@@ -41,7 +41,7 @@ rwbp/rwbp-coordinator                      bb4e6d3a    YES
 rwbp/rwbp-website                          ff2e12ce    YES
 ```
 
-All ten `severityOverrides` blocks are byte-identical in content:
+All nine `severityOverrides` blocks were byte-identical in content:
 
 ```json
 {"bug":"high","correctness":"high","security":"high",
@@ -49,9 +49,32 @@ All ten `severityOverrides` blocks are byte-identical in content:
  "testing":"medium","style":"low"}
 ```
 
-The eleventh, `sd-github-review`, had the block removed on 2026-08-24 under task
+The tenth, `sd-github-review`, had the block removed on 2026-08-24 under task
 `08-09-review-gate-advisory-convergence` after it was shown to be destroying the
 gate's only discrimination axis.
+
+### Correction, 2026-08-24: ten repositories, not eleven
+
+Every count in this task originally said eleven consumers, ten of them carrying
+`severityOverrides`. That was wrong by one.
+One of the two `anomaly-metric-creator` paths under the repository root is a
+**symlink** to the other — the same directory, the same git repository, the same
+remote. The enumeration glob
+`~/repos/*/*/.prism/rules.json` followed it and counted the file twice, and
+because the two paths naturally reported identical hashes, the duplicate looked
+like corroboration rather than a bug.
+
+Found at rollout, when `git checkout -b` on the second path failed with
+`a branch named 'chore/sd-pack-0.71.48' already exists` — the branch the first
+path had just created.
+
+The corrected figures: **ten** repositories, **nine** originally carrying the
+block, **eight** with no `review.json` of their own. Of the nine, two were
+refreshed by the installer, six were edited by hand, and
+`sd-ai-command-pack` was corrected by `make sync`.
+
+A scan for this class of value must resolve `os.path.realpath` and deduplicate
+before counting. The version in acceptance criterion 1 now does.
 
 ### The schema requires the key that has to go
 
@@ -93,7 +116,7 @@ The pack's advisory gate reads the outstanding count, and `_is_advisory` has a
 hard floor at `high`. A rules file that promotes every `correctness` finding to
 `high` therefore guarantees a non-empty outstanding set on any review that finds
 a correctness nit, regardless of whether the nit matters. Enabling `--rules`
-against the current fleet would convert nine currently-unconfigured repositories
+against the current fleet would convert eight currently-unconfigured repositories
 into that state in one release.
 
 ### Chunking is a separate, smaller gap
@@ -110,7 +133,7 @@ boundary is explicit rather than accidental.
 
 ## Requirements
 
-1. **Strip `severityOverrides` from all ten consumers** — by hand where the
+1. **Strip `severityOverrides` from all nine consumers that carry it** — by hand where the
    file carries local customisation, and via the installer's existing
    `if-not-exists` refresh path where it does not. Not "advise against",
    not "document" — the block is removed from the file. `focus` and `required`
@@ -138,7 +161,7 @@ boundary is explicit rather than accidental.
 4. **The behaviour is observable in the receipt.** A reader of a review receipt
    can tell whether rules were applied, and if they were not, why. Today nothing
    in the receipt distinguishes "rules applied" from "rules silently ignored",
-   which is the reason this defect survived across eleven repositories.
+   which is the reason this defect survived across every consumer.
 5. **No consumer is left in a state where the gate is stricter than before
    without someone having chosen that.** *(Verified by criteria 1 and 7.)* Requirement 1 makes rules safe to
    enable; this requirement is the check on it — a consumer whose `required`
@@ -151,7 +174,7 @@ boundary is explicit rather than accidental.
   allowlists. Any per-consumer configuration this task adds lives there.
 - `plugins/sd/bin/` and `plugins/sd/machine-payload/scripts/` are byte-identical
   mirrors. Both move together or the install audit fails.
-- Ten of the eleven consumers are separate git repositories with their own
+- Nine of the ten consumers are separate git repositories with their own
   review gates. The rules-file edit is a fleet change, not a single commit.
 - `.prism/rules.schema.json` is `install: always` and `.prism/rules.json` is
   `install: if-not-exists` (`manifest.json`). The first cannot be fixed
@@ -164,7 +187,7 @@ boundary is explicit rather than accidental.
 
 - [ ] **0. Every consumer's `rules.json` validates against the
       `rules.schema.json` installed beside it**, before and after the strip.
-      Enumerated from the filesystem across all eleven. `sd-github-review`
+      Enumerated from the filesystem across all ten. `sd-github-review`
       fails this today; it must pass when the task closes.
 - [ ] **1. No consumer ships `severityOverrides`, and neither does the
       template.** Repositories edited by hand, plus those the rollout
@@ -172,9 +195,9 @@ boundary is explicit rather than accidental.
       the scan finds. `templates/.prism/rules.json` is checked alongside the
       consumers — it is the source they were copied from. Enumerated from the
       filesystem, not from a list in this document:
-      `for f in ~/repos/*/*/.prism/rules.json; do python3 -c 'import json,sys;
-      d=json.load(open(sys.argv[1])); print(sys.argv[1]) if "severityOverrides"
-      in d else None' "$f"; done` prints nothing.
+      resolving `os.path.realpath` and deduplicating first, because
+      `~/repos/*/*/.prism/rules.json` traverses a symlink between two paths for
+      the same repository. Prints nothing.
 - [ ] **2. `--rules` reaches prism when the file exists.** A `_expand_argv` unit
       test asserts the flag and resolved path for `branch_delta`, `codebase` and
       `worktree` scopes, and asserts its absence when the file does not exist.
