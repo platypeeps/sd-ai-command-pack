@@ -127,9 +127,12 @@ A profile that fell back to `remote` for any reason does not suppress anything.
 - A router classified `absent` may complete locally only when routing is
   optional and the local stage's `remoteGate.state` is `eligible`. That covers
   a clean receipt (`local-stage-terminal`), one whose findings were all
-  dispositioned (`local-findings-dispositioned`), and one whose remaining
-  findings are all at or below a configured advisory ceiling
-  (`local-advisory-released`). Read the gate, not the outcome: a released
+  dispositioned (`local-findings-dispositioned`), one whose remaining findings
+  are all at or below a configured advisory ceiling
+  (`local-advisory-released`), and one released by an accepted finding
+  (`local-findings-accepted`). The last outranks the other three: a receipt
+  that both rebutted and accepted findings reports the acceptance, because the
+  waiver is the part carrying risk. Read the gate, not the outcome: a released
   receipt is still `outcome: "findings"` and still carries zero confidence, by
   design — the release is a policy decision the repository made in advance, not
   a claim that nothing was found. `eligible-with-limitations` is not eligible
