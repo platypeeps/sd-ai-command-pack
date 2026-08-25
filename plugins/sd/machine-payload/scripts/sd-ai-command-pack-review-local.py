@@ -1429,6 +1429,19 @@ def _prism_rules(repo: Path) -> RulesDecision:
 
     path = repo / PRISM_RULES_PATH
     if not path.is_file():
+        # `is_file()` follows symlinks, so it is False for a dangling link and
+        # for a directory just as it is for a genuinely missing path. Only the
+        # last is `absent`; calling the others absent tells a receipt reader the
+        # repository ships no rules when in fact it ships broken ones.
+        if path.is_symlink() or path.exists():
+            return RulesDecision(
+                (),
+                {
+                    "status": "unreadable",
+                    "path": PRISM_RULES_PATH,
+                    "reason": "prism rules are not a readable regular file",
+                },
+            )
         return RulesDecision((), {"status": "absent", "path": PRISM_RULES_PATH})
     try:
         value = _read_json(path, limit=PRISM_RULES_LIMIT, label="prism rules")

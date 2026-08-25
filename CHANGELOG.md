@@ -54,6 +54,12 @@
   indistinguishable from no rules file at all — which is how the missing
   `--rules` flag survived unnoticed across every consumer.
 
+  `absent` means the path is genuinely missing. A dangling symlink or a
+  directory at `.prism/rules.json` records `unreadable`: `Path.is_file()`
+  follows symlinks and so reads a broken link exactly like a missing file, and
+  a receipt calling that `absent` would report a broken checkout as a
+  repository that ships no rules.
+
 ### Upgrade notes
 
 - Roll out **without** `install.py --force`. `.prism/rules.json` is

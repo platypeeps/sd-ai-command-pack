@@ -577,7 +577,11 @@ class ReviewStageTests(InstallTestCase):
     # --- .prism/rules.json handling -------------------------------------
 
     def write_prism_rules(self, root, payload) -> None:
-        """Write .prism/rules.json and commit it, or write raw bytes verbatim."""
+        """Write .prism/rules.json and commit it.
+
+        A ``str`` payload is written verbatim, which is how the malformed-JSON
+        cases are built; anything else is serialized as JSON.
+        """
         rules = root / ".prism/rules.json"
         rules.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(payload, str):
@@ -663,9 +667,39 @@ class ReviewStageTests(InstallTestCase):
                 record = self.prism_rules_record(report)
                 self.assertEqual(record["status"], "unreadable")
                 self.assertTrue(record["reason"])
-                # The receipt is published; it must not carry host paths.
+                # The receipt is published; it must not carry host paths. Both
+                # separators, so the assertion still bites if the suite is ever
+                # run on Windows.
                 self.assertNotIn("/", record["reason"])
+                self.assertNotIn("\\", record["reason"])
                 self.assertEqual(record["path"], ".prism/rules.json")
+
+    def test_a_dangling_prism_rules_symlink_is_unreadable_not_absent(self) -> None:
+        """A broken link is a broken checkout, and the receipt must say so.
+
+        ``Path.is_file()`` follows symlinks, so a dangling link reads as False
+        exactly like a missing file. Reporting `absent` would tell a reader the
+        repository ships no rules when it ships a link to nothing.
+        """
+
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        rules = root / ".prism/rules.json"
+        rules.parent.mkdir(parents=True, exist_ok=True)
+        rules.symlink_to("nowhere.json")
+        self.run_git(root, "add", ".prism/rules.json")
+        self.run_git(root, "commit", "-m", "add a dangling prism rules link")
+
+        result = self.run_stage(root, "rules-dangling")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertNotIn("--rules", log.read_text(encoding="utf-8"))
+        record = self.prism_rules_record(report)
+        self.assertEqual(record["status"], "unreadable")
+        self.assertEqual(record["path"], ".prism/rules.json")
+        self.assertNotIn("/", record["reason"])
+        self.assertNotIn("\\", record["reason"])
 
     def test_gito_argv_is_untouched_by_the_rules_decision(self) -> None:
         root = self.make_repo()
