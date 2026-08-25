@@ -1586,7 +1586,13 @@ class ReviewScopeTests(InstallTestCase):
         self.assertEqual(len(schema_files), 1)
         schema = json.loads(schema_files[0].source.read_text(encoding="utf-8"))
         self.assertIn("$schema", schema)
-        self.assertIn("severityOverrides", schema["properties"])
+        # 0.71.48 retired severityOverrides from the runner, which refuses a
+        # rules file carrying it; 0.71.49 removed it from the schema so the two
+        # agree. This assertion used to require the property and is inverted
+        # rather than deleted, because the schema was pinned in both directions
+        # and only one of the pins was updated at a time.
+        self.assertNotIn("severityOverrides", schema["properties"])
+        # additionalProperties is what turns "not listed" into "forbidden".
         self.assertFalse(schema["additionalProperties"])
         self.assertFalse(
             schema["properties"]["required"]["items"]["additionalProperties"]

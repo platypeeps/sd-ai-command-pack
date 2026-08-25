@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.71.49 - 2026-08-25
+
+### Fixed
+
+- The shipped prism rules schema no longer admits `severityOverrides`. Release
+  0.71.48 retired the key from the runner, which now refuses a `.prism/rules.json`
+  carrying it, but left the property standing in
+  `templates/.prism/rules.schema.json`. An author who hand-wrote one got a file
+  that validated against every check available to them and was then refused at
+  review time, with nothing in between to catch it. The root object already
+  carried `"additionalProperties": false`, so deleting the property is what
+  forbids it. Raised independently by Copilot on four consumer PRs during the
+  0.71.48 rollout, which is the signal the contradiction was legible from
+  outside.
+- The refusal list and the schema are now bound by test rather than by
+  convention. `REFUSED_RULES_KEYS` is a module-level mapping of refused key to
+  the reason published in the receipt, and
+  `test_the_shipped_schema_admits_no_key_the_runner_refuses` asserts the
+  intersection of the schema's admitted keys with that mapping is empty. Editing
+  either side alone now fails, which is precisely how the two drifted apart.
+  Falsified by restoring the property: `- set() + {'severityOverrides'}`.
+- A refused key's receipt reason comes from that mapping rather than from a
+  literal at the refusal site, so a second refused key cannot inherit the first
+  one's explanation. `test_every_refused_key_carries_its_own_receipt_reason`
+  asserts each reason names its own key and carries no path separator, since
+  receipts are published artifacts.
+
 ## 0.71.48 - 2026-08-24
 
 ### Fixed
