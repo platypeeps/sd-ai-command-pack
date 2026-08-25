@@ -19,13 +19,20 @@ is_pack_target_path() {
   esac
 ```
 
-and `check_pr_body_scope` treats a resolved, marker-free body as fatal, not
-advisory:
+and `check_pr_body_scope` treats a marker-free body as fatal, not advisory, by
+whichever route the body arrived — env-provided or fetched through `gh`:
 
 ```sh
     unsatisfied:provided)
       fail "tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section"
+      ;;
+    unsatisfied:resolved)
+      fail "tooling/generated files changed, but the PR body does not include a recognized tooling/generated scope section"
 ```
+
+The repro below supplies the body through `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`, so
+it exercises `unsatisfied:provided`. An open PR whose body `gh` resolves takes
+`unsatisfied:resolved`. Both `fail`.
 
 Reproduced 2026-08-25 in a consumer checkout with an adoption-shaped diff — one
 modified `.sd-ai-command-pack/provenance.json`, nothing else — and the body an
@@ -50,18 +57,44 @@ The pack already knows how to satisfy its own gate:
 section from the branch diff, and `plugins/sd/skills/sd-create-pr/SKILL.md:347`
 invokes it. That covers a PR opened *through* `sd-create-pr`.
 
-Adoption is not opened through `sd-create-pr`. There is no adoption skill —
-`plugins/sd/skills/` has no rollout or adopt entry — and `install.py`'s
-`--configure-fleet` builds a machine-local discovery profile for `sd-status`,
-not a rollout. Adoption is `install.py --thin <consumer>`, then a commit and a
-PR the operator opens by hand, per repo. Nothing in that path calls the
-preparer, so the section is a thing the operator must remember N times.
+Adoption is not opened through `sd-create-pr`, and the path it *is* opened
+through does not call the preparer either.
+
+The pack has a fleet campaign controller: `sd-fleet-refresh`
+(`.agents/skills/sd-fleet-refresh/SKILL.md`, source-checkout-only, procedure in
+`docs/FLEET_ROLLOUT.md`). It issues the install, pushes the head, opens the PR,
+runs the review classifier, and merges. Step 6 of that procedure specifies what
+the PR body's verification summary must attribute, so the controller does author
+bodies — and nothing in the skill or its `references/` mentions a scope section,
+`--prepare-tooling-body`, or the review-scope check. Grepped, not remembered:
+`grep -rn -i "tooling/generated|scope section|prepare-tooling" .agents/skills/sd-fleet-refresh/`
+returns nothing.
+
+Two corrections to an earlier draft of this PRD, both against interest.
+`install.py --thin <consumer>` is **not** the adoption step: `--thin` is a
+one-time conversion to a thin install, documented as requiring
+`--resweep-verdict`, so it runs once per repo rather than once per version. And
+`--configure-fleet`, while genuinely only a machine-local `sd-status` discovery
+profile, is not the whole of the pack's fleet machinery —
+`docs/fleet/consumers.json` carries cohorts, per-consumer
+`candidatePrepare`/`candidateChecks`, and a rollout policy the controller
+consumes.
+
+**Open question, deliberately unsettled here:** whether the `sd-fleet-refresh`
+lane executes the review-scope check at all. Qualifying heads take
+integration-only review, which may not reach it. If the lane never runs the
+check, the defect is confined to hand-rolled adoption and the fix is smaller
+than requirement 1 assumes. Settle this before design — it is the difference
+between a controller bug and an operator-path gap.
 
 ## How it was found
 
-Rolling 0.71.51 to eight consumers on 2026-08-25. All eight PR bodies were
-uniform; seven passed CI and `platypeeps/hoa-manager` failed, because that repo
-alone carried a repo-local CI mirror of this check. Clearing it cost a PR-body
+Rolling 0.71.51 to eight consumers on 2026-08-25 — **by hand, not through
+`sd-fleet-refresh`**, which is itself worth recording: the controller exists and
+the operator did not use it, so this rollout is evidence about the manual path
+and only indirectly about the controller. All eight PR bodies were uniform;
+seven passed CI and `platypeeps/hoa-manager` failed, because that repo alone
+carried a repo-local CI mirror of this check. Clearing it cost a PR-body
 edit plus a close/reopen, because a body-dependent check reads the snapshotted
 `GITHUB_EVENT_PATH` payload and `edited` is not a CI trigger.
 
