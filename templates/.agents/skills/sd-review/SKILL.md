@@ -220,6 +220,14 @@ merge-base OID rather than the pull request's base branch, and `contentDigest`
 is computed over the canonicalized delta, so neither is derivable by hand:
 
 ```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
 bash "$SD_PACK_TOOLCHAIN" run-python -- \
   sd-ai-command-pack-review-local.py \
   --repo . \
@@ -231,8 +239,8 @@ bash "$SD_PACK_TOOLCHAIN" run-python -- \
   --json
 ```
 
-`$SD_PACK_TOOLCHAIN` is the same resolved helper the coordinator invocation
-above uses; a probe is not an exception to the sandbox-safe rule.
+The probe carries its own bootstrap because each fenced block runs in its own
+shell; it is not an exception to the sandbox-safe rule.
 
 A local provider finding you have verified false takes the matching
 `--local-disposition '<stable-id>=rebutted'` pair. The bar is the same as the
