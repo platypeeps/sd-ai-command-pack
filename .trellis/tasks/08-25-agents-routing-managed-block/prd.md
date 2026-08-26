@@ -103,25 +103,40 @@ installer instead of composing with it.
 - [x] `design.md` records the checker-vs-documentation decision with reasoning,
       before implementation starts. Settled 2026-08-25: **documentation-only**
       (`design.md` §1).
-- [ ] Fresh install into a repo with an `AGENTS.md` carrying only a Trellis
+- [x] Fresh install into a repo with an `AGENTS.md` carrying only a Trellis
       block yields both blocks, routing below Trellis, Trellis byte-unchanged.
-- [ ] Fresh install into a repo with no `AGENTS.md` behaves per the decided
+      `test_install_core.AgentsRoutingBlockTests.test_routing_block_lands_below_an_untouched_trellis_block`.
+- [x] Fresh install into a repo with no `AGENTS.md` behaves per the decided
       contract (create vs skip), and that choice is stated in `design.md`.
-- [ ] Re-install is idempotent: byte-identical `AGENTS.md`, proven by hashing.
-- [ ] Consumer text outside the markers survives install and re-install; text
+      Decided: skip, never create (`design.md` §2). Proven by
+      `test_absent_agents_file_is_skipped_and_stays_out_of_the_receipt` and
+      `test_absent_agents_file_is_skipped_under_platform_and_all`.
+- [x] Re-install is idempotent: byte-identical `AGENTS.md`, proven by hashing.
+      `test_reinstalling_leaves_the_file_byte_identical` compares `read_bytes()`
+      across two installs and asserts the second reports `unchanged   AGENTS.md`.
+- [x] Consumer text outside the markers survives install and re-install; text
       inside is replaced.
-- [ ] Removal deletes the block and leaves the Trellis block and consumer text
-      intact.
-- [ ] A repository with no pack installed is byte-unchanged by the whole flow.
-- [ ] Thin conversion handles the new target. **Amended — see `design.md` §5.**
+      `test_consumer_text_outside_the_markers_survives_a_reinstall` keeps prose
+      above, between, and below the two blocks and asserts a hand-edited heading
+      *inside* the markers is overwritten.
+- [x] Removal deletes the block and leaves the Trellis block and consumer text
+      intact. `test_remove.RemoveTests.test_remove_strips_the_routing_block_and_keeps_the_rest`.
+- [x] A repository with no pack installed is byte-unchanged by the whole flow.
+      `test_remove.RemoveTests.test_remove_leaves_an_agents_file_alone_when_the_pack_never_installed`.
+- [x] Thin conversion handles the new target. **Amended — see `design.md` §5.**
       The `installer/thin.py` `BLOCK_MARKERS` table is reached only from
       `plan.block_strip` (`thin.py:871`, `thin.py:1013`), and a `repo-native`
       target classifies `keep`, so an entry there would be unreachable and no
       test could exercise it. The criterion's intent is met by asserting the
       classification instead: the conversion planner puts `AGENTS.md` in
-      `keep`, not `block_strip` and not `blocked`.
-- [ ] `make generate` / surface-check clean with the new manifest row.
-- [ ] Changelog + version.
+      `keep`, not `block_strip` and not `blocked`. Asserted by
+      `test_conversion_plan.ClassifyTargetTests.test_agents_routing_is_kept_with_its_block_intact`.
+- [x] `make generate` / surface-check clean with the new manifest row.
+      `shipped-surface closure: clean; 59 changed path(s)` at the merged head,
+      and `partition-surfaces.py --check` matches the committed tree.
+- [x] Changelog + version. `CHANGELOG.md` `## 0.71.58`; the three manifests
+      (`manifest.json`, `.sd-ai-command-pack/manifest.json`,
+      `plugins/sd/.claude-plugin/plugin.json`) all read `0.71.58`.
 
 ## Notes
 
