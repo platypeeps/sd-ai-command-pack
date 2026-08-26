@@ -129,3 +129,25 @@ inside the review script, which already computes the target it must match.
 
 - Lightweight; PRD-only is appropriate. Diagnostics text plus tests, no contract
   change.
+
+## Relay question — answered (2026-08-25)
+
+**No relay. The quoted bare form is stale, and no surface in this pack
+produces it.** Two independent checks:
+
+- At the reported version. `c5673c35` is the commit that introduced
+  `"version": "0.71.26"`. Its `templates/scripts/sd-ai-command-pack-review-local.py`
+  already carried `raise ReviewInputError(f"cannot read {label} {path}: {error}")`
+  at line 370 and already called it with `label="bookkeeping evidence"` at
+  line 802. A Markdown file passed to that build could not have produced a bare
+  `Expecting value: line 1 column 1 (char 0)`.
+- Across the pack today. No other shipped script reads
+  `--bookkeeping-evidence`, and the only place that surfaces a
+  `json.JSONDecodeError`'s bare `.msg` is `recovery-artifacts.py:231`, which
+  handles a different artifact and still names the file.
+
+The bare string therefore reached the issue's author through a surface outside
+this repository — the filing was made from `platypeeps/sd-github-review` — so
+there is nothing here to fix for that symptom. The issue's *other* symptom and
+its actual complaint both stand, and both are addressed: the missing-path case
+now names the flag, and every branch now names the required shape.

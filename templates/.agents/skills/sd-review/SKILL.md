@@ -209,6 +209,21 @@ validates the evidence, so either keeps the unextended limit. Attempts
 beyond that grant, and every over-limit attempt without valid bookkeeping
 evidence, still require the decision.
 
+The evidence file itself is a five-key JSON object — `"schemaVersion": 1`,
+`"classification": "bookkeeping-successor"`, and `base`, `head`,
+`contentDigest` equal to the target under review. It is **not** the
+finish-work flow's completion receipt, which is a different artifact whose
+`kind` is `trellis-bookkeeping-validation`; the two collide only on the word
+bookkeeping. Read the three target values from the `target` object of a
+`--plan-only --json` run of the same attempt — `base` is the resolved
+merge-base OID rather than the pull request's base branch, and `contentDigest`
+is computed over the canonicalized delta, so neither is derivable by hand:
+
+```bash
+sd-ai-command-pack-review-local.py --repo . --scope pr \
+  --base <base> --head <head> --attempt-id <id> --plan-only --json
+```
+
 A local provider finding you have verified false takes the matching
 `--local-disposition '<stable-id>=rebutted'` pair. The bar is the same as the
 remote one and it is high: rebut only after checking the cited path and line in

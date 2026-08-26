@@ -850,21 +850,119 @@ def _provider_row(provider: Provider) -> dict[str, Any]:
     }
 
 
+# Every `--bookkeeping-evidence` rejection ends with this. The flag's contract
+# was previously discoverable only by reading the function below, and a caller
+# who reverse-engineers a schema from source is one step from hand-authoring a
+# payload to satisfy the check -- which is manufacturing the very evidence the
+# classification exists to require. So the message names the shape, names the
+# artifact it is confused with, and names the one honest way to obtain the
+# three target values: this command's own `--plan-only` report, which derives
+# them from the repository. What it deliberately does NOT do is print the
+# target's own `base`, `head`, or `contentDigest` in the rejection -- handing
+# over the expected values is the same shortcut in a friendlier costume,
+# because a pasted value proves nothing about the tree it claims to describe.
+BOOKKEEPING_EVIDENCE_SHAPE = (
+    "--bookkeeping-evidence expects a JSON file holding an object with exactly "
+    '"schemaVersion": 1, "classification": "bookkeeping-successor", and '
+    '"base", "head", "contentDigest" equal to the reviewed target. It is not '
+    "the final-bundle finish-work receipt, a different artifact that shares "
+    "the word bookkeeping. Obtain the three target values from the "
+    '"target" object in this command\'s own --plan-only --json report for the '
+    "same --repo, --base, and --head; see the successor-head re-entry section "
+    "of the sd-review skill."
+)
+
+
+def _bookkeeping_evidence_path(value: str | None) -> Path | None:
+    """Resolve the flag, attributing a filesystem failure to the flag.
+
+    `Path(...).resolve(strict=True)` raises `OSError`, which the caller's
+    blanket `except (OSError, ReviewInputError)` stringifies verbatim: the
+    operator sees `[Errno 2] No such file or directory: '<path>'` and is told
+    neither which argument was at fault nor that a JSON receipt was wanted.
+    Resolving here rather than widening that `except` keeps the attribution
+    with the one flag that needs it.
+    """
+
+    if not value:
+        return None
+    try:
+        return Path(value).resolve(strict=True)
+    except OSError as error:
+        raise ReviewInputError(
+            f"cannot read --bookkeeping-evidence {_bounded(value, 300)}: "
+            f"{error.strerror or error}. {BOOKKEEPING_EVIDENCE_SHAPE}"
+        ) from error
+
+
 def _validate_bookkeeping_evidence(
     path: Path | None, target: Mapping[str, Any]
 ) -> None:
     if path is None:
-        raise ReviewInputError("bookkeeping successor requires --bookkeeping-evidence")
-    value = _read_json(path, limit=64 * 1024, label="bookkeeping evidence")
-    if not isinstance(value, dict) or value.get("schemaVersion") != 1:
-        raise ReviewInputError("bookkeeping evidence schemaVersion must be 1")
+        raise ReviewInputError(
+            f"bookkeeping successor requires --bookkeeping-evidence. "
+            f"{BOOKKEEPING_EVIDENCE_SHAPE}"
+        )
+    # `_read_json` already attributes its own failures, but with a bare label:
+    # "cannot read bookkeeping evidence <path>: Expecting value". The label is
+    # the flag spelling so the reader knows which argument to fix, and the
+    # shape is appended so a size, encoding, or parse rejection carries the
+    # same contract every other branch here carries.
+    try:
+        value = _read_json(path, limit=64 * 1024, label="--bookkeeping-evidence")
+    except ReviewInputError as error:
+        raise ReviewInputError(f"{error}. {BOOKKEEPING_EVIDENCE_SHAPE}") from error
+    if not isinstance(value, dict):
+        raise ReviewInputError(
+            f"bookkeeping evidence must be a JSON object. "
+            f"{BOOKKEEPING_EVIDENCE_SHAPE}"
+        )
+    if value.get("schemaVersion") != 1:
+        raise ReviewInputError(
+            f"bookkeeping evidence schemaVersion must be 1. "
+            f"{BOOKKEEPING_EVIDENCE_SHAPE}"
+        )
     required = {"base", "head", "contentDigest", "classification"}
-    if set(value) != required | {"schemaVersion"}:
-        raise ReviewInputError("bookkeeping evidence has unsupported or missing fields")
-    if value.get("classification") != "bookkeeping-successor" or any(
-        value.get(key) != target.get(key) for key in ("base", "head", "contentDigest")
-    ):
-        raise ReviewInputError("bookkeeping evidence does not match the exact target")
+    allowed = required | {"schemaVersion"}
+    if set(value) != allowed:
+        missing = sorted(allowed - set(value))
+        unsupported = sorted(set(value) - allowed)
+        detail = ", ".join(
+            part
+            for part in (
+                f"missing {', '.join(missing)}" if missing else "",
+                f"unsupported {', '.join(unsupported)}" if unsupported else "",
+            )
+            if part
+        )
+        raise ReviewInputError(
+            f"bookkeeping evidence has unsupported or missing fields "
+            f"({_bounded(detail, 300)}). {BOOKKEEPING_EVIDENCE_SHAPE}"
+        )
+    if value.get("classification") != "bookkeeping-successor":
+        raise ReviewInputError(
+            f"bookkeeping evidence classification must be "
+            f'"bookkeeping-successor". {BOOKKEEPING_EVIDENCE_SHAPE}'
+        )
+    # Name the field that disagreed, never the value the target holds. The
+    # supplied value is echoed through `_bounded` because it is the
+    # caller-controlled half; the expected one stays unsaid.
+    disagreed = [
+        key
+        for key in ("base", "head", "contentDigest")
+        if value.get(key) != target.get(key)
+    ]
+    if disagreed:
+        supplied = ", ".join(
+            f"{key}={_bounded(str(value.get(key)), 100)}" for key in disagreed
+        )
+        raise ReviewInputError(
+            f"bookkeeping evidence does not match the exact target: "
+            f"{', '.join(disagreed)} "
+            f"{'disagree' if len(disagreed) > 1 else 'disagrees'} "
+            f"(supplied {_bounded(supplied, 400)}). "
+            f"{BOOKKEEPING_EVIDENCE_SHAPE}"
+        )
 
 
 def _family_id(value: object, *, field: str) -> str:
@@ -2712,11 +2810,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ReviewInputError(f"not a Git repository: {repo}")
         config, providers, policy = load_config(repo)
         target = resolve_target(repo, args.scope, args.base, args.head)
-        evidence = (
-            Path(args.bookkeeping_evidence).resolve(strict=True)
-            if args.bookkeeping_evidence
-            else None
-        )
+        evidence = _bookkeeping_evidence_path(args.bookkeeping_evidence)
         family_evidence = (
             Path(args.family_evidence).absolute()
             if args.family_evidence
