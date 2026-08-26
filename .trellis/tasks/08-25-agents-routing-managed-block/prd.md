@@ -11,8 +11,10 @@ carries the measured divergence and the ownership reasoning.
 ## Problem
 
 `se-ai-command-pack` added a repo-owned canonical-entry-point routing section to
-its `AGENTS.md`, plus a `tests/test_agent_routing.py` deriving the wrapped
-workflow set from `.agents/skills/` and failing when the section drifts.
+its `AGENTS.md`, plus a routing test deriving the wrapped workflow set from
+`.agents/skills/` and failing when the section drifts. (That test lives in the
+filing repository, not this one; issue #486 names it. Paths in this PRD are
+otherwise this checkout's.)
 
 That fixes one document in one repository. It reaches no other consumer of this
 pack, and every consumer wanting the rule hand-edits the same section and keeps
@@ -58,7 +60,7 @@ Target shape from the issue:
 Does the block ship with a **pack-owned checker**, or stay
 **documentation-only**?
 
-`se-ai-command-pack`'s `tests/test_agent_routing.py` derives expectations from
+That repository's routing test derives its expectations from
 `.agents/skills/`, which does exist in a consumer — but consumers have no
 obligation to run the observing repository's test suite. This decides whether
 the managed block carries a verification story or just text, so it is a design
