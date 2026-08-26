@@ -22,7 +22,7 @@ gate rather than through it — the first was #551, which produced the task
 This task is the successor to that one, not a duplicate of it. #558 removed the
 deadlock for a *clean* base update and deliberately kept refusing a conflicted
 one. That decision is recorded in
-`.trellis/tasks/08-25-completion-receipt-base-update/prd.md`:
+`.trellis/tasks/archive/2026-08/08-25-completion-receipt-base-update/prd.md`:
 
 > A conflicted base update is refused under its own reason code: a conflict
 > resolution is the branch's own content, and it is the one place this
