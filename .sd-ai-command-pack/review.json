@@ -2,7 +2,36 @@
   "schemaVersion": 1,
   "providers": [
     {
-      "scopes": ["worktree", "branch_delta", "codebase"],
+      "id": "codex",
+      "adapter": "argv",
+      "argv": [
+        "codex-review-provider",
+        "{repo}",
+        "{base}",
+        "{head}"
+      ],
+      "scopes": [
+        "worktree",
+        "branch_delta"
+      ],
+      "dataHandling": "private-network",
+      "costTier": "none",
+      "qualityTier": "deep",
+      "timeoutSeconds": 900,
+      "version": "codex-exec-v1",
+      "enabled": true,
+      "outcomeByExitCode": {
+        "0": "clean",
+        "1": "findings",
+        "3": "unavailable"
+      }
+    },
+    {
+      "scopes": [
+        "worktree",
+        "branch_delta",
+        "codebase"
+      ],
       "dataHandling": "private-network",
       "qualityTier": "standard",
       "enabled": true,
@@ -21,7 +50,11 @@
     }
   ],
   "policy": {
-    "allowedDataHandling": ["local", "private-network", "public-network"],
+    "allowedDataHandling": [
+      "local",
+      "private-network",
+      "public-network"
+    ],
     "documentation": "cheapest",
     "metadata": "cheapest",
     "requiredProviders": []
