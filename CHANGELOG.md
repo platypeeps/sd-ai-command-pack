@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.71.53 - 2026-08-25
+
+### Fixed
+
+- The status collector's machine-scope row no longer reports `unavailable` on
+  a machine install. `machine_scope_api()` looked for the engine in exactly
+  one place -- `installer/machinescope.py` beside the directory holding the
+  running script -- and on a machine install that arithmetic yields
+  `~/.agents`, which ships no `installer/` at all. Since the `sd-status` skill
+  routes thin consumers to precisely that copy, the row was permanently
+  `unavailable` for the documented path, which hid a live 0.71.26-against-
+  0.71.22 version skew: the one thing the row exists to show. The loader now
+  walks an ordered ladder -- the script-adjacent root first, unchanged and
+  still winning wherever it resolves today, then the parent of each
+  `path_pack_bins()` entry in `PATH` order, which reaches the versioned plugin
+  cache root that does carry `installer/`.
+
+  The second rung imports executable Python from a directory `PATH` names, so
+  it is gated: the candidate must hold a real `installer/` package (both
+  `__init__.py` and `machinescope.py`), must carry a pack identity marker, and
+  must have none of the root, the package, or the module world-writable. The
+  identity check accepts `manifest.json` naming `sd-ai-command-pack` **or**
+  `.claude-plugin/plugin.json` naming `sd`; the plugin cache root -- the one
+  arrangement this fix exists to reach -- carries no `manifest.json`, so a
+  gate keyed on that alone would have rejected the target root and shipped a
+  fix that fixed nothing. The script-adjacent rung is deliberately not gated:
+  it is the tree already executing.
+
+  A refused candidate is reported rather than silently skipped, since skipping
+  would degrade back to the same bare `unavailable` while also hiding a
+  directory that had no business being on `PATH`. When no rung answers, the
+  error names every candidate tried and why each was refused. The report gains
+  `engineRung`, `engineRoot`, and a bounded `engineRefusals`, rendered into
+  the human row only when the engine did *not* come from beside the script --
+  so the common arrangement's line is byte-identical, and the unusual one
+  discloses that a version-qualified engine root may be describing an install
+  of a different release.
+
 ## 0.71.52 - 2026-08-25
 
 ### Fixed

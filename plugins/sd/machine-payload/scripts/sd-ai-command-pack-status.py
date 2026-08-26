@@ -118,6 +118,14 @@ TOOLCHAIN_VERDICTS = frozenset({"bound", "shadowed", "unresolved"})
 # PATH is unbounded external input; the report keeps the leading pack entries.
 MAX_PATH_PACK_ENTRIES = 8
 MACHINE_UNAVAILABLE = "unavailable"
+# Pack identity for a candidate engine root, under both spellings that ship.
+# A checkout carries `manifest.json`; the plugin cache root carries only
+# `.claude-plugin/plugin.json`, so requiring the first alone would reject the
+# arrangement the PATH rung exists to reach.
+PACK_MANIFEST_NAME = "sd-ai-command-pack"
+PACK_PLUGIN_NAME = "sd"
+# Refused engine roots are reported, not dropped; PATH is unbounded input.
+MAX_MACHINE_ENGINE_REFUSALS = 8
 # States the machine-install engine reports from the receipt alone. A fourth
 # value, MACHINE_UNAVAILABLE, is this collector's own: it means the receipt
 # could not be read at all (no engine beside this script), which is neither a
@@ -1714,13 +1722,106 @@ def summarize_recovery(classified: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def machine_scope_api() -> Any:
-    """Load the machine-scope install engine from beside this script.
+def machine_engine_candidates(
+    script: Path, environ: Mapping[str, str]
+) -> list[tuple[str, Path]]:
+    """Roots that may carry `installer/`, script-adjacent first, then `PATH`.
 
-    `installer/` sits next to the directory holding this script in every
-    shipped arrangement: `scripts/` in a pack checkout, `bin/` under a plugin
-    root. A vendored consumer repository carries the scripts without the
-    package; that absence is reported, never guessed around.
+    Rung one is the arithmetic this function has always used, and it stays
+    first so every arrangement that resolves today resolves identically and
+    through the same copy. It answers for a pack checkout (`scripts/`), a
+    plugin root (`bin/`), and a `~/.agents/bin` that is a symlink into a plugin
+    root -- `Path.resolve()` follows the link, so that install needs no rung of
+    its own.
+
+    A machine install holding a REAL copy is the arrangement it cannot answer:
+    `parent.parent` of `~/.agents/bin/` is `~/.agents`, which ships no
+    installer package in any arrangement, so the path the `sd-status` skill
+    documents for thin consumers could never resolve the engine (issue #496).
+
+    Rung two is `PATH`, because the pack install whose `bin/` is on `PATH` is a
+    root that does carry the package, and `PATH` order is the order in which a
+    bare helper invocation would already have reached it. The toolchain
+    resolution ladder is deliberately NOT reused here: its rungs are the
+    override, `<repo>/scripts`, and `~/.agents/bin`, and the last of those is
+    precisely the rung that fails.
+    """
+    candidates: list[tuple[str, Path]] = [("adjacent", script.resolve().parent.parent)]
+    seen = {str(candidates[0][1])}
+    for entry in path_pack_bins(environ):
+        root = Path(entry["directory"]).resolve().parent
+        if str(root) in seen:
+            continue
+        seen.add(str(root))
+        candidates.append(("path", root))
+    return candidates
+
+
+def machine_engine_refusal(root: Path) -> str | None:
+    """Why `root` may not supply the engine, or `None` when it may.
+
+    Rung one is exempt from this gate by design: it is the tree already
+    executing, and refusing it would make the collector decline to run from a
+    checkout the caller trusted enough to invoke. Every other rung names a
+    directory an unprivileged process can influence, so a rung that merely
+    finds `machinescope.py` would let any writable `PATH` entry choose what
+    this collector imports and executes.
+
+    Identity is checked against two markers rather than one because the naive
+    choice fails: the plugin cache root -- the arrangement this ladder exists
+    to reach -- carries no `manifest.json` at all, only
+    `.claude-plugin/plugin.json`. A gate keyed on `manifest.json` alone would
+    reject the very root the fix depends on.
+    """
+    package = root / "installer"
+    for required in (package / "__init__.py", package / "machinescope.py"):
+        if not required.is_file():
+            return f"no {required.name} in {package}"
+    if not machine_engine_root_identified(root):
+        return (
+            "no pack identity: neither manifest.json (name "
+            f"{PACK_MANIFEST_NAME!r}) nor .claude-plugin/plugin.json (name "
+            f"{PACK_PLUGIN_NAME!r}) is present in {root}"
+        )
+    for path in (root, package, package / "machinescope.py"):
+        try:
+            mode = path.stat().st_mode
+        except OSError as error:
+            return f"cannot inspect {path}: {safe_text(error, limit=120)}"
+        if mode & stat.S_IWOTH:
+            return f"world-writable: {path}"
+    return None
+
+
+def machine_engine_root_identified(root: Path) -> bool:
+    """Whether `root` carries a pack identity marker under either spelling."""
+    for relative, expected in (
+        (Path("manifest.json"), PACK_MANIFEST_NAME),
+        (Path(".claude-plugin") / "plugin.json", PACK_PLUGIN_NAME),
+    ):
+        path = root / relative
+        if not path.is_file():
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8", errors="strict"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        if isinstance(value, dict) and value.get("name") == expected:
+            return True
+    return False
+
+
+def machine_scope_api(
+    *, environ: Mapping[str, str] | None = None
+) -> tuple[Any, str, Path, list[dict[str, str]]]:
+    """Load the machine-scope install engine, and say where it came from.
+
+    `installer/` sits next to the directory holding this script in most shipped
+    arrangements -- `scripts/` in a pack checkout, `bin/` under a plugin root --
+    but NOT in a machine install, which puts this script in `~/.agents/bin/`
+    beside no package at all. That third arrangement is why this is a ladder
+    rather than one path. A vendored consumer repository reachable by neither
+    rung still reports the absence; it is never guessed around.
 
     The engine resolves the shared helper library through
     ``sys.modules["sd_ai_command_pack_lib"]`` first, and this script has
@@ -1730,28 +1831,53 @@ def machine_scope_api() -> Any:
     they diverge only mid-skew (a refreshed package beside stale scripts). The
     loader's first-import-wins rule is deliberate and is not worked around
     here.
+
+    Returns the module, the rung that supplied it, that rung's root, and every
+    candidate refused along the way. Refusals are returned rather than dropped:
+    a silent skip would degrade to a bare `unavailable`, which is the
+    uninformative failure this ladder exists to remove, and would also hide a
+    rejected candidate that had no business being on `PATH`.
     """
-    root = Path(__file__).resolve().parent.parent
-    module_path = root / "installer" / "machinescope.py"
-    if not module_path.is_file():
-        raise RuntimeError(
-            f"machine-scope engine is not installed beside this script ({module_path})"
-        )
-    root_path = str(root)
-    inserted = root_path not in sys.path
-    if inserted:
-        sys.path.insert(0, root_path)
-    try:
-        with suppress_bytecode_writes():
-            from installer import machinescope
-    except ImportError as error:
-        raise RuntimeError(
-            f"machine-scope engine cannot be imported: {safe_text(error, limit=200)}"
-        ) from error
-    finally:
+    env = os.environ if environ is None else environ
+    refusals: list[dict[str, str]] = []
+    tried: list[str] = []
+    for rung, root in machine_engine_candidates(Path(__file__), env):
+        tried.append(str(root))
+        if rung == "adjacent":
+            if not (root / "installer" / "machinescope.py").is_file():
+                continue
+        else:
+            refusal = machine_engine_refusal(root)
+            if refusal is not None:
+                refusals.append(
+                    {
+                        "root": safe_text(str(root), limit=300),
+                        "reason": safe_text(refusal, limit=300),
+                    }
+                )
+                continue
+        root_path = str(root)
+        inserted = root_path not in sys.path
         if inserted:
-            sys.path.remove(root_path)
-    return machinescope
+            sys.path.insert(0, root_path)
+        try:
+            with suppress_bytecode_writes():
+                from installer import machinescope
+        except ImportError as error:
+            raise RuntimeError(
+                f"machine-scope engine cannot be imported: {safe_text(error, limit=200)}"
+            ) from error
+        finally:
+            if inserted:
+                sys.path.remove(root_path)
+        return machinescope, rung, root, refusals
+    detail = "; ".join(
+        f"{entry['root']} ({entry['reason']})" for entry in refusals
+    )
+    raise RuntimeError(
+        "machine-scope engine is not installed beside this script or on PATH "
+        f"(tried {', '.join(tried)})" + (f"; refused {detail}" if detail else "")
+    )
 
 
 def collect_plugin_version(repo: Path) -> tuple[str, str | None]:
@@ -1823,15 +1949,23 @@ def machine_receipt_state(
     """Receipt state from the engine, without needing a plugin to find it."""
 
     def unavailable(detail: str) -> dict[str, Any]:
+        # Provenance keys are present on every branch, including this one: the
+        # caller reads them by name, and a partial shape here would turn a
+        # reportable failure into a KeyError inside a read-only status run.
         return {
             "state": MACHINE_UNAVAILABLE,
             "packVersion": None,
             "receiptPath": None,
             "detail": safe_text(detail, limit=300),
+            "engineRung": None,
+            "engineRoot": None,
+            "engineRefusals": [],
         }
 
     try:
-        machinescope = machine_scope_api()
+        machinescope, engine_rung, engine_root, engine_refusals = machine_scope_api(
+            environ=environ
+        )
     except RuntimeError as error:
         return unavailable(str(error))
     try:
@@ -1865,6 +1999,13 @@ def machine_receipt_state(
             safe_text(receipt_path, limit=500) if isinstance(receipt_path, str) else None
         ),
         "detail": safe_text(detail, limit=300) if isinstance(detail, str) and detail else None,
+        # Where the engine came from. The PATH rung's root is version-qualified
+        # (`.../sd/<version>/`), so the engine can be a different release from
+        # the install it describes -- which is exactly the skew this row exists
+        # to surface, and is defensible only while the reader can see it.
+        "engineRung": engine_rung,
+        "engineRoot": safe_text(str(engine_root), limit=500),
+        "engineRefusals": engine_refusals[:MAX_MACHINE_ENGINE_REFUSALS],
     }
 
 
@@ -2015,6 +2156,12 @@ def collect_machine_scope(
         "packVersion": receipt["packVersion"],
         "receiptPath": receipt["receiptPath"],
         "detail": receipt["detail"],
+        # Carried through, not recomputed: the row a reader sees is the only
+        # place the engine's provenance can be seen at all, and a receipt key
+        # that stops here renders as an ordinary line that hides a skew.
+        "engineRung": receipt["engineRung"],
+        "engineRoot": receipt["engineRoot"],
+        "engineRefusals": receipt["engineRefusals"],
         "pluginId": MACHINE_PLUGIN_ID,
         "pluginVersion": plugin_version,
         "pluginDetail": plugin_detail,
@@ -3162,6 +3309,21 @@ def format_machine_scope(section: object) -> str:
     detail = section.get("detail")
     if detail:
         machine += f" ({detail})"
+    # Named only when the engine did NOT come from beside this script, so the
+    # common arrangement's line is unchanged and the unusual one is legible:
+    # an engine loaded from a version-qualified plugin root may describe an
+    # install of a different release.
+    if section.get("engineRung") not in (None, "adjacent"):
+        machine += f" [engine via {section.get('engineRung')}: {section.get('engineRoot')}]"
+    refusals = section.get("engineRefusals")
+    if isinstance(refusals, list) and refusals:
+        rejected = "; ".join(
+            f"{entry.get('root')} ({entry.get('reason')})"
+            for entry in refusals
+            if isinstance(entry, dict)
+        )
+        if rejected:
+            machine += f" [refused {rejected}]"
     plugin = str(section.get("pluginVersion"))
     plugin_detail = section.get("pluginDetail")
     if plugin_detail:
