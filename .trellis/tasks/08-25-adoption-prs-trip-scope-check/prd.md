@@ -340,31 +340,64 @@ reaches it.
 
 ## Acceptance criteria
 
-- [ ] A test drives the scope check over a changed-file set of exactly
+- [x] A test drives the scope check over a changed-file set of exactly
       `.sd-ai-command-pack/manifest.json` and
       `.sd-ai-command-pack/provenance.json` with a marker-free PR body, and
       asserts it passes. The same test fails against today's code.
-- [ ] A test covers a pack-owned path **outside** `.sd-ai-command-pack/` —
+      → `test_adoption_diff_of_manifest_and_provenance_needs_no_section`,
+      observed red before the change.
+- [x] A test covers a pack-owned path **outside** `.sd-ai-command-pack/` —
       `.prism/rules.schema.json`, which real adoption history exercises
-      (`99d8843`) — in an otherwise all-pack-owned diff, and asserts it is
-      exempt. This pins that the exemption tracks the receipt rather than the
-      `case` fast path.
-- [ ] A companion test pins requirement 2: the same marker-free body with one
-      authored file added to that set still fails, so the exemption cannot be
-      widened by piggybacking.
-- [ ] Fail-closed is pinned by test: with the base `installed-targets.txt`
-      absent, unreadable, and malformed, and with the base ref unresolvable
-      (four cases), an otherwise-exempt adoption diff still fails. An unusable
-      receipt must never widen the exemption.
-- [ ] Receipt-in-diff is pinned by test: a diff that appends an authored path to
-      `installed-targets.txt` and also changes that path is **not** exempt,
-      because ownership is read from the base copy. This is the hazard the
-      exemption introduces and the reason the base copy governs.
-- [ ] `installed-targets.txt` is itself exempt, since `install.py` rewrites it
-      whenever the target set changes and an adoption diff may carry it.
-- [ ] External evidence: the repro in Evidence, rerun unchanged in a consumer
-      checkout, exits `0` with no `error:` line. This is the shape the defect
-      broke and it cannot be asserted from inside the pack.
+      (`99d8843`).
+      → `test_adoption_diff_covering_a_pack_file_outside_the_pack_dir_is_exempt`.
+- [x] A companion test pins requirement 2: the same marker-free body with one
+      authored file added to that set still fails.
+      → `test_one_authored_file_alongside_pack_files_still_requires_a_section`,
+      plus `test_an_untracked_authored_file_denies_the_exemption` for the
+      unstaged case, which an earlier revision of the design got wrong.
+- [x] Fail-closed is pinned by test.
+      → `test_receipt_absent_at_base_denies_the_exemption` and
+      `test_empty_receipt_at_base_denies_the_exemption`. **Two cases, not the
+      four this criterion originally named.** "Base ref unresolvable" is not
+      reachable: `scope_base_ref` falls back to the discovered default branch,
+      pinned instead by
+      `test_an_unresolvable_configured_base_ref_falls_back_and_still_decides`.
+      "Unreadable" is not distinctly reachable through git, which either
+      resolves a blob or does not; it collapses into the absent case.
+- [x] Receipt-in-diff is pinned by test.
+      → `test_appending_an_authored_path_to_the_receipt_does_not_exempt_it`,
+      and confirmed externally below.
+- [x] `installed-targets.txt` is itself exempt.
+      → `test_installed_targets_itself_may_change_in_an_adoption_diff`.
+- [x] External evidence: the repro in Evidence, rerun unchanged in a consumer
+      checkout, exits `0` with no `error:` line.
+
+      Run 2026-08-26 against a clone of `platypeeps/sd-github-review` at
+      `8f5a409` — a **thin** install, so the script under test is the machine
+      layer's, which is the path the Evidence repro names. Before, machine
+      layer 0.71.53:
+
+      ```
+      info: Changed scope files:
+        - .sd-ai-command-pack/provenance.json
+      error: tooling/generated files changed, but the provided PR body does not include a recognized tooling/generated scope section
+      exit: 1
+      ```
+
+      After, 0.71.55 staged into a scratch prefix via
+      `install.py --machine --home` so the operator's own `~/.agents` was not
+      written to:
+
+      ```
+      info: Changed scope files:
+        - .sd-ai-command-pack/provenance.json
+      info: All changed files are pack-owned at origin/main; adoption diff, no scope section required.
+      exit: 0
+      ```
+
+      Requirement 2 and the tamper case, same consumer, same script: one
+      authored file alongside → exit 1; appending `authored_change.py` to the
+      working-tree receipt and then changing it → still exit 1.
 
 ## Notes
 

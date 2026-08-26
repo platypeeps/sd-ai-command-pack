@@ -32,17 +32,18 @@ that does not pin `SD_AI_COMMAND_PACK_SCOPE_CHECK=advisory`.
       `installed-targets.txt` *and* changes `src/authored.py`. Expect exit 1,
       because ownership is read from the base copy. **This is the security
       criterion; it must fail loudly against a head-copy implementation.**
-- [ ] Fail-closed, four cases, each expect exit 1 on an otherwise-exempt diff:
-      base ref unresolvable; base receipt absent; base receipt unreadable; base
-      receipt empty/whitespace-only.
+- [ ] Fail-closed, two reachable cases, each expect exit 1 on an
+      otherwise-exempt diff: base receipt absent; base receipt empty. An
+      unresolvable base ref is *not* a third case — `scope_base_ref` falls back
+      to the discovered default branch — so a companion test pins the fallback
+      still deciding correctly rather than asserting a state that cannot occur.
 - [ ] `test_repomix_only_diff_is_not_treated_as_adoption`
       — pins the rejected alternative in `design.md`: `docs/repomix-map.md`
       alone is all-*scoped* but not pack-owned, so it must still require a
       section.
-- [ ] `test_untracked_file_does_not_defeat_the_adoption_exemption`
-      — an all-pack-owned diff plus one untracked scratch file still exits 0.
-      Pins that the predicate uses tracked changes only; fails against a
-      `collect_changed_files`-based implementation.
+- [ ] `test_an_untracked_authored_file_denies_the_exemption`
+      — an all-pack-owned diff plus one untracked authored file exits 1.
+      Excluding untracked paths fails open; this pins the safe direction.
 - [ ] `test_explicit_targets_file_override_is_honoured_over_the_base_copy`
       — with `SD_AI_COMMAND_PACK_TARGETS_FILE` set, the override governs and the
       base-copy substitution is skipped. Guards the nine existing call sites in
@@ -54,10 +55,6 @@ that does not pin `SD_AI_COMMAND_PACK_SCOPE_CHECK=advisory`.
 
 ## 2. Implement
 
-- [ ] Add `tracked_changed_files()` — `collect_changed_files` without the
-      trailing `git ls-files --others --exclude-standard` (`:112`). Leave
-      `collect_changed_files` itself untouched; classification keeps its
-      current input set.
 - [ ] Add `base_targets_file()` — materialize
       `git show "${base_ref}:.sd-ai-command-pack/installed-targets.txt"` to a
       temp file, `trap`-cleaned. Non-zero exit, empty output, or unresolvable

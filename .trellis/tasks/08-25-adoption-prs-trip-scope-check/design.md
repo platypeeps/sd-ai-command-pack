@@ -29,7 +29,7 @@ alongside pack files. The fix adds one predicate and one early return, placed
 
 ```
 is_adoption_only_diff:
-    changed = tracked_changed_files()        # NOT collect_changed_files
+    changed = collect_changed_files()        # untracked included; see below
     if changed is empty:            not adoption      # nothing to exempt
     if base receipt unusable:       not adoption      # fail closed
     for path in changed:
@@ -40,27 +40,26 @@ is_adoption_only_diff:
 `pack_owned_at_base` is `is_pack_target_path` with `$TARGETS_FILE` bound to the
 base copy rather than the working tree.
 
-### Why the predicate does not reuse `collect_changed_files`
+### Untracked files are counted, deliberately
 
-`collect_changed_files` ends with a line easy to miss (`:112`):
+`collect_changed_files` ends with `git ls-files --others --exclude-standard`
+(`:112`), so untracked files count as changed.
 
-```sh
-  git ls-files --others --exclude-standard
-```
+An earlier revision of this design excluded them, reasoning that one stray
+scratch note in the operator's tree should not cost the exemption. That is
+wrong, and the existing suite proved it:
+`test_review_scope_script_reports_manifest_driven_pack_changes` builds its
+authored files with `write_text` and never stages them, so excluding untracked
+paths made the predicate blind to them and granted the exemption to a diff that
+plainly was not an adoption.
 
-Untracked files count as changed. That is harmless for *classification* — a
-scratch file matches no scope category, so it never enters `scoped_changes` —
-but it is fatal to an all-pack-owned test: one untracked note in the operator's
-tree would make the diff not-all-pack-owned and silently remove the exemption.
-The operator running `check:full` by hand is the primary blocking path in
-`prd.md`, so an exemption that any stray file defeats would fix the defect on
-paper and not in practice.
-
-`tracked_changed_files` is `collect_changed_files` minus that last line:
-`base_ref...HEAD`, staged, and unstaged. This is also the more correct set on
-the merits — untracked files are not in the PR, and the gate is about the PR's
-diff. The existing classification path is left alone; only the exemption uses
-the narrower set.
+Generalised, excluding untracked files fails **open**: create an authored file,
+leave it unstaged, and an otherwise-pack-only diff is exempt. Requirement 2 is
+the entire safety case for this exemption, so the predicate uses
+`collect_changed_files` unchanged. The cost — an operator with an untracked
+scratch file does not get the exemption — is exactly today's behaviour, so it
+fails **safe**. Consistency with classification is a secondary benefit: one
+notion of "changed", not two.
 
 ### Interaction with `SD_AI_COMMAND_PACK_TARGETS_FILE`
 
@@ -102,14 +101,20 @@ authorisation to skip a gate must not be writable by the diff being gated.
 
 ### Fail-closed cases
 
-All four produce "not adoption", i.e. today's behaviour:
+All three produce "not adoption", i.e. today's behaviour:
 
 | Condition | Why it fails closed |
 |---|---|
-| `scope_base_ref` unresolvable | No trustworthy receipt exists to read |
 | `git show` of the base receipt non-zero | Receipt absent at base (new install) |
 | Base receipt empty after comment-stripping | Indistinguishable from truncation |
 | Any changed path absent from it | Requirement 2 — authored file present |
+
+There is deliberately no "unresolvable base ref" row. `configured_review_base_ref`
+warns and returns non-zero for a ref that does not resolve, and `scope_base_ref`
+then falls back to the discovered default branch — so there is no state in which
+no base ref exists to decide against. That is a better outcome than the
+fail-closed rule an earlier revision assumed: the exemption is not silently
+disabled in checkouts with an unusual base. The receipt read is the real guard.
 
 The last row is requirement 2 in full. No separate mechanism is needed: an
 authored file is by construction absent from a receipt `install.py` wrote.
@@ -126,7 +131,13 @@ is the hazard above.
 ## Observability
 
 Silence would make an exemption indistinguishable from a check that did not run.
-On the exempt path the script prints one line before returning 0:
+The full scope report — categories and changed files — still prints; only the
+body requirement is waived. An earlier revision returned before that report and
+broke `test_scope_guard_accepts_a_relative_explicit_root`, which exists to prove
+the receipt lookup survives a relative root and reads the categories back to do
+it. Suppressing the report to implement an exemption destroyed the evidence that
+the classifier ran at all. After the report, the script prints one line and
+returns 0:
 
 ```
 info: All changed files are pack-owned at <base_ref>; adoption diff, no scope section required.

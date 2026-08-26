@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.71.55 - 2026-08-26
+
+### Fixed
+
+- Review scope: a pack-version adoption PR no longer requires a hand-written
+  `Tooling/generated scope:` section. `check_pr_body_scope` failed on any
+  non-zero count of scoped files, which cannot distinguish a diff of *only*
+  pack-installed files from authored work carried alongside them — so the
+  consumer-side adoption commit the pack itself produces was refused by the
+  pack's own gate. When every changed path is pack-owned, the body requirement
+  is waived; the scope report still prints, and no advisory marker is emitted.
+
+### Security
+
+- The adoption exemption reads file ownership from the **base** copy of
+  `.sd-ai-command-pack/installed-targets.txt` rather than the working tree, so
+  a diff cannot exempt itself by appending its own authored path to the
+  receipt. Untracked files are counted for the same reason. An unreadable or
+  empty base receipt, or one authored file alongside the pack files, denies the
+  exemption.
+
 ## 0.71.54 - 2026-08-25
 
 ### Fixed
