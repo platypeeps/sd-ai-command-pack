@@ -49,8 +49,8 @@ Three steps, each defensible alone.
    survives a review that did not happen.
 
    **Route A — no payload (this is the one #563 hit).** A dead provider writes
-   no report, so `_gito_payload` returns `None` (`:1871`); `_prism_payload`
-   does the same on unparseable stdout (`:1844`). The recovery for a missing
+   no report, so `_gito_payload` returns `None` (`:1876`); `_prism_payload`
+   does the same on unparseable stdout (`:1845`). The recovery for a missing
    payload covers exactly one case (`:2087`):
 
    ```python
