@@ -1739,6 +1739,53 @@ class ReviewStageTests(InstallTestCase):
         self.assertNotIn(target["head"], diagnostic)
         self.assertNotIn(target["contentDigest"], diagnostic)
 
+    def test_oversized_bookkeeping_evidence_is_attributed_to_the_flag(self) -> None:
+        """The size guard fires before the file is read, and still names it."""
+
+        root = self.make_repo()
+        self.write_config(root)
+        oversized = root.parent / "oversized-evidence.json"
+        oversized.write_bytes(b"{" + b" " * (65 * 1024))
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-oversized", "--bookkeeping-evidence", str(oversized)
+        )
+
+        self.assertIn("exceeds 65536 bytes", diagnostic)
+        self.assertIn(str(oversized), diagnostic)
+
+    def test_symlinked_bookkeeping_evidence_is_gated_on_content(self) -> None:
+        """A symlink is followed, and the descriptor check is the real gate.
+
+        `_read_json` refuses a symlink outright, but it never sees one here:
+        the flag is resolved with `Path(...).resolve(strict=True)`, which
+        follows the link before the reader runs. That is unchanged from before
+        this change, and it is sound because the path shape is not what
+        authorizes anything -- the descriptor has to equal the reviewed
+        target's `base`, `head`, and `contentDigest`, so pointing at a file
+        through a link buys the caller exactly nothing. Asserted rather than
+        assumed, since the two guards look like they contradict.
+        """
+
+        root = self.make_repo()
+        self.write_config(root)
+        real = self.bookkeeping_evidence(
+            root,
+            "linked-target.json",
+            {"schemaVersion": 1, "kind": "final-bundle", "status": "valid"},
+        )
+        link = root.parent / "evidence-link.json"
+        link.symlink_to(real)
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-symlink", "--bookkeeping-evidence", str(link)
+        )
+
+        # The link was followed: this is the content rejection, not the
+        # regular-file one that a refused symlink would have produced.
+        self.assertIn("unsupported or missing fields", diagnostic)
+        self.assertNotIn("regular non-symlink file", diagnostic)
+
     def test_provider_timeout_does_not_become_clean(self) -> None:
         root = self.make_repo()
         self.write_config(root, modes=("clean", "slow"), timeout=1)

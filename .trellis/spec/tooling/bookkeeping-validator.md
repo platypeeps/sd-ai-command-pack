@@ -177,6 +177,43 @@ failures append a repo-state context block (HEAD bytes, loose/packed ref
 state, lock files) — capture lives in the assertion wrappers only, never
 `_run_git_process`, whose direct callers expect nonzero exits.
 
+## Gotcha: two unrelated artifacts are both called "bookkeeping"
+
+Adopted 2026-08-25, from issue #490 and from hitting it live while shipping
+PR #551.
+
+This file's validator produces the **completion receipt**: `final-bundle
+--mode completion` output, `kind: "trellis-bookkeeping-validation"`. It is
+what `sd-ship` Stage 2b retains and hands to the `sd-housekeeping` gate.
+
+`sd-ai-command-pack-review-local.py --successor bookkeeping` wants something
+else entirely — the **successor descriptor**, a five-key object:
+
+```json
+{"schemaVersion": 1, "classification": "bookkeeping-successor",
+ "base": "<merge-base OID>", "head": "<OID>", "contentDigest": "<sha256>"}
+```
+
+Passing the first where the second is wanted is the natural mistake, because
+`sd-ship` Stage 2b's prose says to retain the "exact-head schema-version-1
+bookkeeping receipt" and pass it on, and both artifacts are schema-version-1
+JSON. Two consequences to keep:
+
+- Neither artifact's rejection may describe itself as merely "the bookkeeping
+  receipt." Every `--bookkeeping-evidence` rejection now names the
+  final-bundle receipt explicitly as the artifact it is *not*.
+- The descriptor is not hand-derivable. `base` is the resolved merge-base OID
+  rather than the pull request's base branch, and `contentDigest` is computed
+  over the canonicalized delta. Both come from the `target` object of a
+  `--plan-only --json` run of the same attempt; the `sd-review` skill
+  documents that route. A required input reachable only by reading source is a
+  contract that cannot be satisfied from the docs.
+
+When a rejection message hands over the value it expected, it stops being a
+check: a pasted `head` or `contentDigest` proves nothing about the tree it
+claims to describe. Name the field that disagreed and echo only the bounded
+caller-supplied half.
+
 ## Related
 
 - [Code Reuse Thinking Guide](../guides/code-reuse-thinking-guide.md) — this
