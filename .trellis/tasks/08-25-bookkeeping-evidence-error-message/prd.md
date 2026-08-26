@@ -62,20 +62,30 @@ finally used.
 
 ## Acceptance Criteria
 
-- [ ] A test passing a nonexistent path asserts the message contains the flag
+- [x] A test passing a nonexistent path asserts the message contains the flag
       name and the path; it fails on current `main`.
-- [ ] A test passing a non-JSON file asserts the message names the flag and the
+      (`test_absent_bookkeeping_evidence_path_names_the_flag`; verified failing
+      against the pre-fix source.)
+- [x] A test passing a non-JSON file asserts the message names the flag and the
       required keys.
-- [ ] A test per rejection branch in `_validate_bookkeeping_evidence` (bad
+      (`test_non_json_bookkeeping_evidence_names_the_flag_and_shape`.)
+- [x] A test per rejection branch in `_validate_bookkeeping_evidence` (bad
       `schemaVersion`, missing/extra keys, wrong `classification`, target
       mismatch) asserts the shape is named and, for mismatch, the disagreeing
-      field.
-- [ ] Exit codes and JSON report structure for each branch are unchanged,
-      proven by asserting them in the same tests.
-- [ ] The relay question in *Premise correction* is answered in writing — either
+      field. (Four tests, plus one for the omitted flag; the mismatch test also
+      asserts the target's own values are *not* echoed.)
+- [x] Exit codes and JSON report structure for each branch are unchanged,
+      proven by asserting them in the same tests. (One shared
+      `assert_evidence_rejected` helper re-checks exit `2` and the
+      `schemaVersion`/`command`/`status`/`outcome` envelope on every branch.)
+- [x] The relay question in *Premise correction* is answered in writing — either
       "no relay, the quoted bare form is stale" or the relaying surface is named
-      and fixed.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+      and fixed. (See *Relay question — answered* below: no relay.)
+- [x] Changelog entry and version bump to 0.71.54, with the four generated
+      trees regenerated and `shipped-surface closure: clean`.
+
+Post-archive handoff, not an acceptance criterion: fleet rollout reaches
+consumers through the normal `sd-fleet-refresh` cycle after this merges.
 
 ## Field evidence from PR #551 (2026-08-25)
 
