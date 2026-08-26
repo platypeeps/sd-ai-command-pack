@@ -3971,6 +3971,43 @@ class StatusTests(InstallTestCase):
         self.assertEqual(rung, "path")
         self.assertEqual(root, PACK_ROOT.resolve())
 
+    def test_machine_scope_api_steps_over_a_candidate_that_fails_to_import(self) -> None:
+        """A gated candidate can still fail to import; that ends it, not the ladder.
+
+        Raising on the first import failure would strand the collector on a
+        corrupt engine while a perfectly good root sat later in `PATH`. The
+        reason is not lost -- it is recorded as a refusal.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            broken = Path(raw) / "broken"
+            broken_bin = self.decoy_engine_root(broken, identity="manifest")
+            (broken / "installer" / "machinescope.py").write_text(
+                "import sd_definitely_not_a_real_module\n", encoding="utf-8"
+            )
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            environ = {
+                "PATH": os.pathsep.join([str(broken_bin), str(PACK_ROOT / "scripts")])
+            }
+            root_path = str(PACK_ROOT.resolve())
+            baseline = [entry for entry in status.sys.path if entry != root_path]
+
+            with (
+                mock.patch.object(status, "__file__", str(script)),
+                mock.patch.object(status.sys, "path", baseline.copy()),
+                mock.patch.dict(status.sys.modules),
+            ):
+                for name in list(status.sys.modules):
+                    if name == "installer" or name.startswith("installer."):
+                        del status.sys.modules[name]
+                _engine, rung, root, refusals = status.machine_scope_api(environ=environ)
+
+        self.assertEqual(rung, "path")
+        self.assertEqual(root, PACK_ROOT.resolve())
+        self.assertEqual(len(refusals), 1)
+        self.assertEqual(refusals[0]["root"], str(broken.resolve()))
+        self.assertIn("cannot import", refusals[0]["reason"])
+
     def test_machine_scope_without_the_engine_is_unavailable_not_none(self) -> None:
         status = self.load_status_module()
         root = self.make_status_repo()

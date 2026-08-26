@@ -126,6 +126,7 @@ PACK_MANIFEST_NAME = "sd-ai-command-pack"
 PACK_PLUGIN_NAME = "sd"
 # Refused engine roots are reported, not dropped; PATH is unbounded input.
 MAX_MACHINE_ENGINE_REFUSALS = 8
+MACHINE_ENGINE_PACKAGE = "installer"
 # States the machine-install engine reports from the receipt alone. A fourth
 # value, MACHINE_UNAVAILABLE, is this collector's own: it means the receipt
 # could not be read at all (no engine beside this script), which is neither a
@@ -1757,6 +1758,11 @@ def machine_engine_candidates(
     return candidates
 
 
+def machine_engine_module(name: str) -> bool:
+    """Whether `name` is the engine package or one of its submodules."""
+    return name == MACHINE_ENGINE_PACKAGE or name.startswith(f"{MACHINE_ENGINE_PACKAGE}.")
+
+
 def machine_engine_refusal(root: Path) -> str | None:
     """Why `root` may not supply the engine, or `None` when it may.
 
@@ -1871,13 +1877,37 @@ def machine_scope_api(
         inserted = root_path not in sys.path
         if inserted:
             sys.path.insert(0, root_path)
+        preexisting = {name for name in sys.modules if machine_engine_module(name)}
         try:
             with suppress_bytecode_writes():
                 from installer import machinescope
         except ImportError as error:
-            raise RuntimeError(
-                f"machine-scope engine cannot be imported: {safe_text(error, limit=200)}"
-            ) from error
+            # Recorded and stepped over, not raised. A candidate that passed
+            # the gate can still fail to import -- a corrupt engine, a missing
+            # dependency -- and raising here ends the ladder, so a later rung
+            # that would have answered is never tried. The reason is not lost:
+            # it rides in `refusals` and is named by the terminal error if no
+            # rung answers at all.
+            #
+            # Evict what THIS attempt cached first. A failed submodule import
+            # still leaves the parent `installer` package in `sys.modules`,
+            # bound to this candidate's root; left there it satisfies the next
+            # candidate's import and re-raises this same error, which makes the
+            # fall-through above inert. Only names this attempt introduced are
+            # removed, so an `installer` imported before this call survives.
+            for name in [
+                name
+                for name in sys.modules
+                if machine_engine_module(name) and name not in preexisting
+            ]:
+                del sys.modules[name]
+            refusals.append(
+                {
+                    "root": safe_text(str(root), limit=300),
+                    "reason": safe_text(f"cannot import: {error}", limit=300),
+                }
+            )
+            continue
         finally:
             if inserted:
                 sys.path.remove(root_path)
