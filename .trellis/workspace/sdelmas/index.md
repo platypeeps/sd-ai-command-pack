@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 425
+- **Total Sessions**: 426
 - **Last Active**: 2026-08-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1090 | Active |
+| `journal-9.md` | ~1140 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 426 | 2026-08-25 | Name the contract when --bookkeeping-evidence input is unusable | `d1e76e29`, `be6e2c87`, `6800c609`, `c9ee6116` | `fix/bookkeeping-evidence-diagnostics` |
 | 425 | 2026-08-25 | Resolve the machine-scope engine beyond the script's own root | `3cd70cff`, `0ac93742`, `9ba6f15b`, `010f4b51`, `f5b48984`, `b4c9ec63` | `fix/status-machine-scope-resolution` |
 | 424 | 2026-08-24 | Pack-driven prism reviews now pass --rules, and severityOverrides is retired fleet-wide | - | `task/prism-rules-flag-fleet-safe` |
 | 423 | 2026-08-21 | Unblocked the dependabot lock guard; closed the Gemini exemption and the locator-form gap | `0db7a890` | `main` |
