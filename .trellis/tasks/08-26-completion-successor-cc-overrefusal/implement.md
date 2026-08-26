@@ -39,9 +39,12 @@ are regenerated, never hand-edited.
       `:1874`, run `git merge-tree --write-tree <fields[1]> <fields[2]>` and
       capture **both** its exit status and its stdout (the computed tree OID).
 - [ ] 2.2 Return `'base-update'` only when exit is 0 **and** the computed tree
-      equals the commit's own tree (`git rev-parse <oid>^{tree}`, or the tree
-      field already available on `fields`). Exit 0 alone is not sufficient and
-      must not be used alone — see 2.7.
+      equals the commit's own tree. `fields` does **not** carry it — it is the
+      `rev-list --parents -n 1` output (`:1910-1913`), so it is
+      `[oid, parent1, parent2]` and nothing else. Fetch the tree explicitly with
+      `git rev-parse <oid>^{tree}` (or `git show -s --format=%T <oid>`) and treat
+      a failure of that call as "not proven clean", falling through to 2.3.
+      Exit 0 alone is not sufficient and must not be used alone — see 2.7.
 - [ ] 2.3 Every other case — exit 1, exit 0 with a differing tree, an unusable
       exit, or a `merge-tree` that cannot run — continues to the `--cc` call,
       whose paths B then scope-checks. Do **not** route any of these to
@@ -77,13 +80,21 @@ are regenerated, never hand-edited.
       `:2341-2354` covers them. Do not add a parallel reporting path — the site
       already has one, and duplicating it is how these two sites drifted before.
 - [ ] 3.3 Retire `completion_successor_base_update_conflicted` as a shape
-      verdict at both sites. Grep the whole repo for the identifier afterwards;
-      the only survivors should be changelog history.
+      verdict at both sites, then grep **shipped surface only** —
+      `templates/`, the three mirrors, `tests/`, `docs/`, and the installed
+      `.agents/`, `.claude/`, `plugins/sd/skills/` copies. Those must come back
+      clean apart from the `CHANGELOG.md` entry.
+      Do not treat the remaining references as cleanup: the identifier also
+      appears in three archived task docs, in this task's own three artifacts,
+      and in `.build/sd-review/runs/**` logs. All are historical record of a
+      decision that was correct when it was made, and rewriting them would
+      destroy the provenance this task's PRD relies on.
 - [ ] 3.4 Before removing it, confirm nothing consumes it:
       `grep -rn completion_successor_base_update_conflicted` across this repo and
       each fleet consumer checkout. Design assumes it is emit-only; **verify,
       do not assume** — a consumer keying on it would turn this into a breaking
-      change.
+      change. This grep is the wider one on purpose: 3.3 bounds a cleanup, 3.4
+      hunts a consumer, and a consumer could live anywhere.
 
 ## Step 4 — tests
 
