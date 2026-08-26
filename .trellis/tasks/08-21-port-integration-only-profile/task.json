@@ -2,6 +2,8 @@
   "id": "port-integration-only-profile",
   "name": "port-integration-only-profile",
   "title": "Port the fleet integration-only review profile into sd-review",
+  "blockedOn": "08-22-verify-ported-integration-only-path",
+  "blockedReason": "criterion 1 is deferred to 08-22-verify-ported-integration-only-path; this task stays in_progress and must not be archived until that task ticks it",
   "description": "Move the trusted-caller integration-only review profile from sd-review-pr into sd-review and repoint sd-fleet-refresh, deleting nothing.",
   "status": "in_progress",
   "dev_type": null,

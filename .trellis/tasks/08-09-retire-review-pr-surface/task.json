@@ -2,6 +2,8 @@
   "id": "retire-review-pr-surface",
   "name": "retire-review-pr-surface",
   "title": "Retire sd-review-pr: port the fleet integration-only review profile into sd-review",
+  "blocked": true,
+  "blockedReason": "coordination parent; must not be implemented directly -- implement children 08-21-port-integration-only-profile, 08-21-delete-review-pr-surface, 08-21-retire-full-check-family",
   "description": "Delete the sd-review-pr command surface after porting the fleet integration-only review profile into sd-review. Split from 07-24-remove-retired-review-surfaces: sd-review-pr solely implements a trusted nested contract that sd-fleet-refresh depends on, so its removal is a behavioral migration, not a deletion. Also owns full-check.sh + review-full-check.sh deletion, the run_pack_source_drift_gates relocation, the make check recomposition, the FULL_CHECK/REVIEW_PR env families, and the plugin closure allowlist.",
   "status": "planning",
   "dev_type": null,
