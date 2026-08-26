@@ -1101,3 +1101,53 @@ Fixed issue #496: the status collector's machine-scope row was permanently 'unav
 ### Next Steps
 
 - None - task complete
+
+
+## Session 426: Name the contract when --bookkeeping-evidence input is unusable
+<!-- trellis-session: v=2 fp=eea8ad12bc0c37ef -->
+
+**Date**: 2026-08-25
+**Task**: Name the contract when --bookkeeping-evidence input is unusable
+**Branch**: `fix/bookkeeping-evidence-diagnostics`
+
+### Summary
+
+Every rejection on the local review stage's --bookkeeping-evidence flag now names the five-key descriptor it wants, names the finish-work completion receipt it is not, and names the --plan-only probe that produces the three target values. The nonexistent-path case moved out of main()'s blanket except into an attributed helper; the unsupported-or-missing-fields branch now names both sides; the target mismatch names the disagreeing field while deliberately withholding the target's own values, since handing over the expected answer would turn the check into a template for forging it. The sd-review skill gained the descriptor and the route to it, because the message's pointer previously led to a section that documented when to use the flag and never what to put in the file. Diagnostics only: exit codes and the JSON report envelope are asserted unchanged on every branch.
+
+### Main Changes
+
+- Added BOOKKEEPING_EVIDENCE_SHAPE and appended it to all seven rejection branches in _validate_bookkeeping_evidence
+- Moved --bookkeeping-evidence path resolution from main()'s blanket except (OSError, ReviewInputError) into _bookkeeping_evidence_path(), which attributes the failure to the flag
+- Named both the missing and the unsupported keys in the set-mismatch branch, which previously reported neither side
+- Named the disagreeing field in the target-mismatch branch while echoing only the bounded caller-supplied value
+- Documented the five-key descriptor and its --plan-only probe route in templates/.agents/skills/sd-review/SKILL.md
+- Recorded the two-artifacts-named-bookkeeping collision as a durable convention in .trellis/spec/tooling/bookkeeping-validator.md
+- Answered the PRD's relay question: c5673c35 (0.71.26) already carried the attribution, so the issue's bare Expecting value form came from a surface outside this repository
+- Bumped to 0.71.54 and regenerated the four trees
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d1e76e29` | fix(review): name the contract when --bookkeeping-evidence input is unusable |
+| `be6e2c87` | docs(spec): record the two-artifacts-named-bookkeeping collision |
+| `6800c609` | docs(review): route the plan-only probe example through the toolchain |
+| `c9ee6116` | docs(task): mark the acceptance criteria satisfied with their evidence |
+
+### Testing
+
+- [OK] tests/test_review_stage.py: 89 tests, OK; the seven new message tests fail against the pre-fix source and pass after
+- [OK] .github/scripts/run-tests.sh exits 0, 83 modules, zero failures
+- [OK] make generate: shipped-surface closure: clean
+- [OK] Review preflight: 0 failures
+- [OK] sd-review scope=pr: check passed, local clean, remoteGate eligible/local-stage-terminal
+- [OK] Copilot review on PR #554: generated no comments, zero inline comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

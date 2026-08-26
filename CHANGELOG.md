@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.71.54 - 2026-08-25
+
+### Fixed
+
+- Every `--bookkeeping-evidence` rejection in the local review stage now names
+  the contract it wanted. The flag takes a five-key descriptor --
+  `"schemaVersion": 1`, `"classification": "bookkeeping-successor"`, and
+  `base`/`head`/`contentDigest` equal to the reviewed target -- and that shape
+  was discoverable only by reading the validator. A caller who reverse-engineers
+  a schema from source is one step from hand-authoring a payload to satisfy the
+  check, which is manufacturing the evidence the classification exists to
+  require, so the honest route is now the documented one.
+- The nonexistent-path case is attributed to the flag. It was resolved in
+  `main()` under a blanket `except (OSError, ReviewInputError)` that stringified
+  the error verbatim, so the operator saw `[Errno 2] No such file or
+  directory: '<path>'` and was told neither which argument was at fault nor
+  that a JSON file was wanted. The resolution moved into an attributed helper
+  rather than widening that `except`.
+- The unsupported-or-missing-fields rejection names the fields. It compared
+  `set(value)` against the allowed set and reported neither side, so a missing
+  key and an extra one read identically. The common case -- passing
+  `final-bundle --mode completion` output, whose `kind` is
+  `trellis-bookkeeping-validation` and which collides on the word bookkeeping --
+  now says exactly that, and each message disambiguates the two artifacts.
+- The target-mismatch rejection names which of `base`, `head`, or
+  `contentDigest` disagreed and echoes only the bounded caller-supplied value.
+  It deliberately does not print the target's own values: handing over the
+  expected answer is the same shortcut in a friendlier costume, since a pasted
+  value proves nothing about the tree it claims to describe.
+- The `sd-review` skill now documents the descriptor and the one way to obtain
+  it. `base` is the resolved merge-base OID rather than the pull request's base
+  branch and `contentDigest` is computed over the canonicalized delta, so
+  neither is derivable by hand; both are read from the `target` object of a
+  `--plan-only --json` run of the same attempt. A required input reachable only
+  by reading source was a contract that could not be satisfied from the docs.
+
+Diagnostics only: no outcome classification, exit code, or receipt schema
+changes. Exit code 2 and the `schemaVersion`/`command`/`status`/`outcome`
+report envelope are asserted unchanged on every rejection branch.
+
 ## 0.71.53 - 2026-08-25
 
 ### Fixed

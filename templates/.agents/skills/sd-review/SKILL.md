@@ -209,6 +209,39 @@ validates the evidence, so either keeps the unextended limit. Attempts
 beyond that grant, and every over-limit attempt without valid bookkeeping
 evidence, still require the decision.
 
+The evidence file itself is a five-key JSON object — `"schemaVersion": 1`,
+`"classification": "bookkeeping-successor"`, and `base`, `head`,
+`contentDigest` equal to the target under review. It is **not** the
+finish-work flow's completion receipt, which is a different artifact whose
+`kind` is `trellis-bookkeeping-validation`; the two collide only on the word
+bookkeeping. Read the three target values from the `target` object of a
+`--plan-only --json` run of the same attempt — `base` is the resolved
+merge-base OID rather than the pull request's base branch, and `contentDigest`
+is computed over the canonicalized delta, so neither is derivable by hand:
+
+```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-review-local.py \
+  --repo . \
+  --scope pr \
+  --base <base> \
+  --head <head> \
+  --attempt-id <id> \
+  --plan-only \
+  --json
+```
+
+The probe carries its own bootstrap because each fenced block runs in its own
+shell; it is not an exception to the sandbox-safe rule.
+
 A local provider finding you have verified false takes the matching
 `--local-disposition '<stable-id>=rebutted'` pair. The bar is the same as the
 remote one and it is high: rebut only after checking the cited path and line in

@@ -1543,6 +1543,249 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["receipt"]["attempts"], [])
         self.assertFalse(report["receipt"]["confidence"]["granted"])
 
+    def bookkeeping_target(self, root: Path) -> dict:
+        """The exact target a bookkeeping evidence file has to agree with."""
+
+        planned = self.report(self.run_stage(root, "bookkeeping-target", "--plan-only"))
+        return planned["target"]
+
+    def bookkeeping_evidence(
+        self, root: Path, name: str, value: object
+    ) -> Path:
+        path = root.parent / name
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def assert_evidence_rejected(
+        self, root: Path, attempt: str, *arguments: str
+    ) -> str:
+        """Run a rejected bookkeeping attempt and return its diagnostic.
+
+        Every branch is asserted through the same helper so the exit code and
+        the report envelope are re-checked on each one: the point of this work
+        was to change the prose, and a message improvement that quietly moved
+        an exit code or dropped a report key would break every caller that
+        parses the JSON.
+        """
+
+        result = self.run_stage(
+            root, attempt, "--successor", "bookkeeping", *arguments
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        report = self.report(result)
+        self.assertEqual(report["schemaVersion"], 1)
+        self.assertEqual(report["command"], "sd-review-local-stage")
+        self.assertEqual(report["status"], "invalid")
+        self.assertEqual(report["outcome"], "invalid")
+        diagnostic = report["diagnostic"]
+        self.assertIsInstance(diagnostic, str)
+        # The shared contract sentence: which flag, what shape, and the
+        # disambiguation from the similarly named finish-work receipt. Asserted
+        # on every branch because the original defect was branch-specific --
+        # one message happened to be informative and the rest were not.
+        self.assertIn("--bookkeeping-evidence", diagnostic)
+        for key in ("schemaVersion", "classification", "base", "head", "contentDigest"):
+            self.assertIn(key, diagnostic)
+        self.assertIn("bookkeeping-successor", diagnostic)
+        self.assertIn("final-bundle", diagnostic)
+        return diagnostic
+
+    def test_absent_bookkeeping_evidence_path_names_the_flag(self) -> None:
+        """A path that does not exist used to surface as a bare OS error.
+
+        `Path(...).resolve(strict=True)` ran in `main()` under a blanket
+        `except (OSError, ReviewInputError)`, so the operator saw
+        `[Errno 2] No such file or directory: '<path>'` with no mention of the
+        flag that carried the path or of the receipt that was wanted. This
+        fails before the fix on the flag-name assertion.
+        """
+
+        root = self.make_repo()
+        self.write_config(root)
+        missing = root.parent / "not-written-yet.json"
+        self.assertFalse(missing.exists())
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-absent", "--bookkeeping-evidence", str(missing)
+        )
+
+        self.assertIn(str(missing), diagnostic)
+        self.assertIn("No such file or directory", diagnostic)
+        self.assertNotIn("Errno", diagnostic)
+
+    def test_non_json_bookkeeping_evidence_names_the_flag_and_shape(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        notes = root.parent / "notes.md"
+        notes.write_text("# not a receipt\n", encoding="utf-8")
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-not-json", "--bookkeeping-evidence", str(notes)
+        )
+
+        self.assertIn(str(notes), diagnostic)
+        self.assertIn("Expecting value", diagnostic)
+
+    def test_missing_bookkeeping_evidence_flag_states_the_shape(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+
+        diagnostic = self.assert_evidence_rejected(root, "evidence-omitted")
+
+        self.assertIn("requires --bookkeeping-evidence", diagnostic)
+
+    def test_finish_work_receipt_rejection_names_the_offending_fields(self) -> None:
+        """The confusion this task came from: the wrong artifact, by name.
+
+        A `final-bundle --mode completion` receipt is JSON, has
+        `"schemaVersion": 1`, and shares the word bookkeeping, so it is the
+        artifact an operator reaches for first. The rejection now names which
+        keys were missing and which were not recognized, rather than saying
+        only that some unspecified field was wrong.
+        """
+
+        root = self.make_repo()
+        self.write_config(root)
+        receipt = self.bookkeeping_evidence(
+            root,
+            "final-bundle.json",
+            {"schemaVersion": 1, "kind": "final-bundle", "status": "valid"},
+        )
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-wrong-artifact", "--bookkeeping-evidence", str(receipt)
+        )
+
+        self.assertIn("missing base, classification, contentDigest, head", diagnostic)
+        self.assertIn("unsupported kind, status", diagnostic)
+
+    def test_bookkeeping_evidence_schema_version_rejection_is_specific(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        target = self.bookkeeping_target(root)
+        evidence = self.bookkeeping_evidence(
+            root,
+            "bad-version.json",
+            {
+                "schemaVersion": 2,
+                "classification": "bookkeeping-successor",
+                "base": target["base"],
+                "head": target["head"],
+                "contentDigest": target["contentDigest"],
+            },
+        )
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-bad-version", "--bookkeeping-evidence", str(evidence)
+        )
+
+        self.assertIn("schemaVersion must be 1", diagnostic)
+
+    def test_bookkeeping_evidence_classification_rejection_is_specific(self) -> None:
+        root = self.make_repo()
+        self.write_config(root)
+        target = self.bookkeeping_target(root)
+        evidence = self.bookkeeping_evidence(
+            root,
+            "bad-classification.json",
+            {
+                "schemaVersion": 1,
+                "classification": "planning-successor",
+                "base": target["base"],
+                "head": target["head"],
+                "contentDigest": target["contentDigest"],
+            },
+        )
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-bad-class", "--bookkeeping-evidence", str(evidence)
+        )
+
+        self.assertIn("classification must be", diagnostic)
+
+    def test_target_mismatch_names_the_field_without_leaking_the_answer(self) -> None:
+        """Name which field disagreed; never hand over the value it wanted.
+
+        Reporting the target's own `head` and `contentDigest` would turn the
+        rejection into a template for hand-authoring a passing evidence file,
+        which is manufacturing the verification the classification exists to
+        require. Only the caller-supplied half is echoed back.
+        """
+
+        root = self.make_repo()
+        self.write_config(root)
+        target = self.bookkeeping_target(root)
+        forged = "0" * 40
+        evidence = self.bookkeeping_evidence(
+            root,
+            "mismatched.json",
+            {
+                "schemaVersion": 1,
+                "classification": "bookkeeping-successor",
+                "base": target["base"],
+                "head": forged,
+                "contentDigest": "sha256:not-the-digest",
+            },
+        )
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-mismatch", "--bookkeeping-evidence", str(evidence)
+        )
+
+        self.assertIn("does not match the exact target", diagnostic)
+        self.assertIn("head", diagnostic)
+        self.assertIn("contentDigest", diagnostic)
+        self.assertIn(forged, diagnostic)
+        self.assertNotIn(target["head"], diagnostic)
+        self.assertNotIn(target["contentDigest"], diagnostic)
+
+    def test_oversized_bookkeeping_evidence_is_attributed_to_the_flag(self) -> None:
+        """The size guard fires before the file is read, and still names it."""
+
+        root = self.make_repo()
+        self.write_config(root)
+        oversized = root.parent / "oversized-evidence.json"
+        oversized.write_bytes(b"{" + b" " * (65 * 1024))
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-oversized", "--bookkeeping-evidence", str(oversized)
+        )
+
+        self.assertIn("exceeds 65536 bytes", diagnostic)
+        self.assertIn(str(oversized), diagnostic)
+
+    def test_symlinked_bookkeeping_evidence_is_gated_on_content(self) -> None:
+        """A symlink is followed, and the descriptor check is the real gate.
+
+        `_read_json` refuses a symlink outright, but it never sees one here:
+        the flag is resolved with `Path(...).resolve(strict=True)`, which
+        follows the link before the reader runs. That is unchanged from before
+        this change, and it is sound because the path shape is not what
+        authorizes anything -- the descriptor has to equal the reviewed
+        target's `base`, `head`, and `contentDigest`, so pointing at a file
+        through a link buys the caller exactly nothing. Asserted rather than
+        assumed, since the two guards look like they contradict.
+        """
+
+        root = self.make_repo()
+        self.write_config(root)
+        real = self.bookkeeping_evidence(
+            root,
+            "linked-target.json",
+            {"schemaVersion": 1, "kind": "final-bundle", "status": "valid"},
+        )
+        link = root.parent / "evidence-link.json"
+        link.symlink_to(real)
+
+        diagnostic = self.assert_evidence_rejected(
+            root, "evidence-symlink", "--bookkeeping-evidence", str(link)
+        )
+
+        # The link was followed: this is the content rejection, not the
+        # regular-file one that a refused symlink would have produced.
+        self.assertIn("unsupported or missing fields", diagnostic)
+        self.assertNotIn("regular non-symlink file", diagnostic)
+
     def test_provider_timeout_does_not_become_clean(self) -> None:
         root = self.make_repo()
         self.write_config(root, modes=("clean", "slow"), timeout=1)
