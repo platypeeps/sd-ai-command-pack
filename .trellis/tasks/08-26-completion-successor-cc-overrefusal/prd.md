@@ -159,8 +159,9 @@ diagnostics from lying about why anything was refused.
   conflict is a separate question about version-bump mechanics; this task is
   about the receipt being obtainable when they do.
 - Both call sites must be fixed together —
-  `sd-ai-command-pack-review-preflight.mjs:1926` (active-task successor) and
-  `:2280` (post-archive successor) share `classifyFirstParentMerge` and duplicate
+  `templates/scripts/sd-ai-command-pack-review-preflight.mjs:1926` (active-task
+  successor) and `:2280` (post-archive successor) share `classifyFirstParentMerge`
+  and duplicate
   the reason-code branch. Fixing one is not a partial delivery, it is a
   divergence; #558's own changelog records that these two paths had already
   drifted apart once.
@@ -177,8 +178,9 @@ diagnostics from lying about why anything was refused.
 - [ ] A merge that git auto-merged without conflict is no longer described as a
       conflict anywhere: reason code, message, the canonical `sd-finish-work` SKILL.md, and
       `SD_AI_COMMAND_PACK.md` agree with what the code tests.
-- [ ] Both `classifyFirstParentMerge` call sites — review-preflight.mjs:1926 and
-      :2280 — take the change, with a test covering each.
+- [ ] Both `classifyFirstParentMerge` call sites —
+      `templates/scripts/sd-ai-command-pack-review-preflight.mjs:1926` and
+      `:2280` — take the change, with a test covering each.
 - [ ] The #560 regression is pinned: a branch carrying the version-bump file set
       (`CHANGELOG.md` plus the three manifests) updated onto a base that bumped
       the same files must end in a valid receipt.
