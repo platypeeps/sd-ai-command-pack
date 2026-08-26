@@ -2,7 +2,7 @@
 
 ## Origin
 
-Found 2026-08-25 shipping PR #551 at pack 0.71.52. The PR was green,
+Found on 2026-08-25 while shipping PR #551 at pack 0.71.52. The PR was green,
 comment-clean and `CLEAN`-mergeable, and still could not be merged through
 `sd-housekeeping`, because no valid finish-work receipt could be produced for
 it by any documented route.

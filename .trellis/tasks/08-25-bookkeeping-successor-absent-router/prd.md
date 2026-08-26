@@ -2,7 +2,7 @@
 
 ## Origin
 
-Found 2026-08-25 driving PR #551 through `sd-ship until=merge` at pack
+Found on 2026-08-25 while driving PR #551 through `sd-ship until=merge` at pack
 0.71.52. Stage 2b's successor-head re-entry could not reach `ready` through
 its own documented route.
 
