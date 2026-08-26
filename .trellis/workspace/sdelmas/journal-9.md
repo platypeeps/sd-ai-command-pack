@@ -1151,3 +1151,53 @@ Every rejection on the local review stage's --bookkeeping-evidence flag now name
 ### Next Steps
 
 - None - task complete
+
+
+## Session 427: Route canonical entry points from a managed AGENTS.md block
+<!-- trellis-session: v=2 fp=1ce7d539553ab2ca -->
+
+**Date**: 2026-08-26
+**Task**: Route canonical entry points from a managed AGENTS.md block
+**Branch**: `feat/agents-routing-managed-block`
+
+### Summary
+
+The installer now manages a marker-delimited routing block in a repository's own AGENTS.md, so an agent reading the file it already opens finds the pack's wrappers. The block routes by intent rather than naming installed skills, and the installer never creates the file: a repository without an AGENTS.md is skipped and the target stays out of the receipt. Managed-block definitions were consolidated into one MANAGED_BLOCK_SPECS table that fileops, thin, removal, and the thin re-sweep all read.
+
+### Main Changes
+
+- installer/registry.py gains MANAGED_BLOCK_SPECS, one table describing every managed-block target; fileops, thin, removal, and the thin re-sweep read it instead of carrying four hand-edited copies that can disagree.
+- The skip for an absent AGENTS.md is enforced at the top of selected_files, not at write time: installed_targets_content() is built from the selection, so a row PRESERVED at write time still lands in the receipt and then fails the structural audit from the other direction. The gate uses path_is_occupied(), so a dangling symlink stays a conflict rather than a silent skip.
+- The install audit needed the mirror-image fix: expected_targets_from_manifest expects every platform:shared row unconditionally, so OPTIONAL_INSTALL_TARGETS was added, mirroring the pre-existing .gitignore precedent.
+- Three classification sites hold the target as a plain string and match no marker: partition-surfaces.py TARGET_OVERRIDES, the install audit's two target sets, and review-learnings' GENERATED_SIGNAL_PATHS (compared lowercased, so the entry is agents.md). Enumerating the classification sites rather than the marker sites is recorded as the durable convention.
+- The consumer-side half had to land first: platypeeps/loadsmith#258 added the same exemption to that repository's own review-scope script, which asserts the inverse over the receipt. The fleet candidate gate is all-pass with no waiver, so a new exemption is a fleet change, not a local one.
+- ManagedBlockSpec.preserve_invalid_utf8 was renamed preserve_invalid_utf8_on_strip after a Copilot review finding: installs always round-trip undecodable bytes for every target, and only the removal and thin paths branch on the flag. The observation was right and the proposed fix was not - making installs strict would turn a working install into a UnicodeDecodeError for any consumer whose file carries stray bytes.
+- install.py re-exports the six new names the tests reach through the install.* facade; the unused managed_block_spec import was dropped rather than exported.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f4895e03` | feat(install): route canonical entry points from a managed AGENTS.md block |
+| `a081c3c2` | fix(review): address local review findings |
+| `189f20be` | fix(install): export the new re-exported names from install.py __all__ |
+| `35cb1de0` | docs(task): check the acceptance criteria with their evidence |
+
+### Testing
+
+- [OK] .github/scripts/run-tests.sh exits 0, 83 modules, 0 failures
+- [OK] scripts/sd-ai-command-pack-fleet-candidate-check.py: 12 passed, 0 failed; fresh all-pass ledger written
+- [OK] make generate: shipped-surface closure clean; 59 changed path(s), 1166 affected node(s)
+- [OK] .github/scripts/check-helper-resolution.py: 73 authored files clean
+- [OK] .github/scripts/partition-surfaces.py --check matches the committed tree
+- [OK] sd-review scope=pr: ready, exit 0, 0 outstanding findings
+- [OK] Review preflight: 0 failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
