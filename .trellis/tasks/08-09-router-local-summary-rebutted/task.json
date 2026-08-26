@@ -2,7 +2,7 @@
   "id": "router-local-summary-rebutted",
   "name": "router-local-summary-rebutted",
   "title": "Routed review dispatch omits localReview block for fully-rebutted findings receipts",
-  "description": "",
+  "description": "Carry a localReview summary with dispositionCounts on a routed request whose local stage ended findings with every finding rebutted, instead of omitting the block.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
