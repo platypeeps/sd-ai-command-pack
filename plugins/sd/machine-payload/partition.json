@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestVersion": "0.71.59",
+  "manifestVersion": "0.71.60",
   "platforms": {
     "antigravity": {
       "scope": "repo-native",
@@ -81,7 +81,7 @@
   "counts": {
     "machine-claude": 81,
     "machine-other": 90,
-    "repo-native": 561,
+    "repo-native": 562,
     "consumer-config": 7
   },
   "files": [
@@ -4342,6 +4342,12 @@
     {
       "target": ".zcode/commands/sd/work-backlog.md",
       "platform": "zcode",
+      "category": "repo-native",
+      "sharedRuntime": false
+    },
+    {
+      "target": "AGENTS.md",
+      "platform": "shared",
       "category": "repo-native",
       "sharedRuntime": false
     },

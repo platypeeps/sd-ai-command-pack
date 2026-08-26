@@ -43,6 +43,7 @@ BASELINE_ROWS: tuple[dict[str, str], ...] = (
         "kind": "script",
         "target": ".sd-ai-command-pack/bin/sd-ai-command-pack-base.py",
     },
+    {"platform": "shared", "kind": "managed-block", "target": "AGENTS.md"},
 )
 
 
@@ -151,6 +152,55 @@ class PartitionSurfacesTests(InstallTestCase):
                 "retainVendoredFor": ["pi"],
             },
         )
+
+    def test_managed_block_specs_agree_with_their_partition_categories(self) -> None:
+        # The two derived views in §3 -- installer.thin's BLOCK_MARKERS and the
+        # resweep's STRIPPED_BLOCK_LABEL -- filter on `strip_on_thin`, while the
+        # conversion planner decides the same question from the partition
+        # category. Nothing else makes the two agree, so a spec whose flag
+        # contradicts its category would strip a kept surface, or keep a
+        # stripped one, with every other test still green.
+        classify = importlib.import_module("installer.conversion").classify_target
+        partition = importlib.import_module("installer.conversion").load_partition(
+            PARTITION_ARTIFACT
+        )
+        platforms = frozenset(registry.PLATFORM_REGISTRY)
+
+        for target, spec in registry.MANAGED_BLOCK_SPECS.items():
+            with self.subTest(target=target):
+                bucket, reason = classify(target, partition, platforms)
+                self.assertIsNone(reason)
+                if bucket == "block_strip":
+                    # The planner named it; thin.py refuses a target its table
+                    # does not know, so the flag has to admit it.
+                    self.assertTrue(spec.strip_on_thin)
+                else:
+                    # A kept surface. `strip_on_thin` may still be True -- the
+                    # entry is then simply unreachable, which is harmless --
+                    # but False must never coexist with a stripped target.
+                    self.assertEqual(bucket, "keep")
+
+    def test_the_agents_override_matches_exactly_one_manifest_row(self) -> None:
+        manifest = json.loads((PACK_ROOT / "manifest.json").read_text(encoding="utf-8"))
+        rows = [row for row in manifest["files"] if row["target"] == "AGENTS.md"]
+
+        self.assertEqual(len(rows), 1)
+        # `shared` declares no activation markers, so an `if-anchor-exists` row
+        # -- the manifest default -- is never selected in a normal install and
+        # the block would reach no consumer.
+        self.assertEqual(rows[0]["install"], "always")
+        self.assertNotIn("anchor", rows[0])
+        self.assertEqual(rows[0]["kind"], registry.MANAGED_BLOCK_KIND)
+
+        committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
+        # Not a bare `next()`: a missing entry is exactly what this test exists
+        # to catch, and StopIteration inside a test reports as an error with an
+        # opaque traceback rather than as the failure it is.
+        entries = [e for e in committed["files"] if e["target"] == "AGENTS.md"]
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["category"], "repo-native")
+        self.assertFalse(entry["sharedRuntime"])
 
     def test_retain_vendored_for_is_absent_on_every_other_platform(self) -> None:
         committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))

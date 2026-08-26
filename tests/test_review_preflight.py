@@ -93,6 +93,7 @@ import assert from 'node:assert/strict';
 import {
   bookkeepingResultSubject,
   copiedTemplateKind,
+  isCopiedTemplatePath,
   countTrellisTaskContextRows,
   extractDocumentationPathReferences,
   findContradictoryJournalValidationFallbacks,
@@ -144,6 +145,12 @@ assert.equal(copiedTemplateKind('.agents/skills/sd-review-pr/SKILL.md'), 'sd-ai-
 assert.equal(copiedTemplateKind('.qoder/commands/sd-review-pr.md'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('scripts/sd-ai-command-pack-review-scope.sh'), 'sd-ai-command-pack');
 assert.equal(copiedTemplateKind('.sd-ai-command-pack/manifest.json'), 'sd-ai-command-pack');
+// AGENTS.md is an installed target, so the receipt lookup inside
+// isSdCommandPackCopiedPath would classify it. The exemption ahead of that
+// lookup is what keeps a repository's own agent instructions in review scope;
+// `null` here, not 'sd-ai-command-pack'.
+assert.equal(copiedTemplateKind('AGENTS.md'), null);
+assert.equal(isCopiedTemplatePath('AGENTS.md'), false);
 assert.equal(isSourceReviewPath('templates/scripts/sd-ai-command-pack-review-preflight.mjs'), true);
 assert.equal(isSourceReviewPath('scripts/sd-ai-command-pack-review-preflight.mjs'), false);
 assert.equal(isSourceReviewPath('docs/repomix-map.md'), false);

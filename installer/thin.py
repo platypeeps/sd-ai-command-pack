@@ -27,15 +27,11 @@ from installer.fileops import (
 from installer.manifest import read_text_strict
 from installer.references import THIN_PROFILE, restore_thin_text, rewrite_text
 from installer.registry import (
-    COPILOT_GUIDANCE_END,
-    COPILOT_GUIDANCE_START,
-    COPILOT_INSTRUCTIONS_TARGET,
     INSTALLED_TARGETS_FILE,
+    MANAGED_BLOCK_SPECS,
     PACK_MANIFEST_FILE,
     PACK_REPOSITORY,
     PROVENANCE_FILE,
-    TRELLIS_GITIGNORE_END,
-    TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
 )
 from installer.removal import remove_pack_file
@@ -809,26 +805,25 @@ def structural_audit_reasons(root: Path, target: Path) -> tuple[str, ...]:
     return tuple(failures)
 
 
-# Per managed-block target: the marker pair, the label diagnostics use, whether
-# the file may hold invalid UTF-8, and whether the block is *adopted* rather
-# than deleted. Only `.gitignore` is adopted: its rules describe the consumer's
-# own tree and outlive the payload, while the Copilot block describes the
-# payload itself.
+# Per managed-block target the conversion may strip: the marker pair, the label
+# diagnostics use, whether the file may hold invalid UTF-8, and whether the
+# block is *adopted* rather than deleted. Only `.gitignore` is adopted: its
+# rules describe the consumer's own tree and outlive the payload, while the
+# Copilot block describes the payload itself.
+#
+# Derived from the registry rather than restated, and filtered on
+# `strip_on_thin`: a target the conversion must not touch is absent here by
+# construction, not by remembering to leave it out.
 BLOCK_MARKERS = {
-    TRELLIS_GITIGNORE_TARGET.as_posix(): (
-        TRELLIS_GITIGNORE_START,
-        TRELLIS_GITIGNORE_END,
-        ".gitignore",
-        False,
-        True,
-    ),
-    COPILOT_INSTRUCTIONS_TARGET.as_posix(): (
-        COPILOT_GUIDANCE_START,
-        COPILOT_GUIDANCE_END,
-        ".github/copilot-instructions.md",
-        True,
-        False,
-    ),
+    block_target: (
+        spec.start,
+        spec.end,
+        spec.label,
+        spec.preserve_invalid_utf8_on_strip,
+        spec.adopt_on_thin,
+    )
+    for block_target, spec in MANAGED_BLOCK_SPECS.items()
+    if spec.strip_on_thin
 }
 
 

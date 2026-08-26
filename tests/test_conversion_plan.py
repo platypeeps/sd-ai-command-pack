@@ -74,6 +74,11 @@ def simple_partition(tmp: Path):
                     "category": "repo-native",
                 },
                 {
+                    "target": "AGENTS.md",
+                    "platform": "shared",
+                    "category": "repo-native",
+                },
+                {
                     "target": ".github/workflows/sd.yml",
                     "platform": "github",
                     "category": "repo-native",
@@ -143,6 +148,12 @@ class ClassifyTargetTests(InstallTestCase):
         self.assertEqual(
             self.classify(".github/copilot-instructions.md"), ("keep", None)
         )
+
+    def test_agents_routing_is_kept_with_its_block_intact(self) -> None:
+        # repo-native by TARGET_OVERRIDES, not by platform: `shared` disposes
+        # to machine-other, which would route this to `delete`. Forget the
+        # override and a conversion removes the consumer's own AGENTS.md.
+        self.assertEqual(self.classify("AGENTS.md"), ("keep", None))
 
     def test_managed_block_file_with_a_machine_category_blocks(self) -> None:
         partition = load_partition(

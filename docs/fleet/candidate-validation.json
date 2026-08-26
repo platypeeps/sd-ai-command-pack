@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-26T12:47:31Z",
-  "packVersion": "0.71.59",
-  "payloadDigest": "sha256:cb3993202ae1647e5eff631786d1c157134514676230d17c76f1a012bdba9c52",
+  "validatedAt": "2026-08-26T14:05:25Z",
+  "packVersion": "0.71.60",
+  "payloadDigest": "sha256:9be20fc27a305e8c3f4f29395ad03dc91b3049dc7343710e3de5a220b4a1b9dc",
   "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
@@ -92,7 +92,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "7c56bcab797aef53fe738db3fed6812974074864",
+      "baseCommit": "6fba0d86b34200e265ad7b631ee9e705f04f8f91",
       "status": "passed",
       "prepares": [
         [
@@ -129,7 +129,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "8f5a4099dcd1106c851cdceba26145b368accf6e",
+      "baseCommit": "9e1f17f999267bbcd643e1f73822b09206c248bd",
       "status": "passed",
       "prepares": [
         [

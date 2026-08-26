@@ -29,17 +29,12 @@ from installer.provenance import (
     read_existing_provenance_files_for_remove,
 )
 from installer.registry import (
-    COPILOT_GUIDANCE_END,
-    COPILOT_GUIDANCE_START,
-    COPILOT_INSTRUCTIONS_TARGET,
     INSTALLED_TARGETS_FILE,
     LOCAL_ONLY_MARKER_FILE,
+    MANAGED_BLOCK_SPECS,
     PACK_MANIFEST_FILE,
     PROVENANCE_FILE,
     ROOT,
-    TRELLIS_GITIGNORE_END,
-    TRELLIS_GITIGNORE_START,
-    TRELLIS_GITIGNORE_TARGET,
     retired_surface_targets,
 )
 from installer.status import WRITTEN_REMOVE_STATUSES, RemoveStatus
@@ -52,12 +47,9 @@ GENERATED_REMOVAL_TARGETS = frozenset(
         LOCAL_ONLY_MARKER_FILE.as_posix(),
     }
 )
-MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(
-    {
-        TRELLIS_GITIGNORE_TARGET.as_posix(),
-        COPILOT_INSTRUCTIONS_TARGET.as_posix(),
-    }
-)
+# Derived, so a managed-block row added to the registry is a recognized
+# removal target without a second edit here.
+MANAGED_BLOCK_REMOVAL_TARGETS = frozenset(MANAGED_BLOCK_SPECS)
 
 # Compatibility aliases derive from the canonical registry so install-time
 # retirement and source drift lint cannot disagree about old footprints. The
@@ -331,29 +323,22 @@ def remove_installed_pack(
         print("mode: dry-run")
 
     results: list[RemoveResult] = []
-    results.append(
-        remove_text_block_file(
-            target,
-            TRELLIS_GITIGNORE_TARGET,
-            start_marker=TRELLIS_GITIGNORE_START,
-            end_marker=TRELLIS_GITIGNORE_END,
-            label=".gitignore",
-            dry_run=dry_run,
-            backup=backup,
+    # Registry order, so the reported sequence is stable. `adopt` is
+    # deliberately not passed: adoption is a thin-conversion behaviour, and an
+    # ordinary uninstall removes every managed block including .gitignore's.
+    for block_target, spec in MANAGED_BLOCK_SPECS.items():
+        results.append(
+            remove_text_block_file(
+                target,
+                Path(block_target),
+                start_marker=spec.start,
+                end_marker=spec.end,
+                label=spec.label,
+                dry_run=dry_run,
+                backup=backup,
+                preserve_invalid_utf8=spec.preserve_invalid_utf8_on_strip,
+            )
         )
-    )
-    results.append(
-        remove_text_block_file(
-            target,
-            COPILOT_INSTRUCTIONS_TARGET,
-            start_marker=COPILOT_GUIDANCE_START,
-            end_marker=COPILOT_GUIDANCE_END,
-            label=".github/copilot-instructions.md",
-            dry_run=dry_run,
-            backup=backup,
-            preserve_invalid_utf8=True,
-        )
-    )
 
     block_targets = MANAGED_BLOCK_REMOVAL_TARGETS
     for candidate in sorted(

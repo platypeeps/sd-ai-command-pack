@@ -2327,9 +2327,73 @@ MANAGED_BLOCK_KIND = "managed-block"
 COPILOT_INSTRUCTIONS_TARGET = Path(".github/copilot-instructions.md")
 COPILOT_GUIDANCE_START = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->"
 COPILOT_GUIDANCE_END = "<!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->"
+AGENTS_ROUTING_TARGET = Path("AGENTS.md")
+AGENTS_ROUTING_START = "<!-- SD-AI-COMMAND-PACK:ROUTING:START -->"
+AGENTS_ROUTING_END = "<!-- SD-AI-COMMAND-PACK:ROUTING:END -->"
+
+
+# One row per managed-block target. `fileops`, `removal`, and `thin` all read
+# this table rather than hardcoding a target, so adding a block is a row here
+# instead of an edit in each consumer.
+@dataclass(frozen=True)
+class ManagedBlockSpec:
+    start: str
+    end: str
+    label: str
+    # Removal and thin conversion round-trip the destination's bytes through
+    # surrogateescape instead of failing on invalid UTF-8. Named for where it
+    # applies: `install_managed_block` always round-trips, for every target,
+    # so that merging a block into a consumer file the pack cannot fully
+    # decode succeeds rather than raising. Stripping is the asymmetric half --
+    # with this False, a file that does not decode cleanly is left untouched
+    # rather than rewritten, which is the safer default for a destructive
+    # edit and the wrong one for an additive merge.
+    preserve_invalid_utf8_on_strip: bool = False
+    # Thin conversion leaves the block in place and stops managing it, rather
+    # than stripping it. Only for blocks describing the consumer's own tree,
+    # which outlives the payload. Ordinary uninstall never adopts.
+    adopt_on_thin: bool = False
+    # The installer may create the destination when it is absent. False means
+    # the block rides along with a file the consumer already owns: no file,
+    # no block, and the manifest row is skipped rather than preserved.
+    create_if_absent: bool = True
+    # Thin conversion considers the block at all. False keeps the target out
+    # of the conversion's strip/adopt tables by construction.
+    strip_on_thin: bool = True
+
+
+MANAGED_BLOCK_SPECS: dict[str, ManagedBlockSpec] = {
+    TRELLIS_GITIGNORE_TARGET.as_posix(): ManagedBlockSpec(
+        start=TRELLIS_GITIGNORE_START,
+        end=TRELLIS_GITIGNORE_END,
+        label=TRELLIS_GITIGNORE_TARGET.as_posix(),
+        adopt_on_thin=True,
+    ),
+    COPILOT_INSTRUCTIONS_TARGET.as_posix(): ManagedBlockSpec(
+        start=COPILOT_GUIDANCE_START,
+        end=COPILOT_GUIDANCE_END,
+        label=COPILOT_INSTRUCTIONS_TARGET.as_posix(),
+        preserve_invalid_utf8_on_strip=True,
+    ),
+    AGENTS_ROUTING_TARGET.as_posix(): ManagedBlockSpec(
+        start=AGENTS_ROUTING_START,
+        end=AGENTS_ROUTING_END,
+        label=AGENTS_ROUTING_TARGET.as_posix(),
+        # AGENTS.md belongs to the consumer: the pack contributes a routing
+        # block to a file that already exists and creates nothing. The block
+        # is payload-describing, so thin conversion has nothing to adopt --
+        # and nothing to strip either, because a thin consumer still routes
+        # by intent to the machine install.
+        create_if_absent=False,
+        strip_on_thin=False,
+    ),
+}
 
 __all__ = [
     "ACTIVE_TRELLIS_PLATFORM_MARKERS",
+    "AGENTS_ROUTING_END",
+    "AGENTS_ROUTING_START",
+    "AGENTS_ROUTING_TARGET",
     "ALWAYS_INSTALL",
     "BESPOKE_ADAPTER_PLATFORMS",
     "COMMAND_FAMILIES",
@@ -2354,6 +2418,8 @@ __all__ = [
     "LOCAL_ONLY_TRACKED_CHECK_PATHS",
     "LOCAL_ONLY_TRELLIS_EXCLUDES",
     "MANAGED_BLOCK_KIND",
+    "MANAGED_BLOCK_SPECS",
+    "ManagedBlockSpec",
     "GENERATED_COMMAND_TARGET_FAMILIES",
     "INTERACTION_CATEGORIES",
     "INTERACTION_DECISIONS",

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.71.60 - 2026-08-26
+
+### Added
+
+- Canonical entry points are now routed from `AGENTS.md`. The installer manages
+  a marker-delimited block there that points an agent at the pack's wrappers by
+  intent -- ship, finish work, merge, review -- so an agent reading a
+  repository's own instructions file finds the wrappers without being told
+  about them. The block routes by intent rather than naming installed skills,
+  so a later release or a thin conversion cannot make it false.
+- `installer/registry.py` gains `MANAGED_BLOCK_SPECS`, one table describing
+  every managed-block target. `installer/fileops.py`, `installer/thin.py`,
+  `installer/removal.py`, and the thin re-sweep all read it instead of carrying
+  their own copies, so a new block target is one row rather than four
+  hand-edited call sites that can disagree. The field that governs invalid
+  UTF-8 is named `preserve_invalid_utf8_on_strip`, because it applies to the
+  removal and thin paths only: installing a block always round-trips bytes it
+  cannot decode, so that a consumer file the pack does not fully understand is
+  merged rather than refused.
+
+### Fixed
+
+- The installer never creates `AGENTS.md`. A repository without one is skipped
+  with a diagnostic and the target stays out of the receipt; the file is the
+  repository's, and a pack that conjures an agent-instructions file into a repo
+  that declined to have one is writing policy, not payload. The skip is
+  enforced in `selected_files` rather than at write time, because a row
+  preserved at write time still lands in the receipt and then fails the
+  structural audit from the other direction.
+
 ## 0.71.59 - 2026-08-26
 
 ### Changed
@@ -25,6 +55,7 @@
   with a ceiling cannot answer from a receipt cached before the record existed.
   A repository with no ceiling configured is unaffected -- no finding key, no
   plan key, and a byte-identical receipt.
+
 ## 0.71.58 - 2026-08-26
 
 ### Fixed
@@ -58,6 +89,7 @@
   both values. It previously said "does not match the current branch and exact
   head" for either, which is how a receipt generated on a temporary rebase
   branch came to be reported alongside `matchesCurrentHead: true`.
+
 ## 0.71.57 - 2026-08-26
 
 ### Fixed
@@ -91,6 +123,7 @@
   it is reachable only through an argv-adapter provider that reports
   `status: "skipped"`; the bundled `prism` and `gito` adapters emit only
   `clean` and `findings`.
+
 ## 0.71.56 - 2026-08-26
 
 ### Fixed
