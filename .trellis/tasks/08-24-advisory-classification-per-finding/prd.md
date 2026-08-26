@@ -4,7 +4,7 @@
 
 `_disposition_counts` decides, per finding, whether the severity ceiling
 releases it as advisory — and then throws that decision away, returning only
-three integers:
+counts (four of them since the accepted-disposition ground shipped):
 
 ```python
         elif disposition == "outstanding":
@@ -12,7 +12,7 @@ three integers:
                 advisory += 1
             else:
                 blocking += 1
-    return blocking, advisory, dispositioned
+    return blocking, advisory, dispositioned, accepted
 ```
 
 `receipt.findings[]` still carries `disposition: "outstanding"` for both kinds.
@@ -75,5 +75,5 @@ per-finding record is likely useful to it.
 
 ## Notes
 
-- `design.md` and `implement.md` are not written yet. This task is filed, not
-  planned.
+- Planned on 2026-08-26: `design.md` and `implement.md` are written, and the
+  host adversarial review ran against all three.
