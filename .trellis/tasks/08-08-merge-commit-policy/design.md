@@ -153,16 +153,45 @@ that code's message already does.
 be read and for the >2-parent (octopus) case, which no prescribed procedure
 produces. A `--cc` invocation that fails is `indeterminate`, never a pass.
 
-### Open mechanism question, owned by implement.md
+### Settled by measurement (2026-08-26)
 
-`--cc --name-only` yields bare paths — no status and no destination mode, so it
-cannot by itself drive the `D`/`R`/`C` checks or the executable/symlink/gitlink
-rejections that `bookkeepingChangedEntries` supplies. Under the *refusal*
-design that did not matter, because nothing proceeded. Under this design it
-does. Whether `git diff-tree --cc --raw` carries usable modes for a combined
-diff, or a per-parent diff pair is needed instead, must be settled with a
-measurement before implementation — not assumed, which is how this document
-went wrong the first time.
+`--cc --name-only` yields bare paths, so it cannot drive the `D`/`R`/`C` checks
+or the executable/symlink/gitlink rejections. `--cc --raw` can. Measured in a
+scratch repository rather than assumed:
+
+```
+$ git diff-tree --cc -r --raw --no-commit-id HEAD
+::100644 100644 100644 4040089d b9f14aa7 08c213db MM	f.txt
+```
+
+The combined raw record is `::<mode-p1> <mode-p2> <mode-result> <sha-p1>
+<sha-p2> <sha-result> <status-per-parent>	path`. The destination mode is
+present, so a gitlink (`160000`) or symlink (`120000`) introduced *by the
+merge itself* is detectable.
+
+The same probe confirmed the two things this design now rests on:
+
+- the merge was a clean auto-merge — `git merge` exited 0, no conflict, no
+  human involvement — and `--cc` still reported the path. That is #563's
+  finding, reproduced independently here;
+- a mode change and a symlink that arrived from the base side did **not**
+  appear under `--cc`, because each matches one parent exactly. Content the
+  base already carries is correctly invisible to this check, which is the
+  premise the whole relaxation depends on.
+
+**The trap this creates, which implement.md must carry.** The combined format
+is not the two-endpoint format. `bookkeepingChangedEntries` parses
+
+```
+/^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z]\d*)$/
+```
+
+— one leading colon, two modes, two blobs, one status. Combined records have
+two colons, three modes, three blobs, and one status character per parent.
+Feeding combined output to that regex produces `bundle_diff_malformed`, which
+fails closed rather than silently passing, but it means the merge path needs
+its own parser. That parser is the place a mode check could go missing, so it
+is called out here as a named risk rather than left to be discovered.
 
 ## Dependency
 
