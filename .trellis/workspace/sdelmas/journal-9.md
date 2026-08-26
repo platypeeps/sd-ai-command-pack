@@ -1325,3 +1325,44 @@ The retirement program's blocking relationships lived only in PRD prose, so rank
 ### Next Steps
 
 - None - task complete
+
+
+## Session 433: Plan the completion-successor cc over-refusal fix
+<!-- trellis-session: v=2 fp=960f224b1d186774 -->
+
+**Date**: 2026-08-26
+**Task**: Plan the completion-successor cc over-refusal fix
+**Branch**: `docs/plan-completion-successor-cc-overrefusal`
+
+### Summary
+
+Wrote design.md and implement.md for 08-26-completion-successor-cc-overrefusal. Adversarial review found that the PRD's proposed classifier would reopen the smuggling hole #558 closed, which changed the design.
+
+### Main Changes
+
+- Established that classifyFirstParentMerge's two call sites apply different allowlists, so the PRD's 'same per-commit category rules' names a rule set that does not exist; the design scope-checks against each site's own allowlist and widens neither.
+- Measured that git merge-tree --write-tree exit 0 does not prove the recorded merge is clean: a clean auto-merge that the committer hand-edited still exits 0, so classifying on the exit code alone would walk the hand edit through unchecked. The verdict is now the exit/tree pair.
+- Recorded the undeclared Git 2.38+ dependency on merge-tree --write-tree and routed every unproven case to the scope check rather than failing closed to non-linear.
+- Applied two Copilot findings: fields carries no tree OID, and the retirement grep is bounded to shipped surface rather than treating archived task docs as debt.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `60721c99` | docs(task): plan the cc over-refusal fix, closing a hole the obvious fix opens |
+| `a8952099` | docs(task): fetch the tree explicitly, and bound the retirement grep |
+
+### Testing
+
+- [OK] task.py validate 08-26-completion-successor-cc-overrefusal: all validations passed
+- [OK] Smuggling case reproduced in a scratch repository: merge-tree exit 0, computed tree != recorded tree, --cc reports the hand edit
+- [OK] All 16 line citations re-resolved against main at 399b4e38
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
