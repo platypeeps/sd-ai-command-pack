@@ -2032,6 +2032,126 @@ class BookkeepingValidatorTests(InstallTestCase):
         )
         self.assertNotEqual(bookkeeping_head, head)
 
+    # A base update is a merge, and every merge in the successor range used to
+    # be refused. These fixtures build real merges, because the parent
+    # structure is precisely what the validator reads; a synthesized linear
+    # range would test nothing.
+
+    def make_base_update_repo(
+        self, *, conflicted: bool = False, merge_on_base: bool = False
+    ) -> tuple[Path, str]:
+        """Archive commit, base moves, branch merges the base in. No rewrite."""
+
+        root, _archive_dir, bookkeeping_head = self.make_post_archive_successor_repo()
+        self.run_git(root, "switch", "-c", "feature")
+        (root / "feature.txt").write_text("branch work\n", encoding="utf-8")
+        self.run_git(root, "add", "feature.txt")
+        self.run_git(root, "commit", "-m", "successor work")
+
+        self.run_git(root, "switch", "main")
+        # Someone else's archived task, arriving from the base. The branch
+        # never touched it, and it is the path the PRD saw reported as
+        # completion_successor_scope_invalid.
+        other = root / ".trellis/tasks/archive/2026-07/07-25-someone-else"
+        other.mkdir(parents=True)
+        (other / "prd.md").write_text("# Not ours\n", encoding="utf-8")
+        if conflicted:
+            (root / "feature.txt").write_text("base work\n", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "base moves")
+
+        if merge_on_base:
+            # Condition 3: the merge is made while sitting on the base, so the
+            # branch's work is already on the base. Not a base update.
+            self.run_git(root, "merge", "--no-ff", "feature", "-m", "merge feature")
+            return root, self.git_output(root, "rev-parse", "HEAD")
+
+        self.run_git(root, "switch", "feature")
+        if conflicted:
+            # Expected to conflict; _run_git_process does not assert success.
+            self._run_git_process(root, "merge", "--no-ff", "main")
+            (root / "feature.txt").write_text("resolved\n", encoding="utf-8")
+            self.run_git(root, "add", "feature.txt")
+            self.run_git(root, "commit", "-m", "merge main (resolved)")
+        else:
+            self.run_git(root, "merge", "--no-ff", "main", "-m", "merge main")
+        return root, self.git_output(root, "rev-parse", "HEAD")
+
+    def run_completion_bundle(self, root: Path, head: str, **kwargs):
+        return self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            **kwargs,
+        )
+
+    BASE_ENV = {"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": "main"}
+
+    def test_completion_successor_accepts_a_clean_base_update(self) -> None:
+        # The deadlock itself. No force push anywhere in the fixture.
+        root, head = self.make_base_update_repo()
+        result = self.run_completion_bundle(root, head, extra_env=self.BASE_ENV)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(
+            json.loads(result.stdout)["reasonCodes"], ["completion_bundle_valid"]
+        )
+
+    def test_a_base_update_contributes_no_paths_to_the_successor_scope(self) -> None:
+        root, head = self.make_base_update_repo()
+        result = self.run_completion_bundle(root, head, extra_env=self.BASE_ENV)
+        payload = json.loads(result.stdout)
+        # Asserted directly, not inferred from the bundle being valid: the
+        # base's path must be absent from the recorded delta, not merely
+        # forgiven within it.
+        self.assertNotIn(
+            "completion_successor_scope_invalid", payload["reasonCodes"], payload
+        )
+        recorded = json.dumps(payload["evidence"])
+        self.assertNotIn("someone-else", recorded, payload)
+
+    def test_completion_successor_rejects_a_conflicted_base_update(self) -> None:
+        # A conflict resolution is the branch's own content, and it is the one
+        # place the relaxation could otherwise smuggle an edit past the scope
+        # rule. It gets its own reason code, not the feature-merge one.
+        root, head = self.make_base_update_repo(conflicted=True)
+        result = self.run_completion_bundle(root, head, extra_env=self.BASE_ENV)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_base_update_conflicted",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_a_merge_already_on_the_base_branch_is_still_non_linear(self) -> None:
+        # Condition 3, with the environment set so conditions 1 and 2 both
+        # hold and only this one refuses. Without this test the relaxation
+        # would quietly swallow test_completion_successor_rejects_merge_commit.
+        root, head = self.make_base_update_repo(merge_on_base=True)
+        result = self.run_completion_bundle(root, head, extra_env=self.BASE_ENV)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_history_non_linear",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_an_unresolvable_base_tip_keeps_rejecting_the_merge(self) -> None:
+        # No origin, no environment variable: the validator cannot prove this
+        # was a base update, so it keeps the pre-change verdict rather than
+        # softening it.
+        root, head = self.make_base_update_repo()
+        result = self.run_completion_bundle(
+            root, head, extra_env={"SD_AI_COMMAND_PACK_DEFAULT_BRANCH": ""}
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "completion_successor_history_non_linear",
+            json.loads(result.stdout)["reasonCodes"],
+        )
+
     def test_completion_successor_requires_a_canonical_anchor(self) -> None:
         # A one-commit repo with no task and no archive ever created:
         # shapedTailCount is structurally always 0 here (definitively, no Git
@@ -2461,6 +2581,70 @@ class BookkeepingValidatorTests(InstallTestCase):
         self.assertIn(
             "completion_successor_scope_invalid",
             json.loads(result.stdout)["reasonCodes"],
+        )
+
+    def test_active_task_successor_accepts_a_clean_base_update(self) -> None:
+        # The same relaxation in evaluateActiveTaskSuccessorRange. Fixing one
+        # variant and leaving the other is how the two diverged before.
+        root = self.make_validator_repo()
+        name = "active-task-base-update"
+        task_dir = f".trellis/tasks/07-25-{name}"
+        task = self.write_task(
+            root,
+            task_dir,
+            self.task_record(
+                name,
+                status="in_progress",
+                branch="codex/active-task-base-update",
+                completed_at=None,
+            ),
+        )
+        self.run_git(root, "add", ".trellis/tasks")
+        self.run_git(root, "commit", "-m", "fixture work")
+        fixture_work = self.git_output(root, "rev-parse", "HEAD")
+
+        (task / "prd.md").write_text("# Fixture\n\n- [x] Touch.\n", encoding="utf-8")
+        self.run_git(root, "add", task_dir)
+        self.run_git(root, "commit", "-m", "record bookkeeping touch")
+
+        self.run_git(root, "switch", "-c", "feature")
+        (root / "feature.txt").write_text("branch work\n", encoding="utf-8")
+        self.run_git(root, "add", "feature.txt")
+        self.run_git(root, "commit", "-m", "successor work")
+
+        self.run_git(root, "switch", "main")
+        other = root / ".trellis/tasks/archive/2026-07/07-25-someone-else"
+        other.mkdir(parents=True)
+        (other / "prd.md").write_text("# Not ours\n", encoding="utf-8")
+        self.run_git(root, "add", "-A")
+        self.run_git(root, "commit", "-m", "base moves")
+
+        self.run_git(root, "switch", "feature")
+        self.run_git(root, "merge", "--no-ff", "main", "-m", "merge main")
+
+        self.write_session(root, fixture_work)
+        self.run_git(root, "add", ".trellis/workspace")
+        self.run_git(root, "commit", "-m", "record fixture journal")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_validator(
+            root,
+            "final-bundle",
+            "--mode",
+            "completion",
+            "--base",
+            head,
+            "--head",
+            head,
+            extra_env=self.BASE_ENV,
+        )
+
+        payload = json.loads(result.stdout)
+        self.assertNotIn(
+            "completion_successor_history_non_linear", payload["reasonCodes"], payload
+        )
+        self.assertNotIn(
+            "completion_successor_scope_invalid", payload["reasonCodes"], payload
         )
 
     def test_active_task_successor_rejects_archive_touch_in_range(self) -> None:

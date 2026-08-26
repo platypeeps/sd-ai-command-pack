@@ -1438,7 +1438,10 @@ class HousekeepingTests(InstallTestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("finish-work receipt does not match", result.stdout)
+        # The message names which half mismatched. This fixture's receipt
+        # carries the wrong head, so the branch must not be blamed for it.
+        self.assertIn("finish-work receipt records head", result.stdout)
+        self.assertNotIn("but the current branch is", result.stdout)
         self.assertIn("rerun sd-finish-work", result.stdout)
         self.assertFalse(marker.exists())
 

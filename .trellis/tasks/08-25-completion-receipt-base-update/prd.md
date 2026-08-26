@@ -88,6 +88,50 @@ completion receipt that does not require rewriting published history.
   say so explicitly in `sd-ship` rather than leaving the caller to discover
   that no receipt exists.
 
+## Direction, settled
+
+Settled 2026-08-26. Directions 1 and 2 together; direction 3 rejected.
+
+Direction 3 -- accept the deadlock and document a sanctioned rebase -- fails
+on who is standing in it. The loop is only reachable by a caller who may not
+force-push; for anyone who may, there was never a deadlock. Documenting a step
+those callers cannot take is not a route, it is a nicer error message.
+
+Directions 1 and 2 turn out to be one change, not two. The successor range is
+already walked `--first-parent`, so the base's commits are excluded from the
+commit list; what remains is that the merge commit itself is on that chain and
+is rejected for having two parents, and that the scope check reads a
+two-endpoint `git diff anchor head`, which reports everything the base brought
+in. Fixing the parent test without fixing the diff leaves the receipt failing
+on other people's task paths; fixing the diff without the parent test never
+gets that far.
+
+Measured in a scratch repository rather than argued. For a branch that touched
+only `branchfile.txt` and then merged a moved base:
+
+```
+:100644 100644 587be6b b77b4eb M	branchfile.txt
+:000000 100644 0000000 e45c9c2 A	trellis-tasks/someone-else.md
+```
+
+`git diff-tree --cc -r <merge>` is empty for that clean base update and
+non-empty when both sides edited one file, so "this base update contributed
+nothing" is something git will state rather than something the validator has
+to assume. A conflicted base update is refused under its own reason code: a
+conflict resolution is the branch's own content, and it is the one place this
+relaxation could otherwise smuggle a task-path edit past the scope rule.
+
+The classification is deliberately three-sided rather than the obvious
+one-sided test. "Second parent is an ancestor of the base tip" is also
+trivially true for a merge made while sitting on the base branch -- the shape
+of the existing `test_completion_successor_rejects_merge_commit` -- so the
+merge must additionally **not** be an ancestor of the base tip itself, and the
+base tip must resolve at all. A merge is relaxed only when it is positively
+proven to be a base update, never when the validator merely cannot prove
+otherwise.
+
+See `design.md` for the mechanism and `implement.md` for the order.
+
 ## Acceptance criteria
 
 - [ ] A completion receipt validates for a branch that was updated onto a
