@@ -59,14 +59,13 @@ What remains is the condition that actually carries the weight:
    the merge differs from *every* parent. That is the merge's own content.
 
 A merge with no combined-diff paths contributed nothing and is cited
-legitimately. A merge with combined-diff paths resolved a conflict, and the
-resolution is content that was never reviewed as part of any branch — it stays
-refused, under its own reason code rather than the generic one.
+legitimately.
 
-### Ordering, which carries a check that is easy to lose
+A merge **with** combined-diff paths is where an earlier draft of this
+document was wrong, and the correction changes the mechanism rather than
+softening a sentence. See "Premise correction" below.
 
-The `--cc` test must run **before** `bookkeepingChangedEntries`, and must
-refuse rather than fall through. This is not a stylistic preference.
+### What `--cc` alone cannot tell you
 
 `bookkeepingChangedEntries` parses `git diff --raw -z --find-renames` and
 returns entries carrying a status (`D`/`R`/`C` detection for task artifacts)
@@ -75,22 +74,12 @@ executable, symlink, and gitlink/submodule entries, which a name list cannot
 distinguish. `git diff-tree --cc --name-only` returns bare paths and none of
 that.
 
-So a design that *sourced the merge's entries from* `--cc` would silently drop
-delete/rename/copy detection and every mode-based rejection — a merge could
-carry in a symlink or a submodule pointer and no check downstream would see the
-mode to refuse it.
-
-The ordering removes the problem instead of shimming around it:
-
-- non-empty `--cc` → refuse as `planning_recovery_commit_merge_conflicted`, and
-  never reach the entries code;
-- empty `--cc` → the merge contributes nothing, so `commitEntries` and
-  `commitPaths` are both empty, and every downstream per-entry and per-path
-  loop is a no-op over an empty list.
-
-Nothing is skipped, because in the only case that proceeds there is nothing to
-check. No `--cc`-to-entry adapter is written, and none should be: an adapter
-would be the place the mode check goes missing.
+Under the refusal design this document originally carried, that gap was
+harmless: nothing proceeded past a non-empty `--cc`, so there were no entries
+to check. Under the revised mechanism the merge's paths *are* checked, so the
+gap is live and is the open question recorded below. It is called out here
+rather than left implicit because an adapter that quietly maps `--cc` names
+into entry shapes is exactly where the mode rejection would go missing.
 
 ### The second change, which is not optional
 
@@ -107,18 +96,81 @@ paths — the same set condition 2 computes. So the two changes are one change:
 compute the merge's paths with `--cc`, and the empty case falls out as
 "contributes nothing" without a special branch.
 
-## Reason codes
+## Premise correction (2026-08-26)
 
-- Keep `planning_recovery_commit_non_linear` for a merge whose parents cannot
-  be read, and for the >2-parent (octopus) case, which no prescribed procedure
-  produces.
-- Add `planning_recovery_commit_merge_conflicted` for a two-parent merge with
-  non-empty combined diff. Requirement 2 — "the losing side's diagnostic must
-  name the remedy" — is met here: the message names the conflicted paths and
-  says the resolution must be carried by a reviewed commit.
-- A `--cc` invocation that fails is `indeterminate`, never a pass. #558's
-  comment is the precedent: a merge is relaxed only when positively proven
-  clean, never when the check merely cannot prove otherwise.
+`git diff-tree --cc` does not report conflicts. It reports paths whose merged
+content differs from **every** parent, which is true of a conflict resolution
+*and* of a file both sides merely touched that git auto-merged with no human
+involvement. Measured, not argued, in
+`08-26-completion-successor-cc-overrefusal` (PR #563): a clean auto-merge
+exits 0 and still prints the path under `--cc`.
+
+Two things follow, and both bear on this task.
+
+**The earlier mechanism here was wrong.** Treating non-empty `--cc` as "the
+merge resolved a conflict" would have shipped that false premise into a second
+call site, under a reason code whose name asserts it. Naming a check after
+something it does not measure is how the completion-successor rule's four
+artifacts came to disagree with what it tests.
+
+**The empty case is not the common case.** In this repository a version-bearing
+PR must bump `manifest.json`, add the top `CHANGELOG.md` heading, and
+regenerate the fleet ledgers, so any two such PRs write the same positions by
+construction and the second one's base update always produces non-empty `--cc`.
+A design whose only accepting branch is "`--cc` is empty" would therefore
+refuse the merge-main-first-then-record procedure in exactly the cases the
+procedure is used — leaving 08-08's deadlock in place while appearing to fix
+it.
+
+## Revised mechanism: check the merge's content, do not refuse it
+
+The objection to a merge's own content is that nothing vouches for it. The
+answer to unvouched content is to **check** it against the rules this loop
+already applies, not to refuse the commit outright — the same reasoning as
+Direction B of `08-26-completion-successor-cc-overrefusal`.
+
+So the merge's `--cc` paths become *input to the existing per-path category
+rules*, not a refusal trigger:
+
+- empty `--cc` — the merge contributes nothing; nothing to check;
+- non-empty `--cc` — those paths are the merge's own content, and they pass or
+  fail on the same rules any cited commit's paths face: `.trellis/tasks/**`,
+  `.trellis/workspace/**`, the task archive, and finalization evidence are
+  refused; code, docs, specs, and generated payloads are ordinary work.
+
+This keeps the property #558 set out to protect — a merge cannot smuggle a task
+or workspace edit past the scope rule — while removing the refusal for the
+version-stamped file set that provoked the task.
+
+### Reason codes
+
+No new reason code. The merge's out-of-scope paths fail under the existing
+`planning_recovery_commit_scope_invalid`, which is already the accurate name
+for what happened. Requirement 2 is met by naming the offending path, which
+that code's message already does.
+
+`planning_recovery_commit_non_linear` survives for a merge whose parents cannot
+be read and for the >2-parent (octopus) case, which no prescribed procedure
+produces. A `--cc` invocation that fails is `indeterminate`, never a pass.
+
+### Open mechanism question, owned by implement.md
+
+`--cc --name-only` yields bare paths — no status and no destination mode, so it
+cannot by itself drive the `D`/`R`/`C` checks or the executable/symlink/gitlink
+rejections that `bookkeepingChangedEntries` supplies. Under the *refusal*
+design that did not matter, because nothing proceeded. Under this design it
+does. Whether `git diff-tree --cc --raw` carries usable modes for a combined
+diff, or a per-parent diff pair is needed instead, must be settled with a
+measurement before implementation — not assumed, which is how this document
+went wrong the first time.
+
+## Dependency
+
+This task should land after, or alongside,
+`08-26-completion-successor-cc-overrefusal`. That task is correcting the same
+premise in the completion-successor rule and owns the `merge-tree` accuracy
+work; duplicating either here would re-create the divergence the PRD's Out of
+Scope section warns about for the two `classifyFirstParentMerge` call sites.
 
 ## D3
 
@@ -152,6 +204,10 @@ it is claimed that none outlives the run that produced it.
 
 `tests/test_bookkeeping_validator.py` already holds the sibling coverage from
 #558 (`make_base_update_repo` and the `base_update` cases). The PR #350
-regression belongs beside it, building a repo whose journal cites a clean
-merge, plus a conflicted-merge counterpart that must still refuse. Exact
-cases and commands are `implement.md`'s to specify, not this document's.
+regression belongs beside it, building a repo whose journal cites a merge that
+carries version-stamped content — the shape that actually occurs — and a
+counterpart whose merge content touches `.trellis/tasks/**`, which must still
+fail under `planning_recovery_commit_scope_invalid`. A clean auto-merge that
+`--cc` still reports belongs in the set too, since that is the case the old
+premise got wrong. Exact cases and commands are `implement.md`'s to specify,
+not this document's.
