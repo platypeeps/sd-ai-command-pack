@@ -1281,10 +1281,237 @@ class ReviewControllerTests(InstallTestCase):
             scope="pr",
             local_status="skipped",
             capability=absent,
+            local_receipt_extra=self.declined_receipt(),
         )
         self.assertEqual(code, 3)
         self.assertEqual(report["status"], "indeterminate")
-        self.assertIn("clean local review", report["diagnostic"] or "")
+        self.assertIn("asked no local provider", report["diagnostic"] or "")
+
+    # ``outcome: "skipped"`` is reached two ways -- no provider was selected,
+    # and every selected provider reported ``skipped`` in its own payload --
+    # so these helpers build the two shapes explicitly rather than letting a
+    # test's intent rest on which one ``local_report`` happens to default to.
+
+    @staticmethod
+    def zero_selected_receipt(
+        policy_id: str = "bookkeeping-successor",
+    ) -> dict[str, object]:
+        return {
+            "plan": {
+                "configurationDigest": "2" * 64,
+                "policyId": policy_id,
+                "providers": [],
+            },
+            "attempts": [],
+        }
+
+    @staticmethod
+    def declined_receipt() -> dict[str, object]:
+        return {
+            "plan": {
+                "configurationDigest": "2" * 64,
+                "policyId": "substantive-cheapest",
+                "providers": [{"id": "argv"}],
+            },
+            "attempts": [
+                {
+                    "provider": {
+                        "id": "argv",
+                        "costTier": "low",
+                        "qualityTier": "standard",
+                    },
+                    "status": "skipped",
+                    "durationMs": 5,
+                }
+            ],
+        }
+
+    def test_absent_router_accepts_a_pr_whose_plan_asked_no_provider(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        absent = {"state": "absent", "reason": "setup-descriptor-absent"}
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            local_status="skipped",
+            capability=absent,
+            local_receipt_extra=self.zero_selected_receipt(),
+        )
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        # The outcome alone is not the assertion. A run that reaches ``ready``
+        # with neither a routed review nor a local one has to say so on its
+        # face, and name the policy that chose to ask nothing.
+        self.assertEqual(
+            sorted(report["limitations"]),
+            [
+                "local-skipped:bookkeeping-successor",
+                "router-not-configured",
+                "zero-remote-confidence",
+            ],
+        )
+
+    def test_absent_router_still_refuses_a_pr_whose_providers_declined(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        absent = {"state": "absent", "reason": "setup-descriptor-absent"}
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            local_status="skipped",
+            capability=absent,
+            local_receipt_extra=self.declined_receipt(),
+        )
+        # Providers were asked and declined. That is an unexplained absence of
+        # evidence, not a deliberate skip, and accepting it is the hole that
+        # "just accept skipped alongside clean" would have opened.
+        self.assertEqual((code, report["status"]), (3, "indeterminate"))
+        self.assertIn("local-skipped", report["limitations"])
+
+    def test_the_skip_limitation_names_the_policy_verbatim(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        absent = {"state": "absent", "reason": "setup-descriptor-absent"}
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            local_status="skipped",
+            capability=absent,
+            local_receipt_extra=self.zero_selected_receipt("trivial-skip"),
+        )
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        # ``_router_local_summary``'s ``skipReason`` mapping knows only
+        # ``bookkeeping-successor`` and ``explicit-none`` and would relabel this
+        # as ``not-requested``. The limitation reports the policy itself.
+        self.assertIn("local-skipped:trivial-skip", report["limitations"])
+        self.assertNotIn("local-skipped:not-requested", report["limitations"])
+
+    def test_pr_and_non_pr_branches_accept_the_same_local_silence(self) -> None:
+        controller = self.load_controller()
+        absent = {"state": "absent", "reason": "setup-descriptor-absent"}
+        malformed = {
+            "plan": {
+                "configurationDigest": "2" * 64,
+                "policyId": "substantive-cheapest",
+                "providers": "not-a-list",
+            },
+            "attempts": [],
+        }
+        cases = (
+            ("clean", "clean", None),
+            ("zero-selected", "skipped", self.zero_selected_receipt()),
+            ("declined", "skipped", self.declined_receipt()),
+            ("malformed-plan", "skipped", malformed),
+        )
+        for label, status, extra in cases:
+            with self.subTest(case=label):
+                # A fresh repository per run. The controller persists attempt
+                # state under the artifact root and resumes from it, so a
+                # second run against the same repository answers from the
+                # first run's stored decision instead of re-deciding.
+                (pr_code, _pr_report), _d = self.run_with_mocks(
+                    controller,
+                    self.make_repo(),
+                    scope="pr",
+                    local_status=status,
+                    capability=absent,
+                    local_receipt_extra=extra,
+                )
+                (branch_code, _branch_report), _d = self.run_with_mocks(
+                    controller,
+                    self.make_repo(),
+                    scope="branch",
+                    local_status=status,
+                    local_receipt_extra=extra,
+                )
+                # Compare the two branches against each other, not against a
+                # table restated twice -- a table drifts with the code, the
+                # comparison cannot.
+                self.assertEqual(
+                    pr_code == 0,
+                    branch_code == 0,
+                    f"{label}: pr={pr_code} branch={branch_code}",
+                )
+
+    def test_non_pr_no_longer_accepts_a_declined_provider_run(self) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        # Asserted on purpose. This is a tightening, not a bug fix: a non-PR
+        # review whose providers all declined used to reach ``ready``. Pinned
+        # here so a later reader cannot mistake it for a regression.
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="branch",
+            local_status="skipped",
+            local_receipt_extra=self.declined_receipt(),
+        )
+        self.assertEqual((code, report["status"]), (3, "failed"))
+        self.assertIn("local-skipped", report["limitations"])
+
+    def test_bookkeeping_reentry_reaches_ready_on_a_pr_under_an_absent_router(
+        self,
+    ) -> None:
+        controller = self.load_controller()
+        root = self.make_repo()
+        evidence = root / "bookkeeping-evidence.json"
+        evidence.write_text("{}", encoding="utf-8")
+        pr = self.pr(controller, root)
+        local = self.local_report(controller, pr, status="skipped")
+        local["receipt"].update(self.zero_selected_receipt())
+
+        def reentry_args(*extra: str) -> object:
+            return controller.parse_args(
+                [
+                    "--repo",
+                    str(root),
+                    "--scope",
+                    "pr",
+                    "--pr-number",
+                    "42",
+                    "--remote",
+                    "auto",
+                    "--attempt",
+                    "6",
+                    "--successor",
+                    "bookkeeping",
+                    "--artifact-root",
+                    str(self.artifact_root(root)),
+                    "--json",
+                    *extra,
+                ]
+            )
+
+        with mock.patch.object(
+            controller,
+            "_run_check",
+            return_value={"schemaVersion": 1, "status": "passed"},
+        ), mock.patch.object(
+            controller, "_run_local", return_value=local
+        ), mock.patch.object(
+            controller, "_pr_evidence", return_value=pr
+        ), mock.patch.object(
+            controller,
+            "_capability",
+            return_value={"state": "absent", "reason": "setup-descriptor-absent"},
+        ), mock.patch.object(
+            controller, "_default_branch", return_value="main"
+        ):
+            code, report = controller.run(
+                reentry_args("--bookkeeping-evidence", str(evidence))
+            )
+            # Criterion 1: no ``--remote none`` anywhere above.
+            self.assertEqual((code, report["status"]), (0, "ready"))
+
+            # Criterion 5, the other half. The grant is what makes attempt 6
+            # legal at all; without it the attempt is refused before routing,
+            # so a test that exercises only the reachable route would see no
+            # deadlock and a test that exercises only the round limit would
+            # see no gate.
+            with self.assertRaisesRegex(controller.ReviewError, "roundLimit"):
+                controller.run(reentry_args())
 
     def test_branch_scope_derives_unconfigured_base_from_origin_head(self) -> None:
         controller = self.load_controller()

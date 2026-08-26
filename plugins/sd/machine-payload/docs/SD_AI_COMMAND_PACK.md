@@ -1077,6 +1077,27 @@ incompatible setup, provider failure, malformed receipts, stale heads, and
 ambiguous dispatch fail closed. The successor never calls `sd-review-pr` or
 GitHub's reviewer API directly.
 
+`local-stage-terminal` covers two receipt shapes, not one: nothing was found,
+and nothing was asked. The second is a plan that selected zero providers —
+`--successor bookkeeping`, `--local none`, or a risk policy that skips — and it
+completes here too, carrying a third limitation, `local-skipped:<policyId>`,
+naming the policy that chose to ask nothing. The policy is reported verbatim;
+it is not folded into the coarser `skipReason` vocabulary the routed request
+carries.
+
+One case is refused that the gate alone would admit. A receipt whose providers
+were all *asked* and reported `skipped` themselves also reaches
+`eligible / local-stage-terminal`, because it has no outstanding findings and
+no terminal failure — but providers declining to answer is an unexplained
+absence of evidence, not a deliberate skip, and on an absent router it would
+mean completing with no review of any kind. The deciding fact is the plan's
+`providers` list, which is empty for a zero-selection and non-empty here;
+`outcome` and `remoteGate` are both blind to the difference. The same
+predicate governs non-PR scope, so the two cannot drift apart. `skipped` was
+deliberately **not** split into a separate outcome: `outcome` describes what
+the providers found, and the fact this rule needs is already recorded in the
+plan.
+
 A routed receipt records whether the dispatch summoned the reviewer or found it
 already there. When `dispatch.status` is `already-present` — a repository
 ruleset or another channel requested the reviewer first — the report carries the

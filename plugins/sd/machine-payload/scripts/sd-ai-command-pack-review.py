@@ -863,6 +863,49 @@ def _local_outcome(local: object) -> object:
     return local.get("outcome", local.get("status"))
 
 
+def _local_selected_nothing(local: object) -> bool:
+    """Did the local plan select zero providers?
+
+    ``outcome == "skipped"`` cannot answer this. It is reached both when no
+    provider was asked -- ``_aggregate_outcome`` returns ``skipped`` for an
+    empty attempt list -- and when every asked provider reported ``skipped``
+    in its own payload, which ``_parse_argv_payload`` accepts because
+    ``skipped`` is in ``OUTCOMES``. The two are different facts: one is a
+    deliberate zero-selection, the other is providers declining to answer.
+    The plan's provider list separates them with no ambiguity to resolve.
+
+    Anything unreadable -- no receipt, no plan, a non-list ``providers`` --
+    is not a deliberate skip. Failing closed here costs a bookkeeping re-entry
+    an explicit ``--remote none``; failing open would pass a pull request with
+    no review of any kind.
+    """
+
+    if not isinstance(local, Mapping):
+        return False
+    receipt = local.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return False
+    plan = receipt.get("plan")
+    if not isinstance(plan, Mapping):
+        return False
+    providers = plan.get("providers")
+    return isinstance(providers, list) and not providers
+
+
+def _local_silence_is_accounted(local: object, outcome: object) -> bool:
+    """Is the local stage's silence explained, rather than merely reported?
+
+    One predicate, consulted by both the non-PR branch and the absent-router
+    PR branch, so the two cannot drift apart -- they held different mappings
+    for the same fact until 0.71.x, and that divergence is what made the
+    bookkeeping successor unreachable on a pull request.
+    """
+
+    return outcome == "clean" or (
+        outcome == "skipped" and _local_selected_nothing(local)
+    )
+
+
 def _local_outstanding(local: Mapping[str, Any]) -> int | None:
     """Count the local receipt findings the caller has left outstanding.
 
@@ -2116,7 +2159,7 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         )
 
     if scope != "pr":
-        if local_status in {"clean", "skipped"}:
+        if _local_silence_is_accounted(local, local_status):
             _advance(state_path, state, "ready")
             return 0, _report(state=state, status="ready")
         return 3, _report(
@@ -2142,18 +2185,33 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             limitations=("remote-intentionally-skipped",),
         )
     if cap_state == "absent":
-        if local_status != "clean":
+        if not _local_silence_is_accounted(local, local_status):
             return 3, _report(
                 state=state,
                 status="indeterminate",
-                diagnostic="optional router absence requires a clean local review",
+                diagnostic=(
+                    "optional router absence requires a local review that was "
+                    "clean or asked no local provider"
+                ),
                 limitations=("router-not-configured", f"local-{local_status}"),
             )
+        limitations = ["router-not-configured", "zero-remote-confidence"]
+        if local_status == "skipped":
+            # Nothing was reviewed here at all: no router, and a plan that
+            # asked no provider. The run is allowed to complete, so the report
+            # has to say on its face which policy made that choice. The
+            # ``skipReason`` mapping in ``_router_local_summary`` is not used
+            # -- it knows only two policies and would relabel the rest as
+            # ``not-requested``, which is the same conflation this branch
+            # exists to avoid.
+            plan = local["receipt"]["plan"]
+            policy_id = str(plan.get("policyId") or "unknown")
+            limitations.append(f"local-skipped:{policy_id}")
         _advance(state_path, state, "ready")
         return 0, _report(
             state=state,
             status="ready",
-            limitations=("router-not-configured", "zero-remote-confidence"),
+            limitations=tuple(limitations),
         )
     if cap_state != "ready":
         raise ReviewError(f"cannot route from capability state {cap_state}")
