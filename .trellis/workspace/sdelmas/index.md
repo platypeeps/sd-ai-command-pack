@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 431
+- **Total Sessions**: 433
 - **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1318 | Active |
+| `journal-9.md` | ~1358 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 433 | 2026-08-26 | Plan the completion-successor cc over-refusal fix | `60721c99`, `a8952099` | `docs/plan-completion-successor-cc-overrefusal` |
 | 431 | 2026-08-26 | Record the landable blockers in the sd-review-pr retirement program | `9a7dc5e7` | `chore/mark-blocked-planning-tasks` |
 | 429 | 2026-08-26 | File the local provider failure recorded as findings | `cd537ca9`, `ddbe6c53`, `ef10e034` | `task/file-local-provider-failure-masked` |
 | 428 | 2026-08-26 | File the completion-successor over-refusal on base updates | `2a752f17`, `e40edcd8`, `d9a4c00d`, `5a525844` | `docs/file-completion-successor-cc-overrefusal` |
