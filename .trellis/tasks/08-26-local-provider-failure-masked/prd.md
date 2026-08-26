@@ -41,8 +41,8 @@ Three steps, each defensible alone.
    status_value = provider.outcome_by_exit.get(exit_code, "failed")
    ```
 
-   Both shipped adapters map `"1": "findings"` — prism at `:291` and gito at
-   `:306`. That is the right reading of the convention: these tools exit 1 when
+   Both shipped adapters map `"1": "findings"` — prism at `:293` and gito at
+   `:308`. That is the right reading of the convention: these tools exit 1 when
    they find something. They also exit 1 when they fail.
 
 2. The payload is then parsed, and there are two ways the exit-map verdict
@@ -202,7 +202,7 @@ A and B are complementary. Neither touches the gate.
 - [ ] The `:2511` empty-findings guard is unchanged, and a test asserts it still
       blocks when a payload parses to a `findings` status with an empty list.
 - [ ] Both shipped adapters are covered. They share the `"1": "findings"`
-      mapping (prism `:291`, gito `:306`) and both payload parsers return
+      mapping (prism `:293`, gito `:308`) and both payload parsers return
       `None` on an unusable report (`_prism_payload:1845`,
       `_gito_payload:1876`), so neither is protected from either route.
 - [ ] All four copies of `sd-ai-command-pack-review-local.py` are byte-identical
