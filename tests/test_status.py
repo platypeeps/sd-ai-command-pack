@@ -3922,6 +3922,55 @@ class StatusTests(InstallTestCase):
         self.assertEqual(after_success, baseline)
         self.assertEqual(after_failure, baseline)
 
+    def test_machine_engine_refusal_rejects_a_world_writable_package_initializer(
+        self,
+    ) -> None:
+        """`__init__.py` runs before the engine, so it is gated like the engine.
+
+        Locking down `machinescope.py` while leaving the package initializer
+        world-writable gates the wrong file: `from installer import
+        machinescope` executes `__init__.py` first, so the attacker's code runs
+        before the module the gate protected is ever reached.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "open-init"
+            self.decoy_engine_root(root, identity="manifest")
+            initializer = root / "installer" / "__init__.py"
+            initializer.chmod(initializer.stat().st_mode | status.stat.S_IWOTH)
+            refusal = status.machine_engine_refusal(root)
+        self.assertIsNotNone(refusal)
+        self.assertIn("world-writable", refusal)
+        self.assertIn("__init__.py", refusal)
+
+    def test_machine_scope_api_passes_over_a_half_populated_adjacent_root(self) -> None:
+        """A partial `installer/` beside the script must not end the ladder.
+
+        `machinescope.py` without `__init__.py` is not an importable package.
+        Proceeding on it raises out of the loop, so a later rung that would
+        have answered is never reached -- the row reports an opaque import
+        error instead of the install it could have found.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            adjacent = Path(raw) / "adjacent"
+            package = adjacent / "installer"
+            package.mkdir(parents=True)
+            (package / "machinescope.py").write_text("", encoding="utf-8")
+            self.assertFalse((package / "__init__.py").exists())
+            binary_dir = adjacent / "bin"
+            binary_dir.mkdir()
+            script = binary_dir / "sd-ai-command-pack-status.py"
+            script.write_text("", encoding="utf-8")
+
+            with mock.patch.object(status, "__file__", str(script)):
+                _engine, rung, root, _refusals = status.machine_scope_api(
+                    environ={"PATH": str(PACK_ROOT / "scripts")}
+                )
+
+        self.assertEqual(rung, "path")
+        self.assertEqual(root, PACK_ROOT.resolve())
+
     def test_machine_scope_without_the_engine_is_unavailable_not_none(self) -> None:
         status = self.load_status_module()
         root = self.make_status_repo()

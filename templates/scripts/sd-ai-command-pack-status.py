@@ -1783,7 +1783,11 @@ def machine_engine_refusal(root: Path) -> str | None:
             f"{PACK_MANIFEST_NAME!r}) nor .claude-plugin/plugin.json (name "
             f"{PACK_PLUGIN_NAME!r}) is present in {root}"
         )
-    for path in (root, package, package / "machinescope.py"):
+    # `__init__.py` is in this list because `from installer import machinescope`
+    # executes it FIRST. Locking down the module while leaving the package
+    # initializer world-writable gates the wrong file: the attacker's code runs
+    # before the engine is ever reached.
+    for path in (root, package, package / "__init__.py", package / "machinescope.py"):
         try:
             mode = path.stat().st_mode
         except OSError as error:
@@ -1844,7 +1848,14 @@ def machine_scope_api(
     for rung, root in machine_engine_candidates(Path(__file__), env):
         tried.append(str(root))
         if rung == "adjacent":
-            if not (root / "installer" / "machinescope.py").is_file():
+            # Both files, matching the gate below: `machinescope.py` alone is
+            # not an importable package, and proceeding on a half-populated
+            # root raises out of the loop, so a later rung that would have
+            # answered is never tried.
+            package = root / "installer"
+            if not all(
+                (package / name).is_file() for name in ("__init__.py", "machinescope.py")
+            ):
                 continue
         else:
             refusal = machine_engine_refusal(root)
