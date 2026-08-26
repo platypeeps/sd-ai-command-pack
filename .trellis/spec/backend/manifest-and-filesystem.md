@@ -2648,6 +2648,224 @@ Reference files:
 - `templates/scripts/sd-ai-command-pack-status.py`
 - `tests/test_provider_config_history.py`
 
+## Scenario: Managed Blocks And The Skip-When-Absent Target
+
+### 1. Scope / Trigger
+
+A *managed block* is a marker-delimited region the installer owns inside a file
+the consumer otherwise owns. There are three: `.gitignore`'s Trellis block,
+`.github/copilot-instructions.md`, and `AGENTS.md`'s canonical-entry-point
+routing block. Every one is an infra-integration contract, so this carries
+code-spec depth.
+
+Before 0.71.56 each behaviour lived where it was needed: markers in
+`installer/registry.py`, a strip table in `installer/thin.py`, a removal list
+and two hand-written calls in `installer/removal.py`, a label map in the thin
+re-sweep. Four copies of one fact. `AGENTS.md` is the target that made that
+untenable, because it differs from the other two on two axes at once.
+
+### 2. Signatures
+
+```python
+@dataclass(frozen=True)
+class ManagedBlockSpec:
+    start: str
+    end: str
+    label: str
+    preserve_invalid_utf8: bool = False
+    adopt_on_thin: bool = False
+    create_if_absent: bool = True
+    strip_on_thin: bool = True
+
+MANAGED_BLOCK_SPECS: dict[str, ManagedBlockSpec]   # keyed by target as_posix()
+
+def managed_block_spec(target: Path) -> ManagedBlockSpec   # SystemExit if absent
+```
+
+`managed_block_spec` raises rather than returning `None`. An unregistered
+managed-block target is a manifest/registry disagreement, and the only safe
+response to being asked to write markers nobody declared is to stop.
+
+### 3. Contracts
+
+| target | `create_if_absent` | `strip_on_thin` | `adopt_on_thin` | `preserve_invalid_utf8` |
+| --- | --- | --- | --- | --- |
+| `.gitignore` (Trellis block) | yes | yes | yes | no |
+| `.github/copilot-instructions.md` | yes | yes | no | yes |
+| `AGENTS.md` (routing block) | **no** | **no** | no | no |
+
+`installer/fileops.py`, `installer/thin.py`, `installer/removal.py`, and
+`templates/scripts/sd-ai-command-pack-thin-resweep.py` all read this table.
+`thin.py`'s `BLOCK_MARKERS` and the re-sweep's `STRIPPED_BLOCK_LABEL` are
+*derived views* filtered on `strip_on_thin`, so `AGENTS.md` is absent from them
+by construction rather than by a maintainer remembering to omit it.
+
+`adopt` is deliberately not passed by the removal loop. Adoption is a
+thin-conversion behaviour; an ordinary uninstall removes every managed block,
+`.gitignore`'s included. The field is named `adopt_on_thin` to make the leak
+visible if someone wires it up.
+
+The routing block itself carries this statement, and it is the contract a
+reader should rely on:
+
+> The pack verifies that this block matches the version it shipped — `install.py
+> <repo> --check` reports `refresh-required` if the text between the markers
+> drifts. It does **not** verify the routing against this repository's installed
+> skills, and deliberately names none: the block routes by intent so that there
+> is nothing in it that a later release or a thin conversion could make false.
+
+### 4. Validation & Error Matrix
+
+**The skip belongs in `selected_files`, not at write time.** A row whose target
+the pack may not create is dropped from the selection when that target is
+absent — before every install-mode branch, keyed on `path_is_occupied()` rather
+than `.exists()`, so a dangling symlink stays a conflict for the writer to
+report instead of an absent file to skip.
+
+It cannot be a `PRESERVED` result instead. `installed_targets_content()` is
+built from `selected`, so a preserved row still lands in the receipt, and
+`audit_structural_state()` then reports the target as missing — the same audit
+failure, arrived at from the opposite direction. `install_managed_block` keeps
+a defence-in-depth guard, but the selection is what makes the receipt correct.
+
+**A marker-less platform needs `install: "always"`.** The `AGENTS.md` row
+declares `platform: "shared"`, which has no activation markers, so an
+`if-anchor-exists` row is never selected in a normal install. The absent-file
+skip is the gate; the install mode is not.
+
+**The audit expects every `shared` row.** `expected_targets_from_manifest`
+is unconditional, so a legitimately skipped target fails `--check` unless it is
+named. `OPTIONAL_INSTALL_TARGETS` in the install audit is that list, and it
+mirrors the pre-existing `.gitignore` precedent rather than inventing a
+mechanism.
+
+| condition | result |
+| --- | --- |
+| `AGENTS.md` absent | row dropped from selection; `<target> not present; block not created`; not in receipt |
+| `AGENTS.md` present, no block | block appended; target enters the receipt |
+| block text drifts from the shipped template | `--check` reports `refresh-required` |
+| unregistered managed-block target | `SystemExit: unsupported managed block target: <target>` |
+
+### 5. Good / Base / Bad Cases
+
+- **Good**: a repository with an `AGENTS.md` — the block installs, prose outside
+  the markers survives, a second install is a no-op.
+- **Base**: a repository without one — install succeeds, the file is not
+  created, `--check` reports `state: current` and `audit: passed`.
+- **Bad**: a hand-edited block — `--check` reports `refresh-required`, and a
+  re-install replaces the block and nothing else.
+
+### 6. Tests Required
+
+`tests/test_install_core.py` (`AgentsRoutingBlockTests`),
+`tests/test_remove.py`, `tests/test_conversion_plan.py`,
+`tests/test_partition_surfaces.py`, `tests/test_install_audit.py`,
+`tests/test_review_preflight.py`.
+
+Two of these tests were written, observed to pass, and found to prove nothing —
+worth naming, because both failure modes recur:
+
+- a test written against `install_managed_block` asserts the wrong layer;
+  `_require_file_destination` fires before the skip guard, so the guard can be
+  deleted and the test still passes. Assert against `selected_files`.
+- `tests/test_install_audit.py` runs the **consumer's** installed copy of the
+  audit (`[sys.executable, "scripts/..."], cwd=root`), which is installed from
+  `templates/`. `install.py --check` runs the **pack's** own `scripts/` copy
+  (`installer/inspection.py:342`). Patching one and testing the other proves
+  nothing. Demonstrate every guard failing without itself.
+
+### 7. Wrong vs Correct
+
+> **Warning**: a marker sweep does not find every site a new managed-block
+> target must touch. Three of them hold the target path as a plain string and
+> match no marker, no `MANAGED_BLOCK_SPECS` reference, and no `installer/`
+> import. This is the durable lesson: enumerate the *classification* sites, not
+> the marker sites.
+
+The sites, measured rather than reasoned about:
+
+- `.github/scripts/partition-surfaces.py` — `TARGET_OVERRIDES`, which
+  fail-closed-errors if it names zero manifest rows;
+- `templates/scripts/sd-ai-command-pack-install-audit.py` —
+  `PROVENANCE_NEVER_VOUCHED_TARGETS` **and** `OPTIONAL_INSTALL_TARGETS`;
+- `templates/scripts/sd-ai-command-pack-review-learnings.py` —
+  `GENERATED_SIGNAL_PATHS`, compared against a **lowercased** path, so the entry
+  is `agents.md`.
+
+##### Wrong
+
+```python
+if file.install in {ALWAYS_INSTALL, IF_NOT_EXISTS}:
+    ...
+spec = MANAGED_BLOCK_SPECS.get(file.target.as_posix())
+if spec is not None and not spec.create_if_absent:
+    ...   # too late: the ALWAYS_INSTALL branch already selected the row
+```
+
+##### Correct
+
+```python
+spec = MANAGED_BLOCK_SPECS.get(file.target.as_posix())
+if spec is not None and not spec.create_if_absent:
+    if not path_is_occupied(target / file.target):
+        skipped.append((file, f"{file.target} not present; block not created"))
+        continue
+if file.install in {ALWAYS_INSTALL, IF_NOT_EXISTS}:
+```
+
+##### Wrong
+
+```js
+function isSdCommandPackCopiedPath(path) {
+  return (
+    packInstalledTargets().has(path) ||     // AGENTS.md matches here, first
+    ...
+    path === 'AGENTS.md' ||                 // never reached; changes nothing
+```
+
+A new managed-block target does **not** need a literal beside
+`.github/copilot-instructions.md`'s: the receipt lookup already classifies it,
+because it is an installed target. An exemption placed after that lookup is
+dead code, and one placed nowhere leaves the file classified `copied` — which
+tells reviewers not to line-comment the wording of a file that is mostly the
+consumer's own agent instructions plus another installer's block. The pack owns
+about thirty lines of it. That trade runs the wrong way: a missed comment on
+pack prose is cheaper than a skipped review of a repository's agent
+instructions.
+
+##### Correct
+
+```js
+function isSdCommandPackCopiedPath(path) {
+  if (path === 'AGENTS.md') {
+    return false;                            // before the receipt lookup
+  }
+
+  return (
+    packInstalledTargets().has(path) || ...
+```
+
+`.github/copilot-instructions.md` keeps its existing classification. Changing it
+would move every consumer's review scope, which is a separate decision from
+adding a row.
+
+**A consumer that mirrors this classification locally must be updated with it.**
+The pack's preflight is not the only reader: a consumer can carry its own
+review-scope script, and such a script typically asserts the inverse over the
+receipt — every installed target must classify as copied — so a pack-side
+exemption turns that assertion into a guaranteed failure the moment the row
+ships. The fleet candidate check is what surfaces this, because it installs the
+candidate into a clone of each consumer and runs that consumer's own checks:
+
+```
+failed      P20 platypeeps/loadsmith
+error: review preflight fixture mismatch for AGENTS.md: copied=true, expected false
+```
+
+The gate is all-pass and has no waiver mechanism, so the consumer-side change
+lands **before** the pack row does. Treat a new exemption as a fleet change, not
+a local one.
+
 ## Read-Only Status And Housekeeping Delegation
 
 `templates/scripts/sd-ai-command-pack-status.py` is the canonical collector for

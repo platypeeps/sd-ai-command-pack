@@ -25,13 +25,12 @@ from installer.references import THIN_PROFILE, rewrite_text
 from installer.registry import (
     ACTIVE_TRELLIS_PLATFORM_MARKERS,
     ALWAYS_INSTALL,
-    COPILOT_GUIDANCE_END,
-    COPILOT_GUIDANCE_START,
-    COPILOT_INSTRUCTIONS_TARGET,
     FORCE_PRESERVED_TARGETS,
     IF_ANCHOR_EXISTS,
     IF_NOT_EXISTS,
     LOCAL_ENV_GITIGNORE_PATTERNS,
+    MANAGED_BLOCK_SPECS,
+    ManagedBlockSpec,
     PLATFORM_LOCAL_GITIGNORE_PATTERNS,
     REVIEW_ARTIFACT_GITIGNORE_PATTERNS,
     TRELLIS_BLANKET_GITIGNORE_ENTRIES,
@@ -224,6 +223,20 @@ def selected_files(
     platform_filter = set(platforms or [])
 
     for file in files:
+        # Before every install-mode branch: a row whose target the pack may
+        # not create is dropped when that target is absent. It cannot be
+        # PRESERVED at write time instead -- installed_targets_content() is
+        # built from `selected`, so a preserved row still lands in the
+        # receipt and audit_structural_state() then reports the target as
+        # missing. path_is_occupied(), not .exists(): a dangling symlink is
+        # a conflict for the writer to report, not an absent file to skip.
+        spec = MANAGED_BLOCK_SPECS.get(file.target.as_posix())
+        if spec is not None and not spec.create_if_absent:
+            if not path_is_occupied(target / file.target):
+                skipped.append(
+                    (file, f"{file.target} not present; block not created")
+                )
+                continue
         if file.install in {ALWAYS_INSTALL, IF_NOT_EXISTS}:
             selected.append(file)
             continue
@@ -637,23 +650,33 @@ def normalize_managed_block_template(file: PackFile, *, is_thin: bool = False) -
         # authoring a second one keeps the fat emission byte-identical by
         # construction: `is_thin` false is the untouched path.
         block = rewrite_text(block, profile=THIN_PROFILE, key=file.target.as_posix())
-    if COPILOT_GUIDANCE_START not in block or COPILOT_GUIDANCE_END not in block:
+    spec = managed_block_spec(file.target)
+    if spec.start not in block or spec.end not in block:
         raise SystemExit(
             f"error: managed block template missing markers: {file.source}"
         )
     return block
 
 
-def merge_managed_block(current: str, block: str) -> str:
-    start_index, end_index = marker_pair_indexes(
-        current,
-        COPILOT_GUIDANCE_START,
-        COPILOT_GUIDANCE_END,
-        ".github/copilot-instructions.md",
-    )
+def managed_block_spec(target: Path) -> ManagedBlockSpec:
+    spec = MANAGED_BLOCK_SPECS.get(target.as_posix())
+    if spec is None:
+        raise SystemExit(f"error: unsupported managed block target: {target}")
+    return spec
+
+
+def merge_managed_block(
+    current: str,
+    block: str,
+    *,
+    start: str,
+    end: str,
+    label: str,
+) -> str:
+    start_index, end_index = marker_pair_indexes(current, start, end, label)
     has_start = start_index != -1
     if has_start:
-        replace_end = end_index + len(COPILOT_GUIDANCE_END)
+        replace_end = end_index + len(end)
         if replace_end < len(current) and current[replace_end] == "\n":
             replace_end += 1
         return current[:start_index] + block + current[replace_end:]
@@ -777,8 +800,7 @@ def install_managed_block(
     dry_run: bool,
     is_thin: bool = False,
 ) -> InstallResult:
-    if file.target != COPILOT_INSTRUCTIONS_TARGET:
-        raise SystemExit(f"error: unsupported managed block target: {file.target}")
+    spec = managed_block_spec(file.target)
 
     destination = target_destination(target, file.target)
     status = generated_text_file_status(destination)
@@ -786,13 +808,25 @@ def install_managed_block(
         return InstallResult(file, status)
     _require_file_destination(destination, file.target)
 
+    # Defence in depth. selected_files() is the enforcement point -- a row
+    # dropped there never reaches the installed-targets receipt -- but a
+    # caller that assembles PackFiles itself must not create the file either.
+    if not path_is_occupied(destination) and not spec.create_if_absent:
+        return InstallResult(file, InstallStatus.PRESERVED)
+
     block = normalize_managed_block_template(file, is_thin=is_thin)
     if destination.exists():
         current = destination.read_bytes().decode(
             "utf-8",
             errors="surrogateescape",
         )
-        merged = merge_managed_block(current, block)
+        merged = merge_managed_block(
+            current,
+            block,
+            start=spec.start,
+            end=spec.end,
+            label=spec.label,
+        )
         if merged == current:
             return InstallResult(file, InstallStatus.UNCHANGED)
         if not dry_run:
@@ -1148,6 +1182,7 @@ __all__ = [
     "install_trellis_gitignore",
     "is_previously_shipped_default",
     "marker_pair_indexes",
+    "managed_block_spec",
     "merge_managed_block",
     "merge_trellis_gitignore_block",
     "next_backup_path",

@@ -81,6 +81,52 @@ class RemoveTests(InstallTestCase):
         self.assertNotIn(install.COPILOT_GUIDANCE_START, copilot_text)
         self.assertNotIn(install.COPILOT_GUIDANCE_END, copilot_text)
 
+    def test_remove_strips_the_routing_block_and_keeps_the_rest(self) -> None:
+        root = self.make_repo(".github")
+        trellis_block = (
+            "<!-- TRELLIS:START -->\n"
+            "# Trellis Instructions\n"
+            "<!-- TRELLIS:END -->\n"
+        )
+        agents = root / install.AGENTS_ROUTING_TARGET
+        agents.write_text(
+            trellis_block + "\n## Repo notes\n\nKeep this sentence.\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            install.AGENTS_ROUTING_START, agents.read_text(encoding="utf-8")
+        )
+
+        result = self.run_install_inproc(root, "--remove")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        text = agents.read_text(encoding="utf-8")
+        self.assertNotIn(install.AGENTS_ROUTING_START, text)
+        self.assertNotIn(install.AGENTS_ROUTING_END, text)
+        # R4: the file survives, and so does the block another installer owns.
+        self.assertTrue(agents.is_file())
+        self.assertIn(trellis_block, text)
+        self.assertIn("Keep this sentence.", text)
+
+    def test_remove_leaves_an_agents_file_alone_when_the_pack_never_installed(
+        self,
+    ) -> None:
+        # `--remove` against a repo that never had the pack. The routing target
+        # is a recognized removal target, so remove mode reaches it; nothing
+        # may be written when its markers are absent.
+        root = self.make_repo(".github")
+        agents = root / install.AGENTS_ROUTING_TARGET
+        original = "# Agent instructions\n\nEntirely the consumer's.\n"
+        agents.write_text(original, encoding="utf-8")
+        before = agents.read_bytes()
+
+        result = self.run_install_inproc(root, "--remove")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(agents.read_bytes(), before)
+
     def test_remove_dry_run_does_not_delete_pack_files(self) -> None:
         root = self.make_repo()
         result = self.run_install_inproc(root)

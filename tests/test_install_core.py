@@ -31,6 +31,26 @@ InstallTestCase = _support.InstallTestCase
 from installer import fileops, thin  # noqa: E402
 
 
+def merge_copilot_block(current: str, block: str) -> str:
+    """merge_managed_block bound to the Copilot marker pair.
+
+    The merge is parameterized by marker pair so a second managed-block
+    target reuses one merge semantics; these cases exercise the shared
+    branch logic, so they read their markers from the shared spec rather
+    than restating them.
+    """
+    spec = install.MANAGED_BLOCK_SPECS[
+        install.COPILOT_INSTRUCTIONS_TARGET.as_posix()
+    ]
+    return install.merge_managed_block(
+        current,
+        block,
+        start=spec.start,
+        end=spec.end,
+        label=spec.label,
+    )
+
+
 class InstallCoreTests(InstallTestCase):
     """Tests for installer CLI, manifest validation, platform selection, and file install behavior."""
 
@@ -574,7 +594,7 @@ class InstallCoreTests(InstallTestCase):
         with self.assertRaisesRegex(SystemExit, "managed block has no source"):
             install.normalize_managed_block_template(generated_block)
         with self.assertRaisesRegex(SystemExit, "incomplete"):
-            install.merge_managed_block(
+            merge_copilot_block(
                 f"{install.COPILOT_GUIDANCE_START}\npartial\n",
                 "replacement\n",
             )
@@ -597,13 +617,13 @@ class InstallCoreTests(InstallTestCase):
             f"{install.COPILOT_GUIDANCE_END}\n"
         )
 
-        self.assertEqual(install.merge_managed_block("", block), block)
+        self.assertEqual(merge_copilot_block("", block), block)
         self.assertEqual(
-            install.merge_managed_block("Repo\n", block),
+            merge_copilot_block("Repo\n", block),
             f"Repo\n\n{block}",
         )
         self.assertEqual(
-            install.merge_managed_block("Repo\n\n", block),
+            merge_copilot_block("Repo\n\n", block),
             f"Repo\n\n{block}",
         )
 
@@ -612,7 +632,7 @@ class InstallCoreTests(InstallTestCase):
             f"{install.COPILOT_GUIDANCE_END}\nbody\n{install.COPILOT_GUIDANCE_START}\n"
         )
         with self.assertRaisesRegex(SystemExit, "incomplete"):
-            install.merge_managed_block(reversed_markers, "replacement\n")
+            merge_copilot_block(reversed_markers, "replacement\n")
 
     def test_managed_block_update_preserves_invalid_existing_bytes(self) -> None:
         root = self.make_repo(".github")
@@ -673,7 +693,7 @@ class InstallCoreTests(InstallTestCase):
         managed_file = next(
             file
             for file in self._manifest_files
-            if file.kind == install.MANAGED_BLOCK_KIND
+            if file.target == install.COPILOT_INSTRUCTIONS_TARGET
         )
         copilot_real = root / ".github/copilot-instructions.real.md"
         copilot_real.write_text("# Repo guidance\n", encoding="utf-8")
@@ -1341,7 +1361,7 @@ class InstallCoreTests(InstallTestCase):
         end = install.COPILOT_GUIDANCE_END
         block = f"{start}\nnew body\n{end}\n"
         # Managed block whose END marker sits at EOF without a newline.
-        merged = install.merge_managed_block(f"{start}\nold\n{end}", block)
+        merged = merge_copilot_block(f"{start}\nold\n{end}", block)
         self.assertEqual(merged, block)
 
         gi_start = install.TRELLIS_GITIGNORE_START
@@ -1438,7 +1458,7 @@ class InstallCoreTests(InstallTestCase):
         copilot_file = next(
             file
             for file in self._manifest_files
-            if file.kind == install.MANAGED_BLOCK_KIND
+            if file.target == install.COPILOT_INSTRUCTIONS_TARGET
         )
         destination = root / str(install.COPILOT_INSTRUCTIONS_TARGET)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -2213,7 +2233,7 @@ class InstallCoreTests(InstallTestCase):
         )
 
         with self.assertRaisesRegex(SystemExit, "duplicate"):
-            install.merge_managed_block(current, block)
+            merge_copilot_block(current, block)
 
         duplicate_end = (
             f"{install.COPILOT_GUIDANCE_START}\nold\n"
@@ -2222,7 +2242,7 @@ class InstallCoreTests(InstallTestCase):
         )
 
         with self.assertRaisesRegex(SystemExit, "duplicate sd-ai-command-pack end"):
-            install.merge_managed_block(duplicate_end, block)
+            merge_copilot_block(duplicate_end, block)
 
     def test_subprocess_coverage_bootstrap_is_wired(self) -> None:
         # The 100% coverage gate depends on this bootstrap being present and on
@@ -4075,6 +4095,242 @@ class ManagedBlockEmissionTests(InstallTestCase):
         # above, so pin the markers the emission still has to carry.
         self.assertIn(install.COPILOT_GUIDANCE_START, block)
         self.assertIn(install.COPILOT_GUIDANCE_END, block)
+
+
+class AgentsRoutingBlockTests(InstallTestCase):
+    """The routing managed block, against the real shipped manifest row.
+
+    `AGENTS.md` is the pack's only managed-block target the installer must
+    never create: the block is a contribution to a file the consumer owns.
+    That makes the interesting assertions negative ones -- what the installer
+    leaves alone -- so every test here names the artifact it inspects rather
+    than settling for "no exception".
+    """
+
+    TRELLIS_BLOCK = (
+        "<!-- TRELLIS:START -->\n"
+        "# Trellis Instructions\n"
+        "\n"
+        "These instructions are for AI assistants working in this project.\n"
+        "\n"
+        "Managed by Trellis. Edits outside this block are preserved.\n"
+        "\n"
+        "<!-- TRELLIS:END -->\n"
+    )
+
+    def routing_file(self) -> install.PackFile:
+        return next(
+            file
+            for file in self._manifest_files
+            if file.target == install.AGENTS_ROUTING_TARGET
+        )
+
+    def receipt_targets(self, root: Path) -> list[str]:
+        receipt = root / install.INSTALLED_TARGETS_FILE
+        return receipt.read_text(encoding="utf-8").splitlines()
+
+    def agents_path(self, root: Path) -> Path:
+        return root / install.AGENTS_ROUTING_TARGET
+
+    def write_trellis_only(self, root: Path) -> Path:
+        destination = self.agents_path(root)
+        destination.write_text(self.TRELLIS_BLOCK, encoding="utf-8")
+        return destination
+
+    # --- 1 -----------------------------------------------------------------
+    def test_routing_block_lands_below_an_untouched_trellis_block(self) -> None:
+        root = self.make_repo(".github")
+        destination = self.write_trellis_only(root)
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        text = destination.read_text(encoding="utf-8")
+        trellis_end = text.index("<!-- TRELLIS:END -->")
+        routing_start = text.index(install.AGENTS_ROUTING_START)
+        self.assertGreater(routing_start, trellis_end)
+        self.assertIn(install.AGENTS_ROUTING_END, text)
+        # The Trellis slice byte-identical, not merely present: `trellis
+        # update` owns those bytes and the pack must not reflow them.
+        self.assertEqual(text[: len(self.TRELLIS_BLOCK)], self.TRELLIS_BLOCK)
+
+    # --- 2 -----------------------------------------------------------------
+    def test_absent_agents_file_is_skipped_and_stays_out_of_the_receipt(self) -> None:
+        root = self.make_repo(".github")
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        self.assertFalse(self.agents_path(root).exists())
+        self.assertIn("AGENTS.md not present; block not created", result.stdout)
+        # The load-bearing assertion. A row selected-then-PRESERVED still lands
+        # in the receipt, and the structural audit then reports the target as
+        # missing -- the exact inverse of "a repo with no AGENTS.md is
+        # untouched".
+        self.assertNotIn("AGENTS.md", self.receipt_targets(root))
+
+        check = self.run_install(root, "--check")
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertIn("state: current", check.stdout)
+        # Reported separately from `state:`, and the half that catches both the
+        # receipt failure above and the audit's own expected-target set.
+        self.assertIn("audit: passed", check.stdout)
+
+    # --- 3 -----------------------------------------------------------------
+    def test_absent_agents_file_is_skipped_under_platform_and_all(self) -> None:
+        # The row is `install: "always"`, so it is selected before the platform
+        # filter and before the anchor gate. A skip placed below either branch
+        # is dead code for this row; these two arguments are what prove the
+        # guard sits above them.
+        for arguments in (("--platform", "github"), ("--all",)):
+            with self.subTest(arguments=arguments):
+                root = self.make_repo(".github")
+                result = self.run_install_inproc(root, *arguments)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertFalse(self.agents_path(root).exists())
+                self.assertNotIn("AGENTS.md", self.receipt_targets(root))
+
+    # --- 4 -----------------------------------------------------------------
+    def test_reinstalling_leaves_the_file_byte_identical(self) -> None:
+        root = self.make_repo(".github")
+        destination = self.write_trellis_only(root)
+
+        self.assertEqual(self.run_install_inproc(root).returncode, 0)
+        first = destination.read_bytes()
+        second_run = self.run_install_inproc(root)
+        self.assertEqual(second_run.returncode, 0, second_run.stdout)
+        self.assertEqual(destination.read_bytes(), first)
+        self.assertIn("unchanged   AGENTS.md", second_run.stdout)
+
+    # --- 5 -----------------------------------------------------------------
+    def test_consumer_text_outside_the_markers_survives_a_reinstall(self) -> None:
+        root = self.make_repo(".github")
+        destination = self.write_trellis_only(root)
+        self.assertEqual(self.run_install_inproc(root).returncode, 0)
+
+        text = destination.read_text(encoding="utf-8")
+        text = "ABOVE EVERYTHING\n\n" + text.replace(
+            install.AGENTS_ROUTING_START,
+            "BETWEEN THE BLOCKS\n\n" + install.AGENTS_ROUTING_START,
+        )
+        # Inside the markers: replaced on the next install, by contract.
+        text = text.replace("## Canonical Entry Points", "## Hand Edited Heading")
+        destination.write_text(text + "\nBELOW EVERYTHING\n", encoding="utf-8")
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        refreshed = destination.read_text(encoding="utf-8")
+        for kept in ("ABOVE EVERYTHING", "BETWEEN THE BLOCKS", "BELOW EVERYTHING"):
+            with self.subTest(kept=kept):
+                self.assertIn(kept, refreshed)
+        self.assertNotIn("## Hand Edited Heading", refreshed)
+        self.assertIn("## Canonical Entry Points", refreshed)
+
+    # --- 7b ----------------------------------------------------------------
+    def test_the_template_carries_nothing_thin_conversion_rewrites(self) -> None:
+        # The executable form of "no `scripts/` or pack-doc reference": those
+        # are exactly what the thin profile rewrites, so byte-equality across
+        # the two emissions proves the template carries none of them. A prose
+        # assertion would go stale the moment the rewrite table grows.
+        routing = self.routing_file()
+        fat = install.normalize_managed_block_template(routing, is_thin=False)
+        thin_emission = install.normalize_managed_block_template(
+            routing, is_thin=True
+        )
+        self.assertEqual(fat, thin_emission)
+        # A template that lost its markers would satisfy the equality above.
+        self.assertIn(install.AGENTS_ROUTING_START, fat)
+        self.assertIn(install.AGENTS_ROUTING_END, fat)
+
+    # --- 13 ----------------------------------------------------------------
+    def test_a_file_that_is_only_the_routing_block_round_trips(self) -> None:
+        root = self.make_repo(".github")
+        destination = self.agents_path(root)
+        destination.write_text("placeholder\n", encoding="utf-8")
+        self.assertEqual(self.run_install_inproc(root).returncode, 0)
+
+        block = install.normalize_managed_block_template(self.routing_file())
+        destination.write_text(block, encoding="utf-8")
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(destination.read_text(encoding="utf-8"), block)
+
+    # --- 14 ----------------------------------------------------------------
+    def test_an_unterminated_trellis_block_is_appended_to_not_repaired(self) -> None:
+        # Recorded decision, not an accident: the pack does not parse another
+        # installer's markers, so an unterminated TRELLIS:START gets the
+        # routing block appended at EOF -- textually inside it. Guarding this
+        # would couple the pack to `trellis update`'s marker semantics.
+        root = self.make_repo(".github")
+        destination = self.agents_path(root)
+        destination.write_text(
+            "<!-- TRELLIS:START -->\n# Trellis Instructions\n", encoding="utf-8"
+        )
+
+        result = self.run_install_inproc(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        text = destination.read_text(encoding="utf-8")
+        self.assertNotIn("<!-- TRELLIS:END -->", text)
+        self.assertLess(
+            text.index("<!-- TRELLIS:START -->"),
+            text.index(install.AGENTS_ROUTING_START),
+        )
+        self.assertTrue(text.rstrip("\n").endswith(install.AGENTS_ROUTING_END))
+
+    # --- 11 ----------------------------------------------------------------
+    def test_local_only_lists_the_routing_target_exactly_once(self) -> None:
+        # `AGENTS.md` is in LOCAL_ONLY_TRELLIS_EXCLUDES already, and the new
+        # manifest row contributes it a second time. The fixture must own an
+        # AGENTS.md or the row is skipped, no duplicate is produced, and the
+        # test passes on the static entry alone -- proving nothing about the
+        # new row.
+        root = self.make_repo(".github")
+        self.write_trellis_only(root)
+        selected, _ = install.selected_files(
+            self._manifest_files, root, None, False
+        )
+        self.assertIn(
+            install.AGENTS_ROUTING_TARGET,
+            [file.target for file in selected],
+        )
+
+        patterns = install.local_only_exclude_patterns(selected)
+        self.assertEqual(patterns.count("AGENTS.md"), 1)
+
+        specs = install.local_only_tracked_check_specs(selected)
+        self.assertEqual(specs.count("AGENTS.md"), 1)
+
+    # --- 15 ----------------------------------------------------------------
+    def test_a_dangling_agents_symlink_is_a_conflict_not_a_skip(self) -> None:
+        # `.exists()` follows symlinks and is False for a dangling one, so a
+        # selection gate written with it drops this row silently instead of
+        # letting the writer report the conflict. The assertion has to be on
+        # `selected_files` -- calling the writer directly proves nothing here,
+        # because `_require_file_destination` refuses the symlink before the
+        # writer's own create_if_absent guard is ever reached.
+        root = self.make_repo(".github")
+        destination = self.agents_path(root)
+        destination.symlink_to("missing-agents.md")
+        self.assertFalse(destination.exists())
+        self.assertTrue(destination.is_symlink())
+
+        selected, skipped = install.selected_files(
+            self._manifest_files, root, None, False
+        )
+        self.assertIn(
+            install.AGENTS_ROUTING_TARGET, [file.target for file in selected]
+        )
+        self.assertNotIn(
+            install.AGENTS_ROUTING_TARGET, [file.target for file, _ in skipped]
+        )
+
+        # And the writer then reports it, rather than following or replacing.
+        result = install.install_managed_block(
+            self.routing_file(), root, dry_run=False
+        )
+        self.assertEqual(result.status, "symlink-conflict")
+        self.assertTrue(destination.is_symlink())
+        self.assertFalse(destination.exists())
 
 
 if __name__ == "__main__":

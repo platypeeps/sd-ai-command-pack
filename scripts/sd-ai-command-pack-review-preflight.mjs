@@ -4995,6 +4995,17 @@ function isTrellisCopiedPath(path) {
 }
 
 function isSdCommandPackCopiedPath(path) {
+  // The pack manages a block inside this repo-owned file, but the rest of it is
+  // the consumer's own agent instructions plus another installer's block, so
+  // review treats the whole file as local integration rather than copied
+  // payload. The check has to precede the receipt lookup below: `AGENTS.md` is
+  // an installed target, so `packInstalledTargets()` would otherwise classify
+  // it -- and telling a reviewer to skip a repository's own agent instructions
+  // is worse than a missed comment on thirty lines of pack prose.
+  if (path === 'AGENTS.md') {
+    return false;
+  }
+
   return (
     packInstalledTargets().has(path) ||
     path === '.sd-ai-command-pack/installed-targets.txt' ||

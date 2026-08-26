@@ -132,6 +132,11 @@ TARGET_OVERRIDES: tuple[tuple[str, str, bool], ...] = (
     # surfaces call these scripts at runtime, so they are also part of the
     # machine installer payload (`sharedRuntime`).
     ("scripts/**", MACHINE_CLAUDE, True),
+    # The routing managed block. Platform `shared` disposes to `machine-other`,
+    # which would put this row in the machine installer payload -- but the
+    # block is a contribution to a file the *repository* owns and the machine
+    # install cannot reach. Its destination, not its platform, decides.
+    ("AGENTS.md", REPO_NATIVE, False),
 )
 
 MACHINE = "machine"

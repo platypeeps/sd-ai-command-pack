@@ -39,6 +39,9 @@ The current Trellis-focused pack installs:
   present
 - a managed `sd-ai-command-pack` guidance block in
   `.github/copilot-instructions.md` for GitHub Copilot installs
+- a managed `sd-ai-command-pack` canonical-entry-point routing block in an
+  existing `AGENTS.md`; the installer never creates that file, so a repository
+  without one is untouched
 - a Claude-only project rule that adversarially reviews materially changed
   Trellis planning artifacts before implementation starts, with an optional
   parallel native Codex CLI lane
@@ -643,9 +646,9 @@ overwritten.
 
 Use `--remove` to uninstall the pack. It deletes only manifest-recognized
 pack-vouched or template-matching files, generated `.sd-ai-command-pack/` state,
-and the pack-managed `.gitignore`, `.git/info/exclude`, and
-`.github/copilot-instructions.md` blocks; drifted, symlinked, or user-owned
-files are kept unless you add `--force`.
+and the pack-managed `.gitignore`, `.git/info/exclude`,
+`.github/copilot-instructions.md`, and `AGENTS.md` blocks; drifted, symlinked,
+or user-owned files are kept unless you add `--force`.
 
 Platform filters always include the shared skills, `sd-check`, full-check, the shared shell
 helper, housekeeping, review-scope, review-preflight, review-local command

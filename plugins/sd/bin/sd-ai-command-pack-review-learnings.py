@@ -150,9 +150,11 @@ GENERATED_SIGNAL_PATH_PREFIXES = (
     "scripts/sd-ai-command-pack-",
     "scripts/sd_ai_command_pack_",
 )
+# Compared against a lowercased path, so entries are spelled lowercase.
 GENERATED_SIGNAL_PATHS = {
     ".github/copilot-instructions.md",
     ".github/pull_request_template.md",
+    "agents.md",
     "docs/sd_ai_command_pack.md",
 }
 

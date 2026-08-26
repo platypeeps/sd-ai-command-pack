@@ -125,8 +125,19 @@ SOURCE_ONLY_ALLOWED_PACK_FILES = {
     "scripts/sd_ai_command_pack_fleet_lib.py",
 }
 
+# Manifest targets the installer contributes to but never creates. The row is
+# selected only when the consumer already owns the file, so an absent one is a
+# skip rather than a missing install -- expecting it unconditionally would fail
+# the audit of every consumer that does not have the file. Spelled literally
+# because this script ships standalone and cannot import the registry; same
+# class as PROVENANCE_NEVER_VOUCHED_TARGETS below.
+OPTIONAL_INSTALL_TARGETS = {
+    "AGENTS.md",
+}
+
 PROVENANCE_NEVER_VOUCHED_TARGETS = {
     ".gitignore",
+    "AGENTS.md",
     ".gito/config.toml",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/copilot-instructions.md",
@@ -424,9 +435,12 @@ def expected_targets_from_manifest(
     expected = {
         record["target"]
         for record in records
-        if record["platform"] == "shared"
-        or record["install"] in {"always", "if-not-exists"}
-        or record["platform"] in selected_platforms
+        if (
+            record["platform"] == "shared"
+            or record["install"] in {"always", "if-not-exists"}
+            or record["platform"] in selected_platforms
+        )
+        and record["target"] not in OPTIONAL_INSTALL_TARGETS
     }
     expected.update(
         {
@@ -437,6 +451,10 @@ def expected_targets_from_manifest(
     )
     if ".gitignore" in targets:
         expected.add(".gitignore")
+    # Same shape as `.gitignore` above: in the receipt means the pack installed
+    # it and it must still be there, so a later deletion is still a failure.
+    # Absent from the receipt means the row was legitimately skipped.
+    expected.update(OPTIONAL_INSTALL_TARGETS & targets)
     return expected, selected_platforms, []
 
 

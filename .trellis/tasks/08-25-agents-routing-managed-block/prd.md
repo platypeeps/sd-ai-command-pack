@@ -30,10 +30,10 @@ Verified in this checkout on 2026-08-25:
 - `manifest.json` holds exactly one managed-block row —
   `templates/.github/copilot-instructions.sd-ai-command-pack.md` →
   `.github/copilot-instructions.md`, anchor `.github`
-  (`manifest.json:364-370`).
+  (`manifest.json:366-372`).
 - Markers live in `installer/registry.py:2326-2329`
   (`MANAGED_BLOCK_KIND`, `COPILOT_GUIDANCE_START` / `_END`).
-- The merge path is `installer/fileops.py:640`; removal cleanup is
+- The merge path is `installer/fileops.py:647`; removal cleanup is
   `installer/removal.py:349`; conversion categorization is
   `installer/conversion.py:184`; and `installer/thin.py:812-880` keeps a
   **per-managed-block-target table** of marker pair, diagnostic label, and
@@ -77,6 +77,13 @@ installer instead of composing with it.
 
 - R1: A manifest row installs the routing block into `AGENTS.md` under its own
   marker pair, written below the Trellis block and never inside it.
+  **Amended 2026-08-25 — scoped to a well-formed Trellis block**: the pack
+  appends below a properly terminated `TRELLIS:START`/`TRELLIS:END` pair and
+  replaces its own block in place thereafter. It does not parse or repair
+  another installer's markers, so an unterminated Trellis block, or a routing
+  block a consumer hand-placed inside a Trellis block, is out of scope. See
+  `design.md` §3 for the two named states and why guarding them would couple
+  the pack to `trellis update`'s marker semantics.
 - R2: Every surface that the existing managed-block target touches
   (registry markers, merge, removal, conversion, thin per-target table,
   surface-check) handles the new target. Derive that set by sweeping for the
@@ -93,8 +100,9 @@ installer instead of composing with it.
 
 ## Acceptance Criteria
 
-- [ ] `design.md` records the checker-vs-documentation decision with reasoning,
-      before implementation starts.
+- [x] `design.md` records the checker-vs-documentation decision with reasoning,
+      before implementation starts. Settled 2026-08-25: **documentation-only**
+      (`design.md` §1).
 - [ ] Fresh install into a repo with an `AGENTS.md` carrying only a Trellis
       block yields both blocks, routing below Trellis, Trellis byte-unchanged.
 - [ ] Fresh install into a repo with no `AGENTS.md` behaves per the decided
@@ -105,10 +113,15 @@ installer instead of composing with it.
 - [ ] Removal deletes the block and leaves the Trellis block and consumer text
       intact.
 - [ ] A repository with no pack installed is byte-unchanged by the whole flow.
-- [ ] Thin conversion handles the new target — the `installer/thin.py` per-target
-      table has an entry, exercised by a test, not merely present.
+- [ ] Thin conversion handles the new target. **Amended — see `design.md` §5.**
+      The `installer/thin.py` `BLOCK_MARKERS` table is reached only from
+      `plan.block_strip` (`thin.py:871`, `thin.py:1013`), and a `repo-native`
+      target classifies `keep`, so an entry there would be unreachable and no
+      test could exercise it. The criterion's intent is met by asserting the
+      classification instead: the conversion planner puts `AGENTS.md` in
+      `keep`, not `block_strip` and not `blocked`.
 - [ ] `make generate` / surface-check clean with the new manifest row.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+- [ ] Changelog + version.
 
 ## Notes
 
@@ -117,3 +130,33 @@ installer instead of composing with it.
   closure, and it has one open decision.
 - Filed as an issue rather than a PR because the observing repository has no
   standing authority to open pull requests here.
+
+## Post-archive handoff
+
+Not acceptance criteria — these happen after `task.py archive`, on the
+synchronized default branch, and must not be left as unchecked criteria that
+block archival:
+
+- fleet rollout via the normal refresh, at the merged head
+  (`implement.md` step 12).
+
+## Amendments (2026-08-25)
+
+- **Acceptance criterion 8 corrected.** Rationale and the measured call sites are
+  in `design.md` §5; the criterion above carries the corrected form.
+- **One R2 site is not reachable by the sweep the PRD prescribes.**
+  `PROVENANCE_NEVER_VOUCHED_TARGETS`
+  (`templates/scripts/sd-ai-command-pack-install-audit.py:128`) lists
+  `.github/copilot-instructions.md` as a literal target-path string and
+  references neither `COPILOT_GUIDANCE_START` nor `MANAGED_BLOCK_KIND`.
+  Sweeping for the marker constant does not reach it; sweeping for the target
+  path does. Recorded in `design.md` §6.1 and carried into the spec by
+  `implement.md` step 10, so the next managed-block target does not repeat it.
+- **R1 scoped to a well-formed Trellis block** (above). The unamended wording
+  and `design.md` §3 were in direct contradiction: the design accepts two
+  consumer-created states in which the routing block ends up inside the Trellis
+  block, and `design.md` §8 test 14 asserts one of them. Enforcing the
+  unscoped invariant would mean the pack validating `trellis update`'s markers.
+- **Fleet rollout moved out of the acceptance criteria** into Post-archive
+  handoff, matching the SD completion boundary. As an acceptance criterion it
+  could never be satisfied before archival, since it happens after the merge.

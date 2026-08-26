@@ -581,6 +581,21 @@ reviewing the copied file. It also asks Copilot to group duplicate root causes
 and point to deterministic local checks when they already cover a repeated
 issue class.
 
+The installer also maintains a managed `sd-ai-command-pack` routing block in
+`AGENTS.md`, recording which Trellis workflows the pack wraps and that a
+wrapper is the canonical entry point where one exists. Unlike every other
+managed block, this one is **never created**: the installer contributes the
+block to an `AGENTS.md` the repository already owns, and a repository without
+that file is left untouched and reports the row as skipped. Edits outside the
+markers are preserved; edits inside them are replaced on the next install.
+
+The pack verifies that this block matches the version it shipped --
+`install.py <repo> --check` reports `refresh-required` if the text between the
+markers drifts. It does **not** verify the routing against this repository's
+installed skills, and deliberately names none: the block routes by intent so
+that there is nothing in it that a later release or a thin conversion could
+make false.
+
 Pasteable handoff for those findings:
 
 ```text
@@ -2358,7 +2373,8 @@ determine/compare" note and do not fail the audit.
 Use `--remove` to uninstall pack-owned assets. Removal deletes pack-vouched
 files, files that still match the bundled template, generated pack state under
 `.sd-ai-command-pack/`, and the pack-managed blocks in `.gitignore`,
-`.git/info/exclude`, and `.github/copilot-instructions.md`. Drifted files,
+`.git/info/exclude`, `.github/copilot-instructions.md`, and `AGENTS.md`.
+Drifted files,
 symlinks, directories, and user-owned policy files are preserved by default;
 add `--force` to delete drifted regular pack files too, and add `--backup` to
 keep `.bak` copies of deleted files.

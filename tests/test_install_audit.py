@@ -1097,6 +1097,41 @@ class InstallAuditTests(InstallTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("installed target drifted", result.stdout)
 
+    def test_install_audit_ignores_a_hand_authored_agents_provenance_entry(
+        self,
+    ) -> None:
+        # An ordinary install writes no AGENTS.md provenance entry at all --
+        # never_vouched_targets() drops every managed-block row by kind -- so a
+        # test that merely edits the file outside the markers passes with or
+        # without the audit-set entry and proves nothing. The state has to be
+        # produced deliberately: provenance that predates or bypasses that rule.
+        root = self.make_repo(".github")
+        (root / install.AGENTS_ROUTING_TARGET).write_text(
+            "# Agent instructions\n", encoding="utf-8"
+        )
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        provenance_path = root / install.PROVENANCE_FILE
+        payload = json.loads(provenance_path.read_text(encoding="utf-8"))
+        self.assertNotIn("AGENTS.md", payload["files"])
+        payload["files"]["AGENTS.md"] = "sha256:" + "0" * 64
+        provenance_path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/sd-ai-command-pack-install-audit.py"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("installed target drifted", result.stdout)
+
     def test_installed_target_candidates_falls_back_when_receipts_are_unsafe(
         self,
     ) -> None:

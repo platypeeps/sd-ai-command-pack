@@ -48,14 +48,11 @@ from installer import conversion, thin  # noqa: E402
 from installer.manifest import load_manifest  # noqa: E402
 from installer.provenance import PROVENANCE_FILE  # noqa: E402
 from installer.registry import (  # noqa: E402
-    COPILOT_GUIDANCE_START,
-    COPILOT_INSTRUCTIONS_TARGET,
     FORCE_PRESERVED_TARGETS,
     INSTALLED_TARGETS_FILE,
+    MANAGED_BLOCK_SPECS,
     PACK_MANIFEST_FILE,
     PLATFORM_REGISTRY,
-    TRELLIS_GITIGNORE_START,
-    TRELLIS_GITIGNORE_TARGET,
 )
 
 PARTITION = ROOT / "docs/fleet/surface-partition.json"
@@ -78,11 +75,13 @@ SCHEMA_VERSION = 1
 # marker pair per file (installer/removal.py:337). Treating every pack-labelled
 # block in a listed file as stripped is wrong for a file that carries more than
 # one -- measured: every consumer's `.gitignore` has both `trellis-gitignore`
-# and `obsidian-kb`, and only the first is removed. The mapping is derived from
-# the same constants removal uses, so the two cannot drift apart.
+# and `obsidian-kb`, and only the first is removed. The mapping is the same
+# registry table `installer.thin` strips from, filtered the same way, so the
+# two cannot drift apart.
 STRIPPED_BLOCK_LABEL = {
-    TRELLIS_GITIGNORE_TARGET.as_posix(): TRELLIS_GITIGNORE_START,
-    COPILOT_INSTRUCTIONS_TARGET.as_posix(): COPILOT_GUIDANCE_START,
+    block_target: spec.start
+    for block_target, spec in MANAGED_BLOCK_SPECS.items()
+    if spec.strip_on_thin
 }
 
 # R8-4. `docs/review-learnings.md` is the pack's own generated ledger of past
