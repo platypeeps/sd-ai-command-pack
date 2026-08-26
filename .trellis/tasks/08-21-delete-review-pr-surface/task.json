@@ -3,7 +3,7 @@
   "name": "delete-review-pr-surface",
   "title": "Delete the sd-review-pr command surface",
   "blockedOn": "08-21-port-integration-only-profile",
-  "blockedReason": "do not start until child 1 is archived, which is itself gated on 08-22-verify-ported-integration-only-path",
+  "blockedReason": "do not start until 08-21-port-integration-only-profile is archived, which is itself gated on 08-22-verify-ported-integration-only-path",
   "description": "Remove every sd-review-pr identifier, adapter, prompt, manifest row and mirror, flip the registry row to enforcing, and empty the plugin closure allowlist.",
   "status": "planning",
   "dev_type": null,

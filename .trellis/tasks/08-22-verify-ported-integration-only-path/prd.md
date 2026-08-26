@@ -68,8 +68,15 @@ this task is green, because it removes that fallback.
 **Correction (2026-08-26).** An earlier revision of this paragraph named
 `08-21-retire-full-check-family` here as well. That was wrong: child 3 deletes
 the full-check script family, which is not the fallback and is not reachable
-from `sd-review-pr` at all — `templates/.agents/skills/sd-review-pr/SKILL.md:271`
-forbids falling back to either full-check script. Child 3's own PRD states it
+from `sd-review-pr` at all. `templates/.agents/skills/sd-review-pr/SKILL.md`
+forbids falling back to either full-check script, in these words:
+
+> Do not discover `package.json` scripts, read the legacy full-check
+> environment contract, or fall back to `sd-ai-command-pack-full-check.sh` or
+> `sd-ai-command-pack-review-full-check.sh`.
+
+Quoted rather than cited by line: this very claim was carried in child 3's PRD
+as `:295-297` and had drifted 24 lines by the time it was checked. Child 3's own PRD states it
 is "correctness-independent of children 1 and 2" and is ordered after child 2
 only to serialize `RETIRED_TARGETS` edits. It is **not** gated on this task.
 
