@@ -2,7 +2,7 @@
   "id": "work-loop-pr-supersession",
   "name": "work-loop-pr-supersession",
   "title": "Work-loop ledger cannot record a superseded PR replacement",
-  "description": "",
+  "description": "Let a work-loop iteration record that its PR was closed as superseded and replaced, so result --from-receipt accepts the replacement instead of failing ship_receipt_pr_mismatch.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
