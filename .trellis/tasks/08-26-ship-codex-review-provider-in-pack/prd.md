@@ -6,11 +6,16 @@ The codex local review lane (.sd-ai-command-pack/review.json provider id codex, 
 
 ## Requirements
 
-- TBD
+- The wrapper ships as `scripts/sd-ai-command-pack-codex-review-provider.py` with a manifest entry and an installed target, so a consumer install places it on every fleet checkout.
+- The `codex` provider argv in the shipped `review.json` template points at the installed path, not at `~/bin/common`.
+- When `codex` is not installed or not logged in, the wrapper exits 3 (`unavailable`) with a reason, so the coordinator degrades to the remaining lanes instead of failing the run.
+- The wrapper honors the repository's gito `exclude_files` so the codex lane reviews the same scope as gito; a decision on prism rules is recorded in `design.md`.
 
 ## Acceptance Criteria
 
-- [ ] TBD
+- [ ] A fresh consumer install lists the wrapper in `installed-targets.txt` and `sd-ai-command-pack-review-local.py --scope changes --local codex` produces a receipt on that checkout.
+- [ ] With `codex` absent from PATH, the same command records the provider as `unavailable` and the run still completes on the other lanes.
+- [ ] A diff touching only paths in gito's `exclude_files` yields `status: clean` from the codex lane with no model call.
 
 ## Notes
 
