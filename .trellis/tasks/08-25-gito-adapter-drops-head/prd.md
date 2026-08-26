@@ -136,7 +136,7 @@ actually looked at.
       the guard compares two oids, so `--head feature` must not be refused for
       not being spelled like the oid it resolves to. Covering it was cheaper
       than dispositioning it.
-- [ ] External evidence, in two halves. From a working tree that is *not* the
+- [x] External evidence, in two halves. From a working tree that is *not* the
       head, the stage **refuses by name** rather than returning findings — see
       `design.md`, which establishes that gito reads file content from the
       working tree, so a correct review of an unheld head is not available from
@@ -147,6 +147,28 @@ actually looked at.
       This criterion originally read "returns findings confined to the range"
       for the not-the-head case. That was written before the experiment and was
       unsatisfiable as stated.
+
+      **MET 2026-08-25**, both halves, against `platypeeps/sd-github-review`
+      PR #70 (`c3ec5f64...2880186`, 23 files) with real gito v4.4.4.
+
+      *Not the head* — tree at `8f5a4099dcd1`, head requested `2880186745ad`.
+      Before: 18 findings, **13 citing files outside the 23-file diff**, exit 1,
+      receipt recording the correct head. After: exit 2, `outcome: "invalid"`,
+      `provider(s) gito read file content from the working tree, which does not
+      hold the requested head: planned 2880186745ad…, checked out 8f5a4099dcd1…`.
+
+      *At the head* — detached worktree at `2880186745ad`, clean. **3 findings,
+      0 out of range.** gito's own log line changes from
+      `Making merge-base diff: INDEX vs c3ec5f64…` to
+      `Making merge-base diff: 2880186745ad… vs c3ec5f64…`, so the mechanism is
+      visible in the provider's output rather than only in the argv.
+
+      Method, recorded because it is weaker than a release in one respect: the
+      fix branch's script was run directly against the consumer rather than
+      through an installed release, so this evidences the *behaviour* and not
+      the *packaging*. That the installed machine layer delivers it is a
+      release-time check, and worth doing — the previous replay found that layer
+      eighteen versions behind the plugin cache.
 
 ## Notes
 
