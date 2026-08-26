@@ -163,12 +163,30 @@ description. Test names are in `tests/test_review_stage.py`.
       reads `remoteGate.state` instead of requiring a "clean" receipt, which
       would have made this feature inert in exactly the topology it targets;
       and `--attempt-id` is now documented as the optional control it is.
-- [ ] The PR #70 three-round sequence, replayed against the new gate, terminates
+- [x] The PR #70 three-round sequence, replayed against the new gate, terminates
       without a human `review.round-extension` decision.
-      — **not met, and not inferable from the tests above.** Needs a release, a
-      consumer refresh, and working provider credentials; that consumer's prism
-      key returns `401 invalid_api_key` today, which degrades the gate to
-      `eligible-with-limitations` — a green that would prove nothing. Phase 5.
+      — **MET 2026-08-25.** `remoteGate: {"state": "eligible", "reason":
+      "local-findings-accepted"}`, `outstanding: 0`, `accepted: 2`,
+      `advisory: 3`, one provider attempt, exit 0 in 37.0s. Receipt
+      `01bc26a47bed8804…`. Verified on all three things this criterion turns on:
+      `--round-extension-authorized` was never passed and no `roundExtension`
+      appears in the receipt; the gate reached plain `eligible`, not
+      `eligible-with-limitations`; and the `medium` ceiling was live, releasing
+      three of five findings. Full record in the consumer's
+      `08-09-review-gate-advisory-convergence` (archived), section
+      "Third replay, 2026-08-25".
+      **The prism 401 was routed around, not fixed.** `--local auto` under
+      `substantive-ensemble` selected **gito alone**, so `prism-chunked` was
+      never invoked and this run is no evidence about it. The criterion does not
+      name a provider, so it is met — but the credential blocker this note
+      recorded is still real for any future prism run.
+      Two other things the replay depended on, recorded because they were
+      prerequisites rather than incidental: the machine layer was eighteen
+      versions behind (0.71.39 by its receipt) and had to be reinstalled to
+      0.71.51 before `accepted` was even a recognised verb; and gito's head-ref
+      defect (`08-25-gito-adapter-drops-head`) had to be worked around by
+      building an overlay base so the working tree *was* the head. That defect
+      is still open.
 
 ## Out of scope
 
