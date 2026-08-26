@@ -1,15 +1,15 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-25T20:48:24Z",
-  "packVersion": "0.71.51",
-  "payloadDigest": "sha256:a72679df4d1e6d0cbf6649fba3e9fe1eb040ee3526e25bffe9fd9544ddab6740",
+  "validatedAt": "2026-08-26T00:27:53Z",
+  "packVersion": "0.71.52",
+  "payloadDigest": "sha256:f0446f1221a52e480c94872e03fbb8ca74f85b4f3257a9366d9f0caea1a16cb0",
   "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
       "name": "rwbp-coordinator",
       "github": "platypeeps/rwbp-coordinator",
-      "baseCommit": "1e6187abac7f6a9f3b0b3227c68180f9eb74c1ba",
+      "baseCommit": "b373bc70c5d0408e2bf9b9e06094b26cd2814494",
       "status": "passed",
       "prepares": [
         [
@@ -28,7 +28,7 @@
     {
       "name": "loadsmith",
       "github": "platypeeps/loadsmith",
-      "baseCommit": "4677ecd56e7abde2a54369419c5f3e940751ed8e",
+      "baseCommit": "255788fa7ef04be7df4e4808709de53a7d1c6cd3",
       "status": "passed",
       "prepares": [
         [
@@ -49,7 +49,7 @@
     {
       "name": "hoa-manager",
       "github": "platypeeps/hoa-manager",
-      "baseCommit": "1a5feef7f87bd6b7fe1bb96d211563e84fa9678f",
+      "baseCommit": "ddc83d8006b6df7519b9911ac16238ae10d3cd89",
       "status": "passed",
       "prepares": [
         [
@@ -68,7 +68,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "7ccf5c5993d173c952646a0b541202b11718cce1",
+      "baseCommit": "760441f23d308b2f8d76a15c34472b1b1c6adeab",
       "status": "passed",
       "prepares": [
         [
@@ -92,7 +92,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "3402042ca1cbfabeb2b0eb9e451c93d6986d9279",
+      "baseCommit": "7c56bcab797aef53fe738db3fed6812974074864",
       "status": "passed",
       "prepares": [
         [
@@ -114,7 +114,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "2d5c31f5cbb40486cae1cb41865f5cb7b774a4fb",
+      "baseCommit": "1985d2b9be2fa464db0b831e3dae64f59ddd279e",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -129,7 +129,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "99d8843cefab03c60b1d91476f5ef2a1a13b7ce8",
+      "baseCommit": "8f5a4099dcd1106c851cdceba26145b368accf6e",
       "status": "passed",
       "prepares": [
         [
@@ -158,7 +158,7 @@
     {
       "name": "people-profiles",
       "github": "platypeeps/people-profiles",
-      "baseCommit": "84895187c7da88d65761908ddbf556c14dd42fe9",
+      "baseCommit": "81205b23b60835c3d390d6005021788716a2b6e3",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -181,7 +181,7 @@
     {
       "name": "anomaly-metric-creator",
       "github": "platypeeps/anomaly-metric-creator",
-      "baseCommit": "8ed365e5b863cde0fb13afbc15e2a9e6e5a08b67",
+      "baseCommit": "b70b0307a5b29b770da854384e231831964ba1cd",
       "status": "passed",
       "prepares": [
         [

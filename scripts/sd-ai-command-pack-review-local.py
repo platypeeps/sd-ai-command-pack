@@ -168,6 +168,7 @@ PROVIDER_KEYS = frozenset(
         "version",
         "enabled",
         "outcomeByExitCode",
+        "requiresTreeAtHead",
     }
 )
 POLICY_KEYS = frozenset(
@@ -246,6 +247,12 @@ class Provider:
     version: str
     enabled: bool
     outcome_by_exit: Mapping[int, str]
+    # True when the provider reads file *content* from the working tree rather
+    # than from the refs it is given. Such a provider cannot honour a head the
+    # tree does not hold: it would review the requested range's diff against
+    # whatever is checked out. Declared, not inferred from the adapter at the
+    # call site, so an argv provider wrapping such a tool can opt in.
+    requires_tree_at_head: bool = False
 
 
 def _canonical_json(value: object) -> bytes:
@@ -477,6 +484,18 @@ def _parse_provider(value: object) -> Provider:
     enabled = value.get("enabled")
     if not isinstance(enabled, bool):
         raise ReviewInputError(f"provider {identifier} enabled must be boolean")
+    requires_tree_at_head = value.get("requiresTreeAtHead")
+    if requires_tree_at_head is None:
+        # gito resolves the diff from refs but reads content from the tree.
+        requires_tree_at_head = adapter == "gito"
+    elif adapter != "argv":
+        raise ReviewInputError(
+            f"provider {identifier} builtin adapter cannot override requiresTreeAtHead"
+        )
+    elif not isinstance(requires_tree_at_head, bool):
+        raise ReviewInputError(
+            f"provider {identifier} requiresTreeAtHead must be boolean"
+        )
     raw_exit = value.get("outcomeByExitCode")
     if not isinstance(raw_exit, dict) or len(raw_exit) > 32:
         raise ReviewInputError(f"provider {identifier} outcomeByExitCode is invalid")
@@ -505,6 +524,7 @@ def _parse_provider(value: object) -> Provider:
         version,
         enabled,
         exit_map,
+        bool(requires_tree_at_head),
     )
 
 
@@ -1516,6 +1536,38 @@ def _prism_rules(repo: Path) -> RulesDecision:
     )
 
 
+def _require_tree_at_head(
+    repo: Path, target: Mapping[str, Any], selected: Sequence[Provider]
+) -> None:
+    """Refuse a delta review whose head the working tree does not hold.
+
+    Only for providers that declared they read content from the tree. The
+    alternative to refusing is what this replaces: the provider reviews the
+    requested base against whatever is checked out, exits zero, and the receipt
+    records a head the output does not support.
+
+    Not applicable to ``worktree`` (the tree *is* the subject) or ``codebase``
+    (already gated on a clean tree bound to one head upstream). Runs after
+    ``resolve_target``, so a dirty worktree has already been reported as
+    dirtiness rather than surfacing here as a confusing head mismatch.
+    """
+    if str(target["scope"]) != "branch_delta":
+        return
+    bound = [provider for provider in selected if provider.requires_tree_at_head]
+    if not bound:
+        return
+    actual = str(_git(repo, "rev-parse", "--verify", "HEAD")).strip()
+    planned = str(target["head"])
+    if actual == planned:
+        return
+    names = ", ".join(sorted(provider.identifier for provider in bound))
+    raise ReviewInputError(
+        f"provider(s) {names} read file content from the working tree, which "
+        f"does not hold the requested head: planned {planned}, checked out "
+        f"{actual}. Review from a tree or worktree at the requested head."
+    )
+
+
 def _expand_argv(
     provider: Provider,
     target: Mapping[str, Any],
@@ -1566,7 +1618,23 @@ def _expand_argv(
                 "--out",
                 output,
             ]
+        elif scope == "branch_delta":
+            # --what is the head half of the range. Without it gito supplies its
+            # own head from the working tree, so the reviewed range is
+            # base..<checked out> rather than base..head.
+            result = [
+                "gito",
+                "review",
+                "--what",
+                str(target["head"]),
+                "--vs",
+                str(target["base"]),
+                "--out",
+                output,
+            ]
         else:
+            # worktree: the subject is the uncommitted state, which is exactly
+            # the head gito supplies for itself. Naming one would be wrong.
             result = [
                 "gito",
                 "review",
@@ -2407,6 +2475,7 @@ def execute(
         provider for provider in providers if provider.identifier in selected_ids
     ]
     context_path = run_dir / "review-context.json"
+    _require_tree_at_head(repo, target, selected)
     # Once per run, not once per provider: the decision depends only on `repo`.
     rules_decision = _prism_rules(repo)
     commands = {
