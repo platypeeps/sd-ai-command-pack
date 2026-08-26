@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 427
+- **Total Sessions**: 428
 - **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1189 | Active |
+| `journal-9.md` | ~1237 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 428 | 2026-08-26 | File the completion-successor over-refusal on base updates | `2a752f17`, `e40edcd8`, `d9a4c00d`, `5a525844` | `docs/file-completion-successor-cc-overrefusal` |
 | 427 | 2026-08-26 | Route canonical entry points from a managed AGENTS.md block | `f4895e03`, `a081c3c2`, `189f20be`, `35cb1de0` | `feat/agents-routing-managed-block` |
 | 426 | 2026-08-25 | Name the contract when --bookkeeping-evidence input is unusable | `d1e76e29`, `be6e2c87`, `6800c609`, `c9ee6116` | `fix/bookkeeping-evidence-diagnostics` |
 | 425 | 2026-08-25 | Resolve the machine-scope engine beyond the script's own root | `3cd70cff`, `0ac93742`, `9ba6f15b`, `010f4b51`, `f5b48984`, `b4c9ec63` | `fix/status-machine-scope-resolution` |
