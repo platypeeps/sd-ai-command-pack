@@ -1246,3 +1246,44 @@ Filed 08-26-completion-successor-cc-overrefusal after PR #560 could not obtain a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 429: File the local provider failure recorded as findings
+<!-- trellis-session: v=2 fp=99d1ab3de3419658 -->
+
+**Date**: 2026-08-26
+**Task**: File the local provider failure recorded as findings
+**Branch**: `task/file-local-provider-failure-masked`
+
+### Summary
+
+Filed Trellis task 08-26-local-provider-failure-masked as a planning-only PRD: a hard provider failure at a findings-mapped exit code is recorded as `findings` with an empty findings list, which blocks the remote gate under a diagnosis nobody can inspect. Base-updated onto main and re-verified every line citation against the moved base.
+
+### Main Changes
+
+- Documented two independent routes to a false `findings` status: the payload-absent recovery at `:2087` covers only `exit_code == 0`, and the sticky `or status_value == "findings"` disjunct at `:2083` keeps the exit-map verdict even when the payload disagrees.
+- Recorded that the empty-findings guard at `:2511` is deliberate and must survive the fix, and that a corrected `failed` yields `eligible-with-limitations` — which sd-review rejects when the router is absent — so the fix does not unblock a PR during an outage.
+- Repointed two citations that named the enclosing `outcomeByExitCode` key rather than the `"1": "findings"` entry the sentence claims (prism `:291`->`:293`, gito `:306`->`:308`).
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd537ca9` | docs(task): file the local provider failure recorded as findings |
+| `ddbe6c53` | docs(task): make the payload-parser citations agree across the PRD |
+| `ef10e034` | docs(task): cite the exit-map entries rather than the enclosing key |
+
+### Testing
+
+- [OK] Review preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-review scope=pr: status ready, sd-check passed, gito clean with 0 findings, remoteGate eligible/local-stage-terminal
+- [OK] All 16 PRD line citations re-resolved against the moved base
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
