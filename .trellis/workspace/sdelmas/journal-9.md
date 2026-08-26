@@ -1052,3 +1052,52 @@ The pack built prism argv without --rules, so every consumer's .prism/rules.json
 
 - Open the pack PR and the nine consumer PRs
 - Follow-up 4b.5: _disposition_counts never writes the advisory classification back to receipt.findings[]
+
+
+## Session 425: Resolve the machine-scope engine beyond the script's own root
+<!-- trellis-session: v=2 fp=b777ef22b35cf199 -->
+
+**Date**: 2026-08-25
+**Task**: Resolve the machine-scope engine beyond the script's own root
+**Branch**: `fix/status-machine-scope-resolution`
+
+### Summary
+
+Fixed issue #496: the status collector's machine-scope row was permanently 'unavailable' on a machine install, because machine_scope_api() looked for installer/machinescope.py in exactly one place -- beside the running script -- and ~/.agents ships no installer/. Replaced the single lookup with a gated two-rung ladder and threaded engine provenance into the rendered row.
+
+### Main Changes
+
+- Added an ordered engine resolution ladder: the script-adjacent root stays first and unchanged, then the parent of each PATH toolchain entry in PATH order, which reaches the versioned plugin cache root that does carry installer/.
+- Gated the PATH rung, since it imports executable Python from a directory PATH names: a real installer/ package, a pack identity marker, and no world-writable bit. Identity accepts manifest.json OR .claude-plugin/plugin.json -- measured, because the plugin cache root this fix exists to reach carries no manifest.json, so a gate keyed on that alone would have shipped a fix that fixed nothing.
+- Threaded engineRung, engineRoot, and a bounded engineRefusals through machine_receipt_state() and carried them through collect_machine_scope(), which rebuilds its dict field by field -- a receipt key that stops there renders as an ordinary line that hides the skew.
+- Review found four further defects, each fixed and pinned: installer/__init__.py missing from the writability set though the import executes it first; the adjacent rung requiring only machinescope.py, so a partial package ended the ladder; an ImportError aborting the ladder instead of falling through; and PATH roots rebuilt from safe_text() display output, which can name a different directory than the one probed.
+- Recorded the resolution contract in .trellis/spec/backend/manifest-and-filesystem.md with code-spec depth, correcting its definition of 'unavailable', which still encoded the single-rung assumption.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3cd70cff` | fix(status): resolve the machine-scope engine beyond the script's own root (0.71.53) |
+| `0ac93742` | docs(spec): record the machine-scope engine resolution contract |
+| `9ba6f15b` | fix(status): gate the package initializer, and pass over a partial adjacent root |
+| `010f4b51` | fix(status): let the engine ladder step over a candidate that fails to import |
+| `f5b48984` | fix(status): resolve PATH candidates from the raw entry, not its display text |
+| `b4c9ec63` | test(status): close the two acceptance criteria the fixtures had not earned |
+
+### Testing
+
+- [OK] tests/test_status.py: 153 tests, OK
+- [OK] .github/scripts/run-tests.sh: exit 0, 83 modules OK
+- [OK] Reproduction measured both directions: origin/main renders 'unavailable' for the same arrangement; the fix renders a real row via the path rung
+- [OK] Review preflight: 0 failures
+- [OK] make generate: shipped-surface closure clean; all four collector copies byte-identical
+- [OK] sd-review scope=pr: ready, outcome clean, remoteGate eligible, exactHeadReady true
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
