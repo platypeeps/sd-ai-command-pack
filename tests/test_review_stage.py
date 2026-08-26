@@ -594,7 +594,7 @@ class ReviewStageTests(InstallTestCase):
         invocation_log = log.read_text(encoding="utf-8")
         self.assertIn("prism review range", invocation_log)
         self.assertIn("--format json", invocation_log)
-        self.assertIn("gito review --vs", invocation_log)
+        self.assertIn("gito review --what", invocation_log)
         self.assertNotIn("--filter", invocation_log)
 
     # --- .prism/rules.json handling -------------------------------------
@@ -793,6 +793,168 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(
             gito[0]["rules"], {"status": "not-applicable", "adapter": "gito"}
         )
+
+    def gito_argv(self, log: Path) -> list[str]:
+        """The single gito invocation recorded in the fixture log, as a token list.
+
+        Fails rather than returning an empty list when gito never ran: an argv
+        assertion that silently passes on no invocations is worse than no test.
+        """
+        lines = [
+            line
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.startswith("gito ")
+        ]
+        self.assertEqual(len(lines), 1, f"expected one gito invocation, got {lines}")
+        return lines[0].split()
+
+    def test_gito_branch_delta_argv_carries_head_and_base_in_order(self) -> None:
+        """--what <head> --vs <base>, both values pinned, in that order.
+
+        The order matters as much as the presence: gito reviews ``--vs..--what``,
+        so a fix that transposes them reviews ``head..base`` and would still
+        satisfy an assertion that only counted arguments or checked membership.
+        """
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+        base = self.git_output(root, "rev-parse", "main")
+        self.assertNotEqual(base, head, "branch_delta needs a base distinct from head")
+
+        self.run_stage(root, "gito-branch-delta", "--scope", "pr", "--local", "gito")
+
+        argv = self.gito_argv(log)
+        self.assertIn("--what", argv)
+        self.assertEqual(argv[argv.index("--what") + 1], head)
+        self.assertEqual(argv[argv.index("--vs") + 1], base)
+        self.assertLess(
+            argv.index("--what"),
+            argv.index("--vs"),
+            f"--what must precede --vs, got {argv}",
+        )
+
+    def test_gito_worktree_argv_has_no_head(self) -> None:
+        """worktree review is of the tree itself, so there is no head ref to send."""
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        (root / "src/app.py").write_text("seed\nchanged\ndirty\n", encoding="utf-8")
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        self.run_stage(root, "gito-worktree", "--scope", "changes", "--local", "gito")
+
+        argv = self.gito_argv(log)
+        self.assertNotIn("--what", argv)
+        self.assertEqual(argv[argv.index("--vs") + 1], head)
+
+    def test_gito_codebase_argv_is_unchanged(self) -> None:
+        """The --all path is not what this defect is about and must not move."""
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+
+        self.run_stage(root, "gito-codebase", "--scope", "codebase", "--local", "gito")
+
+        argv = self.gito_argv(log)
+        self.assertIn("--all", argv)
+        self.assertEqual(
+            Path(argv[argv.index("--path") + 1]).resolve(), root.resolve()
+        )
+        self.assertNotIn("--what", argv)
+        self.assertNotIn("--vs", argv)
+
+    def detach_head_from(self, root: Path) -> str:
+        """Advance the branch one commit and return the now-historical head oid.
+
+        Leaves the working tree clean and bound to the *new* commit, so a run
+        asking for the returned oid is asking for a head the tree does not hold —
+        the exact situation gito cannot honour.
+        """
+        historical = self.git_output(root, "rev-parse", "HEAD")
+        target = root / "src/app.py"
+        target.write_text(
+            target.read_text(encoding="utf-8") + "later\n", encoding="utf-8"
+        )
+        self.run_git(root, "add", "src/app.py")
+        self.run_git(root, "commit", "-m", "a commit the requested head predates")
+        self.assertNotEqual(self.git_output(root, "rev-parse", "HEAD"), historical)
+        return historical
+
+    def test_gito_refuses_a_head_the_working_tree_does_not_hold(self) -> None:
+        """gito reads content from the tree, so an unheld head silently misreviews.
+
+        Asserts on the message naming both oids rather than on the exception type:
+        the dirty-worktree guard raises the same type, and a type-only assertion
+        could not tell a head mismatch from dirtiness.
+        """
+        root = self.make_repo()
+        self.write_builtin_config(root)
+        historical = self.detach_head_from(root)
+        actual = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_stage(
+            root,
+            "gito-unheld-head",
+            "--scope",
+            "pr",
+            "--head",
+            historical,
+            "--local",
+            "gito",
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(historical, result.stdout)
+        self.assertIn(actual, result.stdout)
+
+    def test_a_symbolic_head_that_resolves_to_the_tree_is_not_refused(self) -> None:
+        """The comparison is between two canonical oids, not two spellings.
+
+        ``--head feature`` and ``--head <oid>`` name the same commit; refusing
+        the first because it is not literally equal to the resolved head would
+        make the guard fire on the common case it is supposed to allow.
+        """
+        root = self.make_repo()
+        log = self.write_builtin_config(root)
+        head = self.git_output(root, "rev-parse", "HEAD")
+
+        result = self.run_stage(
+            root,
+            "gito-symbolic-head",
+            "--scope",
+            "pr",
+            "--head",
+            "feature",
+            "--local",
+            "gito",
+        )
+
+        self.assertNotIn("does not hold", result.stdout)
+        argv = self.gito_argv(log)
+        self.assertEqual(argv[argv.index("--what") + 1], head)
+
+    def test_prism_still_reviews_a_head_the_working_tree_does_not_hold(self) -> None:
+        """The refusal is provider-scoped; prism reads content from refs.
+
+        Without this, a later simplification that moves the check into
+        resolve_target — refusing for every provider — passes its own tests.
+        """
+        root = self.make_repo()
+        self.write_builtin_config(root)
+        historical = self.detach_head_from(root)
+
+        result = self.run_stage(
+            root,
+            "prism-unheld-head",
+            "--scope",
+            "pr",
+            "--head",
+            historical,
+            "--local",
+            "prism",
+        )
+
+        self.assertNotIn("does not hold", result.stdout)
+        report = self.report(result)
+        self.assertIn(report["status"], {"clean", "findings"})
 
     def test_builtin_adapter_rejects_unstructured_success_output(self) -> None:
         root = self.make_repo()

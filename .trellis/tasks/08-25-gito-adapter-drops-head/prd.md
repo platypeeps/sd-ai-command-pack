@@ -100,21 +100,42 @@ actually looked at.
 
 ## Acceptance criteria
 
-- [ ] `_expand_argv` passes the resolved head to gito for `branch_delta`,
+- [x] `_expand_argv` passes the resolved head to gito for `branch_delta`,
       asserted by a test on the constructed argv that fails against today's code.
-- [ ] The same test pins the base argument, so a fix that swaps the two —
+      — `test_gito_branch_delta_argv_carries_head_and_base_in_order`. Confirmed
+      red before the change: `'--what' not found in ['gito', 'review', '--vs',
+      '<base>', '--out', ...]`.
+- [x] The same test pins the base argument, so a fix that swaps the two —
       reviewing `head..base` — fails rather than passing on argv length alone.
-- [ ] The `codebase` argv is asserted unchanged in the same test file, so the
+      — asserts both values by position and asserts `--what` precedes `--vs`.
+- [x] The `codebase` argv is asserted unchanged in the same test file, so the
       fix cannot silently alter the `--all` path.
-- [ ] The `worktree` argv is asserted to carry **no** `--what`, so the fix
+      — `test_gito_codebase_argv_is_unchanged`: `--all`, `--path <repo>`, and
+      neither `--what` nor `--vs`.
+- [x] The `worktree` argv is asserted to carry **no** `--what`, so the fix
       cannot regress `--scope changes` into reviewing the committed head.
-- [ ] The refusal is asserted in-pack and is provider-scoped: a `branch`/`pr`
+      — `test_gito_worktree_argv_has_no_head`. The implementation branches on
+      `scope == "branch_delta"` explicitly rather than on "not codebase", so
+      worktree cannot acquire a head by falling through.
+- [x] The refusal is asserted in-pack and is provider-scoped: a `branch`/`pr`
       run selecting gito against a clean tree whose `HEAD` is not the requested
       head raises `ReviewInputError` with a message naming both oids, and the
       same run selecting prism only still succeeds. The second half is the
       regression guard for a capability prism was measured to have; without it,
       a later collapse of the check into `resolve_target` passes its own tests
       while silently removing that capability.
+      — `test_gito_refuses_a_head_the_working_tree_does_not_hold` (asserts on
+      the message naming both oids, not the exception type, because the
+      dirty-tree guard raises the same type) and
+      `test_prism_still_reviews_a_head_the_working_tree_does_not_hold`. The
+      refusal is a declared provider property, `requiresTreeAtHead`, not an
+      `adapter == "gito"` test at the call site.
+      A third test was added that the criterion did not ask for:
+      `test_a_symbolic_head_that_resolves_to_the_tree_is_not_refused`. The gate
+      flagged this change as adding a `normalization-evidence` boundary risk —
+      the guard compares two oids, so `--head feature` must not be refused for
+      not being spelled like the oid it resolves to. Covering it was cheaper
+      than dispositioning it.
 - [ ] External evidence, in two halves. From a working tree that is *not* the
       head, the stage **refuses by name** rather than returning findings — see
       `design.md`, which establishes that gito reads file content from the

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.71.52 - 2026-08-25
+
+### Fixed
+
+- The local stage's `gito` adapter transmitted only the base of the review
+  range. gito supplies its own head from the working tree, so a delta review
+  was `base..<whatever is checked out>` rather than `base..head`. In ordinary
+  use the tree *is* the head and the bug is invisible; it bites when the head
+  is supplied explicitly and differs — replaying a historical range, or any
+  caller reviewing a ref it has not checked out. The failure was silent and
+  severity-free: exit zero, a plausible finding count, and a receipt recording
+  the base and head that were *asked for*. Observed on a real replay where
+  fourteen of fifteen findings cited files outside the requested diff. The
+  delta invocation now passes `--what <head>` alongside `--vs <base>`;
+  `worktree` keeps no head (the tree is the subject) and `codebase` is
+  unchanged.
+
+### Added
+
+- `requiresTreeAtHead`, a provider property for a tool that reads file
+  *content* from the working tree rather than from the refs it is given. Such a
+  provider cannot honour a head the tree does not hold, so the stage now
+  refuses a `branch_delta` review in that situation, naming both oids, instead
+  of dispatching and recording a head the output does not support. Passing
+  `--what` alone is not sufficient: gito resolves the diff from refs but reads
+  content from the tree, which produces either a crash or a fabricated
+  "inconsistency between diff and final file content" finding.
+  It defaults to true for the built-in `gito` adapter and false otherwise, and
+  only an `argv` provider may declare it — a wrapper such as `prism-chunked`
+  can opt in. `prism` was tested and does **not** need it: it reads content
+  from refs, returning findings about code the tree does not contain.
+
 ## 0.71.51 - 2026-08-25
 
 ### Added
