@@ -4,7 +4,8 @@
 <!-- If the diff touches copied pack/Trellis tooling, broad automation, or
 CI/review files, add the matching explicit scope section on its own line —
 "Tooling/generated scope:", "Automation scope:", or "CI/review scope:" — as
-described in docs/SD_AI_COMMAND_PACK.md. -->
+described in docs/SD_AI_COMMAND_PACK.md. A pack-version adoption PR, whose diff
+is only files the pack itself installs, does not need one. -->
 
 ## Test plan
 

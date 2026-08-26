@@ -1204,6 +1204,14 @@ class ReviewScopeTests(InstallTestCase):
             + "\nLocal integration note.\n",
             encoding="utf-8",
         )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
+        )
         installed_targets = root / install.INSTALLED_TARGETS_FILE
         installed_targets.write_text(
             installed_targets.read_text(encoding="utf-8")
@@ -1287,6 +1295,14 @@ class ReviewScopeTests(InstallTestCase):
             + "\nLocal integration note.\n",
             encoding="utf-8",
         )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-scope.sh"],
@@ -1348,6 +1364,14 @@ class ReviewScopeTests(InstallTestCase):
             + "\nLocal integration note.\n",
             encoding="utf-8",
         )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-scope.sh"],
@@ -1405,6 +1429,14 @@ class ReviewScopeTests(InstallTestCase):
             + "\nLocal integration note.\n",
             encoding="utf-8",
         )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-scope.sh"],
@@ -1459,6 +1491,14 @@ class ReviewScopeTests(InstallTestCase):
             + "\nLocal integration note.\n",
             encoding="utf-8",
         )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
+        )
 
         result = subprocess.run(
             [self._bash_path, "scripts/sd-ai-command-pack-review-scope.sh"],
@@ -1496,6 +1536,14 @@ class ReviewScopeTests(InstallTestCase):
             command_pack_doc.read_text(encoding="utf-8")
             + "\nLocal integration note.\n",
             encoding="utf-8",
+        )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
         )
 
         result = subprocess.run(
@@ -1537,6 +1585,14 @@ class ReviewScopeTests(InstallTestCase):
             command_pack_doc.read_text(encoding="utf-8")
             + "\nLocal integration note.\n",
             encoding="utf-8",
+        )
+        # An authored file alongside the pack file. Without it the diff is
+        # all-pack-owned and the adoption exemption applies, which is the
+        # point of 08-25-adoption-prs-trip-scope-check -- these cases are
+        # about how the body is parsed, so they must stay in the gated
+        # mixed-diff regime the parsing applies to.
+        (root / "local-change.py").write_text(
+            "print('local')\n", encoding="utf-8"
         )
 
         result = subprocess.run(
@@ -1999,6 +2055,270 @@ class ReviewScopeTests(InstallTestCase):
             self.assertIn(
                 "scripts/sd-ai-command-pack-full-check.sh", result.stdout
             )
+
+
+    # ------------------------------------------------------------------
+    # Adoption-diff scope exemption (08-25-adoption-prs-trip-scope-check)
+    #
+    # A pack-version adoption commit changes only pack-owned files. The body
+    # check keys on a non-zero count of scoped files, so it treats that diff as
+    # maximally guilty -- a count where a ratio was meant. These pin the
+    # exemption, the requirement-2 boundary, and the fail-closed rules.
+    # ------------------------------------------------------------------
+
+    ADOPTION_BODY = "chore(sd-review): adopt pack 0.71.53"
+
+    def make_adoption_repo(self) -> Path:
+        """An installed, committed repo whose HEAD carries the receipt."""
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.commit_installed_repo(root)
+        return root
+
+    def run_enforcing_scope(
+        self, root: Path, base_ref: str = "HEAD", **env: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Enforcing mode with a marker-free body, the shape adoption carries.
+
+        MODE defaults to `auto`, which enforces; the advisory helper above
+        cannot exercise `fail`. Test repos have no `origin/main`, so the base
+        ref is pinned explicitly rather than left to the default resolver.
+        """
+        return subprocess.run(
+            ["bash", "scripts/sd-ai-command-pack-review-scope.sh"],
+            cwd=root,
+            env={
+                **os.environ,
+                "SD_AI_COMMAND_PACK_SCOPE_BASE_REF": base_ref,
+                "SD_AI_COMMAND_PACK_SCOPE_PR_BODY": self.ADOPTION_BODY,
+                **env,
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    @staticmethod
+    def touch_pack_files(root: Path, *relative: str) -> None:
+        for name in relative:
+            path = root / name
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+            )
+
+    def test_adoption_diff_of_manifest_and_provenance_needs_no_section(self) -> None:
+        root = self.make_adoption_repo()
+        self.touch_pack_files(
+            root,
+            ".sd-ai-command-pack/manifest.json",
+            ".sd-ai-command-pack/provenance.json",
+        )
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("error:", result.stdout)
+
+    def test_adoption_diff_covering_a_pack_file_outside_the_pack_dir_is_exempt(
+        self,
+    ) -> None:
+        """`.prism/rules.schema.json` is the path real adoption history hits.
+
+        Pins that the exemption follows the receipt rather than the three-path
+        `case` fast path at the top of `is_pack_target_path`.
+        """
+        root = self.make_adoption_repo()
+        self.assertTrue((root / ".prism" / "rules.schema.json").is_file())
+        self.touch_pack_files(
+            root,
+            ".sd-ai-command-pack/manifest.json",
+            ".prism/rules.schema.json",
+        )
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_installed_targets_itself_may_change_in_an_adoption_diff(self) -> None:
+        root = self.make_adoption_repo()
+        self.touch_pack_files(
+            root,
+            ".sd-ai-command-pack/manifest.json",
+            ".sd-ai-command-pack/installed-targets.txt",
+        )
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_one_authored_file_alongside_pack_files_still_requires_a_section(
+        self,
+    ) -> None:
+        """Requirement 2: the exemption cannot be widened by piggybacking."""
+        root = self.make_adoption_repo()
+        self.touch_pack_files(root, ".sd-ai-command-pack/manifest.json")
+        (root / "authored.py").write_text("print('hi')\n", encoding="utf-8")
+        self.run_git(root, "add", "authored.py")
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("error:", result.stdout)
+
+    def test_appending_an_authored_path_to_the_receipt_does_not_exempt_it(
+        self,
+    ) -> None:
+        """The hazard the exemption introduces, and why the base copy governs.
+
+        `TARGETS_FILE` resolves to the working-tree receipt. If ownership were
+        read from it, a diff could append its own authored path and exempt
+        itself. Ownership comes from the base copy, so this must still fail.
+        """
+        root = self.make_adoption_repo()
+        receipt = root / ".sd-ai-command-pack" / "installed-targets.txt"
+        receipt.write_text(
+            receipt.read_text(encoding="utf-8") + "authored.py\n", encoding="utf-8"
+        )
+        (root / "authored.py").write_text("print('hi')\n", encoding="utf-8")
+        self.run_git(root, "add", "authored.py")
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("error:", result.stdout)
+
+    def test_an_untracked_authored_file_denies_the_exemption(self) -> None:
+        """Untracked files are counted, and that is the fail-safe direction.
+
+        An earlier draft excluded them so a stray scratch file would not cost
+        the operator the exemption. That fails open: create an authored file,
+        leave it unstaged, and an otherwise-pack-only diff is exempted --
+        defeating requirement 2, which is the whole safety case here. Counting
+        them costs an operator with an untracked scratch file the exemption,
+        which is exactly today's behaviour.
+        """
+        root = self.make_adoption_repo()
+        self.touch_pack_files(root, ".sd-ai-command-pack/manifest.json")
+        (root / "authored.py").write_text("print('hi')\n", encoding="utf-8")
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("error:", result.stdout)
+
+    def test_repomix_only_diff_is_not_treated_as_adoption(self) -> None:
+        """All-scoped is not all-pack-owned.
+
+        `scoped_changes` also collects repository-map and journal files, so a
+        count comparison would exempt this. Ownership is tested directly.
+        """
+        root = self.make_adoption_repo()
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "repomix-map.md").write_text("# map\n", encoding="utf-8")
+        self.run_git(root, "add", "docs/repomix-map.md")
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("error:", result.stdout)
+
+    def test_adoption_diff_emits_no_scope_advisory_marker(self) -> None:
+        """`rwbp-website`'s lane: nothing left to warn about."""
+        root = self.make_adoption_repo()
+        self.touch_pack_files(
+            root,
+            ".sd-ai-command-pack/manifest.json",
+            ".sd-ai-command-pack/provenance.json",
+        )
+
+        result = self.run_enforcing_scope(
+            root, SD_AI_COMMAND_PACK_SCOPE_CHECK="advisory"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("sd-ai-command-pack-scope-advisory:", result.stdout)
+
+    def test_an_unresolvable_configured_base_ref_falls_back_and_still_decides(
+        self,
+    ) -> None:
+        """There is no "no base ref" state to fail closed on.
+
+        `configured_review_base_ref` warns and returns non-zero for a ref that
+        does not resolve, and `scope_base_ref` then falls back to the discovered
+        default branch. So an unresolvable *configured* ref is not a fail-closed
+        path -- the decision is still made, against the fallback. The real guard
+        is the receipt read in `prepare_base_targets_file`, covered below.
+        """
+        root = self.make_adoption_repo()
+        self.touch_pack_files(root, ".sd-ai-command-pack/manifest.json")
+
+        result = self.run_enforcing_scope(root, base_ref="refs/heads/no-such-branch")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("does not resolve to a commit", result.stdout)
+
+    def test_receipt_absent_at_base_denies_the_exemption(self) -> None:
+        """Base predates the install, so no receipt exists to authorize a skip."""
+        root = self.make_repo()
+        self.run_git(root, "config", "user.email", "test@example.com")
+        self.run_git(root, "config", "user.name", "Test User")
+        self.run_git(root, "commit", "--allow-empty", "-m", "before the pack")
+        pre_install = self.git_output(root, "rev-parse", "HEAD").strip()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        self.commit_installed_repo(root)
+        self.touch_pack_files(root, ".sd-ai-command-pack/manifest.json")
+
+        result = self.run_enforcing_scope(root, base_ref=pre_install)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+
+    def test_empty_receipt_at_base_denies_the_exemption(self) -> None:
+        """An empty receipt is indistinguishable from a truncated one.
+
+        Without this rule the three-path `case` fast path would still match
+        `manifest.json` and `provenance.json`, so an adoption-shaped diff would
+        be exempted on the strength of a receipt that says nothing.
+        """
+        root = self.make_repo()
+        self.assertEqual(self.run_install(root).returncode, 0)
+        (root / ".sd-ai-command-pack" / "installed-targets.txt").write_text(
+            "", encoding="utf-8"
+        )
+        self.commit_installed_repo(root)
+        self.touch_pack_files(root, ".sd-ai-command-pack/manifest.json")
+
+        result = self.run_enforcing_scope(root)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+
+    def test_explicit_targets_file_override_is_honoured_over_the_base_copy(
+        self,
+    ) -> None:
+        """An explicit override governs both classification and exemption.
+
+        The override is load-bearing across the layout suite. The security
+        argument is unaffected: the hazard is a receipt an untrusted diff can
+        rewrite, not one an operator deliberately points elsewhere.
+        """
+        root = self.make_adoption_repo()
+        elsewhere = root.parent / f"{root.name}-targets.txt"
+        elsewhere.write_text(
+            ".sd-ai-command-pack/manifest.json\n", encoding="utf-8"
+        )
+        self.touch_pack_files(
+            root,
+            ".sd-ai-command-pack/manifest.json",
+            ".prism/rules.schema.json",
+        )
+
+        result = self.run_enforcing_scope(
+            root, SD_AI_COMMAND_PACK_TARGETS_FILE=str(elsewhere)
+        )
+
+        # `.prism/rules.schema.json` is absent from the override, so the diff is
+        # not all-pack-owned by the receipt that governs.
+        self.assertEqual(result.returncode, 1, result.stdout)
 
 
 if __name__ == "__main__":

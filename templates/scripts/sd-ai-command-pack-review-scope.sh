@@ -112,6 +112,101 @@ collect_changed_files() {
   git ls-files --others --exclude-standard
 }
 
+ADOPTION_BASE_TARGETS=""
+ADOPTION_BASE_REF=""
+
+cleanup_adoption_base_targets() {
+  if [[ -n "$ADOPTION_BASE_TARGETS" ]]; then
+    rm -f -- "$ADOPTION_BASE_TARGETS"
+    ADOPTION_BASE_TARGETS=""
+  fi
+}
+trap cleanup_adoption_base_targets EXIT
+
+# Materialize the base copy of the installed-targets receipt into
+# ADOPTION_BASE_TARGETS, or return non-zero.
+#
+# The exemption authorizes skipping a gate, so the receipt that grants it must
+# not be writable by the diff being gated. TARGETS_FILE points at the working
+# tree, which is safe today only because naming a path there makes it *more*
+# scoped; under an exemption the sign flips and a diff could exempt itself by
+# appending its own authored path.
+prepare_base_targets_file() {
+  local base_ref tmp
+  base_ref="$(scope_base_ref)"
+  has_ref "$base_ref" || return 1
+
+  ADOPTION_BASE_REF="$base_ref"
+
+  tmp="$(mktemp)" || return 1
+  if ! git show "${base_ref}:.sd-ai-command-pack/installed-targets.txt" >"$tmp" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+
+  # An empty receipt is indistinguishable from a truncated one, and the
+  # three-path fast path in is_pack_target_path would still match manifest.json
+  # and provenance.json -- so an adoption-shaped diff would be exempted on the
+  # strength of a receipt that says nothing.
+  if ! grep -qE '^[^#[:space:]]' "$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+
+  ADOPTION_BASE_TARGETS="$tmp"
+}
+
+# True when every tracked changed path is pack-owned: a version-adoption diff.
+#
+# check_pr_body_scope fails on any non-zero count of scoped files, which cannot
+# tell "only pack files" from "authored work carried alongside pack files". That
+# count is the defect; this predicate supplies the missing distinction.
+# Requirement 2 falls out of it: an authored file is absent from a receipt
+# install.py wrote, so adding one drops the exemption with no second rule.
+# Untracked files are counted, deliberately. Excluding them would make the
+# predicate blind to a *new* authored file -- create it, leave it unstaged,
+# and an otherwise-pack-only diff would be exempted. That fails open, and
+# requirement 2 is the whole safety case for this exemption. Counting them
+# costs an operator with a stray scratch file the exemption, which is exactly
+# today's behaviour and therefore fails safe.
+is_adoption_only_diff() {
+  local -a changed=()
+  local path
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    changed+=("$path")
+  done < <(collect_changed_files | sed '/^$/d' | sort -u)
+
+  [[ "${#changed[@]}" -gt 0 ]] || return 1
+
+  local saved_targets="$TARGETS_FILE"
+  local restore=0
+  # An explicit override governs both classification and exemption; the caller
+  # owns the consequences, which is what an explicit override means. The hazard
+  # above is a receipt an untrusted diff can rewrite, not one an operator
+  # deliberately points elsewhere.
+  if [[ -z "${SD_AI_COMMAND_PACK_TARGETS_FILE:-}" ]]; then
+    prepare_base_targets_file || return 1
+    TARGETS_FILE="$ADOPTION_BASE_TARGETS"
+    restore=1
+  fi
+
+  local result=0
+  for path in "${changed[@]}"; do
+    if ! is_pack_target_path "$path"; then
+      result=1
+      break
+    fi
+  done
+
+  if [[ "$restore" -eq 1 ]]; then
+    TARGETS_FILE="$saved_targets"
+  fi
+
+  return "$result"
+}
+
 is_trellis_runtime_path() {
   local path
   path="$(normalize_repo_path "$1")"
@@ -445,6 +540,17 @@ main() {
   for scoped_file in "${scoped_changes[@]}"; do
     printf '  - %s\n' "$scoped_file"
   done
+
+  # A pack-version adoption diff changes only pack-owned files. The report
+  # above still runs: an operator should see which scope files changed, and
+  # silence here would make the exemption indistinguishable from a check that
+  # never ran. Only the body requirement is waived -- and it is waived before
+  # the advisory branch too, since a warning on every adoption campaign is
+  # exactly the noise this exemption exists to remove from the fleet lane.
+  if is_adoption_only_diff; then
+    printf 'info: All changed files are pack-owned at %s; adoption diff, no scope section required.\n' "$ADOPTION_BASE_REF"
+    return 0
+  fi
 
   if is_advisory "$MODE"; then
     # Advisory never fails and never consults gh-mode requiredness; that is an

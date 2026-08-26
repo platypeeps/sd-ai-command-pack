@@ -858,6 +858,16 @@ copied or generated surfaces. Markdown headings without the colon, such as
 `gh pr view` should not run, pass the PR body through
 `SD_AI_COMMAND_PACK_SCOPE_PR_BODY`.
 
+One diff is exempt: when *every* changed path is a file the pack installs, the
+body needs no scope section. That is the shape of a pack-version adoption
+commit, and there is nothing for an author to declare about it that the diff
+does not already say. Ownership is read from the base copy of
+`.sd-ai-command-pack/installed-targets.txt`, not the working tree, so a diff
+cannot exempt itself by adding its own authored path to the receipt; and one
+authored file alongside the pack files puts the whole diff back under the
+requirement. When the base receipt cannot be read the exemption does not
+apply.
+
 The `sd-create-pr` no-custom-body path reuses the same classifier through
 `sd-ai-command-pack-pr-body-scope.py --prepare-tooling-body`. It captures the
 exact auto-filled GitHub body and NUL-delimited `base...HEAD` paths in secure
