@@ -4037,6 +4037,56 @@ class StatusTests(InstallTestCase):
         self.assertEqual([rung for rung, _ in candidates], ["adjacent", "path"])
         self.assertEqual(candidates[1][1], root.resolve())
 
+    def test_machine_scope_api_resolves_a_plugin_root_through_the_adjacent_rung(
+        self,
+    ) -> None:
+        """A plugin root holding a real copy still resolves through rung 1.
+
+        Asserted on the resolved path, not on success: a ladder that silently
+        answered from a later rung would pass a success-only assertion while
+        loading a different copy of the engine.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "plugin-root"
+            binary_dir = self.decoy_engine_root(root, identity="plugin")
+            script = binary_dir / "sd-ai-command-pack-status.py"
+            script.write_text("", encoding="utf-8")
+
+            with mock.patch.object(status, "__file__", str(script)):
+                _engine, rung, resolved, refusals = status.machine_scope_api(
+                    environ={"PATH": ""}
+                )
+
+        self.assertEqual(rung, "adjacent")
+        self.assertEqual(resolved, root.resolve())
+        self.assertEqual(refusals, [])
+
+    def test_machine_scope_line_names_a_refused_candidate(self) -> None:
+        """A refusal reaches the reader, rather than vanishing into the row.
+
+        A silent skip degrades to plain `unavailable` -- the uninformative
+        failure this ladder exists to remove -- and hides a directory on `PATH`
+        that had no business supplying executable code.
+        """
+        status = self.load_status_module()
+        line = status.format_machine_scope(
+            {
+                "state": "installed",
+                "packVersion": "0.71.52",
+                "engineRung": "path",
+                "engineRoot": "/opt/pack",
+                "engineRefusals": [
+                    {"root": "/tmp/decoy", "reason": "world-writable: /tmp/decoy"}
+                ],
+                "pluginVersion": "0.71.52",
+                "comparison": "current",
+            }
+        )
+        self.assertIn("refused", line)
+        self.assertIn("/tmp/decoy", line)
+        self.assertIn("world-writable", line)
+
     def test_machine_scope_without_the_engine_is_unavailable_not_none(self) -> None:
         status = self.load_status_module()
         root = self.make_status_repo()

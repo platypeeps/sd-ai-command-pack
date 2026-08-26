@@ -124,28 +124,61 @@ a different component.
 
 ## Acceptance Criteria
 
-- [ ] A fixture reproducing the machine-install arrangement (collector at
+- [x] A fixture reproducing the machine-install arrangement (collector at
       `<root>/bin/`, no sibling `installer/`, a trusted pack root reachable on
       `PATH`) resolves the engine. This test fails on current `main`.
-- [ ] A pack-checkout fixture and a plugin-root fixture resolve through the
+      Evidence: `test_machine_scope_api_resolves_a_trusted_root_from_path`.
+      Failure on `main` was measured, not assumed: the same arrangement run
+      against `origin/main`'s collector reports
+      `main state: unavailable`.
+- [x] A pack-checkout fixture and a plugin-root fixture resolve through the
       first rung, proven by asserting the resolved path, not just success. A
       ladder that silently answered from a later rung would pass a
       success-only assertion while changing which copy is loaded.
-- [ ] A fixture with no resolvable rung anywhere still raises, and the message
+      Evidence: `test_machine_scope_api_loads_the_engine_beside_the_script`
+      and `test_machine_scope_api_resolves_a_plugin_root_through_the_adjacent_rung`,
+      both asserting the resolved root and `rung == "adjacent"`. The symlinked
+      `~/.agents/bin` case is covered separately by
+      `test_machine_scope_api_resolves_a_symlinked_bin_through_the_adjacent_rung`.
+- [x] A fixture with no resolvable rung anywhere still raises, and the message
       names each candidate tried, not just the first.
-- [ ] R3 security boundary, each proven by its own fixture:
+      Evidence: `test_machine_scope_api_names_every_candidate_when_none_answer`,
+      asserting both the machine root and the decoy appear in the message.
+- [x] R3 security boundary, each proven by its own fixture:
       - a `PATH` directory holding `installer/machinescope.py` but not
         resembling a pack install is not imported;
       - a world-writable candidate root is refused, and the refusal is
         reported as a named limitation rather than a silent skip that
         degrades to plain `unavailable`;
       - candidates are tried in `PATH` order.
-- [ ] R5: the rendered row names the root the engine was loaded from, and a
+      Evidence: `test_machine_engine_refusal_rejects_an_unvouched_root`;
+      `test_machine_engine_refusal_rejects_a_world_writable_root` and
+      `test_machine_engine_refusal_rejects_a_world_writable_package_initializer`;
+      reporting proven twice, in the receipt by
+      `test_machine_scope_api_reports_every_refused_candidate` and in the
+      rendered row by `test_machine_scope_line_names_a_refused_candidate`;
+      order by `test_machine_engine_candidates_follow_path_order`.
+- [x] R5: the rendered row names the root the engine was loaded from, and a
       fixture where that root's version differs from the reported machine
       install shows both values rather than silently reconciling them.
-- [ ] `sd-status` on a thin consumer renders the machine-scope row, including
+      Evidence: `test_machine_scope_line_shows_engine_provenance_under_version_skew`
+      (0.71.22 install reported by a 0.71.26 engine root, both rendered), with
+      `test_machine_scope_line_omits_provenance_for_the_adjacent_rung` pinning
+      that the common arrangement's line is unchanged.
+- [x] `sd-status` on a thin consumer renders the machine-scope row, including
       the skew case that issue #496 reports as hidden.
-- [ ] Changelog + version; fleet rollout via normal refresh.
+      Evidence: `test_machine_scope_row_is_real_for_a_thin_consumer_install`,
+      a `collect_machine_scope`-level assertion that the row is a real receipt
+      state rather than `unavailable`. This is the only test that proves the
+      row a reader actually sees changed; the rest prove the ladder resolves.
+- [x] Changelog + version; fleet rollout via normal refresh.
+      Evidence: `CHANGELOG.md` 0.71.53; `manifest.json`,
+      `.sd-ai-command-pack/manifest.json`, and
+      `plugins/sd/.claude-plugin/plugin.json` bumped;
+      `docs/fleet/candidate-validation.json` and
+      `docs/fleet/surface-partition.json` regenerated, with `make generate`
+      reporting `shipped-surface closure: clean`. Rollout itself is the normal
+      fleet refresh and is not performed here.
 
 ## Notes
 
