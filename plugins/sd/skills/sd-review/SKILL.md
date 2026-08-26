@@ -220,9 +220,19 @@ merge-base OID rather than the pull request's base branch, and `contentDigest`
 is computed over the canonicalized delta, so neither is derivable by hand:
 
 ```bash
-sd-ai-command-pack-review-local.py --repo . --scope pr \
-  --base <base> --head <head> --attempt-id <id> --plan-only --json
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-review-local.py \
+  --repo . \
+  --scope pr \
+  --base <base> \
+  --head <head> \
+  --attempt-id <id> \
+  --plan-only \
+  --json
 ```
+
+`$SD_PACK_TOOLCHAIN` is the same resolved helper the coordinator invocation
+above uses; a probe is not an exception to the sandbox-safe rule.
 
 A local provider finding you have verified false takes the matching
 `--local-disposition '<stable-id>=rebutted'` pair. The bar is the same as the
