@@ -3587,11 +3587,505 @@ class StatusTests(InstallTestCase):
             mock.patch.object(status, "__file__", str(installed_status)),
             mock.patch.object(status.sys, "path", original_path.copy()),
         ):
-            machinescope = status.machine_scope_api()
+            machinescope, rung, root, refusals = status.machine_scope_api()
 
             self.assertEqual(status.sys.path, original_path)
         self.assertTrue(hasattr(machinescope, "receipt_path"))
         self.assertTrue(hasattr(machinescope, "status"))
+        # The rung matters, not merely that something resolved: a ladder that
+        # quietly answered from PATH here would still pass a success-only
+        # assertion while loading a different copy than it used to.
+        self.assertEqual(rung, "adjacent")
+        self.assertEqual(root, PACK_ROOT.resolve())
+        self.assertEqual(refusals, [])
+
+    def machine_install_arrangement(self, tmp: Path) -> Path:
+        """A machine install: `bin/` holding a real copy, with no sibling package.
+
+        A real file, deliberately, not a symlink: `Path.resolve()` follows a
+        symlink back into the plugin root, so a symlinked fixture would resolve
+        through the script-adjacent rung and prove nothing about this defect.
+        """
+        binary_dir = tmp / "bin"
+        binary_dir.mkdir(parents=True)
+        collector = binary_dir / "sd-ai-command-pack-status.py"
+        collector.write_text("# machine payload copy\n", encoding="utf-8")
+        self.assertFalse((tmp / "installer").exists())
+        return collector
+
+    def test_machine_scope_api_resolves_a_trusted_root_from_path(self) -> None:
+        """Issue #496: a machine install has no sibling `installer/` to find.
+
+        `parent.parent` of `~/.agents/bin/` is `~/.agents`, which ships no
+        installer package in any arrangement, so the documented thin-consumer
+        path could never resolve the engine. The pack checkout on `PATH` is a
+        root that does carry it.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            collector = self.machine_install_arrangement(Path(raw))
+            environ = {"PATH": str(PACK_ROOT / "scripts")}
+            root_path = str(PACK_ROOT.resolve())
+            original_path = [entry for entry in status.sys.path if entry != root_path]
+
+            with (
+                mock.patch.object(status, "__file__", str(collector)),
+                mock.patch.object(status.sys, "path", original_path.copy()),
+            ):
+                machinescope, rung, root, _refusals = status.machine_scope_api(
+                    environ=environ
+                )
+
+                self.assertEqual(status.sys.path, original_path)
+
+        self.assertTrue(hasattr(machinescope, "receipt_path"))
+        self.assertTrue(hasattr(machinescope, "status"))
+        self.assertEqual(rung, "path")
+        self.assertEqual(root, PACK_ROOT.resolve())
+
+    def engine_api_result(self, engine: object) -> tuple[object, str, Path, list[dict[str, str]]]:
+        """The `machine_scope_api()` 4-tuple around a stub engine.
+
+        Stated once so a later change to the tuple's shape lands in one place
+        rather than in every caller that only cares about the engine.
+        """
+        return (engine, "adjacent", PACK_ROOT.resolve(), [])
+
+    def decoy_engine_root(self, root: Path, *, identity: str | None) -> Path:
+        """A root that holds the file the loader wants, with chosen identity.
+
+        `identity` selects the marker spelling: `manifest` for a checkout,
+        `plugin` for the plugin cache arrangement, `None` for a bare decoy that
+        carries the engine and nothing that vouches for it.
+        """
+        package = root / "installer"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "machinescope.py").write_text(
+            "STATUS_SCHEMA_VERSION = 1\n"
+            "def receipt_path(*a, **k):\n    return None\n"
+            "def status(**k):\n    return {}\n",
+            encoding="utf-8",
+        )
+        if identity == "manifest":
+            (root / "manifest.json").write_text(
+                json.dumps({"name": "sd-ai-command-pack"}), encoding="utf-8"
+            )
+        elif identity == "plugin":
+            marker = root / ".claude-plugin"
+            marker.mkdir()
+            (marker / "plugin.json").write_text(
+                json.dumps({"name": "sd", "version": "0.0.1"}), encoding="utf-8"
+            )
+        binary_dir = root / "bin"
+        binary_dir.mkdir()
+        (binary_dir / "sd-ai-command-pack-toolchain.sh").write_text(
+            "#!/bin/sh\n", encoding="utf-8"
+        )
+        return binary_dir
+
+    def test_machine_engine_refusal_accepts_plugin_only_identity(self) -> None:
+        """The plugin cache root carries no manifest.json -- only plugin.json.
+
+        Keying identity on manifest.json alone would reject the one
+        arrangement the PATH rung exists to reach, shipping a fix that fixes
+        nothing. Both spellings are asserted so that cannot regress silently.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            for identity in ("manifest", "plugin"):
+                root = Path(raw) / identity
+                self.decoy_engine_root(root, identity=identity)
+                self.assertIsNone(
+                    status.machine_engine_refusal(root), f"{identity} identity refused"
+                )
+
+    def test_machine_engine_refusal_rejects_an_unvouched_root(self) -> None:
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "decoy"
+            self.decoy_engine_root(root, identity=None)
+            refusal = status.machine_engine_refusal(root)
+        self.assertIsNotNone(refusal)
+        self.assertIn("no pack identity", refusal)
+
+    def test_machine_engine_refusal_rejects_a_world_writable_root(self) -> None:
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "open"
+            self.decoy_engine_root(root, identity="manifest")
+            engine = root / "installer" / "machinescope.py"
+            engine.chmod(engine.stat().st_mode | status.stat.S_IWOTH)
+            refusal = status.machine_engine_refusal(root)
+        self.assertIsNotNone(refusal)
+        self.assertIn("world-writable", refusal)
+
+    def test_machine_engine_candidates_follow_path_order(self) -> None:
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            first = Path(raw) / "first"
+            second = Path(raw) / "second"
+            first_bin = self.decoy_engine_root(first, identity="manifest")
+            second_bin = self.decoy_engine_root(second, identity="plugin")
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            environ = {"PATH": os.pathsep.join([str(first_bin), str(second_bin)])}
+
+            candidates = status.machine_engine_candidates(script, environ)
+
+        self.assertEqual([rung for rung, _ in candidates], ["adjacent", "path", "path"])
+        self.assertEqual(
+            [root for _, root in candidates[1:]], [first.resolve(), second.resolve()]
+        )
+
+    def test_machine_scope_api_reports_every_refused_candidate(self) -> None:
+        """A refusal is reported, never silently skipped.
+
+        A skip would degrade to a bare `unavailable` -- the uninformative
+        failure this ladder exists to remove -- and would also hide a candidate
+        that had no business being on PATH.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            decoy = Path(raw) / "decoy"
+            decoy_bin = self.decoy_engine_root(decoy, identity=None)
+            trusted_bin = PACK_ROOT / "scripts"
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            environ = {"PATH": os.pathsep.join([str(decoy_bin), str(trusted_bin)])}
+            root_path = str(PACK_ROOT.resolve())
+            original_path = [entry for entry in status.sys.path if entry != root_path]
+
+            with (
+                mock.patch.object(status, "__file__", str(script)),
+                mock.patch.object(status.sys, "path", original_path.copy()),
+            ):
+                _engine, rung, root, refusals = status.machine_scope_api(environ=environ)
+
+        self.assertEqual(rung, "path")
+        self.assertEqual(root, PACK_ROOT.resolve())
+        self.assertEqual(len(refusals), 1)
+        self.assertEqual(refusals[0]["root"], str(decoy.resolve()))
+        self.assertIn("no pack identity", refusals[0]["reason"])
+
+    def test_machine_scope_api_names_every_candidate_when_none_answer(self) -> None:
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            decoy = Path(raw) / "decoy"
+            decoy_bin = self.decoy_engine_root(decoy, identity=None)
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            environ = {"PATH": str(decoy_bin)}
+
+            with mock.patch.object(status, "__file__", str(script)):
+                with self.assertRaises(RuntimeError) as raised:
+                    status.machine_scope_api(environ=environ)
+
+            message = str(raised.exception)
+            self.assertIn(str(Path(raw) / "machine"), message)
+            self.assertIn(str(decoy.resolve()), message)
+            self.assertIn("no pack identity", message)
+
+    def test_machine_scope_line_shows_engine_provenance_under_version_skew(self) -> None:
+        """The skew issue #496 reports, rendered.
+
+        An engine loaded from a version-qualified plugin root can describe an
+        install of a different release. Naming the root is what makes that
+        defensible; a line without it reads as an ordinary report.
+        """
+        status = self.load_status_module()
+        line = status.format_machine_scope(
+            {
+                "state": "installed",
+                "packVersion": "0.71.22",
+                "engineRung": "path",
+                "engineRoot": "/home/u/.claude/plugins/cache/sd-ai-command-pack/sd/0.71.26",
+                "engineRefusals": [],
+                "pluginVersion": "0.71.26",
+                "comparison": "behind",
+            }
+        )
+        self.assertIn("installed 0.71.22", line)
+        self.assertIn("engine via path", line)
+        self.assertIn("sd/0.71.26", line)
+
+    def test_machine_scope_line_omits_provenance_for_the_adjacent_rung(self) -> None:
+        status = self.load_status_module()
+        line = status.format_machine_scope(
+            {
+                "state": "installed",
+                "packVersion": "0.71.26",
+                "engineRung": "adjacent",
+                "engineRoot": "/repo",
+                "engineRefusals": [],
+                "pluginVersion": "0.71.26",
+                "comparison": "current",
+            }
+        )
+        self.assertNotIn("engine via", line)
+        self.assertEqual(line, "installed 0.71.26; plugin 0.71.26; current")
+
+    def test_machine_scope_row_is_real_for_a_thin_consumer_install(self) -> None:
+        """The acceptance criterion, end to end.
+
+        The unit tests prove the ladder resolves. Only this one proves the row
+        a reader actually sees stopped saying `unavailable` for the machine
+        install the `sd-status` skill routes thin consumers to.
+        """
+        status = self.load_status_module()
+        repo = self.make_status_repo()
+        with tempfile.TemporaryDirectory() as raw:
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            home = Path(raw) / "home"
+            home.mkdir()
+            environ = {"PATH": str(PACK_ROOT / "scripts"), "HOME": str(home)}
+
+            with (
+                mock.patch.object(status, "__file__", str(script)),
+                self.stub_claude(status, []),
+            ):
+                section = status.collect_machine_scope(
+                    repo, home=home, environ=environ, state_home=Path(raw) / "state"
+                )
+
+        self.assertNotEqual(section["state"], "unavailable")
+        self.assertIn(section["state"], status.MACHINE_RECEIPT_STATES)
+        self.assertEqual(section["engineRung"], "path")
+        self.assertEqual(section["engineRoot"], str(PACK_ROOT.resolve()))
+        self.assertIn("engine via path", status.format_machine_scope(section))
+
+    def test_machine_scope_api_resolves_a_symlinked_bin_through_the_adjacent_rung(
+        self,
+    ) -> None:
+        """`~/.agents/bin` as a symlink into a pack root is not the defect.
+
+        `Path(__file__).resolve()` follows the link, so that arrangement was
+        always served by the first rung. Pinned so the ladder is not later
+        credited with a case it never needed to handle.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            link_parent = Path(raw) / "agents"
+            link_parent.mkdir()
+            link = link_parent / "bin"
+            link.symlink_to(PACK_ROOT / "scripts", target_is_directory=True)
+            script = link / "sd-ai-command-pack-status.py"
+
+            with mock.patch.object(status, "__file__", str(script)):
+                _engine, rung, root, refusals = status.machine_scope_api(
+                    environ={"PATH": ""}
+                )
+
+        self.assertEqual(rung, "adjacent")
+        self.assertEqual(root, PACK_ROOT.resolve())
+        self.assertEqual(refusals, [])
+
+    def test_machine_scope_api_restores_sys_path_on_success_and_on_failure(self) -> None:
+        """`sys.path` is process-global; a rung that widens it must narrow it.
+
+        Both exits are asserted, because the one that leaks is the exception
+        path -- where a `finally` is easy to omit and nothing downstream
+        complains until an unrelated import resolves out of a pack root.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            broken = Path(raw) / "broken"
+            broken_bin = self.decoy_engine_root(broken, identity="manifest")
+            (broken / "installer" / "machinescope.py").write_text(
+                "import sd_definitely_not_a_real_module\n", encoding="utf-8"
+            )
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            root_path = str(PACK_ROOT.resolve())
+            baseline = [entry for entry in status.sys.path if entry != root_path]
+
+            # Success path.
+            with (
+                mock.patch.object(status, "__file__", str(script)),
+                mock.patch.object(status.sys, "path", baseline.copy()),
+            ):
+                status.machine_scope_api(environ={"PATH": str(PACK_ROOT / "scripts")})
+                after_success = list(status.sys.path)
+
+            # Failure path: gate passes, import does not. The engine is
+            # evicted from `sys.modules` first -- the success block above
+            # cached it, and a cached module would make the broken one import
+            # cleanly and quietly test nothing.
+            with (
+                mock.patch.object(status, "__file__", str(script)),
+                mock.patch.object(status.sys, "path", baseline.copy()),
+                mock.patch.dict(status.sys.modules),
+            ):
+                for name in list(status.sys.modules):
+                    if name == "installer" or name.startswith("installer."):
+                        del status.sys.modules[name]
+                with self.assertRaises(RuntimeError):
+                    status.machine_scope_api(environ={"PATH": str(broken_bin)})
+                after_failure = list(status.sys.path)
+
+        self.assertEqual(after_success, baseline)
+        self.assertEqual(after_failure, baseline)
+
+    def test_machine_engine_refusal_rejects_a_world_writable_package_initializer(
+        self,
+    ) -> None:
+        """`__init__.py` runs before the engine, so it is gated like the engine.
+
+        Locking down `machinescope.py` while leaving the package initializer
+        world-writable gates the wrong file: `from installer import
+        machinescope` executes `__init__.py` first, so the attacker's code runs
+        before the module the gate protected is ever reached.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "open-init"
+            self.decoy_engine_root(root, identity="manifest")
+            initializer = root / "installer" / "__init__.py"
+            initializer.chmod(initializer.stat().st_mode | status.stat.S_IWOTH)
+            refusal = status.machine_engine_refusal(root)
+        self.assertIsNotNone(refusal)
+        self.assertIn("world-writable", refusal)
+        self.assertIn("__init__.py", refusal)
+
+    def test_machine_scope_api_passes_over_a_half_populated_adjacent_root(self) -> None:
+        """A partial `installer/` beside the script must not end the ladder.
+
+        `machinescope.py` without `__init__.py` is not an importable package.
+        Proceeding on it raises out of the loop, so a later rung that would
+        have answered is never reached -- the row reports an opaque import
+        error instead of the install it could have found.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            adjacent = Path(raw) / "adjacent"
+            package = adjacent / "installer"
+            package.mkdir(parents=True)
+            (package / "machinescope.py").write_text("", encoding="utf-8")
+            self.assertFalse((package / "__init__.py").exists())
+            binary_dir = adjacent / "bin"
+            binary_dir.mkdir()
+            script = binary_dir / "sd-ai-command-pack-status.py"
+            script.write_text("", encoding="utf-8")
+
+            with mock.patch.object(status, "__file__", str(script)):
+                _engine, rung, root, _refusals = status.machine_scope_api(
+                    environ={"PATH": str(PACK_ROOT / "scripts")}
+                )
+
+        self.assertEqual(rung, "path")
+        self.assertEqual(root, PACK_ROOT.resolve())
+
+    def test_machine_scope_api_steps_over_a_candidate_that_fails_to_import(self) -> None:
+        """A gated candidate can still fail to import; that ends it, not the ladder.
+
+        Raising on the first import failure would strand the collector on a
+        corrupt engine while a perfectly good root sat later in `PATH`. The
+        reason is not lost -- it is recorded as a refusal.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            broken = Path(raw) / "broken"
+            broken_bin = self.decoy_engine_root(broken, identity="manifest")
+            (broken / "installer" / "machinescope.py").write_text(
+                "import sd_definitely_not_a_real_module\n", encoding="utf-8"
+            )
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            environ = {
+                "PATH": os.pathsep.join([str(broken_bin), str(PACK_ROOT / "scripts")])
+            }
+            root_path = str(PACK_ROOT.resolve())
+            baseline = [entry for entry in status.sys.path if entry != root_path]
+
+            with (
+                mock.patch.object(status, "__file__", str(script)),
+                mock.patch.object(status.sys, "path", baseline.copy()),
+                mock.patch.dict(status.sys.modules),
+            ):
+                for name in list(status.sys.modules):
+                    if name == "installer" or name.startswith("installer."):
+                        del status.sys.modules[name]
+                _engine, rung, root, refusals = status.machine_scope_api(environ=environ)
+
+        self.assertEqual(rung, "path")
+        self.assertEqual(root, PACK_ROOT.resolve())
+        self.assertEqual(len(refusals), 1)
+        self.assertEqual(refusals[0]["root"], str(broken.resolve()))
+        self.assertIn("cannot import", refusals[0]["reason"])
+
+    def test_machine_engine_candidates_use_the_raw_path_entry(self) -> None:
+        """A `PATH` entry is a filesystem path, not display text.
+
+        `path_pack_bins()` stores its `directory` through `safe_text()`, which
+        rewrites every control character (`CONTROL_RE` is `[\x00-\x1f\x7f]+`,
+        tab included) to a space, strips the ends, and truncates past 500
+        characters. Rebuilding a `Path` from that names a DIFFERENT directory
+        than the one probed, so a legitimate install silently stops being a
+        candidate. A tab in a directory name is the smallest case that tells
+        the raw entry and the display text apart.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "pa\tck"
+            binary_dir = self.decoy_engine_root(root, identity="manifest")
+
+            # The sanitized spelling is a real divergence, not a rounding of it.
+            sanitized = Path(status.safe_text(str(binary_dir), limit=500)).parent
+            self.assertNotEqual(str(sanitized), str(root))
+            self.assertFalse(sanitized.exists())
+
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            candidates = status.machine_engine_candidates(
+                script, {"PATH": str(binary_dir)}
+            )
+
+        self.assertEqual([rung for rung, _ in candidates], ["adjacent", "path"])
+        self.assertEqual(candidates[1][1], root.resolve())
+
+    def test_machine_scope_api_resolves_a_plugin_root_through_the_adjacent_rung(
+        self,
+    ) -> None:
+        """A plugin root holding a real copy still resolves through rung 1.
+
+        Asserted on the resolved path, not on success: a ladder that silently
+        answered from a later rung would pass a success-only assertion while
+        loading a different copy of the engine.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "plugin-root"
+            binary_dir = self.decoy_engine_root(root, identity="plugin")
+            script = binary_dir / "sd-ai-command-pack-status.py"
+            script.write_text("", encoding="utf-8")
+
+            with mock.patch.object(status, "__file__", str(script)):
+                _engine, rung, resolved, refusals = status.machine_scope_api(
+                    environ={"PATH": ""}
+                )
+
+        self.assertEqual(rung, "adjacent")
+        self.assertEqual(resolved, root.resolve())
+        self.assertEqual(refusals, [])
+
+    def test_machine_scope_line_names_a_refused_candidate(self) -> None:
+        """A refusal reaches the reader, rather than vanishing into the row.
+
+        A silent skip degrades to plain `unavailable` -- the uninformative
+        failure this ladder exists to remove -- and hides a directory on `PATH`
+        that had no business supplying executable code.
+        """
+        status = self.load_status_module()
+        line = status.format_machine_scope(
+            {
+                "state": "installed",
+                "packVersion": "0.71.52",
+                "engineRung": "path",
+                "engineRoot": "/opt/pack",
+                "engineRefusals": [
+                    {"root": "/tmp/decoy", "reason": "world-writable: /tmp/decoy"}
+                ],
+                "pluginVersion": "0.71.52",
+                "comparison": "current",
+            }
+        )
+        self.assertIn("refused", line)
+        self.assertIn("/tmp/decoy", line)
+        self.assertIn("world-writable", line)
 
     def test_machine_scope_without_the_engine_is_unavailable_not_none(self) -> None:
         status = self.load_status_module()
@@ -3841,7 +4335,9 @@ class StatusTests(InstallTestCase):
                 raise RuntimeError("cannot resolve state root")
 
         with (
-            mock.patch.object(status, "machine_scope_api", return_value=BrokenEngine),
+            mock.patch.object(
+                status, "machine_scope_api", return_value=self.engine_api_result(BrokenEngine)
+            ),
             self.stub_claude(status, []),
         ):
             section = status.collect_machine_scope(root)
@@ -3874,7 +4370,11 @@ class StatusTests(InstallTestCase):
         ):
             with self.subTest(engine=engine.__name__):
                 with (
-                    mock.patch.object(status, "machine_scope_api", return_value=engine),
+                    mock.patch.object(
+                        status,
+                        "machine_scope_api",
+                        return_value=self.engine_api_result(engine),
+                    ),
                     self.stub_claude(status, []),
                 ):
                     section = status.collect_machine_scope(root)
