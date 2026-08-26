@@ -1287,3 +1287,41 @@ Filed Trellis task 08-26-local-provider-failure-masked as a planning-only PRD: a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 431: Record the landable blockers in the sd-review-pr retirement program
+<!-- trellis-session: v=2 fp=bb08aa43fac27ea9 -->
+
+**Date**: 2026-08-26
+**Task**: Record the landable blockers in the sd-review-pr retirement program
+**Branch**: `chore/mark-blocked-planning-tasks`
+
+### Summary
+
+The retirement program's blocking relationships lived only in PRD prose, so ranking consumers treated gated tasks as actionable. Recorded the two that the finish-work planning gate can accept in one bundle, and corrected one PRD rollback claim that had drifted.
+
+### Main Changes
+
+- 08-21-delete-review-pr-surface gains blockedOn plus a blockedReason naming the concrete dependency task ID, since work-loop.py candidate_block_status prefers blockedReason over blockedOn in a ranked report.
+- Corrected 08-22-verify-ported-integration-only-path's PRD rollback section, quoting the sentence rather than citing a line that had itself drifted 24 lines.
+- Left 08-21-retire-full-check-family unmarked: verified against sd-review-pr/SKILL.md, which forbids a full-check fallback, so it is genuinely actionable.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9a7dc5e7` | chore(task): record the two landable blockers in the retirement program |
+
+### Testing
+
+- [OK] All touched task directories are status=planning with completedAt null and branch null, at both base and head
+- [OK] No changed planning task links to an in_progress or review task outside the changed set
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
