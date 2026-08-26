@@ -2026,8 +2026,14 @@ class ReviewStageTests(InstallTestCase):
 
         Asserting only that the digest changed would prove nothing -- the
         configuration file changed too, and configurationDigest is already in
-        the plan. What is checked instead is that the ceiling is the *only*
-        added plan key, which fails if the value never reaches the plan.
+        the plan. What is checked instead is *exactly* which plan keys the
+        ceiling adds, which fails if the value never reaches the plan.
+
+        That set is two keys, not one: ``localAdvisoryRecordVersion`` rides the
+        same condition so that adopting the per-finding record moves the
+        receipt identity. It is spelled out rather than relaxed to a subset
+        check -- the assertion's whole value is that it fails when a key
+        nobody intended reaches the plan and changes every digest with it.
         """
 
         strict_root = self.make_repo()
@@ -2045,7 +2051,8 @@ class ReviewStageTests(InstallTestCase):
         self.assertNotIn("localAdvisorySeverityCeiling", strict_plan)
         self.assertEqual(ceiling_plan["localAdvisorySeverityCeiling"], "medium")
         self.assertEqual(
-            set(ceiling_plan) ^ set(strict_plan), {"localAdvisorySeverityCeiling"}
+            set(ceiling_plan) ^ set(strict_plan),
+            {"localAdvisorySeverityCeiling", "localAdvisoryRecordVersion"},
         )
         self.assertNotEqual(ceiling_plan["policyDigest"], strict_plan["policyDigest"])
 
@@ -2282,6 +2289,135 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(receipt["remoteGate"]["state"], "blocked")
         self.assertEqual(receipt["disposition"]["outstanding"], 1)
         self.assertEqual(receipt["disposition"]["advisory"], 1)
+
+    # --- the classification recorded on each finding -------------------------
+
+    def assert_counts_match_records(self, receipt: dict[str, object]) -> None:
+        """Recompute the disposition block from ``findings[]`` and compare.
+
+        Reads only ``disposition`` and ``advisory``, never ``severity``. A
+        helper that re-applied the ceiling here would be re-implementing
+        ``_is_advisory`` in the test suite, which is the duplication the
+        recorded field exists to remove -- and it would agree with the runner
+        by construction, which is the one thing this must not do.
+        """
+
+        counts = {"outstanding": 0, "advisory": 0, "dispositioned": 0, "accepted": 0}
+        for finding in receipt["findings"]:
+            disposition = finding["disposition"]
+            if disposition == "accepted":
+                counts["accepted"] += 1
+            elif disposition != "outstanding":
+                counts["dispositioned"] += 1
+            elif finding.get("advisory"):
+                counts["advisory"] += 1
+            else:
+                counts["outstanding"] += 1
+        recorded = receipt["disposition"]
+        for key, value in counts.items():
+            self.assertEqual(recorded[key], value, f"{key}: {receipt['findings']}")
+
+    def test_a_released_finding_says_so_on_its_own_record(self) -> None:
+        """T14: partition the findings reading nothing but their own records."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"), ceiling="medium")
+
+        receipt = self.report(
+            self.run_stage(root, "recorded", "--local", "prism")
+        )["receipt"]
+
+        outstanding = [
+            item for item in receipt["findings"] if item["disposition"] == "outstanding"
+        ]
+        released = [item["summary"] for item in outstanding if item["advisory"]]
+        blocking = [item["summary"] for item in outstanding if not item["advisory"]]
+
+        self.assertEqual(released, ["mixed advisory observation"])
+        self.assertEqual(blocking, ["mixed real defect"])
+        self.assert_counts_match_records(receipt)
+
+    def test_a_rebutted_finding_does_not_keep_its_advisory_flag(self) -> None:
+        """T15: the record follows the disposition, or this task's own defect
+        comes back one disposition later.
+
+        The second run reuses the stored receipt, so it is ``_redispose_receipt``
+        that recomputes -- the path where a stale ``advisory: true`` would
+        survive. It rebuts the *released* finding deliberately: rebutting the
+        blocking one passes even with the removal unimplemented.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"), ceiling="medium")
+        first = self.report(
+            self.run_stage(root, "cleared", "--local", "prism")
+        )["receipt"]
+        released = next(item for item in first["findings"] if item["advisory"])
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "cleared",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{released['id']}=rebutted",
+            )
+        )["receipt"]
+        stored = next(
+            item for item in receipt["findings"] if item["id"] == released["id"]
+        )
+
+        self.assertEqual(stored["disposition"], "rebutted")
+        self.assertNotIn("advisory", stored)
+        self.assert_counts_match_records(receipt)
+
+    def test_no_ceiling_leaves_every_finding_record_unchanged(self) -> None:
+        """T16: a strict repository's receipt gains nothing at all."""
+
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"))
+
+        receipt = self.report(
+            self.run_stage(root, "strict-records", "--local", "prism")
+        )["receipt"]
+
+        self.assertNotIn("localAdvisoryRecordVersion", receipt["plan"])
+        for finding in receipt["findings"]:
+            self.assertNotIn("advisory", finding)
+        self.assertEqual(receipt["disposition"]["outstanding"], 2)
+        self.assertEqual(receipt["disposition"]["advisory"], 0)
+        self.assert_counts_match_records(receipt)
+
+    def test_adopting_the_record_changes_the_receipt_identity(self) -> None:
+        """T17: recording the classification is a policy change, so it moves
+        the digest that names the receipt.
+
+        Asserting only that the marker is on the plan would leave the point
+        unproven: what requirement 3 asks is that a repository already running
+        with a ceiling cannot serve a cached pre-change receipt, and that is a
+        statement about ``policyDigest``, which ``_receipt_identity`` digests.
+        """
+
+        module = self.load_module_from_path(self.SCRIPT, "sd_review_local_identity")
+        root = self.make_repo()
+        self.write_config(root, modes=("mixed-severity", "clean"), ceiling="medium")
+
+        plan = self.report(
+            self.run_stage(root, "identity", "--local", "prism")
+        )["receipt"]["plan"]
+
+        self.assertEqual(plan["localAdvisoryRecordVersion"], 1)
+
+        legacy = {key: value for key, value in plan.items() if key != "policyDigest"}
+        del legacy["localAdvisoryRecordVersion"]
+        legacy["policyDigest"] = module._digest(legacy)
+        target = {"scope": "branch_delta"}
+
+        self.assertNotEqual(
+            module._receipt_identity(target, plan),
+            module._receipt_identity(target, legacy),
+        )
 
     def test_disposition_reason_outranks_advisory_release(self) -> None:
         """T13: report the strongest claim the receipt supports."""

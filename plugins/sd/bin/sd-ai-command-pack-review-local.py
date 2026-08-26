@@ -1468,6 +1468,12 @@ def build_plan(
     ceiling = policy.get("localAdvisorySeverityCeiling")
     if ceiling is not None:
         plan["localAdvisorySeverityCeiling"] = ceiling
+        # Rides the same condition, for the same reason, and earns its place by
+        # moving the digest: recording the classification on each finding is a
+        # receipt-shape change, so a repository already running with a ceiling
+        # must not answer from a receipt cached before it. Bump this when the
+        # recorded shape changes again.
+        plan["localAdvisoryRecordVersion"] = 1
     plan["policyDigest"] = _digest(plan)
     return plan
 
@@ -2364,7 +2370,7 @@ def _redispose_receipt(
         if isinstance(plan, Mapping)
         else None
     )
-    outstanding, advisory, dispositioned, accepted = _disposition_counts(
+    outstanding, advisory, dispositioned, accepted = _classify_findings(
         findings, ceiling
     )
     disposition = receipt.get("disposition")
@@ -2430,11 +2436,24 @@ def _is_advisory(finding: Mapping[str, Any], ceiling: str | None) -> bool:
     return rank <= FINDING_SEVERITY_RANK[ceiling]
 
 
-def _disposition_counts(
-    findings: Sequence[Mapping[str, Any]],
+def _classify_findings(
+    findings: Sequence[MutableMapping[str, Any]],
     ceiling: str | None,
 ) -> tuple[int, int, int, int]:
-    """Split findings into (blocking, advisory, dispositioned, accepted).
+    """Record each finding's classification and split into
+    (blocking, advisory, dispositioned, accepted).
+
+    The recording and the counting are one traversal of one predicate on
+    purpose. Counting here and marking somewhere else would give the receipt
+    two answers to the same question, which is the defect this function was
+    changed to remove -- and the summary would be the one nobody could check.
+
+    ``advisory`` is popped from every finding before anything is written, and
+    written back only where the classification actually applies: outstanding,
+    under a configured ceiling. So the key is present exactly where the current
+    plan's ceiling classified it, this pass, with no second condition to get
+    wrong when a finding leaves ``outstanding``. Popping an absent key is a
+    no-op, so a strict repository's receipt is untouched.
 
     ``blocking`` keeps the exact meaning the old single ``outstanding`` count
     had whenever no ceiling is configured, which is what makes "absent means
@@ -2448,8 +2467,9 @@ def _disposition_counts(
 
     blocking = advisory = dispositioned = accepted = 0
     for item in findings:
-        if not isinstance(item, Mapping):
+        if not isinstance(item, MutableMapping):
             continue
+        item.pop("advisory", None)
         disposition = item.get("disposition")
         # Tested ahead of the membership branch below, which now contains
         # "accepted" as well: reverse these two and every waiver is silently
@@ -2460,7 +2480,10 @@ def _disposition_counts(
         elif disposition in LOCAL_DISPOSITION_VALUES:
             dispositioned += 1
         elif disposition == "outstanding":
-            if _is_advisory(item, ceiling):
+            released = _is_advisory(item, ceiling)
+            if ceiling is not None:
+                item["advisory"] = released
+            if released:
                 advisory += 1
             else:
                 blocking += 1
@@ -2661,7 +2684,7 @@ def execute(
     findings = _normalize_findings(attempts)
     applied = _apply_local_dispositions(findings, supplied)
     ceiling = plan.get("localAdvisorySeverityCeiling")
-    outstanding, advisory, dispositioned, accepted = _disposition_counts(
+    outstanding, advisory, dispositioned, accepted = _classify_findings(
         findings, ceiling
     )
     outcome = _aggregate_outcome(attempts)
