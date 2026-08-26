@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.71.57 - 2026-08-26
+
+### Fixed
+
+- A `--successor bookkeeping` re-entry on a pull request can now complete in a
+  repository with no routed-review descriptor. `--successor bookkeeping`
+  deliberately selects zero local providers, which makes the local outcome
+  `skipped`, and the absent-router branch for PR scope accepted only `clean` --
+  so the successor's own documented route could not reach `ready`. The
+  workaround was `--remote none`, which is legitimate only where routed review
+  is optional, and it was discovered rather than documented.
+- The branch now accepts a `skipped` outcome when the plan selected zero
+  providers, and reports a third limitation, `local-skipped:<policyId>`, naming
+  the policy that chose to ask nothing. The policy is reported verbatim rather
+  than through the coarser `skipReason` vocabulary, which knows only two
+  policies and would relabel the rest as `not-requested`.
+- The deciding fact is the plan's `providers` list, not the outcome word.
+  `outcome: "skipped"` is reached two ways -- nobody was asked, and every asked
+  provider reported `skipped` in its own payload -- and `remoteGate` cannot
+  tell them apart either, since neither has outstanding findings or a terminal
+  failure. `skipped` was deliberately not split into a new outcome; the
+  unconflated fact was already in the receipt.
+
+### Changed
+
+- A non-PR review whose providers were all asked and all reported `skipped` no
+  longer reaches `ready`. It previously did, because the non-PR branch accepted
+  every `skipped`. Both branches now share one predicate, so they cannot drift
+  apart again -- that divergence is what made the bookkeeping successor
+  unreachable on a pull request. This is a behaviour change, not a bug fix, and
+  it is reachable only through an argv-adapter provider that reports
+  `status: "skipped"`; the bundled `prism` and `gito` adapters emit only
+  `clean` and `findings`.
 ## 0.71.56 - 2026-08-26
 
 ### Fixed
