@@ -77,6 +77,54 @@ finally used.
       and fixed.
 - [ ] Changelog + version; fleet rollout via normal refresh.
 
+## Field evidence from PR #551 (2026-08-25)
+
+Hit while driving PR #551 through `sd-ship until=merge` at 0.71.52. Two things
+this task should absorb, both about the *same* validator.
+
+**The unnamed-fields message is worse than it reads.** Passing the wrong
+artifact yields exactly:
+
+```
+bookkeeping evidence has unsupported or missing fields
+```
+
+No field names, no indication of which side was wrong. The caller cannot tell
+a missing key from an extra one, and `set(value) != required | {"schemaVersion"}`
+treats both identically. The acceptance criterion above already covers naming
+the shape; this is a live instance of why it matters.
+
+**The wrong artifact is the one the docs hand you.** `sd-ship` Stage 2b says
+to retain the finish-work flow's "exact-head schema-version-1 bookkeeping
+receipt" and pass it on. That receipt is `final-bundle --mode completion`
+output, `kind: "trellis-bookkeeping-validation"`. The flag wants something
+else entirely:
+
+```json
+{"schemaVersion": 1, "classification": "bookkeeping-successor",
+ "base": "<merge-base OID>", "head": "<OID>", "contentDigest": "<sha256>"}
+```
+
+Two names collide on the word "bookkeeping" and the docs point at the wrong
+one. Worth deciding whether the fix is a clearer message, a renamed flag, or
+a corrected `sd-ship` instruction — likely the doc, since the descriptor is
+the narrower and more checkable of the two.
+
+**`contentDigest` is not obtainable from documentation.** `base` is the
+resolved merge-base OID, not the PR base, and `contentDigest` is a sha256 over
+a canonicalized diff. The only way found to obtain either was an undocumented
+probe:
+
+```bash
+sd-ai-command-pack-review-local.py --repo . --scope pr \
+  --base origin/main --head <head> --local auto --successor first \
+  --attempt-id probe --plan-only --no-reuse --json
+```
+
+A required input reachable only through an unadvertised flag is a contract
+that cannot be satisfied from the docs. Consider deriving the descriptor
+inside the review script, which already computes the target it must match.
+
 ## Notes
 
 - Lightweight; PRD-only is appropriate. Diagnostics text plus tests, no contract
