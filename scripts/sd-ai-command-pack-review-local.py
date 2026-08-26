@@ -2378,6 +2378,17 @@ def _redispose_receipt(
     recorded.update(applied)
     disposition["localDispositions"] = recorded
     family_gate = plan.get("familyGate", {}) if isinstance(plan, Mapping) else {}
+    # Re-gating a stored receipt: ``attempts`` is not in scope here, so the
+    # degraded fact comes from the record the original run wrote rather than
+    # being recomputed. That is also the right semantics -- a disposition must
+    # not silently clear a limitation it did not address. A malformed or absent
+    # list reads as empty, which is not a hole: a run in which every provider
+    # died still reports an outcome in TERMINAL_FAILURES and is caught by the
+    # other half of the branch.
+    confidence = receipt.get("confidence")
+    stored_limitations = (
+        confidence.get("limitations") if isinstance(confidence, Mapping) else None
+    )
     receipt["remoteGate"] = _remote_gate(
         str(receipt.get("outcome")),
         outstanding,
@@ -2387,6 +2398,9 @@ def _redispose_receipt(
         advisory=advisory,
         dispositioned=dispositioned,
         accepted=accepted,
+        degraded=bool(stored_limitations)
+        if isinstance(stored_limitations, list)
+        else False,
     )
 
 
@@ -2463,6 +2477,7 @@ def _remote_gate(
     advisory: int = 0,
     dispositioned: int = 0,
     accepted: int = 0,
+    degraded: bool = False,
 ) -> dict[str, Any]:
     # A provider that reports ``findings`` but lists none has given evidence
     # nobody can inspect, rebut, or classify by severity, so it still blocks --
@@ -2474,7 +2489,14 @@ def _remote_gate(
     family_state = family_gate.get("state")
     if family_state in {"sibling-audit-required", "round-extension-required"}:
         return {"state": "blocked", "reason": family_state}
-    if outcome in TERMINAL_FAILURES:
+    # ``outcome`` answers what the providers *found*; it is not a verdict, and
+    # it cannot express "found things and also one lane died" -- findings
+    # outrank failure in _aggregate_outcome, deliberately, so that a run which
+    # found real problems does not report them as a failure. ``degraded``
+    # carries the other half of the fact, from the same limitations list the
+    # receipt already records, so the gate's verdict cannot contradict the
+    # receipt's own evidence.
+    if degraded or outcome in TERMINAL_FAILURES:
         return {
             "state": "blocked"
             if local_policy == "required"
@@ -2675,6 +2697,7 @@ def execute(
             advisory=advisory,
             dispositioned=dispositioned,
             accepted=accepted,
+            degraded=bool(limitations),
         ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),
