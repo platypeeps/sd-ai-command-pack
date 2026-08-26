@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.71.56 - 2026-08-26
+
+### Fixed
+
+- A remote review in which one provider found something and another died no
+  longer reports a plain `eligible` gate. `_aggregate_outcome` ranks `findings`
+  ahead of `failed` on purpose -- a run that found real problems should report
+  them as findings, not as a failure -- but the remote gate was reading that
+  single word as its whole verdict, so the terminal-failure branch never ran and
+  the gate contradicted the receipt printed beside it, which already named the
+  dead lane under `confidence.limitations`. The gate now takes a separate
+  `degraded` signal drawn from that same limitations list, so a partial run is
+  gated as limited whatever the providers found. `_aggregate_outcome` is
+  unchanged; reordering it would have traded this bug for its mirror image.
+- Re-gating a stored receipt after a disposition reads the persisted
+  `confidence.limitations` rather than recomputing it, so dispositioning a
+  finding cannot silently clear a provider limitation it did not address.
 ## 0.71.55 - 2026-08-26
 
 ### Fixed

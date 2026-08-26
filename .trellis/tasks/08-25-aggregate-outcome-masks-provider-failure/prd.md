@@ -2,7 +2,7 @@
 
 ## Problem
 
-`templates/scripts/sd-ai-command-pack-review-local.py:1979` walks a fixed
+`templates/scripts/sd-ai-command-pack-review-local.py:2165` walks a fixed
 precedence tuple:
 
 ```python
