@@ -387,10 +387,10 @@ refresh ran clean at the merged head, and which consumers it reached.
 
 - **After Step 2**, before the manifest row exists: full suite green. Proves the
   parameterization is behaviour-preserving.
-- **After Step 5**: `partition-surfaces.py --check` clean. Proves the row and
-  the override agree.
 - **After Step 3**: `tests/test_remove.py`'s existing `.gitignore` assertions
   unchanged. Proves `adopt_on_thin` did not leak into ordinary uninstall.
+- **After Step 5**: `partition-surfaces.py --check` clean. Proves the row and
+  the override agree.
 - **After Step 7**: tests 3, 9, and 15 demonstrated failing without their
   guard. Proves they test something.
 - **After Step 8**: `shipped-surface closure: clean` + four equal digests.

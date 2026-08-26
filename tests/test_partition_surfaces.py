@@ -193,7 +193,12 @@ class PartitionSurfacesTests(InstallTestCase):
         self.assertEqual(rows[0]["kind"], registry.MANAGED_BLOCK_KIND)
 
         committed = json.loads(PARTITION_ARTIFACT.read_text(encoding="utf-8"))
-        entry = next(e for e in committed["files"] if e["target"] == "AGENTS.md")
+        # Not a bare `next()`: a missing entry is exactly what this test exists
+        # to catch, and StopIteration inside a test reports as an error with an
+        # opaque traceback rather than as the failure it is.
+        entries = [e for e in committed["files"] if e["target"] == "AGENTS.md"]
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
         self.assertEqual(entry["category"], "repo-native")
         self.assertFalse(entry["sharedRuntime"])
 
