@@ -436,8 +436,9 @@ state ladder finds it, no plugin required — and reports `machineScope` with
 `state`, `packVersion`, `pluginVersion`, and a separate `comparison`. `state` is
 `none` (the engine positively reports no install), `installed`, `invalid` (a
 malformed receipt, which is an anomaly rather than an absence), or `unavailable`
-(the collector could not consult the engine at all: no `installer/` package
-beside the script, an engine that raised, or a schema it does not recognize) —
+(the collector could not consult the engine at all: no rung of the engine
+ladder below yielded a usable `installer/` package, an engine that raised, or
+a schema it does not recognize) —
 the same name, meaning, and missing-helper trigger the `workLoop` and
 `recoveryArtifacts` ledgers already use. `pluginVersion` is `unavailable` on
 *any* discovery failure: no `claude` on PATH, a nonzero exit, unparsable output,
@@ -447,6 +448,148 @@ known and differ, and `unknown` whenever either side is unavailable — a broken
 CLI can never masquerade as an up-to-date machine. The line is advisory and does
 not change the exit status; `invalid` is promoted into `anomalies` like the two
 ledgers above it, so `--expect-clean` gates on it.
+
+### Machine-scope engine resolution
+
+#### 1. Scope / Trigger
+
+`machine_scope_api()` imports the machine-scope engine. It used to look in
+exactly one place — `installer/machinescope.py` beside the directory holding
+the running script — which is an infra-integration contract, so this carries
+code-spec depth. That single rung is wrong for one shipped arrangement: a
+machine install puts the collector at `~/.agents/bin/`, so the arithmetic
+yields `~/.agents`, which ships no `installer/` at all. Because the `sd-status`
+skill routes thin consumers to precisely that copy, the row was permanently
+`unavailable` for the documented path (issue #496), hiding a real version skew.
+
+#### 2. Signatures
+
+```python
+def machine_scope_api(
+    *, environ: Mapping[str, str] | None = None
+) -> tuple[Any, str, Path, list[dict[str, str]]]:  # module, rung, root, refusals
+
+def machine_engine_candidates(
+    script: Path, environ: Mapping[str, str]
+) -> list[tuple[str, Path]]                        # ordered, deduped
+
+def machine_engine_refusal(root: Path) -> str | None   # None means accepted
+```
+
+The return type is a tuple, not a module. Any caller — including a test that
+patches `machine_scope_api` — must supply the whole tuple; a bare module
+raises `TypeError: cannot unpack non-iterable type object`.
+
+#### 3. Contracts
+
+Rungs, in order. The first accepted candidate wins:
+
+| rung | root | gated |
+| --- | --- | --- |
+| `adjacent` | `Path(__file__).resolve().parent.parent` | no |
+| `path` | parent of each `path_pack_bins()` entry, in `PATH` order | yes |
+
+`machine_receipt_state()` and `collect_machine_scope()` both carry
+`engineRung` (`"adjacent" | "path" | None`), `engineRoot` (string or `None`),
+and `engineRefusals` (bounded list of `{root, reason}`). All three keys are
+present on **every** branch, including the `unavailable` one — the caller
+reads them by name, and a partial shape turns a reportable failure into a
+`KeyError` inside a read-only status run. The keys are additive; an older
+reader that ignores them is unaffected.
+
+No new CLI flag, configuration key, or environment variable. The ladder is
+discovery, not policy; `environ` is read, never mutated.
+
+#### 4. Validation & Error Matrix
+
+The `path` rung imports executable Python from a directory `PATH` names, so it
+is gated. Refusal conditions, each reported rather than silently skipped:
+
+| condition | result |
+| --- | --- |
+| `installer/__init__.py` or `installer/machinescope.py` missing or not a regular file | refused — a lone dropped module is not a package |
+| neither `manifest.json` naming `sd-ai-command-pack` nor `.claude-plugin/plugin.json` naming `sd` | refused: `no pack identity` |
+| root, `installer/`, or `machinescope.py` carries `stat.S_IWOTH` | refused: `world-writable` |
+| no rung accepted | `RuntimeError` naming every candidate tried and each refusal |
+
+The `adjacent` rung is deliberately **not** gated: it is the tree already
+executing, and gating it would make the collector refuse to run from a checkout
+the user already trusts enough to have invoked.
+
+A refusal is never swallowed. Skipping one silently degrades to the same bare
+`unavailable` this ladder exists to remove, and hides a directory that had no
+business being on `PATH`.
+
+#### 5. Good/Base/Bad Cases
+
+- **Good**: pack checkout or plugin root — resolves through `adjacent`, and the
+  rendered line is byte-identical to before this change.
+- **Base**: machine install at `~/.agents/bin` with a trusted pack `bin/` on
+  `PATH` — resolves through `path`; the line gains `[engine via path: <root>]`.
+- **Bad**: a world-writable or unvouched root on `PATH` — refused, recorded in
+  `engineRefusals`, and rendered as `[refused <root> (<reason>)]`.
+
+#### 6. Tests Required
+
+In `tests/test_status.py`, with assertion points:
+
+- machine-install arrangement resolves — **must fail before the fix**;
+- checkout resolves through `adjacent`, asserted on the *resolved path*, not on
+  success alone;
+- symlinked `~/.agents/bin` still served by `adjacent` (`resolve()` follows it);
+- **both** identity spellings accepted — see the gotcha below;
+- unvouched and world-writable roots refused, with the reason asserted;
+- candidates tried in `PATH` order;
+- the no-rung `RuntimeError` names every candidate;
+- `sys.path` restored on the success **and** the import-failure exit — evict
+  `installer*` from `sys.modules` first, or a cached module makes the broken
+  fixture import cleanly and the test asserts nothing;
+- end to end: `collect_machine_scope` over the thin-consumer arrangement
+  renders a real row, not `unavailable`. The unit tests prove the ladder
+  resolves; only this one proves the row a reader sees changed.
+
+#### 7. Wrong vs Correct
+
+> **Warning**: the plugin cache root — the one arrangement the `path` rung
+> exists to reach — carries **no** `manifest.json`. Measured 2026-08-25:
+> `~/.claude/plugins/cache/sd-ai-command-pack/sd/<version>/` has
+> `.claude-plugin/plugin.json` and `installer/`, and no `manifest.json`. A gate
+> keyed on `manifest.json` alone rejects the target root and ships a fix that
+> fixes nothing, while every test written against a checkout still passes.
+
+##### Wrong
+
+```python
+if not (root / "manifest.json").is_file():
+    return "no pack identity"   # rejects the plugin cache root
+```
+
+##### Correct
+
+```python
+if not machine_engine_root_identified(root):   # manifest.json OR plugin.json
+    return "no pack identity"
+```
+
+##### Wrong
+
+```python
+return {..., "detail": receipt["detail"], "pluginId": MACHINE_PLUGIN_ID, ...}
+# provenance stops at the receipt; the row renders as an ordinary line
+```
+
+##### Correct
+
+```python
+"engineRung": receipt["engineRung"],
+"engineRoot": receipt["engineRoot"],
+"engineRefusals": receipt["engineRefusals"],
+```
+
+`collect_machine_scope()` rebuilds its dict field by field rather than
+spreading the receipt, so a new receipt key that is not named here is dropped
+between the receipt and the section — which renders as a normal report that
+silently hides the very skew the key was added to expose.
 
 ### `sd-status fleet` install modes, pins, and skew
 
