@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.71.58 - 2026-08-26
+## 0.71.59 - 2026-08-26
 
 ### Added
 
@@ -29,6 +29,40 @@
   enforced in `selected_files` rather than at write time, because a row
   preserved at write time still lands in the receipt and then fails the
   structural audit from the other direction.
+
+## 0.71.58 - 2026-08-26
+
+### Fixed
+
+- A pull request whose base moves after finish-work can now produce a valid
+  completion receipt without rewriting published history. Four rules closed a
+  loop: the repository blocks a merge while the PR is `BEHIND`; clearing
+  `BEHIND` without a force push means a merge commit; the completion successor
+  rule refused any merge in the range; and housekeeping refuses to merge
+  without the receipt. A caller who may not force-push had no way out of it.
+- The successor range now walks through a merge that is *proven* to be a base
+  update. Three conditions, all required: the merge's second parent is already
+  on the repository's default branch, the merge itself is not yet on that
+  branch, and `git diff-tree --cc` reports no paths -- meaning the update
+  resolved no conflict. The middle condition is not redundant: without it a
+  merge made while sitting on the base branch classifies as a base update. A
+  base tip that will not resolve keeps the old verdict; a merge is relaxed only
+  when it is positively proven to be a base update.
+- A conflicted base update reports a new reason code,
+  `completion_successor_base_update_conflicted`, instead of the generic
+  non-linear one. A conflict resolution is the branch's own content, and it is
+  the one thing this relaxation could otherwise carry past the scope rule.
+- The completion successor's scope delta is now accumulated per commit rather
+  than read as one `anchor..head` diff. The two-endpoint diff reported
+  everything the base update brought in -- other people's archived tasks among
+  it -- and the scope rule then refused the receipt over paths the branch never
+  touched. `evaluateActiveTaskSuccessorRange` has always walked this way; the
+  completion variant was the one that diverged, and both now share the
+  classification.
+- `finish_work_stale` names which of branch or head mismatched, and reports
+  both values. It previously said "does not match the current branch and exact
+  head" for either, which is how a receipt generated on a temporary rebase
+  branch came to be reported alongside `matchesCurrentHead: true`.
 
 ## 0.71.57 - 2026-08-26
 

@@ -1672,6 +1672,15 @@ receipt with a direct read-only final-bundle validator invocation —
 completion mode against the current head's empty delta, planning mode
 re-running the captured base under journal-only-recovery scope — and
 eligibility recomputes and compares the proof before merge.
+
+A head that moved because the branch was updated onto a moved base is covered
+by that same completion-mode call. The update is a merge commit, and the
+successor rule refuses merges; it makes one proven exception for a clean base
+update, so this route no longer dead-ends for a caller who may not force-push.
+See the completion-successor rule in `sd-finish-work` for the three conditions.
+A base update that resolved a conflict is still refused, under
+`completion_successor_base_update_conflicted`. Rebasing remains a valid route
+where it is available; it is no longer the only one.
 Housekeeping owns one normal KB refresh before merge so archived task
 documentation is current. A missing handoff leaves the PR open.
 The refresh creates an absent

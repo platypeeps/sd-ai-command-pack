@@ -230,10 +230,23 @@ task. Ordinary task archival, journal work, and validation need no confirmation.
    documented recovery route, not a replacement for it: a task still in the
    `planning` phase (pre-`task.py start`) continues to use `--mode planning`.
    Zero, more than one, or any unreadable active task fails closed
-   immediately with no history search. A merge commit anywhere in the range,
-   or bookkeeping history older than the bounded search window, still fails
-   closed and is not a bug — this recovers one bounded segment, never a
-   second, independent search for an older starting point.
+   immediately with no history search. Bookkeeping history older than the
+   bounded search window still fails closed and is not a bug — this recovers
+   one bounded segment, never a second, independent search for an older
+   starting point.
+
+   A merge commit in the range fails closed too, with one proven exception:
+   updating the branch onto a moved base. Clearing a `BEHIND` base without a
+   force push produces exactly that merge, and refusing it made the receipt
+   unobtainable for anyone who may not rewrite published history. Such a merge
+   is walked through, contributing no paths, when all three hold — its second
+   parent is already on the repository's default branch, the merge itself is
+   *not* yet on that branch, and `git diff-tree --cc` reports nothing, meaning
+   the update resolved no conflict. Fail any one and it is refused as before.
+   A conflicted base update reports
+   `completion_successor_base_update_conflicted` rather than the generic
+   non-linear code: the resolution is the branch's own content and nothing on
+   the base vouches for it.
 
    A valid result may carry a non-empty `advisories` array: defects in task
    files the bundle did not touch, demoted from blocking findings because

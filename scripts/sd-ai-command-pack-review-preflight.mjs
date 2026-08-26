@@ -1821,6 +1821,64 @@ function findActiveTaskHistoricalBase(taskDir, headOid) {
 // every path in every commit's OWN diff (catches a forbidden mutation later
 // reverted by another commit in the same range, which a net diff would
 // miss).
+function bookkeepingBaseTipRef() {
+  // The tip the base-update classification compares against.
+  // trellisRootDefaultBranchName returns a bare name; prefer the remote-
+  // tracking ref, which is what a real consumer has, and fall back to the
+  // local branch for a repository that has no remote.
+  const name = trellisRootDefaultBranchName();
+  if (!name) {
+    return '';
+  }
+  const remote = `origin/${name}`;
+  if (gitRefExists(remote)) {
+    return remote;
+  }
+  return gitRefExists(name) ? name : '';
+}
+
+// A merge on the first-parent chain is not automatically a defect. Updating a
+// branch onto a moved base is a merge, and it is the only way to clear a
+// BEHIND base without rewriting published history -- which the completion
+// successor rule otherwise made a precondition of producing a receipt at all.
+//
+// The relaxation is deliberately three-sided. "The second parent is already on
+// the base" is on its own also true of a merge made while sitting *on* the
+// base branch, so the merge must additionally not be on the base itself. And a
+// base tip that will not resolve is a reason to keep refusing, not a reason to
+// soften the verdict: a merge is relaxed only when it is positively proven to
+// be a base update, never when this function merely cannot prove otherwise.
+function classifyFirstParentMerge(oid, fields) {
+  if (fields.length === 2 && fields[0] === oid) {
+    return 'linear';
+  }
+  if (fields.length !== 3 || fields[0] !== oid) {
+    return 'non-linear';
+  }
+  const baseTip = bookkeepingBaseTipRef();
+  if (!baseTip) {
+    return 'non-linear';
+  }
+  if (runGit(['merge-base', '--is-ancestor', fields[2], baseTip]).status !== 0) {
+    return 'non-linear';
+  }
+  if (runGit(['merge-base', '--is-ancestor', oid, baseTip]).status === 0) {
+    return 'non-linear';
+  }
+  // Everything a clean base update carries is already on the base, so it
+  // contributes nothing the branch is answerable for. A conflict resolution
+  // is the branch's own content, and it is the one thing this relaxation
+  // could otherwise smuggle past the scope rule -- so ask git, which reports
+  // exactly the paths that differ from every parent.
+  const combined = runGit(
+    ['diff-tree', '--cc', '-r', '--name-only', '--no-commit-id', oid],
+  );
+  if (combined.status !== 0) {
+    return 'non-linear';
+  }
+  return combined.stdout.trim() ? 'conflicted-base-update' : 'base-update';
+}
+
 function evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid) {
   const findings = [];
   const add = (reasonCode, path, message, disposition = 'invalid') => {
@@ -1853,11 +1911,24 @@ function evaluateActiveTaskSuccessorRange(taskDir, historicalBase, headOid) {
     const fields = parents.status === 0
       ? parents.stdout.trim().split(/\s+/).filter(Boolean)
       : [];
-    if (fields.length !== 2 || fields[0] !== oid) {
+    const shape = parents.status === 0
+      ? classifyFirstParentMerge(oid, fields)
+      : 'non-linear';
+    if (shape === 'base-update') {
+      // Nothing to attribute to the branch, and nothing to diff: every path
+      // this commit brings in is already on the base.
+      parent = oid;
+      continue;
+    }
+    if (shape !== 'linear') {
       add(
-        'completion_successor_history_non_linear',
+        shape === 'conflicted-base-update'
+          ? 'completion_successor_base_update_conflicted'
+          : 'completion_successor_history_non_linear',
         '',
-        `active-task completion successor commit ${oid.slice(0, 12)} must have exactly one parent`,
+        shape === 'conflicted-base-update'
+          ? `active-task completion successor commit ${oid.slice(0, 12)} updates the base but resolves a conflict; the resolution is the branch's own content and is not covered by the base`
+          : `active-task completion successor commit ${oid.slice(0, 12)} must have exactly one parent`,
         parents.status === 0 ? 'invalid' : 'indeterminate',
       );
       parent = oid;
@@ -2181,20 +2252,54 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
     );
   }
   const commitEvidence = [];
+  // The scope delta is accumulated per commit rather than read as a single
+  // anchor..head diff. A two-endpoint diff reports everything a base update
+  // brought in -- other people's archived tasks among it -- and the scope rule
+  // then refuses the receipt over paths the branch never touched. This is the
+  // shape evaluateActiveTaskSuccessorRange has always used; the completion
+  // variant is the one that diverged.
+  const unionEntries = [];
+  const seenEntryKeys = new Set();
+  let parent = anchorOid;
+  let unionUnavailable = false;
   for (const oid of commits.slice(0, MAX_BOOKKEEPING_SUCCESSOR_COMMITS)) {
     const parents = runGit(['rev-list', '--parents', '-n', '1', oid]);
     const fields = parents.status === 0
       ? parents.stdout.trim().split(/\s+/).filter(Boolean)
       : [];
-    if (fields.length !== 2 || fields[0] !== oid) {
-      add(
-        'completion_successor_history_non_linear',
-        '',
-        `successor commit ${oid.slice(0, 12)} must have exactly one parent`,
-        parents.status === 0 ? 'invalid' : 'indeterminate',
-      );
+    const shape = parents.status === 0
+      ? classifyFirstParentMerge(oid, fields)
+      : 'non-linear';
+    if (shape === 'base-update') {
+      parent = oid;
       continue;
     }
+    if (shape !== 'linear') {
+      add(
+        shape === 'conflicted-base-update'
+          ? 'completion_successor_base_update_conflicted'
+          : 'completion_successor_history_non_linear',
+        '',
+        shape === 'conflicted-base-update'
+          ? `successor commit ${oid.slice(0, 12)} updates the base but resolves a conflict; the resolution is the branch's own content and is not covered by the base`
+          : `successor commit ${oid.slice(0, 12)} must have exactly one parent`,
+        parents.status === 0 ? 'invalid' : 'indeterminate',
+      );
+      parent = oid;
+      continue;
+    }
+    const commitEntries = bookkeepingChangedEntries(parent, oid, () => {});
+    if (commitEntries === null) {
+      unionUnavailable = true;
+    } else {
+      for (const entry of commitEntries) {
+        const key = `${entry.oldPath || ''}\u0000${entry.path || ''}\u0000${entry.mode || ''}`;
+        if (seenEntryKeys.has(key)) continue;
+        seenEntryKeys.add(key);
+        unionEntries.push(entry);
+      }
+    }
+    parent = oid;
     const subjectArgs = ['log', '-1', '--format=%s', oid];
     const subjectResult = runGit(subjectArgs);
     if (subjectResult.status !== 0) {
@@ -2213,8 +2318,7 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
     });
   }
 
-  const entries = bookkeepingChangedEntries(anchorOid, headOid, () => {});
-  if (entries === null) {
+  if (unionUnavailable) {
     add(
       'completion_successor_history_unavailable',
       '',
@@ -2223,6 +2327,7 @@ function evaluateCompletionSuccessorRange(anchorOid, headOid) {
     );
     return { status: 'indeterminate', evidence: {}, findings };
   }
+  const entries = unionEntries;
   const paths = [...new Set(
     entries.flatMap((entry) => [entry.oldPath, entry.path].filter(Boolean)),
   )].sort();
