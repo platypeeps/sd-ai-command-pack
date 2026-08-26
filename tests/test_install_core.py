@@ -4332,6 +4332,25 @@ class AgentsRoutingBlockTests(InstallTestCase):
         self.assertTrue(destination.is_symlink())
         self.assertFalse(destination.exists())
 
+    # --- 16 ----------------------------------------------------------------
+    def test_the_writer_refuses_to_create_the_file_a_caller_hands_it(self) -> None:
+        # The writer's own create_if_absent guard, reached the only way it
+        # can be: by calling the writer directly on an absent destination.
+        # `selected_files` is the enforcement point and never hands this row
+        # over, so a caller that assembles PackFiles itself -- bypassing the
+        # selection -- is what this guard exists for. Without it the writer
+        # falls through and writes the file, which is why the assertion is on
+        # the file staying absent and not merely on the status word.
+        root = self.make_repo(".github")
+        destination = self.agents_path(root)
+        self.assertFalse(destination.exists())
+
+        result = install.install_managed_block(
+            self.routing_file(), root, dry_run=False
+        )
+        self.assertEqual(result.status, install.InstallStatus.PRESERVED)
+        self.assertFalse(destination.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,7 +30,6 @@ from installer.registry import (
     IF_NOT_EXISTS,
     LOCAL_ENV_GITIGNORE_PATTERNS,
     MANAGED_BLOCK_SPECS,
-    ManagedBlockSpec,
     PLATFORM_LOCAL_GITIGNORE_PATTERNS,
     REVIEW_ARTIFACT_GITIGNORE_PATTERNS,
     TRELLIS_BLANKET_GITIGNORE_ENTRIES,
@@ -38,6 +37,7 @@ from installer.registry import (
     TRELLIS_GITIGNORE_PATTERNS,
     TRELLIS_GITIGNORE_START,
     TRELLIS_GITIGNORE_TARGET,
+    ManagedBlockSpec,
 )
 from installer.status import (
     CONFLICT_STATUSES,
