@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-08-26: Priority raised P2->P1 per parallel-session friction review; root-cause fix for shared-checkout corruption / session-number collisions. See Parallelism Doctrine in ~/.claude/CLAUDE.md.",
+  "notes": "2026-08-26: Priority raised P2->P1 per parallel-session friction review. Root cause rather than symptom: add_session.py derives the session number from the working tree alone, so two sessions on separate branches allocate the same number and their journal entries collide at merge. The fix is to allocate the number when the work lands, not when the branch is created.",
   "meta": {}
 }

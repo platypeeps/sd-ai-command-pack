@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-08-26: Priority raised P2->P1 per parallel-session friction review; root-cause fix for shared-checkout corruption / session-number collisions. See Parallelism Doctrine in ~/.claude/CLAUDE.md.",
+  "notes": "2026-08-26: Priority raised P2->P1 per parallel-session friction review. Root cause rather than symptom: two sessions writing one shared checkout corrupt each other's branch and index state, which surfaces as unexplained dirty paths and mid-run branch switches. The fix is to give every writing session its own worktree.",
   "meta": {}
 }
