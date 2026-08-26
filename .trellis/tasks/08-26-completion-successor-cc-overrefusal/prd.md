@@ -184,4 +184,13 @@ diagnostics from lying about why anything was refused.
       the same files must end in a valid receipt.
 - [ ] All four copies of `sd-ai-command-pack-review-preflight.mjs` are
       byte-identical and `make generate` reports `shipped-surface closure:
-      clean`.
+      clean`. The canonical copy is `templates/scripts/`; the three generated
+      mirrors are `scripts/`, `plugins/sd/bin/`, and
+      `plugins/sd/machine-payload/scripts/`. Verified by a single digest across
+      all four:
+
+      ```bash
+      find . -name sd-ai-command-pack-review-preflight.mjs -not -path './.git/*' \
+        -print0 | xargs -0 shasum -a 256 | awk '{print $1}' | sort -u | wc -l
+      # expect exactly 1
+      ```
