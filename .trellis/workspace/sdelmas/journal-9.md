@@ -1201,3 +1201,48 @@ The installer now manages a marker-delimited routing block in a repository's own
 ### Next Steps
 
 - None - task complete
+
+
+## Session 428: File the completion-successor over-refusal on base updates
+<!-- trellis-session: v=2 fp=e75149c792c82522 -->
+
+**Date**: 2026-08-26
+**Task**: File the completion-successor over-refusal on base updates
+**Branch**: `docs/file-completion-successor-cc-overrefusal`
+
+### Summary
+
+Filed 08-26-completion-successor-cc-overrefusal after PR #560 could not obtain a finish-work receipt despite being green and CLEAN-mergeable. Established by measurement that git diff-tree --cc does not mean conflict: it reports any path whose merged content differs from both parents, which includes clean auto-merges. Planning only; no behavior change.
+
+### Main Changes
+
+- Filed the task with a 187-line evidence-grounded PRD naming two complementary directions: classify accurately via git merge-tree, and scope-check the resolution's paths rather than refusing the receipt
+- Recorded the premise correction against a scratch-repo reproduction: git merge exits 0 with no conflict and --cc still reports the file, so the reason code, its message, sd-finish-work SKILL.md, and SD_AI_COMMAND_PACK.md all describe something narrower than what ships
+- Killed the tempting cheap fix in advance: replaying all four #560 base updates with git merge-tree --write-tree returned a real conflict for every one, so narrowing the check to true conflicts would have left #560 exactly as blocked
+- Showed the refusal is structural rather than incidental: CI requires every shipped-surface PR to write a top CHANGELOG heading plus three manifests plus regenerated ledgers, so any two such PRs collide by construction and the second is refused
+- Ran the project planning-adversarial-review contract; five concerns addressed, including a wrong line number, a five-versus-four copy count, an unsourced version-bump claim, and ambiguous mirror paths
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2a752f17` | docs(task): file the completion-successor over-refusal on base updates |
+| `e40edcd8` | docs(task): name the four preflight copies and the byte-identity check |
+| `d9a4c00d` | docs(task): repoint the predecessor PRD citation at its archived path |
+| `5a525844` | docs(task): make the remaining call-site citations canonical |
+
+### Testing
+
+- [OK] Review preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-review scope=pr on PR 563: status ready, exit 0; sd-check 7/7 passed; gito clean, 0 findings; remoteGate eligible (local-stage-terminal)
+- [OK] All seven file:line citations in the PRD re-derived against the post-base-update tree
+- [OK] Base update onto origin/main: merge-tree exit 0, git diff-tree --cc empty
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
