@@ -370,6 +370,48 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(missing["reasonCodes"], ["finish_work_missing"])
         self.assertEqual(stale["reasonCodes"], ["finish_work_stale"])
 
+    def test_finish_work_stale_names_the_mismatched_half(self) -> None:
+        # The PRD hit the confusing case: a receipt generated on a temporary
+        # rebase branch reported `matchesCurrentHead: true` alongside "does not
+        # match the current branch and exact head". One message for two facts
+        # tells the caller to re-run finish-work without telling them why the
+        # last run did not count.
+        head_only = self.evaluate(
+            self.local_request(finishWorkReceipt=finish_work_receipt(head=OTHER_HEAD)),
+            FixtureRunner(self.repo),
+        )
+        branch_only = self.evaluate(
+            self.local_request(
+                finishWorkReceipt=finish_work_receipt(branch="tmp/rebase")
+            ),
+            FixtureRunner(self.repo),
+        )
+        both = self.evaluate(
+            self.local_request(
+                finishWorkReceipt=finish_work_receipt(
+                    head=OTHER_HEAD, branch="tmp/rebase"
+                )
+            ),
+            FixtureRunner(self.repo),
+        )
+        for result in (head_only, branch_only, both):
+            self.assertEqual(result["reasonCodes"], ["finish_work_stale"], result)
+
+        # The call site appends "rerun sd-finish-work for the current head
+        # before housekeeping", so only the leading clause is this message.
+        def records(result) -> str:
+            return result["diagnostic"].split(";")[0]
+
+        self.assertIn("head", records(head_only))
+        self.assertNotIn("branch", records(head_only))
+
+        self.assertIn("branch", records(branch_only))
+        self.assertIn("tmp/rebase", records(branch_only))
+        self.assertNotIn("head", records(branch_only))
+
+        self.assertIn("branch", records(both))
+        self.assertIn("head", records(both))
+
     def test_forged_or_unavailable_finish_work_receipt_fails_closed(self) -> None:
         mismatch_runner = FixtureRunner(self.repo)
         mismatch_runner.finish_work_result = finish_work_receipt()

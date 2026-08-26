@@ -353,11 +353,28 @@ def revalidate_finish_work_receipt(
         "matchesCurrentHead": receipt_head == head,
         "verified": False,
     }
-    if receipt_head != head or receipt_branch != branch:
+    head_matches = receipt_head == head
+    branch_matches = receipt_branch == branch
+    if not head_matches or not branch_matches:
+        # Name the half that actually differs. Reporting both for either one
+        # left the caller reading "does not match the current branch and exact
+        # head" beside a summary saying ``matchesCurrentHead: true`` -- which
+        # is the exact shape produced by generating a receipt on a temporary
+        # rebase branch, and the one case where knowing which half mismatched
+        # is the whole diagnosis.
+        parts = []
+        if not branch_matches:
+            parts.append(
+                f"branch {receipt_branch!r} but the current branch is {branch!r}"
+            )
+        if not head_matches:
+            parts.append(
+                f"head {receipt_head[:12]} but the current head is {head[:12]}"
+            )
         return (
             "stale",
             summary,
-            "finish-work receipt does not match the current branch and exact head",
+            f"finish-work receipt records {' and '.join(parts)}",
         )
     helper = Path(__file__).resolve().with_name(
         "sd-ai-command-pack-review-preflight.mjs"
