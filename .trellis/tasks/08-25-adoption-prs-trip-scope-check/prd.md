@@ -80,12 +80,64 @@ profile, is not the whole of the pack's fleet machinery —
 `candidatePrepare`/`candidateChecks`, and a rollout policy the controller
 consumes.
 
-**Open question, deliberately unsettled here:** whether the `sd-fleet-refresh`
-lane executes the review-scope check at all. Qualifying heads take
-integration-only review, which may not reach it. If the lane never runs the
-check, the defect is confined to hand-rolled adoption and the fix is smaller
-than requirement 1 assumes. Settle this before design — it is the difference
-between a controller bug and an operator-path gap.
+**That open question is now settled: the lane can run the classifier, but never
+in a mode that can fail.** Three findings:
+
+1. No consumer's `candidateChecks` in `docs/fleet/consumers.json` invokes
+   `sd-ai-command-pack-review-scope.sh` or `sd-ai-command-pack-full-check.sh`
+   *directly*. But two of the nine do not declare repo-local commands at all:
+   `rwbp-website` runs
+   `node "$HOME/.agents/bin/sd-ai-command-pack-review-preflight.mjs"` and
+   `se-ai-command-pack` runs the pack's housekeeping self-test. Both are pack
+   helpers.
+2. That preflight helper **does** reach the scope classifier.
+   `checkScopeAdvisory()` in `scripts/sd-ai-command-pack-review-preflight.mjs:4880`
+   shells out to `sd-ai-command-pack-review-scope.sh`. So the classifier
+   executes inside `rwbp-website`'s lane on every campaign.
+3. It cannot fail there, for two independent reasons. The helper pins
+   `SD_AI_COMMAND_PACK_SCOPE_CHECK: 'advisory'`, and `is_advisory` in the bash
+   script (`:449`) routes that to `warn` plus a machine-readable
+   `sd-ai-command-pack-scope-advisory:` line rather than `fail`. And the Node
+   side never inspects the exit status at all — it greps stdout for the marker
+   and calls `warn()`. A fatal advisory would break the helper's own contract.
+
+Separately, `LANE_STAGES` in `scripts/sd-ai-command-pack-fleet-controller.py`
+orders `local-checks` **before** `pr-publication`, so no PR exists when
+candidate checks run and the body resolver has nothing to read. That is a second
+reason the lane cannot trip on the body, not the first one.
+
+So the PR #292 failure came from GitHub Actions **after** publication, not from
+the fleet lane. The distinction that matters for the campaign is *not enforced*
+rather than *not invoked*: the fleet lane will surface this defect as a warning
+on `rwbp-website`, and will not block on it anywhere.
+
+## What survives
+
+The defect narrows to two blocking paths, plus one non-blocking surface:
+
+- an operator running `check:full` by hand on an adoption branch, which is the
+  repro in **Evidence** and still fails at exit 1;
+- a consumer whose own CI enforces the check on the published PR;
+- non-blocking: `rwbp-website`'s lane, where the pack preflight will emit the
+  `sd-ai-command-pack-scope-advisory:` warning on every adoption campaign. It
+  costs nothing but noise, and it is the one place the fleet operator will
+  actually see this defect without going looking for it.
+
+As of 2026-08-25 the second path is **empty across the fleet**:
+`platypeeps/hoa-manager#293` deleted the only mirror. That is a statement about
+today's fleet, not a guarantee — nothing stops a consumer from adding one, and
+the pack-owned templates still tell them the section is required (requirement 3).
+
+This materially shrinks requirement 1. "Emit the section during adoption" no
+longer has a controller bug to fix: the controller would be adding a section
+that nothing in its own lane can fail on — one lane warns, none blocks. The remaining honest options are to exempt the
+adoption diff in the scope check itself, or to accept that the check is a
+manual-path tool and say so in the templates. Re-open requirement 1 against
+these facts before design.
+
+Also verified while settling this: hoa-manager's `candidateChecks` entry still
+resolves — `scripts/check-review-preflight.mjs` still exists after #293, which
+removed one function from it rather than the file. No fleet-registry breakage.
 
 ## How it was found
 
