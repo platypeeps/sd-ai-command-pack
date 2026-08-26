@@ -4008,6 +4008,35 @@ class StatusTests(InstallTestCase):
         self.assertEqual(refusals[0]["root"], str(broken.resolve()))
         self.assertIn("cannot import", refusals[0]["reason"])
 
+    def test_machine_engine_candidates_use_the_raw_path_entry(self) -> None:
+        """A `PATH` entry is a filesystem path, not display text.
+
+        `path_pack_bins()` stores its `directory` through `safe_text()`, which
+        rewrites every control character (`CONTROL_RE` is `[\x00-\x1f\x7f]+`,
+        tab included) to a space, strips the ends, and truncates past 500
+        characters. Rebuilding a `Path` from that names a DIFFERENT directory
+        than the one probed, so a legitimate install silently stops being a
+        candidate. A tab in a directory name is the smallest case that tells
+        the raw entry and the display text apart.
+        """
+        status = self.load_status_module()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "pa\tck"
+            binary_dir = self.decoy_engine_root(root, identity="manifest")
+
+            # The sanitized spelling is a real divergence, not a rounding of it.
+            sanitized = Path(status.safe_text(str(binary_dir), limit=500)).parent
+            self.assertNotEqual(str(sanitized), str(root))
+            self.assertFalse(sanitized.exists())
+
+            script = self.machine_install_arrangement(Path(raw) / "machine")
+            candidates = status.machine_engine_candidates(
+                script, {"PATH": str(binary_dir)}
+            )
+
+        self.assertEqual([rung for rung, _ in candidates], ["adjacent", "path"])
+        self.assertEqual(candidates[1][1], root.resolve())
+
     def test_machine_scope_without_the_engine_is_unavailable_not_none(self) -> None:
         status = self.load_status_module()
         root = self.make_status_repo()

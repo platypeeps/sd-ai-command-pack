@@ -1745,16 +1745,35 @@ def machine_engine_candidates(
     bare helper invocation would already have reached it. The toolchain
     resolution ladder is deliberately NOT reused here: its rungs are the
     override, `<repo>/scripts`, and `~/.agents/bin`, and the last of those is
-    precisely the rung that fails.
+    precisely the rung that fails. `PATH` is scanned directly rather than
+    through `path_pack_bins()`; the comment on that loop says why.
     """
     candidates: list[tuple[str, Path]] = [("adjacent", script.resolve().parent.parent)]
     seen = {str(candidates[0][1])}
-    for entry in path_pack_bins(environ):
-        root = Path(entry["directory"]).resolve().parent
-        if str(root) in seen:
+    seen_entries: set[str] = set()
+    matched = 0
+    # `PATH` is read here rather than through `path_pack_bins()`, whose
+    # `directory` is `safe_text()` output: control characters replaced,
+    # surrounding whitespace stripped, and anything past 500 characters
+    # truncated with an ellipsis. That is display text. Rebuilding a `Path`
+    # from it can name a DIFFERENT directory than the one that was probed --
+    # `/opt/pack/bin ` is not `/opt/pack/bin` -- so a legitimate install
+    # silently stops being a candidate. `path_pack_bins()` keeps the sanitized
+    # spelling because it feeds a report; a filesystem lookup needs the raw
+    # entry, bounded by the same ceiling.
+    for raw in environ.get("PATH", "").split(os.pathsep):
+        if not raw or raw in seen_entries:
             continue
-        seen.add(str(root))
-        candidates.append(("path", root))
+        seen_entries.add(raw)
+        if not (Path(raw) / TOOLCHAIN_FILENAME).is_file():
+            continue
+        matched += 1
+        root = Path(raw).resolve().parent
+        if str(root) not in seen:
+            seen.add(str(root))
+            candidates.append(("path", root))
+        if matched == MAX_PATH_PACK_ENTRIES:
+            break
     return candidates
 
 
