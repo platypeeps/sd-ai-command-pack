@@ -52,6 +52,15 @@ PR scope is the only scope in which the successor-head re-entry is defined to
 run, so the intended route is unreachable whenever the routed-review
 descriptor is absent.
 
+> Correction, 2026-08-25, left in place rather than rewritten because the
+> sentence above is the original report. "Only scope ... defined to run" is
+> true of the ship flow, not of the tool:
+> `test_bookkeeping_reentry_has_its_own_bounded_round_budget`
+> (`tests/test_review_controller.py:2734`) drives `--successor bookkeeping` at
+> `--scope branch` and reaches `ready` today. The deadlock is specific to PR
+> scope, which is what the rest of this PRD describes; nothing below depends
+> on the stronger claim.
+
 Observed on PR #551, attempt 6:
 
 ```
@@ -83,21 +92,137 @@ because `remoteIntegration.requirement` is `optional` and the gate's own
 `remote-intentionally-skipped` path returns `ready`. That is a property of
 this repository's config, not a general answer.
 
-## Open question to settle first
+## Open question, settled
 
-`skipped` is currently doing double duty. "Zero providers were selected"
-and "providers ran and had nothing to say" are different facts wearing one
-word. Decide whether the fix is:
+Settled 2026-08-25 after reading the code. The PRD offered two answers;
+neither is the one taken, because the investigation found a fact the PRD did
+not have.
 
-- accept `skipped` alongside `clean` on the absent-router PR branch, matching
-  the non-PR branch; or
-- give the zero-selected case its own outcome, so the PR branch can accept
-  *that* without also accepting a genuine provider skip.
+### What the investigation found
 
-The second is likely correct but is the larger change. Cross-reference
-`08-25-aggregate-outcome-masks-provider-failure`, which is the same family:
-the outcome vocabulary is serving as both "what happened" and "is this
-acceptable", and the two branches disagree on the mapping.
+`skipped` is doing double duty, exactly as the PRD suspected, and the second
+meaning is not theoretical. `_aggregate_outcome` reaches `skipped` two ways:
+
+```python
+def _aggregate_outcome(attempts):
+    if not attempts:
+        return "skipped"                              # (a) nobody was asked
+    ...
+    if statuses <= {"clean", "skipped"}:
+        return "clean" if "clean" in statuses else "skipped"   # (b) all declined
+```
+
+Case (b) is reachable. `_parse_argv_payload` accepts any provider-reported
+status that is in `OUTCOMES`, and `OUTCOMES` contains `skipped`:
+
+```python
+if not isinstance(value, dict) or value.get("status") not in OUTCOMES:
+    return None
+```
+
+So an argv-adapter provider can run, report `skipped`, and produce an
+aggregate `skipped` that means "providers were asked and declined to answer".
+That is an unexplained absence of evidence. Case (a) is a deliberate
+zero-selection. Accepting one is reasonable; accepting the other is a hole.
+
+This rules out PRD option 1. Accepting `skipped` alongside `clean` on the
+absent-router PR branch, to match the non-PR branch, would let a PR reach
+`ready` with no routed review *and* no local review, on the strength of
+providers having declined.
+
+### Why not a new outcome word either
+
+PRD option 2 -- give the zero-selected case its own outcome -- is the larger
+change, and it is unnecessary, because the unconflated fact is already in the
+receipt. `build_plan` records the selection:
+
+```python
+"providers": [_provider_row(item) for item in selected],
+```
+
+`plan["providers"] == []` is precisely "zero providers were selected", with no
+ambiguity to resolve. Case (b) has a non-empty `plan["providers"]`.
+
+This is the same shape as the fix taken in
+`08-25-aggregate-outcome-masks-provider-failure`, and deliberately so. There
+the remote gate stopped reading `outcome` as a verdict and drew a separate
+`degraded` signal from `confidence.limitations`, a fact the receipt already
+recorded. Here the router stops reading `outcome` as a verdict and draws the
+"was anything actually asked" fact from `plan["providers"]`, which the receipt
+already records. **The shared decision, stated once for both tasks: `outcome`
+describes what the providers found; it is not a verdict, and it must not be
+widened to carry one. When a gate needs a fact `outcome` cannot express, it
+reads that fact from where the receipt already keeps it.**
+
+`review.py` already works this way in one place, which is corroboration rather
+than coincidence -- `_router_local_summary` disambiguates a `skipped` outcome
+by reading `plan["policyId"]`:
+
+```python
+    if outcome == "skipped":
+        policy_id = plan.get("policyId")
+        summary["skipReason"] = (
+            "bookkeeping-successor"
+            if policy_id == "bookkeeping-successor"
+            else "explicit-none"
+            if policy_id == "explicit-none"
+            else "not-requested"
+        )
+```
+
+That mapping is not reused as the predicate, for two reasons. It is
+incomplete -- `build_plan` also produces `f"{risk_class}-skip"`, a fourth
+deliberate zero-selection that the mapping labels `not-requested` -- and it is
+indirect: after the policy chain, `selected.extend(by_id[item] for item in
+required if item not in selected_ids)` can add required providers back, so a
+`policyId` naming a zero-selection policy does not guarantee a zero selection.
+`plan["providers"]` survives both. `skipReason` stays as it is, for reporting.
+
+### The decision
+
+Accept `skipped` on the absent-router PR branch **only when the plan selected
+zero providers**, and pin the non-PR branch to the same predicate.
+
+### The consequence that is not a bug fix
+
+Today the non-PR branch accepts every `skipped`, case (b) included. Under one
+shared predicate it no longer does. That is an intended tightening, not a
+side effect: a non-PR review in which every provider was asked and declined
+gives zero assurance, and reporting `ready` for it is the same defect in the
+other branch. It is called out here because it is a behavior change beyond the
+reported symptom, and it belongs in the changelog as one.
+
+### Two things the code review turned up, recorded so they are not re-litigated
+
+**The documented rule already promises this fix.**
+`templates/docs/SD_AI_COMMAND_PACK.md:1037` states the absent-router rule in
+terms of the gate, not the outcome:
+
+> When integration is optional and the descriptor is absent, only a local
+> receipt whose `remoteGate.state` is `eligible` may complete, with
+> `router-not-configured` and `zero-remote-confidence` limitations.
+
+A zero-selected receipt has no outstanding findings and no terminal failure, so
+`_remote_gate` returns `{"state": "eligible", "reason": "local-stage-terminal"}`
+for it -- the same reason a clean receipt carries, which is why the doc's
+enumeration of four gate reasons does not need a fifth entry; one of the four
+simply covers two receipt shapes. Under the documented rule it may already complete. The code refuses it
+only because `route()` asks `local_status != "clean"` instead. So this is not a
+new permission being granted; it is the code being brought to the rule the docs
+already state.
+
+**But reading the gate is not the fix either.** The obvious simplification --
+replace the predicate with `receipt["remoteGate"]["state"] == "eligible"` and
+match the docs exactly -- was checked and rejected. `_remote_gate` returns
+`eligible / local-stage-terminal` for case (b) as well: providers that were
+asked and declined leave no outstanding findings and no terminal failure, so
+the gate cannot tell (a) from (b) any more than `outcome` can. Aligning to the
+gate would move the conflation rather than resolve it. The plan's provider list
+remains the only unconflated source.
+
+The consequence is that the code will be *stricter* than the documented rule
+for case (b). That divergence has to be written into the doc paragraph, not
+left implicit -- see the implementation plan's docs step.
 
 ## Acceptance criteria
 
