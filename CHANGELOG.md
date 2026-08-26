@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.71.56 - 2026-08-26
+## 0.71.57 - 2026-08-26
 
 ### Added
 
@@ -14,7 +14,11 @@
   every managed-block target. `installer/fileops.py`, `installer/thin.py`,
   `installer/removal.py`, and the thin re-sweep all read it instead of carrying
   their own copies, so a new block target is one row rather than four
-  hand-edited call sites that can disagree.
+  hand-edited call sites that can disagree. The field that governs invalid
+  UTF-8 is named `preserve_invalid_utf8_on_strip`, because it applies to the
+  removal and thin paths only: installing a block always round-trips bytes it
+  cannot decode, so that a consumer file the pack does not fully understand is
+  merged rather than refused.
 
 ### Fixed
 
@@ -26,6 +30,23 @@
   preserved at write time still lands in the receipt and then fails the
   structural audit from the other direction.
 
+## 0.71.56 - 2026-08-26
+
+### Fixed
+
+- A remote review in which one provider found something and another died no
+  longer reports a plain `eligible` gate. `_aggregate_outcome` ranks `findings`
+  ahead of `failed` on purpose -- a run that found real problems should report
+  them as findings, not as a failure -- but the remote gate was reading that
+  single word as its whole verdict, so the terminal-failure branch never ran and
+  the gate contradicted the receipt printed beside it, which already named the
+  dead lane under `confidence.limitations`. The gate now takes a separate
+  `degraded` signal drawn from that same limitations list, so a partial run is
+  gated as limited whatever the providers found. `_aggregate_outcome` is
+  unchanged; reordering it would have traded this bug for its mirror image.
+- Re-gating a stored receipt after a disposition reads the persisted
+  `confidence.limitations` rather than recomputing it, so dispositioning a
+  finding cannot silently clear a provider limitation it did not address.
 ## 0.71.55 - 2026-08-26
 
 ### Fixed

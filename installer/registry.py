@@ -2340,9 +2340,15 @@ class ManagedBlockSpec:
     start: str
     end: str
     label: str
-    # The destination may hold bytes that are not valid UTF-8, so reads and
-    # writes round-trip through surrogateescape instead of failing.
-    preserve_invalid_utf8: bool = False
+    # Removal and thin conversion round-trip the destination's bytes through
+    # surrogateescape instead of failing on invalid UTF-8. Named for where it
+    # applies: `install_managed_block` always round-trips, for every target,
+    # so that merging a block into a consumer file the pack cannot fully
+    # decode succeeds rather than raising. Stripping is the asymmetric half --
+    # with this False, a file that does not decode cleanly is left untouched
+    # rather than rewritten, which is the safer default for a destructive
+    # edit and the wrong one for an additive merge.
+    preserve_invalid_utf8_on_strip: bool = False
     # Thin conversion leaves the block in place and stops managing it, rather
     # than stripping it. Only for blocks describing the consumer's own tree,
     # which outlives the payload. Ordinary uninstall never adopts.
@@ -2367,7 +2373,7 @@ MANAGED_BLOCK_SPECS: dict[str, ManagedBlockSpec] = {
         start=COPILOT_GUIDANCE_START,
         end=COPILOT_GUIDANCE_END,
         label=COPILOT_INSTRUCTIONS_TARGET.as_posix(),
-        preserve_invalid_utf8=True,
+        preserve_invalid_utf8_on_strip=True,
     ),
     AGENTS_ROUTING_TARGET.as_posix(): ManagedBlockSpec(
         start=AGENTS_ROUTING_START,

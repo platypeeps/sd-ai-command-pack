@@ -819,7 +819,7 @@ BLOCK_MARKERS = {
         spec.start,
         spec.end,
         spec.label,
-        spec.preserve_invalid_utf8,
+        spec.preserve_invalid_utf8_on_strip,
         spec.adopt_on_thin,
     )
     for block_target, spec in MANAGED_BLOCK_SPECS.items()

@@ -2672,7 +2672,7 @@ class ManagedBlockSpec:
     start: str
     end: str
     label: str
-    preserve_invalid_utf8: bool = False
+    preserve_invalid_utf8_on_strip: bool = False
     adopt_on_thin: bool = False
     create_if_absent: bool = True
     strip_on_thin: bool = True
@@ -2688,7 +2688,7 @@ response to being asked to write markers nobody declared is to stop.
 
 ### 3. Contracts
 
-| target | `create_if_absent` | `strip_on_thin` | `adopt_on_thin` | `preserve_invalid_utf8` |
+| target | `create_if_absent` | `strip_on_thin` | `adopt_on_thin` | `preserve_invalid_utf8_on_strip` |
 | --- | --- | --- | --- | --- |
 | `.gitignore` (Trellis block) | yes | yes | yes | no |
 | `.github/copilot-instructions.md` | yes | yes | no | yes |
@@ -2699,6 +2699,17 @@ response to being asked to write markers nobody declared is to stop.
 `thin.py`'s `BLOCK_MARKERS` and the re-sweep's `STRIPPED_BLOCK_LABEL` are
 *derived views* filtered on `strip_on_thin`, so `AGENTS.md` is absent from them
 by construction rather than by a maintainer remembering to omit it.
+
+`preserve_invalid_utf8_on_strip` is named for its scope, and the name is the
+fix for a real ambiguity: `install_managed_block` round-trips undecodable bytes
+through surrogateescape for **every** target regardless of the field. That is
+not an oversight to correct by making installs strict — merging a block into a
+consumer file the pack cannot fully decode should succeed, and a strict read
+would turn a working install into a `UnicodeDecodeError` on any consumer whose
+`.gitignore` or `AGENTS.md` carries stray bytes. Stripping is the asymmetric
+half: with the field False, `read_text_strict` fails and the file is reported
+`PRESERVED` and left untouched, which is the right default for a destructive
+edit and the wrong one for an additive merge.
 
 `adopt` is deliberately not passed by the removal loop. Adoption is a
 thin-conversion behaviour; an ordinary uninstall removes every managed block,

@@ -336,7 +336,7 @@ def remove_installed_pack(
                 label=spec.label,
                 dry_run=dry_run,
                 backup=backup,
-                preserve_invalid_utf8=spec.preserve_invalid_utf8,
+                preserve_invalid_utf8=spec.preserve_invalid_utf8_on_strip,
             )
         )
 

@@ -2678,5 +2678,113 @@ class ReviewStageTests(InstallTestCase):
 
 
 
+    # ------------------------------------------------------------------
+    # A dead provider reaches the gate
+    # (08-25-aggregate-outcome-masks-provider-failure)
+    #
+    # `outcome` answers "what did the providers find". It is not a verdict.
+    # `_aggregate_outcome` ranks `findings` ahead of `failed`, so a run where one
+    # provider found something and another died reported `outcome: "findings"`,
+    # the terminal-failure branch never ran, and the gate said plain `eligible`
+    # about a receipt that names a dead lane in `confidence.limitations`.
+    # ------------------------------------------------------------------
+
+    def test_a_failed_provider_limits_the_gate_even_when_another_found_things(
+        self,
+    ) -> None:
+        """The case the task exists for: findings AND a dead lane."""
+        root = self.make_repo()
+        self.write_config(root, modes=("severity-low", "fail"), ceiling="medium")
+
+        receipt = self.report(self.run_stage(root, "degraded-findings"))["receipt"]
+
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(receipt["remoteGate"]["state"], "eligible-with-limitations")
+        self.assertEqual(receipt["remoteGate"]["reason"], "local-review-limited")
+        self.assertTrue(
+            any("gito" in entry for entry in receipt["confidence"]["limitations"]),
+            receipt["confidence"]["limitations"],
+        )
+
+    def test_aggregate_outcome_still_reports_findings_over_failure(self) -> None:
+        """Precedence asserted, not read off the tuple.
+
+        Reordering the tuple was the rejected fix: it makes `failed` dominate
+        `findings`, so a run that found real problems reports `failed` and the
+        findings vanish from the summary. This fails if someone later "fixes"
+        the defect that way.
+        """
+        root = self.make_repo()
+        self.write_config(root, modes=("severity-low", "fail"), ceiling="medium")
+
+        receipt = self.report(self.run_stage(root, "outcome-precedence"))["receipt"]
+
+        self.assertEqual(receipt["outcome"], "findings")
+
+    def test_a_findings_run_with_no_failure_is_unchanged(self) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("severity-low", "clean"), ceiling="medium")
+
+        receipt = self.report(self.run_stage(root, "no-failure"))["receipt"]
+
+        self.assertEqual(receipt["remoteGate"]["state"], "eligible")
+        self.assertEqual(receipt["remoteGate"]["reason"], "local-advisory-released")
+        self.assertEqual(receipt["confidence"]["limitations"], [])
+
+    def test_a_required_policy_blocks_when_a_provider_dies_alongside_findings(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        self.write_config(root, modes=("severity-low", "fail"), ceiling="medium")
+
+        receipt = self.report(
+            self.run_stage(root, "degraded-required", "--local-policy", "required")
+        )["receipt"]
+
+        self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["remoteGate"]["reason"], "required-local-review-failed")
+
+    def test_outstanding_findings_outrank_a_degraded_lane(self) -> None:
+        """Blocked is blocked; the stronger claim wins.
+
+        A degraded run that still has outstanding findings reports
+        `actionable-local-findings`, not `local-review-limited`. The limitation
+        is still in the receipt either way.
+        """
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "fail"))
+
+        receipt = self.report(self.run_stage(root, "degraded-outstanding"))["receipt"]
+
+        self.assertGreater(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(receipt["remoteGate"]["state"], "blocked")
+        self.assertEqual(receipt["remoteGate"]["reason"], "actionable-local-findings")
+        self.assertNotEqual(receipt["confidence"]["limitations"], [])
+
+    def test_regating_a_stored_degraded_receipt_keeps_the_limitation(self) -> None:
+        """The second call site, which re-gates a receipt rather than building one.
+
+        `attempts` and the local `limitations` list are not in scope there; the
+        persisted `confidence.limitations` is. The two sites are easy to fix
+        asymmetrically and nothing else would catch it.
+        """
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "fail"))
+
+        blocked = self.report(self.run_stage(root, "regate"))["receipt"]
+        self.assertEqual(blocked["remoteGate"]["state"], "blocked")
+        identifier = blocked["findings"][0]["id"]
+
+        receipt = self.report(
+            self.run_stage(
+                root, "regate", "--local-disposition", f"{identifier}=rebutted"
+            )
+        )["receipt"]
+
+        self.assertEqual(receipt["disposition"]["outstanding"], 0)
+        self.assertEqual(receipt["remoteGate"]["state"], "eligible-with-limitations")
+        self.assertEqual(receipt["remoteGate"]["reason"], "local-review-limited")
+
+
 if __name__ == "__main__":
     unittest.main()
