@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.71.59 - 2026-08-26
+## 0.71.60 - 2026-08-26
 
 ### Added
 
@@ -29,6 +29,32 @@
   enforced in `selected_files` rather than at write time, because a row
   preserved at write time still lands in the receipt and then fails the
   structural audit from the other direction.
+
+## 0.71.59 - 2026-08-26
+
+### Changed
+
+- The local review stage records the advisory classification on each finding
+  instead of only in the counts. A repository with
+  `policy.localAdvisorySeverityCeiling` configured previously got a receipt
+  saying *how many* findings the ceiling released and never *which*: the
+  decision was made per finding, added to a counter, and discarded. Anything
+  reconciling a receipt against a review had to re-derive it, which means
+  re-implementing the ceiling predicate -- its vocabulary rules and its rank-0
+  handling included -- in whatever was reading the receipt, with nothing in the
+  artifact to reveal a disagreement.
+- Every outstanding finding now carries `advisory: true` or `advisory: false`
+  in `receipt.findings[]` wherever a ceiling is configured, written by the same
+  traversal that produces the counts, so the summary and the records cannot
+  disagree. The key is removed as soon as a finding is dispositioned, so a
+  released finding that is later rebutted does not keep claiming it was
+  released.
+- Adopting the record is a policy change and is treated as one:
+  `plan.localAdvisoryRecordVersion` is emitted beside the ceiling, so
+  `policyDigest` and the receipt identity move and a repository already running
+  with a ceiling cannot answer from a receipt cached before the record existed.
+  A repository with no ceiling configured is unaffected -- no finding key, no
+  plan key, and a byte-identical receipt.
 
 ## 0.71.58 - 2026-08-26
 

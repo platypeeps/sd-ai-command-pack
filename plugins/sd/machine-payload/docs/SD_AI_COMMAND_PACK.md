@@ -1031,6 +1031,18 @@ strict and is the default, and the value flows into `configurationDigest` and
 `policyDigest` like any other policy change, so adopting it changes the receipt
 identity rather than silently reinterpreting cached receipts.
 
+Where a ceiling is configured, the classification is recorded on each finding:
+every finding still outstanding carries `advisory: true` or `advisory: false`
+in `receipt.findings[]`, so a reader partitions released from blocking by
+reading the record rather than re-applying the ceiling to each severity. The
+key is written only on outstanding findings and is removed as soon as a finding
+is dispositioned, so it never outlives the classification it records. A strict
+repository's receipt carries the key nowhere; `plan.localAdvisoryRecordVersion`
+is present exactly when the record is being written, which is what distinguishes
+a strict repository from a receipt produced before the record existed. That
+marker sits on the plan beside the ceiling, so adopting the record moves
+`policyDigest` and the receipt identity with it.
+
 **Read the meaning per repository before adopting it.** The ceiling is a rank
 comparison; what a given rank *means* comes from whatever assigns severity in
 that repository — for a prism lane, the reviewing model's own per-finding
