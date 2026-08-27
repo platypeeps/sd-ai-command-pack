@@ -251,14 +251,24 @@ class ReviewControllerTests(InstallTestCase):
         stage = self.load_local_stage()
 
         # Only what codex itself loads as instructions: its own directory and
-        # a discovered SKILL.md. Not a skills reference file, not a doc that
-        # merely mentions skills, and not AGENTS.md, which the lane already
-        # neutralizes with project_doc_max_bytes=0.
+        # a SKILL.md it discovers, which means one under .agents/skills or
+        # .codex/skills relative to the -C root. Not a skills reference file,
+        # not a doc that merely mentions skills, and not AGENTS.md, which the
+        # lane already neutralizes with project_doc_max_bytes=0.
+        #
+        # A SKILL.md belonging to some other agent is the case that matters:
+        # this repository carries skills for Claude, for plugin payloads, and
+        # in template trees, and codex loads none of them. Reading those as
+        # taint disabled the default lane for a large share of this
+        # repository's own changes.
         self.assertEqual(
             stage.codex_instruction_surfaces(
                 [
                     ".agents/skills/probe/SKILL.md",
                     ".codex/config.toml",
+                    ".claude/skills/other/SKILL.md",
+                    "plugins/sd/skills/sd-review/SKILL.md",
+                    "templates/.agents/skills/probe/SKILL.md",
                     ".claude/skills/other/references/notes.md",
                     "docs/skills.md",
                     "AGENTS.md",

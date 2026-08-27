@@ -17,6 +17,8 @@ with log.open("a", encoding="utf-8") as stream:
 if provider == "prism":
     if config["prismMode"] == "invalid":
         print("human finding that must not become clean")
+    elif config["prismMode"] == "clean":
+        print(json.dumps({"findings": []}))
     else:
         print(
             json.dumps(

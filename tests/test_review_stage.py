@@ -650,10 +650,16 @@ class ReviewStageTests(InstallTestCase):
         codex = self.codex_attempt(report)
         self.assertEqual(codex["status"], "findings")
         invocation = log.read_text(encoding="utf-8")
-        self.assertIn("codex exec --sandbox read-only -C", invocation)
+        self.assertIn(
+            "codex exec --sandbox read-only --ignore-user-config -C", invocation
+        )
         self.assertIn("--output-schema", invocation)
         self.assertIn("--output-last-message", invocation)
         self.assertIn("-c project_doc_max_bytes=0", invocation)
+        # read-only bounds the shell, not the MCP servers the user's
+        # config.toml would otherwise hand a model that is reading untrusted
+        # diff text. The lane refuses that file outright.
+        self.assertIn("--ignore-user-config", invocation)
         # Codex receives the exact refs the coordinator resolved, not a
         # branch name it would have to resolve itself.
         target = report["receipt"]["target"]
@@ -708,7 +714,7 @@ class ReviewStageTests(InstallTestCase):
     def test_cheapest_policy_falls_back_past_an_unavailable_codex(self) -> None:
         root = self.make_repo(changed_path="docs/guide.md")
         self.write_builtin_config(
-            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+            root, codex_mode="logged-out", prism_mode="finding", gito_count=0
         )
         # Uncommitted, documentation-only, so the worktree target takes the
         # documentation-cheapest policy rather than the substantive ensemble.
@@ -728,6 +734,54 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(report["status"], "findings")
 
+    def test_a_clean_fallback_reviews_the_change_instead_of_failing(self) -> None:
+        """The PRD's requirement: a logged-out codex degrades to the other
+        lanes rather than failing the run. The fallback tests above only ever
+        watched a fallback that *found* something, where the aggregate is
+        ``findings`` either way -- so nothing covered the case where the
+        fallback comes back clean and the primary's ``unavailable`` is the
+        only failing status left to outrank it."""
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        result = self.run_stage(root, "codex-fallback-clean", "--scope", "changes")
+        report = self.report(result)
+
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "unavailable"), ("prism", "clean")],
+        )
+        # The unavailable primary keeps its own status in the receipt -- which
+        # lane was asked and what it answered stays readable -- but records
+        # the fallback that covered it and stops deciding the aggregate.
+        self.assertEqual(self.codex_attempt(report)["supersededBy"], "prism")
+        self.assertEqual(report["receipt"]["outcome"], "clean")
+        self.assertEqual(
+            report["receipt"]["confidence"], {"granted": True, "limitations": []}
+        )
+        self.assertEqual(report["receipt"]["remoteGate"]["state"], "eligible")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_an_unavailable_lane_beside_a_running_one_still_limits_the_run(
+        self,
+    ) -> None:
+        """Supersession is not "ignore every unavailable provider". No
+        fallback runs while some selected provider is still working, so the
+        ensemble is genuinely reduced and the receipt has to say so."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(root, codex_mode="finding")
+
+        report = self.report(self.run_stage(root, "codex-reduced-ensemble"))
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "unavailable")
+        self.assertNotIn("supersededBy", codex)
+        self.assertIn("codex:unavailable", report["receipt"]["confidence"]["limitations"])
+        self.assertFalse(report["receipt"]["confidence"]["granted"])
+
     def test_worktree_review_rejects_a_tree_that_moved_during_the_run(self) -> None:
         root = self.make_repo()
         self.write_builtin_config(root, codex_mode="mutate")
@@ -743,7 +797,7 @@ class ReviewStageTests(InstallTestCase):
     def test_low_risk_successor_falls_back_past_an_unavailable_codex(self) -> None:
         root = self.make_repo()
         self.write_builtin_config(
-            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+            root, codex_mode="logged-out", prism_mode="finding", gito_count=0
         )
 
         result = self.run_stage(

@@ -120,6 +120,14 @@ def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
     the context of the lane reviewing it, which is exactly the influence an
     independent gate must not grant. ``AGENTS.md`` is excluded: the lane
     already runs with ``project_doc_max_bytes=0``.
+
+    The match is anchored at those two roots rather than at any ``SKILL.md``
+    below any ``skills`` directory, because the lane runs with ``-C <repo>``
+    and codex reads only those two paths relative to it. A repository that
+    also stores skills for other agents -- ``.claude/skills/``, a plugin
+    payload, a template tree -- edits files codex never loads, and treating
+    those as taint disabled the default lane for changes it could review
+    perfectly well.
     """
     tainted = []
     for path in paths:
@@ -127,7 +135,12 @@ def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
         parts = lowered.split("/")
         if parts[0] == ".codex":
             tainted.append(path)
-        elif parts[-1] == "skill.md" and "skills" in parts[:-1]:
+        elif (
+            len(parts) > 2
+            and parts[0] == ".agents"
+            and parts[1] == "skills"
+            and parts[-1] == "skill.md"
+        ):
             tainted.append(path)
     return sorted(tainted)
 
@@ -1896,6 +1909,15 @@ def _expand_argv(
             "exec",
             "--sandbox",
             "read-only",
+            # The lane reads diff text it does not trust, so it must not run
+            # holding tools that reach outside the checkout. --sandbox
+            # read-only bounds the shell; it does nothing about MCP servers
+            # configured in ~/.codex/config.toml, whose credentials would stay
+            # live and reachable by anything the reviewed diff talks the model
+            # into. --ignore-user-config drops that file -- auth still resolves
+            # through CODEX_HOME, so a subscription login keeps working -- and
+            # leaves the lane with the flags below and nothing else.
+            "--ignore-user-config",
             "-C",
             str(repo),
             # The reviewed checkout must not instruct its own reviewer: a
@@ -2372,10 +2394,50 @@ def _normalize_findings(
     )
 
 
+def _mark_superseded_by_fallback(
+    attempts: Sequence[MutableMapping[str, Any]],
+    fallback_ids: Sequence[str],
+) -> None:
+    """Record that a completed fallback covers the primaries it stood in for.
+
+    The execution stage runs a fallback only when every selected provider came
+    back ``unavailable``, so a fallback that produced a review is the plan
+    working as designed, not a degraded run -- the PRD's requirement is that a
+    missing or logged-out primary "degrades to the other lanes instead of
+    failing". Left unmarked, the primary's ``unavailable`` outranks the
+    fallback's ``clean`` in ``_aggregate_outcome`` and lands in
+    ``confidence.limitations``, so the successful review reported as a provider
+    failure and blocked remote routing.
+
+    The superseded attempt keeps its own status and stays in the receipt: which
+    lane was asked and what it answered is exactly what a reader needs. It
+    simply stops deciding the aggregate.
+    """
+    if not fallback_ids:
+        return
+    covered = sorted(
+        str(item["provider"]["id"])
+        for item in attempts
+        if str(item["provider"]["id"]) in set(fallback_ids)
+        and str(item.get("status")) != "unavailable"
+    )
+    if not covered:
+        return
+    for item in attempts:
+        if (
+            str(item["provider"]["id"]) not in set(fallback_ids)
+            and str(item.get("status")) == "unavailable"
+        ):
+            item["supersededBy"] = covered[0]
+
+
 def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
     if not attempts:
         return "skipped"
-    statuses = {str(item.get("status")) for item in attempts}
+    active = [item for item in attempts if not item.get("supersededBy")]
+    if not active:
+        return "skipped"
+    statuses = {str(item.get("status")) for item in active}
     for status_value in ("findings", "failed", "unavailable", "cancelled"):
         if status_value in statuses:
             return status_value
@@ -2931,10 +2993,16 @@ def execute(
                 for provider in selected
             ]
             attempts = [future.result() for future in futures]
+        # Every provider that actually ran, in the order it ran. The reconfirm
+        # below has to cover the fallbacks too, not just ``selected``.
+        executed = list(selected)
+        fallback_ids: list[str] = []
         for fallback in fallbacks:
             if any(item["status"] != "unavailable" for item in attempts):
                 break
             _require_tree_at_head(repo, target, [fallback])
+            executed.append(fallback)
+            fallback_ids.append(fallback.identifier)
             attempts.append(
                 _run_provider(
                     fallback,
@@ -2959,7 +3027,13 @@ def execute(
                     ),
                 )
             )
-        _reconfirm_tree_binding(repo, target, selected)
+        _mark_superseded_by_fallback(attempts, fallback_ids)
+        # ``executed``, not ``selected``: a fallback is bound to the head by
+        # _require_tree_at_head before it starts, but only this reconfirm
+        # catches a checkout that moved while it ran. Passing ``selected``
+        # skipped exactly the provider whose findings the receipt attests to
+        # when the primaries were all unavailable.
+        _reconfirm_tree_binding(repo, target, executed)
     else:
         attempts = []
     attempts.sort(key=lambda item: str(item["provider"]["id"]))
@@ -2973,7 +3047,7 @@ def execute(
     limitations = [
         f"{item['provider']['id']}:{item['status']}"
         for item in attempts
-        if item["status"] in TERMINAL_FAILURES
+        if item["status"] in TERMINAL_FAILURES and not item.get("supersededBy")
     ]
     receipt = {
         "schemaVersion": 1,
