@@ -889,6 +889,35 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("codex:skipped", report["receipt"]["confidence"]["limitations"])
         self.assertNotEqual(report["receipt"]["remoteGate"]["state"], "eligible")
 
+    def test_a_lane_mapped_to_skipped_still_lets_a_fallback_review(self) -> None:
+        """Absence of any shape lets the fallback run. A lane whose exit a
+        repository maps to ``skipped`` reviewed nothing, exactly like a
+        missing one, so treating it as "somebody reported" left the change
+        unreviewed with nothing saying so."""
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        for provider in value["providers"]:
+            if provider["id"] == "codex":
+                provider["outcomeByExitCode"] = {"0": "clean", "1": "skipped"}
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "map the codex lane to skipped")
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        report = self.report(
+            self.run_stage(root, "codex-skipped-fallback", "--scope", "changes")
+        )
+
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "skipped"), ("prism", "clean")],
+        )
+        self.assertEqual(report["receipt"]["outcome"], "clean")
+
     def test_a_required_lane_mapped_to_skipped_still_degrades_the_gate(self) -> None:
         """The third way out of running. ``skipped`` is neither a terminal
         failure nor a decline, so a repository that maps an exit code to it

@@ -1604,6 +1604,14 @@ def build_plan(
     # digests must not move to say so.
     if required:
         plan["requiredProviders"] = list(required)
+    # Unconditional, and deliberately so -- the opposite case from the keys
+    # above. Those record a feature a repository did not turn on, so moving
+    # its digest buys nothing; this records that the rules for reading a
+    # receipt changed. Absence no longer decides an outcome other lanes
+    # answered, and fallbacks now run for absence of any shape, so a receipt
+    # cached under the previous rules would be re-gated to a verdict this
+    # code would not reach. Bump when those rules change again.
+    plan["localReviewSemanticsVersion"] = 2
     plan["policyDigest"] = _digest(plan)
     return plan
 
@@ -3177,13 +3185,16 @@ def execute(
         executed = list(selected)
         fallback_ids: list[str] = []
         for fallback in fallbacks:
-            # A declined lane produced no review, exactly like an unavailable
-            # one, and the fallback is a different tool that the reviewed
-            # change does not taint -- so it can read what codex would not.
-            # Treating the decline as "some lane reported" stopped the
-            # fallbacks that exist to cover precisely this gap.
+            # Absence, whatever its shape: a lane that is missing, that
+            # declined for independence, or whose exit a repository maps to
+            # ``skipped`` all produced no review, and the fallback is a
+            # different tool the reviewed change does not taint -- so it can
+            # read what they did not. Malfunction is not absence: ``failed``
+            # and ``cancelled`` mean a lane ran and went wrong, which the gate
+            # reports on its own terms rather than papering over.
             if any(
-                item["status"] != "unavailable" and not item.get("declined")
+                item["status"] not in {"unavailable", "skipped"}
+                and not item.get("declined")
                 for item in attempts
             ):
                 break
