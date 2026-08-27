@@ -163,6 +163,7 @@ class ReviewStageTests(InstallTestCase):
         gito_severity: object = 2,
         codex_mode: str | None = None,
         codex_executable: bool = True,
+        gito_move_head: bool = False,
     ) -> Path:
         """Configure builtin adapters backed by the fixture executable.
 
@@ -239,6 +240,7 @@ class ReviewStageTests(InstallTestCase):
                     "gitoCount": gito_count,
                     "gitoSeverity": gito_severity,
                     "codexMode": codex_mode or "finding",
+                    "gitoMoveHead": gito_move_head,
                 }
             ),
             encoding="utf-8",
@@ -884,6 +886,23 @@ class ReviewStageTests(InstallTestCase):
 
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("became dirty while provider(s) codex", result.stdout)
+
+    def test_codebase_review_rejects_a_head_that_moved_during_the_run(
+        self,
+    ) -> None:
+        # The dirtiness re-check cannot see this: an empty commit moves HEAD
+        # and leaves the tree clean, so before the codebase branch of
+        # _reconfirm_tree_binding existed the receipt named a commit the
+        # provider never read.
+        root = self.make_repo()
+        self.write_builtin_config(root, gito_move_head=True)
+
+        result = self.run_stage(
+            root, "gito-codebase-drift", "--scope", "codebase", "--local", "gito"
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("HEAD moved while the local review ran", result.stdout)
 
     def test_codex_lane_steps_aside_when_the_change_edits_its_own_skills(
         self,

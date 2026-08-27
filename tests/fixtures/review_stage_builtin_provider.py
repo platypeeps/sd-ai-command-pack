@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,6 +41,13 @@ if provider == "prism":
             )
         )
 elif provider == "gito":
+    if config.get("gitoMoveHead"):
+        # An empty commit moves HEAD and leaves the tree clean, which is the
+        # one shape the dirtiness re-check cannot see.
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-q", "-m", "moved mid-review"],
+            check=True,
+        )
     try:
         output = Path(sys.argv[sys.argv.index("--out") + 1])
     except (ValueError, IndexError):

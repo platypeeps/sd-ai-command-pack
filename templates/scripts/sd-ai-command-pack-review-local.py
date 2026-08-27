@@ -1830,6 +1830,20 @@ def _reconfirm_tree_binding(
     # Same two conditions resolve_target and _require_tree_at_head enforced
     # before the run: the requested head is checked out, and nothing else is.
     _require_tree_at_head(repo, target, selected)
+    if scope == "codebase":
+        # _require_tree_at_head speaks only for branch_delta, and codebase
+        # was bound to one head upstream rather than by it, so without this
+        # the scope is re-checked for dirtiness alone. A clean checkout of a
+        # different commit mid-run leaves the tree clean and would pass,
+        # producing exactly the receipt the worktree branch above refuses:
+        # one naming a head no provider read.
+        head = str(_git(repo, "rev-parse", "--verify", "HEAD")).strip()
+        if head != str(target["head"]):
+            raise ReviewInputError(
+                "HEAD moved while the local review ran: the receipt names "
+                f"{target['head']} and the checkout is at {head}; rerun the "
+                "stage against the current tree"
+            )
     if str(_git(repo, "status", "--porcelain=v1", "--untracked-files=all")):
         names = ", ".join(
             sorted(
