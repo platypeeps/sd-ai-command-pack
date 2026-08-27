@@ -1366,3 +1366,41 @@ Wrote design.md and implement.md for 08-26-completion-successor-cc-overrefusal. 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 434: File the blocked-marker bookkeeping gate gap
+<!-- trellis-session: v=2 fp=8f09a7975ad8d252 -->
+
+**Date**: 2026-08-26
+**Task**: File the blocked-marker bookkeeping gate gap
+**Branch**: `chore/file-blocked-marker-gate-gap`
+
+### Summary
+
+Filed 08-26-blocked-marker-no-finish-work-route, a planning task recording that an in_progress task, or a planning task that parents one, has no route through any finish-work bookkeeping mode to receive a blockedOn marker.
+
+### Main Changes
+
+- Created the 08-26-blocked-marker-no-finish-work-route task record with PRD, task.json, and empty implement/check manifests
+- Documented three measured refusals with no route between them: planning_lifecycle_mutation, completion_successor_history_non_linear plus completion_successor_scope_invalid, and planning_active_task_outside_closure
+- Cited validateBookkeepingPlanningBundle in templates/scripts/sd-ai-command-pack-review-preflight.mjs as the planning-mode refusal site
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ec235179a539a076bc036d3d6755522a005240fe` | docs(task): file the blocked-marker bookkeeping gate gap |
+
+### Testing
+
+- [OK] sd-review scope=pr pr=571: ready, exit 0; sd-check 7 passed / 1 skipped; gito local provider clean, 0 findings
+- [OK] CI on PR #571: all required checks SUCCESS, mergeable CLEAN
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
