@@ -129,6 +129,11 @@ def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
     payload, a template tree -- edits files codex never loads, and treating
     those as taint disabled the default lane for changes it could review
     perfectly well.
+
+    Within those two roots the whole skill directory counts, not only
+    ``SKILL.md``. Discovery reads the frontmatter, but a skill's references
+    are loadable text sitting behind a name the model can see, and the
+    distinction is too fine to rest an independence guard on.
     """
     tainted = []
     for path in paths:
@@ -136,12 +141,7 @@ def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
         parts = lowered.split("/")
         if parts[0] == ".codex":
             tainted.append(path)
-        elif (
-            len(parts) > 2
-            and parts[0] == ".agents"
-            and parts[1] == "skills"
-            and parts[-1] == "skill.md"
-        ):
+        elif len(parts) > 2 and parts[0] == ".agents" and parts[1] == "skills":
             tainted.append(path)
     return sorted(tainted)
 
@@ -1930,6 +1930,11 @@ def _expand_argv(
             # through CODEX_HOME, so a subscription login keeps working -- and
             # leaves the lane with the flags below and nothing else.
             "--ignore-user-config",
+            # execpolicy `.rules` load on their own path, not through
+            # config.toml, so dropping that file does not drop these. A
+            # project rule is repository-controlled, which is the same thing
+            # the reviewed diff is.
+            "--ignore-rules",
             # A gate run leaves no session behind. Without this, every review
             # writes a transcript of the diff it read -- source snippets and
             # tool output -- into the user's Codex home, outside the bounded

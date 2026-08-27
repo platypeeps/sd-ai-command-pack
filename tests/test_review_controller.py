@@ -270,12 +270,20 @@ class ReviewControllerTests(InstallTestCase):
                     "plugins/sd/skills/sd-review/SKILL.md",
                     "templates/.agents/skills/probe/SKILL.md",
                     ".claude/skills/other/references/notes.md",
+                    # Within the two roots codex reads, the whole skill
+                    # directory counts: a reference file is loadable text
+                    # behind a name the model can already see.
+                    ".agents/skills/probe/references/notes.md",
                     "docs/skills.md",
                     "AGENTS.md",
                     "src/app.py",
                 ]
             ),
-            [".agents/skills/probe/SKILL.md", ".codex/config.toml"],
+            [
+                ".agents/skills/probe/SKILL.md",
+                ".agents/skills/probe/references/notes.md",
+                ".codex/config.toml",
+            ],
         )
 
     def test_fallback_supersession_covers_only_what_a_review_replaced(

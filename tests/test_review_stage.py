@@ -651,9 +651,12 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(codex["status"], "findings")
         invocation = log.read_text(encoding="utf-8")
         self.assertIn(
-            "codex exec --sandbox read-only --ignore-user-config --ephemeral -C",
+            "codex exec --sandbox read-only --ignore-user-config "
+            "--ignore-rules --ephemeral -C",
             invocation,
         )
+        # execpolicy .rules load on their own path, not through config.toml.
+        self.assertIn("--ignore-rules", invocation)
         # No session transcript of the reviewed diff outside the run's own
         # bounded artifact directory.
         self.assertIn("--ephemeral", invocation)
@@ -685,15 +688,22 @@ class ReviewStageTests(InstallTestCase):
         self.write_builtin_config(root, codex_mode="finding", codex_executable=False)
         # The adapter always resolves the bare name ``codex``, so a real
         # install on the developer machine must be hidden from this run.
-        git_dir = os.path.dirname(shutil.which("git") or "/usr/bin/git")
-        isolated = {"PATH": f"{root.parent / 'bin'}{os.pathsep}{git_dir}"}
+        # Rebuilding the path from git's own directory hid codex only on a
+        # machine that keeps the two apart; where they share a prefix -- a
+        # Homebrew prefix, /usr/local/bin, a Nix profile -- a real codex came
+        # back alongside git and the run exercised the wrong binary. Drop
+        # every directory holding a codex instead and keep the rest: the
+        # fixtures are `#!/usr/bin/env python3` scripts and still need an
+        # interpreter to be findable.
+        fake_bin = root.parent / "bin"
+        surviving = [
+            entry
+            for entry in os.environ.get("PATH", "").split(os.pathsep)
+            if entry and not os.path.exists(os.path.join(entry, "codex"))
+        ]
+        isolated = {"PATH": os.pathsep.join([str(fake_bin), *surviving])}
 
         with mock.patch.dict(os.environ, isolated):
-            # git and codex share a directory on plenty of machines -- a
-            # Homebrew prefix, /usr/local/bin, a Nix profile -- and putting
-            # the git directory back on the path puts a real codex back with
-            # it. The test would still pass while exercising the wrong binary,
-            # so make that case fail loudly instead of silently.
             self.assertIsNone(
                 shutil.which("codex"),
                 "a real codex is reachable on the isolated PATH",
