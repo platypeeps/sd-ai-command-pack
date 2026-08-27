@@ -765,6 +765,33 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "eligible")
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_a_fallback_does_not_cover_a_required_provider(self) -> None:
+        """``requiredProviders`` says that lane must actually run. A cheaper
+        substitute clearing its limitation would let the fallback list
+        override a policy the repository wrote."""
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value.setdefault("policy", {})["requiredProviders"] = ["codex"]
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "require the codex lane")
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        report = self.report(
+            self.run_stage(root, "codex-required", "--scope", "changes")
+        )
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "unavailable")
+        self.assertNotIn("supersededBy", codex)
+        self.assertIn(
+            "codex:unavailable", report["receipt"]["confidence"]["limitations"]
+        )
+
     def test_an_unavailable_lane_beside_a_running_one_still_limits_the_run(
         self,
     ) -> None:

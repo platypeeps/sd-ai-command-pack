@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import (
     Any,
+    Collection,
     Literal,
     Mapping,
     MutableMapping,
@@ -1791,6 +1792,17 @@ def _reconfirm_tree_binding(
     """
     scope = str(target["scope"])
     if scope == "worktree":
+        # HEAD first. The digest below is recomputed against the refs the
+        # receipt names, not against the live checkout, so a HEAD that moved
+        # to a commit carrying an identical delta passes it -- and the receipt
+        # would then attest to a head nothing was reviewed at.
+        head = str(_git(repo, "rev-parse", "--verify", "HEAD")).strip()
+        if head != str(target["head"]):
+            raise ReviewInputError(
+                "HEAD moved while the local review ran: the receipt names "
+                f"{target['head']} and the checkout is at {head}; rerun the "
+                "stage against the current tree"
+            )
         # The tree is the subject, so any change to it invalidates the digest
         # every provider was pointed at.
         fresh = resolve_target(
@@ -2397,17 +2409,30 @@ def _normalize_findings(
 def _mark_superseded_by_fallback(
     attempts: Sequence[MutableMapping[str, Any]],
     fallback_ids: Sequence[str],
+    required_ids: Collection[str] = (),
 ) -> None:
-    """Record that a completed fallback covers the primaries it stood in for.
+    """Record that a completed fallback covers the lanes it stood in for.
 
-    The execution stage runs a fallback only when every selected provider came
+    The execution stage runs a fallback only when every attempt so far came
     back ``unavailable``, so a fallback that produced a review is the plan
     working as designed, not a degraded run -- the PRD's requirement is that a
     missing or logged-out primary "degrades to the other lanes instead of
-    failing". Left unmarked, the primary's ``unavailable`` outranks the
+    failing". Left unmarked, the unavailable lane's status outranks the
     fallback's ``clean`` in ``_aggregate_outcome`` and lands in
     ``confidence.limitations``, so the successful review reported as a provider
     failure and blocked remote routing.
+
+    Everything unavailable ahead of the successful fallback is covered, not
+    just the originally selected providers: the loop advances to a second
+    fallback only because the first one was unavailable too, so an earlier
+    fallback is in exactly the position a primary is in.
+
+    ``required_ids`` is the exception, and it is not a detail. A repository
+    that names a provider in ``requiredProviders`` is saying that lane must
+    actually run; letting a cheaper substitute clear its limitation would turn
+    a policy the repository wrote into one the fallback list overrides. A
+    required lane that did not run stays a limitation, and the gate keeps
+    reporting it.
 
     The superseded attempt keeps its own status and stays in the receipt: which
     lane was asked and what it answered is exactly what a reader needs. It
@@ -2415,18 +2440,22 @@ def _mark_superseded_by_fallback(
     """
     if not fallback_ids:
         return
+    fallbacks = set(fallback_ids)
+    required = set(required_ids)
     covered = sorted(
         str(item["provider"]["id"])
         for item in attempts
-        if str(item["provider"]["id"]) in set(fallback_ids)
+        if str(item["provider"]["id"]) in fallbacks
         and str(item.get("status")) != "unavailable"
     )
     if not covered:
         return
     for item in attempts:
+        identifier = str(item["provider"]["id"])
         if (
-            str(item["provider"]["id"]) not in set(fallback_ids)
-            and str(item.get("status")) == "unavailable"
+            str(item.get("status")) == "unavailable"
+            and identifier not in required
+            and identifier not in covered
         ):
             item["supersededBy"] = covered[0]
 
@@ -2890,6 +2919,7 @@ def execute(
     allow_reuse: bool,
     dispositions: Mapping[str, Mapping[str, Any]] | None = None,
     fallbacks: Sequence[Provider] = (),
+    required_providers: Collection[str] = (),
 ) -> tuple[dict[str, Any], bool]:
     supplied = dict(dispositions or {})
     identity = _receipt_identity(target, plan)
@@ -3027,7 +3057,7 @@ def execute(
                     ),
                 )
             )
-        _mark_superseded_by_fallback(attempts, fallback_ids)
+        _mark_superseded_by_fallback(attempts, fallback_ids, required_providers)
         # ``executed``, not ``selected``: a fallback is bound to the head by
         # _require_tree_at_head before it starts, but only this reconfirm
         # catches a checkout that moved while it ran. Passing ``selected``
@@ -3278,6 +3308,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 allow_reuse=not args.no_reuse,
                 dispositions=_parse_local_dispositions(args.local_disposition),
                 fallbacks=cheapest_fallbacks(providers, policy, target, plan),
+                required_providers=[
+                    str(item) for item in policy["requiredProviders"]
+                ],
             )
             report = _report(receipt, reused=reused)
             code = (
