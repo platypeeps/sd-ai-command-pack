@@ -1459,3 +1459,42 @@ Took the codex local review adapter from a findings-heavy review loop to a clean
 ### Next Steps
 
 - None - task complete
+
+
+## Session 436: File the generated-structural-map and bookkeeping-prefix follow-ups
+<!-- trellis-session: v=2 fp=9437ca664f4135f8 -->
+
+**Date**: 2026-08-27
+**Task**: File the generated-structural-map and bookkeeping-prefix follow-ups
+**Branch**: `docs/file-bookkeeping-map-tasks`
+
+### Summary
+
+Filed three planning tasks from one investigation into the pincer a consumer repository hits between the finalization gate and its generated-map drift test, and published them for review.
+
+### Main Changes
+
+- Filed follow-up A: regenerate the consumer's structural map inside sd-finish-work, after archive and journal, computing the receipt at base-equal-to-head whenever it does.
+- Filed follow-up B: run checkGeneratedStructuralMapPaths on the final-bundle path, where the drift is created, instead of catching it on a later PR.
+- Filed follow-up C: export the bookkeeping path prefixes as one consumable constant rather than the literals each validator repeats.
+- Reworded the cross-repository task reference in two PRDs: the publish preflight read the consumer repo's task path as repo-local and failed on a path that does not exist here.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `630f446a` | docs(task): file the generated-structural-map and prefix follow-ups |
+
+### Testing
+
+- [OK] sd-ai-command-pack-review-preflight.mjs: 0 failure(s), 1 warning(s) (three task directories in one PR, one reviewable outcome)
+- [OK] sd-review --scope pr --pr-number 573: sd-check 8/8 passed, local review clean, 0 findings, confidence granted
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
