@@ -803,6 +803,34 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "eligible")
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_an_absent_optional_lane_does_not_fail_a_run_the_others_reviewed(
+        self,
+    ) -> None:
+        """A substantive review selects codex as a lane rather than a
+        fallback, so nothing supersedes it and its absence used to decide the
+        outcome -- every repository without codex installed failed every
+        substantive review. Absence is a smaller ensemble, not a wrong
+        answer."""
+        root = self.make_repo()
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+
+        result = self.run_stage(root, "codex-absent-ensemble", "--local", "all")
+        report = self.report(result)
+        receipt = report["receipt"]
+
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in receipt["attempts"]],
+            [("codex", "unavailable"), ("gito", "clean"), ("prism", "clean")],
+        )
+        self.assertEqual(receipt["outcome"], "clean")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        # Reduced, and the receipt says so: the lane is still a limitation and
+        # confidence is still withheld. It just does not fail the run.
+        self.assertIn("codex:unavailable", receipt["confidence"]["limitations"])
+        self.assertFalse(receipt["confidence"]["granted"])
+
     def test_a_declined_lane_still_lets_a_fallback_review_the_change(self) -> None:
         """A decline leaves the ensemble as short as an unavailable does, and
         the fallback is a different tool the reviewed change does not taint --

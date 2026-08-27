@@ -378,6 +378,11 @@ def _default_config() -> dict[str, Any]:
                 "id": "codex",
                 "adapter": "codex",
                 "argv": [],
+                # Opt-in: codex is an external, subscription-billed tool, and a
+                # substantive review selects it as a lane rather than a
+                # fallback. Enabled by default it would put every repository
+                # that has not installed codex into a degraded review.
+                "enabled": False,
                 "scopes": ["worktree", "branch_delta"],
                 "costTier": "none",
                 "qualityTier": "deep",
@@ -1577,9 +1582,6 @@ def build_plan(
         "localPolicy": local_policy,
         "fixPolicy": fix_policy,
         "configurationDigest": configuration_digest,
-        # On the plan, not only in the policy the run read: re-gating a stored
-        # receipt has to reach the same verdict from the receipt alone.
-        "requiredProviders": list(required),
     }
     # Carried on the plan only when configured, never as an explicit null. The
     # plan is digested into policyDigest and policyDigest into the receipt
@@ -1595,6 +1597,13 @@ def build_plan(
         # must not answer from a receipt cached before it. Bump this when the
         # recorded shape changes again.
         plan["localAdvisoryRecordVersion"] = 1
+    # Same condition, same reason. The required set has to be on the plan and
+    # not only in the policy the run read, because re-gating a stored receipt
+    # must reach the same verdict from the receipt alone -- but a repository
+    # that named no required lane gates exactly as it always did, so its
+    # digests must not move to say so.
+    if required:
+        plan["requiredProviders"] = list(required)
     plan["policyDigest"] = _digest(plan)
     return plan
 
@@ -2551,12 +2560,46 @@ def _blocking_limitations(
     return blocking
 
 
-def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
+def _aggregate_outcome(
+    attempts: Sequence[Mapping[str, Any]], required: Collection[str] = ()
+) -> str:
+    """What the ensemble found, from the lanes that were in a position to say.
+
+    A lane that could not run is a smaller ensemble, not a wrong answer. When
+    other lanes did review the change, letting the dead one decide the outcome
+    reported a completed review as a provider failure and blocked routing on
+    it -- which is what the PRD refuses when it says a logged-out codex
+    "degrades to the other lanes instead of failing the run". The reduced
+    ensemble is not lost: it lands in ``confidence.limitations`` and drives the
+    gate's ``degraded`` signal, so the receipt still says fewer lanes looked.
+
+    ``required`` is the exception, on the same reasoning as everywhere else: a
+    repository naming a lane in ``requiredProviders`` said that lane must
+    actually run, so its absence is the answer rather than a footnote.
+    """
     if not attempts:
         return "skipped"
     active = [item for item in attempts if not item.get("supersededBy")]
     if not active:
         return "skipped"
+    names = set(required)
+    reviewed = {
+        str(item.get("status"))
+        for item in active
+        if str(item.get("status")) in {"clean", "findings"}
+    }
+    # Only absence is demoted, never malfunction. A lane that is missing or
+    # logged out never started; a lane that ``failed`` or was ``cancelled``
+    # ran and went wrong, which is a distinct condition the gate reports on
+    # its own terms.
+    absent = all(
+        str(item.get("status")) in {"unavailable", "skipped"}
+        and str(item["provider"]["id"]) not in names
+        for item in active
+        if str(item.get("status")) not in {"clean", "findings"}
+    )
+    if reviewed and absent:
+        return "findings" if "findings" in reviewed else "clean"
     statuses = {str(item.get("status")) for item in active}
     for status_value in ("findings", "failed", "unavailable", "cancelled"):
         if status_value in statuses:
@@ -3187,7 +3230,8 @@ def execute(
     outstanding, advisory, dispositioned, accepted = _classify_findings(
         findings, ceiling
     )
-    outcome = _aggregate_outcome(attempts)
+    required_ids = list(plan.get("requiredProviders", ()))
+    outcome = _aggregate_outcome(attempts, required_ids)
     limitations = [
         f"{item['provider']['id']}:{item['status']}"
         for item in attempts
@@ -3221,13 +3265,15 @@ def execute(
             advisory=advisory,
             dispositioned=dispositioned,
             accepted=accepted,
-            degraded=bool(
-                _blocking_limitations(
-                    limitations, plan.get("requiredProviders", ())
-                )
-            ),
+            degraded=bool(_blocking_limitations(limitations, required_ids)),
         ),
-        "confidence": {"granted": outcome == "clean", "limitations": limitations},
+        # ``outcome`` can now be clean while a lane died, so granting on it
+        # alone would vouch for an ensemble that was never assembled.
+        "confidence": {
+            "granted": outcome == "clean"
+            and not _blocking_limitations(limitations, required_ids),
+            "limitations": limitations,
+        },
         "createdAt": time.time(),
     }
     _atomic_json(receipt_path, receipt)
