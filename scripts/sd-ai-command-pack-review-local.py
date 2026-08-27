@@ -110,6 +110,28 @@ CODEX_OUTPUT_SCHEMA = {
 }
 
 
+def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
+    """Reviewed paths that codex itself would load as instructions.
+
+    codex discovers skills under ``.agents/skills`` and ``.codex/skills`` in
+    the directory it runs in, and every discovered skill's name and
+    description enter the model's context whether or not the skill is
+    invoked. A change that adds or edits one is therefore writing text into
+    the context of the lane reviewing it, which is exactly the influence an
+    independent gate must not grant. ``AGENTS.md`` is excluded: the lane
+    already runs with ``project_doc_max_bytes=0``.
+    """
+    tainted = []
+    for path in paths:
+        lowered = path.lower()
+        parts = lowered.split("/")
+        if parts[0] == ".codex":
+            tainted.append(path)
+        elif parts[-1] == "skill.md" and "skills" in parts[:-1]:
+            tainted.append(path)
+    return sorted(tainted)
+
+
 def _codex_prompt(scope: str, base: str, head: str) -> str:
     """Prompt for codex exec. Codex fetches the diff itself from the exact
     refs the coordinator resolved, so the argv stays small."""
@@ -1743,6 +1765,50 @@ def _require_tree_at_head(
     )
 
 
+def _reconfirm_tree_binding(
+    repo: Path, target: Mapping[str, Any], selected: Sequence[Provider]
+) -> None:
+    """Re-check, after the providers have run, that the tree still holds what
+    the receipt is about to claim they reviewed.
+
+    ``_require_tree_at_head`` and ``resolve_target`` bind the tree before the
+    run, but a provider that reads the live checkout may run for minutes. A
+    tree that moves in between leaves a receipt vouching for content no
+    provider saw, which is the failure both pre-run guards exist to prevent.
+    """
+    scope = str(target["scope"])
+    if scope == "worktree":
+        # The tree is the subject, so any change to it invalidates the digest
+        # every provider was pointed at.
+        fresh = resolve_target(
+            repo, "changes", str(target["base"]), str(target["head"])
+        )
+        if fresh["contentDigest"] != target["contentDigest"]:
+            raise ReviewInputError(
+                "working tree changed while the local review ran; rerun the "
+                "stage against the current tree"
+            )
+        return
+    if not any(provider.requires_tree_at_head for provider in selected):
+        return
+    # Same two conditions resolve_target and _require_tree_at_head enforced
+    # before the run: the requested head is checked out, and nothing else is.
+    _require_tree_at_head(repo, target, selected)
+    if str(_git(repo, "status", "--porcelain=v1", "--untracked-files=all")):
+        names = ", ".join(
+            sorted(
+                provider.identifier
+                for provider in selected
+                if provider.requires_tree_at_head
+            )
+        )
+        raise ReviewInputError(
+            f"the working tree became dirty while provider(s) {names} read "
+            "file content from it; rerun the stage against a clean tree at "
+            "the requested head"
+        )
+
+
 def _expand_argv(
     provider: Provider,
     target: Mapping[str, Any],
@@ -2104,6 +2170,7 @@ def _run_provider(
     run_dir: Path,
     environment: Mapping[str, str],
     rules: Mapping[str, Any] | None = None,
+    unavailable_reason: str | None = None,
 ) -> dict[str, Any]:
     attempt_dir = run_dir / provider.identifier
     attempt_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -2133,13 +2200,13 @@ def _run_provider(
         _atomic_json(attempt_dir / "attempt.json", result)
         return result
     executable = shutil.which(argv[0], path=environment.get("PATH"))
-    if executable is None:
+    if executable is None or unavailable_reason is not None:
         result = {
             **base,
             "status": "unavailable",
             "exitCode": None,
             "durationMs": 0,
-            "diagnostic": f"{argv[0]} is not available",
+            "diagnostic": unavailable_reason or f"{argv[0]} is not available",
             "findings": [],
         }
         _atomic_json(attempt_dir / "attempt.json", result)
@@ -2727,7 +2794,11 @@ def cheapest_fallbacks(
     documentation, metadata, and low-risk policies. Computed outside the plan
     so the plan's shape, and therefore every receipt digest, is unchanged.
     """
-    if not str(plan["policyId"]).endswith("-cheapest"):
+    policy_id = str(plan["policyId"])
+    # Every policy that selects exactly one provider by cost, not only the
+    # `<risk>-cheapest` family: `low-risk-successor` picks the same way and
+    # would otherwise strand a successor run on a single unavailable lane.
+    if not policy_id.endswith("-cheapest") and policy_id != "low-risk-successor":
         return []
     selected = {str(row["id"]) for row in plan["providers"] if isinstance(row, dict)}
     allowed = set(policy["allowedDataHandling"])
@@ -2822,6 +2893,16 @@ def execute(
             "confidenceCredit": {"granted": False},
         },
     )
+    tainted = codex_instruction_surfaces(
+        [str(row["path"]) for row in target["paths"] if isinstance(row, dict)]
+    )
+    codex_reason = (
+        "the reviewed change edits instruction surfaces codex loads "
+        f"({', '.join(tainted[:3])}{'...' if len(tainted) > 3 else ''}), so this "
+        "lane cannot review it independently"
+        if tainted
+        else None
+    )
     if selected:
         try:
             environment, _, _ = build_tool_environment(repo=repo)
@@ -2842,6 +2923,9 @@ def execute(
                         rules_decision.record
                         if provider.adapter == "prism"
                         else {"status": "not-applicable", "adapter": provider.adapter}
+                    ),
+                    unavailable_reason=(
+                        codex_reason if provider.adapter == "codex" else None
                     ),
                 )
                 for provider in selected
@@ -2870,17 +2954,12 @@ def execute(
                         if fallback.adapter == "prism"
                         else {"status": "not-applicable", "adapter": fallback.adapter}
                     ),
+                    unavailable_reason=(
+                        codex_reason if fallback.adapter == "codex" else None
+                    ),
                 )
             )
-        if str(target["scope"]) == "worktree":
-            # Every worktree provider reads the live tree, and a run may last
-            # minutes; a receipt digested from the pre-run content must not
-            # vouch for a tree that moved underneath the review.
-            fresh = resolve_target(repo, "changes", str(target["base"]), str(target["head"]))
-            if fresh["contentDigest"] != target["contentDigest"]:
-                raise ReviewInputError(
-                    "working tree changed while the local review ran; rerun the stage against the current tree"
-                )
+        _reconfirm_tree_binding(repo, target, selected)
     else:
         attempts = []
     attempts.sort(key=lambda item: str(item["provider"]["id"]))

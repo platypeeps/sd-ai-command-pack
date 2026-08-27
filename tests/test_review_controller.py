@@ -247,6 +247,27 @@ class ReviewControllerTests(InstallTestCase):
         )
         return path
 
+    def test_codex_instruction_surface_detection_is_narrow(self) -> None:
+        stage = self.load_local_stage()
+
+        # Only what codex itself loads as instructions: its own directory and
+        # a discovered SKILL.md. Not a skills reference file, not a doc that
+        # merely mentions skills, and not AGENTS.md, which the lane already
+        # neutralizes with project_doc_max_bytes=0.
+        self.assertEqual(
+            stage.codex_instruction_surfaces(
+                [
+                    ".agents/skills/probe/SKILL.md",
+                    ".codex/config.toml",
+                    ".claude/skills/other/references/notes.md",
+                    "docs/skills.md",
+                    "AGENTS.md",
+                    "src/app.py",
+                ]
+            ),
+            [".agents/skills/probe/SKILL.md", ".codex/config.toml"],
+        )
+
     def test_configuration_is_shared_strict_and_path_safe(self) -> None:
         controller = self.load_controller()
         local_stage = self.load_local_stage()

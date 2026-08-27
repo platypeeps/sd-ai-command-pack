@@ -740,6 +740,51 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn("working tree changed while the local review ran", result.stdout)
 
+    def test_low_risk_successor_falls_back_past_an_unavailable_codex(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+
+        result = self.run_stage(
+            root, "codex-successor", "--successor", "low-risk"
+        )
+        report = self.report(result)
+
+        self.assertEqual(report["receipt"]["plan"]["policyId"], "low-risk-successor")
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "unavailable"), ("prism", "findings")],
+        )
+
+    def test_branch_review_rejects_a_tree_that_became_dirty_during_the_run(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="mutate")
+
+        result = self.run_stage(root, "codex-branch-drift", "--local", "codex")
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("became dirty while provider(s) codex", result.stdout)
+
+    def test_codex_lane_steps_aside_when_the_change_edits_its_own_skills(
+        self,
+    ) -> None:
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(root, codex_mode="finding")
+
+        report = self.report(self.run_stage(root, "codex-tainted"))
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "unavailable")
+        self.assertIn("instruction surfaces codex loads", codex["diagnostic"])
+        # The lane steps aside; the others still review the change.
+        self.assertEqual(
+            sorted(finding["summary"] for finding in report["receipt"]["findings"]),
+            ["Gito finding", "Prism finding"],
+        )
+
     def test_codex_adapter_refuses_codebase_scope(self) -> None:
         root = self.make_repo()
         self.write_builtin_config(root, codex_mode="finding")
