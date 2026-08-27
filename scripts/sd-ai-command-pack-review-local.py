@@ -117,7 +117,10 @@ def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
     codex discovers skills under ``.agents/skills`` and ``.codex/skills`` in
     the directory it runs in, and every discovered skill's name and
     description enter the model's context whether or not the skill is
-    invoked. A change that adds or edits one is therefore writing text into
+    invoked. Under ``.codex`` the whole root counts rather than its skills
+    alone: that directory is codex's own configuration surface -- config,
+    rules, and instruction text the lane loads before it reads a diff -- so
+    the guard treats an edit anywhere beneath it as taint. A change that adds or edits one is therefore writing text into
     the context of the lane reviewing it, which is exactly the influence an
     independent gate must not grant. ``AGENTS.md`` is excluded: the lane
     already runs with ``project_doc_max_bytes=0``.
@@ -569,6 +572,14 @@ def _parse_provider(value: object) -> Provider:
         field=f"provider {identifier} scopes",
         allowed=set(CANONICAL_SCOPES),
     )
+    # The codex adapter builds a diff review and refuses codebase scope when
+    # its argv is expanded. Catching that here instead means a configuration
+    # that can never run is rejected while the config is read, not partway
+    # through a selected review round.
+    if adapter == "codex" and "codebase" in scopes:
+        raise ReviewInputError(
+            f"provider {identifier} codex adapter does not support codebase scope"
+        )
     if not scopes:
         raise ReviewInputError(f"provider {identifier} scopes cannot be empty")
     data_handling = value.get("dataHandling")

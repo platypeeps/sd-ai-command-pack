@@ -689,19 +689,32 @@ class ReviewStageTests(InstallTestCase):
         # The adapter always resolves the bare name ``codex``, so a real
         # install on the developer machine must be hidden from this run.
         # Rebuilding the path from git's own directory hid codex only on a
-        # machine that keeps the two apart; where they share a prefix -- a
-        # Homebrew prefix, /usr/local/bin, a Nix profile -- a real codex came
-        # back alongside git and the run exercised the wrong binary. Drop
-        # every directory holding a codex instead and keep the rest: the
-        # fixtures are `#!/usr/bin/env python3` scripts and still need an
-        # interpreter to be findable.
+        # machine that keeps the two apart, and dropping every directory
+        # that holds a codex takes the rest of that directory down with it --
+        # a Homebrew prefix, /usr/local/bin, or a Nix profile carries git and
+        # python3 beside codex, and the fixtures are `#!/usr/bin/env python3`
+        # scripts that still need an interpreter. Replace such a directory in
+        # place with a shim exposing everything it offered except codex, so
+        # the entry keeps its position and only the one name disappears.
         fake_bin = root.parent / "bin"
-        surviving = [
-            entry
-            for entry in os.environ.get("PATH", "").split(os.pathsep)
-            if entry and not os.path.exists(os.path.join(entry, "codex"))
-        ]
-        isolated = {"PATH": os.pathsep.join([str(fake_bin), *surviving])}
+        entries = []
+        for index, entry in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
+            if not entry:
+                continue
+            if not os.path.exists(os.path.join(entry, "codex")):
+                entries.append(entry)
+                continue
+            shim = root.parent / f"codex-free-{index}"
+            shim.mkdir(parents=True, exist_ok=True)
+            for item in os.listdir(entry):
+                if item == "codex":
+                    continue
+                link = shim / item
+                if link.is_symlink() or link.exists():
+                    continue
+                link.symlink_to(os.path.join(entry, item))
+            entries.append(str(shim))
+        isolated = {"PATH": os.pathsep.join([str(fake_bin), *entries])}
 
         with mock.patch.dict(os.environ, isolated):
             self.assertIsNone(
@@ -919,6 +932,16 @@ class ReviewStageTests(InstallTestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not support codebase scope", result.stdout)
+
+        # The refusal belongs to reading the configuration, not to expanding
+        # the argv of a lane that was already selected: a codex provider
+        # offering a scope its adapter can never run is rejected on any run,
+        # including one that never asks for that scope.
+        other = self.run_stage(
+            root, "codex-codebase-declared", "--scope", "changes", "--local", "codex"
+        )
+        self.assertNotEqual(other.returncode, 0)
+        self.assertIn("does not support codebase scope", other.stdout)
 
     # --- .prism/rules.json handling -------------------------------------
 
