@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.71.61 - 2026-08-26
+
+### Added
+
+- Local review gains a built-in `codex` adapter and makes it the first
+  default lane, ahead of `prism` and `gito`. It runs `codex exec` read-only
+  inside the checkout against the exact base and head the coordinator
+  resolved, billed to the Codex CLI's own login rather than an API key, and
+  binds the answer to an output schema so an unreadable answer is a failed
+  attempt rather than a clean one. A machine without `codex`, or with a
+  logged-out one, records the lane as unavailable and the run continues on the
+  remaining lanes; a repository that ships its own `review.json` must list
+  `codex` itself, as this repository now does.
+
+### Fixed
+
+- Under the documentation, metadata, and low-risk cheapest policies, a sole
+  provider that reports unavailable now falls through to the next cheapest
+  eligible provider instead of ending the run with no review; a cost-free
+  lane is always the cheapest, which made this gap reachable on every machine
+  missing it. The plan and every receipt digest are unchanged.
+- The codex lane runs with `project_doc_max_bytes=0`, so the reviewed
+  checkout's `AGENTS.md` cannot instruct its own reviewer.
+- A worktree-scope review whose content digest moved while the providers ran
+  is now rejected as invalid instead of writing a receipt that vouches for a
+  tree the providers never saw.
+
 ## 0.71.60 - 2026-08-26
 
 ### Added

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import shutil
 import signal
 import time
+from unittest import mock
 
 try:
     import install_test_support as _support
@@ -159,8 +161,32 @@ class ReviewStageTests(InstallTestCase):
         prism_mode: str = "finding",
         gito_count: int = 1,
         gito_severity: object = 2,
+        codex_mode: str | None = None,
+        codex_executable: bool = True,
+        gito_move_head: bool = False,
     ) -> Path:
+        """Configure builtin adapters backed by the fixture executable.
+
+        ``codex_mode`` adds a codex provider; ``codex_executable=False`` keeps
+        that provider configured but leaves no ``codex`` on PATH.
+        """
         providers = []
+        if codex_mode is not None:
+            providers.append(
+                {
+                    "id": "codex",
+                    "adapter": "codex",
+                    "argv": [],
+                    "scopes": ["worktree", "branch_delta"],
+                    "dataHandling": "local",
+                    "costTier": "none",
+                    "qualityTier": "deep",
+                    "timeoutSeconds": 5,
+                    "version": "fixture-v1",
+                    "enabled": True,
+                    "outcomeByExitCode": {"0": "clean", "1": "unavailable"},
+                }
+            )
         for identifier, cost in (("prism", "low"), ("gito", "medium")):
             providers.append(
                 {
@@ -213,12 +239,17 @@ class ReviewStageTests(InstallTestCase):
                     "prismMode": prism_mode,
                     "gitoCount": gito_count,
                     "gitoSeverity": gito_severity,
+                    "codexMode": codex_mode or "finding",
+                    "gitoMoveHead": gito_move_head,
                 }
             ),
             encoding="utf-8",
         )
         payload = fixture.read_bytes()
-        for provider in ("prism", "gito"):
+        executables = ["prism", "gito"]
+        if codex_mode is not None and codex_executable:
+            executables.append("codex")
+        for provider in executables:
             executable = fake_bin / provider
             executable.write_bytes(payload)
             executable.chmod(0o755)
@@ -596,6 +627,509 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("--format json", invocation_log)
         self.assertIn("gito review --what", invocation_log)
         self.assertNotIn("--filter", invocation_log)
+
+    # --- codex adapter ---------------------------------------------------
+
+    def attempt(self, report, identifier):
+        for row in report["receipt"]["attempts"]:
+            if row["provider"]["id"] == identifier:
+                return row
+        self.fail(f"no {identifier} attempt in receipt")
+
+    def codex_attempt(self, report):
+        return self.attempt(report, "codex")
+
+    def test_codex_adapter_seeds_schema_and_reads_the_answer_file(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root, codex_mode="finding")
+
+        result = self.run_stage(root, "codex-native")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+        self.assertIn(
+            "Codex finding",
+            [finding["summary"] for finding in report["receipt"]["findings"]],
+        )
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "findings")
+        invocation = log.read_text(encoding="utf-8")
+        self.assertIn(
+            "codex exec --sandbox read-only --ignore-user-config "
+            "--ignore-rules --ephemeral -C",
+            invocation,
+        )
+        # execpolicy .rules load on their own path, not through config.toml.
+        self.assertIn("--ignore-rules", invocation)
+        # No session transcript of the reviewed diff outside the run's own
+        # bounded artifact directory.
+        self.assertIn("--ephemeral", invocation)
+        self.assertIn("--output-schema", invocation)
+        self.assertIn("--output-last-message", invocation)
+        self.assertIn("-c project_doc_max_bytes=0", invocation)
+        # read-only bounds the shell, not the MCP servers the user's
+        # config.toml would otherwise hand a model that is reading untrusted
+        # diff text. The lane refuses that file outright.
+        self.assertIn("--ignore-user-config", invocation)
+        # Codex receives the exact refs the coordinator resolved, not a
+        # branch name it would have to resolve itself.
+        target = report["receipt"]["target"]
+        self.assertIn(f"git diff {target['base']}..{target['head']}", invocation)
+
+    def test_codex_adapter_clean_answer_does_not_block(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(
+            root, codex_mode="clean", prism_mode="clean", gito_count=0
+        )
+
+        report = self.report(self.run_stage(root, "codex-clean", "--local", "codex"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "clean")
+        self.assertEqual(report["receipt"]["findings"], [])
+
+    def test_codex_adapter_unavailable_when_binary_is_missing(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="finding", codex_executable=False)
+        # The adapter always resolves the bare name ``codex``, so a real
+        # install on the developer machine must be hidden from this run.
+        # Rebuilding the path from git's own directory hid codex only on a
+        # machine that keeps the two apart, and dropping every directory
+        # that holds a codex takes the rest of that directory down with it --
+        # a Homebrew prefix, /usr/local/bin, or a Nix profile carries git and
+        # python3 beside codex, and the fixtures are `#!/usr/bin/env python3`
+        # scripts that still need an interpreter. Replace such a directory in
+        # place with a shim exposing everything it offered except codex, so
+        # the entry keeps its position and only the one name disappears.
+        fake_bin = root.parent / "bin"
+        entries = []
+        for index, entry in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
+            if not entry:
+                continue
+            if not os.path.exists(os.path.join(entry, "codex")):
+                entries.append(entry)
+                continue
+            shim = root.parent / f"codex-free-{index}"
+            shim.mkdir(parents=True, exist_ok=True)
+            for item in os.listdir(entry):
+                if item == "codex":
+                    continue
+                link = shim / item
+                if link.is_symlink() or link.exists():
+                    continue
+                link.symlink_to(os.path.join(entry, item))
+            entries.append(str(shim))
+        isolated = {"PATH": os.pathsep.join([str(fake_bin), *entries])}
+
+        with mock.patch.dict(os.environ, isolated):
+            self.assertIsNone(
+                shutil.which("codex"),
+                "a real codex is reachable on the isolated PATH",
+            )
+            report = self.report(self.run_stage(root, "codex-missing"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "unavailable")
+        # The other lanes still ran and their findings survive.
+        self.assertEqual(
+            sorted(finding["summary"] for finding in report["receipt"]["findings"]),
+            ["Gito finding", "Prism finding"],
+        )
+
+    def test_codex_adapter_logged_out_maps_to_unavailable(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="logged-out")
+
+        report = self.report(self.run_stage(root, "codex-logged-out"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "unavailable")
+        self.assertEqual(report["status"], "findings")
+
+    def test_codex_adapter_invalid_answer_is_a_failure_not_clean(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="invalid")
+
+        report = self.report(self.run_stage(root, "codex-invalid", "--local", "codex"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "failed")
+
+    def test_cheapest_policy_falls_back_past_an_unavailable_codex(self) -> None:
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="finding", gito_count=0
+        )
+        # Uncommitted, documentation-only, so the worktree target takes the
+        # documentation-cheapest policy rather than the substantive ensemble.
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        result = self.run_stage(root, "codex-fallback", "--scope", "changes")
+        report = self.report(result)
+
+        self.assertEqual(report["receipt"]["plan"]["policyId"], "documentation-cheapest")
+        self.assertEqual(
+            [row["id"] for row in report["receipt"]["plan"]["providers"]], ["codex"]
+        )
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "unavailable"), ("prism", "findings")],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+
+    def test_a_clean_fallback_reviews_the_change_instead_of_failing(self) -> None:
+        """The PRD's requirement: a logged-out codex degrades to the other
+        lanes rather than failing the run. The fallback tests above only ever
+        watched a fallback that *found* something, where the aggregate is
+        ``findings`` either way -- so nothing covered the case where the
+        fallback comes back clean and the primary's ``unavailable`` is the
+        only failing status left to outrank it."""
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        result = self.run_stage(root, "codex-fallback-clean", "--scope", "changes")
+        report = self.report(result)
+
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "unavailable"), ("prism", "clean")],
+        )
+        # The unavailable primary keeps its own status in the receipt -- which
+        # lane was asked and what it answered stays readable -- but records
+        # the fallback that covered it and stops deciding the aggregate.
+        self.assertEqual(self.codex_attempt(report)["supersededBy"], "prism")
+        self.assertEqual(report["receipt"]["outcome"], "clean")
+        self.assertEqual(
+            report["receipt"]["confidence"], {"granted": True, "limitations": []}
+        )
+        self.assertEqual(report["receipt"]["remoteGate"]["state"], "eligible")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_an_absent_optional_lane_does_not_fail_a_run_the_others_reviewed(
+        self,
+    ) -> None:
+        """A substantive review selects codex as a lane rather than a
+        fallback, so nothing supersedes it and its absence used to decide the
+        outcome -- every repository without codex installed failed every
+        substantive review. Absence is a smaller ensemble, not a wrong
+        answer."""
+        root = self.make_repo()
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+
+        result = self.run_stage(root, "codex-absent-ensemble", "--local", "all")
+        report = self.report(result)
+        receipt = report["receipt"]
+
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in receipt["attempts"]],
+            [("codex", "unavailable"), ("gito", "clean"), ("prism", "clean")],
+        )
+        self.assertEqual(receipt["outcome"], "clean")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        # Reduced, and the receipt says so: the lane is still a limitation and
+        # confidence is still withheld. It just does not fail the run.
+        self.assertIn("codex:unavailable", receipt["confidence"]["limitations"])
+        self.assertFalse(receipt["confidence"]["granted"])
+
+    def test_a_declined_lane_still_lets_a_fallback_review_the_change(self) -> None:
+        """A decline leaves the ensemble as short as an unavailable does, and
+        the fallback is a different tool the reviewed change does not taint --
+        so the fallback that exists to cover that gap has to run."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(
+            root, codex_mode="finding", prism_mode="clean", gito_count=0
+        )
+        # The decline is decided from the reviewed paths, so the skill has to
+        # be in this scope's diff rather than merely present in the checkout.
+        (root / ".agents/skills/probe/SKILL.md").write_text(
+            "seed\nchanged\nagain\n", encoding="utf-8"
+        )
+
+        result = self.run_stage(root, "codex-declined-fallback", "--scope", "changes")
+        report = self.report(result)
+
+        attempts = [
+            (row["provider"]["id"], row["status"])
+            for row in report["receipt"]["attempts"]
+        ]
+        self.assertEqual(attempts, [("codex", "skipped"), ("prism", "clean")])
+        # Covered by a lane that actually read the change, so the decline
+        # stops deciding the aggregate and stops being a limitation.
+        self.assertEqual(self.codex_attempt(report)["supersededBy"], "prism")
+        self.assertEqual(report["receipt"]["outcome"], "clean")
+        self.assertEqual(
+            report["receipt"]["confidence"], {"granted": True, "limitations": []}
+        )
+
+    def test_a_required_lane_that_declines_still_degrades_the_gate(self) -> None:
+        """``requiredProviders`` says that lane must actually run. A lane
+        declining to is not an answer to that, any more than a fallback
+        standing in for it is."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        # Every other lane clean, so the gate's verdict turns on the
+        # required lane's absence rather than on somebody's findings.
+        self.write_builtin_config(
+            root, codex_mode="finding", prism_mode="clean", gito_count=0
+        )
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value.setdefault("policy", {})["requiredProviders"] = ["codex"]
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "require the codex lane")
+
+        report = self.report(self.run_stage(root, "codex-required-decline"))
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "skipped")
+        self.assertNotIn("supersededBy", codex)
+        self.assertIn("codex:skipped", report["receipt"]["confidence"]["limitations"])
+        self.assertNotEqual(report["receipt"]["remoteGate"]["state"], "eligible")
+
+    def test_a_lane_mapped_to_skipped_still_lets_a_fallback_review(self) -> None:
+        """Absence of any shape lets the fallback run. A lane whose exit a
+        repository maps to ``skipped`` reviewed nothing, exactly like a
+        missing one, so treating it as "somebody reported" left the change
+        unreviewed with nothing saying so."""
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        for provider in value["providers"]:
+            if provider["id"] == "codex":
+                provider["outcomeByExitCode"] = {"0": "clean", "1": "skipped"}
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "map the codex lane to skipped")
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        report = self.report(
+            self.run_stage(root, "codex-skipped-fallback", "--scope", "changes")
+        )
+
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "skipped"), ("prism", "clean")],
+        )
+        self.assertEqual(report["receipt"]["outcome"], "clean")
+
+    def test_a_required_lane_mapped_to_skipped_still_degrades_the_gate(self) -> None:
+        """The third way out of running. ``skipped`` is neither a terminal
+        failure nor a decline, so a repository that maps an exit code to it
+        could have its required lane read nothing and still be told the
+        review was clean, ungraded, and confident."""
+        root = self.make_repo()
+        # A valid provider payload overrides the exit-code mapping, so
+        # ``skipped`` is only reachable through an exit that produced no
+        # report at all -- here the rate-limit mode, remapped.
+        self.write_config(root, modes=("clean", "rate-limit"), required=["gito"])
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        for provider in value["providers"]:
+            if provider["id"] == "gito":
+                provider["outcomeByExitCode"]["8"] = "skipped"
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "require a lane that maps to skipped")
+
+        report = self.report(self.run_stage(root, "required-skipped", "--local", "all"))
+        receipt = report["receipt"]
+
+        self.assertEqual(self.attempt(report, "gito")["status"], "skipped")
+        self.assertIn("gito:skipped", receipt["confidence"]["limitations"])
+        self.assertFalse(receipt["confidence"]["granted"])
+        self.assertNotEqual(receipt["remoteGate"]["state"], "eligible")
+
+    def test_a_fallback_does_not_cover_a_required_provider(self) -> None:
+        """``requiredProviders`` says that lane must actually run. A cheaper
+        substitute clearing its limitation would let the fallback list
+        override a policy the repository wrote."""
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value.setdefault("policy", {})["requiredProviders"] = ["codex"]
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "require the codex lane")
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        report = self.report(
+            self.run_stage(root, "codex-required", "--scope", "changes")
+        )
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "unavailable")
+        self.assertNotIn("supersededBy", codex)
+        self.assertIn(
+            "codex:unavailable", report["receipt"]["confidence"]["limitations"]
+        )
+
+    def test_an_unavailable_lane_beside_a_running_one_still_limits_the_run(
+        self,
+    ) -> None:
+        """Supersession is not "ignore every unavailable provider". No
+        fallback runs while some selected provider is still working, so the
+        ensemble is genuinely reduced and the receipt has to say so."""
+        # A genuinely broken lane, not one that declined: a lane that steps
+        # aside for independence reports ``skipped`` and is covered by
+        # test_a_lane_that_declined_does_not_block_a_clean_review.
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="logged-out")
+
+        report = self.report(self.run_stage(root, "codex-reduced-ensemble"))
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "unavailable")
+        self.assertNotIn("supersededBy", codex)
+        self.assertIn("codex:unavailable", report["receipt"]["confidence"]["limitations"])
+        self.assertFalse(report["receipt"]["confidence"]["granted"])
+
+    def test_worktree_review_rejects_a_tree_that_moved_during_the_run(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="mutate")
+        (root / "src/app.py").write_text("seed\nchanged\nmore\n", encoding="utf-8")
+
+        result = self.run_stage(
+            root, "codex-drift", "--scope", "changes", "--local", "codex"
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("working tree changed while the local review ran", result.stdout)
+
+    def test_low_risk_successor_falls_back_past_an_unavailable_codex(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="finding", gito_count=0
+        )
+
+        result = self.run_stage(
+            root, "codex-successor", "--successor", "low-risk"
+        )
+        report = self.report(result)
+
+        self.assertEqual(report["receipt"]["plan"]["policyId"], "low-risk-successor")
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "unavailable"), ("prism", "findings")],
+        )
+
+    def test_branch_review_rejects_a_tree_that_became_dirty_during_the_run(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="mutate")
+
+        result = self.run_stage(root, "codex-branch-drift", "--local", "codex")
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("became dirty while provider(s) codex", result.stdout)
+
+    def test_codebase_review_rejects_a_head_that_moved_during_the_run(
+        self,
+    ) -> None:
+        # The dirtiness re-check cannot see this: an empty commit moves HEAD
+        # and leaves the tree clean, so before the codebase branch of
+        # _reconfirm_tree_binding existed the receipt named a commit the
+        # provider never read.
+        root = self.make_repo()
+        self.write_builtin_config(root, gito_move_head=True)
+
+        result = self.run_stage(
+            root, "gito-codebase-drift", "--scope", "codebase", "--local", "gito"
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("HEAD moved while the local review ran", result.stdout)
+
+    def test_codex_lane_steps_aside_when_the_change_edits_its_own_skills(
+        self,
+    ) -> None:
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(root, codex_mode="finding")
+
+        report = self.report(self.run_stage(root, "codex-tainted"))
+
+        codex = self.codex_attempt(report)
+        # Declining for independence is not a failure. Recording it as one
+        # made every change to these paths permanently unreviewable, because
+        # the guard fires on exactly the paths this pack ships.
+        self.assertEqual(codex["status"], "skipped")
+        self.assertTrue(codex["declined"])
+        self.assertIn("instruction surfaces codex loads", codex["diagnostic"])
+        # The lane steps aside; the others still review the change.
+        self.assertEqual(
+            sorted(finding["summary"] for finding in report["receipt"]["findings"]),
+            ["Gito finding", "Prism finding"],
+        )
+        # Visible in the receipt, but it does not degrade the gate.
+        self.assertIn("codex:skipped", report["receipt"]["confidence"]["limitations"])
+
+    def test_a_lane_that_declined_does_not_block_a_clean_review(self) -> None:
+        # The whole point of the status change: a change editing codex's own
+        # instruction surfaces must still be able to reach a clean review on
+        # the strength of the lanes that can read it.
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(
+            root, codex_mode="finding", prism_mode="clean", gito_count=0
+        )
+
+        report = self.report(self.run_stage(root, "codex-declined-clean"))
+
+        receipt = report["receipt"]
+        self.assertEqual(self.codex_attempt(report)["status"], "skipped")
+        self.assertEqual(receipt["outcome"], "clean")
+        self.assertTrue(receipt["confidence"]["granted"])
+        self.assertIn("codex:skipped", receipt["confidence"]["limitations"])
+        self.assertNotEqual(receipt["remoteGate"]["reason"], "local-review-limited")
+
+    def test_deleting_a_skill_does_not_make_the_codex_lane_step_aside(self) -> None:
+        """Nothing is left at the path for codex to load, so the change
+        cannot write into its own reviewer's context."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(root, codex_mode="clean")
+        (root / ".agents/skills/probe/SKILL.md").unlink()
+
+        report = self.report(
+            self.run_stage(root, "codex-deleted-skill", "--scope", "changes")
+        )
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "clean")
+
+    def test_codex_adapter_refuses_codebase_scope(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="finding")
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value["providers"][0]["scopes"] = ["worktree", "branch_delta", "codebase"]
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "offer codebase scope to codex")
+
+        result = self.run_stage(
+            root, "codex-codebase", "--scope", "codebase", "--local", "codex"
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not support codebase scope", result.stdout)
+
+        # The refusal belongs to reading the configuration, not to expanding
+        # the argv of a lane that was already selected: a codex provider
+        # offering a scope its adapter can never run is rejected on any run,
+        # including one that never asks for that scope.
+        other = self.run_stage(
+            root, "codex-codebase-declared", "--scope", "changes", "--local", "codex"
+        )
+        self.assertNotEqual(other.returncode, 0)
+        self.assertIn("does not support codebase scope", other.stdout)
 
     # --- .prism/rules.json handling -------------------------------------
 

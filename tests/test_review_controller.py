@@ -247,13 +247,94 @@ class ReviewControllerTests(InstallTestCase):
         )
         return path
 
+    def test_codex_instruction_surface_detection_is_narrow(self) -> None:
+        stage = self.load_local_stage()
+
+        # Only what codex itself loads as instructions: its own directory and
+        # a SKILL.md it discovers, which means one under .agents/skills or
+        # .codex/skills relative to the -C root. Not a skills reference file,
+        # not a doc that merely mentions skills, and not AGENTS.md, which the
+        # lane already neutralizes with project_doc_max_bytes=0.
+        #
+        # A SKILL.md belonging to some other agent is the case that matters:
+        # this repository carries skills for Claude, for plugin payloads, and
+        # in template trees, and codex loads none of them. Reading those as
+        # taint disabled the default lane for a large share of this
+        # repository's own changes.
+        self.assertEqual(
+            stage.codex_instruction_surfaces(
+                [
+                    ".agents/skills/probe/SKILL.md",
+                    ".codex/config.toml",
+                    ".claude/skills/other/SKILL.md",
+                    "plugins/sd/skills/sd-review/SKILL.md",
+                    "templates/.agents/skills/probe/SKILL.md",
+                    ".claude/skills/other/references/notes.md",
+                    # Within the two roots codex reads, the whole skill
+                    # directory counts: a reference file is loadable text
+                    # behind a name the model can already see.
+                    ".agents/skills/probe/references/notes.md",
+                    "docs/skills.md",
+                    "AGENTS.md",
+                    "src/app.py",
+                ]
+            ),
+            [
+                ".agents/skills/probe/SKILL.md",
+                ".agents/skills/probe/references/notes.md",
+                ".codex/config.toml",
+            ],
+        )
+
+    def test_fallback_supersession_covers_only_what_a_review_replaced(
+        self,
+    ) -> None:
+        stage = self.load_local_stage()
+
+        def attempts(*rows: tuple[str, str]) -> list[dict[str, object]]:
+            return [
+                {"provider": {"id": identifier}, "status": status}
+                for identifier, status in rows
+            ]
+
+        # The ordinary case: the selected lane was unavailable, the fallback
+        # reviewed, so the fallback covers it.
+        rows = attempts(("codex", "unavailable"), ("prism", "clean"))
+        stage._mark_superseded_by_fallback(rows, ["prism"])
+        self.assertEqual(rows[0].get("supersededBy"), "prism")
+        self.assertNotIn("supersededBy", rows[1])
+
+        # An earlier fallback that was itself unavailable sits in exactly the
+        # position a primary sits in: the loop only reached the second one
+        # because the first produced nothing.
+        rows = attempts(
+            ("codex", "unavailable"), ("prism", "unavailable"), ("gito", "findings")
+        )
+        stage._mark_superseded_by_fallback(rows, ["prism", "gito"])
+        self.assertEqual(rows[0].get("supersededBy"), "gito")
+        self.assertEqual(rows[1].get("supersededBy"), "gito")
+
+        # A repository can map an exit code to `skipped`. A fallback that
+        # lands there reviewed nothing, so it stands in for nothing.
+        rows = attempts(("codex", "unavailable"), ("prism", "skipped"))
+        stage._mark_superseded_by_fallback(rows, ["prism"])
+        self.assertNotIn("supersededBy", rows[0])
+
+        # `requiredProviders` says that lane must actually run; a cheaper
+        # substitute does not get to clear its limitation.
+        rows = attempts(("codex", "unavailable"), ("prism", "clean"))
+        stage._mark_superseded_by_fallback(rows, ["prism"], ["codex"])
+        self.assertNotIn("supersededBy", rows[0])
+
     def test_configuration_is_shared_strict_and_path_safe(self) -> None:
         controller = self.load_controller()
         local_stage = self.load_local_stage()
         root = self.make_repo()
         default, remote = controller.load_review_configuration(root)
         self.assertEqual(remote["requirement"], "optional")
-        self.assertEqual(len(default["providers"]), 2)
+        self.assertEqual(
+            [row["id"] for row in default["providers"]], ["codex", "prism", "gito"]
+        )
         local_default, _providers, _policy = local_stage.load_config(root)
         self.assertEqual(default, local_default)
         self.assertEqual(
@@ -265,9 +346,10 @@ class ReviewControllerTests(InstallTestCase):
         path.parent.mkdir(parents=True)
         config = default | {
             "providers": [
-                default["providers"][0]
+                default["providers"][0],
+                default["providers"][1]
                 | {"version": "prism-r\u00e9view-v1"},
-                default["providers"][1],
+                default["providers"][2],
             ],
             "remoteIntegration": {
                 "requirement": "required",

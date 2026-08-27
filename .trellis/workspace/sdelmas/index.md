@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 434
-- **Last Active**: 2026-08-26
+- **Total Sessions**: 435
+- **Last Active**: 2026-08-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1397 | Active |
+| `journal-9.md` | ~1451 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 435 | 2026-08-27 | Codex local review adapter: opt-in lane, absence semantics, and the ship round | `07daecbf`, `e7a28652`, `41cea1fd`, `951ccb28`, `fb031ced`, `4ae42850`, `e7f85106`, `0c656dca`, `c95946e1`, `610e58d1`, `76ca62bf`, `9661a144`, `ecbfb0d1`, `6a9ee598`, `a91f6970`, `0ec1bb71` | `task/codex-local-adapter` |
 | 434 | 2026-08-26 | File the blocked-marker bookkeeping gate gap | `ec235179a539a076bc036d3d6755522a005240fe` | `chore/file-blocked-marker-gate-gap` |
 | 433 | 2026-08-26 | Plan the completion-successor cc over-refusal fix | `60721c99`, `a8952099` | `docs/plan-completion-successor-cc-overrefusal` |
 | 431 | 2026-08-26 | Record the landable blockers in the sd-review-pr retirement program | `9a7dc5e7` | `chore/mark-blocked-planning-tasks` |

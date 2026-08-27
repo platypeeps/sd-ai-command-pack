@@ -2,7 +2,31 @@
   "schemaVersion": 1,
   "providers": [
     {
-      "scopes": ["worktree", "branch_delta", "codebase"],
+      "scopes": [
+        "worktree",
+        "branch_delta"
+      ],
+      "dataHandling": "private-network",
+      "qualityTier": "deep",
+      "enabled": true,
+      "id": "codex",
+      "adapter": "codex",
+      "argv": [],
+      "costTier": "none",
+      "timeoutSeconds": 900,
+      "version": "builtin-v1",
+      "outcomeByExitCode": {
+        "0": "clean",
+        "1": "unavailable",
+        "2": "unavailable"
+      }
+    },
+    {
+      "scopes": [
+        "worktree",
+        "branch_delta",
+        "codebase"
+      ],
       "dataHandling": "private-network",
       "qualityTier": "standard",
       "enabled": true,
@@ -21,7 +45,11 @@
     }
   ],
   "policy": {
-    "allowedDataHandling": ["local", "private-network", "public-network"],
+    "allowedDataHandling": [
+      "local",
+      "private-network",
+      "public-network"
+    ],
     "documentation": "cheapest",
     "metadata": "cheapest",
     "requiredProviders": []

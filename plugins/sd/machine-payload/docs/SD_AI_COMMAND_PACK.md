@@ -1008,6 +1008,16 @@ pr=<positive-number>
 attempt=<positive-number>
 ```
 
+Local review providers come from `.sd-ai-command-pack/review.json` when the
+repository ships one, otherwise from the built-in defaults: `codex` first, then
+`prism` and `gito`. The `codex` adapter runs `codex exec --sandbox read-only`
+inside the checkout, billed to the Codex CLI's own login rather than an API key,
+and constrains the answer with an output schema; a machine without `codex`, or
+with a logged-out `codex`, records that lane as `unavailable` and the run
+continues on the remaining lanes. `prism` and `gito` stay selectable through
+`local=<provider-id>` and `requiredProviders`. A repository-owned `review.json`
+replaces the defaults entirely, so it must list `codex` itself to use that lane.
+
 The optional `.sd-ai-command-pack/review.json` `remoteIntegration` object
 accepts only `requirement` (`optional|required`), a repository-contained
 `descriptorPath`, and bounded `receiptPolls`, `pollSeconds`, and `roundLimit`

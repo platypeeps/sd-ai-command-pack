@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import (
     Any,
+    Collection,
     Literal,
     Mapping,
     MutableMapping,
@@ -83,6 +84,98 @@ OUTCOMES = declare_verdict_domain(
 )
 TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
 FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
+CODEX_SCHEMA_FILE = "codex-schema.json"
+CODEX_ANSWER_FILE = "codex-answer.json"
+CODEX_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["findings"],
+    "properties": {
+        "findings": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "line", "severity", "summary", "family"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "line": {"type": ["integer", "null"]},
+                    "severity": {"enum": ["high", "medium", "low", "unspecified"]},
+                    "summary": {"type": "string"},
+                    "family": {"type": "string"},
+                },
+            },
+        }
+    },
+}
+
+
+def codex_instruction_surfaces(paths: Sequence[str]) -> list[str]:
+    """Reviewed paths that codex itself would load as instructions.
+
+    codex discovers skills under ``.agents/skills`` and ``.codex/skills`` in
+    the directory it runs in, and every discovered skill's name and
+    description enter the model's context whether or not the skill is
+    invoked. Under ``.codex`` the whole root counts rather than its skills
+    alone: that directory is codex's own configuration surface -- config,
+    rules, and instruction text the lane loads before it reads a diff -- so
+    the guard treats an edit anywhere beneath it as taint. A change that adds or edits one is therefore writing text into
+    the context of the lane reviewing it, which is exactly the influence an
+    independent gate must not grant. ``AGENTS.md`` is excluded: the lane
+    already runs with ``project_doc_max_bytes=0``.
+
+    The match is anchored at those two roots rather than at any ``SKILL.md``
+    below any ``skills`` directory, because the lane runs with ``-C <repo>``
+    and codex reads only those two paths relative to it. A repository that
+    also stores skills for other agents -- ``.claude/skills/``, a plugin
+    payload, a template tree -- edits files codex never loads, and treating
+    those as taint disabled the default lane for changes it could review
+    perfectly well.
+
+    Within those two roots the whole skill directory counts, not only
+    ``SKILL.md``. Discovery reads the frontmatter, but a skill's references
+    are loadable text sitting behind a name the model can see, and the
+    distinction is too fine to rest an independence guard on.
+    """
+    tainted = []
+    for path in paths:
+        lowered = path.lower()
+        parts = lowered.split("/")
+        if parts[0] == ".codex":
+            tainted.append(path)
+        elif len(parts) > 2 and parts[0] == ".agents" and parts[1] == "skills":
+            tainted.append(path)
+    return sorted(tainted)
+
+
+def _codex_prompt(scope: str, base: str, head: str) -> str:
+    """Prompt for codex exec. Codex fetches the diff itself from the exact
+    refs the coordinator resolved, so the argv stays small."""
+    if scope == "branch_delta":
+        subject = (
+            f"the committed change `git diff {base}..{head}`; do not review the "
+            "working tree beyond those two refs"
+        )
+    else:
+        subject = (
+            "the uncommitted working-tree change: `git diff HEAD` plus every "
+            "file listed by `git status --porcelain --untracked-files=all`"
+        )
+    return (
+        "You are one lane of a multi-provider code review gate, taking the "
+        "adversarial stance: find the strongest reasons this change should not "
+        f"ship yet. Review {subject}. Report defects the change introduces: "
+        "correctness bugs, security issues, data-integrity risks, and "
+        "maintainability problems that would cost real time later. Judge "
+        "severity per finding; high means it should block a merge. Do not "
+        "report style, wording, or observations that are not defects, and "
+        "prefer few precise findings over many speculative ones. path is the "
+        "repository-relative file, line is the line in the new version or "
+        "null, family is one short category word such as security, "
+        "correctness, testing, or maintainability. Respond only with JSON "
+        "matching the output schema; an empty findings array means clean."
+    )
 FINDING_FAMILY_IDS = REVIEW_FINDING_FAMILY_IDS
 FINDING_DISPOSITIONS = frozenset(
     {"outstanding", "fix", "fixed", "rebutted", "resolved", "miscited"}
@@ -282,6 +375,27 @@ def _default_config() -> dict[str, Any]:
         "providers": [
             {
                 **shared,
+                "id": "codex",
+                "adapter": "codex",
+                "argv": [],
+                # Opt-in: codex is an external, subscription-billed tool, and a
+                # substantive review selects it as a lane rather than a
+                # fallback. Enabled by default it would put every repository
+                # that has not installed codex into a degraded review.
+                "enabled": False,
+                "scopes": ["worktree", "branch_delta"],
+                "costTier": "none",
+                "qualityTier": "deep",
+                "timeoutSeconds": 900,
+                "version": "builtin-v1",
+                "outcomeByExitCode": {
+                    "0": "clean",
+                    "1": "unavailable",
+                    "2": "unavailable",
+                },
+            },
+            {
+                **shared,
                 "id": "prism",
                 "adapter": "prism",
                 "argv": [],
@@ -432,7 +546,7 @@ def _parse_provider(value: object) -> Provider:
     version = value.get("version")
     if not isinstance(identifier, str) or not ID_RE.fullmatch(identifier):
         raise ReviewInputError("provider id is invalid")
-    if adapter not in {"prism", "gito", "argv"}:
+    if adapter not in {"prism", "gito", "codex", "argv"}:
         raise ReviewInputError(f"provider {identifier} has an unsupported adapter")
     if not isinstance(version, str) or not version or len(version) > 128:
         raise ReviewInputError(f"provider {identifier} version is invalid")
@@ -463,6 +577,14 @@ def _parse_provider(value: object) -> Provider:
         field=f"provider {identifier} scopes",
         allowed=set(CANONICAL_SCOPES),
     )
+    # The codex adapter builds a diff review and refuses codebase scope when
+    # its argv is expanded. Catching that here instead means a configuration
+    # that can never run is rejected while the config is read, not partway
+    # through a selected review round.
+    if adapter == "codex" and "codebase" in scopes:
+        raise ReviewInputError(
+            f"provider {identifier} codex adapter does not support codebase scope"
+        )
     if not scopes:
         raise ReviewInputError(f"provider {identifier} scopes cannot be empty")
     data_handling = value.get("dataHandling")
@@ -486,8 +608,9 @@ def _parse_provider(value: object) -> Provider:
         raise ReviewInputError(f"provider {identifier} enabled must be boolean")
     requires_tree_at_head = value.get("requiresTreeAtHead")
     if requires_tree_at_head is None:
-        # gito resolves the diff from refs but reads content from the tree.
-        requires_tree_at_head = adapter == "gito"
+        # gito resolves the diff from refs but reads content from the tree;
+        # codex runs inside the checkout and reads whatever is there.
+        requires_tree_at_head = adapter in {"gito", "codex"}
     elif adapter != "argv":
         raise ReviewInputError(
             f"provider {identifier} builtin adapter cannot override requiresTreeAtHead"
@@ -1411,7 +1534,7 @@ def build_plan(
         selected = [
             provider
             for provider in eligible
-            if provider.identifier in {"prism", "gito"}
+            if provider.identifier in {"codex", "prism", "gito"}
         ]
         policy_id = (
             "repeated-family"
@@ -1474,6 +1597,21 @@ def build_plan(
         # must not answer from a receipt cached before it. Bump this when the
         # recorded shape changes again.
         plan["localAdvisoryRecordVersion"] = 1
+    # Same condition, same reason. The required set has to be on the plan and
+    # not only in the policy the run read, because re-gating a stored receipt
+    # must reach the same verdict from the receipt alone -- but a repository
+    # that named no required lane gates exactly as it always did, so its
+    # digests must not move to say so.
+    if required:
+        plan["requiredProviders"] = list(required)
+    # Unconditional, and deliberately so -- the opposite case from the keys
+    # above. Those record a feature a repository did not turn on, so moving
+    # its digest buys nothing; this records that the rules for reading a
+    # receipt changed. Absence no longer decides an outcome other lanes
+    # answered, and fallbacks now run for absence of any shape, so a receipt
+    # cached under the previous rules would be re-gated to a verdict this
+    # code would not reach. Bump when those rules change again.
+    plan["localReviewSemanticsVersion"] = 2
     plan["policyDigest"] = _digest(plan)
     return plan
 
@@ -1672,6 +1810,75 @@ def _require_tree_at_head(
     )
 
 
+def _reconfirm_tree_binding(
+    repo: Path, target: Mapping[str, Any], selected: Sequence[Provider]
+) -> None:
+    """Re-check, after the providers have run, that the tree still holds what
+    the receipt is about to claim they reviewed.
+
+    ``_require_tree_at_head`` and ``resolve_target`` bind the tree before the
+    run, but a provider that reads the live checkout may run for minutes. A
+    tree that moves in between leaves a receipt vouching for content no
+    provider saw, which is the failure both pre-run guards exist to prevent.
+    """
+    scope = str(target["scope"])
+    if scope == "worktree":
+        # HEAD first. The digest below is recomputed against the refs the
+        # receipt names, not against the live checkout, so a HEAD that moved
+        # to a commit carrying an identical delta passes it -- and the receipt
+        # would then attest to a head nothing was reviewed at.
+        head = str(_git(repo, "rev-parse", "--verify", "HEAD")).strip()
+        if head != str(target["head"]):
+            raise ReviewInputError(
+                "HEAD moved while the local review ran: the receipt names "
+                f"{target['head']} and the checkout is at {head}; rerun the "
+                "stage against the current tree"
+            )
+        # The tree is the subject, so any change to it invalidates the digest
+        # every provider was pointed at.
+        fresh = resolve_target(
+            repo, "changes", str(target["base"]), str(target["head"])
+        )
+        if fresh["contentDigest"] != target["contentDigest"]:
+            raise ReviewInputError(
+                "working tree changed while the local review ran; rerun the "
+                "stage against the current tree"
+            )
+        return
+    if not any(provider.requires_tree_at_head for provider in selected):
+        return
+    # Same two conditions resolve_target and _require_tree_at_head enforced
+    # before the run: the requested head is checked out, and nothing else is.
+    _require_tree_at_head(repo, target, selected)
+    if scope == "codebase":
+        # _require_tree_at_head speaks only for branch_delta, and codebase
+        # was bound to one head upstream rather than by it, so without this
+        # the scope is re-checked for dirtiness alone. A clean checkout of a
+        # different commit mid-run leaves the tree clean and would pass,
+        # producing exactly the receipt the worktree branch above refuses:
+        # one naming a head no provider read.
+        head = str(_git(repo, "rev-parse", "--verify", "HEAD")).strip()
+        if head != str(target["head"]):
+            raise ReviewInputError(
+                "HEAD moved while the local review ran: the receipt names "
+                f"{target['head']} and the checkout is at {head}; rerun the "
+                "stage against the current tree"
+            )
+    if str(_git(repo, "status", "--porcelain=v1", "--untracked-files=all")):
+        names = ", ".join(
+            sorted(
+                provider.identifier
+                for provider in selected
+                if provider.requires_tree_at_head
+            )
+        )
+        raise ReviewInputError(
+            f"the working tree became dirty while provider(s) {names} read "
+            "file content from it; rerun the stage against a clean tree at "
+            "the requested head"
+        )
+
+
 def _expand_argv(
     provider: Provider,
     target: Mapping[str, Any],
@@ -1747,6 +1954,50 @@ def _expand_argv(
                 "--out",
                 output,
             ]
+    elif provider.adapter == "codex":
+        if scope == "codebase":
+            raise ReviewInputError(
+                "codex adapter reviews a diff and does not support codebase scope"
+            )
+        # The schema and answer files live in the attempt directory, which
+        # _run_provider creates and seeds before the process starts.
+        result = [
+            "codex",
+            "exec",
+            "--sandbox",
+            "read-only",
+            # The lane reads diff text it does not trust, so it must not run
+            # holding tools that reach outside the checkout. --sandbox
+            # read-only bounds the shell; it does nothing about MCP servers
+            # configured in ~/.codex/config.toml, whose credentials would stay
+            # live and reachable by anything the reviewed diff talks the model
+            # into. --ignore-user-config drops that file -- auth still resolves
+            # through CODEX_HOME, so a subscription login keeps working -- and
+            # leaves the lane with the flags below and nothing else.
+            "--ignore-user-config",
+            # execpolicy `.rules` load on their own path, not through
+            # config.toml, so dropping that file does not drop these. A
+            # project rule is repository-controlled, which is the same thing
+            # the reviewed diff is.
+            "--ignore-rules",
+            # A gate run leaves no session behind. Without this, every review
+            # writes a transcript of the diff it read -- source snippets and
+            # tool output -- into the user's Codex home, outside the bounded
+            # artifact directory that holds the rest of the run's evidence and
+            # outside anything that ever cleans it up.
+            "--ephemeral",
+            "-C",
+            str(repo),
+            # The reviewed checkout must not instruct its own reviewer: a
+            # changed AGENTS.md would otherwise load above this prompt.
+            "-c",
+            "project_doc_max_bytes=0",
+            "--output-schema",
+            str(attempt_dir / CODEX_SCHEMA_FILE),
+            "--output-last-message",
+            str(attempt_dir / CODEX_ANSWER_FILE),
+            _codex_prompt(scope, str(target["base"]), str(target["head"])),
+        ]
     else:
         if any("," in path for path in paths) and any(
             "{paths}" in item for item in provider.argv
@@ -1923,6 +2174,42 @@ def _gito_payload(attempt_dir: Path) -> dict[str, Any] | None:
     return {"status": "findings" if findings else "clean", "findings": findings}
 
 
+def _codex_payload(attempt_dir: Path) -> dict[str, Any] | None:
+    """Read the schema-constrained answer codex wrote for this attempt.
+
+    codex exec enforces CODEX_OUTPUT_SCHEMA on the final message, so the
+    answer is already in the normalized finding shape; this only bounds it.
+    """
+    path = attempt_dir / CODEX_ANSWER_FILE
+    try:
+        value = _read_json(path, limit=MAX_OUTPUT_BYTES, label="codex answer")
+    except ReviewInputError:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
+        return None
+    raw_findings = value["findings"]
+    if len(raw_findings) > MAX_FINDINGS:
+        return None
+    findings: list[dict[str, Any]] = []
+    for raw in raw_findings:
+        if not isinstance(raw, dict):
+            return None
+        severity = raw.get("severity")
+        if severity not in FINDING_SEVERITY_RANK:
+            return None
+        line = raw.get("line")
+        findings.append(
+            {
+                "path": raw.get("path"),
+                "line": line if isinstance(line, int) and not isinstance(line, bool) else None,
+                "severity": severity,
+                "summary": raw.get("summary"),
+                "family": raw.get("family"),
+            }
+        )
+    return {"status": "findings" if findings else "clean", "findings": findings}
+
+
 def _parse_provider_payload(
     provider: Provider, stdout: bytes, attempt_dir: Path
 ) -> dict[str, Any] | None:
@@ -1930,6 +2217,8 @@ def _parse_provider_payload(
         return _prism_payload(stdout)
     if provider.adapter == "gito":
         return _gito_payload(attempt_dir)
+    if provider.adapter == "codex":
+        return _codex_payload(attempt_dir)
     return _parse_argv_payload(stdout)
 
 
@@ -1971,9 +2260,14 @@ def _run_provider(
     run_dir: Path,
     environment: Mapping[str, str],
     rules: Mapping[str, Any] | None = None,
+    declined_reason: str | None = None,
 ) -> dict[str, Any]:
     attempt_dir = run_dir / provider.identifier
     attempt_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    if provider.adapter == "codex":
+        (attempt_dir / CODEX_SCHEMA_FILE).write_text(
+            json.dumps(CODEX_OUTPUT_SCHEMA), encoding="utf-8"
+        )
     started = time.time()
     base = {
         "provider": _provider_row(provider),
@@ -1991,6 +2285,26 @@ def _run_provider(
             "exitCode": None,
             "durationMs": 0,
             "diagnostic": "provider cancelled before start",
+            "findings": [],
+        }
+        _atomic_json(attempt_dir / "attempt.json", result)
+        return result
+    if declined_reason is not None:
+        # A lane that steps aside to stay independent has not failed: it read
+        # the change, recognised that reviewing it would mean reading text the
+        # change itself wrote into its context, and declined. Recording that
+        # as ``unavailable`` made it a terminal failure indistinguishable from
+        # a missing or logged-out binary, and since the guard fires on exactly
+        # the paths this pack ships, any change touching them could never
+        # reach a clean local review. ``skipped`` is the honest status and is
+        # deliberately not a terminal failure; the reason travels with it.
+        result = {
+            **base,
+            "status": "skipped",
+            "exitCode": None,
+            "durationMs": 0,
+            "diagnostic": declined_reason,
+            "declined": True,
             "findings": [],
         }
         _atomic_json(attempt_dir / "attempt.json", result)
@@ -2168,10 +2482,133 @@ def _normalize_findings(
     )
 
 
-def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
+def _mark_superseded_by_fallback(
+    attempts: Sequence[MutableMapping[str, Any]],
+    fallback_ids: Sequence[str],
+    required_ids: Collection[str] = (),
+) -> None:
+    """Record that a completed fallback covers the lanes it stood in for.
+
+    The execution stage runs a fallback only when every attempt so far came
+    back ``unavailable`` or declined for independence, so a fallback that
+    produced a review is the plan
+    working as designed, not a degraded run -- the PRD's requirement is that a
+    missing or logged-out primary "degrades to the other lanes instead of
+    failing". Left unmarked, the unavailable lane's status outranks the
+    fallback's ``clean`` in ``_aggregate_outcome`` and lands in
+    ``confidence.limitations``, so the successful review reported as a provider
+    failure and blocked remote routing.
+
+    Everything unavailable ahead of the successful fallback is covered, not
+    just the originally selected providers: the loop advances to a second
+    fallback only because the first one was unavailable too, so an earlier
+    fallback is in exactly the position a primary is in.
+
+    ``required_ids`` is the exception, and it is not a detail. A repository
+    that names a provider in ``requiredProviders`` is saying that lane must
+    actually run; letting a cheaper substitute clear its limitation would turn
+    a policy the repository wrote into one the fallback list overrides. A
+    required lane that did not run stays a limitation, and the gate keeps
+    reporting it.
+
+    The superseded attempt keeps its own status and stays in the receipt: which
+    lane was asked and what it answered is exactly what a reader needs. It
+    simply stops deciding the aggregate.
+    """
+    if not fallback_ids:
+        return
+    fallbacks = set(fallback_ids)
+    required = set(required_ids)
+    # A fallback covers the lanes ahead of it only by having reviewed the
+    # change. ``clean`` and ``findings`` are the two statuses that mean it
+    # did; every other status -- ``skipped`` included, which a repository can
+    # map an exit code to -- means the substitute produced no review either,
+    # and superseding on it would clear the limitation without anything having
+    # looked at the diff.
+    covered = sorted(
+        str(item["provider"]["id"])
+        for item in attempts
+        if str(item["provider"]["id"]) in fallbacks
+        and str(item.get("status")) in {"clean", "findings"}
+    )
+    if not covered:
+        return
+    for item in attempts:
+        identifier = str(item["provider"]["id"])
+        if (
+            (str(item.get("status")) == "unavailable" or item.get("declined"))
+            and identifier not in required
+            and identifier not in covered
+        ):
+            item["supersededBy"] = covered[0]
+
+
+def _blocking_limitations(
+    limitations: Sequence[str], required: Collection[str] = ()
+) -> list[str]:
+    """The limitations that degrade the gate, out of everything it records.
+
+    A lane that declined for independence is recorded beside the real ones so
+    the receipt stays honest about how many lanes read the change, but it is
+    not a failure and must not block routing. Its entry carries ``skipped``,
+    which is deliberately outside ``TERMINAL_FAILURES``, so the distinction is
+    already in the string every caller stores.
+
+    ``requiredProviders`` overrides that for the lane it names, on the same
+    reasoning as the supersession rule: a repository saying "this lane must
+    run" is not answered by the lane declining to. Its absence degrades the
+    gate whether it broke or stepped aside.
+    """
+    names = set(required)
+    blocking = []
+    for item in limitations:
+        identifier, _, status = str(item).rpartition(":")
+        if status in TERMINAL_FAILURES or identifier in names:
+            blocking.append(item)
+    return blocking
+
+
+def _aggregate_outcome(
+    attempts: Sequence[Mapping[str, Any]], required: Collection[str] = ()
+) -> str:
+    """What the ensemble found, from the lanes that were in a position to say.
+
+    A lane that could not run is a smaller ensemble, not a wrong answer. When
+    other lanes did review the change, letting the dead one decide the outcome
+    reported a completed review as a provider failure and blocked routing on
+    it -- which is what the PRD refuses when it says a logged-out codex
+    "degrades to the other lanes instead of failing the run". The reduced
+    ensemble is not lost: it lands in ``confidence.limitations`` and drives the
+    gate's ``degraded`` signal, so the receipt still says fewer lanes looked.
+
+    ``required`` is the exception, on the same reasoning as everywhere else: a
+    repository naming a lane in ``requiredProviders`` said that lane must
+    actually run, so its absence is the answer rather than a footnote.
+    """
     if not attempts:
         return "skipped"
-    statuses = {str(item.get("status")) for item in attempts}
+    active = [item for item in attempts if not item.get("supersededBy")]
+    if not active:
+        return "skipped"
+    names = set(required)
+    reviewed = {
+        str(item.get("status"))
+        for item in active
+        if str(item.get("status")) in {"clean", "findings"}
+    }
+    # Only absence is demoted, never malfunction. A lane that is missing or
+    # logged out never started; a lane that ``failed`` or was ``cancelled``
+    # ran and went wrong, which is a distinct condition the gate reports on
+    # its own terms.
+    absent = all(
+        str(item.get("status")) in {"unavailable", "skipped"}
+        and str(item["provider"]["id"]) not in names
+        for item in active
+        if str(item.get("status")) not in {"clean", "findings"}
+    )
+    if reviewed and absent:
+        return "findings" if "findings" in reviewed else "clean"
+    statuses = {str(item.get("status")) for item in active}
     for status_value in ("findings", "failed", "unavailable", "cancelled"):
         if status_value in statuses:
             return status_value
@@ -2404,7 +2841,14 @@ def _redispose_receipt(
         advisory=advisory,
         dispositioned=dispositioned,
         accepted=accepted,
-        degraded=bool(stored_limitations)
+        degraded=bool(
+            _blocking_limitations(
+                stored_limitations,
+                plan.get("requiredProviders", ())
+                if isinstance(plan, Mapping)
+                else (),
+            )
+        )
         if isinstance(stored_limitations, list)
         else False,
     )
@@ -2576,6 +3020,41 @@ def _validate_reusable(
     return value
 
 
+def cheapest_fallbacks(
+    providers: Sequence[Provider],
+    policy: Mapping[str, Any],
+    target: Mapping[str, Any],
+    plan: Mapping[str, Any],
+) -> list[Provider]:
+    """Providers to try, cheapest first, when a ``*-cheapest`` plan's sole
+    provider reports unavailable.
+
+    A cost-free lane such as codex is always the cheapest, so without this a
+    machine missing that lane would run no review at all under the
+    documentation, metadata, and low-risk policies. Computed outside the plan
+    so the plan's shape, and therefore every receipt digest, is unchanged.
+    """
+    policy_id = str(plan["policyId"])
+    # Every policy that selects exactly one provider by cost, not only the
+    # `<risk>-cheapest` family: `low-risk-successor` picks the same way and
+    # would otherwise strand a successor run on a single unavailable lane.
+    if not policy_id.endswith("-cheapest") and policy_id != "low-risk-successor":
+        return []
+    selected = {str(row["id"]) for row in plan["providers"] if isinstance(row, dict)}
+    allowed = set(policy["allowedDataHandling"])
+    eligible = [
+        provider
+        for provider in providers
+        if provider.enabled
+        and str(target["scope"]) in provider.scopes
+        and provider.data_handling in allowed
+        and provider.identifier not in selected
+    ]
+    return sorted(
+        eligible, key=lambda item: (COST_TIERS.index(item.cost_tier), item.identifier)
+    )
+
+
 def execute(
     *,
     repo: Path,
@@ -2588,6 +3067,8 @@ def execute(
     fix_policy: str,
     allow_reuse: bool,
     dispositions: Mapping[str, Mapping[str, Any]] | None = None,
+    fallbacks: Sequence[Provider] = (),
+    required_providers: Collection[str] = (),
 ) -> tuple[dict[str, Any], bool]:
     supplied = dict(dispositions or {})
     identity = _receipt_identity(target, plan)
@@ -2653,6 +3134,24 @@ def execute(
             "confidenceCredit": {"granted": False},
         },
     )
+    tainted = codex_instruction_surfaces(
+        [
+            str(row["path"])
+            for row in target["paths"]
+            # A deleted skill is not an instruction surface: there is nothing
+            # left at that path for codex to load, so the change cannot write
+            # into its own reviewer's context and the lane has no reason to
+            # step aside.
+            if isinstance(row, dict) and str(row.get("kind")) != "deleted"
+        ]
+    )
+    codex_reason = (
+        "the reviewed change edits instruction surfaces codex loads "
+        f"({', '.join(tainted[:3])}{'...' if len(tainted) > 3 else ''}), so this "
+        "lane cannot review it independently"
+        if tainted
+        else None
+    )
     if selected:
         try:
             environment, _, _ = build_tool_environment(repo=repo)
@@ -2674,10 +3173,65 @@ def execute(
                         if provider.adapter == "prism"
                         else {"status": "not-applicable", "adapter": provider.adapter}
                     ),
+                    declined_reason=(
+                        codex_reason if provider.adapter == "codex" else None
+                    ),
                 )
                 for provider in selected
             ]
             attempts = [future.result() for future in futures]
+        # Every provider that actually ran, in the order it ran. The reconfirm
+        # below has to cover the fallbacks too, not just ``selected``.
+        executed = list(selected)
+        fallback_ids: list[str] = []
+        for fallback in fallbacks:
+            # Absence, whatever its shape: a lane that is missing, that
+            # declined for independence, or whose exit a repository maps to
+            # ``skipped`` all produced no review, and the fallback is a
+            # different tool the reviewed change does not taint -- so it can
+            # read what they did not. Malfunction is not absence: ``failed``
+            # and ``cancelled`` mean a lane ran and went wrong, which the gate
+            # reports on its own terms rather than papering over.
+            if any(
+                item["status"] not in {"unavailable", "skipped"}
+                and not item.get("declined")
+                for item in attempts
+            ):
+                break
+            _require_tree_at_head(repo, target, [fallback])
+            executed.append(fallback)
+            fallback_ids.append(fallback.identifier)
+            attempts.append(
+                _run_provider(
+                    fallback,
+                    argv=_expand_argv(
+                        fallback,
+                        target,
+                        run_dir / fallback.identifier,
+                        context_path,
+                        repo,
+                        rules_decision,
+                    ),
+                    repo=repo,
+                    run_dir=run_dir,
+                    environment=environment,
+                    rules=(
+                        rules_decision.record
+                        if fallback.adapter == "prism"
+                        else {"status": "not-applicable", "adapter": fallback.adapter}
+                    ),
+                    declined_reason=(
+                        codex_reason if fallback.adapter == "codex" else None
+                    ),
+                )
+            )
+        _mark_superseded_by_fallback(attempts, fallback_ids, required_providers)
+        # ``executed``, not ``selected``: a fallback is bound to the head by
+        # _require_tree_at_head before it starts, but only this reconfirm
+        # catches a checkout that moved while it ran. Passing ``selected``
+        # skipped exactly the provider whose findings the receipt attests to
+        # when the primaries were all unavailable.
+        _reconfirm_tree_binding(repo, target, executed)
     else:
         attempts = []
     attempts.sort(key=lambda item: str(item["provider"]["id"]))
@@ -2687,11 +3241,26 @@ def execute(
     outstanding, advisory, dispositioned, accepted = _classify_findings(
         findings, ceiling
     )
-    outcome = _aggregate_outcome(attempts)
+    required_ids = list(plan.get("requiredProviders", ()))
+    outcome = _aggregate_outcome(attempts, required_ids)
     limitations = [
         f"{item['provider']['id']}:{item['status']}"
         for item in attempts
-        if item["status"] in TERMINAL_FAILURES
+        if not item.get("supersededBy")
+        and (
+            item["status"] in TERMINAL_FAILURES
+            or item.get("declined")
+            # A required lane is a limitation whenever it did not review the
+            # change, whatever the reason. Listing only terminal failures and
+            # declines left the third way out open: a repository can map an
+            # exit code to ``skipped``, which is neither, so a required lane
+            # could produce a clean, ungraded, confidence-granted review
+            # having read nothing.
+            or (
+                str(item["provider"]["id"]) in set(required_ids)
+                and item["status"] not in {"clean", "findings"}
+            )
+        )
     ]
     receipt = {
         "schemaVersion": 1,
@@ -2720,9 +3289,15 @@ def execute(
             advisory=advisory,
             dispositioned=dispositioned,
             accepted=accepted,
-            degraded=bool(limitations),
+            degraded=bool(_blocking_limitations(limitations, required_ids)),
         ),
-        "confidence": {"granted": outcome == "clean", "limitations": limitations},
+        # ``outcome`` can now be clean while a lane died, so granting on it
+        # alone would vouch for an ensemble that was never assembled.
+        "confidence": {
+            "granted": outcome == "clean"
+            and not _blocking_limitations(limitations, required_ids),
+            "limitations": limitations,
+        },
         "createdAt": time.time(),
     }
     _atomic_json(receipt_path, receipt)
@@ -2921,6 +3496,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fix_policy=args.fix,
                 allow_reuse=not args.no_reuse,
                 dispositions=_parse_local_dispositions(args.local_disposition),
+                fallbacks=cheapest_fallbacks(providers, policy, target, plan),
+                required_providers=[
+                    str(item) for item in policy["requiredProviders"]
+                ],
             )
             report = _report(receipt, reused=reused)
             code = (

@@ -271,6 +271,28 @@ def load_review_configuration(repo: Path) -> tuple[dict[str, Any], dict[str, Any
             "schemaVersion": 1,
             "providers": [
                 {
+                    "id": "codex",
+                    "adapter": "codex",
+                    "argv": [],
+                    "scopes": ["worktree", "branch_delta"],
+                    "dataHandling": "private-network",
+                    "costTier": "none",
+                    "qualityTier": "deep",
+                    "timeoutSeconds": 900,
+                    "version": "builtin-v1",
+                    # Opt-in: codex is an external, subscription-billed tool,
+                    # and a substantive review selects it as a lane rather
+                    # than a fallback. Enabled by default it would put every
+                    # repository that has not installed codex into a degraded
+                    # review. Kept in step with the local stage's own default.
+                    "enabled": False,
+                    "outcomeByExitCode": {
+                        "0": "clean",
+                        "1": "unavailable",
+                        "2": "unavailable",
+                    },
+                },
+                {
                     "id": "prism",
                     "adapter": "prism",
                     "argv": [],

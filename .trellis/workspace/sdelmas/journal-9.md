@@ -1404,3 +1404,58 @@ Filed 08-26-blocked-marker-no-finish-work-route, a planning task recording that 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 435: Codex local review adapter: opt-in lane, absence semantics, and the ship round
+<!-- trellis-session: v=2 fp=81c2b2514818345d -->
+
+**Date**: 2026-08-27
+**Task**: Codex local review adapter: opt-in lane, absence semantics, and the ship round
+**Branch**: `task/codex-local-adapter`
+
+### Summary
+
+Took the codex local review adapter from a findings-heavy review loop to a clean gate: the lane now ships disabled, a lane that steps aside or is missing no longer fails a run the other lanes reviewed, and the receipt-reading rules are versioned.
+
+### Main Changes
+
+- Added the codex adapter as a local review lane beside prism and gito, shipping disabled: a repository opts in with enabled: true, so a machine without codex is not pushed into a degraded review.
+- Recorded the independence step-aside as skipped rather than unavailable, and taught the gate that a decline is absence: it never denies confidence on its own, fallbacks still run for it, and a required lane that declines still degrades the gate.
+- Stopped an absent optional lane from failing a run the other lanes reviewed, and versioned the receipt-reading rules with localReviewSemanticsVersion so receipts cached under the previous rules stop answering.
+- Hardened the lane's scope binding: the codex adapter refuses codebase scope at config load, and a codebase run whose HEAD moved mid-review is rejected instead of recorded as an exact-head receipt.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `07daecbf` | feat(sd-review): add a codex adapter as the default local review lane |
+| `e7a28652` | chore(release): bump to 0.71.61 for the codex local review lane |
+| `41cea1fd` | fix(sd-review): close three gaps the codex lane found in its own branch |
+| `951ccb28` | fix(sd-review): close four defects the lanes found in the codex adapter |
+| `fb031ced` | fix(sd-review): close three more defects the gito lane found in the fixes |
+| `4ae42850` | fix(sd-review): supersession needs a review, and the lane leaves no session |
+| `e7f85106` | fix(sd-review): deleted skills do not taint, and the missing-codex test isolates |
+| `0c656dca` | fix(sd-review): drop execpolicy rules, widen the guard, isolate the test properly |
+| `c95946e1` | fix(review): reject unrunnable codex scope at config load and repair PATH isolation |
+| `610e58d1` | fix(review): re-check HEAD after a codebase review runs |
+| `76ca62bf` | fix(review): a lane that declines for independence is skipped, not unavailable |
+| `9661a144` | fix(review): a decline must not suppress fallbacks or excuse a required lane |
+| `ecbfb0d1` | fix(review): ship codex opt-in and stop an absent lane failing a reviewed run |
+| `6a9ee598` | fix(review): a required lane mapped to skipped is still a limitation |
+| `a91f6970` | fix(review): absence of any shape lets a fallback run, and version the rules |
+| `0ec1bb71` | docs(task): check the acceptance criteria against live runs |
+
+### Testing
+
+- [OK] make test VENV=../sd-ai-command-pack/.venv exits 0, no FAILED line
+- [OK] sd-review --scope pr --pr-number 572 rounds 13 and 14: check passed 8/8, local clean, 0 findings, confidence granted
+- [OK] live codex-cli 0.150.1 run over a real change: attempt clean with schema and answer files; same change with codex shimmed off PATH: codex unavailable, gito clean, receipt still granted
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
