@@ -689,6 +689,15 @@ class ReviewStageTests(InstallTestCase):
         isolated = {"PATH": f"{root.parent / 'bin'}{os.pathsep}{git_dir}"}
 
         with mock.patch.dict(os.environ, isolated):
+            # git and codex share a directory on plenty of machines -- a
+            # Homebrew prefix, /usr/local/bin, a Nix profile -- and putting
+            # the git directory back on the path puts a real codex back with
+            # it. The test would still pass while exercising the wrong binary,
+            # so make that case fail loudly instead of silently.
+            self.assertIsNone(
+                shutil.which("codex"),
+                "a real codex is reachable on the isolated PATH",
+            )
             report = self.report(self.run_stage(root, "codex-missing"))
 
         self.assertEqual(self.codex_attempt(report)["status"], "unavailable")
@@ -869,6 +878,20 @@ class ReviewStageTests(InstallTestCase):
             sorted(finding["summary"] for finding in report["receipt"]["findings"]),
             ["Gito finding", "Prism finding"],
         )
+
+    def test_deleting_a_skill_does_not_make_the_codex_lane_step_aside(self) -> None:
+        """Nothing is left at the path for codex to load, so the change
+        cannot write into its own reviewer's context."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(root, codex_mode="clean")
+        (root / ".agents/skills/probe/SKILL.md").unlink()
+
+        report = self.report(
+            self.run_stage(root, "codex-deleted-skill", "--scope", "changes")
+        )
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "clean")
 
     def test_codex_adapter_refuses_codebase_scope(self) -> None:
         root = self.make_repo()

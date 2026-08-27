@@ -2998,7 +2998,15 @@ def execute(
         },
     )
     tainted = codex_instruction_surfaces(
-        [str(row["path"]) for row in target["paths"] if isinstance(row, dict)]
+        [
+            str(row["path"])
+            for row in target["paths"]
+            # A deleted skill is not an instruction surface: there is nothing
+            # left at that path for codex to load, so the change cannot write
+            # into its own reviewer's context and the lane has no reason to
+            # step aside.
+            if isinstance(row, dict) and str(row.get("kind")) != "deleted"
+        ]
     )
     codex_reason = (
         "the reviewed change edits instruction surfaces codex loads "
