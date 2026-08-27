@@ -1577,6 +1577,9 @@ def build_plan(
         "localPolicy": local_policy,
         "fixPolicy": fix_policy,
         "configurationDigest": configuration_digest,
+        # On the plan, not only in the policy the run read: re-gating a stored
+        # receipt has to reach the same verdict from the receipt alone.
+        "requiredProviders": list(required),
     }
     # Carried on the plan only when configured, never as an explicit null. The
     # plan is digested into policyDigest and policyDigest into the receipt
@@ -2470,7 +2473,8 @@ def _mark_superseded_by_fallback(
     """Record that a completed fallback covers the lanes it stood in for.
 
     The execution stage runs a fallback only when every attempt so far came
-    back ``unavailable``, so a fallback that produced a review is the plan
+    back ``unavailable`` or declined for independence, so a fallback that
+    produced a review is the plan
     working as designed, not a degraded run -- the PRD's requirement is that a
     missing or logged-out primary "degrades to the other lanes instead of
     failing". Left unmarked, the unavailable lane's status outranks the
@@ -2515,14 +2519,16 @@ def _mark_superseded_by_fallback(
     for item in attempts:
         identifier = str(item["provider"]["id"])
         if (
-            str(item.get("status")) == "unavailable"
+            (str(item.get("status")) == "unavailable" or item.get("declined"))
             and identifier not in required
             and identifier not in covered
         ):
             item["supersededBy"] = covered[0]
 
 
-def _blocking_limitations(limitations: Sequence[str]) -> list[str]:
+def _blocking_limitations(
+    limitations: Sequence[str], required: Collection[str] = ()
+) -> list[str]:
     """The limitations that degrade the gate, out of everything it records.
 
     A lane that declined for independence is recorded beside the real ones so
@@ -2530,12 +2536,19 @@ def _blocking_limitations(limitations: Sequence[str]) -> list[str]:
     not a failure and must not block routing. Its entry carries ``skipped``,
     which is deliberately outside ``TERMINAL_FAILURES``, so the distinction is
     already in the string every caller stores.
+
+    ``requiredProviders`` overrides that for the lane it names, on the same
+    reasoning as the supersession rule: a repository saying "this lane must
+    run" is not answered by the lane declining to. Its absence degrades the
+    gate whether it broke or stepped aside.
     """
-    return [
-        item
-        for item in limitations
-        if str(item).rsplit(":", 1)[-1] in TERMINAL_FAILURES
-    ]
+    names = set(required)
+    blocking = []
+    for item in limitations:
+        identifier, _, status = str(item).rpartition(":")
+        if status in TERMINAL_FAILURES or identifier in names:
+            blocking.append(item)
+    return blocking
 
 
 def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
@@ -2777,7 +2790,14 @@ def _redispose_receipt(
         advisory=advisory,
         dispositioned=dispositioned,
         accepted=accepted,
-        degraded=bool(_blocking_limitations(stored_limitations))
+        degraded=bool(
+            _blocking_limitations(
+                stored_limitations,
+                plan.get("requiredProviders", ())
+                if isinstance(plan, Mapping)
+                else (),
+            )
+        )
         if isinstance(stored_limitations, list)
         else False,
     )
@@ -3114,7 +3134,15 @@ def execute(
         executed = list(selected)
         fallback_ids: list[str] = []
         for fallback in fallbacks:
-            if any(item["status"] != "unavailable" for item in attempts):
+            # A declined lane produced no review, exactly like an unavailable
+            # one, and the fallback is a different tool that the reviewed
+            # change does not taint -- so it can read what codex would not.
+            # Treating the decline as "some lane reported" stopped the
+            # fallbacks that exist to cover precisely this gap.
+            if any(
+                item["status"] != "unavailable" and not item.get("declined")
+                for item in attempts
+            ):
                 break
             _require_tree_at_head(repo, target, [fallback])
             executed.append(fallback)
@@ -3193,7 +3221,11 @@ def execute(
             advisory=advisory,
             dispositioned=dispositioned,
             accepted=accepted,
-            degraded=bool(_blocking_limitations(limitations)),
+            degraded=bool(
+                _blocking_limitations(
+                    limitations, plan.get("requiredProviders", ())
+                )
+            ),
         ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),

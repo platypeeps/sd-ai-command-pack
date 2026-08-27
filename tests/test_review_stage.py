@@ -803,6 +803,61 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(report["receipt"]["remoteGate"]["state"], "eligible")
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_a_declined_lane_still_lets_a_fallback_review_the_change(self) -> None:
+        """A decline leaves the ensemble as short as an unavailable does, and
+        the fallback is a different tool the reviewed change does not taint --
+        so the fallback that exists to cover that gap has to run."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(
+            root, codex_mode="finding", prism_mode="clean", gito_count=0
+        )
+        # The decline is decided from the reviewed paths, so the skill has to
+        # be in this scope's diff rather than merely present in the checkout.
+        (root / ".agents/skills/probe/SKILL.md").write_text(
+            "seed\nchanged\nagain\n", encoding="utf-8"
+        )
+
+        result = self.run_stage(root, "codex-declined-fallback", "--scope", "changes")
+        report = self.report(result)
+
+        attempts = [
+            (row["provider"]["id"], row["status"])
+            for row in report["receipt"]["attempts"]
+        ]
+        self.assertEqual(attempts, [("codex", "skipped"), ("prism", "clean")])
+        # Covered by a lane that actually read the change, so the decline
+        # stops deciding the aggregate and stops being a limitation.
+        self.assertEqual(self.codex_attempt(report)["supersededBy"], "prism")
+        self.assertEqual(report["receipt"]["outcome"], "clean")
+        self.assertEqual(
+            report["receipt"]["confidence"], {"granted": True, "limitations": []}
+        )
+
+    def test_a_required_lane_that_declines_still_degrades_the_gate(self) -> None:
+        """``requiredProviders`` says that lane must actually run. A lane
+        declining to is not an answer to that, any more than a fallback
+        standing in for it is."""
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        # Every other lane clean, so the gate's verdict turns on the
+        # required lane's absence rather than on somebody's findings.
+        self.write_builtin_config(
+            root, codex_mode="finding", prism_mode="clean", gito_count=0
+        )
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value.setdefault("policy", {})["requiredProviders"] = ["codex"]
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "require the codex lane")
+
+        report = self.report(self.run_stage(root, "codex-required-decline"))
+
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "skipped")
+        self.assertNotIn("supersededBy", codex)
+        self.assertIn("codex:skipped", report["receipt"]["confidence"]["limitations"])
+        self.assertNotEqual(report["receipt"]["remoteGate"]["state"], "eligible")
+
     def test_a_fallback_does_not_cover_a_required_provider(self) -> None:
         """``requiredProviders`` says that lane must actually run. A cheaper
         substitute clearing its limitation would let the fallback list
