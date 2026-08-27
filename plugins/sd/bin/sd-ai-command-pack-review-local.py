@@ -1930,6 +1930,12 @@ def _expand_argv(
             # through CODEX_HOME, so a subscription login keeps working -- and
             # leaves the lane with the flags below and nothing else.
             "--ignore-user-config",
+            # A gate run leaves no session behind. Without this, every review
+            # writes a transcript of the diff it read -- source snippets and
+            # tool output -- into the user's Codex home, outside the bounded
+            # artifact directory that holds the rest of the run's evidence and
+            # outside anything that ever cleans it up.
+            "--ephemeral",
             "-C",
             str(repo),
             # The reviewed checkout must not instruct its own reviewer: a
@@ -2442,11 +2448,17 @@ def _mark_superseded_by_fallback(
         return
     fallbacks = set(fallback_ids)
     required = set(required_ids)
+    # A fallback covers the lanes ahead of it only by having reviewed the
+    # change. ``clean`` and ``findings`` are the two statuses that mean it
+    # did; every other status -- ``skipped`` included, which a repository can
+    # map an exit code to -- means the substitute produced no review either,
+    # and superseding on it would clear the limitation without anything having
+    # looked at the diff.
     covered = sorted(
         str(item["provider"]["id"])
         for item in attempts
         if str(item["provider"]["id"]) in fallbacks
-        and str(item.get("status")) != "unavailable"
+        and str(item.get("status")) in {"clean", "findings"}
     )
     if not covered:
         return

@@ -651,8 +651,12 @@ class ReviewStageTests(InstallTestCase):
         self.assertEqual(codex["status"], "findings")
         invocation = log.read_text(encoding="utf-8")
         self.assertIn(
-            "codex exec --sandbox read-only --ignore-user-config -C", invocation
+            "codex exec --sandbox read-only --ignore-user-config --ephemeral -C",
+            invocation,
         )
+        # No session transcript of the reviewed diff outside the run's own
+        # bounded artifact directory.
+        self.assertIn("--ephemeral", invocation)
         self.assertIn("--output-schema", invocation)
         self.assertIn("--output-last-message", invocation)
         self.assertIn("-c project_doc_max_bytes=0", invocation)

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-27T02:09:45Z",
+  "validatedAt": "2026-08-27T02:18:55Z",
   "packVersion": "0.71.61",
-  "payloadDigest": "sha256:deccf3cb879cc4c24e2f3df76d47e0dc8d0328243beada62a04de76e433a411c",
+  "payloadDigest": "sha256:7e9401b17a2a797c84605b6c62ca686f44213ba4df4010691a8c4f7f8b4202a3",
   "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
@@ -92,7 +92,7 @@
     {
       "name": "mezmo_benchmark",
       "github": "answerbook/mezmo_benchmark",
-      "baseCommit": "30ce9dbb8ae49a613a7ecc99c0be9bc78a2e8358",
+      "baseCommit": "409eecb48338910853e92b236b74cd193129ac1f",
       "status": "passed",
       "prepares": [
         [

@@ -278,6 +278,46 @@ class ReviewControllerTests(InstallTestCase):
             [".agents/skills/probe/SKILL.md", ".codex/config.toml"],
         )
 
+    def test_fallback_supersession_covers_only_what_a_review_replaced(
+        self,
+    ) -> None:
+        stage = self.load_local_stage()
+
+        def attempts(*rows: tuple[str, str]) -> list[dict[str, object]]:
+            return [
+                {"provider": {"id": identifier}, "status": status}
+                for identifier, status in rows
+            ]
+
+        # The ordinary case: the selected lane was unavailable, the fallback
+        # reviewed, so the fallback covers it.
+        rows = attempts(("codex", "unavailable"), ("prism", "clean"))
+        stage._mark_superseded_by_fallback(rows, ["prism"])
+        self.assertEqual(rows[0].get("supersededBy"), "prism")
+        self.assertNotIn("supersededBy", rows[1])
+
+        # An earlier fallback that was itself unavailable sits in exactly the
+        # position a primary sits in: the loop only reached the second one
+        # because the first produced nothing.
+        rows = attempts(
+            ("codex", "unavailable"), ("prism", "unavailable"), ("gito", "findings")
+        )
+        stage._mark_superseded_by_fallback(rows, ["prism", "gito"])
+        self.assertEqual(rows[0].get("supersededBy"), "gito")
+        self.assertEqual(rows[1].get("supersededBy"), "gito")
+
+        # A repository can map an exit code to `skipped`. A fallback that
+        # lands there reviewed nothing, so it stands in for nothing.
+        rows = attempts(("codex", "unavailable"), ("prism", "skipped"))
+        stage._mark_superseded_by_fallback(rows, ["prism"])
+        self.assertNotIn("supersededBy", rows[0])
+
+        # `requiredProviders` says that lane must actually run; a cheaper
+        # substitute does not get to clear its limitation.
+        rows = attempts(("codex", "unavailable"), ("prism", "clean"))
+        stage._mark_superseded_by_fallback(rows, ["prism"], ["codex"])
+        self.assertNotIn("supersededBy", rows[0])
+
     def test_configuration_is_shared_strict_and_path_safe(self) -> None:
         controller = self.load_controller()
         local_stage = self.load_local_stage()
