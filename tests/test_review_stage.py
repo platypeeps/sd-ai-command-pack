@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import shutil
 import signal
 import time
+from unittest import mock
 
 try:
     import install_test_support as _support
@@ -159,8 +161,31 @@ class ReviewStageTests(InstallTestCase):
         prism_mode: str = "finding",
         gito_count: int = 1,
         gito_severity: object = 2,
+        codex_mode: str | None = None,
+        codex_executable: bool = True,
     ) -> Path:
+        """Configure builtin adapters backed by the fixture executable.
+
+        ``codex_mode`` adds a codex provider; ``codex_executable=False`` keeps
+        that provider configured but leaves no ``codex`` on PATH.
+        """
         providers = []
+        if codex_mode is not None:
+            providers.append(
+                {
+                    "id": "codex",
+                    "adapter": "codex",
+                    "argv": [],
+                    "scopes": ["worktree", "branch_delta"],
+                    "dataHandling": "local",
+                    "costTier": "none",
+                    "qualityTier": "deep",
+                    "timeoutSeconds": 5,
+                    "version": "fixture-v1",
+                    "enabled": True,
+                    "outcomeByExitCode": {"0": "clean", "1": "unavailable"},
+                }
+            )
         for identifier, cost in (("prism", "low"), ("gito", "medium")):
             providers.append(
                 {
@@ -213,12 +238,16 @@ class ReviewStageTests(InstallTestCase):
                     "prismMode": prism_mode,
                     "gitoCount": gito_count,
                     "gitoSeverity": gito_severity,
+                    "codexMode": codex_mode or "finding",
                 }
             ),
             encoding="utf-8",
         )
         payload = fixture.read_bytes()
-        for provider in ("prism", "gito"):
+        executables = ["prism", "gito"]
+        if codex_mode is not None and codex_executable:
+            executables.append("codex")
+        for provider in executables:
             executable = fake_bin / provider
             executable.write_bytes(payload)
             executable.chmod(0o755)
@@ -596,6 +625,137 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("--format json", invocation_log)
         self.assertIn("gito review --what", invocation_log)
         self.assertNotIn("--filter", invocation_log)
+
+    # --- codex adapter ---------------------------------------------------
+
+    def codex_attempt(self, report):
+        for row in report["receipt"]["attempts"]:
+            if row["provider"]["id"] == "codex":
+                return row
+        self.fail("no codex attempt in receipt")
+
+    def test_codex_adapter_seeds_schema_and_reads_the_answer_file(self) -> None:
+        root = self.make_repo()
+        log = self.write_builtin_config(root, codex_mode="finding")
+
+        result = self.run_stage(root, "codex-native")
+        report = self.report(result)
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+        self.assertIn(
+            "Codex finding",
+            [finding["summary"] for finding in report["receipt"]["findings"]],
+        )
+        codex = self.codex_attempt(report)
+        self.assertEqual(codex["status"], "findings")
+        invocation = log.read_text(encoding="utf-8")
+        self.assertIn("codex exec --sandbox read-only -C", invocation)
+        self.assertIn("--output-schema", invocation)
+        self.assertIn("--output-last-message", invocation)
+        self.assertIn("-c project_doc_max_bytes=0", invocation)
+        # Codex receives the exact refs the coordinator resolved, not a
+        # branch name it would have to resolve itself.
+        target = report["receipt"]["target"]
+        self.assertIn(f"git diff {target['base']}..{target['head']}", invocation)
+
+    def test_codex_adapter_clean_answer_does_not_block(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(
+            root, codex_mode="clean", prism_mode="clean", gito_count=0
+        )
+
+        report = self.report(self.run_stage(root, "codex-clean", "--local", "codex"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "clean")
+        self.assertEqual(report["receipt"]["findings"], [])
+
+    def test_codex_adapter_unavailable_when_binary_is_missing(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="finding", codex_executable=False)
+        # The adapter always resolves the bare name ``codex``, so a real
+        # install on the developer machine must be hidden from this run.
+        git_dir = os.path.dirname(shutil.which("git") or "/usr/bin/git")
+        isolated = {"PATH": f"{root.parent / 'bin'}{os.pathsep}{git_dir}"}
+
+        with mock.patch.dict(os.environ, isolated):
+            report = self.report(self.run_stage(root, "codex-missing"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "unavailable")
+        # The other lanes still ran and their findings survive.
+        self.assertEqual(
+            sorted(finding["summary"] for finding in report["receipt"]["findings"]),
+            ["Gito finding", "Prism finding"],
+        )
+
+    def test_codex_adapter_logged_out_maps_to_unavailable(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="logged-out")
+
+        report = self.report(self.run_stage(root, "codex-logged-out"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "unavailable")
+        self.assertEqual(report["status"], "findings")
+
+    def test_codex_adapter_invalid_answer_is_a_failure_not_clean(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="invalid")
+
+        report = self.report(self.run_stage(root, "codex-invalid", "--local", "codex"))
+
+        self.assertEqual(self.codex_attempt(report)["status"], "failed")
+
+    def test_cheapest_policy_falls_back_past_an_unavailable_codex(self) -> None:
+        root = self.make_repo(changed_path="docs/guide.md")
+        self.write_builtin_config(
+            root, codex_mode="logged-out", prism_mode="clean", gito_count=0
+        )
+        # Uncommitted, documentation-only, so the worktree target takes the
+        # documentation-cheapest policy rather than the substantive ensemble.
+        (root / "docs/guide.md").write_text("seed\nchanged\nagain\n", encoding="utf-8")
+
+        result = self.run_stage(root, "codex-fallback", "--scope", "changes")
+        report = self.report(result)
+
+        self.assertEqual(report["receipt"]["plan"]["policyId"], "documentation-cheapest")
+        self.assertEqual(
+            [row["id"] for row in report["receipt"]["plan"]["providers"]], ["codex"]
+        )
+        self.assertEqual(
+            [(row["provider"]["id"], row["status"]) for row in report["receipt"]["attempts"]],
+            [("codex", "unavailable"), ("prism", "findings")],
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(report["status"], "findings")
+
+    def test_worktree_review_rejects_a_tree_that_moved_during_the_run(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="mutate")
+        (root / "src/app.py").write_text("seed\nchanged\nmore\n", encoding="utf-8")
+
+        result = self.run_stage(
+            root, "codex-drift", "--scope", "changes", "--local", "codex"
+        )
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("working tree changed while the local review ran", result.stdout)
+
+    def test_codex_adapter_refuses_codebase_scope(self) -> None:
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="finding")
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value["providers"][0]["scopes"] = ["worktree", "branch_delta", "codebase"]
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "offer codebase scope to codex")
+
+        result = self.run_stage(
+            root, "codex-codebase", "--scope", "codebase", "--local", "codex"
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not support codebase scope", result.stdout)
 
     # --- .prism/rules.json handling -------------------------------------
 

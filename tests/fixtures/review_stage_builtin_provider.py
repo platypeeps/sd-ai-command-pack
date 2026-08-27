@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Prism/Gito output fixture selected by the executable filename."""
+"""Native Prism/Gito/Codex output fixture selected by the executable filename."""
 
 from __future__ import annotations
 
@@ -61,5 +61,40 @@ elif provider == "gito":
     (output / "code-review-report.json").write_text(
         json.dumps(report), encoding="utf-8"
     )
+elif provider == "codex":
+    try:
+        answer = Path(sys.argv[sys.argv.index("--output-last-message") + 1])
+        schema = Path(sys.argv[sys.argv.index("--output-schema") + 1])
+    except (ValueError, IndexError):
+        raise SystemExit(
+            "codex fixture requires --output-schema and --output-last-message"
+        ) from None
+    if not schema.is_file():
+        raise SystemExit("codex fixture expects the schema file to be seeded")
+    mode = config.get("codexMode", "finding")
+    if mode == "logged-out":
+        print("error: not logged in; run codex login", file=sys.stderr)
+        raise SystemExit(1)
+    if mode == "mutate":
+        repo = Path(sys.argv[sys.argv.index("-C") + 1])
+        (repo / "src/app.py").write_text("seed\nchanged\ndrifted\n", encoding="utf-8")
+        mode = "clean"
+    if mode == "invalid":
+        answer.write_text("not json", encoding="utf-8")
+    else:
+        findings = (
+            []
+            if mode == "clean"
+            else [
+                {
+                    "path": "src/app.py",
+                    "line": 2,
+                    "severity": "high",
+                    "summary": "Codex finding",
+                    "family": "correctness",
+                }
+            ]
+        )
+        answer.write_text(json.dumps({"findings": findings}), encoding="utf-8")
 else:
     raise SystemExit(f"unsupported fixture provider: {provider}")

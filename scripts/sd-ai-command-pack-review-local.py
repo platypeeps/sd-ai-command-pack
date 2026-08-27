@@ -83,6 +83,60 @@ OUTCOMES = declare_verdict_domain(
 )
 TERMINAL_FAILURES = frozenset({"unavailable", "failed", "cancelled"})
 FINDING_SEVERITY_RANK = {"unspecified": 0, "low": 1, "medium": 2, "high": 3}
+CODEX_SCHEMA_FILE = "codex-schema.json"
+CODEX_ANSWER_FILE = "codex-answer.json"
+CODEX_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["findings"],
+    "properties": {
+        "findings": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "line", "severity", "summary", "family"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "line": {"type": ["integer", "null"]},
+                    "severity": {"enum": ["high", "medium", "low", "unspecified"]},
+                    "summary": {"type": "string"},
+                    "family": {"type": "string"},
+                },
+            },
+        }
+    },
+}
+
+
+def _codex_prompt(scope: str, base: str, head: str) -> str:
+    """Prompt for codex exec. Codex fetches the diff itself from the exact
+    refs the coordinator resolved, so the argv stays small."""
+    if scope == "branch_delta":
+        subject = (
+            f"the committed change `git diff {base}..{head}`; do not review the "
+            "working tree beyond those two refs"
+        )
+    else:
+        subject = (
+            "the uncommitted working-tree change: `git diff HEAD` plus every "
+            "file listed by `git status --porcelain --untracked-files=all`"
+        )
+    return (
+        "You are one lane of a multi-provider code review gate, taking the "
+        "adversarial stance: find the strongest reasons this change should not "
+        f"ship yet. Review {subject}. Report defects the change introduces: "
+        "correctness bugs, security issues, data-integrity risks, and "
+        "maintainability problems that would cost real time later. Judge "
+        "severity per finding; high means it should block a merge. Do not "
+        "report style, wording, or observations that are not defects, and "
+        "prefer few precise findings over many speculative ones. path is the "
+        "repository-relative file, line is the line in the new version or "
+        "null, family is one short category word such as security, "
+        "correctness, testing, or maintainability. Respond only with JSON "
+        "matching the output schema; an empty findings array means clean."
+    )
 FINDING_FAMILY_IDS = REVIEW_FINDING_FAMILY_IDS
 FINDING_DISPOSITIONS = frozenset(
     {"outstanding", "fix", "fixed", "rebutted", "resolved", "miscited"}
@@ -282,6 +336,22 @@ def _default_config() -> dict[str, Any]:
         "providers": [
             {
                 **shared,
+                "id": "codex",
+                "adapter": "codex",
+                "argv": [],
+                "scopes": ["worktree", "branch_delta"],
+                "costTier": "none",
+                "qualityTier": "deep",
+                "timeoutSeconds": 900,
+                "version": "builtin-v1",
+                "outcomeByExitCode": {
+                    "0": "clean",
+                    "1": "unavailable",
+                    "2": "unavailable",
+                },
+            },
+            {
+                **shared,
                 "id": "prism",
                 "adapter": "prism",
                 "argv": [],
@@ -432,7 +502,7 @@ def _parse_provider(value: object) -> Provider:
     version = value.get("version")
     if not isinstance(identifier, str) or not ID_RE.fullmatch(identifier):
         raise ReviewInputError("provider id is invalid")
-    if adapter not in {"prism", "gito", "argv"}:
+    if adapter not in {"prism", "gito", "codex", "argv"}:
         raise ReviewInputError(f"provider {identifier} has an unsupported adapter")
     if not isinstance(version, str) or not version or len(version) > 128:
         raise ReviewInputError(f"provider {identifier} version is invalid")
@@ -486,8 +556,9 @@ def _parse_provider(value: object) -> Provider:
         raise ReviewInputError(f"provider {identifier} enabled must be boolean")
     requires_tree_at_head = value.get("requiresTreeAtHead")
     if requires_tree_at_head is None:
-        # gito resolves the diff from refs but reads content from the tree.
-        requires_tree_at_head = adapter == "gito"
+        # gito resolves the diff from refs but reads content from the tree;
+        # codex runs inside the checkout and reads whatever is there.
+        requires_tree_at_head = adapter in {"gito", "codex"}
     elif adapter != "argv":
         raise ReviewInputError(
             f"provider {identifier} builtin adapter cannot override requiresTreeAtHead"
@@ -1411,7 +1482,7 @@ def build_plan(
         selected = [
             provider
             for provider in eligible
-            if provider.identifier in {"prism", "gito"}
+            if provider.identifier in {"codex", "prism", "gito"}
         ]
         policy_id = (
             "repeated-family"
@@ -1747,6 +1818,30 @@ def _expand_argv(
                 "--out",
                 output,
             ]
+    elif provider.adapter == "codex":
+        if scope == "codebase":
+            raise ReviewInputError(
+                "codex adapter reviews a diff and does not support codebase scope"
+            )
+        # The schema and answer files live in the attempt directory, which
+        # _run_provider creates and seeds before the process starts.
+        result = [
+            "codex",
+            "exec",
+            "--sandbox",
+            "read-only",
+            "-C",
+            str(repo),
+            # The reviewed checkout must not instruct its own reviewer: a
+            # changed AGENTS.md would otherwise load above this prompt.
+            "-c",
+            "project_doc_max_bytes=0",
+            "--output-schema",
+            str(attempt_dir / CODEX_SCHEMA_FILE),
+            "--output-last-message",
+            str(attempt_dir / CODEX_ANSWER_FILE),
+            _codex_prompt(scope, str(target["base"]), str(target["head"])),
+        ]
     else:
         if any("," in path for path in paths) and any(
             "{paths}" in item for item in provider.argv
@@ -1923,6 +2018,42 @@ def _gito_payload(attempt_dir: Path) -> dict[str, Any] | None:
     return {"status": "findings" if findings else "clean", "findings": findings}
 
 
+def _codex_payload(attempt_dir: Path) -> dict[str, Any] | None:
+    """Read the schema-constrained answer codex wrote for this attempt.
+
+    codex exec enforces CODEX_OUTPUT_SCHEMA on the final message, so the
+    answer is already in the normalized finding shape; this only bounds it.
+    """
+    path = attempt_dir / CODEX_ANSWER_FILE
+    try:
+        value = _read_json(path, limit=MAX_OUTPUT_BYTES, label="codex answer")
+    except ReviewInputError:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
+        return None
+    raw_findings = value["findings"]
+    if len(raw_findings) > MAX_FINDINGS:
+        return None
+    findings: list[dict[str, Any]] = []
+    for raw in raw_findings:
+        if not isinstance(raw, dict):
+            return None
+        severity = raw.get("severity")
+        if severity not in FINDING_SEVERITY_RANK:
+            return None
+        line = raw.get("line")
+        findings.append(
+            {
+                "path": raw.get("path"),
+                "line": line if isinstance(line, int) and not isinstance(line, bool) else None,
+                "severity": severity,
+                "summary": raw.get("summary"),
+                "family": raw.get("family"),
+            }
+        )
+    return {"status": "findings" if findings else "clean", "findings": findings}
+
+
 def _parse_provider_payload(
     provider: Provider, stdout: bytes, attempt_dir: Path
 ) -> dict[str, Any] | None:
@@ -1930,6 +2061,8 @@ def _parse_provider_payload(
         return _prism_payload(stdout)
     if provider.adapter == "gito":
         return _gito_payload(attempt_dir)
+    if provider.adapter == "codex":
+        return _codex_payload(attempt_dir)
     return _parse_argv_payload(stdout)
 
 
@@ -1974,6 +2107,10 @@ def _run_provider(
 ) -> dict[str, Any]:
     attempt_dir = run_dir / provider.identifier
     attempt_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    if provider.adapter == "codex":
+        (attempt_dir / CODEX_SCHEMA_FILE).write_text(
+            json.dumps(CODEX_OUTPUT_SCHEMA), encoding="utf-8"
+        )
     started = time.time()
     base = {
         "provider": _provider_row(provider),
@@ -2576,6 +2713,37 @@ def _validate_reusable(
     return value
 
 
+def cheapest_fallbacks(
+    providers: Sequence[Provider],
+    policy: Mapping[str, Any],
+    target: Mapping[str, Any],
+    plan: Mapping[str, Any],
+) -> list[Provider]:
+    """Providers to try, cheapest first, when a ``*-cheapest`` plan's sole
+    provider reports unavailable.
+
+    A cost-free lane such as codex is always the cheapest, so without this a
+    machine missing that lane would run no review at all under the
+    documentation, metadata, and low-risk policies. Computed outside the plan
+    so the plan's shape, and therefore every receipt digest, is unchanged.
+    """
+    if not str(plan["policyId"]).endswith("-cheapest"):
+        return []
+    selected = {str(row["id"]) for row in plan["providers"] if isinstance(row, dict)}
+    allowed = set(policy["allowedDataHandling"])
+    eligible = [
+        provider
+        for provider in providers
+        if provider.enabled
+        and str(target["scope"]) in provider.scopes
+        and provider.data_handling in allowed
+        and provider.identifier not in selected
+    ]
+    return sorted(
+        eligible, key=lambda item: (COST_TIERS.index(item.cost_tier), item.identifier)
+    )
+
+
 def execute(
     *,
     repo: Path,
@@ -2588,6 +2756,7 @@ def execute(
     fix_policy: str,
     allow_reuse: bool,
     dispositions: Mapping[str, Mapping[str, Any]] | None = None,
+    fallbacks: Sequence[Provider] = (),
 ) -> tuple[dict[str, Any], bool]:
     supplied = dict(dispositions or {})
     identity = _receipt_identity(target, plan)
@@ -2678,6 +2847,40 @@ def execute(
                 for provider in selected
             ]
             attempts = [future.result() for future in futures]
+        for fallback in fallbacks:
+            if any(item["status"] != "unavailable" for item in attempts):
+                break
+            _require_tree_at_head(repo, target, [fallback])
+            attempts.append(
+                _run_provider(
+                    fallback,
+                    argv=_expand_argv(
+                        fallback,
+                        target,
+                        run_dir / fallback.identifier,
+                        context_path,
+                        repo,
+                        rules_decision,
+                    ),
+                    repo=repo,
+                    run_dir=run_dir,
+                    environment=environment,
+                    rules=(
+                        rules_decision.record
+                        if fallback.adapter == "prism"
+                        else {"status": "not-applicable", "adapter": fallback.adapter}
+                    ),
+                )
+            )
+        if str(target["scope"]) == "worktree":
+            # Every worktree provider reads the live tree, and a run may last
+            # minutes; a receipt digested from the pre-run content must not
+            # vouch for a tree that moved underneath the review.
+            fresh = resolve_target(repo, "changes", str(target["base"]), str(target["head"]))
+            if fresh["contentDigest"] != target["contentDigest"]:
+                raise ReviewInputError(
+                    "working tree changed while the local review ran; rerun the stage against the current tree"
+                )
     else:
         attempts = []
     attempts.sort(key=lambda item: str(item["provider"]["id"]))
@@ -2921,6 +3124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fix_policy=args.fix,
                 allow_reuse=not args.no_reuse,
                 dispositions=_parse_local_dispositions(args.local_disposition),
+                fallbacks=cheapest_fallbacks(providers, policy, target, plan),
             )
             report = _report(receipt, reused=reused)
             code = (

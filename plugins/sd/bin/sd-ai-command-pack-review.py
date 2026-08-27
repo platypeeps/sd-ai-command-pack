@@ -271,6 +271,23 @@ def load_review_configuration(repo: Path) -> tuple[dict[str, Any], dict[str, Any
             "schemaVersion": 1,
             "providers": [
                 {
+                    "id": "codex",
+                    "adapter": "codex",
+                    "argv": [],
+                    "scopes": ["worktree", "branch_delta"],
+                    "dataHandling": "private-network",
+                    "costTier": "none",
+                    "qualityTier": "deep",
+                    "timeoutSeconds": 900,
+                    "version": "builtin-v1",
+                    "enabled": True,
+                    "outcomeByExitCode": {
+                        "0": "clean",
+                        "1": "unavailable",
+                        "2": "unavailable",
+                    },
+                },
+                {
                     "id": "prism",
                     "adapter": "prism",
                     "argv": [],

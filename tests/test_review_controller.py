@@ -253,7 +253,9 @@ class ReviewControllerTests(InstallTestCase):
         root = self.make_repo()
         default, remote = controller.load_review_configuration(root)
         self.assertEqual(remote["requirement"], "optional")
-        self.assertEqual(len(default["providers"]), 2)
+        self.assertEqual(
+            [row["id"] for row in default["providers"]], ["codex", "prism", "gito"]
+        )
         local_default, _providers, _policy = local_stage.load_config(root)
         self.assertEqual(default, local_default)
         self.assertEqual(
@@ -265,9 +267,10 @@ class ReviewControllerTests(InstallTestCase):
         path.parent.mkdir(parents=True)
         config = default | {
             "providers": [
-                default["providers"][0]
+                default["providers"][0],
+                default["providers"][1]
                 | {"version": "prism-r\u00e9view-v1"},
-                default["providers"][1],
+                default["providers"][2],
             ],
             "remoteIntegration": {
                 "requirement": "required",

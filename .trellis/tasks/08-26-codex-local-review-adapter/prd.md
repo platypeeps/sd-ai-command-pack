@@ -1,0 +1,39 @@
+# Add a codex adapter as the default local review lane, keeping prism and gito available
+
+## Goal
+
+Local review today runs prism and gito through OpenRouter, billed per token. The Codex CLI on a developer machine is logged in with a ChatGPT subscription and can review a diff with a JSON output schema, so the same second opinion can run at no marginal cost. Add a built-in codex adapter to the local review stage next to prism and gito: it hands codex exec the exact base and head the coordinator resolved, forces a structured answer through an output schema, and maps a missing or logged-out codex to unavailable so the run degrades to the other lanes instead of failing. Make codex the first built-in default while leaving prism and gito enabled, so the OpenRouter lanes remain selectable per run or required per repository.
+
+## Requirements
+
+- `scripts/sd-ai-command-pack-review-local.py` accepts `"adapter": "codex"` next to `prism`, `gito`, and `argv`, and the built-in defaults in both that script and `scripts/sd-ai-command-pack-review.py` list codex first with prism and gito still enabled.
+- The codex lane receives the exact base and head the coordinator resolved and reviews only that range (branch delta) or the uncommitted working tree (worktree); it does not offer codebase scope.
+- The answer is constrained by an output schema to the normalized finding shape (path, line, severity, summary, family); an unreadable answer is a `failed` attempt, never `clean`.
+- A missing `codex` executable or a logged-out codex is recorded as `unavailable`, and the run continues on the remaining lanes.
+- codex joins the substantive ensemble policy, and `--local prism`, `--local gito`, and `requiredProviders` keep the OpenRouter lanes selectable.
+- A repository that ships its own `.sd-ai-command-pack/review.json` replaces the built-in defaults, so codex reaches such a repository only through an explicit entry; this repository's `.sd-ai-command-pack/review.json` lists codex first, ahead of gito.
+- Under the `documentation`, `metadata`, and `low-risk` cheapest policies, a codex attempt recorded as `unavailable` falls through to the next cheapest eligible provider without changing the plan's shape or any receipt digest.
+- codex runs with `project_doc_max_bytes=0`, so the reviewed checkout's `AGENTS.md` cannot instruct its own reviewer.
+- A worktree-scope run whose content digest no longer matches the tree after the providers finish is rejected as invalid instead of producing a receipt.
+- `tests/test_review_stage.py` covers the schema seed, the answer parse, the clean answer, the missing binary, the logged-out binary, the invalid answer, the codebase-scope refusal, the cheapest-policy fallback, and the moved-tree rejection.
+
+## Acceptance Criteria
+
+- [ ] `make test` passes with the new codex cases.
+- [ ] On this repository, `sd-ai-command-pack-review-local.py --scope changes --local codex` against a real change produces a receipt whose codex attempt is `findings` or `clean`, with the schema and answer files in the attempt directory.
+- [ ] With `codex` removed from PATH, the same command records the codex attempt as `unavailable` and the receipt still carries the attempts of the remaining configured lanes (gito in this repository).
+
+## Notes
+
+- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
+- Lightweight tasks can remain PRD-only.
+- For complex tasks, add `design.md` for technical design and `implement.md` for execution planning before `task.py start`.
+
+## Planning review ledger
+
+- C-1 (medium, addressed): the acceptance criteria assumed prism runs in this repository; its `review.json` configures only gito. Criterion reworded to the remaining configured lanes.
+- C-2 (high, addressed): "first built-in default" only reaches repositories without their own `review.json`; a live run here reported `requested local provider is unavailable or ineligible: codex` until the repository entry existed. Requirement added for the explicit repository entry.
+- C-3 (low, parked): the logged-out exit code mapping (1 and 2 to `unavailable`) is covered by the fixture, not by a real logged-out codex. Owner: whoever first sees a logged-out run; trigger: a codex attempt recorded as `failed` with an authentication message in `stderr.txt`.
+- C-4 (high, addressed; raised by the codex lane reviewing this change): `costTier: none` made codex the sole cheapest provider, so a machine without codex ran no documentation, metadata, or low-risk review at all. Fallback added in the execution stage, verified by `test_cheapest_policy_falls_back_past_an_unavailable_codex`.
+- C-5 (high, addressed; codex lane): codex loaded the reviewed checkout's `AGENTS.md` above the review prompt. `-c project_doc_max_bytes=0` added; skills and MCP servers configured in the developer's own `~/.codex` still load and are outside this task.
+- C-6 (medium, addressed; codex lane): worktree-scope receipts digested the pre-run tree while codex re-read the live tree. Post-run digest comparison added for every worktree run, verified by `test_worktree_review_rejects_a_tree_that_moved_during_the_run`.
