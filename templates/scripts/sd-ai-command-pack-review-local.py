@@ -3236,7 +3236,20 @@ def execute(
         f"{item['provider']['id']}:{item['status']}"
         for item in attempts
         if not item.get("supersededBy")
-        and (item["status"] in TERMINAL_FAILURES or item.get("declined"))
+        and (
+            item["status"] in TERMINAL_FAILURES
+            or item.get("declined")
+            # A required lane is a limitation whenever it did not review the
+            # change, whatever the reason. Listing only terminal failures and
+            # declines left the third way out open: a repository can map an
+            # exit code to ``skipped``, which is neither, so a required lane
+            # could produce a clean, ungraded, confidence-granted review
+            # having read nothing.
+            or (
+                str(item["provider"]["id"]) in set(required_ids)
+                and item["status"] not in {"clean", "findings"}
+            )
+        )
     ]
     receipt = {
         "schemaVersion": 1,

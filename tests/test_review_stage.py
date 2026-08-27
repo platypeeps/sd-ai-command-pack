@@ -630,11 +630,14 @@ class ReviewStageTests(InstallTestCase):
 
     # --- codex adapter ---------------------------------------------------
 
-    def codex_attempt(self, report):
+    def attempt(self, report, identifier):
         for row in report["receipt"]["attempts"]:
-            if row["provider"]["id"] == "codex":
+            if row["provider"]["id"] == identifier:
                 return row
-        self.fail("no codex attempt in receipt")
+        self.fail(f"no {identifier} attempt in receipt")
+
+    def codex_attempt(self, report):
+        return self.attempt(report, "codex")
 
     def test_codex_adapter_seeds_schema_and_reads_the_answer_file(self) -> None:
         root = self.make_repo()
@@ -885,6 +888,33 @@ class ReviewStageTests(InstallTestCase):
         self.assertNotIn("supersededBy", codex)
         self.assertIn("codex:skipped", report["receipt"]["confidence"]["limitations"])
         self.assertNotEqual(report["receipt"]["remoteGate"]["state"], "eligible")
+
+    def test_a_required_lane_mapped_to_skipped_still_degrades_the_gate(self) -> None:
+        """The third way out of running. ``skipped`` is neither a terminal
+        failure nor a decline, so a repository that maps an exit code to it
+        could have its required lane read nothing and still be told the
+        review was clean, ungraded, and confident."""
+        root = self.make_repo()
+        # A valid provider payload overrides the exit-code mapping, so
+        # ``skipped`` is only reachable through an exit that produced no
+        # report at all -- here the rate-limit mode, remapped.
+        self.write_config(root, modes=("clean", "rate-limit"), required=["gito"])
+        config = root / ".sd-ai-command-pack/review.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        for provider in value["providers"]:
+            if provider["id"] == "gito":
+                provider["outcomeByExitCode"]["8"] = "skipped"
+        config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.run_git(root, "add", ".sd-ai-command-pack/review.json")
+        self.run_git(root, "commit", "-m", "require a lane that maps to skipped")
+
+        report = self.report(self.run_stage(root, "required-skipped", "--local", "all"))
+        receipt = report["receipt"]
+
+        self.assertEqual(self.attempt(report, "gito")["status"], "skipped")
+        self.assertIn("gito:skipped", receipt["confidence"]["limitations"])
+        self.assertFalse(receipt["confidence"]["granted"])
+        self.assertNotEqual(receipt["remoteGate"]["state"], "eligible")
 
     def test_a_fallback_does_not_cover_a_required_provider(self) -> None:
         """``requiredProviders`` says that lane must actually run. A cheaper
