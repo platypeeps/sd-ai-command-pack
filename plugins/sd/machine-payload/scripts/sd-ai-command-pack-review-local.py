@@ -2240,7 +2240,7 @@ def _run_provider(
     run_dir: Path,
     environment: Mapping[str, str],
     rules: Mapping[str, Any] | None = None,
-    unavailable_reason: str | None = None,
+    declined_reason: str | None = None,
 ) -> dict[str, Any]:
     attempt_dir = run_dir / provider.identifier
     attempt_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -2269,14 +2269,34 @@ def _run_provider(
         }
         _atomic_json(attempt_dir / "attempt.json", result)
         return result
+    if declined_reason is not None:
+        # A lane that steps aside to stay independent has not failed: it read
+        # the change, recognised that reviewing it would mean reading text the
+        # change itself wrote into its context, and declined. Recording that
+        # as ``unavailable`` made it a terminal failure indistinguishable from
+        # a missing or logged-out binary, and since the guard fires on exactly
+        # the paths this pack ships, any change touching them could never
+        # reach a clean local review. ``skipped`` is the honest status and is
+        # deliberately not a terminal failure; the reason travels with it.
+        result = {
+            **base,
+            "status": "skipped",
+            "exitCode": None,
+            "durationMs": 0,
+            "diagnostic": declined_reason,
+            "declined": True,
+            "findings": [],
+        }
+        _atomic_json(attempt_dir / "attempt.json", result)
+        return result
     executable = shutil.which(argv[0], path=environment.get("PATH"))
-    if executable is None or unavailable_reason is not None:
+    if executable is None:
         result = {
             **base,
             "status": "unavailable",
             "exitCode": None,
             "durationMs": 0,
-            "diagnostic": unavailable_reason or f"{argv[0]} is not available",
+            "diagnostic": f"{argv[0]} is not available",
             "findings": [],
         }
         _atomic_json(attempt_dir / "attempt.json", result)
@@ -2500,6 +2520,22 @@ def _mark_superseded_by_fallback(
             and identifier not in covered
         ):
             item["supersededBy"] = covered[0]
+
+
+def _blocking_limitations(limitations: Sequence[str]) -> list[str]:
+    """The limitations that degrade the gate, out of everything it records.
+
+    A lane that declined for independence is recorded beside the real ones so
+    the receipt stays honest about how many lanes read the change, but it is
+    not a failure and must not block routing. Its entry carries ``skipped``,
+    which is deliberately outside ``TERMINAL_FAILURES``, so the distinction is
+    already in the string every caller stores.
+    """
+    return [
+        item
+        for item in limitations
+        if str(item).rsplit(":", 1)[-1] in TERMINAL_FAILURES
+    ]
 
 
 def _aggregate_outcome(attempts: Sequence[Mapping[str, Any]]) -> str:
@@ -2741,7 +2777,7 @@ def _redispose_receipt(
         advisory=advisory,
         dispositioned=dispositioned,
         accepted=accepted,
-        degraded=bool(stored_limitations)
+        degraded=bool(_blocking_limitations(stored_limitations))
         if isinstance(stored_limitations, list)
         else False,
     )
@@ -3066,7 +3102,7 @@ def execute(
                         if provider.adapter == "prism"
                         else {"status": "not-applicable", "adapter": provider.adapter}
                     ),
-                    unavailable_reason=(
+                    declined_reason=(
                         codex_reason if provider.adapter == "codex" else None
                     ),
                 )
@@ -3102,7 +3138,7 @@ def execute(
                         if fallback.adapter == "prism"
                         else {"status": "not-applicable", "adapter": fallback.adapter}
                     ),
-                    unavailable_reason=(
+                    declined_reason=(
                         codex_reason if fallback.adapter == "codex" else None
                     ),
                 )
@@ -3127,7 +3163,8 @@ def execute(
     limitations = [
         f"{item['provider']['id']}:{item['status']}"
         for item in attempts
-        if item["status"] in TERMINAL_FAILURES and not item.get("supersededBy")
+        if not item.get("supersededBy")
+        and (item["status"] in TERMINAL_FAILURES or item.get("declined"))
     ]
     receipt = {
         "schemaVersion": 1,
@@ -3156,7 +3193,7 @@ def execute(
             advisory=advisory,
             dispositioned=dispositioned,
             accepted=accepted,
-            degraded=bool(limitations),
+            degraded=bool(_blocking_limitations(limitations)),
         ),
         "confidence": {"granted": outcome == "clean", "limitations": limitations},
         "createdAt": time.time(),

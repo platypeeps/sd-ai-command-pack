@@ -836,8 +836,11 @@ class ReviewStageTests(InstallTestCase):
         """Supersession is not "ignore every unavailable provider". No
         fallback runs while some selected provider is still working, so the
         ensemble is genuinely reduced and the receipt has to say so."""
-        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
-        self.write_builtin_config(root, codex_mode="finding")
+        # A genuinely broken lane, not one that declined: a lane that steps
+        # aside for independence reports ``skipped`` and is covered by
+        # test_a_lane_that_declined_does_not_block_a_clean_review.
+        root = self.make_repo()
+        self.write_builtin_config(root, codex_mode="logged-out")
 
         report = self.report(self.run_stage(root, "codex-reduced-ensemble"))
 
@@ -913,13 +916,37 @@ class ReviewStageTests(InstallTestCase):
         report = self.report(self.run_stage(root, "codex-tainted"))
 
         codex = self.codex_attempt(report)
-        self.assertEqual(codex["status"], "unavailable")
+        # Declining for independence is not a failure. Recording it as one
+        # made every change to these paths permanently unreviewable, because
+        # the guard fires on exactly the paths this pack ships.
+        self.assertEqual(codex["status"], "skipped")
+        self.assertTrue(codex["declined"])
         self.assertIn("instruction surfaces codex loads", codex["diagnostic"])
         # The lane steps aside; the others still review the change.
         self.assertEqual(
             sorted(finding["summary"] for finding in report["receipt"]["findings"]),
             ["Gito finding", "Prism finding"],
         )
+        # Visible in the receipt, but it does not degrade the gate.
+        self.assertIn("codex:skipped", report["receipt"]["confidence"]["limitations"])
+
+    def test_a_lane_that_declined_does_not_block_a_clean_review(self) -> None:
+        # The whole point of the status change: a change editing codex's own
+        # instruction surfaces must still be able to reach a clean review on
+        # the strength of the lanes that can read it.
+        root = self.make_repo(changed_path=".agents/skills/probe/SKILL.md")
+        self.write_builtin_config(
+            root, codex_mode="finding", prism_mode="clean", gito_count=0
+        )
+
+        report = self.report(self.run_stage(root, "codex-declined-clean"))
+
+        receipt = report["receipt"]
+        self.assertEqual(self.codex_attempt(report)["status"], "skipped")
+        self.assertEqual(receipt["outcome"], "clean")
+        self.assertTrue(receipt["confidence"]["granted"])
+        self.assertIn("codex:skipped", receipt["confidence"]["limitations"])
+        self.assertNotEqual(receipt["remoteGate"]["reason"], "local-review-limited")
 
     def test_deleting_a_skill_does_not_make_the_codex_lane_step_aside(self) -> None:
         """Nothing is left at the path for codex to load, so the change
