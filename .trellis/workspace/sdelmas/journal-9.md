@@ -1793,3 +1793,42 @@ The documentation path-reference gate fails a document for naming a Git branch w
 ### Next Steps
 
 - None - task complete
+
+
+## Session 444: File the housekeeping worktree-held verdict disagreement
+<!-- trellis-session: v=2 fp=8653009f73d3ecbb -->
+
+**Date**: 2026-08-28
+**Task**: File the housekeeping worktree-held verdict disagreement
+**Branch**: `task/08-28-housekeeping-verdict-worktree-held`
+
+### Summary
+
+Filed Trellis task 08-28-housekeeping-verdict-worktree-held, documenting why a successful merge performed from a secondary worktree reports outcome.verdict blocked. Housekeeping already demotes the two worktree anomalies via ADVISORY_ANOMALY_CODES; the block comes from three status expectation checks in a separate layer that has no awareness of a held default branch.
+
+### Main Changes
+
+- Added .trellis/tasks/08-28-housekeeping-verdict-worktree-held/ with a PRD tracing the false-blocked verdict to three status expectation codes: current_branch_unexpected, local_source_branch_retained, remote_source_branch_retained.
+- Recorded that local_source_branch_retained has holder awareness but its scan guard 'not row.get("current")' excludes the current worktree, which is the one that could not switch away — the right guard for who else holds a branch, the wrong guard for whether deletion was possible.
+- Cited prior art 08-07-status-housekeeping-anomaly-disagreement, which fixed the same disagreement for the anomaly channel; the expectation channel was never covered.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d418664f` | docs(task): file the worktree-held verdict disagreement |
+
+### Testing
+
+- [OK] sd-check: passed=7, failed=0, skipped=1
+- [OK] review-preflight pre-archive: 0 failure(s), 0 warning(s)
+- [OK] PR #582 CI settled: total=12, pending=0, failed=0; Copilot generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
