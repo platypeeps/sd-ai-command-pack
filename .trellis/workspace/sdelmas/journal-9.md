@@ -1967,8 +1967,8 @@ Filed 08-28-codex-lane-fleet-rollout (P2, planning): the deployment half of movi
 
 ### Main Changes
 
-- 08-28-codex-lane-fleet-rollout (P2): eight of nine consumers have no .sd-ai-command-pack/review.json and fall back to _default_config(), where codex is enabled: false. PRD covers authoring per-consumer config with codex enabled and policy.localAdvisorySeverityCeiling set.
-- Constraint recorded: without localAdvisorySeverityCeiling the local-advisory-released branch of _remote_gate cannot fire, so enabling codex alone does not change routing.
+- 08-28-codex-lane-fleet-rollout (P2): eight of nine consumers have no .sd-ai-command-pack/review.json and fall back to _default_config(), where codex is enabled: false. PRD covers authoring per-consumer config with codex enabled; the advisory ceiling is a separate per-consumer policy decision.
+- Correction from review: enabling codex alone IS sufficient for a clean run - _remote_gate returns eligible/local-stage-terminal with zero outstanding findings and no ceiling consulted. The ceiling only releases outstanding low/medium findings, so mandating it fleet-wide would weaken the gate in nine repositories at once.
 - Constraint recorded: codex maps exit 1 and 2 to unavailable, a TERMINAL_FAILURE, so a failed codex yields eligible-with-limitations, which sd-review rejects for a routed skip. A second lane does not rescue that - _blocking_limitations collects every TERMINAL_FAILURES limitation regardless of how many other providers completed - so codex-only consumers are permitted and the provider set is a per-consumer decision.
 - Adversarial review added the ordering dependency on 08-28-gito-blanket-exclusion-fleet: review.json lands inside the .sd-ai-command-pack/** blanket pattern all eight targets carry, so its own PR would present gito an entirely excluded diff.
 

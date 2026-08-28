@@ -55,14 +55,27 @@ advisory has been reporting.
 
 ## Constraints
 
-### The advisory ceiling is required, not optional
+### The advisory ceiling is a separate policy decision, not a prerequisite
 
-`_default_config()` omits `policy.localAdvisorySeverityCeiling`. Without it the
-`local-advisory-released` branch of `_remote_gate` cannot fire, so any
-outstanding local finding — at any severity — leaves the gate `blocked` and the
-review escalates to the routed backend regardless of whether codex ran. Enabling
-the provider without setting the ceiling does not change routing behaviour.
-`sd-github-review` sets `"medium"`.
+Enabling `codex` is sufficient on its own for the case this rollout is for. A
+clean codex run leaves zero outstanding findings, and `_remote_gate` returns
+`eligible` with reason `local-stage-terminal` without consulting any ceiling.
+`_default_config()` omits `policy.localAdvisorySeverityCeiling`, and that
+omission does not stand in the way.
+
+The ceiling governs a different case: what happens when the local lane *does*
+find something. Without it, every outstanding finding blocks the gate at any
+severity and the review escalates to the routed backend. With it set to
+`medium`, findings at or below that severity are released as advisory and no
+longer force a round — they are still reported, but they no longer route.
+
+That is a real loosening of the gate, so it is a per-consumer policy decision
+this task must make deliberately rather than a box to tick everywhere.
+Mandating `medium` fleet-wide would let medium-severity local findings bypass
+routed review in nine repositories at once, which is a larger change than
+turning the codex lane on and should not ride along with it unexamined.
+`sd-github-review` sets `"medium"`; that is one repository's decision, not a
+fleet default.
 
 ### Codex cannot be a repository's only substantive lane
 
@@ -154,7 +167,9 @@ machine without it degrades to the same routed path these consumers use today.
    permitted; where a second lane is chosen, record what it is expected to
    contribute when codex is unavailable.
 2. Author `.sd-ai-command-pack/review.json` in each consumer that lacks one,
-   with `codex` enabled and `policy.localAdvisorySeverityCeiling` set.
+   with `codex` enabled. Decide `policy.localAdvisorySeverityCeiling`
+   separately and per consumer, recording the reason when it is set; omitting
+   it is the strict default and an acceptable outcome.
 3. Land each consumer's file through that repository's own normal gated flow.
    This task does not merge on their behalf.
 4. Roll out in the cohort order `docs/fleet/consumers.json` declares — canary
@@ -197,7 +212,9 @@ machine without it degrades to the same routed path these consumers use today.
    done
    ```
 
-2. Every consumer's config reports a non-null `localAdvisorySeverityCeiling`.
+2. Every consumer whose config sets `localAdvisorySeverityCeiling` has a
+   recorded reason for that choice; consumers that omit it are recorded as
+   deliberately strict. A non-null ceiling everywhere is not the target.
 3. Every consumer's config records, in the task's rollout notes, which
    provider set it received and why — including the deliberate choice where a
    consumer is codex-only.
