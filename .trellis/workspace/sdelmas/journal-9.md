@@ -1752,3 +1752,44 @@ While clearing the sd-status F-1 advisory, a thoroughly dead remote branch (orig
 ### Next Steps
 
 - None - task complete
+
+
+## Session 443: File the review-preflight branch-name-versus-path collision
+<!-- trellis-session: v=2 fp=128b2bf099a53653 -->
+
+**Date**: 2026-08-28
+**Task**: File the review-preflight branch-name-versus-path collision
+**Branch**: `task/08-28-preflight-branch-name-vs-path`
+
+### Summary
+
+The documentation path-reference gate fails a document for naming a Git branch whose first segment collides with a configured reference prefix. Found when the PRD for 08-28-status-remote-branch-detection failed on the branch it was describing, while a second branch named the same way in the same document passed.
+
+### Main Changes
+
+- Filed 08-28-preflight-branch-name-vs-path: shouldCheckDocumentationPathReference accepts a prefix match unconditionally at preflight.mjs:5368, and referencePrefixes contains docs/, apps/, and scripts/ -- all ordinary Git branch-name prefixes -- while origin/ is absent.
+- Recorded that the gate already draws this distinction on its other branch: the bare-filename rule at :5372-5386 declines a target with no line/range suffix, on the stated reasoning that prose uses a filename as a noun more often than as a path.
+- Documented that the existing [absent: ...] marker does not cover the case, because it asserts a path is intentionally absent; using it on a branch name would put a false claim in the document.
+- Weighed three directions without deciding -- a sibling branch marker, context-sensitive suppression, or requiring a path-ish tail for prefix matches -- and ruled out narrowing the prefix list as insufficient on its own.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d6f174a` | docs(task): file the preflight branch-name-versus-path collision |
+
+### Testing
+
+- [OK] sd-check on the branch head: passed=7, failed=0, skipped=1 (advisory knowledge.obsidian-kb lane)
+- [OK] review-preflight on the branch: 0 failure(s), 0 warning(s)
+- [OK] PR #581 CI: 12 checks, all success; Copilot generated no comments
+- [OK] every preflight.mjs citation verified line by line; one wrong reference corrected before commit
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
