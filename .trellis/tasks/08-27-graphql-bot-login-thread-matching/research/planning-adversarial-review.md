@@ -121,7 +121,8 @@ introduced C-4 (the empty-set false positive), which round 2 caught and
 criterion 5 now pins — the expected shape. No further defects found in the
 corrected text; no figure changed in one artifact and left standing in another.
 
-Two remediation rounds used of the permitted two. Not exhausted.
+Two remediation rounds used of the permitted two: the budget is spent, and
+round 2 converged, so no further round was needed.
 
 ## Status
 
