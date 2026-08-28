@@ -1711,3 +1711,44 @@ Cleared the sd-status F-1 advisory on branch docs/file-review-and-kb-defects, wh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 442: File the remote-only stale branch detection gap in sd-status
+<!-- trellis-session: v=2 fp=acb60429f47e6fbc -->
+
+**Date**: 2026-08-28
+**Task**: File the remote-only stale branch detection gap in sd-status
+**Branch**: `task/08-28-status-remote-branch-detection`
+
+### Summary
+
+While clearing the sd-status F-1 advisory, a thoroughly dead remote branch (origin/feat/codex-local-review-lane) proved invisible to the leftover-branch classification because it walks local refs alone. Filed as a planning task with the mechanism traced to specific lines.
+
+### Main Changes
+
+- Filed 08-28-status-remote-branch-detection: classify_local_branches reads only localBranches, so a branch existing only on the remote is never classified, never becomes a follow-up, and never reaches the anomaly list.
+- Traced the mechanism: state["remoteBranches"] is already collected at status.py:529-543 and consumed at :2798 and :3509-3510 for the inventory line, but the classifier at :2488 never reads it, and its merge-evidence query at :567-574 is scoped to refs/heads.
+- Recorded as a requirement that a closed-unmerged pull request is stronger cleanup evidence than no pull request at all -- the distinction the codex-lane branch turned on, which an open-PR-only classifier would miss.
+- Kept the existing absence-claim discipline as an explicit constraint: truncated or stale evidence must yield unknown, never a false no-pull-request claim.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b119f64f` | docs(task): file the remote-only stale branch detection gap |
+
+### Testing
+
+- [OK] sd-check on the branch head: passed=7, failed=0, skipped=1 (advisory knowledge.obsidian-kb lane)
+- [OK] every status.py citation in the PRD verified line by line against the tree, and re-verified after rebasing onto merged main
+- [OK] PR #580 CI: 12 checks, all success, mergeable_state clean
+- [OK] Copilot review: reviewed 2 of 4 changed files, generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
