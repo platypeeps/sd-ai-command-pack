@@ -349,6 +349,15 @@ may enter housekeeping's merge mutation path.
   receipts; dirty local state; and local/remote/PR head mismatches. Assert that
   invalid local evidence stops before GitHub collection.
 - Multi-page resolved and unresolved review threads.
+- Login comparison across both transports: a configured bare name matching a
+  bot principal over either API, the same bare name declining to promote the
+  like-named human account, and a configured `name[bot]` never matching the
+  human `name`.
+- Pagination bounded on rows read: a filtered query whose author filter
+  discards most rows still stops at the cap.
+- The emptied-set guard in both directions: a filter that empties a set the
+  other transport still holds reports the contradiction, and one that merely
+  empties a set stays clean without fetching the confirming page.
 - Provider/auth/rate-limit failures and malformed JSON/check/thread payloads.
 - Unknown schema major, unknown fields, strict mode/policy validation, local
   and PR head changes during evaluation, and every malformed/unavailable final
