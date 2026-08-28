@@ -1667,3 +1667,47 @@ Filed the defects the 0.71.62 rollout surfaced but did not stop to fix, plus iss
 ### Next Steps
 
 - None - task complete
+
+
+## Session 441: File the review-lane and KB-refresh defects, deduplicating one against an existing task
+<!-- trellis-session: v=2 fp=e7d37047a0da7b49 -->
+
+**Date**: 2026-08-28
+**Task**: File the review-lane and KB-refresh defects, deduplicating one against an existing task
+**Branch**: `docs/file-review-and-kb-defects`
+
+### Summary
+
+Cleared the sd-status F-1 advisory on branch docs/file-review-and-kb-defects, which held four unpublished Trellis task records and no pull request. Three were genuinely new; the fourth duplicated 08-26-local-provider-failure-masked, so its distinct evidence was folded into that task instead of filed twice. Copilot review then caught stale code citations introduced by rebasing the branch onto main.
+
+### Main Changes
+
+- Filed 08-28-kb-refresh-blocking-io: the Obsidian KB refresh has no timeout, so a cloud-synced .obsidian-kb target blocks housekeeping in the kernel with no diagnostic beyond the step banner.
+- Filed 08-28-local-review-lane-fallback: codex declines any head touching an instruction surface it loads, which on this repository is routine, leaving gito as the only lane and any gito outage as a total review outage.
+- Filed 08-28-review-coordinator-reuse-bypass: review-local.py has --no-reuse, but the coordinator neither exposes nor forwards it, so a stored bad verdict replays across three cache layers.
+- Dropped the duplicate 08-28-review-provider-crash-vs-findings and folded its distinct contribution -- the PR #574 recurrence and links to the two adjacent defects -- into 08-26-local-provider-failure-masked, repointing both sibling cross-references.
+- Corrected five code citations: four review-local.py references were off by exactly five lines after rebasing onto main, and the coordinator-state row cited _artifact_root rather than the review-controller path.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8bfa2d83` | docs(task): file the review-lane and KB-refresh defects |
+| `aa295746` | docs(task): correct code citations shifted by the rebase onto main |
+
+### Testing
+
+- [OK] sd-check on the branch head: passed=7, failed=0, skipped=1 (advisory knowledge.obsidian-kb lane)
+- [OK] shipped-surface closure: clean; 13 changed path(s), 0 affected node(s)
+- [OK] PR #579 CI: 11 checks, all success, mergeable_state clean
+- [OK] grep for the dropped task slug across .trellis/ and docs/: no dangling references
+- [OK] every corrected citation re-verified against the tree with sed before commit
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
