@@ -1510,6 +1510,67 @@ class ReviewControllerTests(InstallTestCase):
                     receipt_check_name="sd-github-review/receipt",
                 )
 
+    def test_thread_pagination_cap_counts_rows_the_author_filter_discards(self) -> None:
+        # The cap has to count rows read, not rows kept: with authors
+        # configured, discarded rows never reach `threads`, so a limit on the
+        # survivors lets a filtered query paginate without bound.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "copilot",
+            "backend": {
+                "reviewAuthors": ["review-bot[bot]"],
+                "checkNames": [],
+                "findingChannels": ["inline-comment"],
+            },
+            "dispatch": {"status": "requested", "phase": "observed"},
+        }
+        rows = [
+            {
+                "id": f"thread-{index}",
+                "isResolved": False,
+                "isOutdated": False,
+                "comments": {
+                    "nodes": [
+                        {
+                            "id": f"comment-{index}",
+                            "body": "Unrelated",
+                            "author": {
+                                "login": "a-colleague",
+                                "__typename": "User",
+                            },
+                        }
+                    ],
+                    "pageInfo": {"hasNextPage": False},
+                },
+            }
+            for index in range(1_001)
+        ]
+        thread_payload = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {"reviewThreads": {"nodes": rows}}
+                    }
+                }
+            }
+        ]
+
+        with mock.patch.object(
+            controller, "_gh_json", return_value=thread_payload
+        ):
+            with self.assertRaisesRegex(
+                controller.ReviewError,
+                "review threads exceed 1000 rows",
+            ):
+                controller._collect_observation(
+                    root,
+                    pr=pr,
+                    receipt=receipt,
+                    receipt_check_name="sd-github-review/receipt",
+                )
+
     def test_remote_rebuttal_disposition_clears_only_matching_stable_id(self) -> None:
         controller = self.load_controller()
         root = self.make_repo()

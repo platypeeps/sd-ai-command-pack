@@ -1667,6 +1667,11 @@ def _collect_review_threads(
             if not isinstance(row, dict):
                 raise ReviewError("review thread row must be an object")
             fetched += 1
+            # Cap on rows read, not rows kept. The author filter discards rows
+            # before they reach `threads`, so a limit counting only survivors
+            # lets a filtered query paginate without bound.
+            if fetched > 1_000:
+                raise ReviewError("review threads exceed 1000 rows")
             comments = row.get("comments")
             comment_rows = comments.get("nodes", []) if isinstance(comments, dict) else []
             matching = []

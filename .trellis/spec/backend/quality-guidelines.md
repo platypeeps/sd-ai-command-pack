@@ -249,8 +249,11 @@ may enter housekeeping's merge mutation path.
 - Collect checks for the evaluated head. Blocking or pending checks are
   `blocked`; skipped and neutral checks are non-blocking, but at least one
   successful check is required.
-- Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread
-  kept by the `reviewAuthors` filter is blocking -- when no authors are
+- Paginate GraphQL `reviewThreads` through exhaustion, bounding the walk on
+  rows **read**, not rows kept: the author filter discards rows before they
+  reach the result, so a cap counting survivors lets a filtered query paginate
+  without bound. Any unresolved thread kept by the `reviewAuthors` filter is
+  blocking -- when no authors are
   configured nothing is filtered, so every unresolved thread blocks; malformed,
   incomplete, unauthorized, rate-limited, or otherwise unreadable evidence is
   `indeterminate`, never clean.
