@@ -350,9 +350,9 @@ may enter housekeeping's merge mutation path.
   invalid local evidence stops before GitHub collection.
 - Multi-page resolved and unresolved review threads.
 - Login comparison across both transports: a configured bare name matching a
-  bot principal over either API, the same bare name declining to promote the
-  like-named human account, and a configured `name[bot]` never matching the
-  human `name`.
+  bot principal over either API, a configured `name[bot]` never matching the
+  human `name`, and the fold granting a match only where GitHub reports the
+  principal as a bot.
 - Pagination bounded on rows read: a filtered query whose author filter
   discards most rows still stops at the cap.
 - The emptied-set guard in both directions: a filter that empties a set the
