@@ -1952,3 +1952,45 @@ Applied five Copilot findings on the rebased head of PR #583, all verified again
 ### Next Steps
 
 - None - task complete
+
+
+## Session 449: File the codex-lane fleet rollout task
+<!-- trellis-session: v=2 fp=a9c9d3a7c6722007 -->
+
+**Date**: 2026-08-28
+**Task**: File the codex-lane fleet rollout task
+**Branch**: `task/08-28-codex-lane-fleet-rollout`
+
+### Summary
+
+Filed 08-28-codex-lane-fleet-rollout (P2, planning): the deployment half of moving fleet review onto the local codex lane.
+
+### Main Changes
+
+- 08-28-codex-lane-fleet-rollout (P2): eight of nine consumers have no .sd-ai-command-pack/review.json and fall back to _default_config(), where codex is enabled: false. PRD covers authoring per-consumer config with codex enabled and policy.localAdvisorySeverityCeiling set.
+- Constraint recorded: without localAdvisorySeverityCeiling the local-advisory-released branch of _remote_gate cannot fire, so enabling codex alone does not change routing.
+- Constraint recorded: codex maps exit 1 and 2 to unavailable, a TERMINAL_FAILURE, so a codex-only lane yields eligible-with-limitations, which sd-review rejects for a routed skip. Each consumer needs a second substantive provider.
+- Adversarial review added the ordering dependency on 08-28-gito-blanket-exclusion-fleet: review.json lands inside the .sd-ai-command-pack/** blanket pattern all eight targets carry, so its own PR would present gito an entirely excluded diff.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `59dae771` | docs(trellis): file the codex-lane fleet rollout task |
+
+### Testing
+
+- [OK] [OK] Enumerated all nine consumers from docs/fleet/consumers.json; review.json absent in eight, tracked=0 and not-ignored in each
+- [OK] [OK] Confirmed _default_config() ships codex enabled: false at templates/scripts/sd-ai-command-pack-review-local.py:385
+- [OK] [OK] grep -rn 'review\.json' installer/ returns no hits; the pack ships no template
+- [OK] [OK] scripts/prism-chunked-review.py absent in all eight targets, so sd-github-review's provider set is not portable as-is
+- [OK] [NOT VERIFIED] sd-status fleet unavailable on this machine: fleet configuration not found
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Sequence 08-28-gito-blanket-exclusion-fleet ahead of this task, or narrow each consumer's pattern in the same change
+- Decide the per-consumer provider set before starting; codex cannot be the sole substantive lane
