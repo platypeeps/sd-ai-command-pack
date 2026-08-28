@@ -1809,18 +1809,35 @@ def _collect_observation(
         or ("conversation-comment" in channels and bool(matching_conversation))
         or ("review" in channels and bool(matching_reviews))
     )
-    # One author, two transports: a review by these authors came back over
-    # REST while every thread the GraphQL query returned was discarded by the
-    # same author set. Whatever the cause, the inline-comment channel has been
-    # emptied by the filter rather than by the pull request, and reporting that
-    # as clean hides every finding it dropped. A query that returned no rows at
-    # all is not this -- there is genuinely nothing there.
-    author_filter_emptied = bool(
+    # One author, two transports: the GraphQL thread pass kept nothing while
+    # REST holds inline comments by these same authors. The inline-comment
+    # channel was emptied by the filter rather than by the pull request, and
+    # reporting that as clean hides every finding it dropped.
+    #
+    # The cheap terms below are only a pre-filter, never the verdict: a pull
+    # request carrying unrelated human threads and a body-only review by a
+    # configured author satisfies all of them while nothing was dropped at all.
+    # Confirm against the other transport before calling it a contradiction,
+    # and pay for that page only in the suspicious case. A query that returned
+    # no rows at all never reaches the confirmation -- there is genuinely
+    # nothing there.
+    author_filter_emptied = False
+    if (
         "inline-comment" in channels
         and threads_fetched
         and not threads
         and matching_reviews
-    )
+    ):
+        inline_comments = _paginated_rest_array(
+            repo,
+            endpoint=(
+                f"repos/{owner}/{name}/pulls/{pr['number']}/comments?per_page=100"
+            ),
+            context="collect pull request inline review comments",
+        )
+        author_filter_emptied = any(
+            _matching_author(row, authors) is not None for row in inline_comments
+        )
     status = (
         "findings"
         if unresolved or review_findings or conversation_findings

@@ -1220,11 +1220,29 @@ class ReviewControllerTests(InstallTestCase):
             ]
         ]
 
+        # The other transport still holds the inline comment the thread pass
+        # dropped: that, not the bare counts, is what makes this a contradiction.
+        inline_comments = [
+            [
+                {
+                    "id": 21,
+                    "node_id": "PRRC_21",
+                    "html_url": "https://example.test/comment/21",
+                    "body": "Dropped finding",
+                    "path": "src/dispatch.js",
+                    "line": 62,
+                    "user": {"login": "review-bot[bot]"},
+                }
+            ]
+        ]
+
         def fake_gh(_args, *, context, **_kwargs):
             if context == "collect paginated review threads":
                 return thread_payload
             if context == "collect pull request reviews":
                 return reviews
+            if context == "collect pull request inline review comments":
+                return inline_comments
             if context == "collect pull request checks":
                 return []
             self.fail(f"unexpected GitHub context: {context}")
@@ -1239,6 +1257,89 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(observation["reviewThreads"]["fetched"], 1)
         self.assertEqual(observation["reviewThreads"]["total"], 0)
         self.assertEqual(observation["status"], "inconsistent")
+
+    def test_author_filter_check_needs_the_other_transport_to_agree(self) -> None:
+        # The counts alone cannot tell a dropped finding from an ordinary pull
+        # request. Unrelated human threads plus a body-only review by a
+        # configured author satisfy every cheap term of the pre-filter while
+        # nothing was dropped at all -- REST holds no inline comment by those
+        # authors. Firing here would refuse `clean` for the whole life of the
+        # branch, which is the shape a clean Copilot review actually has.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "copilot",
+            "backend": {
+                "reviewAuthors": ["review-bot[bot]"],
+                "checkNames": [],
+                "findingChannels": ["inline-comment", "review"],
+            },
+            "dispatch": {"status": "requested", "phase": "observed"},
+        }
+        human_threads = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "id": "thread-1",
+                                        "isResolved": False,
+                                        "isOutdated": False,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "id": "comment-1",
+                                                    "body": "Nit: rename this",
+                                                    "author": {"login": "a-colleague"},
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+        reviews = [
+            [
+                {
+                    "id": 11,
+                    "node_id": "PRR_11",
+                    "html_url": "https://example.test/review/11",
+                    "state": "COMMENTED",
+                    "body": "No issues found.",
+                    "commit_id": pr["head"],
+                    "user": {"login": "review-bot[bot]"},
+                }
+            ]
+        ]
+
+        def fake_gh(_args, *, context, **_kwargs):
+            if context == "collect paginated review threads":
+                return human_threads
+            if context == "collect pull request reviews":
+                return reviews
+            if context == "collect pull request inline review comments":
+                return [[]]
+            if context == "collect pull request checks":
+                return []
+            self.fail(f"unexpected GitHub context: {context}")
+
+        with mock.patch.object(controller, "_gh_json", side_effect=fake_gh):
+            observation = controller._collect_observation(
+                root,
+                pr=pr,
+                receipt=receipt,
+                receipt_check_name="sd-github-review/receipt",
+            )
+        self.assertEqual(observation["reviewThreads"]["fetched"], 1)
+        self.assertEqual(observation["reviewThreads"]["total"], 0)
+        self.assertNotEqual(observation["status"], "inconsistent")
 
     def test_author_filter_check_ignores_a_genuinely_empty_thread_set(self) -> None:
         # The negative case that keeps the guard honest: the query returned no

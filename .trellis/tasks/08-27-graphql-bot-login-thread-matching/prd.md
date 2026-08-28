@@ -118,9 +118,22 @@ not be silently downgraded to a limitation the caller can ignore.
 - [ ] The reverse spelling — payload carrying `[bot]`, config without it —
       also matches, so neither side is privileged.
 - [ ] An observation whose GraphQL thread query returned rows, all of which
-      the author filter discarded, while a REST review by those same authors
-      matched, does not return `status: "clean"`, and its diagnostic names the
-      contradiction.
+      the author filter discarded, while REST holds an inline comment by those
+      same authors, does not return `status: "clean"`, and its diagnostic names
+      the contradiction.
+- [ ] Discarded threads alone do not fire it. A pull request carrying unrelated
+      human threads and a body-only review by a configured author -- the shape
+      of a clean Copilot review -- still reports `clean`, because REST holds no
+      inline comment by those authors to have been dropped.
+
+      **Deviation, recorded during review rather than reworded to pass.** The
+      first criterion above originally accepted a matching REST *review* as the
+      other-transport evidence. Review round 1 established that this is too
+      broad: unrelated human threads plus a body-only review satisfy it while
+      nothing was dropped, which would refuse `clean` for the life of the
+      branch. The evidence is narrowed to REST inline comments -- the same
+      channel the GraphQL thread pass reads -- and the cheap counts become a
+      pre-filter that pays for the confirming page only in the suspicious case.
 - [ ] A genuinely empty thread set — the query returned no rows at all — still
       reports `clean`. R2 must not fire when there is simply nothing there.
 - [ ] Both new tests fail against unmodified source. A test that passes
@@ -166,10 +179,11 @@ make test
 ```
 
 Expected: no failures, no skips (the target fails the build on
-`skipped=[1-9]`), and no existing test edited. `make test` also enforces
-100% coverage on `install.py`/`installer/*` and runs the shipped-script
-coverage, docs, and mode checks, so a new helper added to the collector must
-satisfy those too.
+`skipped=[1-9]`), and no existing test's assertions weakened -- mock plumbing
+that must track a changed signature may be updated, and every such update is
+recorded as a deviation above. `make test` also enforces 100% coverage on
+`install.py`/`installer/*` and runs the shipped-script coverage, docs, and mode
+checks, so a new helper added to the collector must satisfy those too.
 
-Failure means any new test passes before the fix, any existing test breaks, or
-`make test` reports a skip.
+Failure means any new test passes before the fix, any existing test's
+assertions break or are weakened, or `make test` reports a skip.
