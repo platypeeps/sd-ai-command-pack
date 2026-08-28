@@ -979,8 +979,12 @@ def _provider_row(provider: Provider) -> dict[str, Any]:
 # payload to satisfy the check -- which is manufacturing the very evidence the
 # classification exists to require. So the message names the shape, names the
 # artifact it is confused with, and names the one honest way to obtain the
-# three target values: this command's own `--plan-only` report, which derives
-# them from the repository. What it deliberately does NOT do is print the
+# three target values: a `--plan-only` report from this stage, which derives
+# them from the repository. It names the stage script rather than saying "this
+# command" because `--bookkeeping-evidence` is also accepted and forwarded by
+# the `sd-ai-command-pack-review.py` controller, which has no `--plan-only`;
+# a self-reference reads as that controller to the caller who invoked it and
+# sends them to a flag it rejects. What it deliberately does NOT do is print the
 # target's own `base`, `head`, or `contentDigest` in the rejection -- handing
 # over the expected values is the same shortcut in a friendlier costume,
 # because a pasted value proves nothing about the tree it claims to describe.
@@ -990,9 +994,9 @@ BOOKKEEPING_EVIDENCE_SHAPE = (
     '"base", "head", "contentDigest" equal to the reviewed target. It is not '
     "the final-bundle finish-work receipt, a different artifact that shares "
     "the word bookkeeping. Obtain the three target values from the "
-    '"target" object in this command\'s own --plan-only --json report for the '
-    "same --repo, --base, and --head; see the successor-head re-entry section "
-    "of the sd-review skill."
+    '"target" object of a sd-ai-command-pack-review-local.py --plan-only '
+    "--json report for the same --repo, --base, and --head; see the "
+    "successor-head re-entry section of the sd-review skill."
 )
 
 

@@ -141,6 +141,45 @@ test per surviving blocking condition proving it still fails, and assert the
 exact verdict -- `verdict == "clean"`, not `verdict != "blocked"`, since
 `failed` and `indeterminate` would satisfy the negative form.
 
+### Don't: say "this command" in a diagnostic that gets forwarded
+
+**Problem**: a stage prints a remedy naming its own flag.
+
+```python
+# Don't do this: correct only for a caller who invoked this stage directly.
+BOOKKEEPING_EVIDENCE_SHAPE = (
+    ...
+    "Obtain the three target values from the "
+    '"target" object in this command\'s own --plan-only --json report'
+)
+```
+
+`sd-ai-command-pack-review.py` also accepts `--bookkeeping-evidence`, forwards
+it to the stage, and relays the stage's rejection back verbatim. That
+controller has no `--plan-only`. To a caller who used it, "this command" reads
+as the controller, so the remedy sends them to a flag it rejects with
+`unrecognized arguments`.
+
+**Instead**: name the executable, so the sentence is true from every entry
+point that can surface it.
+
+```python
+# Do this instead.
+    "Obtain the three target values from the "
+    '"target" object of a sd-ai-command-pack-review-local.py --plan-only '
+    "--json report"
+```
+
+**Why**: a diagnostic is data that travels. Any message a wrapper can relay is
+read outside the process that wrote it, so deixis — "this command", "the flag
+above", "rerun with the same arguments" — resolves against the wrong referent.
+Self-reference is safe only in a message no other surface forwards, and that
+property is not visible from the line that writes it. Prefer the absolute name.
+
+**Check**: for each argument a wrapper forwards, confirm the wrapped command's
+diagnostics name the tool the remedy belongs to rather than referring to
+themselves.
+
 ## API Error Responses
 
 There is no HTTP API. For CLI errors, print actionable text that names the
