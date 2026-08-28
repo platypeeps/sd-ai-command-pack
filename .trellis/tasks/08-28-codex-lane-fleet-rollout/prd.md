@@ -74,13 +74,32 @@ The `codex` provider maps both exit 1 and exit 2 to `unavailable`:
 
 `unavailable` is a member of `TERMINAL_FAILURES`, so a codex invocation that
 does not exit cleanly marks the run degraded and `_remote_gate` returns
-`eligible-with-limitations`. The `sd-review` skill rejects that state for a
-routed skip. Each consumer therefore needs at least one non-codex substantive
-provider alongside it. The two working precedents are the pack itself
-(`codex` + `gito`) and `sd-github-review` (`codex` + `prism-chunked` + `gito`);
-the latter's `prism-chunked` entry is an `argv` adapter pointing at a
-review script that lives only in the `sd-github-review` checkout, so that
-provider set is not portable to the other consumers as-is.
+`eligible-with-limitations`, which the `sd-review` skill rejects for a routed
+skip.
+
+A second lane does **not** rescue that. `_blocking_limitations` collects every
+limitation whose status is in `TERMINAL_FAILURES` regardless of how many other
+providers completed, and `degraded` is set from that list, so a failed codex
+degrades the gate whether or not `gito` ran beside it. Configuring an extra
+provider to make a codex failure locally terminal would not work, and this task
+must not be planned as though it did.
+
+What a second lane does buy is the outcome rather than the gate:
+`_aggregate_outcome` decides from the lanes that were in a position to answer,
+so when codex dies the surviving lane still reports what it found instead of
+the review reporting nothing. That is a real benefit and a real cost, and it is
+a per-consumer judgement, not a precondition.
+
+The consequence for this rollout is narrower than a second-lane requirement: a
+codex-only consumer skips routing when codex exits cleanly and routes remotely
+when it does not — which is the same remote path that consumer uses today, so
+the failure mode is no worse than the status quo.
+
+The two existing precedents are the pack itself (`codex` + `gito`) and
+`sd-github-review` (`codex` + `prism-chunked` + `gito`). The latter's
+`prism-chunked` entry is an `argv` adapter pointing at a review script that
+lives only in the `sd-github-review` checkout, so that provider set is not
+portable to the other consumers as-is.
 
 ### The file this task adds is inside the fleet's gito exclusion
 
@@ -130,9 +149,10 @@ machine without it degrades to the same routed path these consumers use today.
 
 ## Requirements
 
-1. Decide the provider set each consumer gets, honouring the constraint that
-   codex is never the sole substantive lane, and record the decision per
-   consumer rather than assuming one shape fits all nine.
+1. Decide the provider set each consumer gets and record the decision per
+   consumer rather than assuming one shape fits all nine. A codex-only set is
+   permitted; where a second lane is chosen, record what it is expected to
+   contribute when codex is unavailable.
 2. Author `.sd-ai-command-pack/review.json` in each consumer that lacks one,
    with `codex` enabled and `policy.localAdvisorySeverityCeiling` set.
 3. Land each consumer's file through that repository's own normal gated flow.
@@ -178,8 +198,9 @@ machine without it degrades to the same routed path these consumers use today.
    ```
 
 2. Every consumer's config reports a non-null `localAdvisorySeverityCeiling`.
-3. Every consumer's config lists at least one enabled substantive provider
-   other than `codex`.
+3. Every consumer's config records, in the task's rollout notes, which
+   provider set it received and why — including the deliberate choice where a
+   consumer is codex-only.
 4. On at least one canary consumer, a real `sd-review` run over a non-trivial
    branch produces a receipt whose `remoteGate.state` is `eligible` and whose
    selected providers include `codex`, with zero routed rounds. Capture the
@@ -203,5 +224,7 @@ error: fleet configuration not found; run install.py TARGET --configure-fleet
        from the sd-ai-command-pack source checkout
 ```
 
-Acceptance criterion 5 depends on it. Either configure the fleet profile as a
-first step, or record the criterion as unverifiable and say so explicitly.
+Acceptance criterion 6 depends on it. Criterion 5 does not: the exclusion
+check greps each consumer's `.gito/config.toml` directly and stays verifiable
+while the fleet profile is missing. Either configure the fleet profile as a
+first step, or record criterion 6 as unverifiable and say so explicitly.
