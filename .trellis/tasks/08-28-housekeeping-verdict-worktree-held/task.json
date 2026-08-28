@@ -1,8 +1,8 @@
 {
   "id": "housekeeping-verdict-worktree-held",
   "name": "housekeeping-verdict-worktree-held",
-  "title": "A successful worktree merge reports verdict blocked because status expectations ignore the held default branch",
-  "description": "housekeeping demotes default_branch_held_elsewhere to advisory, but the three status expectation checks it delegates to stay blocking, so a clean merge exits 1",
+  "title": "A successful worktree merge reports verdict blocked when the default branch is held elsewhere",
+  "description": "housekeeping demotes default_branch_held_elsewhere to advisory, but the three status expectation checks it delegates to stay blocking, so a clean merge exits 1. A fourth check separately misreports the merged branch as unmerged; that one is advisory and does not affect the exit status",
   "status": "planning",
   "dev_type": null,
   "scope": null,
