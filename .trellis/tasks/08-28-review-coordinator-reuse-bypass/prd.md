@@ -9,9 +9,9 @@ operator can see.
 
 ## Background
 
-The local stage already has the control. `scripts/sd-ai-command-pack-review-local.py:3418`
-defines `--no-reuse`, and `:3497` passes `allow_reuse=not args.no_reuse` into `execute()`,
-which skips the stored receipt at `:3076`.
+The local stage already has the control. `scripts/sd-ai-command-pack-review-local.py:3423`
+defines `--no-reuse`, and `:3502` passes `allow_reuse=not args.no_reuse` into `execute()`,
+which skips the stored receipt at `:3081`.
 
 The coordinator does not expose or forward it. `scripts/sd-ai-command-pack-review.py:2032-2053`
 lists every accepted flag; there is no reuse control among them, and the local-stage argv it
@@ -22,8 +22,8 @@ Three caches hold a verdict, keyed differently:
 
 | Layer | Location | Key |
 | --- | --- | --- |
-| Coordinator state | `<tool namespace>/review-controller/<attempt-id>.json` (`:605`) | attempt id |
-| Local receipt | `.build/sd-review/receipts/<identity>.json` | `_receipt_identity(target, plan)` (`review-local.py:2994`) |
+| Coordinator state | `<tool namespace>/review-controller/<attempt-id>.json` (`:612`) | attempt id |
+| Local receipt | `.build/sd-review/receipts/<identity>.json` | `_receipt_identity(target, plan)` (`review-local.py:2999`) |
 | Local run dir | `.build/sd-review/runs/<attempt-id>/` | attempt id |
 
 `--attempt-id` does not help: the receipt is keyed by a digest over target and plan, so a new

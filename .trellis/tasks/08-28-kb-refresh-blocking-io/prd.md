@@ -21,7 +21,7 @@ there is no indication that the KB target is the problem, or which path it resol
 ## Evidence
 
 Observed on 2026-08-28 while merging PR #574. Two housekeeping runs stalled at the refresh
-step; `ps` showed `update-spec-kb.py` at 0.0% CPU for over 1.5 minutes, and the first run was
+step; `ps` showed `sd-ai-command-pack-update-spec-kb.py` at 0.0% CPU for over 1.5 minutes, and the first run was
 killed at a 10-minute ceiling with no output beyond the step banner. The PR was green,
 eligible, and exact-head current the whole time; only the KB step blocked the merge.
 

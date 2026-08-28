@@ -2,7 +2,7 @@
   "id": "kb-refresh-blocking-io",
   "name": "kb-refresh-blocking-io",
   "title": "Bound the Obsidian KB refresh against a stalled filesystem target",
-  "description": "update-spec-kb.py blocks indefinitely when .obsidian-kb points at a cloud-synced path, stalling housekeeping with no diagnostic",
+  "description": "sd-ai-command-pack-update-spec-kb.py blocks indefinitely when .obsidian-kb points at a cloud-synced path, stalling housekeeping with no diagnostic",
   "status": "planning",
   "dev_type": null,
   "scope": null,
