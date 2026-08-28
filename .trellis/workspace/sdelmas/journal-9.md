@@ -1832,3 +1832,42 @@ Filed Trellis task 08-28-housekeeping-verdict-worktree-held, documenting why a s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 445: File three unfiled defects from the 0.71.62 rollout
+<!-- trellis-session: v=2 fp=5584179e33b6fcd9 -->
+
+**Date**: 2026-08-28
+**Task**: File three unfiled defects from the 0.71.62 rollout
+**Branch**: `task/08-28-review-scope-and-journal-defects`
+
+### Summary
+
+Three defects observed driving the 0.71.62 rollout and the 0.71.63 release that no existing task covered (PR #584).
+
+### Main Changes
+
+- 08-28-gito-blanket-exclusion-fleet (P2): eight of nine consumers still blanket-exclude .sd-ai-command-pack/**; six own config under that prefix, so a config-only PR is reported as a provider failure. Fixed in sd-github-review as fd2263a, never propagated.
+- 08-28-journal-merge-session-corruption (P1): a git text merge of two appended journal sessions interleaves them; git reports a clean auto-merge and only the final-bundle validator catches it.
+- 08-28-fleet-lane-head-advance-by-construction (P2): finalization always moves the head after the review record, so every lane takes the pr-head-advanced path; the guard's message names the PR head while demanding the lane's stored one.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02737012` | docs(task): file three unfiled defects from the 0.71.62 rollout |
+| `cd8fc25a` | docs(task): scope the gito goal to what narrowing exclusions achieves |
+
+### Testing
+
+- [OK] Adversarial planning review, one remediation round: three factual errors corrected in my own drafts (receipt count, line citation, an unverifiable commit-lag figure).
+- [OK] Review finding on the gito PRD: goal promised what the non-goals excluded; rescoped in cd8fc25a with the residual risk named.
+- [OK] sd-ai-command-pack-review-preflight.mjs -- 0 failures, 0 authored source lines.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Fold the gito propagation into the 0.71.63 fleet refresh campaign.
