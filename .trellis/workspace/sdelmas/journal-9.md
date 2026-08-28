@@ -1587,3 +1587,38 @@ Fixed the --bookkeeping-evidence rejection sending controller callers to a flag 
 ### Next Steps
 
 - Merge PR #577 through the housekeeping gate; consider a fleet refresh to 0.71.63.
+
+
+## Session 439: Review fix: article and quoted invocation in the bookkeeping-evidence remedy
+<!-- trellis-session: v=2 fp=7b889a8d7c7c1ad4 -->
+
+**Date**: 2026-08-28
+**Task**: Review fix: article and quoted invocation in the bookkeeping-evidence remedy
+**Branch**: `fix/bookkeeping-evidence-plan-only-guidance`
+
+### Summary
+
+Copilot review on PR #577: the stage script name reads as "ess-dee-...", so it takes "an", not "a".
+
+### Main Changes
+
+- templates/scripts/sd-ai-command-pack-review-local.py and .trellis/spec/backend/error-handling.md: "of a sd-ai-command-pack-review-local.py --plan-only --json report" becomes "of an \"sd-ai-command-pack-review-local.py --plan-only --json\" report", quoting the full invocation so a reader copying the remedy gets the exact command.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `44517f2b` | fix(review): use "an" before the stage script name in the remedy |
+
+### Testing
+
+- [OK] make release-prep -- exit 0; version and changelog gates passed; candidate ledger valid; all suites OK.
+- [OK] test_bookkeeping_evidence_guidance_names_the_stage_script ... ok.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge PR #577 through the housekeeping gate.
