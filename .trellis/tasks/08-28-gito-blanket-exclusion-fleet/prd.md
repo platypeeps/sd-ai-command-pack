@@ -3,9 +3,14 @@
 ## Goal
 
 A pull request whose entire diff is repo-owned configuration under
-`.sd-ai-command-pack/` must leave a non-empty local review scope, so the
-coordinator reports an empty diff as an empty diff rather than as a broken
-review provider.
+`.sd-ai-command-pack/` must leave a non-empty local review scope, so it is
+reviewed rather than emptied out of scope.
+
+This narrows exclusions only. It does not change how the adapter reports a scope
+that is genuinely empty: a PR touching nothing but excluded generated surfaces
+still surfaces as `local provider failure blocks remote routing` rather than as
+an empty diff. That mapping is tracked as a non-goal below, with the residual
+risk stated.
 
 ## Background
 
@@ -81,8 +86,13 @@ That is why the 0.71.62 rollout never surfaced this.
 
 - Changing how the gito adapter maps an empty scope. Reporting an empty diff
   distinctly from a provider failure is a real improvement, but it is a separate
-  change with its own blast radius, and narrowing the exclusion fixes the
-  reachable failure without it.
+  change with its own blast radius.
+
+  Residual risk of deferring it: a PR whose diff is entirely excluded generated
+  surfaces — a provenance-only or manifest-only change, for instance — still
+  reports as a provider failure after this task ships. Narrowing the exclusions
+  removes the reachable cases enumerated above; it does not remove the class.
+  Anyone who hits the residual case will see the same misleading diagnostic.
 - Adding repo-owned config to the two consumers that have none.
 
 ## Acceptance Criteria
