@@ -1622,3 +1622,48 @@ Copilot review on PR #577: the stage script name reads as "ess-dee-...", so it t
 ### Next Steps
 
 - Merge PR #577 through the housekeeping gate.
+
+
+## Session 440: File five follow-up tasks from the 0.71.62 fleet rollout
+<!-- trellis-session: v=2 fp=4c0677c9cd6d99b1 -->
+
+**Date**: 2026-08-28
+**Task**: File five follow-up tasks from the 0.71.62 fleet rollout
+**Branch**: `task/08-28-fleet-rollout-followups`
+
+### Summary
+
+Filed the defects the 0.71.62 rollout surfaced but did not stop to fix, plus issue #575. Every line number and mechanism claim was verified against source rather than carried from the rollout notes, which were wrong on one point. Nothing was implemented; all five tasks stay at planning.
+
+### Main Changes
+
+- Filed 08-28-fleet-receipt-decision-evidence: --blocker and reasonCode both go through safe_token, and _load_provenance validates a provenance file then hands the caller only its reasonCode, so a product-failure receipt cannot record how the decision was reached.
+- Filed 08-28-task-context-row-schema-reporting: both halves of the task-context check key on presence of a file property, so a row missing file emits no issue and counts as zero and the operator reads 'contains no context rows' against a populated manifest.
+- Folded D4 into 08-28-fleet-lane-procedural-defects: --release is required on plan and record, absent on next, and optional on resume, while the campaign already carries its release in state.
+- Folded issue #575 into 08-28-adoption-exemption-managed-blocks as a second surface: the gate in review-scope.sh and the copilot-instructions sentence state one rule and both reason about whole files.
+- Corrected a rollout-notes error rather than filing on it: status --show-issued already exists at fleet-controller.py:1979, so the issued-action-id trap was a discoverability failure, not a missing capability.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b1ff27b` | docs(trellis): file three follow-up tasks from the 0.71.62 fleet rollout |
+| `03c5889f` | docs(trellis): file two more 0.71.62 rollout defects and fold in a fourth lane defect |
+| `f6c994ce` | docs(trellis): fold issue #575 into the adoption-exemption task as a second surface |
+
+### Testing
+
+- [OK] safe_token on --blocker confirmed at fleet-controller.py:1179; provenance keys beyond reasonCode confirmed dropped at :2103-2116
+- [OK] countTrellisTaskContextRows counts iff hasOwnProperty('file') at review-preflight.mjs:4591; issue branches gated by the same check at :4697
+- [OK] --release policy confirmed: plan :1941 required, record :1958 required, next :1953 absent, resume :1992 optional
+- [OK] MANAGED_BLOCK_SPECS confirmed at installer/registry.py:2365
+- [OK] copilot-instructions copies confirmed non-identical: template :66 vs .github :77, differing hashes
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
