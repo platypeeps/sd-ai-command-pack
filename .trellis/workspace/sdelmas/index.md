@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 445
+- **Total Sessions**: 447
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1873 | Active |
+| `journal-9.md` | ~1903 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 447 | 2026-08-28 | Correct the remote-branch cause in the worktree-held verdict task | `36c25a8e` | `task/08-28-hk-verdict-prd-amend` |
 | 445 | 2026-08-28 | File three unfiled defects from the 0.71.62 rollout | `02737012`, `cd8fc25a` | `task/08-28-review-scope-and-journal-defects` |
 | 444 | 2026-08-28 | File the housekeeping worktree-held verdict disagreement | `d418664f` | `task/08-28-housekeeping-verdict-worktree-held` |
 | 443 | 2026-08-28 | File the review-preflight branch-name-versus-path collision | `3d6f174a` | `task/08-28-preflight-branch-name-vs-path` |

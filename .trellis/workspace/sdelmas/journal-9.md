@@ -1871,3 +1871,44 @@ Three defects observed driving the 0.71.62 rollout and the 0.71.63 release that 
 ### Next Steps
 
 - Fold the gito propagation into the 0.71.63 fleet refresh campaign.
+
+
+## Session 447: Correct the remote-branch cause in the worktree-held verdict task
+<!-- trellis-session: v=2 fp=5af212380924aeb6 -->
+
+**Date**: 2026-08-28
+**Task**: Correct the remote-branch cause in the worktree-held verdict task
+**Branch**: `task/08-28-hk-verdict-prd-amend`
+
+### Summary
+
+Merging PR #582 from a worktree reproduced the defect that PR documented, and the evidence contradicted one of its three stated causes. Amended the PRD: remote_source_branch_retained fires on a stale remote-tracking ref, not a retained branch, because the held-default-branch return skips the prune housekeeping already ships for auto-delete-on-merge remotes. Added a fourth code and synced task.json.
+
+### Main Changes
+
+- Corrected cause 3 in 08-28-housekeeping-verdict-worktree-held/prd.md: delete_branch_on_merge removes the head branch at merge, so the check reads a stale tracking ref (status.py:2798-2799); housekeeping.sh:1023-1033 already prunes this case and the return at :963-970 skips it.
+- Added a fourth code, local_branches_unmerged_without_pr (:2639-2647), which named the branch that had just merged through PR #582; advisory, so non-blocking, but false and from the same root condition.
+- Widened the title, goal, and the deletion-gate non-goal, which had excluded the change the new prune requirement needs, and synced task.json title and description that still described three status expectation checks.
+- Corrected a pre-existing citation: ADVISORY_ANOMALY_CODES is at :54-67, not :64-69, which overshot into INDETERMINATE_ANOMALY_CODES.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `36c25a8e` | docs(task): correct the remote-branch cause and add the fourth code |
+
+### Testing
+
+- [OK] review-preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-check: passed=7, failed=0, skipped=1
+- [OK] All nine PRD line citations re-verified against source after rebase onto 44157411
+- [NOTE] The rebase reproduced 08-28-journal-merge-session-corruption: union-merging journal-9.md interleaved sessions 445 and 446, moving 445's commit table under 446. Rebuilt the entry from the pristine journal.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
