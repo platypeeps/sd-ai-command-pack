@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 442
+- **Total Sessions**: 443
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1743 | Active |
+| `journal-9.md` | ~1784 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 443 | 2026-08-28 | File the review-preflight branch-name-versus-path collision | `3d6f174a` | `task/08-28-preflight-branch-name-vs-path` |
 | 442 | 2026-08-28 | File the remote-only stale branch detection gap in sd-status | `b119f64f` | `task/08-28-status-remote-branch-detection` |
 | 441 | 2026-08-28 | File the review-lane and KB-refresh defects, deduplicating one against an existing task | `8bfa2d83`, `aa295746` | `docs/file-review-and-kb-defects` |
 | 440 | 2026-08-28 | File five follow-up tasks from the 0.71.62 fleet rollout | `2b1ff27b`, `03c5889f`, `f6c994ce` | `task/08-28-fleet-rollout-followups` |
