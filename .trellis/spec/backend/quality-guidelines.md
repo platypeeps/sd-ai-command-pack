@@ -252,20 +252,28 @@ may enter housekeeping's merge mutation path.
 - Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread is
   blocking; malformed, incomplete, unauthorized, rate-limited, or otherwise
   unreadable evidence is `indeterminate`, never clean.
-- Compare a GitHub login by normalized spelling, never verbatim. REST reports a
-  bot as `name[bot]`; GraphQL's `Bot.login` reports the same account as `name`.
-  Fold both the configured `reviewAuthors` and the payload login -- lowercase,
-  strip a trailing `[bot]` -- so configuration does not have to know which
-  transport the collector called. An exact comparison drops every finding that
-  arrived over the other API while a review matched on the one that agreed with
-  config, which reports `clean` for a head carrying unresolved findings.
+- Compare a GitHub login by exact spelling first, then by the folded spelling
+  for a bot only. REST reports a bot as `name[bot]`; GraphQL's `Bot.login`
+  reports the same account as `name`, so configuration would otherwise have to
+  know which transport the collector called -- an exact-only comparison drops
+  every finding that arrived over the other API while a review matched on the
+  one that agreed with config, reporting `clean` for a head carrying unresolved
+  findings. Keep the configured `reviewAuthors` in both spellings, lowercased
+  and `[bot]`-stripped, and grant the folded match only where GitHub reports
+  the principal as a bot: GraphQL `__typename`, REST `user.type`, or the
+  `[bot]` suffix, which only an app can carry. `name[bot]` and the user account
+  `name` are different principals; a fold that merges them hands a human the
+  app's review authority.
 - A filter that empties a non-empty evidence set is a contradiction, not a
-  clean result. When the thread query returned rows, every row was discarded by
-  the author filter, and a review by those same authors matched on another
-  transport, report the inconsistency with a diagnostic naming it -- never
-  `clean`, and never a limitation the caller may ignore. Key it on rows fetched
-  versus rows kept: a query that returned nothing at all is genuinely empty and
-  must still be `clean`.
+  clean result -- but prove it on the same channel before saying so. Rows
+  fetched versus rows kept is a pre-filter, not the finding: unrelated human
+  threads plus a body-only review by a configured author satisfy it while
+  nothing was dropped. Confirm against the other transport -- REST inline
+  comments by those same authors, the channel the GraphQL thread pass reads --
+  and only then report the inconsistency with a diagnostic naming it, never
+  `clean` and never a limitation the caller may ignore. Fetch that confirming
+  page only in the suspicious case; a query that returned nothing at all never
+  reaches it and must still be `clean`.
 - `local-branch` requires a clean working tree, equal local, remote, and PR head
   OIDs, and a schema-version-1 final-bundle receipt for that exact head. The
   evaluator reruns the canonical validator with the receipt's mode, base, and

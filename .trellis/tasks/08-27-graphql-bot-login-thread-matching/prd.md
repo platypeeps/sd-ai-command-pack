@@ -74,19 +74,29 @@ to both sides of the comparison: the configured `reviewAuthors` and the login
 read off the payload. Configuration must not have to know which transport the
 collector chose.
 
+The fold is granted to bots only. `name[bot]` and the user account `name` are
+different GitHub principals, and both APIs say which is which -- GraphQL
+`__typename`, REST `user.type`, and the suffix itself, which only an app can
+carry. An exact spelling always matches; the folded spelling matches only a
+principal GitHub reports as a bot, so a human registering an app's bare name
+never inherits its review authority.
+
 Matching stays case-insensitive, as it is today. A login carrying no `[bot]`
 suffix on either side is unaffected.
 
 ### R2 — Fail closed when the author filter empties a non-empty thread set
 
 When the GraphQL thread query returns rows and **every** row is discarded by
-the `reviewAuthors` filter, while a review by those same authors *did* match
-over REST, the observation is internally contradictory: one author matched on
-one transport and none matched on the other. The observation must not report
-`clean` in that state.
+the `reviewAuthors` filter, while REST still holds an inline comment by those
+same authors, the observation is internally contradictory: one author matched
+on one transport and none matched on the other, on the same channel. The
+observation must not report `clean` in that state.
 
-The signal is structural — raw rows fetched versus rows kept, both already
-known inside `_collect_review_threads` — not textual. Do **not** derive it by
+Rows fetched versus rows kept — both already known inside
+`_collect_review_threads` — is the pre-filter, not the finding: unrelated human
+threads plus a body-only review satisfy it while nothing was dropped. The
+confirming REST page is fetched only when the pre-filter holds, so the ordinary
+path costs no extra call. The signal is structural, not textual. Do **not** derive it by
 parsing a review body for a phrase like "generated 3 comments": that text is
 free English written by the backend, the REST review object carries no comment
 count to check it against (`keys` are `_links, author_association, body,

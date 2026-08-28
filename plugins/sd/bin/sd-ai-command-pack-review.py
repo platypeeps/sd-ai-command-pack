@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -1462,6 +1463,25 @@ def _paginated_rest_array(
     return rows
 
 
+@dataclasses.dataclass(frozen=True)
+class AuthorSet:
+    """The configured review authors in both spellings a comparison needs.
+
+    ``exact`` is what the repository wrote, lowercased; ``folded`` has the
+    trailing ``[bot]`` removed. Keeping them apart is what stops the fold that
+    reconciles REST and GraphQL from also merging an app with the like-named
+    human account.
+    """
+
+    exact: frozenset[str] | set[str]
+    folded: frozenset[str] | set[str]
+
+    def __bool__(self) -> bool:
+        # Callers ask "were any review authors configured at all?" to decide
+        # whether to filter; an empty set must stay falsy through this wrapper.
+        return bool(self.exact or self.folded)
+
+
 def _normalized_login(value: Any) -> str | None:
     """Fold one GitHub login to a spelling both transports agree on.
 
@@ -1480,14 +1500,44 @@ def _normalized_login(value: Any) -> str | None:
     return login or None
 
 
-def _matching_author(row: Mapping[str, Any], authors: set[str]) -> str | None:
-    # `authors` is normalized at construction; normalize the payload side too
-    # so neither spelling is privileged. The original login is returned, not
-    # the folded one -- callers render it as evidence.
+def _principal_is_bot(container: Mapping[str, Any], login: str) -> bool:
+    """Report whether GitHub itself calls this principal a bot.
+
+    ``foo[bot]`` and the user account ``foo`` are different GitHub principals,
+    so the suffix fold that reconciles the two transports must never be applied
+    to a human. Both APIs say which is which: GraphQL through ``__typename``,
+    REST through ``user.type``. The REST spelling of the login is proof on its
+    own -- only an app can carry the suffix.
+    """
+    typename = container.get("__typename")
+    if isinstance(typename, str) and typename.strip().lower() == "bot":
+        return True
+    kind = container.get("type")
+    if isinstance(kind, str) and kind.strip().lower() == "bot":
+        return True
+    return login.strip().lower().endswith("[bot]")
+
+
+def _matching_author(row: Mapping[str, Any], authors: AuthorSet) -> str | None:
+    # Exact spelling always matches: it names one principal unambiguously.
+    # The folded spelling is what reconciles the two transports, so it is
+    # granted only to a principal GitHub reports as a bot -- otherwise a
+    # configured `foo[bot]` would hand the human account `foo` the app's
+    # review authority. The original login is returned, not the folded one --
+    # callers render it as evidence.
     for field in ("user", "author"):
         container = row.get(field)
-        login = container.get("login") if isinstance(container, dict) else None
-        if isinstance(login, str) and _normalized_login(login) in authors:
+        if not isinstance(container, dict):
+            continue
+        login = container.get("login")
+        if not isinstance(login, str):
+            continue
+        if login.strip().lower() in authors.exact:
+            return login
+        if (
+            _principal_is_bot(container, login)
+            and _normalized_login(login) in authors.folded
+        ):
             return login
     return None
 
@@ -1508,9 +1558,9 @@ def _nested_thread_comments(
     repo: Path,
     *,
     thread_id: str,
-    authors: set[str],
+    authors: AuthorSet,
 ) -> list[dict[str, Any]]:
-    query = """query($id:ID!,$endCursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$endCursor){nodes{id url body path line author{login}}pageInfo{hasNextPage endCursor}}}}}"""
+    query = """query($id:ID!,$endCursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$endCursor){nodes{id url body path line author{login __typename}}pageInfo{hasNextPage endCursor}}}}}"""
     value = _gh_json(
         [
             "api",
@@ -1567,9 +1617,9 @@ def _collect_review_threads(
     owner: str,
     name: str,
     number: int,
-    authors: set[str],
+    authors: AuthorSet,
 ) -> tuple[list[dict[str, Any]], int]:
-    query = """query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
+    query = """query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login __typename}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
     thread_value = _gh_json(
         [
             "api",
@@ -1672,14 +1722,19 @@ def _collect_observation(
 ) -> dict[str, Any]:
     disposition_map = dict(dispositions or {})
     backend = receipt.get("backend")
-    authors = {
-        normalized
-        for normalized in (
-            _normalized_login(item)
-            for item in (backend.get("reviewAuthors", []) if isinstance(backend, dict) else [])
-        )
-        if normalized is not None
-    }
+    configured_authors = [
+        item
+        for item in (backend.get("reviewAuthors", []) if isinstance(backend, dict) else [])
+        if isinstance(item, str) and item.strip()
+    ]
+    authors = AuthorSet(
+        exact={item.strip().lower() for item in configured_authors},
+        folded={
+            normalized
+            for normalized in (_normalized_login(item) for item in configured_authors)
+            if normalized is not None
+        },
+    )
     check_names = {
         str(item)
         for item in (backend.get("checkNames", []) if isinstance(backend, dict) else [])

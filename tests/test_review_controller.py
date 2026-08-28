@@ -1081,7 +1081,9 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(observation["status"], "findings")
         self.assertEqual(observation["reviewThreads"]["unresolved"], 1)
 
-    def _bot_login_observation(self, controller, root, pr, *, configured, payload):
+    def _bot_login_observation(
+        self, controller, root, pr, *, configured, payload, typename="Bot"
+    ):
         """Observe one unresolved thread whose author is spelled `payload`."""
         receipt = {
             "selectedRoute": "copilot",
@@ -1110,7 +1112,10 @@ class ReviewControllerTests(InstallTestCase):
                                                     "body": "Guard the null probe",
                                                     "path": "src/dispatch.js",
                                                     "line": 62,
-                                                    "author": {"login": payload},
+                                                    "author": {
+                                                        "login": payload,
+                                                        "__typename": typename,
+                                                    },
                                                 }
                                             ]
                                         },
@@ -1161,6 +1166,25 @@ class ReviewControllerTests(InstallTestCase):
                 self.assertEqual(observation["reviewThreads"]["unresolved"], 1)
                 self.assertEqual(observation["status"], "findings")
 
+    def test_bot_suffix_fold_does_not_promote_the_like_named_human(self) -> None:
+        # `review-bot[bot]` and the user account `review-bot` are different
+        # GitHub principals. Folding the suffix is what reconciles REST with
+        # GraphQL, so it is granted only where GitHub reports a bot -- a human
+        # who registers the app's bare name must not inherit its authority.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        observation = self._bot_login_observation(
+            controller,
+            root,
+            pr,
+            configured="review-bot[bot]",
+            payload="review-bot",
+            typename="User",
+        )
+        self.assertEqual(observation["reviewThreads"]["fetched"], 1)
+        self.assertEqual(observation["reviewThreads"]["total"], 0)
+
     def test_author_filter_emptying_threads_is_not_clean(self) -> None:
         # A review by the configured authors came back over REST while every
         # thread the GraphQL query returned was discarded by that same author
@@ -1194,7 +1218,17 @@ class ReviewControllerTests(InstallTestCase):
                                                 {
                                                     "id": "comment-1",
                                                     "body": "Dropped finding",
-                                                    "author": {"login": "someone-else"},
+                                                    "path": "src/dispatch.js",
+                                                    "line": 62,
+                                                    # The same comment REST
+                                                    # reports below, but this
+                                                    # principal is not one the
+                                                    # filter may fold: GitHub
+                                                    # calls it a user.
+                                                    "author": {
+                                                        "login": "review-bot",
+                                                        "__typename": "User",
+                                                    },
                                                 }
                                             ]
                                         },
@@ -1231,7 +1265,7 @@ class ReviewControllerTests(InstallTestCase):
                     "body": "Dropped finding",
                     "path": "src/dispatch.js",
                     "line": 62,
-                    "user": {"login": "review-bot[bot]"},
+                    "user": {"login": "review-bot[bot]", "type": "Bot"},
                 }
             ]
         ]
