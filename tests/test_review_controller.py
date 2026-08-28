@@ -1131,6 +1131,10 @@ class ReviewControllerTests(InstallTestCase):
         def fake_gh(_args, *, context, **_kwargs):
             if context == "collect paginated review threads":
                 return thread_payload
+            if context == "collect pull request inline review comments":
+                # Reached only when the filter kept nothing; REST holds no
+                # comment by a configured author, so nothing was dropped.
+                return [[]]
             if context == "collect pull request checks":
                 return []
             self.fail(f"unexpected GitHub context: {context}")

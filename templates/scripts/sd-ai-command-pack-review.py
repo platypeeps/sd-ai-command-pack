@@ -1870,19 +1870,19 @@ def _collect_observation(
     # reporting that as clean hides every finding it dropped.
     #
     # The cheap terms below are only a pre-filter, never the verdict: a pull
-    # request carrying unrelated human threads and a body-only review by a
-    # configured author satisfies all of them while nothing was dropped at all.
-    # Confirm against the other transport before calling it a contradiction,
-    # and pay for that page only in the suspicious case. A query that returned
-    # no rows at all never reaches the confirmation -- there is genuinely
-    # nothing there.
+    # request carrying unrelated human threads satisfies them while nothing was
+    # dropped at all. Confirm against the other transport before calling it a
+    # contradiction, and pay for that page only in the suspicious case. A query
+    # that returned no rows at all never reaches the confirmation -- there is
+    # genuinely nothing there.
+    #
+    # A matching review is deliberately not one of the terms. It reads as
+    # corroboration but is populated only when the `review` channel is
+    # configured, so requiring it would let an inline-only backend -- the one
+    # whose findings live entirely in the channel this guard protects -- skip
+    # the check altogether.
     author_filter_emptied = False
-    if (
-        "inline-comment" in channels
-        and threads_fetched
-        and not threads
-        and matching_reviews
-    ):
+    if "inline-comment" in channels and threads_fetched and not threads:
         inline_comments = _paginated_rest_array(
             repo,
             endpoint=(

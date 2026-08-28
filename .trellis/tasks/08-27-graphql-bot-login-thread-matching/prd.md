@@ -81,6 +81,21 @@ carry. An exact spelling always matches; the folded spelling matches only a
 principal GitHub reports as a bot, so a human registering an app's bare name
 never inherits its review authority.
 
+The fold is asymmetric on purpose. `name[bot]` in config never reaches the
+human `name`; the bare `name` in config does reach the bot `name[bot]`, because
+that is how a repository ordinarily names an App reviewer and GraphQL shows
+apps unsuffixed -- demanding the suffix in config would break the transport
+independence R1 exists to provide.
+
+**Accepted, recorded during review round 3.** A reviewer flagged the second
+direction: a repository that means the human `name` and writes it bare also
+authorizes an app of that name. The finding is accurate. It is accepted rather
+than fixed because the alternative fails the criterion below -- config without
+the suffix must still match a payload carrying it -- and no third spelling
+distinguishes the two intents. The bound is documented instead: write
+`name[bot]` when you mean the app; there is no spelling that means the human
+alone.
+
 Matching stays case-insensitive, as it is today. A login carrying no `[bot]`
 suffix on either side is unaffected.
 
@@ -94,9 +109,13 @@ observation must not report `clean` in that state.
 
 Rows fetched versus rows kept — both already known inside
 `_collect_review_threads` — is the pre-filter, not the finding: unrelated human
-threads plus a body-only review satisfy it while nothing was dropped. The
-confirming REST page is fetched only when the pre-filter holds, so the ordinary
-path costs no extra call. The signal is structural, not textual. Do **not** derive it by
+threads satisfy it while nothing was dropped. The confirming REST page is
+fetched only when the pre-filter holds, so the ordinary path costs no extra
+call. A matching review is deliberately not one of the pre-filter's terms: it
+reads as corroboration but exists only when the `review` channel is configured,
+so requiring it would exempt an inline-only backend — the one whose findings
+live entirely in the channel this guard protects. The signal is structural, not
+textual. Do **not** derive it by
 parsing a review body for a phrase like "generated 3 comments": that text is
 free English written by the backend, the REST review object carries no comment
 count to check it against (`keys` are `_links, author_association, body,

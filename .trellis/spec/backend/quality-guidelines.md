@@ -264,6 +264,15 @@ may enter housekeeping's merge mutation path.
   `[bot]` suffix, which only an app can carry. `name[bot]` and the user account
   `name` are different principals; a fold that merges them hands a human the
   app's review authority.
+- The fold is deliberately asymmetric, and this is a decision, not an
+  oversight. Configuring `name[bot]` never matches the human `name`. Configuring
+  the bare `name` does match the bot `name[bot]`, because that is the ordinary
+  way a repository names a GitHub App reviewer -- GraphQL shows apps without
+  the suffix, so requiring the suffix in config would break the transport
+  independence this rule exists to provide. The residual is bounded and worth
+  stating: a repository that means the *human* `name` and writes it bare also
+  authorizes an app of the same name. Write `name[bot]` when you mean the app;
+  there is no spelling that means the human alone.
 - A filter that empties a non-empty evidence set is a contradiction, not a
   clean result -- but prove it on the same channel before saying so. Rows
   fetched versus rows kept is a pre-filter, not the finding: unrelated human
