@@ -1912,3 +1912,43 @@ Merging PR #582 from a worktree reproduced the defect that PR documented, and th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 448: Review fixes on the amended worktree-held verdict PRD
+<!-- trellis-session: v=2 fp=ce632e1674ee2987 -->
+
+**Date**: 2026-08-28
+**Task**: Review fixes on the amended worktree-held verdict PRD
+**Branch**: `task/08-28-hk-verdict-prd-amend`
+
+### Summary
+
+Applied five Copilot findings on the rebased head of PR #583, all verified against source first. Two arrived as suppressed comments, which do not appear in the review comment count.
+
+### Main Changes
+
+- Restored 'the three blocking codes' in the requirements; widening it to 'these codes' had swept in local_branches_unmerged_without_pr, which the same PRD describes as advisory and never blocking.
+- Expanded the housekeeping.sh excerpt to include the outer DRY_RUN/current_branch guard and the branch_switch_incomplete else, so it no longer reads as an unconditional return; it is now structurally identical to :963-970.
+- Restored the scripts/ prefix on one citation, added the missing comma in the task.json description, and corrected index.md's journal-9.md line count from ~1903 to the actual 1914.
+- Follow-up finding on the same review: adding that comma made "so a clean merge exits 1" govern the advisory fourth code as well. Split the description so the exit status is attributed to the three blocking checks only.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19483de1` | docs(task): apply review findings on the amended PRD |
+
+### Testing
+
+- [OK] review-preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-check with PR body: passed=7, failed=0, skipped=1
+- [OK] Excerpt diffed against scripts/sd-ai-command-pack-housekeeping.sh:963-970; identical apart from the marked elision in the message string
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
