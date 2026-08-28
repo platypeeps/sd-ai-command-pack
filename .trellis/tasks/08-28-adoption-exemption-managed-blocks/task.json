@@ -2,7 +2,7 @@
   "id": "adoption-exemption-managed-blocks",
   "name": "adoption-exemption-managed-blocks",
   "title": "Scope the pack-version adoption exemption to managed block boundaries",
-  "description": "The pack-version adoption exemption is file-level and too broad now that AGENTS.md is only partially installer-managed via a marker block",
+  "description": "The pack-version adoption exemption is file-level on both surfaces -- the gate in review-scope.sh and the reviewer instruction in copilot-instructions (issue #575) -- and too broad now that AGENTS.md is only partially installer-managed via a marker block",
   "status": "planning",
   "dev_type": null,
   "scope": null,
