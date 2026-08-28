@@ -1969,7 +1969,7 @@ Filed 08-28-codex-lane-fleet-rollout (P2, planning): the deployment half of movi
 
 - 08-28-codex-lane-fleet-rollout (P2): eight of nine consumers have no .sd-ai-command-pack/review.json and fall back to _default_config(), where codex is enabled: false. PRD covers authoring per-consumer config with codex enabled and policy.localAdvisorySeverityCeiling set.
 - Constraint recorded: without localAdvisorySeverityCeiling the local-advisory-released branch of _remote_gate cannot fire, so enabling codex alone does not change routing.
-- Constraint recorded: codex maps exit 1 and 2 to unavailable, a TERMINAL_FAILURE, so a codex-only lane yields eligible-with-limitations, which sd-review rejects for a routed skip. Each consumer needs a second substantive provider.
+- Constraint recorded: codex maps exit 1 and 2 to unavailable, a TERMINAL_FAILURE, so a failed codex yields eligible-with-limitations, which sd-review rejects for a routed skip. A second lane does not rescue that - _blocking_limitations collects every TERMINAL_FAILURES limitation regardless of how many other providers completed - so codex-only consumers are permitted and the provider set is a per-consumer decision.
 - Adversarial review added the ordering dependency on 08-28-gito-blanket-exclusion-fleet: review.json lands inside the .sd-ai-command-pack/** blanket pattern all eight targets carry, so its own PR would present gito an entirely excluded diff.
 
 ### Git Commits
@@ -1993,4 +1993,4 @@ Filed 08-28-codex-lane-fleet-rollout (P2, planning): the deployment half of movi
 ### Next Steps
 
 - Sequence 08-28-gito-blanket-exclusion-fleet ahead of this task, or narrow each consumer's pattern in the same change
-- Decide the per-consumer provider set before starting; codex cannot be the sole substantive lane
+- Decide the per-consumer provider set before starting; a codex-only set is permitted, and a second lane buys the outcome via _aggregate_outcome rather than routed-skip eligibility
