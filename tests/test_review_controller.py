@@ -1081,6 +1081,223 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(observation["status"], "findings")
         self.assertEqual(observation["reviewThreads"]["unresolved"], 1)
 
+    def _bot_login_observation(self, controller, root, pr, *, configured, payload):
+        """Observe one unresolved thread whose author is spelled `payload`."""
+        receipt = {
+            "selectedRoute": "copilot",
+            "backend": {
+                "reviewAuthors": [configured],
+                "checkNames": [],
+                "findingChannels": ["inline-comment"],
+            },
+            "dispatch": {"status": "requested", "phase": "observed"},
+        }
+        thread_payload = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "id": "thread-1",
+                                        "isResolved": False,
+                                        "isOutdated": False,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "id": "comment-1",
+                                                    "body": "Guard the null probe",
+                                                    "path": "src/dispatch.js",
+                                                    "line": 62,
+                                                    "author": {"login": payload},
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+
+        def fake_gh(_args, *, context, **_kwargs):
+            if context == "collect paginated review threads":
+                return thread_payload
+            if context == "collect pull request checks":
+                return []
+            self.fail(f"unexpected GitHub context: {context}")
+
+        with mock.patch.object(controller, "_gh_json", side_effect=fake_gh):
+            return controller._collect_observation(
+                root,
+                pr=pr,
+                receipt=receipt,
+                receipt_check_name="sd-github-review/receipt",
+            )
+
+    def test_bot_login_matches_across_rest_and_graphql_spellings(self) -> None:
+        # GraphQL reports `Bot.login` without the `[bot]` suffix REST carries.
+        # Comparing the two verbatim dropped every inline finding that arrived
+        # over GraphQL while the REST-sourced review still matched, so the
+        # observation reported clean for a head with unresolved findings.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        for configured, payload in (
+            ("copilot-pull-request-reviewer[bot]", "copilot-pull-request-reviewer"),
+            ("copilot-pull-request-reviewer", "copilot-pull-request-reviewer[bot]"),
+            ("Copilot-Pull-Request-Reviewer[bot]", "copilot-pull-request-reviewer"),
+        ):
+            with self.subTest(configured=configured, payload=payload):
+                observation = self._bot_login_observation(
+                    controller, root, pr, configured=configured, payload=payload
+                )
+                # Neither spelling is privileged: config should not have to
+                # know which transport the collector called.
+                self.assertEqual(observation["reviewThreads"]["total"], 1)
+                self.assertEqual(observation["reviewThreads"]["unresolved"], 1)
+                self.assertEqual(observation["status"], "findings")
+
+    def test_author_filter_emptying_threads_is_not_clean(self) -> None:
+        # A review by the configured authors came back over REST while every
+        # thread the GraphQL query returned was discarded by that same author
+        # set. Whatever the cause, the inline channel was emptied by the filter
+        # rather than by the pull request, and `clean` would hide the drop.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "copilot",
+            "backend": {
+                "reviewAuthors": ["review-bot[bot]"],
+                "checkNames": [],
+                "findingChannels": ["inline-comment", "review"],
+            },
+            "dispatch": {"status": "requested", "phase": "observed"},
+        }
+        thread_payload = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "id": "thread-1",
+                                        "isResolved": False,
+                                        "isOutdated": False,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "id": "comment-1",
+                                                    "body": "Dropped finding",
+                                                    "author": {"login": "someone-else"},
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+        reviews = [
+            [
+                {
+                    "id": 11,
+                    "node_id": "PRR_11",
+                    "html_url": "https://example.test/review/11",
+                    "state": "COMMENTED",
+                    "body": "Reviewed",
+                    "commit_id": pr["head"],
+                    "user": {"login": "review-bot[bot]"},
+                }
+            ]
+        ]
+
+        def fake_gh(_args, *, context, **_kwargs):
+            if context == "collect paginated review threads":
+                return thread_payload
+            if context == "collect pull request reviews":
+                return reviews
+            if context == "collect pull request checks":
+                return []
+            self.fail(f"unexpected GitHub context: {context}")
+
+        with mock.patch.object(controller, "_gh_json", side_effect=fake_gh):
+            observation = controller._collect_observation(
+                root,
+                pr=pr,
+                receipt=receipt,
+                receipt_check_name="sd-github-review/receipt",
+            )
+        self.assertEqual(observation["reviewThreads"]["fetched"], 1)
+        self.assertEqual(observation["reviewThreads"]["total"], 0)
+        self.assertEqual(observation["status"], "inconsistent")
+
+    def test_author_filter_check_ignores_a_genuinely_empty_thread_set(self) -> None:
+        # The negative case that keeps the guard honest: the query returned no
+        # rows at all, so there is nothing to have dropped. Firing here would
+        # refuse `clean` on every clean pull request.
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "copilot",
+            "backend": {
+                "reviewAuthors": ["review-bot[bot]"],
+                "checkNames": [],
+                "findingChannels": ["inline-comment", "review"],
+            },
+            "dispatch": {"status": "requested", "phase": "observed"},
+        }
+        empty_threads = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {"reviewThreads": {"nodes": []}}
+                    }
+                }
+            }
+        ]
+        reviews = [
+            [
+                {
+                    "id": 11,
+                    "node_id": "PRR_11",
+                    "html_url": "https://example.test/review/11",
+                    "state": "COMMENTED",
+                    "body": "Reviewed",
+                    "commit_id": pr["head"],
+                    "user": {"login": "review-bot[bot]"},
+                }
+            ]
+        ]
+
+        def fake_gh(_args, *, context, **_kwargs):
+            if context == "collect paginated review threads":
+                return empty_threads
+            if context == "collect pull request reviews":
+                return reviews
+            if context == "collect pull request checks":
+                return []
+            self.fail(f"unexpected GitHub context: {context}")
+
+        with mock.patch.object(controller, "_gh_json", side_effect=fake_gh):
+            observation = controller._collect_observation(
+                root,
+                pr=pr,
+                receipt=receipt,
+                receipt_check_name="sd-github-review/receipt",
+            )
+        self.assertEqual(observation["reviewThreads"]["fetched"], 0)
+        self.assertNotEqual(observation["status"], "inconsistent")
+
     def test_undeclared_inline_threads_do_not_become_findings(self) -> None:
         controller = self.load_controller()
         root = self.make_repo()
@@ -2815,7 +3032,9 @@ class ReviewControllerTests(InstallTestCase):
 
         def observe(status: str) -> dict[str, object]:
             with mock.patch.object(
-                controller, "_collect_review_threads", return_value=[]
+                # (threads, fetched): the collector reports both so a caller
+                # can tell an empty pull request from an emptied filter.
+                controller, "_collect_review_threads", return_value=([], 0)
             ), mock.patch.object(
                 controller, "_paginated_rest_array", return_value=reviews
             ), mock.patch.object(

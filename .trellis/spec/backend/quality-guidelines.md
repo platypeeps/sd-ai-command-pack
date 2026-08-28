@@ -252,6 +252,20 @@ may enter housekeeping's merge mutation path.
 - Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread is
   blocking; malformed, incomplete, unauthorized, rate-limited, or otherwise
   unreadable evidence is `indeterminate`, never clean.
+- Compare a GitHub login by normalized spelling, never verbatim. REST reports a
+  bot as `name[bot]`; GraphQL's `Bot.login` reports the same account as `name`.
+  Fold both the configured `reviewAuthors` and the payload login -- lowercase,
+  strip a trailing `[bot]` -- so configuration does not have to know which
+  transport the collector called. An exact comparison drops every finding that
+  arrived over the other API while a review matched on the one that agreed with
+  config, which reports `clean` for a head carrying unresolved findings.
+- A filter that empties a non-empty evidence set is a contradiction, not a
+  clean result. When the thread query returned rows, every row was discarded by
+  the author filter, and a review by those same authors matched on another
+  transport, report the inconsistency with a diagnostic naming it -- never
+  `clean`, and never a limitation the caller may ignore. Key it on rows fetched
+  versus rows kept: a query that returned nothing at all is genuinely empty and
+  must still be `clean`.
 - `local-branch` requires a clean working tree, equal local, remote, and PR head
   OIDs, and a schema-version-1 final-bundle receipt for that exact head. The
   evaluator reruns the canonical validator with the receipt's mode, base, and
