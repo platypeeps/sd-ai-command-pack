@@ -278,10 +278,11 @@ may enter housekeeping's merge mutation path.
   stating: a repository that means the *human* `name` and writes it bare also
   authorizes an app of the same name. Write `name[bot]` when you mean the app;
   there is no spelling that means the human alone.
-- A filter that empties a non-empty evidence set is a contradiction, not a
-  clean result -- but prove it on the same channel before saying so. Rows
-  fetched versus rows kept is a pre-filter, not the finding: unrelated human
-  threads satisfy it while nothing was dropped. Confirm against the other
+- A filter that empties a set the *other transport* still holds is a
+  contradiction, not a clean result; a filter that merely empties a set is
+  ordinary and stays clean. Rows fetched versus rows kept is the pre-filter
+  that selects what to check, never the finding itself: unrelated human threads
+  satisfy it while nothing was dropped. Confirm against the other
   transport -- REST inline comments by those same authors, the channel the
   GraphQL thread pass reads -- and only then report the inconsistency with a
   diagnostic naming it, never `clean` and never a limitation the caller may
