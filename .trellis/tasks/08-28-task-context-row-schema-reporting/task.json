@@ -1,8 +1,8 @@
 {
-  "id": "fleet-lane-procedural-defects",
-  "name": "fleet-lane-procedural-defects",
-  "title": "Close four sd-fleet-refresh lane defects found in the 0.71.62 rollout",
-  "description": "Task seeding must bind the branch, fleet PR bodies need the scope heading, local dispositions must use coordinator-normalized finding ids, and --release is required, absent, or optional depending on the subcommand",
+  "id": "task-context-row-schema-reporting",
+  "name": "task-context-row-schema-reporting",
+  "title": "Report a task-context row missing its file key instead of an empty manifest",
+  "description": "a context row without a file key is valid JSONL that no check inspects, so it emits no issue and counts as zero usable rows, and preflight reports contains no context rows against a populated file",
   "status": "planning",
   "dev_type": null,
   "scope": null,

@@ -1,9 +1,9 @@
-# Close three sd-fleet-refresh lane defects found in the 0.71.62 rollout
+# Close four sd-fleet-refresh lane defects found in the 0.71.62 rollout
 
 ## Goal
 
-Three defects cost an operator a failed or blocked lane each during the 0.71.62
-fleet rollout. All three are knowable in advance and none is documented where
+Four defects cost an operator a failed or blocked lane, a rejected command, or
+a recovery during the 0.71.62 fleet rollout. All four are knowable in advance and none is documented where
 the operator is standing when it bites. Close each at the point of failure —
 prefer a mechanical guard over a sentence in a skill file.
 
@@ -69,11 +69,25 @@ Both ids are 16 hex characters and both appear in artifacts under
 `.build/sd-review/`, so they are trivially confusable and the error names the
 rejected id without naming where the right one lives.
 
-A fourth, smaller trap was hit and is in scope only as documentation: an empty
-`implement.jsonl` / `check.jsonl` fails seeded-task validation with
-`task_context_unfilled` (`scripts/sd-ai-command-pack-review-preflight.mjs:1156`),
-and the row schema is `{"file": ..., "reason": ...}` — a row using `path`
-instead of `file` is silently treated as unfilled.
+A related trap — an empty `implement.jsonl` / `check.jsonl` failing seeded-task
+validation with `task_context_unfilled`, and a row using `path` instead of
+`file` being silently treated as unfilled
+(`scripts/sd-ai-command-pack-review-preflight.mjs:1156`) — is in scope here only
+as operator documentation. The reporting fix is tracked separately as
+`08-28-task-context-row-schema-reporting`.
+
+### D4 — `--release` is required, absent, or optional depending on the subcommand
+
+The controller's campaign subcommands take three different positions on one flag
+(`scripts/sd-ai-command-pack-fleet-controller.py`): `plan` (`:1939`) requires it
+(`:1941`), `record` (`:1956`) requires it (`:1958`), `resume` (`:1984`) accepts
+it optionally (`:1992`), and `next` (`:1953`) does not accept it at all, so
+passing it is an argparse error.
+
+The campaign already knows its own release. `status` and `validate` read it out
+of state and print it without being told (`:2043-2060`). An operator who has just
+been required to pass `--release` to `record` gets an unrecognized-argument
+error for the same flag on the next command in the sequence.
 
 ## Requirements
 
@@ -91,6 +105,11 @@ instead of `file` is silently treated as unfilled.
   `deterministic-check-not-passed`.
 - D3: the disposition-id mismatch error must name where the accepted ids come
   from. Naming the field is the whole fix.
+- D4: `--release` must behave consistently across the campaign subcommands.
+  Since the campaign carries its release in state, accepting and ignoring it, or
+  accepting it as a consistency assertion, are both better than one subcommand
+  rejecting what the previous one demanded. If a subcommand keeps requiring it,
+  say why in the help text.
 - Documentation-only fixes are acceptable only where a mechanical guard is not
   possible; say which was chosen and why for each.
 
@@ -100,6 +119,9 @@ instead of `file` is silently treated as unfilled.
   disposition mechanism. Each defect is a sharp edge on a working design.
 - The archived-task PR linkage defect — tracked separately as
   `08-28-fleet-publish-pr-linkage`.
+- The `task_context_unfilled` misreport — tracked separately as
+  `08-28-task-context-row-schema-reporting`. Only its operator documentation is
+  in scope here.
 
 ## Acceptance Criteria
 
@@ -113,6 +135,9 @@ instead of `file` is silently treated as unfilled.
       only as `deterministic-check-not-passed`.
 - [ ] D3: the rejection message names `local.receipt.findings[].id` as the
       source of accepted ids.
+- [ ] D4: the same `--release` invocation is valid across `plan`, `record`,
+      `next`, and `resume`, or each divergence is documented in its own help
+      text. A test covers the sequence an operator actually runs.
 - [ ] The jsonl row schema (`file`, `reason`) and the empty-file failure are
       documented where a lane operator will encounter them.
 - [ ] Each defect states whether it was closed mechanically or by documentation,
