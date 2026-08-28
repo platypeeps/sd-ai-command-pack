@@ -30,6 +30,22 @@ gito exit=1        # <dir>/provider-output is empty
 `retries = 3` in `.gito/config.toml` was consumed; all four attempts returned
 402. This is a billing wall, not a transient blip, and not a review.
 
+## Recurrence on PR #574
+
+The same shape reappeared on 2026-08-28 shipping PR #574, at pack 0.71.62. gito hit an
+OpenRouter `402` credit limit again, exited 1 after 4.1s having written no report, and the
+coordinator recorded `status: findings, exitCode: 1, findings: []` with
+`remoteGate: {"state": "blocked", "reason": "actionable-local-findings"}`. The review stayed
+blocked across repeated attempts; once the credit limit was lifted, the same command on the
+same head ran 40s and returned four real findings. Route A, unchanged, six weeks after #563.
+
+Two adjacent defects turned the single masked failure into a wedged gate, and are tracked
+separately:
+
+- `.trellis/tasks/08-28-review-coordinator-reuse-bypass` — why the bad verdict, once stored,
+  could not be discarded.
+- `.trellis/tasks/08-28-local-review-lane-fallback` — why gito was the only lane running.
+
 ## The mechanism
 
 Three steps, each defensible alone.
