@@ -2,7 +2,7 @@
   "id": "task-context-row-schema-reporting",
   "name": "task-context-row-schema-reporting",
   "title": "Report a task-context row missing its file key instead of an empty manifest",
-  "description": "a context row without a file key is valid JSONL that no check inspects, so it emits no issue and counts as zero usable rows, and preflight reports contains no context rows against a populated file",
+  "description": "A context row missing the file key matches no issue branch and counts as zero usable rows, so preflight reports contains no context rows against a populated manifest.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
