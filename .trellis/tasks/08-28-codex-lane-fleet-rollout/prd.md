@@ -78,8 +78,9 @@ does not exit cleanly marks the run degraded and `_remote_gate` returns
 routed skip. Each consumer therefore needs at least one non-codex substantive
 provider alongside it. The two working precedents are the pack itself
 (`codex` + `gito`) and `sd-github-review` (`codex` + `prism-chunked` + `gito`);
-the latter's `prism-chunked` entry is a repo-local `argv` adapter pointing at
-`scripts/prism-chunked-review.py` and is not portable as-is.
+the latter's `prism-chunked` entry is an `argv` adapter pointing at a
+review script that lives only in the `sd-github-review` checkout, so that
+provider set is not portable to the other consumers as-is.
 
 ### The file this task adds is inside the fleet's gito exclusion
 
