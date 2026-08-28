@@ -166,8 +166,8 @@ point that can surface it.
 ```python
 # Do this instead.
     "Obtain the three target values from the "
-    '"target" object of a sd-ai-command-pack-review-local.py --plan-only '
-    "--json report"
+    '"target" object of an '
+    '"sd-ai-command-pack-review-local.py --plan-only --json" report'
 ```
 
 **Why**: a diagnostic is data that travels. Any message a wrapper can relay is

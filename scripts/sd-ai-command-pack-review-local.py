@@ -994,8 +994,9 @@ BOOKKEEPING_EVIDENCE_SHAPE = (
     '"base", "head", "contentDigest" equal to the reviewed target. It is not '
     "the final-bundle finish-work receipt, a different artifact that shares "
     "the word bookkeeping. Obtain the three target values from the "
-    '"target" object of a sd-ai-command-pack-review-local.py --plan-only '
-    "--json report for the same --repo, --base, and --head; see the "
+    '"target" object of an '
+    '"sd-ai-command-pack-review-local.py --plan-only --json" report for the '
+    "same --repo, --base, and --head; see the "
     "successor-head re-entry section of the sd-review skill."
 )
 
