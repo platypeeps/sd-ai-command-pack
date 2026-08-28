@@ -103,10 +103,14 @@ prefixes them `status_`. Each fails differently:
    (`:963-970`):
 
    ```bash
-   if [ -n "$(worktree_holding_branch "$DEFAULT_BRANCH")" ]; then
-     add_anomaly branch_retained_default_held "...skipped branch deletion"
+   if [ "$DRY_RUN" -eq 0 ] && [ "$(current_branch)" != "$DEFAULT_BRANCH" ]; then
+     if [ -n "$(worktree_holding_branch "$DEFAULT_BRANCH")" ]; then
+       add_anomaly branch_retained_default_held "...skipped branch deletion"
+     else
+       add_anomaly branch_switch_incomplete "still on $branch; skipped branch deletion"
+     fi
+     return 0
    fi
-   return 0
    ```
 
    So this is not a missing holder check. The correct guard exists, and the early return skips
@@ -146,11 +150,11 @@ through a second door.
 - A branch held by the **current** worktree is recognised as held. The `not row.get("current")`
   condition is correct for reporting *who else* holds a branch, but wrong as the gate on whether
   deletion was possible.
-- Every one of these codes stays blocking in its ordinary case. A source branch retained
+- Every one of the three blocking codes stays blocking in its ordinary case. A source branch retained
   with no worktree holding it, a current branch that differs from the default for any other
   reason, and a genuinely retained remote branch on a normal run all still block.
 - The stale remote-tracking ref is resolved where the staleness is introduced, not by weakening
-  `remote_source_branch_retained`. The prune at `sd-ai-command-pack-housekeeping.sh:1023-1033`
+  `remote_source_branch_retained`. The prune at `scripts/sd-ai-command-pack-housekeeping.sh:1023-1033`
   already exists for this; the held-default-branch return at `:963-970` must not skip it. A check
   that reads `remoteBranches` is entitled to assume that list is current.
 - The branch classification that feeds `local_branches_unmerged_without_pr` does not describe a
