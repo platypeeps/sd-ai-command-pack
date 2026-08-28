@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.71.63 - 2026-08-28
+
+### Fixed
+
+- The `--bookkeeping-evidence` rejection no longer sends the caller to a flag
+  the command they invoked does not accept. Its closing guidance said to read
+  the three target values from "this command's own `--plan-only --json`
+  report", which is true of the local review stage that emits the message but
+  not of `sd-ai-command-pack-review.py`, which also accepts the flag, forwards
+  it, and relays the rejection back verbatim -- that controller has no
+  `--plan-only`. The guidance now names
+  `sd-ai-command-pack-review-local.py --plan-only --json`, which reads
+  correctly from either entry point.
+
 ## 0.71.62 - 2026-08-28
 
 ### Fixed

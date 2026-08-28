@@ -2193,6 +2193,26 @@ class ReviewStageTests(InstallTestCase):
         self.assertIn("missing base, classification, contentDigest, head", diagnostic)
         self.assertIn("unsupported kind, status", diagnostic)
 
+    def test_bookkeeping_evidence_guidance_names_the_stage_script(self) -> None:
+        """The guidance has to survive being forwarded by the controller.
+
+        `--bookkeeping-evidence` is also accepted by
+        `sd-ai-command-pack-review.py`, which forwards it here and relays this
+        rejection back verbatim. That controller has no `--plan-only`, so a
+        message that said "this command's own --plan-only report" sent such a
+        caller to a flag the command they invoked rejects. Naming the stage
+        script reads correctly from either entry point.
+        """
+
+        root = self.make_repo()
+        self.write_config(root)
+
+        diagnostic = self.assert_evidence_rejected(root, "evidence-omitted")
+
+        self.assertIn("--plan-only", diagnostic)
+        self.assertIn("sd-ai-command-pack-review-local.py --plan-only", diagnostic)
+        self.assertNotIn("this command's own", diagnostic)
+
     def test_bookkeeping_evidence_schema_version_rejection_is_specific(self) -> None:
         root = self.make_repo()
         self.write_config(root)
