@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -1462,15 +1463,82 @@ def _paginated_rest_array(
     return rows
 
 
-def _matching_author(row: Mapping[str, Any], authors: set[str]) -> str | None:
-    user = row.get("user")
-    login = user.get("login") if isinstance(user, dict) else None
-    if isinstance(login, str) and login.lower() in authors:
-        return login
-    author = row.get("author")
-    login = author.get("login") if isinstance(author, dict) else None
-    if isinstance(login, str) and login.lower() in authors:
-        return login
+@dataclasses.dataclass(frozen=True)
+class AuthorSet:
+    """The configured review authors in both spellings a comparison needs.
+
+    ``exact`` is what the repository wrote, lowercased; ``folded`` has the
+    trailing ``[bot]`` removed. Keeping them apart is what stops the fold that
+    reconciles REST and GraphQL from also merging an app with the like-named
+    human account.
+    """
+
+    exact: frozenset[str] | set[str]
+    folded: frozenset[str] | set[str]
+
+    def __bool__(self) -> bool:
+        # Callers ask "were any review authors configured at all?" to decide
+        # whether to filter; an empty set must stay falsy through this wrapper.
+        return bool(self.exact or self.folded)
+
+
+def _normalized_login(value: Any) -> str | None:
+    """Fold one GitHub login to a spelling both transports agree on.
+
+    REST reports a bot as ``copilot-pull-request-reviewer[bot]``; GraphQL's
+    ``Bot.login`` reports the same account as ``copilot-pull-request-reviewer``.
+    Backend ``reviewAuthors`` are configured in one spelling and compared
+    against payloads from both, so an exact match silently drops every finding
+    that arrived over the other transport. Configuration should not have to
+    know which API the collector happened to call.
+    """
+    if not isinstance(value, str):
+        return None
+    login = value.strip().lower()
+    if login.endswith("[bot]"):
+        login = login[: -len("[bot]")]
+    return login or None
+
+
+def _principal_is_bot(container: Mapping[str, Any], login: str) -> bool:
+    """Report whether GitHub itself calls this principal a bot.
+
+    ``foo[bot]`` and the user account ``foo`` are different GitHub principals,
+    so the suffix fold that reconciles the two transports must never be applied
+    to a human. Both APIs say which is which: GraphQL through ``__typename``,
+    REST through ``user.type``. The REST spelling of the login is proof on its
+    own -- only an app can carry the suffix.
+    """
+    typename = container.get("__typename")
+    if isinstance(typename, str) and typename.strip().lower() == "bot":
+        return True
+    kind = container.get("type")
+    if isinstance(kind, str) and kind.strip().lower() == "bot":
+        return True
+    return login.strip().lower().endswith("[bot]")
+
+
+def _matching_author(row: Mapping[str, Any], authors: AuthorSet) -> str | None:
+    # Exact spelling always matches: it names one principal unambiguously.
+    # The folded spelling is what reconciles the two transports, so it is
+    # granted only to a principal GitHub reports as a bot -- otherwise a
+    # configured `foo[bot]` would hand the human account `foo` the app's
+    # review authority. The original login is returned, not the folded one --
+    # callers render it as evidence.
+    for field in ("user", "author"):
+        container = row.get(field)
+        if not isinstance(container, dict):
+            continue
+        login = container.get("login")
+        if not isinstance(login, str):
+            continue
+        if login.strip().lower() in authors.exact:
+            return login
+        if (
+            _principal_is_bot(container, login)
+            and _normalized_login(login) in authors.folded
+        ):
+            return login
     return None
 
 
@@ -1490,9 +1558,9 @@ def _nested_thread_comments(
     repo: Path,
     *,
     thread_id: str,
-    authors: set[str],
+    authors: AuthorSet,
 ) -> list[dict[str, Any]]:
-    query = """query($id:ID!,$endCursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$endCursor){nodes{id url body path line author{login}}pageInfo{hasNextPage endCursor}}}}}"""
+    query = """query($id:ID!,$endCursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$endCursor){nodes{id url body path line author{login __typename}}pageInfo{hasNextPage endCursor}}}}}"""
     value = _gh_json(
         [
             "api",
@@ -1549,9 +1617,9 @@ def _collect_review_threads(
     owner: str,
     name: str,
     number: int,
-    authors: set[str],
-) -> list[dict[str, Any]]:
-    query = """query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
+    authors: AuthorSet,
+) -> tuple[list[dict[str, Any]], int]:
+    query = """query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved isOutdated comments(first:100){nodes{id url body path line author{login __typename}} pageInfo{hasNextPage}}}pageInfo{hasNextPage endCursor}}}}}"""
     thread_value = _gh_json(
         [
             "api",
@@ -1572,6 +1640,7 @@ def _collect_review_threads(
     )
     pages = thread_value if isinstance(thread_value, list) else [thread_value]
     threads: list[dict[str, Any]] = []
+    fetched = 0
     for page in pages:
         data = page.get("data") if isinstance(page, dict) else None
         repository_value = (
@@ -1597,6 +1666,12 @@ def _collect_review_threads(
         for row in rows:
             if not isinstance(row, dict):
                 raise ReviewError("review thread row must be an object")
+            fetched += 1
+            # Cap on rows read, not rows kept. The author filter discards rows
+            # before they reach `threads`, so a limit counting only survivors
+            # lets a filtered query paginate without bound.
+            if fetched > 1_000:
+                raise ReviewError("review threads exceed 1000 rows")
             comments = row.get("comments")
             comment_rows = comments.get("nodes", []) if isinstance(comments, dict) else []
             matching = []
@@ -1636,7 +1711,10 @@ def _collect_review_threads(
                 )
                 if len(threads) > 1_000:
                     raise ReviewError("review threads exceed 1000 rows")
-    return threads
+    # The kept count alone cannot tell "nothing was there" from "the author
+    # filter discarded everything". Report both so the caller can refuse to
+    # call the second one clean.
+    return threads, fetched
 
 
 def _collect_observation(
@@ -1649,10 +1727,19 @@ def _collect_observation(
 ) -> dict[str, Any]:
     disposition_map = dict(dispositions or {})
     backend = receipt.get("backend")
-    authors = {
-        str(item).lower()
+    configured_authors = [
+        item
         for item in (backend.get("reviewAuthors", []) if isinstance(backend, dict) else [])
-    }
+        if isinstance(item, str) and item.strip()
+    ]
+    authors = AuthorSet(
+        exact={item.strip().lower() for item in configured_authors},
+        folded={
+            normalized
+            for normalized in (_normalized_login(item) for item in configured_authors)
+            if normalized is not None
+        },
+    )
     check_names = {
         str(item)
         for item in (backend.get("checkNames", []) if isinstance(backend, dict) else [])
@@ -1668,7 +1755,7 @@ def _collect_observation(
     owner = repository["owner"]
     name = repository["name"]
 
-    threads = (
+    threads, threads_fetched = (
         _collect_review_threads(
             repo,
             owner=owner,
@@ -1677,7 +1764,7 @@ def _collect_observation(
             authors=authors,
         )
         if "inline-comment" in channels
-        else []
+        else ([], 0)
     )
 
     issue_comments = (
@@ -1782,9 +1869,40 @@ def _collect_observation(
         or ("conversation-comment" in channels and bool(matching_conversation))
         or ("review" in channels and bool(matching_reviews))
     )
+    # One author, two transports: the GraphQL thread pass kept nothing while
+    # REST holds inline comments by these same authors. The inline-comment
+    # channel was emptied by the filter rather than by the pull request, and
+    # reporting that as clean hides every finding it dropped.
+    #
+    # The cheap terms below are only a pre-filter, never the verdict: a pull
+    # request carrying unrelated human threads satisfies them while nothing was
+    # dropped at all. Confirm against the other transport before calling it a
+    # contradiction, and pay for that page only in the suspicious case. A query
+    # that returned no rows at all never reaches the confirmation -- there is
+    # genuinely nothing there.
+    #
+    # A matching review is deliberately not one of the terms. It reads as
+    # corroboration but is populated only when the `review` channel is
+    # configured, so requiring it would let an inline-only backend -- the one
+    # whose findings live entirely in the channel this guard protects -- skip
+    # the check altogether.
+    author_filter_emptied = False
+    if "inline-comment" in channels and threads_fetched and not threads:
+        inline_comments = _paginated_rest_array(
+            repo,
+            endpoint=(
+                f"repos/{owner}/{name}/pulls/{pr['number']}/comments?per_page=100"
+            ),
+            context="collect pull request inline review comments",
+        )
+        author_filter_emptied = any(
+            _matching_author(row, authors) is not None for row in inline_comments
+        )
     status = (
         "findings"
         if unresolved or review_findings or conversation_findings
+        else "inconsistent"
+        if author_filter_emptied
         else "blocked"
         if any(str(item.get("bucket", "")).lower() in {"fail", "cancel"} for item in blocking_checks)
         else "pending"
@@ -1798,6 +1916,7 @@ def _collect_observation(
         "latencyMs": remote_latency,
         "reviewThreads": {
             "total": len(threads),
+            "fetched": threads_fetched,
             "unresolved": len(unresolved),
             "items": unresolved[:100],
         },
@@ -2377,6 +2496,18 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             state=state,
             status="findings",
             diagnostic="remote review findings require disposition",
+            limitations=qualifiers,
+        )
+    if observation_status == "inconsistent":
+        return 1, _report(
+            state=state,
+            status="blocked",
+            diagnostic=(
+                "remote observation is self-contradictory: a review by the "
+                "configured authors was found, but every review thread was "
+                "discarded by that same author filter, so inline findings "
+                "cannot be read at this head"
+            ),
             limitations=qualifiers,
         )
     if observation_status == "blocked":

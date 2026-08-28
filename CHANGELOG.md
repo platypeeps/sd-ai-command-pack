@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.71.62 - 2026-08-28
+
+### Fixed
+
+- Review thread collection no longer conflates a GitHub App with the human
+  account that shares its name. A configured login is matched exactly first;
+  the `[bot]` suffix fold that reconciles the REST and GraphQL spellings now
+  applies only when the payload identifies the principal as a bot, so a
+  human account named `foo` can no longer inherit the review authority of
+  `foo[bot]`. Both GraphQL queries select `__typename` to make that
+  determination possible.
+- The 1000-row review-thread pagination cap counts rows read rather than
+  rows kept. Previously the author filter discarded rows before they reached
+  the cap, letting a filtered query paginate without bound.
+- The emptied-set consistency guard no longer returns a permanent block for
+  the ordinary case of a filter that legitimately empties a set. It reports a
+  contradiction only when the other transport still holds a matching comment,
+  cross-checked against the REST inline-comment endpoint.
+
 ## 0.71.61 - 2026-08-26
 
 ### Added

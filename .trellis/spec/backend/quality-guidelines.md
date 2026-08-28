@@ -249,9 +249,48 @@ may enter housekeeping's merge mutation path.
 - Collect checks for the evaluated head. Blocking or pending checks are
   `blocked`; skipped and neutral checks are non-blocking, but at least one
   successful check is required.
-- Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread is
-  blocking; malformed, incomplete, unauthorized, rate-limited, or otherwise
-  unreadable evidence is `indeterminate`, never clean.
+- Paginate GraphQL `reviewThreads` through exhaustion, bounding the walk on
+  rows **read**, not rows kept: the author filter discards rows before they
+  reach the result, so a cap counting survivors lets a filtered query paginate
+  without bound. Any unresolved thread kept by the `reviewAuthors` filter is
+  blocking -- when no authors are
+  configured nothing is filtered, so every unresolved thread blocks; malformed,
+  incomplete, unauthorized, rate-limited, or otherwise unreadable evidence is
+  `indeterminate`, never clean.
+- Compare a GitHub login by exact spelling first, then by the folded spelling
+  for a bot only. REST reports a bot as `name[bot]`; GraphQL's `Bot.login`
+  reports the same account as `name`, so configuration would otherwise have to
+  know which transport the collector called -- an exact-only comparison drops
+  every finding that arrived over the other API while a review matched on the
+  one that agreed with config, reporting `clean` for a head carrying unresolved
+  findings. Keep the configured `reviewAuthors` in both spellings, lowercased
+  and `[bot]`-stripped, and grant the folded match only where GitHub reports
+  the principal as a bot: GraphQL `__typename`, REST `user.type`, or the
+  `[bot]` suffix, which only an app can carry. `name[bot]` and the user account
+  `name` are different principals; a fold that merges them hands a human the
+  app's review authority.
+- The fold is deliberately asymmetric, and this is a decision, not an
+  oversight. Configuring `name[bot]` never matches the human `name`. Configuring
+  the bare `name` does match the bot `name[bot]`, because that is the ordinary
+  way a repository names a GitHub App reviewer -- GraphQL shows apps without
+  the suffix, so requiring the suffix in config would break the transport
+  independence this rule exists to provide. The residual is bounded and worth
+  stating: a repository that means the *human* `name` and writes it bare also
+  authorizes an app of the same name. Write `name[bot]` when you mean the app;
+  there is no spelling that means the human alone.
+- A filter that empties a set the *other transport* still holds is a
+  contradiction, not a clean result; a filter that merely empties a set is
+  ordinary and stays clean. Rows fetched versus rows kept is the pre-filter
+  that selects what to check, never the finding itself: unrelated human threads
+  satisfy it while no finding was dropped. Confirm against the other
+  transport -- REST inline comments by those same authors, the channel the
+  GraphQL thread pass reads -- and only then report the inconsistency with a
+  diagnostic naming it, never `clean` and never a limitation the caller may
+  ignore. Do not add a matching review to the pre-filter: it exists only when
+  the `review` channel is configured, so requiring it would exempt an
+  inline-only backend. Fetch the confirming page only in the suspicious case; a
+  query that returned nothing at all never reaches it and must still be
+  `clean`.
 - `local-branch` requires a clean working tree, equal local, remote, and PR head
   OIDs, and a schema-version-1 final-bundle receipt for that exact head. The
   evaluator reruns the canonical validator with the receipt's mode, base, and
@@ -310,6 +349,15 @@ may enter housekeeping's merge mutation path.
   receipts; dirty local state; and local/remote/PR head mismatches. Assert that
   invalid local evidence stops before GitHub collection.
 - Multi-page resolved and unresolved review threads.
+- Login comparison across both transports: a configured bare name matching a
+  bot principal over either API, a configured `name[bot]` never matching the
+  human `name`, and the fold granting a match only where GitHub reports the
+  principal as a bot.
+- Pagination bounded on rows read: a filtered query whose author filter
+  discards most rows still stops at the cap.
+- The emptied-set guard in both directions: a filter that empties a set the
+  other transport still holds reports the contradiction, and one that merely
+  empties a set stays clean without fetching the confirming page.
 - Provider/auth/rate-limit failures and malformed JSON/check/thread payloads.
 - Unknown schema major, unknown fields, strict mode/policy validation, local
   and PR head changes during evaluation, and every malformed/unavailable final

@@ -1498,3 +1498,53 @@ Filed three planning tasks from one investigation into the pincer a consumer rep
 ### Next Steps
 
 - None - task complete
+
+
+## Session 437: Normalize bot login when matching review threads
+<!-- trellis-session: v=2 fp=c789533270d1401b -->
+
+**Date**: 2026-08-27
+**Task**: Normalize bot login when matching review threads
+**Branch**: `task/08-27-graphql-bot-login-thread-matching`
+
+### Summary
+
+Shipped PR 574: GraphQL Bot.login lacks the [bot] suffix REST carries, so author matching dropped every inline finding and the observation reported clean. Nine review rounds hardened the fix -- the fold is now granted to bots only, the emptied-set guard is confirmed across transports, and thread pagination is bounded on rows read.
+
+### Main Changes
+
+- Match a GitHub login by exact spelling first, then by the [bot]-stripped spelling for a principal GitHub reports as a bot (GraphQL __typename, REST user.type, or the suffix itself), so an app and the like-named human stay distinct
+- Confirm the emptied-thread guard against REST inline comments rather than REST reviews; rows fetched versus rows kept is only a pre-filter, and unrelated human threads no longer force a permanent blocked
+- Drop the matching-review term from that pre-filter so an inline-only backend cannot skip the check
+- Bound thread pagination on rows read rather than rows kept, from a Copilot review finding: the author filter discards rows before they reach the capped list
+- Record the bare-config residual as an accepted decision in spec and PRD -- configuring name also authorizes name[bot], because R1 requires suffixless config to match a bot payload
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `996ddff3` | fix(sd-review): normalize bot login when matching review threads |
+| `3d5e436e` | chore(fleet): refresh candidate ledger for the review-thread fix |
+| `5cbc778e` | fix(sd-review): confirm the emptied-thread guard across transports |
+| `a9608b58` | fix(sd-review): grant the bot-suffix fold to bots only |
+| `97ed1a49` | fix(sd-review): check the emptied-thread guard for inline-only backends |
+| `9411925b` | docs(spec): correct two review-observation rules the filter contradicts |
+| `bae659ac` | fix(sd-review): bound thread pagination on rows read, not rows kept |
+| `8076f6d3` | docs(task): correct the remediation-round budget line |
+| `ee5bcfde` | docs(task): record acceptance evidence and check the criteria |
+| `1272f297` | docs(spec): state the emptied-set rule the same way at every depth |
+
+### Testing
+
+- [OK] make test VENV=.venv exits 0; 69 review-controller tests pass
+- [OK] red proof: collector replaced with origin/main copy, every new test fails, restoring the branch copy returns 69 OK
+- [OK] sd-review scope=pr attempt 9 returns ready, remoteGate eligible, 0 outstanding
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-9.md`
-- **Total Sessions**: 436
+- **Total Sessions**: 437
 - **Last Active**: 2026-08-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-9.md` | ~1491 | Active |
+| `journal-9.md` | ~1540 | Active |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
 | `journal-6.md` | ~1981 | Archived |
@@ -37,6 +37,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 437 | 2026-08-27 | Normalize bot login when matching review threads | `996ddff3`, `3d5e436e`, `5cbc778e`, `a9608b58`, `97ed1a49`, `9411925b`, `bae659ac`, `8076f6d3`, `ee5bcfde`, `1272f297` | `task/08-27-graphql-bot-login-thread-matching` |
 | 436 | 2026-08-27 | File the generated-structural-map and bookkeeping-prefix follow-ups | `630f446a` | `docs/file-bookkeeping-map-tasks` |
 | 435 | 2026-08-27 | Codex local review adapter: opt-in lane, absence semantics, and the ship round | `07daecbf`, `e7a28652`, `41cea1fd`, `951ccb28`, `fb031ced`, `4ae42850`, `e7f85106`, `0c656dca`, `c95946e1`, `610e58d1`, `76ca62bf`, `9661a144`, `ecbfb0d1`, `6a9ee598`, `a91f6970`, `0ec1bb71` | `task/codex-local-adapter` |
 | 434 | 2026-08-26 | File the blocked-marker bookkeeping gate gap | `ec235179a539a076bc036d3d6755522a005240fe` | `chore/file-blocked-marker-gate-gap` |
