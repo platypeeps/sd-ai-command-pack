@@ -140,17 +140,17 @@ not be silently downgraded to a limitation the caller can ignore.
 
 ## Acceptance Criteria
 
-- [ ] A GraphQL thread payload whose comment author login is
+- [x] A GraphQL thread payload whose comment author login is
       `copilot-pull-request-reviewer`, matched against `reviewAuthors`
       `["copilot-pull-request-reviewer[bot]"]`, yields
       `reviewThreads.total == 1` and `unresolved == 1`.
-- [ ] The reverse spelling — payload carrying `[bot]`, config without it —
+- [x] The reverse spelling — payload carrying `[bot]`, config without it —
       also matches, so neither side is privileged.
-- [ ] An observation whose GraphQL thread query returned rows, all of which
+- [x] An observation whose GraphQL thread query returned rows, all of which
       the author filter discarded, while REST holds an inline comment by those
       same authors, does not return `status: "clean"`, and its diagnostic names
       the contradiction.
-- [ ] Discarded threads alone do not fire it. A pull request carrying unrelated
+- [x] Discarded threads alone do not fire it. A pull request carrying unrelated
       human threads and a body-only review by a configured author -- the shape
       of a clean Copilot review -- still reports `clean`, because REST holds no
       inline comment by those authors to have been dropped.
@@ -163,11 +163,11 @@ not be silently downgraded to a limitation the caller can ignore.
       branch. The evidence is narrowed to REST inline comments -- the same
       channel the GraphQL thread pass reads -- and the cheap counts become a
       pre-filter that pays for the confirming page only in the suspicious case.
-- [ ] A genuinely empty thread set — the query returned no rows at all — still
+- [x] A genuinely empty thread set — the query returned no rows at all — still
       reports `clean`. R2 must not fire when there is simply nothing there.
-- [ ] Both new tests fail against unmodified source. A test that passes
+- [x] Both new tests fail against unmodified source. A test that passes
       pre-fix is not accepted as evidence.
-- [ ] The full pack test suite is green, with no existing test's assertions
+- [x] The full pack test suite is green, with no existing test's assertions
       weakened to accommodate the change.
 
       **Deviation, recorded during implementation rather than reworded to
@@ -181,9 +181,36 @@ not be silently downgraded to a limitation the caller can ignore.
       necessary and honest mock update, so the criterion is narrowed to what it
       was actually protecting -- assertions, not mock plumbing. No other
       existing test was touched.
-- [ ] All four copies of the collector are updated in one commit, per the
+- [x] All four copies of the collector are updated in one commit, per the
       convention in `ecbfb0d1`: `scripts/`, `templates/scripts/`,
       `plugins/sd/bin/`, `plugins/sd/machine-payload/scripts/`.
+
+## Acceptance Evidence
+
+Recorded when each box above was checked, not asserted in advance.
+
+- Spelling criteria (1, 2): `test_bot_login_matches_across_rest_and_graphql_spellings`
+  covers three configured/payload permutations; all pass, each asserting
+  `reviewThreads.total == 1`, `unresolved == 1`, `status == "findings"`.
+- Contradiction and its bound (3, 4): `test_author_filter_emptying_threads_is_not_clean`
+  (one comment seen over both transports, principal differing) reports
+  `inconsistent`; `test_author_filter_check_needs_the_other_transport_to_agree`
+  holds `clean` for unrelated human threads with no REST inline comment by a
+  configured author. `test_bot_suffix_fold_does_not_promote_the_like_named_human`
+  keeps the human out of the app's authority.
+- Empty set (5): `test_author_filter_check_ignores_a_genuinely_empty_thread_set`
+  asserts `fetched == 0` and a status other than `inconsistent`.
+- Red proof (6): the collector was replaced with `origin/main`'s copy and the
+  new tests rerun -- `bot_login` 3 subtest failures, `author_filter` 1 failure
+  and 3 errors, `pagination_cap_counts` 1 failure. Restoring the branch copy
+  returns 69 tests OK.
+- Suite (7): `make test VENV=.venv` exits 0. One existing test's mock was
+  updated for the changed signature, recorded as a deviation above; no
+  assertion was weakened.
+- Mirrors (8): every collector commit on this branch writes `scripts/`,
+  `templates/scripts/`, `plugins/sd/bin/`, and
+  `plugins/sd/machine-payload/scripts/` together, and `make generate` reports
+  `plugins/sd (210 files)` unchanged against the surface partition.
 
 ## Verification
 
