@@ -249,9 +249,11 @@ may enter housekeeping's merge mutation path.
 - Collect checks for the evaluated head. Blocking or pending checks are
   `blocked`; skipped and neutral checks are non-blocking, but at least one
   successful check is required.
-- Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread is
-  blocking; malformed, incomplete, unauthorized, rate-limited, or otherwise
-  unreadable evidence is `indeterminate`, never clean.
+- Paginate GraphQL `reviewThreads` through exhaustion. Any unresolved thread
+  kept by the `reviewAuthors` filter is blocking -- when no authors are
+  configured nothing is filtered, so every unresolved thread blocks; malformed,
+  incomplete, unauthorized, rate-limited, or otherwise unreadable evidence is
+  `indeterminate`, never clean.
 - Compare a GitHub login by exact spelling first, then by the folded spelling
   for a bot only. REST reports a bot as `name[bot]`; GraphQL's `Bot.login`
   reports the same account as `name`, so configuration would otherwise have to
@@ -276,13 +278,15 @@ may enter housekeeping's merge mutation path.
 - A filter that empties a non-empty evidence set is a contradiction, not a
   clean result -- but prove it on the same channel before saying so. Rows
   fetched versus rows kept is a pre-filter, not the finding: unrelated human
-  threads plus a body-only review by a configured author satisfy it while
-  nothing was dropped. Confirm against the other transport -- REST inline
-  comments by those same authors, the channel the GraphQL thread pass reads --
-  and only then report the inconsistency with a diagnostic naming it, never
-  `clean` and never a limitation the caller may ignore. Fetch that confirming
-  page only in the suspicious case; a query that returned nothing at all never
-  reaches it and must still be `clean`.
+  threads satisfy it while nothing was dropped. Confirm against the other
+  transport -- REST inline comments by those same authors, the channel the
+  GraphQL thread pass reads -- and only then report the inconsistency with a
+  diagnostic naming it, never `clean` and never a limitation the caller may
+  ignore. Do not add a matching review to the pre-filter: it exists only when
+  the `review` channel is configured, so requiring it would exempt an
+  inline-only backend. Fetch the confirming page only in the suspicious case; a
+  query that returned nothing at all never reaches it and must still be
+  `clean`.
 - `local-branch` requires a clean working tree, equal local, remote, and PR head
   OIDs, and a schema-version-1 final-bundle receipt for that exact head. The
   evaluator reruns the canonical validator with the receipt's mode, base, and
