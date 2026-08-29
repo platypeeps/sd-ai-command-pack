@@ -91,3 +91,45 @@ Recorded the second-lane decision in the PRD and made the acceptance checks enfo
 ### Next Steps
 
 - Roll out codex + gito per consumer in the registry's cohort order, after or with the gito exclusion narrowing
+
+
+## Session 452: Add answerbook/mezmo-world-simulator to the fleet as a thin consumer
+<!-- trellis-session: v=2 fp=18aaf828366b6866 -->
+
+**Date**: 2026-08-28
+**Task**: Add answerbook/mezmo-world-simulator to the fleet as a thin consumer
+**Branch**: `chore/fleet-add-mezmo-world-simulator`
+
+### Summary
+
+Registered answerbook/mezmo-world-simulator in the fleet registry, converted it to thin mode, regenerated the candidate-validation ledger for the converted consumer, and widened the fleet inventory test expectations to match. The registry now carries ten consumers.
+
+### Main Changes
+
+- Added the answerbook/mezmo-world-simulator entry to docs/fleet/consumers.json, taking the registry from nine consumers to ten.
+- Converted the new consumer to thin mode so it matches every other fleet entry.
+- Regenerated docs/fleet/candidate-validation.json so the candidate ledger reflects the thin conversion.
+- Updated tests/test_fleet_preflight.py inventory expectations to include the new consumer.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6c58ca01` | chore: add answerbook/mezmo-world-simulator to the fleet |
+| `ad6c25d9` | chore: mezmo-world-simulator converted to thin |
+| `bc2f9abc` | chore: regenerate candidate ledger for the thin mezmo-world-simulator row |
+| `8a316bb8` | test: fleet inventory expectations include mezmo-world-simulator |
+
+### Testing
+
+- [OK] python -m unittest discover -s tests -p 'test_fleet*.py' — Ran 232 tests, OK
+- [OK] python -m unittest tests.test_fleet_preflight — Ran 26 tests, OK
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

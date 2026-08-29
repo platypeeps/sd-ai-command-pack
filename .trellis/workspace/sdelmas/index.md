@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-10.md`
-- **Total Sessions**: 451
+- **Total Sessions**: 452
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-10.md` | ~83 | Active |
+| `journal-10.md` | ~126 | Active |
 | `journal-9.md` | ~1996 | Archived |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
@@ -38,6 +38,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 452 | 2026-08-28 | Add answerbook/mezmo-world-simulator to the fleet as a thin consumer | `6c58ca01`, `ad6c25d9`, `bc2f9abc`, `8a316bb8` | `chore/fleet-add-mezmo-world-simulator` |
 | 451 | 2026-08-28 | Adopt codex + gito as the rollout's default provider set | `6f6a15be`, `4ed524e3` | `task/08-28-codex-lane-fleet-rollout` |
 | 450 | 2026-08-28 | Work the codex-lane rollout PRD through its review cycle | `0711f0bb`, `3985dfdc`, `3a6a628b`, `96f170d8`, `5b48dce5`, `0b241722` | `task/08-28-codex-lane-fleet-rollout` |
 | 449 | 2026-08-28 | File the codex-lane fleet rollout task | `59dae771` | `task/08-28-codex-lane-fleet-rollout` |
