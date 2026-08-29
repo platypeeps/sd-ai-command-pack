@@ -43,3 +43,7 @@ python_version = "3.10"
 check_untyped_defs = true
 warn_unused_ignores = true
 mypy_path = ".github/scripts"
+# bin/ ships two extension-less executables (sd-check, sd-docs-lint). Without
+# this, mypy names every shebang script `__main__` and the second one is a
+# duplicate-module error rather than a type check.
+scripts_are_modules = true
