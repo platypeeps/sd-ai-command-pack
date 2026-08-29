@@ -259,3 +259,47 @@ Fixed two housekeeping defects in which the typed result disagreed with the evid
 ### Next Steps
 
 - None - task complete
+
+
+## Session 456: Bound the KB refresh, stop reading branch names as paths, classify remote-only branches
+<!-- trellis-session: v=2 fp=8ce945780ca0d026 -->
+
+**Date**: 2026-08-28
+**Task**: Bound the KB refresh, stop reading branch names as paths, classify remote-only branches
+**Branch**: `task/08-28-bookkeeping-integrity`
+
+### Summary
+
+Addressed three independent stability/correctness tasks in one batch and released them as pack 0.71.65: the unbounded Obsidian KB refresh that could stall a whole housekeeping run, the review-preflight path gate that read a Git branch name as a repository path when its prefix collided, and the sd-status leftover-branch classification that never looked at remote-only refs.
+
+### Main Changes
+
+- housekeeping: bounded refresh_obsidian_kb with run_command_with_timeout under SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS (default 60, 0 disables); exit 124 degrades to the advisory kb_refresh_timed_out anomaly naming the resolved .obsidian-kb target, because the KB is a regenerable mirror the merge never reads
+- review-preflight: a configured reference prefix now marks a path claim only when the tail is shaped like a location (line/range citation or a file extension on the final segment), so naming the branch docs/<slug> no longer fails the gate while origin/<slug> passes
+- sd-status: added classify_remote_branches plus its own merge evidence walked from the remote default tip over refs/remotes, a closed-unmerged pull-request disposition, and a closed-PR GitHub listing; one row per branch and no new fetch
+- registered kb_refresh_timed_out in both advisory anomaly sets, documented both new behaviours in docs/SD_AI_COMMAND_PACK.md and the sd-housekeeping/sd-status skills, and released the payload as 0.71.65
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ababa981` | fix(bookkeeping): bound the KB refresh, stop reading branch names as paths, classify remote-only branches |
+| `8747dba6` | chore(task): archive 08-28-kb-refresh-blocking-io |
+| `8c89a6cb` | chore(task): archive 08-28-preflight-branch-name-vs-path |
+| `b7b5ee54` | chore(task): archive 08-28-status-remote-branch-detection |
+
+### Testing
+
+- [OK] make check -- MAKE_EXIT=0
+- [OK] make generate -- shipped-surface closure: clean; 53 changed path(s)
+- [OK] pre-archive gate -- valid ['pre_archive_valid'] across all three task directories
+- [OK] old vs new preflight on the same document: old FAIL docs/scratch-branch-check.md:3 references missing path docs/file-review-and-kb-defects; new reports none
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

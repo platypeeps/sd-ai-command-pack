@@ -63,6 +63,11 @@ ADVISORY_ANOMALY_CODES = frozenset(
     {
         "branch_retained_default_held",
         "default_branch_held_elsewhere",
+        # The Obsidian KB is a regenerable mirror the merge never reads, and an
+        # unresponsive .obsidian-kb target is a property of the operator's
+        # filesystem rather than of the branch being merged, so a refresh that
+        # exhausted its bound is reported without blocking the gate.
+        "kb_refresh_timed_out",
         # The pull request was already merged when the run first resolved it,
         # so the finish-work receipt it was handed was never verified. The run
         # cannot un-merge, and the cleanup it went on to do was correct, so this

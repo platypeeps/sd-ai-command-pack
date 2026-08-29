@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.71.65 - 2026-08-28
+
+### Fixed
+
+- The housekeeping Obsidian KB refresh is time-bounded. It writes through
+  `.obsidian-kb`, whose target the operator chooses, and a target on a
+  cloud-synced filesystem blocks in the kernel rather than failing, which stalled
+  the entire housekeeping run with no diagnostic. The refresh now runs under
+  `SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS` (default 60, `0`
+  disables); exhausting the bound reports the advisory `kb_refresh_timed_out`
+  anomaly naming the resolved target and the run continues, because the KB is a
+  regenerable mirror the merge never reads.
+- `review-preflight` no longer reads a Git branch name as a repository path.
+  `apps/`, `docs/`, `scripts/`, and `tests/` are configured reference prefixes
+  and also ordinary branch-name prefixes, so the gate failed a document for
+  naming the branch `docs/<slug>` while the same document's `origin/<slug>`
+  passed untouched. A prefixed reference is now checked only when its tail is
+  shaped like a location — a line/range citation, or a file extension on the
+  final segment — which is the same noun-versus-location test the bare-filename
+  rule already applies. Genuine missing `docs/...` file citations still fail.
+- `sd-status` classifies branches that exist on the configured remote with no
+  local ref. The leftover-branch classification walked `refs/heads` alone, so a
+  branch deleted locally or never checked out here reached no row, follow-up, or
+  anomaly however long it had been dead. Remote rows carry their own merge
+  evidence, walked from the remote default tip over `refs/remotes`, and one
+  extra disposition: a pull request closed *unmerged* is reported as such rather
+  than as "no pull request". Rows are advisory, one per branch, and the
+  no-fetch contract is unchanged.
+
 ## 0.71.64 - 2026-08-28
 
 ### Fixed

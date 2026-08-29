@@ -107,18 +107,18 @@ and blocks nothing; it is not tolerable if a remote row is ever made blocking.
 
 ## Acceptance criteria
 
-- [ ] A fixture repository with a remote-tracking ref and no matching local branch produces a
+- [x] A fixture repository with a remote-tracking ref and no matching local branch produces a
       classified row for it; the same fixture on today's code produces none.
-- [ ] A remote branch whose pull request is closed unmerged is reported with a disposition
+- [x] A remote branch whose pull request is closed unmerged is reported with a disposition
       distinguishing it from a branch with no pull request at all.
-- [ ] A remote branch reachable from the default tip is reported merged, not unmerged —
+- [x] A remote branch reachable from the default tip is reported merged, not unmerged —
       pinning that merge evidence is not the local-only `refs/heads` query.
-- [ ] Truncated pull-request evidence (`MAX_ITEMS`) yields `unknown` with a reason for a
+- [x] Truncated pull-request evidence (`MAX_ITEMS`) yields `unknown` with a reason for a
       remote row, matching the existing local-row guarantee.
-- [ ] A branch present both locally and on the remote yields exactly one row.
-- [ ] `--json` exposes the remote rows in the structured inventory, and the human report keeps
+- [x] A branch present both locally and on the remote yields exactly one row.
+- [x] `--json` exposes the remote rows in the structured inventory, and the human report keeps
       its bounded fleet output.
-- [ ] No new `git fetch` is introduced on the status path; a test asserts the collector issues
+- [x] No new `git fetch` is introduced on the status path; a test asserts the collector issues
       no network-mutating git command.
 
 ## Related

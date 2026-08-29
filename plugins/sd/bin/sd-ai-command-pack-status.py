@@ -52,6 +52,7 @@ ADVISORY_CALLER_ANOMALY_CODES = frozenset(
     {
         "branch_retained_default_held",
         "default_branch_held_elsewhere",
+        "kb_refresh_timed_out",
         "pull_request_merged_before_run",
     }
 )
@@ -570,6 +571,7 @@ def collect_git(
     # the absence claim.
     state["mergedIntoDefault"] = None
     state["mergedIntoRemoteDefault"] = None
+    state["remoteBranchesMerged"] = None
     if isinstance(resolved_default, str) and resolved_default:
         merged = git_output(
             repo,
@@ -591,6 +593,20 @@ def collect_git(
         )
         if merged_remote is not None:
             state["mergedIntoRemoteDefault"] = sorted(merged_remote.splitlines())
+        # Merge evidence for the remote-only branches, walked from the same
+        # remote default tip but over `refs/remotes` rather than `refs/heads`.
+        # The local-only query cannot witness a ref that has no local branch:
+        # reusing it would report every remote-only branch unmerged.
+        merged_remote_refs = git_output(
+            repo,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--merged",
+            f"refs/remotes/{remote}/{resolved_default}",
+            f"refs/remotes/{remote}",
+        )
+        if merged_remote_refs is not None:
+            state["remoteBranchesMerged"] = sorted(merged_remote_refs.splitlines())
     stash_list = git_output(repo, "stash", "list", "--format=%gd")
     if stash_list is None:
         state["stashCount"] = None
@@ -2273,15 +2289,21 @@ def collect_machine_scope(
 def parse_gh_lines(output: str, *, kind: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for line in output.splitlines()[:MAX_ITEMS]:
-        fields = line.split(PR_SEPARATOR, 2)
+        fields = line.split(PR_SEPARATOR, 3)
         if len(fields) < 2 or not fields[0].isdigit():
             continue
         item = {
             "number": int(fields[0]),
             "title": safe_text(fields[1]),
         }
-        if kind == "pr" and len(fields) > 2:
+        if kind in {"pr", "closed-pr"} and len(fields) > 2:
             item["head"] = safe_text(fields[2], limit=120)
+        if kind == "closed-pr":
+            # The closed listing is queried unfiltered so its length still
+            # answers the truncation question; the merged/unmerged split is
+            # made here. A closed-unmerged pull request is the distinguishing
+            # evidence a remote-only branch needs, and a merged one is not.
+            item["merged"] = bool(len(fields) > 3 and fields[3].strip())
         items.append(item)
     return items
 
@@ -2445,6 +2467,8 @@ def collect_github(
             "currentPr": None,
             "openPrs": [],
             "openPrsStatus": "unavailable",
+            "closedPrs": [],
+            "closedPrsStatus": "unavailable",
             "openIssues": [],
             "openIssuesStatus": "unavailable",
         }
@@ -2454,6 +2478,8 @@ def collect_github(
             "currentPr": None,
             "openPrs": [],
             "openPrsStatus": "unavailable",
+            "closedPrs": [],
+            "closedPrsStatus": "unavailable",
             "openIssues": [],
             "openIssuesStatus": "unavailable",
         }
@@ -2463,6 +2489,8 @@ def collect_github(
             "currentPr": None,
             "openPrs": [],
             "openPrsStatus": "unavailable",
+            "closedPrs": [],
+            "closedPrsStatus": "unavailable",
             "openIssues": [],
             "openIssuesStatus": "unavailable",
         }
@@ -2485,6 +2513,29 @@ def collect_github(
         ],
         cwd=repo,
     )
+    # Closed pull requests answer a question the open listing cannot: whether
+    # an abandoned branch was deliberately closed unmerged, or simply never had
+    # a pull request. The two call for different operator action, so they must
+    # not collapse into one "no open PR" reading.
+    closed_pr_result = run_command(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            slug,
+            "--state",
+            "closed",
+            "--limit",
+            str(MAX_ITEMS),
+            "--json",
+            "number,title,headRefName,mergedAt",
+            "--jq",
+            ".[] | [.number,.title,.headRefName,(.mergedAt // \"\")] "
+            "| join(\"\\u001f\")",
+        ],
+        cwd=repo,
+    )
     issue_result = run_command(
         [
             "gh",
@@ -2504,7 +2555,11 @@ def collect_github(
         cwd=repo,
     )
     status = "available"
-    if pr_result.returncode != 0 or issue_result.returncode != 0:
+    if (
+        pr_result.returncode != 0
+        or closed_pr_result.returncode != 0
+        or issue_result.returncode != 0
+    ):
         status = "partial"
     return {
         "status": status,
@@ -2513,6 +2568,12 @@ def collect_github(
         if pr_result.returncode == 0
         else [],
         "openPrsStatus": "available" if pr_result.returncode == 0 else "unavailable",
+        "closedPrs": parse_gh_lines(closed_pr_result.stdout, kind="closed-pr")
+        if closed_pr_result.returncode == 0
+        else [],
+        "closedPrsStatus": (
+            "available" if closed_pr_result.returncode == 0 else "unavailable"
+        ),
         "openIssues": parse_gh_lines(issue_result.stdout, kind="issue")
         if issue_result.returncode == 0
         else [],
@@ -2650,8 +2711,154 @@ def classify_local_branches(
     }
 
 
+def classify_remote_branches(
+    git: Mapping[str, Any],
+    github: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Classify branches that exist on the configured remote and nowhere local.
+
+    ``classify_local_branches`` walks ``refs/heads``, so a branch deleted
+    locally -- or never checked out on this machine -- is classified by nothing
+    and reaches neither the follow-ups nor the anomaly list, however long it has
+    been dead. This is the same matrix over the other half of the refs, with
+    three differences the refs themselves force:
+
+    * merge evidence is reachability from the remote default tip over
+      ``refs/remotes``. The local-only query cannot witness a ref with no local
+      branch, so reusing it would report every remote branch unmerged.
+    * a closed-unmerged pull request is its own disposition. For a remote-only
+      branch it is the informative fact -- someone decided not to ship it --
+      and collapsing it into "no pull request" would be true but misleading.
+    * there is no held-by-worktree axis; a remote ref is not checked out.
+
+    The absence-claim discipline is inherited unchanged: ``gh pr list`` is
+    bounded at MAX_ITEMS on both listings, and a full page proves nothing about
+    a branch missing from it, so it reports ``unknown`` with the reason rather
+    than a false "no pull request". Status never fetches, so the refs walked
+    here may be stale; ``evidence.remoteRefs`` labels that, and every row stays
+    advisory -- a squash or rebase merge is reachable from no tip and reads
+    unmerged here exactly as it does for a local branch.
+    """
+
+    remote_branches = git.get("remoteBranches")
+    remote = git.get("remote") or "origin"
+    default = git.get("defaultBranch")
+    if not isinstance(remote_branches, list):
+        return {
+            "status": "unavailable",
+            "evidence": {
+                "pullRequests": "unknown",
+                "closedPullRequests": "unknown",
+                "remoteRefs": "unknown",
+            },
+            "rows": [],
+            "truncated": False,
+        }
+
+    open_prs: list[Mapping[str, Any]] = []
+    pr_evidence = "github_unavailable"
+    closed_prs: list[Mapping[str, Any]] = []
+    closed_evidence = "github_unavailable"
+    if isinstance(github, dict):
+        raw_open = github.get("openPrs")
+        if github.get("openPrsStatus") == "available" and isinstance(raw_open, list):
+            open_prs = [row for row in raw_open if isinstance(row, dict)]
+            pr_evidence = (
+                "pr_evidence_truncated" if len(open_prs) >= MAX_ITEMS else "available"
+            )
+        raw_closed = github.get("closedPrs")
+        if github.get("closedPrsStatus") == "available" and isinstance(
+            raw_closed, list
+        ):
+            closed_prs = [row for row in raw_closed if isinstance(row, dict)]
+            closed_evidence = (
+                "closed_pr_evidence_truncated"
+                if len(closed_prs) >= MAX_ITEMS
+                else "available"
+            )
+
+    open_by_head: dict[str, int] = {}
+    for row in open_prs:
+        head = row.get("head")
+        number = row.get("number")
+        if isinstance(head, str) and head and isinstance(number, int):
+            open_by_head.setdefault(head, number)
+    closed_unmerged_by_head: dict[str, int] = {}
+    for row in closed_prs:
+        head = row.get("head")
+        number = row.get("number")
+        if row.get("merged"):
+            continue
+        if isinstance(head, str) and head and isinstance(number, int):
+            closed_unmerged_by_head.setdefault(head, number)
+
+    merged_value = git.get("remoteBranchesMerged")
+    merged = set(merged_value) if isinstance(merged_value, list) else None
+    refs_evidence = "refreshed" if git.get("refsFreshness") == "refreshed" else "cached"
+
+    local_branches = git.get("localBranches")
+    local = set(local_branches) if isinstance(local_branches, list) else set()
+    prefix = f"{remote}/"
+    candidates: list[tuple[str, str]] = []
+    for ref in remote_branches:
+        if not isinstance(ref, str) or not ref.startswith(prefix):
+            continue
+        name = ref[len(prefix) :]
+        # HEAD is a symbolic pointer, the default branch is not leftover, and a
+        # branch that also exists locally is already classified there: one row
+        # per branch, whichever half of the refs it lives in.
+        if not name or name == "HEAD" or name == default or name in local:
+            continue
+        candidates.append((ref, name))
+
+    candidates.sort()
+    rows: list[dict[str, Any]] = []
+    for ref, name in candidates[:MAX_ITEMS]:
+        pull_request: int | None = open_by_head.get(name)
+        closed_pull_request = closed_unmerged_by_head.get(name)
+        if merged is not None and ref in merged:
+            disposition = "merged"
+            pull_request = None
+            closed_pull_request = None
+        elif pull_request is not None:
+            disposition = "unmerged-with-pull-request"
+        elif merged is None:
+            # Without merge evidence, "unmerged" is not established, so neither
+            # is anything that follows from it.
+            disposition = "unknown"
+        elif closed_pull_request is not None:
+            # Direct evidence, on its own authority: a present row needs no
+            # complete listing behind it, exactly as an open pull request does
+            # not.
+            disposition = "unmerged-with-closed-pull-request"
+            pull_request = closed_pull_request
+        elif pr_evidence == "available" and closed_evidence == "available":
+            disposition = "unmerged-without-pull-request"
+        else:
+            disposition = "unknown"
+        rows.append(
+            {
+                "branch": safe_text(ref, limit=120),
+                "disposition": disposition,
+                "pullRequest": pull_request,
+            }
+        )
+    return {
+        "status": "ok",
+        "evidence": {
+            "pullRequests": pr_evidence,
+            "closedPullRequests": closed_evidence,
+            "remoteRefs": refs_evidence,
+        },
+        "rows": rows,
+        "truncated": len(candidates) > MAX_ITEMS,
+    }
+
+
 def branch_classification_anomalies(
     classification: Mapping[str, Any],
+    *,
+    scope: str = "local",
 ) -> list[tuple[str, str]]:
     """Advisory anomalies derived from the branch classification.
 
@@ -2678,7 +2885,78 @@ def branch_classification_anomalies(
         name = safe_text(row.get("branch"), limit=120)
         return f"{name} [held by {held}]" if held else name
 
+    def joined(selected: list[Mapping[str, Any]]) -> str:
+        return ", ".join(render(row) for row in selected[:HUMAN_ITEM_LIMIT]) + (
+            f"; +{len(selected) - HUMAN_ITEM_LIMIT} more"
+            if len(selected) > HUMAN_ITEM_LIMIT
+            else ""
+        )
+
     anomalies: list[tuple[str, str]] = []
+    if scope == "remote":
+        evidence = classification.get("evidence")
+        stale_note = ""
+        if isinstance(evidence, dict) and evidence.get("remoteRefs") != "refreshed":
+            # Status never fetches, so these refs are as old as the last fetch:
+            # the branch may already be gone. Say so rather than let an
+            # advisory row read as a confident claim about the remote today.
+            stale_note = (
+                "; read from cached remote-tracking refs, which status never "
+                "fetches"
+            )
+        closed = [
+            row
+            for row in rows
+            if row.get("disposition") == "unmerged-with-closed-pull-request"
+        ]
+        if closed:
+            anomalies.append(
+                (
+                    "remote_branches_pull_request_closed_unmerged",
+                    safe_text(
+                        f"{len(closed)} remote branch(es) survive a pull request "
+                        f"that was closed unmerged: {joined(closed)}{stale_note}",
+                        limit=500,
+                    ),
+                )
+            )
+        remote_prless = [
+            row
+            for row in rows
+            if row.get("disposition") == "unmerged-without-pull-request"
+        ]
+        if remote_prless:
+            anomalies.append(
+                (
+                    "remote_branches_unmerged_without_pr",
+                    safe_text(
+                        f"{len(remote_prless)} remote branch(es) are unmerged with "
+                        f"no pull request: {joined(remote_prless)}{stale_note}",
+                        limit=500,
+                    ),
+                )
+            )
+        remote_unknown = [row for row in rows if row.get("disposition") == "unknown"]
+        if remote_unknown:
+            reasons = []
+            if isinstance(evidence, dict):
+                for key in ("pullRequests", "closedPullRequests"):
+                    if evidence.get(key) != "available":
+                        reasons.append(str(evidence.get(key)))
+            anomalies.append(
+                (
+                    "remote_branches_pr_state_unknown",
+                    safe_text(
+                        f"{len(remote_unknown)} remote branch(es) could not be "
+                        f"classified ({', '.join(reasons) or 'incomplete evidence'}"
+                        "); this is an unknown, not a claim that they have no "
+                        "pull request",
+                        limit=500,
+                    ),
+                )
+            )
+        return anomalies
+
     prless = [row for row in rows if row.get("disposition") == "unmerged-without-pull-request"]
     if prless:
         anomalies.append(
@@ -3335,6 +3613,7 @@ def collect_local(
         "anomalies": [],
         "anomalyDetails": [],
         "localBranchClassification": {},
+        "remoteBranchClassification": {},
         "followUps": [],
         "nextSteps": [],
     }
@@ -3428,6 +3707,14 @@ def collect_local(
     classification = classify_local_branches(git, report["github"])
     report["localBranchClassification"] = classification
     for code, message in branch_classification_anomalies(classification):
+        details.append((code, SEVERITY_ADVISORY, message))
+    # The other half of the refs. A remote-only branch is classified by nothing
+    # else, so without this an abandoned remote branch survives every report.
+    remote_classification = classify_remote_branches(git, report["github"])
+    report["remoteBranchClassification"] = remote_classification
+    for code, message in branch_classification_anomalies(
+        remote_classification, scope="remote"
+    ):
         details.append((code, SEVERITY_ADVISORY, message))
     if expect_clean:
         details.extend(

@@ -109,16 +109,16 @@ Not a decision this PRD makes; each has a real cost.
 
 ## Acceptance criteria
 
-- [ ] A document naming a branch whose first segment is a configured reference prefix passes
+- [x] A document naming a branch whose first segment is a configured reference prefix passes
       the gate, and the same document on today's code fails it.
-- [ ] A genuine reference to a non-existent file under `docs/` still fails, pinned by a test so
+- [x] A genuine reference to a non-existent file under `docs/` still fails, pinned by a test so
       the fix cannot over-reach into silencing real findings.
-- [ ] `docs/<branch>` and `origin/<branch>` are treated identically by the gate.
-- [ ] A test covers at least one additional colliding prefix from the configured list, so the
+- [x] `docs/<branch>` and `origin/<branch>` are treated identically by the gate.
+- [x] A test covers at least one additional colliding prefix from the configured list, so the
       fix is not special-cased to `docs/`.
-- [ ] If the resolution introduces notation, the failure message names it, and a test asserts
+- [x] If the resolution introduces notation, the failure message names it, and a test asserts
       the message does.
-- [ ] All four copies of `sd-ai-command-pack-review-preflight.mjs` stay byte-identical and
+- [x] All four copies of `sd-ai-command-pack-review-preflight.mjs` stay byte-identical and
       `make generate` reports `shipped-surface closure: clean`.
 
 ## Related

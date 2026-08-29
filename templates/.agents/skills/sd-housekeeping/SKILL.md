@@ -86,7 +86,13 @@ for the shared ownership sequence and authoring examples.
 3. Refresh `.obsidian-kb` once before fetch or merge through the installed KB
    helper. An absent `.obsidian-kb` is
    created; valid directory symlinks are preserved. Invalid or occupied paths
-   block before writes or merge.
+   block before writes or merge. The refresh is time-bounded
+   (`SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS`, default 60): a target
+   on a cloud-synced filesystem can block in the kernel rather than failing, so
+   exhausting the bound reports the advisory `kb_refresh_timed_out` anomaly
+   naming the resolved target and the run continues. The KB is a regenerable
+   mirror the merge never reads; do not report a timed-out refresh as a merge
+   blocker.
 4. Fetch/prune the selected remote and detect its default branch.
 5. For an open PR, let `sd-ai-command-pack-pr-eligibility.py` collect the
    versioned exact-head receipt. Interpret its `status`, `reasonCodes`,

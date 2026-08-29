@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-10.md`
-- **Total Sessions**: 455
+- **Total Sessions**: 456
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-10.md` | ~249 | Active |
+| `journal-10.md` | ~294 | Active |
 | `journal-9.md` | ~1996 | Archived |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
@@ -38,6 +38,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 456 | 2026-08-28 | Bound the KB refresh, stop reading branch names as paths, classify remote-only branches | `ababa981`, `8747dba6`, `8c89a6cb`, `b7b5ee54` | `task/08-28-bookkeeping-integrity` |
 | 455 | 2026-08-28 | Housekeeping report fidelity: unverified receipts and worktree-held merges | `11b4eab6`, `0767551d`, `0a653aee` | `task/08-28-housekeeping-report-fidelity` |
 | 454 | 2026-08-28 | File the housekeeping merged-before-run defect and narrow its claim under review | `13184021`, `de75b498` | `task/08-28-housekeeping-external-merge-unflagged` |
 | 453 | 2026-08-28 | File the thin-only install task and correct its PRD under review | `8a1dff13`, `2629490b` | `task/08-28-thin-only-install` |
