@@ -253,19 +253,30 @@ machine without it degrades to the same routed path these consumers use today.
 
 ## Acceptance criteria
 
-1. Running the fleet enumeration below reports `codex=True` for all nine
-   consumers, with no `ABSENT` rows:
+1. Running the fleet enumeration below reports, for all nine consumers with no
+   `ABSENT` rows, that `codex` is enabled, that `gito` is enabled, and that the
+   builtin `prism` adapter is absent or disabled — the provider set requirement
+   1 names. A consumer deviating from that set fails this criterion unless the
+   task's rollout notes carry its recorded reason.
 
    ```bash
    for p in <each consumer pathHint>; do
      python3 - "$p/.sd-ai-command-pack/review.json" <<'EOF'
    import json,sys
    d=json.load(open(sys.argv[1]))
-   print([(x["id"],x["enabled"]) for x in d["providers"]],
-         d["policy"].get("localAdvisorySeverityCeiling"))
+   e={x["id"]: x["enabled"] for x in d["providers"]}
+   ok = e.get("codex") and e.get("gito") and not e.get("prism")
+   print(sys.argv[1], e, d["policy"].get("localAdvisorySeverityCeiling"),
+         "OK" if ok else "DEVIATION")
    EOF
    done
    ```
+
+   `not e.get("prism")` is deliberately true when the key is absent as well as
+   when it is present and disabled: the requirement is that the builtin adapter
+   does not run, not that it is listed. A repository-local `argv` provider that
+   wraps prism, such as the chunked one `sd-github-review` carries, is a
+   different id and is not caught by this check.
 
 2. Every consumer whose config sets `localAdvisorySeverityCeiling` has a
    recorded reason for that choice; consumers that omit it are recorded as
