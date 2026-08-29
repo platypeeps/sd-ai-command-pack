@@ -330,7 +330,10 @@ class SdlcCommandsTests(InstallTestCase):
         arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
         for pin in (
             "scripts/sd-ai-command-pack-fleet-timing.py",
-            "start both `reviewer-wait` and `ci-wait`",
+            "bracket every stage with `stage-run`",
+            "`reviewer-wait` and `ci-wait`, both started immediately after the",
+            # The stranding cause: the skill named no command for closing a lane.
+            "every selected consumer needs `consumer-end --run-id <run-id>",
             "report --run-id <run-id> --complete",
             "never changes a delivery gate's authoritative result",
         ):

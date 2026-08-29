@@ -67,20 +67,66 @@ record.
   control flow that drives `stage-start`, so a future lane cannot be half
   instrumented by a caller that returns early.
 
+## Verdict
+
+**The caller is the defect. The recorder's completion gate is correct and was
+refusing exactly what it should have refused.** Evidence, from the 25 run files
+now on disk under `~/.local/state/sd-ai-command-pack/fleet-timing/`:
+
+- 18 are `active`, 7 `completed`.
+- Every one of the 18 has at least one consumer with `outcome: null`. Only 5
+  have any open stage attempt. The dominant cause of stranding is therefore the
+  missing `consumer-end`, not the missing `stage-end` the error text named.
+- `consumer-end` appears nowhere in `.agents/skills/sd-fleet-refresh/SKILL.md`
+  (zero matches). The skill's Timing evidence section told the operator to
+  "bracket the corresponding delivery work" and named no command for closing
+  either a stage or a lane.
+
+So the primary fix is the skill: `stage-run` is now mandated as the bracket, and
+`consumer-end` is mandated in the same step that records a terminal controller
+result. Three recorder defects were found alongside it and fixed, none of them
+the cause of the stranding:
+
+1. The completion error named neither consumer, stage, nor attempt, and reported
+   only the first of the two gates, so an operator who cleared the open attempts
+   hit the missing-outcome gate as a fresh surprise. It now collects both and
+   names each blocker with the exact remedial command.
+2. `report` could not distinguish a measured run from an uninstrumented one. Six
+   of the seven `completed` runs are hollow — outcomes recorded, no stages — and
+   said nothing about it. `build_summary` now carries a derived `instrumentation`
+   block naming every unmeasured lane.
+3. An attempt that outlived its monotonic epoch could be neither ended nor
+   reported: `build_summary` raised "monotonic clock moved backwards during
+   active stage". This is not a clock fault — `time.monotonic_ns()` has no
+   cross-process epoch, and every stage of a campaign is a separate process.
+   `measure_elapsed` now falls back to the wall clock and records
+   `elapsedSource: "wall"`, refusing only when both clocks moved backwards.
+   Before: 20 of 25 files loaded and reported. After: 25 of 25.
+
+**Never-instrumented lane, decided:** such a run may complete. Its consumer
+outcomes are real evidence from the controller, and withholding completion would
+strand the run permanently for a gap that has already happened. What it may not
+do is read as measured data, so the report names every lane without stages and
+`render_human` prints `instrumented: N/M consumers`.
+
+**Disposition of the stranded historical runs:** left as they are. They are
+private observability records, no timestamp is fabricated for them, and they now
+all load and report — a reader can see both what was measured and what was not.
+
 ## Acceptance criteria
 
-- [ ] A written verdict, backed by executed evidence, on whether the recorder or
+- [x] A written verdict, backed by executed evidence, on whether the recorder or
       the caller is the defect. Recorded either way.
-- [ ] A test drives a full simulated campaign and asserts the run reaches
+- [x] A test drives a full simulated campaign and asserts the run reaches
       `completed` with every consumer carrying an `outcome`.
-- [ ] A test asserts that a run with an open attempt cannot be completed, and
+- [x] A test asserts that a run with an open attempt cannot be completed, and
       that the error names the consumer, stage, and attempt.
-- [ ] A test covers the never-instrumented lane and asserts the documented
+- [x] A test covers the never-instrumented lane and asserts the documented
       decision, whichever way it goes.
-- [ ] A test covers an early return in the caller between `stage-start` and
+- [x] A test covers an early return in the caller between `stage-start` and
       `stage-end` and asserts the stage is not left open.
-- [ ] The 21 existing run files still load without error after the change.
-- [ ] `make check` passes.
+- [x] The 21 existing run files still load without error after the change.
+- [x] `make check` passes.
 
 ## Out of scope
 

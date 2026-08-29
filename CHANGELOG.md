@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.71.66 - 2026-08-29
+
+### Fixed
+
+- Fleet timing runs can reach `completed`. Of the 25 recorded runs, 18 stranded
+  `active`: every one was missing a consumer's terminal outcome, because
+  `sd-fleet-refresh` told the operator to bracket delivery work without naming
+  the command that closes a stage or a lane — `consumer-end` appeared nowhere in
+  the skill. The skill now mandates `consumer-end` in the same step that records
+  a terminal controller result, and brackets stages with the new `stage-run`
+  subcommand, which starts the stage, runs the command, and ends it in a
+  `finally` while exiting with the command's own status. An early return in a
+  lane can no longer leave an attempt open.
+- The timing completion error names what is missing. It reported only the first
+  of its two gates and identified neither consumer, stage, nor attempt, so an
+  operator who cleared the open attempts met the missing-outcome gate as a fresh
+  surprise. It now collects every blocker and names each with its exact remedial
+  command.
+- `report` distinguishes a measured run from an uninstrumented one. Six of the
+  seven previously `completed` runs recorded outcomes and no stages at all, and
+  said nothing about it. The summary now carries a derived `instrumentation`
+  block naming every lane without stages, and the human report prints
+  `instrumented: N/M consumers`. A never-instrumented lane may still complete —
+  its outcome is real controller evidence — but it can no longer read as
+  measured data.
+- A timing attempt that outlived its monotonic epoch could be neither ended nor
+  reported. `time.monotonic_ns()` has no cross-process epoch and every campaign
+  stage is a separate process, so five recorded runs raised "monotonic clock
+  moved backwards during active stage" from `report` itself. Elapsed measurement
+  now falls back to the wall clock and records the optional attempt field
+  `elapsedSource: "wall"`, refusing only when both clocks moved backwards. All
+  25 recorded runs load and report; previously 20 did.
+
 ## 0.71.65 - 2026-08-28
 
 ### Fixed

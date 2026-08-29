@@ -9,6 +9,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -120,6 +121,12 @@ ATTEMPT_FIELDS = frozenset(
         "reason",
     }
 )
+# Recorded only when the elapsed time could not be measured with the monotonic
+# clock. Optional rather than required: every attempt written before this field
+# existed is monotonic-measured, and a strict schema that demanded it would
+# orphan the runs already on disk.
+ATTEMPT_OPTIONAL_FIELDS = frozenset({"elapsedSource"})
+ELAPSED_SOURCES = frozenset({"monotonic", "wall"})
 LOCK_FIELDS = frozenset(
     {"schemaVersion", "runId", "repositoryDigest", "pid", "hostname", "acquiredAtWallNs"}
 )
@@ -148,9 +155,15 @@ def system_reading() -> ClockReading:
     return ClockReading(wall_ns=time.time_ns(), monotonic_ns=monotonic_ns)
 
 
-def _strict_fields(value: Mapping[str, Any], allowed: frozenset[str], label: str) -> None:
+def _strict_fields(
+    value: Mapping[str, Any],
+    allowed: frozenset[str],
+    label: str,
+    *,
+    required: frozenset[str] | None = None,
+) -> None:
     unknown = sorted((key for key in value if key not in allowed), key=str)
-    missing = sorted(allowed - set(value))
+    missing = sorted((allowed if required is None else required) - set(value))
     if unknown:
         raise FleetTimingError(f"{label} has unknown field: {unknown[0]}")
     if missing:
@@ -231,7 +244,15 @@ def _json_payload(value: Mapping[str, Any]) -> str:
 
 def validate_attempt(value: object, label: str) -> None:
     attempt = _object(value, label)
-    _strict_fields(attempt, ATTEMPT_FIELDS, label)
+    _strict_fields(
+        attempt,
+        ATTEMPT_FIELDS | ATTEMPT_OPTIONAL_FIELDS,
+        label,
+        required=ATTEMPT_FIELDS,
+    )
+    source = attempt.get("elapsedSource")
+    if source is not None and source not in ELAPSED_SOURCES:
+        raise FleetTimingError(f"{label} elapsedSource is not a supported source")
     _integer(attempt["attempt"], f"{label} attempt", minimum=1)
     _integer(attempt["startedWallNs"], f"{label} startedWallNs")
     _integer(attempt["startedMonotonicNs"], f"{label} startedMonotonicNs")
@@ -245,6 +266,8 @@ def validate_attempt(value: object, label: str) -> None:
     if ended is None:
         if reason is not None:
             raise FleetTimingError(f"{label} active attempt cannot have a reason")
+        if source is not None:
+            raise FleetTimingError(f"{label} active attempt cannot have an elapsedSource")
         return
     _integer(ended, f"{label} endedWallNs")
     _integer(elapsed, f"{label} elapsedNs")
@@ -730,6 +753,36 @@ def _find_stage(stages: Sequence[dict[str, Any]], name: str) -> dict[str, Any] |
     return next((stage for stage in stages if stage["name"] == name), None)
 
 
+def measure_elapsed(
+    attempt: Mapping[str, Any], reading: ClockReading
+) -> tuple[int, str]:
+    """Elapsed nanoseconds for an attempt, and which clock measured them.
+
+    A monotonic clock cannot run backwards inside one boot -- that is what
+    makes it monotonic -- so a reading below the attempt's origin does not mean
+    the clock is broken. It means the attempt outlived the epoch it was started
+    in: the machine rebooted, or the state file was carried to another host.
+    Raising there left an attempt that could be neither ended nor reported,
+    which is precisely how the stranded runs on disk became unrecoverable.
+
+    The wall clock is the only measure comparable across epochs, so it takes
+    over and the attempt records that it did. If the wall clock has also moved
+    backwards, nothing measured the interval and the run says so rather than
+    inventing a duration.
+    """
+
+    elapsed = reading.monotonic_ns - attempt["startedMonotonicNs"]
+    if elapsed >= 0:
+        return elapsed, "monotonic"
+    wall_elapsed = reading.wall_ns - attempt["startedWallNs"]
+    if wall_elapsed < 0:
+        raise FleetTimingError(
+            "both the monotonic and wall clocks moved backwards since the attempt "
+            "started; the interval cannot be measured"
+        )
+    return wall_elapsed, "wall"
+
+
 def start_stage(
     state: dict[str, Any],
     *,
@@ -789,9 +842,9 @@ def end_stage(
         if attempt["outcome"] == outcome and attempt["reason"] == normalized_reason:
             return False
         raise FleetTimingError("stage has no active attempt to end")
-    elapsed = reading.monotonic_ns - attempt["startedMonotonicNs"]
-    if elapsed < 0:
-        raise FleetTimingError("monotonic clock moved backwards during stage")
+    elapsed, source = measure_elapsed(attempt, reading)
+    if source == "wall":
+        attempt["elapsedSource"] = source
     attempt.update(
         {
             "endedWallNs": reading.wall_ns,
@@ -833,30 +886,124 @@ def end_consumer(
     return True
 
 
+def open_attempts(state: Mapping[str, Any]) -> list[str]:
+    """Every attempt still missing an end, as ``scope/stage#attempt`` labels.
+
+    The completion gate used to say only "active stages", which named neither
+    the lane nor the stage nor the attempt -- so an operator holding a run that
+    would not complete had nowhere to start. These labels are exactly the
+    arguments ``stage-end`` needs.
+    """
+
+    labels: list[str] = []
+    for stage in state["fleetStages"]:
+        for attempt in stage["attempts"]:
+            if attempt["endedWallNs"] is None:
+                labels.append(f"fleet/{stage['name']}#{attempt['attempt']}")
+    for consumer in state["consumers"]:
+        for stage in consumer["stages"]:
+            for attempt in stage["attempts"]:
+                if attempt["endedWallNs"] is None:
+                    labels.append(
+                        f"{consumer['name']}/{stage['name']}#{attempt['attempt']}"
+                    )
+    return labels
+
+
+def run_bracketed_stage(
+    store: TimingStore,
+    run_id: str,
+    *,
+    consumer_name: str | None,
+    stage_name: str,
+    command: Sequence[str],
+) -> tuple[dict[str, Any], bool, int]:
+    """Start a stage, run ``command``, and end the stage whatever happens.
+
+    Every stranded run on disk was stranded by a *caller* that recorded
+    ``stage-start`` and then returned before ``stage-end`` -- the recorder was
+    never at fault. Prose telling the caller to remember both halves is what
+    already failed, so the two halves are welded into one control flow here: the
+    end is in a ``finally``, so an early return, a nonzero exit, a missing
+    executable, or a signal all close the attempt instead of leaking it.
+
+    The outcome is measured, never asserted: exit 0 is ``passed``, a nonzero
+    exit is ``failed``, and a command that could not run to completion is
+    ``interrupted``. The reason carries the exit status only -- never the
+    command, which would put operator paths into the record.
+    """
+
+    outcome = "interrupted"
+    reason: str | None = "the bracketed command did not run to completion"
+    status = 127
+    mutate_state(
+        store,
+        run_id,
+        system_reading(),
+        lambda current: start_stage(
+            current,
+            consumer_name=consumer_name,
+            stage_name=stage_name,
+            reading=system_reading(),
+        ),
+    )
+    try:
+        completed = subprocess.run(list(command), check=False)
+        status = int(completed.returncode)
+        if status == 0:
+            outcome, reason = "passed", None
+        else:
+            outcome = "failed"
+            reason = f"the bracketed command exited with status {status}"
+    except OSError as exc:
+        outcome = "interrupted"
+        reason = f"the bracketed command could not be started: {exc.strerror}"
+    finally:
+        reading = system_reading()
+        state, changed = mutate_state(
+            store,
+            run_id,
+            reading,
+            lambda current: end_stage(
+                current,
+                consumer_name=consumer_name,
+                stage_name=stage_name,
+                outcome=outcome,
+                reason=reason,
+                reading=reading,
+            ),
+        )
+    return state, changed, status
+
+
 def complete_state(state: dict[str, Any], reading: ClockReading) -> bool:
     if state["status"] == "completed":
         return False
-    if any(
-        attempt["endedWallNs"] is None
-        for stage in state["fleetStages"]
-        for attempt in stage["attempts"]
-    ) or any(
-        attempt["endedWallNs"] is None
-        for consumer in state["consumers"]
-        for stage in consumer["stages"]
-        for attempt in stage["attempts"]
-    ):
-        raise FleetTimingError("cannot complete timing run with active stages")
+    # Both gates are reported together. They are independent -- a run can be
+    # blocked on open attempts, on missing outcomes, or on both -- and raising
+    # on the first one hid the second: every stranded run on disk was missing
+    # consumer outcomes, but the message operators saw named only the stages.
+    blockers: list[str] = []
+    labels = open_attempts(state)
+    if labels:
+        blockers.append(
+            "stage attempts still open (end each with `stage-end --run-id "
+            f"{state['runId']} --consumer <name> --stage <stage> --outcome "
+            "<outcome>`, or --fleet for a fleet stage): " + ", ".join(labels)
+        )
     incomplete = [
         consumer["name"]
         for consumer in state["consumers"]
         if consumer["outcome"] is None
     ]
     if incomplete:
-        raise FleetTimingError(
-            "cannot complete timing run without consumer outcomes: "
-            + ", ".join(incomplete)
+        blockers.append(
+            "consumers without a terminal outcome (record each with "
+            f"`consumer-end --run-id {state['runId']} --consumer <name> "
+            "--outcome <outcome>`): " + ", ".join(incomplete)
         )
+    if blockers:
+        raise FleetTimingError("cannot complete timing run: " + "; ".join(blockers))
     state["status"] = "completed"
     state["completedAtWallNs"] = reading.wall_ns
     return True
@@ -882,9 +1029,7 @@ def _attempt_interval(
     attempt: Mapping[str, Any], reading: ClockReading
 ) -> tuple[int, int, int]:
     if attempt["endedWallNs"] is None:
-        elapsed = reading.monotonic_ns - attempt["startedMonotonicNs"]
-        if elapsed < 0:
-            raise FleetTimingError("monotonic clock moved backwards during active stage")
+        elapsed, _source = measure_elapsed(attempt, reading)
         end_wall = reading.wall_ns
     else:
         elapsed = attempt["elapsedNs"]
@@ -1031,6 +1176,14 @@ def build_summary(state: Mapping[str, Any], reading: ClockReading) -> dict[str, 
         key=lambda name: (totals[name], -STAGE_ORDER[name]),
         default=None,
     )
+    # A lane that recorded no stage at all was never measured, and completion
+    # alone must not let it read as measured data. Every duration above is a
+    # sum over the lanes that *were* instrumented, so the report says how many
+    # those were and names the ones it knows nothing about. This is derived, not
+    # stored: historical runs gain the block without a schema migration.
+    unmeasured = [
+        consumer["name"] for consumer in state["consumers"] if not consumer["stages"]
+    ]
     return {
         "schemaVersion": SCHEMA_VERSION,
         "runId": state["runId"],
@@ -1038,6 +1191,11 @@ def build_summary(state: Mapping[str, Any], reading: ClockReading) -> dict[str, 
         "status": state["status"],
         "fleetStages": fleet_stage_summaries,
         "consumers": consumer_summaries,
+        "instrumentation": {
+            "consumersTotal": len(state["consumers"]),
+            "consumersMeasured": len(state["consumers"]) - len(unmeasured),
+            "consumersWithoutStages": unmeasured,
+        },
         "aggregate": {
             "criticalPathNs": critical_path,
             "activeWallNs": _union_duration(all_intervals),
@@ -1108,6 +1266,17 @@ def render_human(state: Mapping[str, Any], summary: Mapping[str, Any]) -> str:
             )
         ),
     ]
+    instrumentation = summary["instrumentation"]
+    unmeasured = instrumentation["consumersWithoutStages"]
+    lines.append(
+        f"instrumented: {instrumentation['consumersMeasured']}/"
+        f"{instrumentation['consumersTotal']} consumers"
+        + (
+            "; no stages recorded for " + ", ".join(unmeasured)
+            if unmeasured
+            else ""
+        )
+    )
     for consumer in summary["consumers"]:
         lines.append(
             f"- {consumer['name']} · priority {consumer['priority']} · "
@@ -1164,6 +1333,19 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     stage_end.add_argument("--outcome", choices=sorted(STAGE_OUTCOMES), required=True)
     stage_end.add_argument("--reason")
 
+    stage_run = subparsers.add_parser("stage-run")
+    stage_run.add_argument("--run-id", required=True)
+    add_scope_arguments(stage_run)
+    stage_run.add_argument("--stage", choices=STAGES, required=True)
+    # Not "command": the subparser dest is already `command`, and a positional
+    # of that name overwrites it with the remainder list.
+    stage_run.add_argument(
+        "bracketed",
+        nargs=argparse.REMAINDER,
+        metavar="-- COMMAND",
+        help="the command to bracket, after a bare --",
+    )
+
     consumer_end = subparsers.add_parser("consumer-end")
     consumer_end.add_argument("--run-id", required=True)
     consumer_end.add_argument("--consumer", required=True)
@@ -1181,6 +1363,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     operation = str(args.command)
+    command_status = 0
     try:
         reading = system_reading()
         store = timing_store(args.repo, args.run_id, args.state_home)
@@ -1217,6 +1400,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reason=args.reason,
                     reading=reading,
                 ),
+            )
+        elif args.command == "stage-run":
+            consumer_name = None if args.fleet else safe_token(args.consumer, "consumer")
+            command = list(args.bracketed)
+            if command and command[0] == "--":
+                command = command[1:]
+            if not command:
+                raise FleetTimingError("stage-run requires a command after --")
+            state, changed, command_status = run_bracketed_stage(
+                store,
+                args.run_id,
+                consumer_name=consumer_name,
+                stage_name=args.stage,
+                command=command,
             )
         elif args.command == "consumer-end":
             name = safe_token(args.consumer, "consumer")
@@ -1261,7 +1458,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print(render_human(state, output["summary"]))
         print(f"operation: {operation}; changed: {'yes' if changed else 'no'}")
-    return 0
+    # The bracket is transparent: the caller still sees whether its own command
+    # succeeded, so wrapping a step cannot silently swallow that step's failure.
+    return command_status
 
 
 if __name__ == "__main__":
