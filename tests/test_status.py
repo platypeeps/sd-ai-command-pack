@@ -2343,11 +2343,14 @@ class StatusTests(InstallTestCase):
             "unknown",
         )
 
-    def test_status_collector_issues_no_network_git_command(self) -> None:
+    def test_status_collector_issues_no_network_mutating_git_command(self) -> None:
         """Status is read-only and never fetches; this enumerates, not greps.
 
         Every git argv the collector can build is read off the AST, so a new
-        network or mutating subcommand fails here rather than silently shipping.
+        mutating or ref-updating subcommand fails here rather than silently
+        shipping. The allowlist is not "no network": `ls-remote` reads the
+        remote without touching a ref or the working tree, which is the line
+        this guard draws.
         """
 
         source = (

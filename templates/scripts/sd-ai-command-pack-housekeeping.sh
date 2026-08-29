@@ -90,6 +90,7 @@ source_sd_ai_command_pack_shell_lib() {
     case " $* " in
       *" --self-test "*)
         have() { command -v "$1" >/dev/null 2>&1; }
+        nonnegative_int_or_default() { printf '%s' "$2"; }
         run_command_with_timeout() {
           shift
           "$@"
@@ -404,6 +405,12 @@ refresh_obsidian_kb() {
     return 1
   fi
   local refresh_output
+  # Sanitized at the point of use, not where the global is assigned: the shared
+  # library that provides this helper is sourced after that assignment, and
+  # run_command_with_timeout tests the value with `-eq`, which aborts the run on
+  # a non-numeric one rather than falling back.
+  local timeout_seconds
+  timeout_seconds="$(nonnegative_int_or_default "$HOUSEKEEPING_KB_TIMEOUT_SECONDS" 60)"
   # Bounded: the helper writes through .obsidian-kb, and a target on a
   # cloud-synced filesystem blocks in the kernel instead of returning an error.
   # Without a bound that stall is the whole gate's stall, and the operator sees
@@ -411,13 +418,13 @@ refresh_obsidian_kb() {
   # be a second write against the same unresponsive target, and the bound
   # already ends the step either way.
   if [ "$DRY_RUN" -eq 1 ]; then
-    if refresh_output="$(run_command_with_timeout "$HOUSEKEEPING_KB_TIMEOUT_SECONDS" bash "$toolchain" run-python -- "$helper" --dry-run 2>&1)"; then
+    if refresh_output="$(run_command_with_timeout "$timeout_seconds" bash "$toolchain" run-python -- "$helper" --dry-run 2>&1)"; then
       refresh_status=0
     else
       refresh_status=$?
     fi
   else
-    if refresh_output="$(run_command_with_timeout "$HOUSEKEEPING_KB_TIMEOUT_SECONDS" bash "$toolchain" run-python -- "$helper" 2>&1)"; then
+    if refresh_output="$(run_command_with_timeout "$timeout_seconds" bash "$toolchain" run-python -- "$helper" 2>&1)"; then
       refresh_status=0
     else
       refresh_status=$?
@@ -468,7 +475,7 @@ refresh_obsidian_kb() {
   # repoint the symlink from inside this run. The message names the resolved
   # target, which is the fact the stalled run could not otherwise surface.
   if [ "$refresh_status" -eq 124 ]; then
-    add_anomaly kb_refresh_timed_out "Obsidian KB refresh did not complete within ${HOUSEKEEPING_KB_TIMEOUT_SECONDS}s and was ended; .obsidian-kb resolves to $(obsidian_kb_target). A target on a cloud-synced or otherwise unresponsive filesystem blocks rather than failing; repoint it at local storage, or raise SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS, then re-run: sd-ai-command-pack-toolchain.sh run-python -- sd-ai-command-pack-update-spec-kb.py"
+    add_anomaly kb_refresh_timed_out "Obsidian KB refresh did not complete within ${timeout_seconds}s and was ended; .obsidian-kb resolves to $(obsidian_kb_target). A target on a cloud-synced or otherwise unresponsive filesystem blocks rather than failing; repoint it at local storage, or raise SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS, then re-run: sd-ai-command-pack-toolchain.sh run-python -- sd-ai-command-pack-update-spec-kb.py"
     return 0
   fi
 

@@ -1045,6 +1045,26 @@ class HousekeepingTests(InstallTestCase):
             # The bound actually ends the step rather than waiting out the stub.
             self.assertLess(elapsed, 20, timed_out.stdout)
 
+            # A non-numeric override falls back to the documented default
+            # rather than reaching run_command_with_timeout's `-eq` test, which
+            # aborts on a value that is not an integer. The stub returns at once
+            # so this proves the bound was accepted, not that 60s elapsed.
+            toolchain.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            garbage = subprocess.run(
+                [self._bash_path, "-c", probe],
+                cwd=root,
+                env={**os.environ, "KB_TIMEOUT": "not-a-number"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(garbage.returncode, 0, garbage.stdout)
+            self.assertNotIn("integer expression expected", garbage.stdout)
+            self.assertIn("rc=0", garbage.stdout)
+            self.assertNotIn("kb_refresh_timed_out", garbage.stdout)
+            self.assertIn("refreshed .obsidian-kb after finish-work", garbage.stdout)
+
     def test_housekeeping_kb_ignore_write_flag_tracks_helper_write_states(
         self,
     ) -> None:
