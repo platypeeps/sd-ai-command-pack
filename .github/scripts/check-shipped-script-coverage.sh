@@ -33,13 +33,9 @@ done <<'EOF'
 scripts/sd-ai-command-pack-audit-route.py 77
 scripts/sd-ai-command-pack-audit-inventory.py 85
 scripts/sd-ai-command-pack-check.py 74
-scripts/sd-ai-command-pack-fleet-preflight.py 82
-scripts/sd-ai-command-pack-fleet-candidate-check.py 90
 scripts/sd-ai-command-pack-fleet-controller.py 76
-scripts/sd-ai-command-pack-fleet-publish.py 85
 scripts/sd-ai-command-pack-fleet-finding-classify.py 85
 scripts/sd-ai-command-pack-thin-resweep.py 76
-scripts/sd-ai-command-pack-fleet-review-classify.py 80
 scripts/sd-ai-command-pack-fleet-timing.py 88
 scripts/sd-ai-command-pack-fleet-wave-plan.py 85
 scripts/sd-ai-command-pack-housekeeping-result.py 97

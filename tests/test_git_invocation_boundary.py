@@ -4,15 +4,15 @@ Two sound static (AST) checks over the shipped ``scripts/*.py`` surface:
 
 * Check 1 — no script builds its own direct ``subprocess.run``/``Popen`` call on
   a git-argv literal except the shared library.
-* Check 2 — none of the six migrated files carry a git-argv literal at all,
-  which also closes fleet-publish's ``run(["git", ...])`` indirection (its
-  ``run`` wrapper calls ``subprocess.run(list(argv))`` on a *variable*, so
-  Check 1 alone would miss it).
+* Check 2 — none of the migrated files carry a git-argv literal at all, which
+  also closes any ``run(["git", ...])`` indirection (a ``run`` wrapper that
+  calls ``subprocess.run(list(argv))`` on a *variable* is something Check 1
+  alone would miss).
 
 Residual limit (deferred to human review): a brand-new self-wrapping script that
 feeds git through a variable, or fully dynamic argv, escapes a static lint. The
-three generic shared-env runners (pr-eligibility, status, fleet-candidate-check)
-are intentionally allowed: they run a variable argv through the shared
+two generic shared-env runners (pr-eligibility, status) are intentionally
+allowed: they run a variable argv through the shared
 environment, so git is incidental, not a hand-built git-specific environment.
 """
 
@@ -26,17 +26,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
 LIB_NAME = "sd_ai_command_pack_lib.py"
 
-# The six files migrated off hand-built git subprocess environments in A-076.
+# The files migrated off hand-built git subprocess environments in A-076
+# (fleet-publish was migrated too and has since been deleted).
 MIGRATED_FILES = (
     "sd-ai-command-pack-review-local.py",
     "sd-ai-command-pack-surface-check.py",
     "sd-ai-command-pack-install-audit.py",
     "sd-ai-command-pack-work-loop.py",
     "sd-ai-command-pack-fleet-controller.py",
-    "sd-ai-command-pack-fleet-publish.py",
 )
 
-# The three generic shared-env runners that legitimately pass a variable argv
+# The generic shared-env runners that legitimately pass a variable argv
 # (git incidental) through the shared environment. Printed on failure to explain
 # why they are not migration targets.
 GENERIC_RUNNERS = {
@@ -45,9 +45,6 @@ GENERIC_RUNNERS = {
     ),
     "sd-ai-command-pack-status.py": (
         "generic shared-env runner: variable argv through build_tool_environment"
-    ),
-    "sd-ai-command-pack-fleet-candidate-check.py": (
-        "generic shared-env runner: assigns argv then calls run_command"
     ),
 }
 
@@ -146,7 +143,7 @@ class GitInvocationBoundaryTest(unittest.TestCase):
         )
 
     def test_migrated_files_have_no_git_literal(self) -> None:
-        """Check 2: the six migrated files carry no git-argv literal at all."""
+        """Check 2: the migrated files carry no git-argv literal at all."""
 
         offenders: dict[str, list[int]] = {}
         for name in MIGRATED_FILES:

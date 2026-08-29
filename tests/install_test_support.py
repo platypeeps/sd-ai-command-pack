@@ -1382,38 +1382,6 @@ class InstallTestCase(unittest.TestCase):
         self.run_git(root, "commit", "-m", "baseline")
         return root
 
-    def run_pack_source_drift_gates(
-        self,
-        root: Path,
-        *,
-        extra_env: dict[str, str] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        if self._bash_path is None:
-            self.skipTest("bash is not available on PATH")
-        env = {
-            **os.environ,
-            "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE": "1",
-            "SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF": "HEAD",
-        }
-        if extra_env:
-            env.update(extra_env)
-        return subprocess.run(
-            [
-                self._bash_path,
-                "-c",
-                "source scripts/sd-ai-command-pack-full-check.sh; "
-                "if [ -n \"${SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH:-}\" ]; "
-                "then PATH=\"$SD_AI_COMMAND_PACK_FULL_CHECK_TEST_RUNTIME_PATH\"; fi; "
-                "run_pack_source_drift_gates",
-            ],
-            cwd=root,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
-
     def installer_subprocess_env(self) -> dict[str, str] | None:
         if "COVERAGE_PROCESS_START" not in os.environ:
             return None

@@ -105,93 +105,6 @@ is_disabled() {
   esac
 }
 
-sd_ai_command_pack_source_identity() {
-  if [ ! -f "$REPO_ROOT/install.py" ] || [ ! -f "$REPO_ROOT/manifest.json" ] || [ ! -d "$REPO_ROOT/templates" ]; then
-    printf 'absent\n'
-    return 0
-  fi
-  if ! have python3; then
-    return 3
-  fi
-
-  python3 - <<'PACK_SOURCE_IDENTITY'
-import json
-import re
-import sys
-from pathlib import Path
-
-expected_name = "sd-ai-command-pack"
-manifest_path = Path("manifest.json")
-
-try:
-    raw = manifest_path.read_bytes()
-except OSError as exc:
-    print(f"pack source identity error: cannot read manifest.json: {exc}", file=sys.stderr)
-    raise SystemExit(2)
-
-asserted_identity = bool(
-    re.search(br'"name"\s*:\s*"sd-ai-command-pack"', raw)
-)
-try:
-    text = raw.decode("utf-8")
-    manifest = json.loads(text)
-except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-    if asserted_identity:
-        print(
-            "pack source identity error: manifest.json asserts "
-            f"{expected_name!r} but is malformed: {exc}",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-    print("other")
-    raise SystemExit(0)
-
-if not isinstance(manifest, dict) or manifest.get("name") != expected_name:
-    print("other")
-    raise SystemExit(0)
-
-identity_errors = []
-version = manifest.get("version")
-if not isinstance(version, str) or not version.strip():
-    identity_errors.append("version must be a non-empty string")
-if not isinstance(manifest.get("files"), list):
-    identity_errors.append("files must be a list")
-if identity_errors:
-    print(
-        "pack source identity error: manifest.json asserts "
-        f"{expected_name!r} but is malformed: {'; '.join(identity_errors)}",
-        file=sys.stderr,
-    )
-    raise SystemExit(2)
-
-print(expected_name)
-PACK_SOURCE_IDENTITY
-}
-
-warn_unarmed_pack_source_hook() {
-  [ -d "$REPO_ROOT/.githooks" ] || return 0
-
-  local identity=""
-  local identity_status=0
-  identity="$(sd_ai_command_pack_source_identity)" || identity_status=$?
-  if [ "$identity_status" -eq 2 ]; then
-    return 1
-  fi
-  if [ "$identity_status" -eq 3 ]; then
-    warn "python3 not found on PATH; cannot verify pack source identity for the source-hook advisory, so pre-push hook configuration is not checked."
-    return 0
-  fi
-  if [ "$identity_status" -ne 0 ] || [ "$identity" != "sd-ai-command-pack" ]; then
-    return 0
-  fi
-
-  local hooks_path
-  hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
-  if [ "$hooks_path" != ".githooks" ]; then
-    warn "pre-push chore-scope guard is not armed; run: git config core.hooksPath .githooks"
-  fi
-}
-
 run() {
   section "$1"
   shift
@@ -608,313 +521,26 @@ run_sd_ai_command_pack_kb_freshness_check() {
   fi
 }
 
-run_pack_source_drift_gates() {
-  # Deterministic pre-PR gates that only apply inside the sd-ai-command-pack
-  # source repository itself: command surfaces must match the canonical
-  # registry, every tracked manifest target must match its templates/ twin,
-  # and every pack env var read by shipped scripts must be documented in the
-  # installed usage guide.
-  local mode="${SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT:-auto}"
-
-  if is_disabled "$mode"; then
-    warn "Skipping pack source drift gates because SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=$mode."
+run_sd_ai_command_pack_surface_check() {
+  # Shipped-surface closure only applies inside the pack source repository
+  # itself: the helper is a sibling of this script, and the generic source
+  # markers (install.py, manifest.json, templates/) are what make a checkout a
+  # pack source tree rather than a consumer install. Consumers skip silently.
+  local name="sd-ai-command-pack-surface-check.py"
+  local script="$SCRIPT_DIR/$name"
+  if [ ! -f "$REPO_ROOT/install.py" ] || [ ! -f "$REPO_ROOT/manifest.json" ] || [ ! -d "$REPO_ROOT/templates" ]; then
     return 0
   fi
-  local identity=""
-  local identity_status=0
-  identity="$(sd_ai_command_pack_source_identity)" || identity_status=$?
-  if [ "$identity_status" -eq 2 ]; then
-    return 1
-  fi
-  if [ "$identity_status" -eq 3 ]; then
-    warn "python3 not found on PATH; cannot verify pack source identity, so pack source drift gates are skipped."
+  if [ ! -f "$script" ]; then
+    warn "$name not found; skipping shipped-surface closure check."
     return 0
   fi
-  if [ "$identity" = "absent" ]; then
-    return 0
-  fi
-  if [ "$identity" != "sd-ai-command-pack" ]; then
-    printf 'Pack source drift gates: manifest identity is not sd-ai-command-pack; skipping SD-specific source checks.\n'
+  if ! have python3; then
+    warn "python3 not found on PATH; skipping shipped-surface closure check."
     return 0
   fi
 
-  section "Pack source drift gates: command surfaces, template twins, release ledger, and env-var docs"
-  local surface_check_name="sd-ai-command-pack-surface-check.py"
-  local surface_check="$SCRIPT_DIR/$surface_check_name"
-  if [ ! -f "$surface_check" ]; then
-    printf 'Shipped-surface closure validator is required but %s is missing.\n' "$surface_check_name" >&2
-    return 1
-  fi
-  if ! run "SD shipped-surface closure" python3 "$surface_check"; then
-    return 1
-  fi
-  local release_base_ref
-  release_base_ref="$(full_check_base_ref)"
-  SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF:-$release_base_ref}" python3 - <<'PACK_SOURCE_DRIFT_GATES'
-import json
-import os
-import re
-import subprocess
-import sys
-from pathlib import Path
-
-errors = []
-
-manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
-compared = 0
-for item in manifest.get("files", []):
-    if item.get("kind") == "managed-block":
-        continue
-    source = Path(str(item["source"]))
-    target = Path(str(item["target"]))
-    if not target.exists():
-        continue
-    compared += 1
-    if source.read_bytes() != target.read_bytes():
-        errors.append(f"template drift: {target} differs from {source}")
-print(f"template twin pairs compared: {compared}")
-
-def git_output(args, *, allow_fail=False):
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=60,
-        )
-    except subprocess.TimeoutExpired:
-        if allow_fail:
-            return None
-        errors.append(f"git command timed out after 60s: git {' '.join(args)}")
-        return None
-    except OSError as exc:
-        if allow_fail:
-            return None
-        errors.append(f"git command failed to start: git {' '.join(args)}: {exc}")
-        return None
-    if result.returncode != 0:
-        if allow_fail:
-            return None
-        detail = (result.stderr or result.stdout).strip()
-        errors.append(f"git command failed: git {' '.join(args)}: {detail}")
-        return None
-    return result.stdout
-
-
-def git_paths(args):
-    output = git_output(args, allow_fail=True)
-    if output is None:
-        return set()
-    return {line.strip() for line in output.splitlines() if line.strip()}
-
-
-def git_ref_status(ref):
-    if not ref:
-        return False, None
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=60,
-        )
-    except subprocess.TimeoutExpired:
-        return False, (
-            f"release version gate cannot resolve base ref {ref!r}: "
-            "git timed out after 60s"
-        )
-    except OSError as exc:
-        return False, (
-            f"release version gate cannot resolve base ref {ref!r}: "
-            f"git executable unavailable: {exc}"
-        )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        suffix = f": {detail}" if detail else ""
-        return False, (
-            f"release version gate cannot compare committed payload changes "
-            f"because base ref {ref!r} does not resolve{suffix}"
-        )
-    return True, None
-
-
-base_ref = os.environ.get("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", "").strip()
-changed_paths = set()
-base_resolves, base_ref_error = git_ref_status(base_ref)
-if base_ref and base_resolves:
-    changed_paths |= git_paths(["diff", "--name-only", f"{base_ref}...HEAD"])
-elif base_ref and base_ref_error:
-    errors.append(base_ref_error)
-changed_paths |= git_paths(["diff", "--cached", "--name-only"])
-changed_paths |= git_paths(["diff", "--name-only"])
-
-payload_singletons = {
-    "manifest.json",
-    "docs/SD_AI_COMMAND_PACK.md",
-    "templates/docs/SD_AI_COMMAND_PACK.md",
-    ".claude-plugin/marketplace.json",
-    ".github/scripts/generate-plugin.py",
-}
-payload_prefixes = ("templates/", "plugins/")
-payload_changed = sorted(
-    path
-    for path in changed_paths
-    if path.startswith(payload_prefixes) or path in payload_singletons
-)
-current_version = str(manifest.get("version", "")).strip()
-base_version = None
-if base_ref and base_resolves:
-    base_manifest = git_output(["show", f"{base_ref}:manifest.json"], allow_fail=True)
-    if base_manifest is not None:
-        try:
-            base_version = str(json.loads(base_manifest).get("version", "")).strip()
-        except json.JSONDecodeError:
-            base_version = None
-
-if base_version is not None:
-    version_bumped = bool(current_version and current_version != base_version)
-else:
-    manifest_diff = "\n".join(
-        output
-        for output in (
-            git_output(["diff", "--cached", "--", "manifest.json"], allow_fail=True),
-            git_output(["diff", "--", "manifest.json"], allow_fail=True),
-        )
-        if output
-    )
-    version_bumped = bool(re.search(r'(?m)^[+-]\s*"version"\s*:', manifest_diff))
-
-if payload_changed:
-    preview = ", ".join(payload_changed[:8])
-    if len(payload_changed) > 8:
-        preview += f", ... ({len(payload_changed)} total)"
-    if not version_bumped:
-        if base_version is None:
-            version_detail = "manifest version change was not visible in the current diff"
-        else:
-            version_detail = (
-                f"manifest version stayed at {current_version!r} relative to {base_ref}"
-            )
-        errors.append(
-            "release version drift: shipped payload changed without manifest "
-            f"version bump ({preview}); {version_detail}"
-        )
-    elif base_version is None:
-        print("release version gate: shipped payload changed and manifest version diff was detected")
-    else:
-        print(
-            "release version gate: shipped payload changed; "
-            f"manifest version {base_version} -> {current_version}"
-        )
-else:
-    print("release version gate: no shipped payload changes detected")
-
-if version_bumped:
-    changelog_path = Path("CHANGELOG.md")
-    top_release_heading = None
-    if changelog_path.is_file():
-        top_release_heading = next(
-            (
-                line.strip()
-                for line in changelog_path.read_text(encoding="utf-8").splitlines()
-                if line.startswith("## ")
-            ),
-            None,
-        )
-    expected_heading = re.compile(
-        rf"^## {re.escape(current_version)} - \d{{4}}-\d{{2}}-\d{{2}}$"
-    )
-    if not current_version or not top_release_heading or not expected_heading.fullmatch(
-        top_release_heading
-    ):
-        found = repr(top_release_heading) if top_release_heading else "no release heading"
-        errors.append(
-            "release changelog drift: manifest version bump to "
-            f"{current_version!r} requires the top CHANGELOG.md release heading "
-            f"'## {current_version} - YYYY-MM-DD'; found {found}"
-        )
-    else:
-        print(
-            "release changelog gate: manifest version bump has matching top heading "
-            f"{top_release_heading!r}"
-        )
-
-    candidate_command = [
-        sys.executable,
-        "scripts/sd-ai-command-pack-fleet-candidate-check.py",
-        "--check-ledger",
-    ]
-    try:
-        candidate_result = subprocess.run(
-            candidate_command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="strict",
-            timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
-        errors.append(f"release candidate ledger check could not run: {exc}")
-    else:
-        candidate_detail = candidate_result.stdout.strip()
-        if candidate_result.returncode != 0:
-            suffix = f": {candidate_detail}" if candidate_detail else ""
-            errors.append(
-                "release candidate ledger drift: run "
-                "scripts/sd-ai-command-pack-fleet-candidate-check.py before "
-                f"merging the release{suffix}"
-            )
-        else:
-            print(candidate_detail)
-else:
-    print("release changelog gate: manifest version unchanged")
-
-var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
-exempt = {
-    # Internal test hook, intentionally undocumented.
-    "SD_AI_COMMAND_PACK_FULL_CHECK_TEST_SOURCE",
-    # Source-only fleet candidate marker, never read by consumer payloads.
-    "SD_AI_COMMAND_PACK_CANDIDATE_CHECK",
-    # Legacy rename hint prefixes emitted by the install audit, not env vars.
-    "SD_AI_COMMAND_PACK_FULL_CHECK",
-    "SD_AI_COMMAND_PACK_HOUSEKEEPING",
-}
-script_vars = set()
-for path in Path("scripts").iterdir():
-    if path.suffix in {".sh", ".py", ".mjs"}:
-        script_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
-skill_vars = set()
-for path in Path("templates/.agents/skills").glob("*/SKILL.md"):
-    skill_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
-documented = set(
-    var_re.findall(Path("docs/SD_AI_COMMAND_PACK.md").read_text(encoding="utf-8"))
-)
-for name in sorted((script_vars | skill_vars) - documented - exempt):
-    errors.append(
-        f"undocumented env var: {name} is read by shipped scripts or skills but missing "
-        "from docs/SD_AI_COMMAND_PACK.md"
-    )
-for name in sorted(documented - script_vars - skill_vars):
-    errors.append(
-        f"stale documented env var: {name} is documented but no shipped "
-        "script or skill consumes it"
-    )
-print(
-    f"env vars checked: {len(script_vars)} in scripts, "
-    f"{len(skill_vars)} in skills, {len(documented)} documented"
-)
-
-if errors:
-    for error in errors:
-        print(f"error: {error}", file=sys.stderr)
-    sys.exit(1)
-PACK_SOURCE_DRIFT_GATES
+  run "SD shipped-surface closure" python3 "$script"
 }
 
 run_sd_ai_command_pack_pr_body_scope_check() {
@@ -1073,14 +699,13 @@ main() {
   prepare_tool_cache_env || exit 5
   section "SD AI command pack full check"
   git status -sb
-  warn_unarmed_pack_source_hook
 
   run "Whitespace check: unstaged diff" git diff --check
   run "Whitespace check: staged diff" git diff --cached --check
   run_review_preflight
   run_sd_ai_command_pack_install_audit
   run_sd_ai_command_pack_kb_freshness_check
-  run_pack_source_drift_gates
+  run_sd_ai_command_pack_surface_check
   run_sd_ai_command_pack_scope_check
   run_sd_ai_command_pack_pr_body_scope_check
   run_ci_classification_report

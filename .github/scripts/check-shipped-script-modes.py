@@ -22,11 +22,8 @@ re-create it. It is a *basename* prefix, matched with ``PurePosixPath().name``:
 a substring match would also exempt any future directory containing the string.
 
 Scope is the three trees that carry shipped helpers. It is deliberately not the
-repository: ``.github/workflows/tests.yml`` reads the prior revision's mode for
-``.github/scripts/bookkeeping_ci_scope.py`` and treats anything but ``100644``
-as untrusted, falling back to the full lane. That guard fails *open*, so making
-those files executable would silently disable fast-lane selection while CI
-stayed green.
+repository: a mode drift in repository-only automation is a lint concern, not a
+shipped-payload concern, and widening the scope would blur that line.
 
 Modes are read from ``git ls-files -s`` -- the index, not the filesystem. A
 checkout with ``core.fileMode`` disabled lets the two disagree, and the index is

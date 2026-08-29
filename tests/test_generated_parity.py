@@ -957,14 +957,11 @@ class GeneratedParityTests(InstallTestCase):
             "os: macos-latest",
             "unittest-output.log",
             "skipped=[1-9][0-9]*",
-            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/bookkeeping_ci_scope.py",
+            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
             "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
-            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/bookkeeping_ci_scope.py",
-            "needs: [ci-scope, unittest, lint, security, release-payload-gate, main-push-scope]",
-            "RELEASE_PAYLOAD_GATE_RESULT",
-            "LINT_RESULT",
+            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
         ):
             self.assertIn(expected, workflow)
         # Ruff's lint target is inferred from project.requires-python (covered
@@ -1017,10 +1014,8 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("--fail-under=76", coverage_gate)
         for expected in (
             "scripts/sd-ai-command-pack-check.py 74",
-            "scripts/sd-ai-command-pack-fleet-candidate-check.py 90",
             "scripts/sd-ai-command-pack-fleet-controller.py 76",
             "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
-            "scripts/sd-ai-command-pack-fleet-review-classify.py 80",
             "scripts/sd-ai-command-pack-fleet-timing.py 88",
             "scripts/sd-ai-command-pack-fleet-wave-plan.py 85",
         ):
@@ -1277,24 +1272,20 @@ class GeneratedParityTests(InstallTestCase):
         self.assertIn("git ls-files failed", outside_work_tree.stderr)
         self.assertNotIn("No tracked shell scripts found", outside_work_tree.stdout)
 
-    def test_ci_dependency_and_main_push_guards_are_bounded(self) -> None:
+    def test_ci_dependency_pins_are_bounded(self) -> None:
         workflow = (PACK_ROOT / ".github/workflows/tests.yml").read_text(
             encoding="utf-8"
         )
         dependabot = yaml.safe_load(
             (PACK_ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
         )
-        main_push_guard = (
-            PACK_ROOT / ".github/scripts/check-main-push-scope.sh"
-        ).read_text(encoding="utf-8")
-
         self.assertNotRegex(
             workflow,
             r"uses: actions/(?:checkout|setup-python)@v\d+",
         )
         self.assertEqual(
             workflow.count("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"),
-            9,
+            4,
         )
         self.assertEqual(
             workflow.count(
@@ -1302,29 +1293,18 @@ class GeneratedParityTests(InstallTestCase):
             ),
             4,
         )
-        self.assertIn("main-push-scope:", workflow)
-        self.assertIn("release-payload-gate:", workflow)
-        self.assertIn("SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF", workflow)
-        self.assertIn("run_pack_source_drift_gates", workflow)
-        self.assertIn('"${{ github.event.before }}" "${{ github.sha }}"', workflow)
-        self.assertIn("pull-requests: read", workflow)
-        self.assertEqual(workflow.count("pull-requests: read"), 1)
-        self.assertIn("commits/${GITHUB_SHA}/pulls", workflow)
-        self.assertIn("set -o pipefail", workflow)
-        merge_probe = 'git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null'
-        self.assertIn(merge_probe, workflow)
-        main_push_start = workflow.index("main-push-scope:")
-        self.assertLess(
-            workflow.index(merge_probe, main_push_start),
-            workflow.index("gh api", main_push_start),
+        # 0.72.0 is the terminal release: CI is exactly the four unconditional
+        # checks, with no scope classifier, aggregate, payload gate, main-push
+        # guard, or auto-tag job in front of or behind them.
+        jobs = yaml.safe_load(workflow)["jobs"]
+        self.assertEqual(
+            list(jobs), ["unittest", "shell-coverage", "lint", "security"]
         )
-        self.assertIn("invalid pull-request merge evidence", workflow)
-        self.assertIn("SD_AI_COMMAND_PACK_MAIN_PUSH_PR_MERGE", workflow)
-        self.assertIn("git diff --no-renames --name-only -z", main_push_guard)
-        self.assertIn(
-            ".trellis/tasks/*|.trellis/workspace/*|.trellis/audit/*",
-            main_push_guard,
-        )
+        for job in jobs.values():
+            self.assertNotIn("needs", job)
+            self.assertNotIn("if", job)
+        self.assertNotIn("ci-scope", workflow)
+        self.assertNotIn("bookkeeping", workflow)
 
         updates = dependabot["updates"]
         self.assertEqual(
@@ -1344,7 +1324,6 @@ class GeneratedParityTests(InstallTestCase):
             "make setup",
             "make check",
             "[CONTRIBUTING.md](CONTRIBUTING.md)",
-            "git config core.hooksPath .githooks",
         ):
             self.assertIn(expected, readme)
         for expected in (
@@ -1356,7 +1335,7 @@ class GeneratedParityTests(InstallTestCase):
             "make check",
             "pack JavaScript syntax checks when Node is available",
             "Missing optional tools print warnings",
-            "Bump `manifest.json` whenever shipped payload changes",
+            "0.72.0 (tag `v0.72.0`) is the terminal release",
             "Treat `templates/**` as the source of truth",
             "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
             "Keep Trellis-owned platform files in their Trellis-managed state",
@@ -1369,13 +1348,11 @@ class GeneratedParityTests(InstallTestCase):
             self.assertIn(expected, contributing)
         for target in (
             "setup:",
-            "hooks:",
             "test:",
             "lint:",
             "audit:",
             "full-check:",
             "check:",
-            "git config core.hooksPath .githooks",
             "SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0",
             "SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0",
             "command -v node >/dev/null 2>&1",

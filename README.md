@@ -758,8 +758,7 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13  # Intel Homebre
 python -m pip install -r requirements-dev.txt
 python -m ruff check install.py installer scripts templates/scripts tests \
   .github/scripts/check-command-surface-drift.py \
-  .github/scripts/partition-surfaces.py \
-  .github/scripts/prepare-release.py
+  .github/scripts/partition-surfaces.py
 if command -v node >/dev/null 2>&1; then
   node --check scripts/sd-ai-command-pack-review-preflight.mjs
   node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
@@ -799,94 +798,40 @@ tests are the compensating controls.
 
 ### Releasing
 
-Start every release from a clean, up-to-date `main`, then create a release
-branch. Bump `manifest.json` whenever the shipped payload changes: `templates/**`,
-`docs/SD_AI_COMMAND_PACK.md`, or the manifest itself. The full-check pack-source
-drift gate fails when those files change without a manifest version bump. Every
-version bump must also add the matching top `CHANGELOG.md` heading in the form
-`## <version> - YYYY-MM-DD`; the same gate rejects missing or stale headings.
-Pull request CI runs the same release payload gate as a small standalone job
-against the PR base and feeds that result into `CI Result`, so payload drift is
-blocked remotely even when the local full-check was missed.
+There are no further releases. 0.72.0 (tag `v0.72.0`) is the terminal
+release of this pack: `manifest.json` stays at that version, `CHANGELOG.md`
+gets no new heading, and no tag is created after it. The release train that
+used to run here -- release preparation, the candidate ledger, the payload
+gate, the CI scope classifier, and the post-merge auto-tag job -- has been
+deleted rather than left dormant.
 
-When the release payload, version, changelog, and documentation edits are
-ready, run the canonical preparation command:
-
-```bash
-make release-prep
-```
-
-This single workflow regenerates command surfaces, self-syncs the dogfood
-install and local spec KB, and checks release/version prerequisites before any
-expensive fleet work. It runs the full-fleet candidate validator only when the
-exact payload or fleet manifest makes the existing ledger stale, then requires
-strict shipped-surface closure and finishes with `make check`. The validator
-uses disposable origin clones and never modifies active consumer worktrees.
-See the fleet runbook for diagnostic filters and failure policy.
-
-Housekeeping uses the normal refresh so an absent KB is created after
-finish-work. Intentional guarded callers, such as the backlog loop's final
-follow-up refresh, use `--if-present` when they must refresh generated
-knowledge without creating a KB. Missing KBs then return success with a visible
-skip reason; existing invalid or conflicting KB paths still fail.
-`make release-prep` owns the normal generate, sync, candidate-evidence, and
-final-check order; run its component commands directly only for focused
-diagnosis.
-
-Use a conventional release commit such as
-`chore: release sd-ai-command-pack <version>` and merge the PR. After the
-required test lanes pass on `main`, the `Auto-tag release` CI job creates the
-lightweight `v<version>` tag at the merged commit. The job is idempotent and
-fails instead of moving an existing tag. Verify the same plan locally without
-writing a tag:
-
-```bash
-python3 .github/scripts/create-release-tag.py --base HEAD^ --head HEAD --dry-run
-```
-
-If the post-merge tag job fails, rerun the failed workflow after correcting the
-reported ledger or permissions problem; do not move or overwrite a published
-version tag. After the tag exists, use the fleet preflight below before opening
-consumer refresh PRs.
+CI is exactly four unconditional checks on every pull request and every push
+to `main`: the `unittest` matrix, `shell-coverage`, `lint`, and `security`.
+Merge authority is GitHub branch protection on those checks; there is no
+aggregate context, no bookkeeping fast lane, and no direct-to-main path policy
+beyond what branch protection enforces.
 
 ### Fleet Rollout
 
 The checked-in fleet manifest lives at `docs/fleet/consumers.json`. It lists
 the real consumer repositories, GitHub slugs, local path hints, explicit
-platform sets, lightweight candidate checks, and rollout priorities. Run the
-source-owned preflight from this checkout:
+platform sets, lightweight candidate checks, and rollout priorities. Read it
+with the fleet status report from this checkout:
 
 ```bash
-python3 scripts/sd-ai-command-pack-fleet-preflight.py
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-status.py fleet
 ```
 
-Repos reported as `at-target` should be skipped, which prevents duplicate
-empty refresh PRs. A converted consumer is skipped only when its recorded
-targets are all still on disk: version equality is the fat contract's evidence
-of health, and a thin consumer whose residual lost a file reports
-`residual-damaged` instead, because for a thin install the receipt is the
-allowlist and nothing else in the sweep can tell a missing residual file from a
-machine surface the conversion removed on purpose. For repos that need a
-refresh or repair, the preflight prints the exact `install.py` and
-install-audit commands — always run the printed command rather than
-reconstructing it, since a thin consumer's carries no `--platform` (its
-platform set is owned by its pin, and a thin-aware refresh rejects the flag).
-The audit
-command passes each explicit platform through `--expected-platform`, so missing
+A consumer is refreshed by running `install.py <repo> --force` from this
+checkout and then `scripts/sd-ai-command-pack-install-audit.py --repo <repo>
+--expected-platform ...` for each of its explicit platforms, so missing
 selected-platform files are caught even if a faulty install also omitted them
-from receipts and provenance. See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md)
-for the fast-canary order, interruption threshold, review ownership, and
-compact rollout runbook.
-
-After committing a consumer refresh, the source workflow runs
-`scripts/sd-ai-command-pack-fleet-review-classify.py` with the exact
-pre-refresh base commit. Eligibility requires the verified release and
-candidate ledger, canonical consumer/platform identity, current
-`install.py --check --json` plus exact audit, safe historical/current receipts,
-and a committed diff limited to their union. Integration-only review suppresses
-only a new remote implementation-review request; existing threads, consumer
-checks, GitHub CI, watch, and housekeeping remain mandatory. Use the
-`remote-review` fleet flag to force the configured reviewer.
+from receipts and provenance. A thin consumer's install carries no
+`--platform` (its platform set is owned by its pin, and a thin-aware refresh
+rejects the flag). See [docs/FLEET_ROLLOUT.md](docs/FLEET_ROLLOUT.md) for the
+fast-canary order, interruption threshold, review ownership, and compact
+rollout runbook.
 
 Verified findings then pass through
 `scripts/sd-ai-command-pack-fleet-finding-classify.py` before watch, merge, or
@@ -906,36 +851,6 @@ stage. The source-only helper stores private atomic state outside repositories,
 never prints its state path, and rejects paths or secret-like material in
 reasons. Timing errors are visible and pause further mutation; they never
 reinterpret install, audit, review, CI, or housekeeping outcomes.
-
-### Direct-to-main Chore Commits
-
-Branch protection on `main` requires pull requests with the `CI Result`
-check, with `enforce_admins` left off deliberately: the Trellis wrap-up flow
-(task archive, journal, and task-file commits under `.trellis/tasks/**` and
-`.trellis/workspace/**`) pushes those chore commits directly to `main` under
-the maintainer bypass. Everything else goes through a pull request.
-
-The tracked `.githooks/pre-push` hook keeps that bypass honest by rejecting
-any direct push to `main` that touches paths outside the two chore
-directories. Install it once per clone:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-`make setup` also arms the hook. The full-check script warns in this source
-checkout when `.githooks` is not configured, because direct-to-main chore
-commits rely on that local guard when maintainer bypass is available.
-
-The `Main push scope` CI job applies the same path policy to every push on
-`main` and feeds the result into `CI Result`. It is a server-side detective
-backstop for an unarmed or bypassed local hook: an accidental non-chore push is
-reported with its offending paths, but the pushed commit still needs an
-explicit revert because CI cannot retract an accepted push.
-
-For a deliberate one-shot exception, bypass the hook with
-`SD_AI_COMMAND_PACK_CHORE_SCOPE_BYPASS=1 git push ...`. The server-side scope
-job still evaluates that push; use a pull request for non-chore changes.
 
 ### Upstream Path
 
