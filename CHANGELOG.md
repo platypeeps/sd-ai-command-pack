@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.72.0 - 2026-08-29
+
+### Changed
+
+- **Terminal release.** 0.72.0 is the last version of this pack shipped through
+  the release train and plugin marketplace. No further releases follow; the
+  fleet refresh, receipt ledger, candidate validator, and `sd-fleet-*` lanes
+  stop here. The successor is the same repository re-based on
+  `docs/work/**` artifacts and a machine-scope install
+  (`git clone platypeeps/sd-ai-command-pack && python3 install.py --user`);
+  its design record lives at `docs/work/2026-08-29-artifacts-as-product/`.
+  Nothing in an installed 0.72.0 changes behaviour: the version bump exists so
+  that every consumer's `Pack version update check` names this release, and
+  the pointer above is what a second machine finds when it looks for the next
+  version. Consumers are removed from the plugin one pull request each, in the
+  successor's own migration sequence; until then they keep working on 0.72.0
+  unchanged.
+
 ## 0.71.67 - 2026-08-29
 
 ### Fixed

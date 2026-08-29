@@ -1,5 +1,12 @@
 # SD AI command pack
 
+> **Terminal release (0.72.0, 2026-08-29).** This is the last version of the
+> pack shipped through the release train and plugin marketplace. The successor
+> — same repository, `docs/work/**` artifacts, machine-scope
+> `python3 install.py --user` — is designed at
+> `docs/work/2026-08-29-artifacts-as-product/` and migrates each consumer with
+> one removal pull request. Nothing installed from 0.72.0 changes behaviour.
+
 This repo has the reusable SD AI command setup installed from
 `platypeeps/sd-ai-command-pack`.
 
