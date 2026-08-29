@@ -7,10 +7,11 @@ authored templates, docs, and the generated adapters and mirrors — for the
 retired wording.
 
 The scope is an allowlist of shipped roots, never a repo-wide grep with
-exclusions: `.trellis/` task records, the archive, and the journal
-legitimately describe the removal and must stay out of scope. Roots that stop
-existing (for example when the committed mirrors are retired) are skipped
-rather than failing the scan.
+exclusions: work items under `docs/work/` -- the planning records that
+described and performed the removal -- legitimately name the retired selector
+and must stay out of scope, which is why `docs` carries the one carve-out
+below. Roots that stop existing (for example when the committed mirrors are
+retired) are skipped rather than failing the scan.
 """
 
 from __future__ import annotations
@@ -32,6 +33,10 @@ SHIPPED_ROOTS = (
     ".github/prompts",
     ".github/command-sources",
 )
+
+# The only carve-out inside a shipped root: work items are the history of the
+# removal, so quoting the retired selector is what they are for.
+EXCLUDED_PREFIXES = ("docs/work/",)
 
 TEXT_SUFFIXES = {
     ".json",
@@ -65,7 +70,9 @@ def shipped_files() -> list[Path]:
         files.extend(
             path
             for path in sorted(base.rglob("*"))
-            if path.is_file() and path.suffix in TEXT_SUFFIXES
+            if path.is_file()
+            and path.suffix in TEXT_SUFFIXES
+            and not path.relative_to(REPO_ROOT).as_posix().startswith(EXCLUDED_PREFIXES)
         )
     return files
 

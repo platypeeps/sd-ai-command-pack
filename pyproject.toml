@@ -30,6 +30,7 @@ extend-exclude = [
     ".opencode",
     ".ruff_cache",
     ".sd-ai-command-pack",
+    "tests/fixtures/trellis-scripts",
     ".venv",
     "node_modules",
 ]
