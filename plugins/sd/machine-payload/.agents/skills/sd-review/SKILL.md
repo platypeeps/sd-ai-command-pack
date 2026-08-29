@@ -202,7 +202,10 @@ stored remote dispositions, and the next invocation dispatches again. The
 abandoned dispatch stays in the record, marked, and does not advance the remote
 attempt sequence — the router was never told about it, so there is nothing for
 a later re-request to name. Use it only against that limitation; a delayed
-receipt is still a resume, not a reset.
+receipt is still a resume, not a reset. An attempt whose dispatch predates the
+dispatch record is adopted into it on the next invocation, and its deadline runs
+from that invocation rather than from the original dispatch, which nothing in
+such a state records.
 
 The remote attempt number is not `--attempt`. `--attempt` counts review rounds,
 most of which may never route, while the router numbers the dispatches it

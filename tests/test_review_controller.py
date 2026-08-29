@@ -3574,6 +3574,60 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(report["limitations"], ["remote-dispatch-abandoned"])
         self.assertIn("--reset-remote-dispatch", report["diagnostic"])
 
+    def test_a_pre_ledger_dispatch_is_adopted_so_the_deadline_reaches_it(
+        self,
+    ) -> None:
+        """The states that provoked the wedge must not be the ones it misses.
+
+        A state written before the ledger existed records its dispatch only as a
+        `route-dispatched` phase over a stored `remoteRequest`. The deadline
+        matches on the ledger, so without adoption those states -- the exact
+        population the bound was written for -- keep reporting `pending`.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+
+        # Rewrite the state into its pre-ledger shape: the phase and the stored
+        # request, with the dispatch recorded nowhere else.
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        request = state["remoteRequest"]
+        del state["remoteDispatches"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            receipt_always_absent=True,
+        )
+
+        # Adopted, not abandoned: the clock starts at the upgrade, so a dispatch
+        # that may still be live is not terminated on the first run that sees it.
+        self.assertEqual((code, report["status"]), (3, "pending"))
+        adopted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(adopted["remoteDispatches"]), 1)
+        record = adopted["remoteDispatches"][0]
+        self.assertEqual(record["correlationId"], request["correlationId"])
+        self.assertFalse(record["fulfilled"] or record["abandoned"])
+
+        # And the anchor holds still, so the deadline now reaches it.
+        record["dispatchedAt"] -= 4_000
+        state_path.write_text(json.dumps(adopted), encoding="utf-8")
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            receipt_always_absent=True,
+        )
+
+        self.assertEqual((code, report["status"]), (3, "failed"))
+        self.assertEqual(report["limitations"], ["remote-dispatch-abandoned"])
+
     def test_resetting_the_dispatch_keeps_the_attempts_evidence(self) -> None:
         """The escape from a dead dispatch must not cost the audit trail.
 

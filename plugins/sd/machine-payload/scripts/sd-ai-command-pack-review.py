@@ -1229,7 +1229,10 @@ def _remote_dispatches(state: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Read the record of remote dispatches this attempt has actually made.
 
     A state written before this field existed has none, which is the same
-    answer as a state that never dispatched, so absence needs no migration.
+    answer as a state that never dispatched, so absence needs no migration --
+    except for the one case that is not the same answer, a pre-ledger state
+    still holding a dispatched request, which ``_adopt_legacy_dispatch`` enters
+    into the record before the deadline is consulted.
     """
 
     value = state.get("remoteDispatches")
@@ -1288,6 +1291,56 @@ def _record_dispatch(
         }
     )
     _advance(path, state, "route-dispatched", remoteDispatches=dispatches)
+
+
+def _adopt_legacy_dispatch(
+    path: Path, state: dict[str, Any], request: Mapping[str, Any]
+) -> None:
+    """Enter a pre-ledger dispatch into the record so the deadline can reach it.
+
+    A state written before the ledger existed records its dispatch only as a
+    ``route-dispatched`` phase over a stored ``remoteRequest``. The deadline
+    matches on the ledger, so without this the states that provoked the wedge
+    are the one population the bound never reaches, and they keep reporting
+    `pending` forever.
+
+    The clock starts here rather than at the original dispatch, because nothing
+    in such a state records when that was: ``updatedAt`` moves with every later
+    invocation's stage bookkeeping, and the request carries no timestamp.
+    Adoption is persisted, so the anchor stops moving from this point on and the
+    deadline runs from the upgrade forward. Dating the row from a timestamp that
+    does not mean what it would have to mean would abandon a live dispatch on
+    the first post-upgrade run.
+    """
+
+    if state.get("phase") != "route-dispatched" or _remote_dispatches(state):
+        return
+    attempt = request.get("attempt")
+    correlation = request.get("correlationId")
+    logical = request.get("logicalDispatchId")
+    if not isinstance(correlation, str) or not isinstance(logical, str):
+        return
+    _advance(
+        path,
+        state,
+        "route-dispatched",
+        remoteDispatches=[
+            {
+                "attempt": (
+                    attempt
+                    if isinstance(attempt, int)
+                    and not isinstance(attempt, bool)
+                    and attempt >= 1
+                    else 1
+                ),
+                "correlationId": correlation,
+                "logicalDispatchId": logical,
+                "dispatchedAt": int(time.time()),
+                "fulfilled": False,
+                "abandoned": False,
+            }
+        ],
+    )
 
 
 def _mark_dispatch_fulfilled(
@@ -2533,6 +2586,7 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     request = state["remoteRequest"]
     if not isinstance(request, dict):
         raise ReviewError("remote request state is invalid")
+    _adopt_legacy_dispatch(state_path, state, request)
 
     if state.get("phase") == "reconciliation-required":
         existing = _query_receipt(
