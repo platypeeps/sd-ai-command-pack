@@ -2037,17 +2037,8 @@ of bypassing the cache contract.
   an ignore-verification error also fails with a targeted diagnostic. `0` skips
   entirely; `required` stays read-only and fails when the helper, `python3`,
   or a passing check is unavailable.
-- `SD_AI_COMMAND_PACK_FULL_CHECK_PACK_DRIFT=0`: skip the pack source drift
-  gates (template twin parity, release-version coverage for shipped payload
-  changes, and env-var documentation coverage). In `auto` mode, generic source
-  markers (`install.py`, `manifest.json`, and `templates/`) only make a repo a
-  candidate: the gates run only when the parsed root manifest has
-  `name: sd-ai-command-pack` plus a non-empty `version` and a `files` list.
-  Other installer repos, including `se-ai-command-pack`, skip the SD-specific
-  gates. A malformed manifest that asserts the SD identity fails conservatively
-  instead of silently bypassing source checks.
 - `SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF`: explicit base ref for the
-  pack-source release-version gate. Defaults to
+  shipped-surface closure check's changed-path window. Defaults to
   `SD_AI_COMMAND_PACK_FULL_CHECK_BASE_REF`, then the discovered branch-diff
   sequence above.
 - `SD_AI_COMMAND_PACK_INSTALL_AUDIT=required`: fail if the full-check cannot run

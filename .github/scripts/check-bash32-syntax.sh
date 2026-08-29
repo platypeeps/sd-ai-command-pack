@@ -82,7 +82,7 @@ is_shell_file() {
 tracked_list="$(mktemp)"
 trap 'rm -f "$tracked_list"' EXIT
 
-if ! git ls-files -z -- '*.sh' .githooks >"$tracked_list"; then
+if ! git ls-files -z -- '*.sh' >"$tracked_list"; then
   printf '%s\n' \
     "error: git ls-files failed; cannot enumerate tracked shell scripts for the bash 3.2 gate." >&2
   exit 1

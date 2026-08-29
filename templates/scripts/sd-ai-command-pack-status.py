@@ -4235,7 +4235,7 @@ def read_consumer_pin(root: Path, pin_path: str) -> dict[str, Any]:
     the installed manifest, so neither can express this three-way state. Load
     time already rejects absolute and ``..``-bearing pin paths, but a purely
     relative path can still leave the checkout through a symlink, so the read
-    repeats the containment pattern used by ``filesystem_payload_digest``:
+    repeats the usual containment pattern:
     ``resolve(strict=True)`` then ``relative_to`` the consumer root. An escape
     is reported, never followed.
     """

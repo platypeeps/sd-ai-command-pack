@@ -40,7 +40,6 @@ RELEASE_EVIDENCE = (
     "manifest.json",
     "CHANGELOG.md",
     ".sd-ai-command-pack/manifest.json",
-    "docs/fleet/candidate-validation.json",
 )
 
 
@@ -528,7 +527,6 @@ def _graph(
         _add_node(nodes, f"path:{path}", kind, path)
     edges.add(Edge(f"path:{CHECK_CONFIG}", "checks-with", f"path:{SURFACE_HELPER}"))
     edges.add(Edge(f"path:{FULL_CHECK}", "checks-with", f"path:{SURFACE_HELPER}"))
-    edges.add(Edge(f"path:{CI_WORKFLOW}", "invokes", f"path:{FULL_CHECK}"))
     if len(nodes) > MAX_GRAPH_ITEMS or len(edges) > MAX_GRAPH_ITEMS:
         raise SurfaceInputError("surface graph exceeds the bounded node or edge limit")
     return nodes, edges
@@ -596,18 +594,6 @@ def _caller_findings(root: Path) -> list[Finding]:
                 f"edit {FULL_CHECK}",
             )
         )
-    workflow = _regular_text(root, CI_WORKFLOW, label="CI workflow")
-    ci_count = workflow.count("run_pack_source_drift_gates")
-    if ci_count != 1:
-        findings.append(
-            Finding(
-                "checker.registration",
-                CI_WORKFLOW,
-                "invokes",
-                f"CI must invoke the shared source-drift gate exactly once; found {ci_count}",
-                f"edit {CI_WORKFLOW}",
-            )
-        )
     return findings
 
 
@@ -655,7 +641,7 @@ def _release_evidence_findings(root: Path) -> list[Finding]:
                     relative,
                     "requires-release-evidence",
                     str(error),
-                    "restore release evidence, then run make sync and the fleet candidate check",
+                    "restore release evidence, then run make sync",
                 )
             )
     receipt = root / ".sd-ai-command-pack/manifest.json"
@@ -668,36 +654,6 @@ def _release_evidence_findings(root: Path) -> list[Finding]:
                     "mirrors",
                     "installed pack manifest differs from the release manifest",
                     "make sync",
-                )
-            )
-    candidate = root / "scripts/sd-ai-command-pack-fleet-candidate-check.py"
-    if candidate.is_file() and not candidate.is_symlink():
-        environment = dict(os.environ)
-        environment["PYTHONDONTWRITEBYTECODE"] = "1"
-        try:
-            result = subprocess.run(
-                [sys.executable, str(candidate), "--check-ledger"],
-                cwd=root,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="strict",
-                timeout=60,
-                env=environment,
-            )
-        except (OSError, subprocess.TimeoutExpired, UnicodeError) as error:
-            raise SurfaceInputError(f"candidate-ledger check could not run: {error}") from error
-        if result.returncode != 0:
-            detail = " ".join(result.stdout.split())[:800]
-            findings.append(
-                Finding(
-                    "provenance.candidate-stale",
-                    "docs/fleet/candidate-validation.json",
-                    "requires-release-evidence",
-                    detail or f"candidate-ledger check exited {result.returncode}",
-                    "python3 scripts/sd-ai-command-pack-fleet-candidate-check.py",
                 )
             )
     return findings

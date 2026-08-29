@@ -44,105 +44,6 @@ inventory, Trellis work, and numbered next steps. It does not fetch or modify
 consumers, so ref-derived values are labelled `cached`; add `--no-network` for
 a local-only snapshot or `--json` for schema-versioned automation output.
 
-## Release Candidate Validation
-
-For normal release preparation, run the source repository's canonical command:
-
-```bash
-make release-prep
-```
-
-It regenerates and self-syncs the exact payload, rejects version, changelog,
-generated-surface, mirror, or other closure defects before fleet work, and
-invokes the full validator only when the current ledger is stale. A current
-exact-payload ledger is reused. The command requires strict closure after a
-refresh and finishes with the repository's complete `make check` gate.
-
-The validator does not write to active consumer worktrees. It discovers each
-checkout's `origin`, clones the default branch under a temporary directory,
-installs the working pack candidate, runs the install audit, and runs the
-repo-owned `candidatePrepare` phase followed by the lightweight, read-only
-`candidateChecks` declared in the fleet manifest. It continues after failures
-so the report covers the whole fleet, then cleans the temporary clones.
-
-Preparation and checks run in declaration order in the same disposable
-checkout. Preparation is the only repo-owned phase allowed to mutate generated
-artifacts. Every consumer declares `candidatePrepare` explicitly; use an empty
-array when the repository owns no preparation step. When a repo owns a tracked
-structural map, declare its deterministic refresh command in
-`candidatePrepare`, then keep the corresponding preflight in `candidateChecks`
-read-only. This keeps candidate validation representative of the real rollout
-without weakening or hiding mutation inside the consumer gate.
-
-The current six map-owning consumers run `bash scripts/update_repomix` during
-preparation. `sd-github-review` runs `npm ci` so its locked YAML dependency is
-available to its tests and metadata validator. `se-ai-command-pack` explicitly
-declares no preparation because it owns neither that generator nor
-`docs/repomix-map.md`.
-The validator supplies disposable npm, uv, and Python bytecode cache paths to
-these commands so local cache permissions cannot make a candidate fail.
-
-A full all-pass run atomically updates
-`docs/fleet/candidate-validation.json`. That ledger is bound to the pack
-version, installable payload, fleet manifest, the candidate validator's own
-sources, declared preparation and checks, and consumer base commits. Release PR/full-check validation and automatic
-tagging reject a missing, stale, partial, or failing ledger. Verify it without
-running consumer commands:
-
-```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-candidate-check.py --check-ledger
-```
-
-Use `--consumer <name>` for a diagnostic rerun. Partial runs never replace the
-canonical full-fleet ledger. Direct full-fleet invocation remains available
-for focused operation; prefer `make release-prep` so generation and sync cannot
-invalidate evidence after it runs.
-
-## Preflight
-
-Ensure the published tag is available locally, then run the source-owned
-preflight before opening consumer refresh PRs:
-
-```bash
-git fetch --tags origin
-python3 scripts/sd-ai-command-pack-fleet-preflight.py
-```
-
-Use `--remote <name>` when a remote other than `origin` is the release
-authority. Preflight is read-only and never fetches or rewrites tags itself.
-
-Before it evaluates consumers, preflight reads the target version from
-`manifest.json` and requires all release identity checks to pass:
-
-- the corresponding local `v<version>` tag exists and its raw object ID
-  matches the exact tag ref advertised by the release remote;
-- the tag commit is an ancestor of the current checkout;
-- the tagged manifest version and exact installable payload digest match the
-  current checkout; and
-- candidate evidence validates both at the tagged commit and against the
-  current fleet manifest and payload.
-
-A missing, mismatched, stale, or rewritten identity exits before consumer
-inventory or mutation. Later documentation and Trellis bookkeeping commits on
-`main` remain valid when the installable payload is byte-identical to the tag.
-
-Repos already at the verified target version are reported as `at-target` and
-should be skipped, which prevents duplicate empty refresh PRs.
-
-JSON preflight output is a schema-versioned object with `releaseIdentity` and
-`consumers`. Each consumer includes both `candidatePrepare` and
-`candidateChecks`, so orchestration can inspect the complete candidate contract
-without parsing the source manifest independently.
-
-For each repo that needs a refresh, the preflight prints the exact install,
-audit, and repo-scoped `candidatePrepare` commands. The audit command passes the
-fleet manifest's explicit platform set through `--expected-platform` so missing
-selected-platform files are caught even when a faulty install also omitted them
-from receipts or provenance. Run preparation commands in declaration order
-after the audit and before the consumer full-check; deterministic generated
-artifacts must be part of the committed refresh.
-
 ## Campaign Controller
 
 Every rollout is planned and advanced through the source-only
@@ -168,11 +69,10 @@ override exists only for tests. If a campaign action ID is lost mid-rollout, it
 can be recovered directly from this JSON rather than reconstructed from
 conversation history.
 
-`preflight` is not a controller subcommand. It is the fleet-lane stage run once
-from the pack checkout via `scripts/sd-ai-command-pack-fleet-preflight.py` (see
-**Preflight**) before the controller issues any consumer action. The controller
-consumes the resulting release-identity and candidate evidence; it does not
-re-run preflight and exposes no `preflight` verb of its own.
+`preflight` is not a controller subcommand. It is the fleet-lane stage that
+inventories consumers (see **Timing Evidence**) before the controller issues
+any consumer action; the controller does not re-run it and exposes no
+`preflight` verb of its own.
 
 Create one safe campaign ID and plan once:
 
@@ -290,25 +190,18 @@ the refresh reinstalls its residual):
    set.
 4. Run each printed `candidatePrepare` command from the consumer checkout, then
    run the consumer's deterministic full-check and stage only the refresh.
-5. Commit and push through `scripts/sd-ai-command-pack-fleet-publish.py`, which
-   folds the work commit, the post-archive structural-map regeneration, the
-   real `task.py archive`, and the recorded journal into the single head it
-   pushes. The publication order is stated once, in the `pr-publication` stage
-   of `.agents/skills/sd-fleet-refresh/SKILL.md`; follow it there rather than
-   reconstructing it here. A repo the helper refuses (see **Publish helper is
-   consumer-only**) self-releases through `sd-finish-work` under the same
-   ordering constraint: regenerate the map after the archive move and before
-   the push, never in a commit appended to a pushed head.
-6. Run the source-side fleet review classifier against the exact base and the
-   pushed head, using integration-only review when it qualifies and the normal
-   configured remote-review loop otherwise. Open the PR, inspect existing
-   feedback, and classify every verified
-   finding with the source finding-severity gate before watch or merge. In the
-   PR body's verification summary, attribute each ownership class to the check
-   that validates it: the install audit and `provenance.json` for pack-owned
-   receipt targets, and the fleet review classifier's integration-only
-   eligibility plus the consumer's own integration and readiness checks for any
-   newly tracked Trellis-owned adapter or consumer-owned path. Do not describe a
+5. Commit and push through `sd-finish-work`, which folds the work commit, the
+   post-archive structural-map regeneration, the real `task.py archive`, and
+   the recorded journal into the single head it pushes: regenerate the map
+   after the archive move and before the push, never in a commit appended to a
+   pushed head.
+6. Open the PR through the normal configured remote-review loop, inspect
+   existing feedback, and classify every verified finding with the source
+   finding-severity gate before watch or merge. In the PR body's verification
+   summary, attribute each ownership class to the check that validates it: the
+   install audit and `provenance.json` for pack-owned receipt targets, and the
+   consumer's own integration and readiness checks for any newly tracked
+   Trellis-owned adapter or consumer-owned path. Do not describe a
    Trellis-owned adapter as covered by the pack install audit.
 7. Wait for required checks and merge through the consumer housekeeping gate
    only when finding disposition permits the rollout to continue.
@@ -323,38 +216,6 @@ and CI may settle concurrently, but controller-issued housekeeping merges
 remain one at a time in manifest order. Do not move AMC first merely because it
 appears in an operator's local list, and never rebuild scheduler state from
 conversation history.
-
-### Publish helper is consumer-only
-
-`scripts/sd-ai-command-pack-fleet-publish.py` folds the work commit, the real
-`task.py archive`, and the recorded journal into one reviewed head. That fold is
-correct on a fleet **consumer**, but it trips the pack's own completion-mode
-bookkeeping gate (`.github/scripts/bookkeeping_ci_scope.py` +
-`completion_archive_move_missing`), which validates each incremental push and
-requires the live task to pre-exist the finish-work push. The helper therefore
-**refuses to run** against any repo carrying that gate — including the
-sd-ai-command-pack repo itself — exiting with the precondition failure code (3).
-The pack self-releases via `sd-finish-work`, never via this helper.
-
-Being consumer-only does not make it consumer-resident. The helper is listed in
-`SOURCE_ONLY_ALLOWED_PACK_FILES` and is never installed into a consumer: it runs
-from the pack checkout with `--repo <consumer>`. It therefore resolves the pack
-helpers it shells to -- the record-session wrapper and the review preflight --
-from the source checkout that owns it, not from the consumer working directory.
-A thin consumer vendors no `scripts/sd-ai-command-pack-*` at all, so a
-consumer-relative lookup finds nothing. `--record-session` and
-`--review-preflight` override the defaults.
-
-The preflight invocation also passes `--repo <consumer>` explicitly. The
-preflight otherwise picks its repository from `SD_AI_COMMAND_PACK_REPO_ROOT`
-before falling back to the working directory's git top level, and the consumer
-full check exports that variable -- so without the explicit argument a receipt
-could describe the pack checkout while claiming to describe the consumer.
-
-Both helpers are proved present by `check_preconditions`, before the work
-commit, the archive move, and the journal. The helper folds those three into one
-head and has no resume path, so a dependency it can check while the run is still
-a no-op is checked there rather than at receipt time.
 
 ## Timing Evidence
 
@@ -391,7 +252,7 @@ Use `stage-start` and `stage-end` around these exact boundaries:
 
 | Scope | Stage | Boundary |
 | --- | --- | --- |
-| Fleet | `preflight` | Release identity, candidate evidence, and consumer preflight |
+| Fleet | `preflight` | Consumer inventory before the first consumer action |
 | Consumer | `checkout-validation` | Clean-tree check, base capture, and refresh branch creation |
 | Consumer | `install` | Installer mutation only |
 | Consumer | `audit` | Printed structural install audit |
@@ -450,8 +311,8 @@ from work merely shifted into a concurrent interval.
 ## Interruption Policy
 
 Stop a rollout for a correctness, security, installation/audit, or
-compatibility defect in the released pack. Fix it before tagging when candidate
-validation catches it; if it escaped into a tag, use a patch release.
+compatibility defect in the pack. Fix it at the source before resuming the
+rollout.
 
 Do not interrupt a healthy rollout for low-risk hardening, style, or an
 unrelated consumer finding. Address a small consumer-owned migration in that
@@ -517,22 +378,11 @@ exposure, human and JSON output, failure behavior, and generated or template
 mirrors where they apply. Record excluded adjacent surfaces so the sweep cannot
 expand without a reason.
 
-Iterate with focused source tests and, when useful, partial candidate
-diagnostics:
+Iterate with focused source tests. After the finding ledger and regressions
+converge, freeze the payload and update the release surfaces once.
 
-```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-candidate-check.py --consumer <name>
-```
-
-Partial runs remain diagnostic and must never replace the canonical candidate
-ledger. After the finding ledger and regressions converge, freeze the payload,
-select one corrective version, update the release surfaces once, and run one
-canonical full-fleet candidate validation with the no-filter command. Only the
-no-filter canonical command may update `docs/fleet/candidate-validation.json`.
-
-Merge and tag the corrective release through the source lifecycle, then resume
-the original fleet task from a fresh preflight. A terminal merge-stage
+Merge the corrective change through the source lifecycle, then resume the
+original fleet task from a fresh preflight. A terminal merge-stage
 `packBlocker` caused by a taskless finish-work lane must first use the explicit
 controller transition:
 
@@ -573,43 +423,6 @@ security defect would become riskier while waiting for the bounded sweep, it
 may ship immediately with that reason recorded; keep the remaining campaign
 open rather than silently discarding it.
 
-## Integration-Only Review Classification
-
-After the refresh commit exists and before choosing its review profile, run
-this read-only command from the pack source checkout:
-
-```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-review-classify.py \
-  --consumer <name> --repo <consumer-path> \
-  --base-commit <full-pre-refresh-sha> --remote origin --json
-```
-
-Exit `0` proves the exact head is eligible for integration-only review. The
-classifier reuses the release-identity guard, requires the canonical consumer
-and platform set, runs authoritative `install.py --check --json` inspection
-with the exact audit, validates safe installed-target receipts at both the base
-commit and current checkout, and requires every committed changed path to be in
-the union of those receipts plus receipt/provenance metadata. Rename detection
-is disabled so both sides remain visible, and retired pack targets stay
-classifiable through the historical receipt.
-
-Exit `1`, malformed output, unavailable proof, a dirty tree, stale release or
-candidate evidence, audit/provenance drift, a non-ancestor base, or any
-consumer-owned path means `remote-review-required`. This is a safe fallback,
-not a rollout failure. Use the normal `sd-review-pr` convergence loop. The
-`remote-review` fleet flag also forces that path for every selected consumer.
-
-For an eligible head, the trusted fleet invocation of `sd-review-pr` reruns the
-classifier and binds its result to the local and PR head before skipping a new
-configured remote implementation-review request. It still runs the consumer
-full-check, dispositions first-review advisories, fetches all existing reviews,
-comments, and unresolved threads, addresses valid findings, waits for required
-CI, performs the PR-scoped learning pass, and hands the PR to the normal watch
-and housekeeping gates. Any review fix changes the head and triggers another
-classification; a new ambiguous or consumer-owned path switches to remote
-review.
-
 ## Review Ownership
 
 Pack-owned implementation is reviewed in the sd-ai-command-pack source PR.
@@ -618,10 +431,9 @@ receipt and provenance integrity, secrets, documentation accuracy, and any
 repo-owned migration or integration change. Do not repeat line-level review of
 unchanged vendored pack implementation in every consumer.
 
-This boundary is enforced, not inferred from a scope hint. A pure qualifying
-refresh records `integration-only` with zero new remote-review rounds. A mixed,
-ambiguous, explicitly overridden, or invalid refresh records `remote` and uses
-the configured reviewer. Existing reviewer feedback blocks both profiles.
+Every consumer refresh PR uses the configured reviewer through the normal
+remote-review loop. Existing reviewer feedback blocks the merge until it is
+dispositioned.
 
 ### Requesting the Copilot reviewer
 
@@ -696,50 +508,3 @@ while still naming the resolver under `scripts/` trades many blockers for one
 per calling file, and one is still blocked. Measured before the resolver
 shipped, the fleet's 288 resolve-reachable references were spread across 68
 files, not one bootstrap site per consumer.
-
-## Ops: candidate ledger staleness and branch-protection merge-skew
-
-The fleet candidate ledger (`docs/fleet/candidate-validation.json`) carries a
-`payloadDigest` that CI enforces via `test_surface_closure`
-(`provenance.candidate-stale`, `scripts/sd-ai-command-pack-surface-check.py:553`).
-A shipped-payload change that forgets to regenerate the ledger reds CI. Two
-failure paths, two mitigations:
-
-Since 0.69.0 the ledger also carries a `validatorDigest`, so **editing
-`scripts/sd-ai-command-pack-fleet-candidate-check.py` marks the ledger stale
-too** and needs the same regeneration. That file has no `manifest.json` row, so
-before 0.69.0 it moved no digest at all: the ledger stayed current and
-`make release-prep` skipped fleet validation entirely rather than running the
-edited validator. The staleness is the fix, not a new hazard — but it is a new
-reason to regenerate, and it reaches a file whose edits used to be free.
-
-- **Feature branch (author forgot regen).** The pre-push hook
-  (`.githooks/pre-push`) now runs `sd-ai-command-pack-fleet-candidate-check.py
-  --check-ledger` and blocks the push locally with the fix command. Regenerate
-  with `.venv/bin/python scripts/sd-ai-command-pack-fleet-candidate-check.py`
-  (or bypass an intentional WIP push with `SD_AI_COMMAND_PACK_LEDGER_BYPASS=1`).
-
-- **`main` on merge (payloadDigest merge-skew).** With
-  `required_status_checks.strict = false`, two payload PRs each pass CI in
-  isolation, merge sequentially, and leave combined `main` with a payloadDigest
-  matching neither ledger, so `main` reds on the merge push (observed: run
-  30720359738, 2026-08-01). The local hook cannot catch this — it is a
-  server-side merge ordering problem.
-  **Remediation applied 2026-08-02:** branch protection on
-  `platypeeps/sd-ai-command-pack` now sets `required_status_checks.strict = true`
-  ("Require branches to be up to date before merging"). A PR whose base advanced
-  must update onto the new tip and re-run CI before merge, so its ledger
-  regenerates against the combined tree and a stale digest blocks pre-merge
-  instead of reddening `main`. Trade-off: a rebase + ledger regen and a full
-  ~6-minute CI cycle whenever `main` advances under an open PR. `enforce_admins`
-  stays `false` so emergency merges remain possible; the `.githooks/pre-push`
-  chore-scope guard backstops direct `main` pushes.
-  Rollback:
-
-  ```
-  gh api --method PATCH \
-    repos/platypeeps/sd-ai-command-pack/branches/main/protection/required_status_checks \
-    -F strict=false
-  ```
-
-  A GitHub merge queue remains the heavier alternative if PR concurrency rises.

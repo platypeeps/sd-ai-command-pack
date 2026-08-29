@@ -4,15 +4,11 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup hooks generate surface-check sync release-prep test lint audit full-check check
+.PHONY: setup generate surface-check sync test lint audit full-check check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
 	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
-	git config core.hooksPath .githooks
-
-hooks:
-	git config core.hooksPath .githooks
 
 # generate-plugin.py consumes the partition artifact, so it follows
 # partition-surfaces.py.
@@ -38,12 +34,6 @@ sync:
 	"$(VENV_PYTHON)" install.py . --force
 	"$(VENV_PYTHON)" scripts/sd-ai-command-pack-update-spec-kb.py
 
-# Canonical release preparation: generate and self-sync first, refresh exact
-# fleet evidence only when stale, then run the complete maintainer gate.
-release-prep:
-	"$(VENV_PYTHON)" .github/scripts/prepare-release.py
-	$(MAKE) check
-
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
@@ -63,8 +53,8 @@ test:
 # syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
 # a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/bookkeeping_ci_scope.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/prepare-release.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/summarize_shell_coverage.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
@@ -76,7 +66,7 @@ lint:
 		printf '%s\n' "warning: node not found; skipping JavaScript syntax checks."; \
 	fi
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		git ls-files -z '*.sh' | xargs -0 shellcheck -S warning .githooks/pre-push; \
+		git ls-files -z '*.sh' | xargs -0 shellcheck -S warning; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: shellcheck not found and STRICT=1; shell lint is required." >&2; \
 		exit 1; \

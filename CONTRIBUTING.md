@@ -11,9 +11,8 @@ make setup
 bash scripts/sd-ai-command-pack-toolchain.sh doctor
 ```
 
-`make setup` creates `.venv`, installs `requirements-dev.txt` and
-`requirements-security.txt`, and arms the direct-to-main safety hook with
-`git config core.hooksPath .githooks`.
+`make setup` creates `.venv` and installs `requirements-dev.txt` and
+`requirements-security.txt`.
 
 Both requirements files are hash-pinned compiled resolutions, installed with
 `--require-hashes` locally and in CI so the transitive closure cannot drift
@@ -102,26 +101,18 @@ Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
 `templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
 tracked OpenCode JavaScript receives syntax-only validation with `node --check`.
 `scripts/sd-ai-command-pack-review-preflight.mjs` keeps that `node --check`
-syntax gate in the `lint` job and is additionally coverage-measured with c8 in
-the `ci-scope` job's bookkeeping lane (no floor yet; floors arrive in a
-follow-up at or below measured values). The `templates/scripts/` twin is a
-byte-identical mirror and is not separately measured.
+syntax gate in the `lint` job; its behaviour is exercised by the Python test
+suite's subprocess tests rather than by a JavaScript coverage number. The
+`templates/scripts/` twin is a byte-identical mirror and is not separately
+measured.
 
 ## Main Branch Policy
 
-Only task and workspace bookkeeping under `.trellis/tasks/**` and
-`.trellis/workspace/**` may be pushed directly to `main`. The tracked pre-push
-hook prevents other paths locally, and the `Main push scope` CI job detects the
-same violation after any accepted push. Use a pull request for every non-chore
-change; CI cannot undo an accidental direct push.
-
-Every pull-request head and direct `main` push still receives the required
-`CI Result`. A linear task/workspace-only successor of a successful exact head
-uses the bookkeeping lane: it revalidates the current metadata and journal
-bundle while skipping the unit matrix, lint, security, and release-payload
-jobs. Missing prior evidence, mixed paths, unsafe tree entries, invalid
-bookkeeping, or any classifier ambiguity fails closed to full CI or a failed
-aggregate; the fast lane is never a path-ignore exemption.
+Every change to `main` goes through a pull request. Merge authority is GitHub
+branch protection on the four CI checks; there is no local pre-push hook, no
+server-side path policy, and no bookkeeping fast lane. A pull-request head and
+a push to `main` run the same four unconditional jobs: the `unittest` matrix,
+`shell-coverage`, `lint`, and `security`.
 
 CI intentionally tests the supported Python floor (3.10) and current project
 runtime (3.13), plus macOS on 3.13. Intermediate 3.11/3.12 jobs would duplicate
@@ -131,25 +122,12 @@ insufficient.
 
 ## Release And Payload Rules
 
-- Use the canonical release-preparation command after the release payload,
-  version, changelog, and documentation edits are ready:
-
-  ```bash
-  make release-prep
-  ```
-
-  It regenerates command surfaces, self-syncs the dogfood install and spec KB,
-  rejects release/version/closure defects before fleet work, refreshes the
-  exact-payload fleet ledger only when it is stale, and finishes with
-  `make check`. Do not run the full-fleet validator earlier in the edit cycle;
-  later generation or sync changes can invalidate its evidence.
-- Bump `manifest.json` whenever shipped payload changes: `templates/**`,
-  `docs/SD_AI_COMMAND_PACK.md`, or the manifest itself.
-- Pull request CI runs a `Release payload gate` job against the PR base and
-  includes it in `CI Result`, so payload changes without the manifest bump and
-  matching top `CHANGELOG.md` heading are blocked before merge. A version bump
-  also requires the all-pass `docs/fleet/candidate-validation.json` produced or
-  reused by `make release-prep` to match the exact payload and fleet manifest.
+- 0.72.0 (tag `v0.72.0`) is the terminal release. There are no further
+  releases: do not bump `manifest.json`, do not add a `CHANGELOG.md` heading,
+  and do not create a tag. The release preparation command, the candidate
+  ledger, the payload gate, and the auto-tag job were deleted with it.
+  Shipped payload edits after 0.72.0 are reviewed and merged like any other
+  change and are not versioned.
 - Treat `templates/**` as the source of truth for shipped files. Root-level
   copies under `.agents/`, `.opencode/`, `scripts/`, and similar dogfood paths
   are mirrors.
@@ -164,10 +142,6 @@ insufficient.
   bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
     scripts/sd-ai-command-pack-update-spec-kb.py
   ```
-
-- Use `--consumer` with the fleet validator only for diagnosis. It uses a
-  disposable origin clone, and a partial or failing run never replaces the
-  canonical full-fleet ledger.
 
 ## Versioning
 

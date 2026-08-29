@@ -379,8 +379,6 @@ class SdlcCommandsTests(InstallTestCase):
         for pin in (
             "## Corrective Campaign",
             "Exact duplicates reuse the owning row",
-            "Partial runs remain diagnostic",
-            "Only the no-filter canonical command",
             "original fleet task",
         ):
             self.assertIn(pin.casefold(), guide_normalized.casefold())

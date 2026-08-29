@@ -55,12 +55,6 @@ ALLOWED_LITERALS: dict[str, tuple[str, frozenset[str]]] = {
         "a converted install",
         frozenset({"scripts/sd-ai-command-pack-update-spec-kb.py"}),
     ),
-    "sd-ai-command-pack-full-check.sh": (
-        "pack-source-only release gate: the fleet candidate checker has no "
-        "manifest row and only ever runs inside the pack source repository, "
-        "whose own tree is the correct anchor",
-        frozenset({"scripts/sd-ai-command-pack-fleet-candidate-check.py"}),
-    ),
     "sd-ai-command-pack-housekeeping.sh": (
         "shellcheck source= directive: a static-analysis annotation, not a "
         "runtime path (the runtime load uses $SCRIPT_DIR)",
@@ -131,7 +125,6 @@ ALLOWED_LITERALS: dict[str, tuple[str, frozenset[str]]] = {
         "repository's own tree, which is always a full checkout",
         frozenset(
             {
-                "scripts/sd-ai-command-pack-fleet-candidate-check.py",
                 "scripts/sd-ai-command-pack-full-check.sh",
                 "scripts/sd-ai-command-pack-surface-check.py",
             }
