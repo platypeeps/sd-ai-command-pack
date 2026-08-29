@@ -173,3 +173,42 @@ Filed the thin-only-install planning task, which proposes making install.py writ
 
 - The task stays in `planning`; this session filed the record and fixed its PRD, and
   implemented nothing. Implementation waits on a review gate and `task.py start`.
+
+
+## Session 454: File the housekeeping merged-before-run defect and narrow its claim under review
+<!-- trellis-session: v=2 fp=317e565bde3282cf -->
+
+**Date**: 2026-08-28
+**Task**: File the housekeeping merged-before-run defect and narrow its claim under review
+**Branch**: `task/08-28-housekeeping-external-merge-unflagged`
+
+### Summary
+
+Filed the planning task for housekeeping's silent clean verdict when a PR is already MERGED at first lookup and a supplied finish-work receipt is discarded unverified. The review's one finding was correct: a MERGED first lookup cannot distinguish a foreign merge from housekeeping's own interrupted earlier run, so the requirement was narrowed to claim only that the merge preceded this invocation.
+
+### Main Changes
+
+- Filed .trellis/tasks/08-28-housekeeping-external-merge-unflagged with the observed PR #586 versus PR #587 evidence, the route_branch_pr_lifecycle mechanism, and the receipt-discard gap.
+- Renamed the proposed anomaly to pull_request_merged_before_run, carrying mergedBy as evidence rather than attribution, and added the interrupted-run retry shape as a pinned acceptance case.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `13184021` | docs(task): file housekeeping's silent clean verdict on an externally merged PR |
+| `de75b498` | docs(task): claim only that the PR merged before the run, not that the merge was external |
+
+### Testing
+
+- [OK] sd-ai-command-pack-review-preflight.mjs — Review preflight: 0 failure(s), 0 warning(s)
+- [OK] sd-ai-command-pack-review.py --scope pr --attempt 2 — status ready, remoteGate eligible/local-stage-terminal
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- The task stays in `planning`; this session filed the record and implemented nothing.
+  Implementation waits on a review gate and `task.py start`.
