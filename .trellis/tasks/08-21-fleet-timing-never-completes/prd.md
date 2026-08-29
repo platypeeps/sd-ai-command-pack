@@ -42,10 +42,13 @@ decays as a campaign proceeds, which points at the caller — the refresh skill 
 not at the recorder.
 
 This is systemic, not local to this campaign. Of 21 runs on disk under
-`~/.local/state/sd-ai-command-pack/fleet-timing/`, **15 are `active`**, the
-oldest (`refresh-v0-55-0-20260727T005724Z`) from 2026-07-27; only 6 reached
-`completed`. Every rollout since late July has produced an unusable timing
-record.
+`~/.local/state/sd-ai-command-pack/fleet-timing/` on 2026-08-21, **15 are
+`active`**, the oldest of those (`refresh-v0-55-0-20260727T005724Z`) from
+2026-07-27; only 6 reached `completed`. Every rollout since late July has
+produced an unusable timing record. By the time the fix landed on 2026-08-29 the
+directory held 25 runs, 18 `active` and 7 `completed` — the same ratio, four
+campaigns later. Figures below that describe the fix use the 25-run set; this
+paragraph is the original observation and is left at its own date.
 
 ## Requirements
 
@@ -126,10 +129,12 @@ all load and report — a reader can see both what was measured and what was not
 - [x] A test covers an early return in the caller between `stage-start` and
       `stage-end` and asserts the stage is not left open.
 - [x] The 21 existing run files still load without error after the change.
+      Verified against all 25 runs present at fix time, which is a superset:
+      25 of 25 load and report, where 20 did before.
 - [x] `make check` passes.
 
 ## Out of scope
 
-- Backfilling durations for the 15 stranded historical runs. Their disposition
-  is a decision this task should state, but fabricating timestamps for them is
-  never in scope.
+- Backfilling durations for the stranded historical runs (15 at the time of
+  writing, 18 at the time of the fix). Their disposition is a decision this task
+  should state, but fabricating timestamps for them is never in scope.

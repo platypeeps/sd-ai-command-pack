@@ -25,11 +25,11 @@ impossible through supported commands:
 `resume` offers exactly three ways to revive a terminal lane, and each guards on
 a different `result`:
 
-| `resume` flag | required lane state | source |
+| `resume` flag | required lane state | guard in `fleet-controller.py` |
 | --- | --- | --- |
-| `--retry-consumer` | `terminal` + `ownership-skip` | `fleet-controller.py:1365` |
-| `--recover-consumer` | `terminal` + `review-finding` + `packBlocker` + stage `merge` | `:1430` |
-| `--recover-exhausted-consumer` | `terminal` + `retry-exhausted` | `:1514` |
+| `--retry-consumer` | `terminal` + `ownership-skip` | `retry_consumer` |
+| `--recover-consumer` | `terminal` + `review-finding` + `packBlocker` + stage `merge` | `recover_pack_blocker` |
+| `--recover-exhausted-consumer` | `terminal` + `retry-exhausted` | `recover_retry_exhausted` |
 
 `operator-decision` matches none of them. The state the controller itself
 creates for "a human must decide" is the one state it cannot accept a decision

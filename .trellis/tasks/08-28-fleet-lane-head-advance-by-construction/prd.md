@@ -38,7 +38,8 @@ reached `merged` correctly on 14 receipts; the cost was procedural.
 
 ### The message describes the opposite of what it wants
 
-The guard at `scripts/sd-ai-command-pack-fleet-controller.py:1214-1217`
+The guard at the top of `_advance_lane` in
+`scripts/sd-ai-command-pack-fleet-controller.py`
 compares the receipt head against the lane's *stored* head:
 
 ```python
