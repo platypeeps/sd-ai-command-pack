@@ -135,23 +135,23 @@ run cannot un-merge, and the verdict should not block on it.
 
 ## Acceptance criteria
 
-- [ ] A test reproduces the observed shape — feature branch, valid receipt supplied, PR
+- [x] A test reproduces the observed shape — feature branch, valid receipt supplied, PR
       resolves `MERGED` on first lookup — and asserts `identity.finishWork.provided` is
       true, `identity.finishWork.verified` is false, and the advisory merged-before-run
       anomaly is present. It fails against the current code.
-- [ ] The same test asserts `outcome.verdict` is `clean` and the exit status is zero, so the
+- [x] The same test asserts `outcome.verdict` is `clean` and the exit status is zero, so the
       new evidence does not block.
-- [ ] A test pins case 1: the same `MERGED` lookup with no receipt supplied produces no
+- [x] A test pins case 1: the same `MERGED` lookup with no receipt supplied produces no
       merged-before-run anomaly and `identity.finishWork` stays `null`.
-- [ ] A test pins the retry shape: an interrupted run that merged and a retry from the
+- [x] A test pins the retry shape: an interrupted run that merged and a retry from the
       feature branch with the same receipt yields the same advisory code with the same
       neutral wording, and nothing in the result names an external actor.
-- [ ] `test_housekeeping_requires_finish_work_receipt_before_auto_merge` and
+- [x] `test_housekeeping_requires_finish_work_receipt_before_auto_merge` and
       `test_housekeeping_rejects_stale_finish_work_receipt_before_auto_merge` still pass
       unchanged; the `OPEN` route is not touched.
-- [ ] The advisory code is in `ADVISORY_ANOMALY_CODES` and in the collector's identical set,
+- [x] The advisory code is in `ADVISORY_ANOMALY_CODES` and in the collector's identical set,
       and the existing test that pins the two sets together still passes.
-- [ ] `sd-housekeeping/SKILL.md`'s expected-clean block documents the new report line, and
+- [x] `sd-housekeeping/SKILL.md`'s expected-clean block documents the new report line, and
       the four shipped copies of every changed file stay byte-identical with `make generate`
       reporting `shipped-surface closure: clean`.
 
