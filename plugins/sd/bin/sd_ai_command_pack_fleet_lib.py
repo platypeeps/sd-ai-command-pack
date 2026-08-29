@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import ntpath
 import os
 import re
-import stat
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -33,7 +31,6 @@ DEFAULT_FLEET_PIN_PATH = ".sd-ai-command-pack/provenance.json"
 # dirty worktree -- must neither fail the pack's release nor be recorded as a
 # pass, because both answers are lies in opposite directions. `blocked` is the
 # third answer, and `reasons` is what keeps it from becoming a silent skip.
-CANDIDATE_LEDGER_SCHEMA_VERSION = 4
 
 # The candidate validator source the payload digest cannot see.
 #
@@ -739,215 +736,3 @@ def manifest_version(manifest: Mapping[str, Any], label: str = "pack manifest") 
 
 def pack_version(path: Path) -> str:
     return manifest_version(load_json_object(path, "pack manifest"))
-
-
-def payload_digest(
-    manifest: Mapping[str, Any],
-    source_loader: Callable[[str], PayloadSource],
-) -> str:
-    files = manifest.get("files")
-    if not isinstance(files, list):
-        raise FleetConfigError("pack manifest files must be an array")
-
-    sources: set[str] = set()
-    for index, item in enumerate(files):
-        if not isinstance(item, dict):
-            raise FleetConfigError(f"pack manifest files[{index}] must be an object")
-        source = item.get("source")
-        if not isinstance(source, str) or not source:
-            raise FleetConfigError(f"pack manifest files[{index}] has invalid source")
-        source_path = PurePosixPath(source)
-        if source_path.is_absolute() or ".." in source_path.parts:
-            raise FleetConfigError(f"pack manifest source is unsafe: {source}")
-        sources.add(source)
-
-    digest = hashlib.sha256()
-    digest.update(b"sd-ai-command-pack-candidate-payload-v1\0")
-    digest.update(
-        json.dumps(
-            manifest,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-        ).encode("utf-8")
-    )
-    digest.update(b"\0")
-    for source in sorted(sources):
-        payload = source_loader(source)
-        digest.update(source.encode("utf-8"))
-        digest.update(b"\0x\0" if payload.executable else b"\0-\0")
-        digest.update(hashlib.sha256(payload.content).digest())
-    return f"sha256:{digest.hexdigest()}"
-
-
-def filesystem_payload_digest(manifest_path: Path) -> str:
-    manifest = load_json_object(manifest_path, "pack manifest")
-    root = manifest_path.resolve().parent
-
-    def load_source(relative_path: str) -> PayloadSource:
-        path = root / relative_path
-        try:
-            resolved = path.resolve(strict=True)
-            resolved.relative_to(root)
-            mode = resolved.stat().st_mode
-            return PayloadSource(
-                content=resolved.read_bytes(),
-                executable=bool(mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)),
-            )
-        except (OSError, ValueError) as error:
-            raise FleetConfigError(
-                f"cannot read pack manifest source {relative_path}: {error}"
-            ) from None
-
-    return payload_digest(manifest, load_source)
-
-
-def candidate_validator_digest(source_loader: Callable[[str], bytes]) -> str:
-    """Digest the validator sources the payload digest cannot see.
-
-    Composed like `payload_digest` above -- sorted, path-qualified, one
-    sha256 per source -- with one deliberate departure: the executable bit
-    does not participate. `payload_digest` is right to include it for files
-    that are executed directly; every source named here is run as
-    `sys.executable <path>`, so its permission bit changes no behavior and
-    hashing it would let `chmod +x` invalidate a ledger whose validator is
-    byte-identical.
-
-    Takes a loader rather than a root so a caller validating a ledger
-    recorded at some commit can supply that commit's blobs. Pairing a
-    historical ledger with the working tree's validator would report a
-    routine post-release edit as tampered evidence.
-    """
-    digest = hashlib.sha256()
-    digest.update(b"sd-ai-command-pack-candidate-validator-v1\0")
-    for source in sorted(CANDIDATE_VALIDATOR_SOURCES):
-        digest.update(source.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(source_loader(source)).digest())
-    return f"sha256:{digest.hexdigest()}"
-
-
-def filesystem_candidate_validator_digest(root: Path) -> str:
-    """The working-tree loader. Fails closed; never substitutes a default.
-
-    `root` is resolved here rather than trusted from the caller: the
-    containment check below compares against a resolved source path, so an
-    unresolved root turns every symlinked prefix -- `/var` on macOS, most
-    obviously -- into a spurious escape.
-    """
-    root = root.resolve()
-
-    def load_source(relative_path: str) -> bytes:
-        path = root / relative_path
-        try:
-            resolved = path.resolve(strict=True)
-            resolved.relative_to(root)
-            return resolved.read_bytes()
-        except (OSError, ValueError) as error:
-            raise FleetConfigError(
-                f"cannot read candidate validator source {relative_path}: {error}"
-            ) from None
-
-    return candidate_validator_digest(load_source)
-
-
-def fleet_manifest_digest(content: bytes) -> str:
-    return f"sha256:{hashlib.sha256(content).hexdigest()}"
-
-
-def validate_candidate_ledger(
-    ledger: Mapping[str, Any],
-    *,
-    expected_version: str,
-    expected_payload_digest: str,
-    expected_fleet_digest: str,
-    expected_validator_digest: str,
-    consumers: list[FleetConsumer],
-) -> list[str]:
-    errors: list[str] = []
-    if ledger.get("schemaVersion") != CANDIDATE_LEDGER_SCHEMA_VERSION:
-        errors.append(
-            "candidate ledger schemaVersion must be "
-            f"{CANDIDATE_LEDGER_SCHEMA_VERSION}"
-        )
-    for field, expected in (
-        ("packVersion", expected_version),
-        ("payloadDigest", expected_payload_digest),
-        ("fleetManifestDigest", expected_fleet_digest),
-        ("validatorDigest", expected_validator_digest),
-    ):
-        if ledger.get(field) != expected:
-            errors.append(
-                f"candidate ledger {field} is {ledger.get(field)!r}; expected {expected!r}"
-            )
-    if not isinstance(ledger.get("validatedAt"), str) or not ledger["validatedAt"]:
-        errors.append("candidate ledger validatedAt is missing")
-
-    raw_results = ledger.get("consumers")
-    if not isinstance(raw_results, list):
-        errors.append("candidate ledger consumers must be an array")
-        return errors
-
-    by_name: dict[str, Mapping[str, Any]] = {}
-    for index, result in enumerate(raw_results):
-        if not isinstance(result, dict):
-            errors.append(f"candidate ledger consumers[{index}] must be an object")
-            continue
-        name = result.get("name")
-        if not isinstance(name, str) or not name:
-            errors.append(f"candidate ledger consumers[{index}] has no name")
-            continue
-        key = name.casefold()
-        if key in by_name:
-            errors.append(f"candidate ledger repeats consumer {name}")
-            continue
-        by_name[key] = result
-
-    expected_names = {consumer.name.casefold() for consumer in consumers}
-    actual_names = set(by_name)
-    for name in sorted(expected_names - actual_names):
-        errors.append(f"candidate ledger is missing consumer {name}")
-    for name in sorted(actual_names - expected_names):
-        errors.append(f"candidate ledger has unknown consumer {name}")
-
-    for consumer in consumers:
-        result = by_name.get(consumer.name.casefold())
-        if result is None:
-            continue
-        if result.get("github") != consumer.github:
-            errors.append(f"candidate ledger {consumer.name} github does not match fleet")
-        status = result.get("status")
-        if status == "blocked":
-            # A blocked consumer is recorded, never certified. The reasons are
-            # the whole point: a ledger row that says `blocked` and not why is
-            # a skipped consumer wearing a status, which is the same defect as
-            # a gate reporting success for a validation it never ran.
-            reasons = result.get("reasons")
-            if not isinstance(reasons, list) or not reasons:
-                errors.append(
-                    f"candidate ledger {consumer.name} is blocked with no reasons"
-                )
-            elif not all(
-                isinstance(reason, str) and reason for reason in reasons
-            ):
-                errors.append(
-                    f"candidate ledger {consumer.name} has an empty or "
-                    "non-string blocked reason"
-                )
-        elif status != "passed":
-            errors.append(
-                f"candidate ledger {consumer.name} status is {status!r}; "
-                "expected 'passed' or 'blocked'"
-            )
-        base_commit = result.get("baseCommit")
-        if not isinstance(base_commit, str) or not SHA_RE.fullmatch(base_commit):
-            errors.append(f"candidate ledger {consumer.name} baseCommit is invalid")
-        expected_prepares = [list(command) for command in consumer.candidate_prepare]
-        if result.get("prepares") != expected_prepares:
-            errors.append(
-                f"candidate ledger {consumer.name} prepares do not match fleet"
-            )
-        expected_checks = [list(command) for command in consumer.candidate_checks]
-        if result.get("checks") != expected_checks:
-            errors.append(f"candidate ledger {consumer.name} checks do not match fleet")
-    return errors

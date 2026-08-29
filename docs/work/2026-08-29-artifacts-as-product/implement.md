@@ -36,7 +36,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 
 ## Step checklist
 
-- [ ] M0 — tombstone 0.72.0 (this branch)
+- [x] M0 — tombstone 0.72.0 (#596, tag v0.72.0 at fea7e133)
 - [ ] 0 — kill release train + gate stack
 - [ ] 1 — one copy of every file
 - [ ] 2 — `docs/work` replaces `.trellis`; sd_route.py
