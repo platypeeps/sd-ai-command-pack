@@ -261,7 +261,7 @@ class StatusTests(InstallTestCase):
         which has no sibling ``installer/``; the installed arrangement does, so
         ``__file__`` points at the mirror the pack actually ships.
         """
-        installed_status = PACK_ROOT / "scripts/sd-ai-command-pack-status.py"
+        installed_status = PACK_ROOT / "templates/scripts/sd-ai-command-pack-status.py"
         with mock.patch.object(status, "__file__", str(installed_status)):
             return status.collect_machine_scope(
                 root,
@@ -4005,7 +4005,7 @@ class StatusTests(InstallTestCase):
         # The installed arrangement: scripts/ beside installer/. The canonical
         # templates/scripts/ copy has no sibling package, which is the absence
         # covered by the next test.
-        installed_status = PACK_ROOT / "scripts/sd-ai-command-pack-status.py"
+        installed_status = PACK_ROOT / "templates/scripts/sd-ai-command-pack-status.py"
         root_path = str(PACK_ROOT.resolve())
         original_path = [entry for entry in status.sys.path if entry != root_path]
 
@@ -4050,7 +4050,7 @@ class StatusTests(InstallTestCase):
         status = self.load_status_module()
         with tempfile.TemporaryDirectory() as raw:
             collector = self.machine_install_arrangement(Path(raw))
-            environ = {"PATH": str(PACK_ROOT / "scripts")}
+            environ = {"PATH": str(PACK_ROOT / "templates/scripts")}
             root_path = str(PACK_ROOT.resolve())
             original_path = [entry for entry in status.sys.path if entry != root_path]
 
@@ -4174,7 +4174,7 @@ class StatusTests(InstallTestCase):
         with tempfile.TemporaryDirectory() as raw:
             decoy = Path(raw) / "decoy"
             decoy_bin = self.decoy_engine_root(decoy, identity=None)
-            trusted_bin = PACK_ROOT / "scripts"
+            trusted_bin = PACK_ROOT / "templates/scripts"
             script = self.machine_install_arrangement(Path(raw) / "machine")
             environ = {"PATH": os.pathsep.join([str(decoy_bin), str(trusted_bin)])}
             root_path = str(PACK_ROOT.resolve())
@@ -4188,9 +4188,15 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(rung, "path")
         self.assertEqual(root, PACK_ROOT.resolve())
-        self.assertEqual(len(refusals), 1)
-        self.assertEqual(refusals[0]["root"], str(decoy.resolve()))
+        # Two refusals: the decoy, and `templates/` itself -- a pack source
+        # checkout offers the nearer root first and it genuinely carries no
+        # installer package, so it is refused rather than silently skipped.
+        self.assertEqual(
+            [entry["root"] for entry in refusals],
+            [str(decoy.resolve()), str((PACK_ROOT / "templates").resolve())],
+        )
         self.assertIn("no pack identity", refusals[0]["reason"])
+        self.assertIn("installer", refusals[1]["reason"])
 
     def test_machine_scope_api_names_every_candidate_when_none_answer(self) -> None:
         status = self.load_status_module()
@@ -4261,7 +4267,7 @@ class StatusTests(InstallTestCase):
             script = self.machine_install_arrangement(Path(raw) / "machine")
             home = Path(raw) / "home"
             home.mkdir()
-            environ = {"PATH": str(PACK_ROOT / "scripts"), "HOME": str(home)}
+            environ = {"PATH": str(PACK_ROOT / "templates/scripts"), "HOME": str(home)}
 
             with (
                 mock.patch.object(status, "__file__", str(script)),
@@ -4291,7 +4297,7 @@ class StatusTests(InstallTestCase):
             link_parent = Path(raw) / "agents"
             link_parent.mkdir()
             link = link_parent / "bin"
-            link.symlink_to(PACK_ROOT / "scripts", target_is_directory=True)
+            link.symlink_to(PACK_ROOT / "templates/scripts", target_is_directory=True)
             script = link / "sd-ai-command-pack-status.py"
 
             with mock.patch.object(status, "__file__", str(script)):
@@ -4326,7 +4332,7 @@ class StatusTests(InstallTestCase):
                 mock.patch.object(status, "__file__", str(script)),
                 mock.patch.object(status.sys, "path", baseline.copy()),
             ):
-                status.machine_scope_api(environ={"PATH": str(PACK_ROOT / "scripts")})
+                status.machine_scope_api(environ={"PATH": str(PACK_ROOT / "templates/scripts")})
                 after_success = list(status.sys.path)
 
             # Failure path: gate passes, import does not. The engine is
@@ -4391,7 +4397,7 @@ class StatusTests(InstallTestCase):
 
             with mock.patch.object(status, "__file__", str(script)):
                 _engine, rung, root, _refusals = status.machine_scope_api(
-                    environ={"PATH": str(PACK_ROOT / "scripts")}
+                    environ={"PATH": str(PACK_ROOT / "templates/scripts")}
                 )
 
         self.assertEqual(rung, "path")
@@ -4413,7 +4419,7 @@ class StatusTests(InstallTestCase):
             )
             script = self.machine_install_arrangement(Path(raw) / "machine")
             environ = {
-                "PATH": os.pathsep.join([str(broken_bin), str(PACK_ROOT / "scripts")])
+                "PATH": os.pathsep.join([str(broken_bin), str(PACK_ROOT / "templates/scripts")])
             }
             root_path = str(PACK_ROOT.resolve())
             baseline = [entry for entry in status.sys.path if entry != root_path]
@@ -4430,8 +4436,12 @@ class StatusTests(InstallTestCase):
 
         self.assertEqual(rung, "path")
         self.assertEqual(root, PACK_ROOT.resolve())
-        self.assertEqual(len(refusals), 1)
-        self.assertEqual(refusals[0]["root"], str(broken.resolve()))
+        # The broken root, then `templates/` -- see the refusal-inventory test
+        # above for why a source checkout contributes that second entry.
+        self.assertEqual(
+            [entry["root"] for entry in refusals],
+            [str(broken.resolve()), str((PACK_ROOT / "templates").resolve())],
+        )
         self.assertIn("cannot import", refusals[0]["reason"])
 
     def test_machine_engine_candidates_use_the_raw_path_entry(self) -> None:
@@ -5160,7 +5170,7 @@ class StatusTests(InstallTestCase):
         # The installed arrangement (scripts/ beside installer/) with a real
         # `claude` stub on PATH: the only test that exercises the engine seam,
         # the CLI seam, and the human line together.
-        status_script = PACK_ROOT / "scripts/sd-ai-command-pack-status.py"
+        status_script = PACK_ROOT / "templates/scripts/sd-ai-command-pack-status.py"
         root = self.make_status_repo()
         home, state_home = self.machine_scratch()
         self.write_machine_receipt(state_home, pack_version="9.9.9")
@@ -5294,7 +5304,7 @@ class StatusTests(InstallTestCase):
         outside = Path(tempdir.name)
 
         self.assertEqual(
-            fleet.find_pack_source(PACK_ROOT / "scripts"), PACK_ROOT.resolve()
+            fleet.find_pack_source(PACK_ROOT / "templates/scripts"), PACK_ROOT.resolve()
         )
         self.assertEqual(fleet.find_pack_source(PACK_ROOT), PACK_ROOT.resolve())
         self.assertIsNone(fleet.find_pack_source(outside))
@@ -5327,7 +5337,7 @@ class StatusTests(InstallTestCase):
         original = status.__file__
         status.__file__ = str(machine_bin / "sd-ai-command-pack-status.py")
         try:
-            from_checkout = status.runtime_pack_root(cwd=PACK_ROOT / "scripts")
+            from_checkout = status.runtime_pack_root(cwd=PACK_ROOT / "templates/scripts")
             from_nowhere = status.runtime_pack_root(cwd=elsewhere)
         finally:
             status.__file__ = original

@@ -6,9 +6,9 @@
 include =
     install.py
     installer/*
-    scripts/sd-ai-command-pack-*.py
-    scripts/sd_ai_command_pack_lib.py
-    scripts/sd_ai_command_pack_fleet_lib.py
+    templates/scripts/sd-ai-command-pack-*.py
+    templates/scripts/sd_ai_command_pack_lib.py
+    templates/scripts/sd_ai_command_pack_fleet_lib.py
     .github/scripts/*.py
     */scripts/sd-ai-command-pack-*.py
     */scripts/sd_ai_command_pack_lib.py
@@ -24,10 +24,11 @@ entry =
     install.py
     */install.py
 # Shipped helper scripts execute as installed copies inside temp consumer
-# repos (and as templates/scripts twins); map every copy back onto the
-# canonical scripts/ source. Twins are byte-identical so line numbers align.
+# repos; map every copy back onto the one canonical source tree,
+# templates/scripts/. Installed copies are byte-identical so line numbers
+# align.
 helper_scripts =
-    scripts/
+    templates/scripts/
     */scripts/
 
 [report]

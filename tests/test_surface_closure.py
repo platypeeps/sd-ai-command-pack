@@ -6,14 +6,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest import mock
 
 from installer import registry
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = PACK_ROOT / "scripts/sd-ai-command-pack-surface-check.py"
+SCRIPT = PACK_ROOT / "templates/scripts/sd-ai-command-pack-surface-check.py"
 
 
 def load_checker():
@@ -240,6 +240,7 @@ class SurfaceClosureTests(unittest.TestCase):
                 COMMAND_REGISTRY=(command,),
                 SOURCE_ONLY_COMMAND_NAMES=frozenset({"sd-fleet-refresh"}),
                 SOURCE_ONLY_SKILL_REFERENCES={},
+                SOURCE_ONLY_TEMPLATE_SCRIPTS=(),
                 PLATFORM_REGISTRY={},
                 RETIRED_COMMAND_SURFACES=(),
             )
@@ -358,26 +359,24 @@ class SurfaceClosureTests(unittest.TestCase):
                     ).issubset(manifest_targets)
                 )
 
-    def test_local_and_ci_registration_drift_is_deterministic(self) -> None:
+    def test_local_gate_registration_drift_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            for relative in (
-                self.checker.CHECK_CONFIG,
-                self.checker.FULL_CHECK,
-                self.checker.CI_WORKFLOW,
-            ):
+            for relative in (self.checker.FULL_CHECK, self.checker.CI_WORKFLOW):
                 destination = root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes((PACK_ROOT / relative).read_bytes())
-            config_path = root / self.checker.CHECK_CONFIG
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["checks"] = []
-            config_path.write_text(json.dumps(config), encoding="utf-8")
+            full_check = root / self.checker.FULL_CHECK
+            helper = PurePosixPath(self.checker.SURFACE_HELPER).name
+            full_check.write_text(
+                full_check.read_text(encoding="utf-8").replace(helper, "other-helper.py"),
+                encoding="utf-8",
+            )
 
             findings = self.checker._caller_findings(root)
 
             self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].path, self.checker.CHECK_CONFIG)
+            self.assertEqual(findings[0].path, self.checker.FULL_CHECK)
             self.assertEqual(findings[0].code, "checker.registration")
 
     def test_stale_generator_reports_owner_without_mutation(self) -> None:

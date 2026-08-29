@@ -912,7 +912,7 @@ class InstallTestCase(unittest.TestCase):
         result = subprocess.run(
             [
                 "node",
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs"),
                 "final-bundle",
                 "--mode",
                 "completion",
@@ -947,7 +947,7 @@ class InstallTestCase(unittest.TestCase):
         result = subprocess.run(
             [
                 "node",
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs"),
                 "final-bundle",
                 "--mode",
                 "planning",
@@ -1463,7 +1463,7 @@ class InstallTestCase(unittest.TestCase):
         return subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
                 "--repo",
                 str(root),
             ],

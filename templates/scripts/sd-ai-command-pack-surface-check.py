@@ -33,13 +33,11 @@ MAX_GRAPH_ITEMS = 20_000
 MAX_FINDINGS = 200
 HELP_CATALOG = "templates/.agents/skills/sd-help/references/command-catalog.md"
 SURFACE_HELPER = "scripts/sd-ai-command-pack-surface-check.py"
-CHECK_CONFIG = ".sd-ai-command-pack/check.json"
 FULL_CHECK = "templates/scripts/sd-ai-command-pack-full-check.sh"
 CI_WORKFLOW = ".github/workflows/tests.yml"
 RELEASE_EVIDENCE = (
     "manifest.json",
     "CHANGELOG.md",
-    ".sd-ai-command-pack/manifest.json",
 )
 
 
@@ -451,6 +449,7 @@ def _source_only_paths(registry: ModuleType, linter: ModuleType) -> set[str]:
         )
         for reference in registry.SOURCE_ONLY_SKILL_REFERENCES.get(name, ()):
             paths.add(f"templates/.agents/skills/{name}/{reference}")
+    paths.update(registry.SOURCE_ONLY_TEMPLATE_SCRIPTS)
     return paths
 
 
@@ -465,7 +464,7 @@ def _node_kind(path: str, source_only: set[str]) -> str:
         return "generated"
     if path.startswith("docs/") or path == "README.md":
         return "documentation-only"
-    if path.startswith(".github/") or path.startswith("tests/") or path == CHECK_CONFIG:
+    if path.startswith(".github/") or path.startswith("tests/"):
         return "check-only"
     return "installable"
 
@@ -519,13 +518,11 @@ def _graph(
     for path in RELEASE_EVIDENCE:
         _add_node(nodes, f"path:{path}", "provenance", path)
     for path, kind in (
-        (CHECK_CONFIG, "check-only"),
         (FULL_CHECK, "check-only"),
         (CI_WORKFLOW, "check-only"),
         (SURFACE_HELPER, "check-only"),
     ):
         _add_node(nodes, f"path:{path}", kind, path)
-    edges.add(Edge(f"path:{CHECK_CONFIG}", "checks-with", f"path:{SURFACE_HELPER}"))
     edges.add(Edge(f"path:{FULL_CHECK}", "checks-with", f"path:{SURFACE_HELPER}"))
     if len(nodes) > MAX_GRAPH_ITEMS or len(edges) > MAX_GRAPH_ITEMS:
         raise SurfaceInputError("surface graph exceeds the bounded node or edge limit")
@@ -558,30 +555,6 @@ def _closure(
 
 def _caller_findings(root: Path) -> list[Finding]:
     findings: list[Finding] = []
-    _, raw_config = _load_json(root, CHECK_CONFIG, label="sd-check configuration")
-    if not isinstance(raw_config, dict) or raw_config.get("schemaVersion") != 1:
-        raise SurfaceInputError("sd-check configuration must use schemaVersion 1")
-    checks = raw_config.get("checks")
-    if not isinstance(checks, list):
-        raise SurfaceInputError("sd-check configuration checks must be an array")
-    registered = 0
-    for index, check in enumerate(checks):
-        if not isinstance(check, dict):
-            raise SurfaceInputError(f"sd-check configuration checks[{index}] must be an object")
-        argv = check.get("argv")
-        if not isinstance(argv, list) or any(not isinstance(value, str) for value in argv):
-            raise SurfaceInputError(f"sd-check configuration checks[{index}].argv must be a text array")
-        registered += sum(value == SURFACE_HELPER for value in argv)
-    if registered != 1:
-        findings.append(
-            Finding(
-                "checker.registration",
-                CHECK_CONFIG,
-                "checks-with",
-                f"sd-check must register {SURFACE_HELPER} exactly once; found {registered}",
-                f"edit {CHECK_CONFIG}",
-            )
-        )
     full_check = _regular_text(root, FULL_CHECK, label="local pre-publication gate")
     local_count = full_check.count(PurePosixPath(SURFACE_HELPER).name)
     if local_count != 1:
@@ -641,19 +614,7 @@ def _release_evidence_findings(root: Path) -> list[Finding]:
                     relative,
                     "requires-release-evidence",
                     str(error),
-                    "restore release evidence, then run make sync",
-                )
-            )
-    receipt = root / ".sd-ai-command-pack/manifest.json"
-    if receipt.is_file() and not receipt.is_symlink():
-        if receipt.read_bytes() != (root / "manifest.json").read_bytes():
-            findings.append(
-                Finding(
-                    "provenance.stale",
-                    ".sd-ai-command-pack/manifest.json",
-                    "mirrors",
-                    "installed pack manifest differs from the release manifest",
-                    "make sync",
+                    "restore release evidence",
                 )
             )
     return findings
@@ -720,37 +681,6 @@ def _evaluate(root: Path, base_ref: str | None) -> dict[str, object]:
     generated = _generator_finding(root)
     if generated is not None:
         findings.append(generated)
-
-    for entry in entries:
-        source = entry["source"]
-        target = entry["target"]
-        target_path = root / target
-        if entry["kind"] == "managed-block" or not target_path.exists():
-            continue
-        try:
-            target_bytes = _regular_bytes(root, target, label="generated mirror")
-            source_bytes = _regular_bytes(root, source, label="template source")
-        except SurfaceInputError as error:
-            findings.append(
-                Finding(
-                    "mirror.invalid",
-                    target,
-                    "mirrors",
-                    str(error),
-                    "make sync",
-                )
-            )
-            continue
-        if target_bytes != source_bytes:
-            findings.append(
-                Finding(
-                    "mirror.stale",
-                    target,
-                    "mirrors",
-                    f"generated mirror differs from {source}",
-                    "make sync",
-                )
-            )
 
     resolved_base, changed_paths = collect_changed_paths(root, base_ref)
     nodes, edges = _graph(registry, entries, source_only)

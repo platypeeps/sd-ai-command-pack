@@ -1803,7 +1803,7 @@ class InstallCoreTests(InstallTestCase):
         # hand-rolled line check, so this cannot drift from _body_has_heading()
         # (which also matches headings behind Markdown markers like "- "/"> ").
         scope_check = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_pr_body_scope_template_guard",
         )
         for heading in (
@@ -1970,7 +1970,7 @@ class InstallCoreTests(InstallTestCase):
     def test_configure_fleet_lazy_loader_handles_cached_path_and_missing_helper(
         self,
     ) -> None:
-        scripts_path = str((PACK_ROOT / "scripts").resolve())
+        scripts_path = str((PACK_ROOT / "templates/scripts").resolve())
         update = object()
         fleet_module = mock.Mock()
         fleet_module.configure_fleet_profile.return_value = update
@@ -2401,15 +2401,15 @@ class InstallCoreTests(InstallTestCase):
 
     def test_platform_registry_dirs_covered_by_shipped_scanners(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_registry_coverage",
         )
         scope_script = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_pr_body_scope_registry_coverage",
         )
         review_scope_text = (
-            install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh"
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh"
         ).read_text(encoding="utf-8")
         scope_patterns = {
             pattern for rule in scope_script.DEFAULT_RULES for pattern in rule.patterns
@@ -3704,11 +3704,11 @@ class InstallCoreTests(InstallTestCase):
 
     def test_review_provider_scan_excludes_are_managed_in_scripts(self) -> None:
         lib_paths = [
-            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
         ]
         runner_paths = [
-            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
         ]
         expected_dirs = (
@@ -3770,12 +3770,12 @@ class InstallCoreTests(InstallTestCase):
             "join_by_comma",
         )
         lib_paths = [
-            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
         ]
         runner_paths = [
-            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
         ]
@@ -3795,10 +3795,10 @@ class InstallCoreTests(InstallTestCase):
         self,
     ) -> None:
         script_paths = [
-            install.ROOT / "scripts/sd-ai-command-pack-full-check.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-scope.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             install.ROOT / "templates/scripts/sd-ai-command-pack-full-check.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-scope.sh",
@@ -3810,9 +3810,9 @@ class InstallCoreTests(InstallTestCase):
             self.assertNotIn("origin/main", content, script_path)
 
         for script_path in (
-            install.ROOT / "scripts/sd-ai-command-pack-shell-lib.sh",
             install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
         ):
             content = script_path.read_text(encoding="utf-8")
@@ -3884,7 +3884,7 @@ class InstallCoreTests(InstallTestCase):
         audit = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,

@@ -13,9 +13,8 @@ resolver is ever reached.
 Scanned trees are enumerated from the filesystem, not from a fixed list, so a
 skill or reference document added later is covered without editing this gate.
 Only authored trees are scanned; the generated copies under
-``templates/{.commands,.claude,.gemini,.github}`` and the repository's own
-``.agents/skills``/``.claude/skills`` are refreshed by ``make generate`` and
-``make sync``, and scanning them would report every defect twice and fail a
+``templates/{.commands,.claude,.gemini,.github}`` are refreshed by
+``make generate``, and scanning them would report every defect twice and fail a
 tree whose only repair is regeneration.
 """
 

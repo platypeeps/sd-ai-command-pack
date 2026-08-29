@@ -15,7 +15,7 @@ unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
-CLASSIFIER = PACK_ROOT / "scripts/sd-ai-command-pack-fleet-finding-classify.py"
+CLASSIFIER = PACK_ROOT / "templates/scripts/sd-ai-command-pack-fleet-finding-classify.py"
 
 
 class FleetFindingClassifyTests(InstallTestCase):

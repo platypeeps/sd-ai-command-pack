@@ -496,69 +496,6 @@ class HelpCommandTests(InstallTestCase):
         ), self.assertRaisesRegex(RuntimeError, "no command target pattern"):
             registry.command_installed_targets("sd-one", "one")
 
-    def test_source_only_adapter_twins_follow_present_anchors(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_name:
-            root = Path(temp_name)
-            for anchor in (".claude", ".gemini", ".github", ".opencode"):
-                (root / anchor).mkdir()
-
-            self.assertEqual(
-                registry.source_only_adapter_twins(
-                    "sd-one",
-                    "one",
-                    registry.GENERATED_COMMAND_TARGET_FAMILIES,
-                    root=root,
-                ),
-                (
-                    (
-                        "templates/.claude/commands/sd/one.md",
-                        ".claude/commands/sd/one.md",
-                    ),
-                    (
-                        "templates/.gemini/commands/sd/one.toml",
-                        ".gemini/commands/sd/one.toml",
-                    ),
-                    (
-                        "templates/.github/prompts/sd-one.prompt.md",
-                        ".github/prompts/sd-one.prompt.md",
-                    ),
-                    (
-                        "templates/.commands/sd-one.md",
-                        ".opencode/commands/sd-one.md",
-                    ),
-                ),
-            )
-            (root / ".cursor").mkdir()
-            self.assertIn(
-                ("templates/.commands/sd-one.md", ".cursor/commands/sd-one.md"),
-                registry.source_only_adapter_twins(
-                    "sd-one",
-                    "one",
-                    registry.GENERATED_COMMAND_TARGET_FAMILIES,
-                    root=root,
-                ),
-            )
-            self.assertEqual(
-                registry.source_only_adapter_twins("sd-one", "one", (), root=root),
-                (),
-            )
-
-    def test_source_only_adapter_twins_reject_platform_without_pattern(self) -> None:
-        invalid_opencode = registry.PlatformInfo(
-            directory=".opencode",
-            command_kind="command",
-            command_target_pattern=None,
-        )
-        with tempfile.TemporaryDirectory() as temp_name, mock.patch.dict(
-            registry.PLATFORM_REGISTRY, {"opencode": invalid_opencode}
-        ), self.assertRaisesRegex(RuntimeError, "no command target pattern"):
-            registry.source_only_adapter_twins(
-                "sd-one",
-                "one",
-                registry.GENERATED_COMMAND_TARGET_FAMILIES,
-                root=Path(temp_name),
-            )
-
     def test_retired_surface_lookup_reports_missing_id(self) -> None:
         with self.assertRaisesRegex(
             RuntimeError, "unknown retired command surface id: missing"

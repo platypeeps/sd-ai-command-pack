@@ -17,7 +17,7 @@ run_coverage_report() {
   "$PYTHON_BIN" -m coverage report "$@"
 }
 
-run_coverage_report --include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py,scripts/sd_ai_command_pack_fleet_lib.py" --fail-under=76
+run_coverage_report --include="templates/scripts/sd-ai-command-pack-*.py,templates/scripts/sd_ai_command_pack_lib.py,templates/scripts/sd_ai_command_pack_fleet_lib.py" --fail-under=76
 
 while read -r script floor; do
   case "$script" in
@@ -30,28 +30,28 @@ while read -r script floor; do
   printf '\n==> %s coverage floor %s%%\n' "$script" "$floor"
   run_coverage_report --include="$script" --fail-under="$floor"
 done <<'EOF'
-scripts/sd-ai-command-pack-audit-route.py 77
-scripts/sd-ai-command-pack-audit-inventory.py 85
-scripts/sd-ai-command-pack-check.py 74
-scripts/sd-ai-command-pack-fleet-controller.py 76
-scripts/sd-ai-command-pack-fleet-finding-classify.py 85
-scripts/sd-ai-command-pack-thin-resweep.py 76
-scripts/sd-ai-command-pack-fleet-timing.py 88
-scripts/sd-ai-command-pack-fleet-wave-plan.py 85
-scripts/sd-ai-command-pack-housekeeping-result.py 97
-scripts/sd-ai-command-pack-install-audit.py 89
-scripts/sd-ai-command-pack-pr-body-scope.py 78
-scripts/sd-ai-command-pack-pr-eligibility.py 85
-scripts/sd-ai-command-pack-record-session.py 79
-scripts/sd-ai-command-pack-recovery-artifacts.py 80
-scripts/sd-ai-command-pack-review-layout.py 95
-scripts/sd-ai-command-pack-review-learnings.py 79
-scripts/sd-ai-command-pack-review-local.py 70
-scripts/sd-ai-command-pack-review.py 70
-scripts/sd-ai-command-pack-status.py 80
-scripts/sd-ai-command-pack-surface-check.py 70
-scripts/sd-ai-command-pack-update-spec-kb.py 83
-scripts/sd-ai-command-pack-work-loop.py 80
-scripts/sd_ai_command_pack_lib.py 88
-scripts/sd_ai_command_pack_fleet_lib.py 90
+templates/scripts/sd-ai-command-pack-audit-route.py 77
+templates/scripts/sd-ai-command-pack-audit-inventory.py 85
+templates/scripts/sd-ai-command-pack-check.py 74
+templates/scripts/sd-ai-command-pack-fleet-controller.py 76
+templates/scripts/sd-ai-command-pack-fleet-finding-classify.py 85
+templates/scripts/sd-ai-command-pack-thin-resweep.py 76
+templates/scripts/sd-ai-command-pack-fleet-timing.py 88
+templates/scripts/sd-ai-command-pack-fleet-wave-plan.py 85
+templates/scripts/sd-ai-command-pack-housekeeping-result.py 97
+templates/scripts/sd-ai-command-pack-install-audit.py 89
+templates/scripts/sd-ai-command-pack-pr-body-scope.py 78
+templates/scripts/sd-ai-command-pack-pr-eligibility.py 85
+templates/scripts/sd-ai-command-pack-record-session.py 79
+templates/scripts/sd-ai-command-pack-recovery-artifacts.py 80
+templates/scripts/sd-ai-command-pack-review-layout.py 95
+templates/scripts/sd-ai-command-pack-review-learnings.py 79
+templates/scripts/sd-ai-command-pack-review-local.py 70
+templates/scripts/sd-ai-command-pack-review.py 70
+templates/scripts/sd-ai-command-pack-status.py 80
+templates/scripts/sd-ai-command-pack-surface-check.py 70
+templates/scripts/sd-ai-command-pack-update-spec-kb.py 83
+templates/scripts/sd-ai-command-pack-work-loop.py 80
+templates/scripts/sd_ai_command_pack_lib.py 88
+templates/scripts/sd_ai_command_pack_fleet_lib.py 90
 EOF

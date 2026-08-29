@@ -8,13 +8,14 @@ update meet, so these tests are organized around the seam between them:
   installing from the old root would claim an update that did not happen.
 * **Skew** — when the plugin half lands and the machine half does not, the
   divergence has to be legible in the run's own output, and a rerun has to
-  converge. That pair is the acceptance criterion, so it runs against the real
-  plugin root and the real machine installer rather than a stub.
+  converge.
 
-The Claude CLI is stubbed on PATH the way the housekeeping tests stub `gh`; the
-plugin root it names is either the committed `plugins/sd` tree or a synthetic
-root whose machine installer is a marker-writing stub, depending on whether the
-test needs to reach the installer at all.
+The Claude CLI is stubbed on PATH the way the housekeeping tests stub `gh`, and
+the plugin root it names is a synthetic root whose machine installer is a
+marker-writing stub. The pack no longer carries a plugin tree of its own -- the
+generator and the `plugins/sd` payload went with the release train -- so the
+end-to-end half of this seam has no real root to run against until a new
+installer ships.
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ Path = _support.Path
 install = _support.install
 InstallTestCase = _support.InstallTestCase
 
-PLUGIN_ROOT = _support.PACK_ROOT / "plugins" / "sd"
 PLUGIN_ID = "sd@sd-ai-command-pack"
 
 STUB_CLAUDE = """#!/usr/bin/env bash
@@ -173,76 +173,11 @@ class PackUpdateTests(InstallTestCase):
             return []
         return path.read_text(encoding="utf-8").splitlines()
 
-    # -- the real plugin root: both halves, and the skew between them --------
-
-    def test_update_then_machine_install_reports_current(self) -> None:
-        root = self.make_update_fixture()
-        self.write_claude_stub(root, self.listing_for(PLUGIN_ROOT))
-
-        result = self.run_pack_update(root)
-
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn(f"plugin update {PLUGIN_ID}", self.claude_log(root))
-        self.assertIn("plugin list --json", self.claude_log(root))
-        self.assertIn(f"installing machine surfaces from {PLUGIN_ROOT}", result.stdout)
-        self.assertIn("status:  current", result.stdout)
-        # The receipt lands under the state root this run was given, and it
-        # records the version the resolved plugin root advertises.
-        receipt = root / "state" / "machine" / "machine-receipt.json"
-        self.assertTrue(receipt.is_file(), result.stdout)
-        plugin_version = json.loads(
-            (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
-        )["version"]
-        self.assertEqual(
-            json.loads(receipt.read_text(encoding="utf-8"))["packVersion"],
-            plugin_version,
-        )
-        self.assertIn(f"plugin:  {PLUGIN_ID} {plugin_version}", result.stdout)
-
-    def test_rerun_after_a_complete_update_is_a_no_op(self) -> None:
-        root = self.make_update_fixture()
-        self.write_claude_stub(root, self.listing_for(PLUGIN_ROOT))
-        first = self.run_pack_update(root)
-        self.assertEqual(first.returncode, 0, first.stdout)
-
-        second = self.run_pack_update(root)
-
-        self.assertEqual(second.returncode, 0, second.stdout)
-        self.assertIn("owned-current", second.stdout)
-        self.assertIn("status:  current", second.stdout)
-
-    def test_failed_machine_install_shows_skew_and_a_rerun_converges(self) -> None:
-        root = self.make_update_fixture()
-        self.write_claude_stub(root, self.listing_for(PLUGIN_ROOT))
-        # A file the receipt does not own at a payload destination: the
-        # installer refuses the whole run, which is the "plugin updated,
-        # machine install failed" half-state the update has to make legible.
-        conflict = root / "home" / ".agents" / "skills" / "sd-check" / "SKILL.md"
-        conflict.parent.mkdir(parents=True)
-        conflict.write_text("locally authored\n", encoding="utf-8")
-
-        interrupted = self.run_pack_update(root)
-
-        self.assertNotEqual(interrupted.returncode, 0)
-        self.assertIn("refusing to install over files this receipt does not own", interrupted.stdout)
-        self.assertIn("machine: none unknown", interrupted.stdout)
-        self.assertIn("status:  skew", interrupted.stdout)
-        self.assertIn("Rerun this script to converge", interrupted.stdout)
-        self.assertFalse((root / "state" / "machine" / "machine-receipt.json").exists())
-        self.assertEqual(conflict.read_text(encoding="utf-8"), "locally authored\n")
-
-        conflict.unlink()
-        converged = self.run_pack_update(root)
-
-        self.assertEqual(converged.returncode, 0, converged.stdout)
-        self.assertIn("status:  current", converged.stdout)
-        self.assertTrue((root / "state" / "machine" / "machine-receipt.json").is_file())
-
     # -- fail-closed resolution: nothing installs -----------------------------
 
     def test_missing_claude_cli_fails_before_anything_runs(self) -> None:
         root = self.make_update_fixture()
-        self.write_claude_stub(root, self.listing_for(PLUGIN_ROOT))
+        self.write_claude_stub(root, self.listing_for(self.write_stub_plugin_root(root)))
         # An empty directory is the whole PATH, so no `claude` can be found
         # here or anywhere the developer happens to have installed one. The
         # script reaches its check with shell builtins and the absolute
@@ -323,16 +258,20 @@ class PackUpdateTests(InstallTestCase):
         # the same root, so there is nothing to refuse -- and refusing would
         # strand the only refresh path a thin machine has.
         root = self.make_update_fixture()
-        listing = self.listing_for(PLUGIN_ROOT)
+        plugin_root = self.write_stub_plugin_root(root)
+        listing = self.listing_for(plugin_root)
         duplicate = dict(listing[-1])
         duplicate["scope"] = "project"
         duplicate["projectPath"] = str(root)
         self.write_claude_stub(root, [*listing, duplicate])
 
-        result = self.run_pack_update(root)
+        result = self.run_pack_update(
+            root,
+            STUB_INSTALL_STATUS_JSON='{"state": "installed", "packVersion": "9.9.9"}',
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn(f"installing machine surfaces from {PLUGIN_ROOT}", result.stdout)
+        self.assertIn(f"installing machine surfaces from {plugin_root}", result.stdout)
         self.assertIn("status:  current", result.stdout)
 
     def test_conflicting_install_paths_are_refused(self) -> None:
@@ -450,7 +389,7 @@ class PackUpdateTests(InstallTestCase):
 
     def test_unknown_option_is_a_usage_error(self) -> None:
         root = self.make_update_fixture()
-        self.write_claude_stub(root, self.listing_for(PLUGIN_ROOT))
+        self.write_claude_stub(root, self.listing_for(self.write_stub_plugin_root(root)))
 
         result = self.run_pack_update(root, "--nonesuch")
 

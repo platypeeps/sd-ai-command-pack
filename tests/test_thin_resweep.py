@@ -54,7 +54,7 @@ SHELL_HELPERS = tuple(
 
 def load_resweep():
     """Import the shipped script by path; its name is not a module name."""
-    path = ROOT / "scripts/sd-ai-command-pack-thin-resweep.py"
+    path = ROOT / "templates/scripts/sd-ai-command-pack-thin-resweep.py"
     spec = importlib.util.spec_from_file_location("thin_resweep", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -446,7 +446,7 @@ class ClassifierDigestTests(unittest.TestCase):
             "installer/conversion.py",
             "installer/manifest.py",
             "manifest.json",
-            "scripts/sd-ai-command-pack-thin-resweep.py",
+            "templates/scripts/sd-ai-command-pack-thin-resweep.py",
             *__import__("installer.conversion", fromlist=["x"])
             .force_preserved_template_sources(ROOT),
         ):
@@ -473,7 +473,9 @@ class ClassifierDigestTests(unittest.TestCase):
         self.assert_digest_moves("templates/.github/PULL_REQUEST_TEMPLATE.md", "\n- x\n")
 
     def test_editing_the_resweep_rule_moves_the_digest(self) -> None:
-        self.assert_digest_moves("scripts/sd-ai-command-pack-thin-resweep.py", "\n# x\n")
+        self.assert_digest_moves(
+            "templates/scripts/sd-ai-command-pack-thin-resweep.py", "\n# x\n"
+        )
 
     def test_editing_the_manifest_moves_the_digest(self) -> None:
         self.assert_digest_moves("manifest.json", "\n")
@@ -494,12 +496,23 @@ class ShippingBoundaryTests(unittest.TestCase):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         sources = {row.get("source") for row in manifest["files"]}
         targets = {row.get("target") for row in manifest["files"]}
-        self.assertNotIn("scripts/sd-ai-command-pack-thin-resweep.py", sources)
-        self.assertNotIn("scripts/sd-ai-command-pack-thin-resweep.py", targets)
+        self.assertNotIn(
+            "templates/scripts/sd-ai-command-pack-thin-resweep.py", sources
+        )
+        self.assertNotIn(
+            "templates/scripts/sd-ai-command-pack-thin-resweep.py", targets
+        )
 
-    def test_the_resweep_has_no_templates_twin(self) -> None:
-        self.assertFalse(
-            (ROOT / "templates/scripts/sd-ai-command-pack-thin-resweep.py").exists()
+    def test_the_resweep_is_registered_source_only(self) -> None:
+        # It sits under `templates/scripts/` so it can import the shared helper
+        # library as a sibling, so the drift gate would otherwise demand a
+        # manifest row for it. The source-only registration is what keeps the
+        # single copy honest without shipping it.
+        from installer import registry
+
+        self.assertIn(
+            "templates/scripts/sd-ai-command-pack-thin-resweep.py",
+            registry.SOURCE_ONLY_TEMPLATE_SCRIPTS,
         )
 
 

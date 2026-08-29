@@ -739,7 +739,7 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_pr_body_scope_default_rule_patterns_match_representatives(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_pr_body_scope_default_rules",
         )
 
@@ -786,11 +786,11 @@ class ReviewScopeTests(InstallTestCase):
         self,
     ) -> None:
         pr_body_scope = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_pr_body_scope_manifest_coverage",
         )
         install_audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_manifest_coverage",
         )
         _, files = install.load_manifest()
@@ -908,7 +908,7 @@ class ReviewScopeTests(InstallTestCase):
         self.assertIn("scripts/local-review-wrapper.py", result.stdout)
 
     def test_pr_body_scope_merge_rules_dedupes_patterns_in_order(self) -> None:
-        module_path = install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py"
+        module_path = install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py"
         module = self.load_module_from_path(
             module_path,
             "sd_ai_command_pack_pr_body_scope_test",
@@ -938,7 +938,7 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_pr_body_scope_accepts_markdown_heading_without_colon(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_ai_command_pack_pr_body_scope_heading_test",
         )
 
@@ -957,7 +957,7 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_pr_body_scope_double_star_patterns_match_nested_paths(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_ai_command_pack_pr_body_scope_match_test",
         )
 
@@ -970,7 +970,7 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_pr_body_scope_split_changed_files_strips_path_whitespace(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_ai_command_pack_pr_body_scope_split_test",
         )
 
@@ -983,7 +983,7 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_pr_body_scope_config_rejects_empty_headings(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_ai_command_pack_pr_body_scope_config_shape_test",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-pr-body-scope-test-")
@@ -1012,7 +1012,7 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_pr_body_scope_config_can_include_installed_targets(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-pr-body-scope.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-pr-body-scope.py",
             "sd_ai_command_pack_pr_body_scope_installed_targets_test",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-pr-body-scope-test-")
@@ -1737,14 +1737,10 @@ class ReviewScopeTests(InstallTestCase):
 
     def test_review_pr_remote_reviewer_is_configurable(self) -> None:
         skill_paths = [
-            install.ROOT / ".agents/skills/sd-review-pr/SKILL.md",
             install.ROOT / "templates/.agents/skills/sd-review-pr/SKILL.md",
         ]
         adapter_paths = [
-            install.ROOT / ".claude/commands/sd/review-pr.md",
-            install.ROOT / ".gemini/commands/sd/review-pr.toml",
             install.ROOT / ".github/prompts/sd-review-pr.prompt.md",
-            install.ROOT / ".opencode/commands/sd-review-pr.md",
             install.ROOT / "templates/.claude/commands/sd/review-pr.md",
             install.ROOT / "templates/.commands/sd-review-pr.md",
             install.ROOT / "templates/.gemini/commands/sd/review-pr.toml",

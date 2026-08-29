@@ -19,7 +19,7 @@ unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
-CONTROLLER = PACK_ROOT / "scripts/sd-ai-command-pack-fleet-controller.py"
+CONTROLLER = PACK_ROOT / "templates/scripts/sd-ai-command-pack-fleet-controller.py"
 HEAD = "a" * 40
 OTHER_HEAD = "b" * 40
 

@@ -34,7 +34,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_learnings_survive_non_object_graphql_payload(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_payloads",
         )
         with mock.patch.object(learnings, "_run_gh_json", return_value=None):
@@ -181,7 +181,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_review_window_marks_unread_pages_as_truncated(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_thread_bounds",
         )
         payload = {
@@ -469,7 +469,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_learnings_neutralize_embedded_managed_markers(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_markers",
         )
         comment = learnings.PullRequestComment(
@@ -735,7 +735,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_signal_exposes_bounded_cluster_contract(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_planning_contract",
         )
         raw_body = "Validate the boundary and failure matrix. " + "private detail " * 30
@@ -784,7 +784,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_signal_selects_only_relevant_path_families(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_planning_selection",
         )
         comments = [
@@ -837,7 +837,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_signal_reports_tracked_snapshot_freshness(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_snapshot_status",
         )
         comment = module.PullRequestComment(
@@ -883,7 +883,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_review_attempt_cache_reuses_one_scan_with_private_receipt(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_attempt_cache",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-attempt-")
@@ -946,7 +946,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_review_attempt_cache_reports_stale_and_unavailable_evidence(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_attempt_stale",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-stale-")
@@ -1026,7 +1026,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_attempt_cli_reuses_receipt_without_markdown_writes(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_planning_cli",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-cli-")
@@ -1090,7 +1090,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_review_attempt_cache_rejects_repository_storage(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_attempt_boundary",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-boundary-")
@@ -1111,7 +1111,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_arguments_are_bounded_and_mutually_exclusive(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_planning_arguments",
         )
         parser = module._build_parser()
@@ -1206,7 +1206,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_path_and_signal_validation_is_explicit(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_planning_validation",
         )
         invalid_paths = (
@@ -1284,7 +1284,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_cache_rejects_unsafe_inputs_and_receipts(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_cache_validation",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-security-")
@@ -1370,7 +1370,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_cache_refreshes_and_handles_invalid_collectors(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_cache_refresh",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-refresh-")
@@ -1433,7 +1433,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_planning_cli_supports_explicit_prs_and_reports_collection_errors(self) -> None:
         module = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_planning_pr_cli",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-review-learning-pr-cli-")
@@ -1512,7 +1512,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_learnings_truncate_summaries_at_word_boundaries(self) -> None:
         learnings = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_truncation",
         )
 
@@ -1539,7 +1539,7 @@ class ReviewLearningsTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"),
             ],
             cwd=root,
             text=True,
@@ -2487,7 +2487,7 @@ class ReviewLearningsTests(InstallTestCase):
         # Regression: a hung git/gh call must surface the [sd-review-learnings:*]
         # exit-2 contract, not a raw subprocess.TimeoutExpired traceback.
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_timeout_regression",
         )
         root = self.make_repo()
@@ -2531,7 +2531,7 @@ class ReviewLearningsTests(InstallTestCase):
         # A nonzero `git ls-files` exit must surface as RuntimeError carrying
         # git's stderr, with a stable fallback message when stderr is blank.
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_untracked_failure",
         )
         failed_result = subprocess.CompletedProcess(
@@ -2558,7 +2558,7 @@ class ReviewLearningsTests(InstallTestCase):
 
     def test_review_learnings_working_tree_diff_includes_untracked_files(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             "sd_review_learnings_untracked_diff",
         )
         root = Path(tempfile.mkdtemp(prefix="sd-learnings-untracked-"))
@@ -2598,7 +2598,7 @@ class ManagedBlockNarrowingTests(InstallTestCase):
 
     def _module(self, name: str):  # noqa: ANN202
         return self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py",
             name,
         )
 
@@ -2642,7 +2642,7 @@ class ManagedBlockNarrowingTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-review-learnings.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-learnings.py"),
                 "--allow-narrowing",
             ],
             text=True,

@@ -112,16 +112,6 @@ class CompletionLifecycleReferenceTests(unittest.TestCase):
         self.assertIn("prospectively", text)
         self.assertNotIn("rewrite historical", text.lower())
 
-    def test_installed_root_reference_matches_template(self) -> None:
-        template = _reference_text("templates/.agents")
-        installed = _reference_text(".agents")
-        self.assertEqual(
-            template,
-            installed,
-            "installed sd-help completion-lifecycle reference drifted from "
-            "template; run make generate && make sync",
-        )
-
 
 class CompletionLifecycleSkillContractTests(unittest.TestCase):
     def test_every_boundary_skill_links_the_shared_reference(self) -> None:

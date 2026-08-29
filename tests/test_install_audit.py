@@ -36,7 +36,7 @@ class InstallAuditTests(InstallTestCase):
         self,
     ) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_scan_bases",
         )
         for pattern in audit.PACK_FILE_PATTERNS:
@@ -95,7 +95,7 @@ class InstallAuditTests(InstallTestCase):
 
     def test_install_audit_allows_source_only_fleet_files_in_source_repo(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_source_only",
         )
         root = self.make_repo()
@@ -140,7 +140,7 @@ class InstallAuditTests(InstallTestCase):
 
     def test_consumer_audit_does_not_require_source_only_fleet_helpers(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_consumer_source_only",
         )
         root = self.make_repo()
@@ -184,7 +184,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -289,7 +289,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -312,7 +312,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
                 "--expected-platform",
                 "cursor",
             ],
@@ -519,7 +519,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -552,7 +552,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             env={**os.environ, "PATH": ""},
@@ -570,7 +570,7 @@ class InstallAuditTests(InstallTestCase):
 
     def test_install_audit_batches_structural_gitignore_candidates(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_structural_batch",
         )
         root = self.make_repo()
@@ -613,7 +613,7 @@ class InstallAuditTests(InstallTestCase):
 
     def test_install_audit_check_ignore_exit_one_means_no_matches(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_check_ignore_none",
         )
         root = self.make_repo()
@@ -644,7 +644,7 @@ class InstallAuditTests(InstallTestCase):
 
     def test_install_audit_batches_expected_target_gitignore_candidates(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_expected_batch",
         )
         root = self.make_repo()
@@ -707,7 +707,7 @@ class InstallAuditTests(InstallTestCase):
 
     def test_install_audit_batches_provenance_missing_targets(self) -> None:
         audit = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_provenance_batch",
         )
         root = self.make_repo()
@@ -808,7 +808,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -830,7 +830,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -875,7 +875,7 @@ class InstallAuditTests(InstallTestCase):
                             sys.executable,
                             str(
                                 PACK_ROOT
-                                / "scripts/sd-ai-command-pack-install-audit.py"
+                                / "templates/scripts/sd-ai-command-pack-install-audit.py"
                             ),
                             "--upstream-manifest",
                             str(reference),
@@ -892,7 +892,7 @@ class InstallAuditTests(InstallTestCase):
             missing = subprocess.run(
                 [
                     sys.executable,
-                    str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                    str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
                     "--upstream-manifest",
                     str(Path(temp_dir) / "missing.json"),
                 ],
@@ -910,7 +910,7 @@ class InstallAuditTests(InstallTestCase):
             malformed = subprocess.run(
                 [
                     sys.executable,
-                    str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                    str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
                     "--upstream-manifest",
                     str(invalid_utf8),
                 ],
@@ -933,7 +933,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -955,7 +955,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -970,7 +970,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -985,7 +985,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1021,7 +1021,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1181,7 +1181,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1210,7 +1210,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1249,7 +1249,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1278,7 +1278,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1294,7 +1294,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1317,7 +1317,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1349,7 +1349,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1380,7 +1380,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1414,7 +1414,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1521,7 +1521,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1558,7 +1558,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1589,7 +1589,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1613,7 +1613,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1646,7 +1646,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1674,7 +1674,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,
@@ -1749,7 +1749,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
                 "--help",
             ],
             env={**os.environ, "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0"},
@@ -1765,7 +1765,7 @@ class InstallAuditTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
                 "--definitely-not-a-flag",
             ],
             env={**os.environ, "SD_AI_COMMAND_PACK_INSTALL_AUDIT": "0"},
@@ -1855,7 +1855,7 @@ class InstallAuditTests(InstallTestCase):
         # caller's `== THIN_MODE` -- would otherwise read `thin-corrupt` as a
         # thin install and skip the completeness check on a damaged pin.
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_installed_mode",
         )
         root = self.make_repo()
@@ -1877,13 +1877,24 @@ class InstallAuditTests(InstallTestCase):
 
     def test_install_audit_legacy_advisories_cover_all_pack_scripts(self) -> None:
         module = self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_legacy_paths",
         )
+        # Source-only operator tooling lives beside the payload so it can
+        # import the shared helper library as a sibling, but it is never
+        # installed into a consumer, so no consumer can hold a rename-era copy
+        # of it to be advised about.
+        from installer import registry
+
+        source_only = {
+            path.rsplit("/", 1)[-1] for path in registry.SOURCE_ONLY_TEMPLATE_SCRIPTS
+        }
         current_scripts = sorted(
             path.name
             for path in (install.ROOT / "templates/scripts").iterdir()
-            if path.is_file() and path.name.startswith("sd-ai-command-pack-")
+            if path.is_file()
+            and path.name.startswith("sd-ai-command-pack-")
+            and path.name not in source_only
         )
         self.assertTrue(current_scripts)
         post_rename_scripts = {
@@ -2042,7 +2053,7 @@ class ProviderConfigDriftTests(InstallTestCase):
 
     def audit_module(self):
         return self.load_module_from_path(
-            install.ROOT / "scripts/sd-ai-command-pack-install-audit.py",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py",
             "sd_install_audit_provider_config",
         )
 

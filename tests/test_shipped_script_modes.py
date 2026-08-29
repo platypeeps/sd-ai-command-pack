@@ -33,7 +33,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - import shim
 
 PACK_ROOT = _support.PACK_ROOT
 GATE = PACK_ROOT / ".github/scripts/check-shipped-script-modes.py"
-TOOLCHAIN = PACK_ROOT / "scripts/sd-ai-command-pack-toolchain.sh"
+TOOLCHAIN = PACK_ROOT / "templates/scripts/sd-ai-command-pack-toolchain.sh"
 
 if str(PACK_ROOT) not in sys.path:
     sys.path.insert(0, str(PACK_ROOT))
@@ -109,13 +109,13 @@ class ShippedScriptModeGateTest(unittest.TestCase):
         root = Path(tempfile.mkdtemp(prefix="sd-modes-"))
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         git("init", "-q", str(root), cwd=Path(tempfile.gettempdir()))
-        (root / "scripts").mkdir()
+        (root / "templates/scripts").mkdir(parents=True)
         (root / ".github/scripts").mkdir(parents=True)
         shutil.copy2(GATE, root / ".github/scripts" / GATE.name)
         return root
 
     def _write(self, root: Path, name: str, mode: int) -> None:
-        path = root / "scripts" / name
+        path = root / "templates/scripts" / name
         path.write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
         path.chmod(mode)
         git("add", "--chmod=" + ("+x" if mode & 0o111 else "-x"), str(path), cwd=root)
@@ -154,7 +154,7 @@ class ShippedScriptModeGateTest(unittest.TestCase):
 
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn("NOT-EXEC", result.stderr)
-        self.assertIn("scripts/sd-ai-command-pack-probe.sh", result.stderr)
+        self.assertIn("templates/scripts/sd-ai-command-pack-probe.sh", result.stderr)
 
     def test_an_executable_library_module_fails(self) -> None:
         root = self._repo()
@@ -164,11 +164,11 @@ class ShippedScriptModeGateTest(unittest.TestCase):
 
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn("LIB-EXEC", result.stderr)
-        self.assertIn(f"scripts/{LIBRARY_PREFIX}probe.py", result.stderr)
+        self.assertIn(f"templates/scripts/{LIBRARY_PREFIX}probe.py", result.stderr)
 
     def test_a_file_without_a_shebang_is_ignored(self) -> None:
         root = self._repo()
-        plain = root / "scripts" / "notes.txt"
+        plain = root / "templates/scripts" / "notes.txt"
         plain.write_text("no shebang here\n", encoding="utf-8")
         git("add", str(plain), cwd=root)
 

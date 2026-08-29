@@ -18,9 +18,9 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = REPO_ROOT / "scripts" / "sd-ai-command-pack-review-layout.py"
+SCRIPT = REPO_ROOT / "templates/scripts" / "sd-ai-command-pack-review-layout.py"
 
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "templates/scripts"))
 sys.path.insert(0, str(REPO_ROOT))
 
 
@@ -678,7 +678,7 @@ class BindingAgreementTests(unittest.TestCase):
         shell = subprocess.run(
             [
                 "bash",
-                str(REPO_ROOT / "scripts" / "sd-ai-command-pack-review-scope.sh"),
+                str(REPO_ROOT / "templates/scripts" / "sd-ai-command-pack-review-scope.sh"),
                 "--json",
                 *arguments,
             ],
@@ -712,7 +712,7 @@ class BindingAgreementTests(unittest.TestCase):
 
         script = (
             "import { resolvePackLayout } from "
-            f"'{REPO_ROOT / 'scripts' / 'sd-ai-command-pack-review-preflight.mjs'}';\n"
+            f"'{REPO_ROOT / 'templates' / 'scripts' / 'sd-ai-command-pack-review-preflight.mjs'}';\n"
             f"const out = resolvePackLayout({{ root: {json.dumps(str(self.root))}, "
             f"paths: {json.dumps(paths)} }});\n"
             "process.stdout.write(JSON.stringify(out));\n"

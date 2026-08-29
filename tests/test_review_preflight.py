@@ -125,7 +125,7 @@ import {
   validateTrellisPlanningBaseInheritance,
   validateTrellisRootTaskBaseBranch,
   validateTrellisJournalSessions,
-} from './scripts/sd-ai-command-pack-review-preflight.mjs';
+} from './templates/scripts/sd-ai-command-pack-review-preflight.mjs';
 
 assert.equal(copiedTemplateKind('.trellis/scripts/get_context.py'), 'trellis');
 assert.equal(copiedTemplateKind('.zcode/agents/trellis-check.md'), 'trellis');
@@ -1156,7 +1156,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         self.run_git(root, "config", "user.email", "test@example.com")
@@ -1877,7 +1877,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         empty_bin = root / "empty-bin"
@@ -1918,7 +1918,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         shim_bin = root / "shim-bin"
@@ -4830,7 +4830,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         config_dir = root / ".sd-ai-command-pack"
@@ -4861,7 +4861,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         config_dir = root / ".sd-ai-command-pack"
@@ -4901,7 +4901,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         (root / "tests").mkdir()
@@ -4942,7 +4942,7 @@ assert.deepEqual(
         scripts_dir = root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            install.ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            install.ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts_dir / "sd-ai-command-pack-review-preflight.mjs",
         )
         if map_lines is not None:
@@ -5052,7 +5052,7 @@ assert.deepEqual(
 import assert from 'node:assert/strict';
 import {
   parseGeneratedStructuralMapEntries,
-} from './scripts/sd-ai-command-pack-review-preflight.mjs';
+} from './templates/scripts/sd-ai-command-pack-review-preflight.mjs';
 
 const parsed = parseGeneratedStructuralMapEntries([
   '# Directory Structure',

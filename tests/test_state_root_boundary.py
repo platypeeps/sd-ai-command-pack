@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = ROOT / "scripts"
+SCRIPTS_DIR = ROOT / "templates/scripts"
 LIB_NAME = "sd_ai_command_pack_lib.py"
 CONSOLIDATED = ("resolve_state_root", "ensure_private_directory")
 STATE_HOME_ENV = "SD_AI_COMMAND_PACK_STATE_HOME"

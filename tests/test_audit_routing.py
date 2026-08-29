@@ -15,7 +15,7 @@ sys = _support.sys
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
-ROUTER = PACK_ROOT / "scripts/sd-ai-command-pack-audit-route.py"
+ROUTER = PACK_ROOT / "templates/scripts/sd-ai-command-pack-audit-route.py"
 TEMPLATE_ROUTER = PACK_ROOT / "templates/scripts/sd-ai-command-pack-audit-route.py"
 
 

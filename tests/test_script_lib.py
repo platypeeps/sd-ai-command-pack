@@ -26,7 +26,7 @@ tempfile = _support.tempfile
 class ScriptLibTests(InstallTestCase):
     def load_lib(self):
         return self.load_module_from_path(
-            install.ROOT / "scripts/sd_ai_command_pack_lib.py",
+            install.ROOT / "templates/scripts/sd_ai_command_pack_lib.py",
             "sd_ai_command_pack_lib_test",
         )
 

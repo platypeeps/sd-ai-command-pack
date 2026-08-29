@@ -34,7 +34,7 @@ make check
 ```
 
 `make check` runs the full local maintainer battery: coverage-gated tests,
-Ruff, mypy over `installer/`, `install.py`, and shipped `scripts/`,
+Ruff, mypy over `installer/`, `install.py`, and `templates/scripts/`,
 pack JavaScript syntax checks when Node is available, optional ShellCheck,
 optional Bandit/Zizmor, and the SD full-check gate with Prism/Gito disabled.
 Missing optional tools print warnings instead of blocking Python-only
@@ -53,7 +53,7 @@ missing interpreter into a failure, and `SD_AI_COMMAND_PACK_BASH32` overrides
 the interpreter search with a space-separated candidate list.
 
 `make generate` and the pack-source portion of `make full-check` also run
-`scripts/sd-ai-command-pack-surface-check.py`. The versioned validator derives
+`templates/scripts/sd-ai-command-pack-surface-check.py`. The versioned validator derives
 the complete affected graph from `installer/registry.py` and `manifest.json`,
 including explicitly source-only references, generated mirrors, caller
 registrations, and release evidence. Its internal command lint rejects stale
@@ -97,14 +97,13 @@ scope and collect the kcov data. Leaving all of them unset â€” the normal case â
 runs the tests exactly as before with no coverage instrumentation. kcov is
 Linux-only, so this reproduction does not run on macOS.
 
-Ruff covers pack-owned Python in `install.py`, `installer/`, `scripts/`,
-`templates/scripts/`, and `tests/`. Trellis-owned platform runtime is excluded;
-tracked OpenCode JavaScript receives syntax-only validation with `node --check`.
-`scripts/sd-ai-command-pack-review-preflight.mjs` keeps that `node --check`
-syntax gate in the `lint` job; its behaviour is exercised by the Python test
-suite's subprocess tests rather than by a JavaScript coverage number. The
-`templates/scripts/` twin is a byte-identical mirror and is not separately
-measured.
+Ruff covers pack-owned Python in `install.py`, `installer/`, `templates/scripts/`,
+and `tests/`. Trellis-owned platform runtime is excluded; tracked OpenCode
+JavaScript receives syntax-only validation with `node --check`.
+`templates/scripts/sd-ai-command-pack-review-preflight.mjs` keeps that
+`node --check` syntax gate in the `lint` job; its behaviour is exercised by the
+Python test suite's subprocess tests rather than by a JavaScript coverage
+number.
 
 ## Main Branch Policy
 
@@ -128,19 +127,17 @@ insufficient.
   ledger, the payload gate, and the auto-tag job were deleted with it.
   Shipped payload edits after 0.72.0 are reviewed and merged like any other
   change and are not versioned.
-- Treat `templates/**` as the source of truth for shipped files. Root-level
-  copies under `.agents/`, `.opencode/`, `scripts/`, and similar dogfood paths
-  are mirrors.
-- After changing shipped payload, and before full-check after README, docs,
-  spec, or task edits, run `make sync`: it self-syncs the dogfood install
-  (`install.py . --force`) and refreshes the generated spec KB
-  (`scripts/sd-ai-command-pack-update-spec-kb.py`) in one step.
-- Without make, the same two steps are:
+- `templates/**` holds the one copy of every shipped file. The repository no
+  longer installs itself: the root-level dogfood renders under `.agents/`,
+  `.opencode/`, `scripts/`, and similar paths were deleted, so there is no
+  mirror to keep in sync and nothing to re-render after a payload edit.
+- After changing a generated surface, run `make generate`: it regenerates the
+  command surfaces under `templates/**` and re-runs the surface check.
+- Without make, that is:
 
   ```bash
-  bash scripts/sd-ai-command-pack-toolchain.sh run-python -- install.py . --force
-  bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-    scripts/sd-ai-command-pack-update-spec-kb.py
+  python3 .github/scripts/generate-command-surfaces.py
+  python3 templates/scripts/sd-ai-command-pack-surface-check.py
   ```
 
 ## Versioning
@@ -174,16 +171,10 @@ behavior changes and the patch number for compatible fixes or documentation.
 - Keep Trellis-owned platform files in their Trellis-managed state so
   `trellis update --dry-run --migrate` does not report avoidable local
   overrides.
-- Do not track `.opencode/package.json` or any `.opencode` Bun lockfile in this
-  repo unless the checked-in OpenCode plugins or tools import external npm
-  packages. If that changes, keep the manifest minimal, commit the lockfile,
-  and refresh it from `.opencode/` with:
-
-  ```bash
-  cd .opencode
-  bun install --lockfile-only
-  ```
-
+- Do not track `templates/.opencode/package.json` or any OpenCode Bun lockfile
+  in this repo unless the checked-in OpenCode plugins or tools import external
+  npm packages. If that changes, keep the manifest minimal and commit the
+  lockfile.
 - Put machine-specific Claude permissions in the ignored
   `.claude/settings.local.json`, not Trellis-owned `.claude/settings.json`.
 

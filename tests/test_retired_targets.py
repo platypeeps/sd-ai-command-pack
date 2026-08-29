@@ -71,7 +71,7 @@ class RetiredTargetsTests(InstallTestCase):
         return subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
             ],
             cwd=root,
             text=True,

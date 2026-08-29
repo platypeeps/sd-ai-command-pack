@@ -736,11 +736,11 @@ breakdown and release rules. The explicit commands below mirror the main test
 lane for environments without `make`.
 
 Shipped payload changes are guarded by
-`scripts/sd-ai-command-pack-surface-check.py`. The versioned read-only helper
+`templates/scripts/sd-ai-command-pack-surface-check.py`. The versioned read-only helper
 derives installable, generated, source-only, documentation, checker, retired,
 and release-evidence relations from the registry and manifest. `sd-check`, the
 local pre-publication gate, and CI invoke that same executable; stale state is
-reported with `make generate` or `make sync` ownership and is never repaired by
+reported with `make generate` ownership and is never repaired by
 the checker. The focused `.github/scripts/check-command-surface-drift.py`
 module remains an internal semantic lint consumed by this single entry point.
 
@@ -756,11 +756,9 @@ test -x "$BREW_PYTHON" || BREW_PYTHON=/usr/local/bin/python3.13  # Intel Homebre
 "$BREW_PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
-python -m ruff check install.py installer scripts templates/scripts tests \
-  .github/scripts/check-command-surface-drift.py \
-  .github/scripts/partition-surfaces.py
+python -m ruff check install.py installer templates/scripts tests \
+  .github/scripts/check-command-surface-drift.py
 if command -v node >/dev/null 2>&1; then
-  node --check scripts/sd-ai-command-pack-review-preflight.mjs
   node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
   bash .github/scripts/check-opencode-js.sh
 else
@@ -819,12 +817,12 @@ platform sets, lightweight candidate checks, and rollout priorities. Read it
 with the fleet status report from this checkout:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-status.py fleet
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-status.py fleet
 ```
 
 A consumer is refreshed by running `install.py <repo> --force` from this
-checkout and then `scripts/sd-ai-command-pack-install-audit.py --repo <repo>
+checkout and then `templates/scripts/sd-ai-command-pack-install-audit.py --repo <repo>
 --expected-platform ...` for each of its explicit platforms, so missing
 selected-platform files are caught even if a faulty install also omitted them
 from receipts and provenance. A thin consumer's install carries no
@@ -834,7 +832,7 @@ fast-canary order, interruption threshold, review ownership, and compact
 rollout runbook.
 
 Verified findings then pass through
-`scripts/sd-ai-command-pack-fleet-finding-classify.py` before watch, merge, or
+`templates/scripts/sd-ai-command-pack-fleet-finding-classify.py` before watch, merge, or
 the next consumer mutation. Correctness, security, install/audit, and
 compatibility block by default; bounded hardening, style, testing,
 documentation, diagnostics, and unrelated-consumer observations become one
@@ -844,7 +842,7 @@ pauses rather than silently deferring, and explicit overrides require recorded
 rationale.
 
 The fleet workflow records resumable stage boundaries with
-`scripts/sd-ai-command-pack-fleet-timing.py`. Its final report distinguishes
+`templates/scripts/sd-ai-command-pack-fleet-timing.py`. Its final report distinguishes
 critical path and interval-union active time from summed stage duration, and
 shows reviewer/CI overlap, retries, the slowest consumer, and the slowest
 stage. The source-only helper stores private atomic state outside repositories,

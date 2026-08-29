@@ -76,9 +76,10 @@ EXIT_CONFLICT = 2
 
 SHARED_LIB_MODULE = "sd_ai_command_pack_lib"
 # The shipped helper is not an `installer` module: it lives beside the scripts
-# that import it, which is `scripts/` in a pack checkout and `bin/` under a
-# plugin root. Both are siblings of this package's parent.
-SHARED_LIB_DIRECTORIES = ("scripts", "bin")
+# that import it, which is `templates/scripts/` in a pack checkout, `scripts/`
+# in a vendored consumer install, and `bin/` under a plugin root. All three are
+# reached from this package's parent.
+SHARED_LIB_DIRECTORIES = ("templates/scripts", "scripts", "bin")
 
 # OpenCode's own opt-outs for the external-skills lane. Neither changes what
 # gets installed -- they are per-environment variables another shell may not

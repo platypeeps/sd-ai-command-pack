@@ -3,12 +3,12 @@
 
 ``sd-ai-command-pack-toolchain.sh run --`` ends in ``exec "$RUN_COMMAND"``, so a
 helper the toolchain resolves must carry the executable bit or the invocation
-dies with ``Permission denied``. Three generators already conclude
-"executable" for exactly this set -- ``installer/machinepayload.py``,
-``.github/scripts/generate-plugin.py``, and the repo-install path in
-``installer/fileops.py`` -- so every installed copy is ``755``. Only the
-repository's own tracked modes were left behind, and a mode is invisible in
-diff review, which is why this is a gate rather than a matter of care.
+dies with ``Permission denied``. Two generators already conclude
+"executable" for exactly this set -- ``installer/machinepayload.py`` and the
+repo-install path in ``installer/fileops.py`` -- so every installed copy is
+``755``. Only the repository's own tracked modes were left behind, and a mode
+is invisible in diff review, which is why this is a gate rather than a matter
+of care.
 
 Two properties, enforced in both directions:
 
@@ -21,7 +21,7 @@ prevent is one bit with two derivations; a third copy of the constant would
 re-create it. It is a *basename* prefix, matched with ``PurePosixPath().name``:
 a substring match would also exempt any future directory containing the string.
 
-Scope is the three trees that carry shipped helpers. It is deliberately not the
+Scope is the trees that carry shipped helpers. It is deliberately not the
 repository: a mode drift in repository-only automation is a lint concern, not a
 shipped-payload concern, and widening the scope would blur that line.
 
@@ -45,7 +45,6 @@ if str(REPO_ROOT) not in sys.path:
 from installer.machinepayload import LIBRARY_PREFIX  # noqa: E402
 
 TREES: tuple[str, ...] = (
-    "scripts",
     "templates/scripts",
     ".sd-ai-command-pack/bin",
 )
