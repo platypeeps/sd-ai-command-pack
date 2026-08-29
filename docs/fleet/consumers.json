@@ -29,7 +29,8 @@
         "strategy": "sequential",
         "consumers": [
           "people-profiles",
-          "anomaly-metric-creator"
+          "anomaly-metric-creator",
+          "mezmo-world-simulator"
         ]
       }
     ]
@@ -292,6 +293,28 @@
         ]
       ],
       "mode": "thin"
+    },
+    {
+      "name": "mezmo-world-simulator",
+      "github": "answerbook/mezmo-world-simulator",
+      "pathHint": "~/repos/mezmo/mezmo-world-simulator",
+      "platforms": [
+        "claude",
+        "gemini",
+        "github",
+        "opencode"
+      ],
+      "rolloutPriority": 100,
+      "candidateTimeoutSeconds": 180,
+      "candidatePrepare": [],
+      "candidateChecks": [
+        [
+          "bash",
+          "-c",
+          "research-kit render . >/dev/null && research-kit review ."
+        ]
+      ],
+      "mode": "fat"
     }
   ],
   "excludedAliases": [
