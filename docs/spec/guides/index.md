@@ -65,7 +65,7 @@ These guides help you **ask the right questions before coding**.
 
 ### When a Design Changes Control Flow That Existing Tests Already Pin
 
-Adopted 2026-08-01, from `.trellis/tasks/archive/2026-08/07-31-completion-recovery-no-archive-anchor`.
+Adopted 2026-08-01, from `docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor`.
 That task's design went through two full rounds of host+Codex adversarial
 review — read-only, line-by-line against real source — before any code was
 written, and both rounds found and fixed real, confirmed defects. Despite
@@ -109,7 +109,7 @@ Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` steps 4 an
 
 ### When Closing Out a Task Whose Work Already Landed
 
-Adopted 2026-08-06, from `.trellis/tasks/archive/2026-08/07-28-consolidate-shared-script-helpers`.
+Adopted 2026-08-06, from `docs/work/archive/2026-08/2026-07-28-consolidate-shared-script-helpers`.
 That task sat `in_progress` with five unchecked acceptance criteria long after
 the work was done — two of its four planned commits shipped under it, and the
 other two were split mid-implementation into follow-up tasks that inherited two

@@ -1,8 +1,8 @@
 # Review Attempt State: What May Be Memoized
 
-> When changing what `templates/scripts/sd-ai-command-pack-review.py` (+ the
-> `templates/scripts/` mirror) stores in, or serves from, its per-attempt
-> state file.
+> When changing what `templates/scripts/sd-ai-command-pack-review.py` — the
+> single source, installed into consuming repositories as `scripts/` — stores
+> in, or serves from, its per-attempt state file.
 
 ---
 

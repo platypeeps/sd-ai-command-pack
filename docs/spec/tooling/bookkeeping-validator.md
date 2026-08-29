@@ -2,7 +2,7 @@
 
 > Non-obvious gotchas and conventions specific to
 > `templates/scripts/sd-ai-command-pack-review-preflight.mjs`, learned from
-> `.trellis/tasks/archive/2026-08/07-31-completion-recovery-no-archive-anchor`.
+> `docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor`.
 
 ---
 

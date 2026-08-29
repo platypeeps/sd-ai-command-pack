@@ -3,7 +3,7 @@
 Scope/trigger: any pack-managed content that a consumer regenerates from a
 script — `docs/repomix-map.md`, the `.gitignore` `.obsidian-kb` block, and
 anything added later. Established by
-`.trellis/tasks/archive/2026-08/08-12-fleet-publish-ignore-block-ordering`
+`docs/work/archive/2026-08/2026-08-12-fleet-publish-ignore-block-ordering`
 after campaign `refresh-0.71.2-20260813T014138Z-c3`.
 
 Cite the archive path, not the active one. `task.py archive` moves the whole
