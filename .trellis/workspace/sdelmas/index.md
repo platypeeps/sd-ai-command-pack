@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-10.md`
-- **Total Sessions**: 453
+- **Total Sessions**: 454
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-10.md` | ~165 | Active |
+| `journal-10.md` | ~204 | Active |
 | `journal-9.md` | ~1996 | Archived |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
@@ -38,6 +38,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 454 | 2026-08-28 | File the housekeeping merged-before-run defect and narrow its claim under review | `13184021`, `de75b498` | `task/08-28-housekeeping-external-merge-unflagged` |
 | 453 | 2026-08-28 | File the thin-only install task and correct its PRD under review | `8a1dff13`, `2629490b` | `task/08-28-thin-only-install` |
 | 452 | 2026-08-28 | Add answerbook/mezmo-world-simulator to the fleet as a thin consumer | `6c58ca01`, `ad6c25d9`, `bc2f9abc`, `8a316bb8` | `chore/fleet-add-mezmo-world-simulator` |
 | 451 | 2026-08-28 | Adopt codex + gito as the rollout's default provider set | `6f6a15be`, `4ed524e3` | `task/08-28-codex-lane-fleet-rollout` |
