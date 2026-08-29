@@ -1207,6 +1207,12 @@ def _reset_remote_dispatch(path: Path, state: dict[str, Any]) -> None:
     never told about it, so there is nothing for a ``rerequestOf`` to name.
     """
 
+    # Adopt first, or a pre-ledger dispatch is cleared without ever being
+    # recorded: it has no row to mark, so the history this promises to keep
+    # would be exactly the history that is lost.
+    stored = state.get("remoteRequest")
+    if isinstance(stored, dict):
+        _adopt_legacy_dispatch(path, state, stored)
     dispatches = _remote_dispatches(state)
     pending = [row for row in dispatches if not row["fulfilled"] and not row["abandoned"]]
     if not pending and state.get("remoteRequest") is None:

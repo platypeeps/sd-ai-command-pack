@@ -3628,6 +3628,43 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual((code, report["status"]), (3, "failed"))
         self.assertEqual(report["limitations"], ["remote-dispatch-abandoned"])
 
+    def test_resetting_a_pre_ledger_dispatch_still_records_it(self) -> None:
+        """Reset promises the abandoned dispatch stays in the record.
+
+        A pre-ledger state has no row to mark, so clearing it without adopting
+        it first would drop the one dispatch the record exists to show -- and
+        the states that need the reset most are exactly the pre-ledger ones.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        request = state["remoteRequest"]
+        del state["remoteDispatches"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            extra_args=("--reset-remote-dispatch",),
+        )
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        dispatch.assert_called_once()
+        after = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(after["remoteDispatches"]), 2)
+        adopted = after["remoteDispatches"][0]
+        self.assertEqual(adopted["correlationId"], request["correlationId"])
+        self.assertTrue(adopted["abandoned"])
+        self.assertFalse(adopted["fulfilled"])
+        # It never counted toward the sequence, so the replacement is still 1.
+        self.assertEqual(after["remoteDispatches"][1]["attempt"], 1)
+
     def test_resetting_the_dispatch_keeps_the_attempts_evidence(self) -> None:
         """The escape from a dead dispatch must not cost the audit trail.
 
