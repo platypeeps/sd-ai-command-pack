@@ -238,9 +238,17 @@ machine without it degrades to the same routed path these consumers use today.
    deliberately strict. A non-null ceiling everywhere is not the target.
 3. Every consumer's config either enables a provider whose `scopes` include
    `codebase`, or carries a recorded decision that the repository has given up
-   `scope=codebase`. Verify by running `sd-review scope=codebase --plan-only`
-   in at least one rolled-out consumer and confirming it plans rather than
-   raising `no eligible local review provider satisfies the selected policy`.
+   `scope=codebase`. Verify with the local stage helper, which is what owns
+   `--plan-only` — `sd-review` has no such control:
+
+   ```bash
+   bash "$SD_PACK_TOOLCHAIN" run-python -- \
+     sd-ai-command-pack-review-local.py --repo . --scope codebase \
+     --plan-only --json
+   ```
+
+   Confirm it plans rather than raising `no eligible local review provider
+   satisfies the selected policy`.
 4. On at least one canary consumer, a real `sd-review` run over a non-trivial
    branch produces a receipt whose `remoteGate.state` is `eligible` and whose
    selected providers include `codex`, with zero routed rounds. Capture the
