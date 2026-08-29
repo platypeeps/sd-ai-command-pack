@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Machine-scope installer receipt/journal schema and state-ladder contract the backup fix must extend"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed and refusal-before-mutation conventions for the journal trust validation"}

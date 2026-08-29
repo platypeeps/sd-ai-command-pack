@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Governs deleting a command surface: the public/internal classification contract and the doc path-reference exemptions, both of which fail in files the deletion never touches."}
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "24 manifest rows and the RETIRED_TARGETS contract; command_installed_targets() returns no scripts/ path."}
-{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Locates the eleven source paths and the generated mirror trees the deletion must cover."}

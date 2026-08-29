@@ -1,2 +1,0 @@
-{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Verify every consumer receipt, provenance record, platform set, and post-merge audit against the release contract."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify consumer checks, skips, and final reporting are explicit and no unrelated files are included."}

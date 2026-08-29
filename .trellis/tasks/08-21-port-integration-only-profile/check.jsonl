@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review standard for the ported validation logic."}
-{"file": ".trellis/spec/tooling/review-attempt-state.md", "reason": "Verify the trusted-caller path leaves coordinator attempt state coherent."}
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify the new sd-review section survives generation into every adapter surface."}

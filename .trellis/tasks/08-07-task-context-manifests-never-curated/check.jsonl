@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Finding codes and gate-timing rules used to assert no new merge-time failure is introduced."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Dispatch-report conventions for asserting the no-spec-entries statement is visible in the run."}

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines deterministic test, coverage, and release-gate expectations for validating the registry and scanner change."}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Defines generated-surface parity and adapter validation requirements."}

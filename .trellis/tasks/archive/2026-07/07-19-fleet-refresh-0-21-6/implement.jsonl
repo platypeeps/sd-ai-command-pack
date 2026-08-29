@@ -1,2 +1,0 @@
-{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Defines release candidate, manifest, provenance, and consumer installation contracts."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines validation, no-unrelated-mutation, and explicit skip-reporting expectations."}

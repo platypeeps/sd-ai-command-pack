@@ -1,24 +1,6 @@
-<!-- TRELLIS:START -->
-# Trellis Instructions
+# sd-ai-command-pack
 
-These instructions are for AI assistants working in this project.
-
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
-
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
-
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
-
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
-
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
-
-<!-- TRELLIS:END -->
+Instructions for AI assistants working in this repository.
 
 ## Maintainer Rules
 
@@ -42,10 +24,14 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 - Read [CONTRIBUTING.md](CONTRIBUTING.md), then run `make check` before
   publishing a change.
-- Read `.trellis/spec/frontend/adapter-guidelines.md` before changing commands,
-  prompts, skills, or platform adapters.
-- Read `.trellis/spec/backend/manifest-and-filesystem.md` before changing the
-  installer, manifest, provenance, audit, or filesystem behavior.
+- Read [docs/spec/frontend/adapter-guidelines.md](docs/spec/frontend/adapter-guidelines.md)
+  before changing commands, prompts, skills, or platform adapters.
+- Read [docs/spec/backend/manifest-and-filesystem.md](docs/spec/backend/manifest-and-filesystem.md)
+  before changing the installer, manifest, provenance, audit, or filesystem
+  behavior.
+- Planning artifacts live in [docs/work](docs/work/README.md): one directory per
+  item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
+  is the whole tracked footprint of the workflow.
 
 <!-- SD-AI-COMMAND-PACK:ROUTING:START -->
 ## Canonical Entry Points

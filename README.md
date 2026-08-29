@@ -32,7 +32,7 @@ initialized. If `trellis` is not available yet, follow the official
 [Trellis install and first-task instructions](https://docs.trytrellis.app/start/install-and-first-task)
 first; they cover installing the CLI with
 `npm install -g @mindfoldhq/trellis@latest` and running `trellis init` so the
-target repo has `.trellis/config.yaml`.
+target repo has `.trellis/config.yaml` [absent: target-repo Trellis path].
 
 The current Trellis-focused pack installs:
 
@@ -62,7 +62,7 @@ thin entry points that load the matching shared skill. Wrappers live under the
 `/trellis:*` commands, and they delegate to Trellis' own start, continue,
 finish-work, and update-spec skills without changing behavior — including on
 Claude Code, where the start wrapper reads SessionStart context from
-`.trellis/scripts/get_context.py`. Codex exposes them as `sd-*` skills. See the
+`.trellis/scripts/get_context.py` [absent: target-repo Trellis path]. Codex exposes them as `sd-*` skills. See the
 installed guide's [What is installed](docs/SD_AI_COMMAND_PACK.md#what-is-installed)
 for the full Codex skill list, per-platform command shapes, and adapter details.
 
@@ -203,7 +203,7 @@ to the same collector. The command's `--json` output uses schema version 1.
 
 Initializes Trellis session context through the existing `trellis-start`
 behavior. Claude Code derives equivalent context from
-`.trellis/scripts/get_context.py` because Claude's Trellis install does not ship
+`.trellis/scripts/get_context.py` [absent: target-repo Trellis path] because Claude's Trellis install does not ship
 a `trellis-start` skill.
 
 ### sd-continue
@@ -261,7 +261,7 @@ dispatch, generated-state refresh, Git mutation, or repository-owned cache
 writes. Built-ins cover staged/unstaged whitespace, review preflight, install
 audit, generated-knowledge freshness, tooling/generated scope, and PR-body
 scope when their installed helpers apply. Repository-specific prerequisites and
-checks use strict argv arrays in `.sd-ai-command-pack/check.json`.
+checks use strict argv arrays in `.sd-ai-command-pack/check.json` [absent: target-repo install path].
 
 The aggregate result and every row distinguish `passed`, `failed`, `skipped`,
 `unavailable`, `invalid`, and `indeterminate`. A before/after state guard fails
@@ -320,7 +320,7 @@ classification; existing feedback, local checks, CI, and merge gates remain.
 
 The command-owned deterministic gate runs
 `scripts/sd-ai-command-pack-check.py --json` through the installed toolchain.
-It consumes `.sd-ai-command-pack/check.json` when present and never discovers
+It consumes `.sd-ai-command-pack/check.json` [absent: target-repo install path] when present and never discovers
 `package.json` scripts or falls back to the legacy full-check selector.
 
 ### Planning artifact adversarial review
@@ -526,7 +526,7 @@ From this repository:
 python3 install.py /path/to/trellis/repo
 ```
 
-The installer requires `.trellis/config.yaml` in the target repo and will fail
+The installer requires `.trellis/config.yaml` [absent: target-repo Trellis path] in the target repo and will fail
 with the Trellis install link if that marker is missing. It always installs the
 shared `.agents` skills, `sd-check`, full-check, the shared shell helper, housekeeping,
 record-session, review-scope, review-local command assets, review-preflight,
@@ -625,7 +625,7 @@ python3 scripts/sd-ai-command-pack-update-spec-kb.py --dry-run
 Use `--local-only` when you want Trellis and this pack available in one clone
 without adding generated framework files to the shared GitHub repository. In
 that mode the installer requires the target to be the Git repo root, runs
-`trellis init --yes --skip-existing --codex` when `.trellis/config.yaml` is
+`trellis init --yes --skip-existing --codex` when `.trellis/config.yaml` [absent: target-repo Trellis path] is
 missing, adds any requested platform flags such as `--cursor` or `--gemini`,
 then writes a managed local block to `.git/info/exclude` for Trellis and
 sd-ai-command-pack paths. It also writes `.sd-ai-command-pack/local-only.txt`

@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Owns installer behavior, tests, and compatibility expectations; a comment-only change must still satisfy its shipped-payload rules."}
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Owns pack metadata and file writes, including the release drift gate that requires a version bump and CHANGELOG entry for any shipped payload change."}
-{"file": ".trellis/spec/backend/fleet-consumer-conversion.md", "reason": "Records why consumer code scanning raises this finding on every pack refresh, which is the evidence this task exists on."}

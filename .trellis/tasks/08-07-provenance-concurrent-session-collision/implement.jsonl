@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Pack tooling conventions govern install audit and provenance handling."}
-{"file": ".trellis/spec/backend/index.md", "reason": "Script layout and shared helper boundaries for the audit code path."}

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Tooling spec index; locate gate-script and session-bootstrap conventions for the lock and worktree work"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Crash-safe locking: stale-lock takeover must follow the fail-safe error conventions"}

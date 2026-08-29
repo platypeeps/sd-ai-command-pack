@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Ownership boundary for pack-shipped tooling and the templates/ mirror duty; the review coordinator is a shipped script with a scripts/ twin that must stay byte-identical."}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "The gate's failure path is the change: what a non-passing check returns, what is persisted, and what the report carries when a stage declines to store its verdict."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Pre-development thinking checklist; the recompute contract touches resume semantics, so the checklist's state/idempotency prompts apply."}

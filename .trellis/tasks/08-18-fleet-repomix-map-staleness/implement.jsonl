@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/fleet-publish-generated-content.md", "reason": "Establishes that pack-managed generated content, docs/repomix-map.md included, belongs in the refresh work commit; this defect is that rule failing to hold across releases, so the fix must land inside its contract."}
-{"file": ".trellis/spec/backend/fleet-consumer-conversion.md", "reason": "Describes running the installer against a registered consumer, which is the lane where the stale map is produced and where the regeneration step would have to be enforced."}

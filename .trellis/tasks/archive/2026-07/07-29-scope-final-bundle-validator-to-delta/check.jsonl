@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Owns the final-bundle contract and the regression coverage bar the acceptance criteria must meet in tests/test_bookkeeping_validator.py, where final-bundle coverage lives."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Mistake 4 (:74, every consumer parses the same payload) is exactly the receipt-contract risk here, and the post-template-modification checklist (:152) governs the templates/root mirror parity this change must preserve."}

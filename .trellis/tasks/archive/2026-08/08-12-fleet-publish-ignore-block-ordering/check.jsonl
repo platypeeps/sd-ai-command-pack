@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Verification must confirm the published bundle still yields a valid completion receipt; these notes describe the validator that decides that."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "The fix should reuse the established regenerate-then-commit shape already used for docs/repomix-map.md rather than introduce a second mechanism; this guide is the repo's stated test for that choice."}

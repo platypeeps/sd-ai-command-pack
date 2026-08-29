@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Shipped-surface, twin-mirror, and release-gate rules every new sd-* command must satisfy."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Skill authoring conventions for the sd-submit-pack-task SKILL.md and its command adapters."}
-{"file": ".trellis/spec/backend/index.md", "reason": "Helper-script conventions for the shipped Python that performs the worktree, commit, push, and PR sequence."}

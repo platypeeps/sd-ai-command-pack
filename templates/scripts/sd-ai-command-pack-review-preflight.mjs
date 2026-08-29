@@ -3334,6 +3334,16 @@ function checkCopiedTemplateDiffDisclosure() {
   );
 }
 
+// A repository that authors a command pack documents the paths its payload
+// takes in the repositories that install it -- `scripts/<helper>`, not the
+// authoring copy. Those files are present here too, under `templates/`, which
+// holds the single copy of every shipped file, so a reference to one is
+// satisfied and must not be reported as missing. A repository with no
+// `templates/` tree is unaffected: the fallback simply never matches.
+function documentationReferenceExists(candidate) {
+  return exists(candidate) || exists(`templates/${candidate}`);
+}
+
 function checkDocumentationPathReferences() {
   const missing = [];
 
@@ -3343,6 +3353,12 @@ function checkDocumentationPathReferences() {
       file === 'docs/SD_AI_COMMAND_PACK.md' ||
       file === 'docs/repomix-map.md' ||
       file.startsWith('.trellis/tasks/archive/') ||
+      // Work items are the docs/ successor to Trellis tasks and are exempt for
+      // the same reason the archive is: a planning record cites the files its
+      // item proposes to create and the files the repository had when it was
+      // written, neither of which a path-existence check can judge. Spec pages
+      // under docs/spec describe current state and keep the check.
+      file.startsWith('docs/work/') ||
       // Design/implement artifacts are forward-looking: they reference files
       // the task proposes to CREATE, so a path-existence check is wrong for
       // them. PRDs/specs describe current state and keep the check.
@@ -3360,7 +3376,7 @@ function checkDocumentationPathReferences() {
       ...findMissingDocumentationPathReferences(
         file,
         referenceText,
-        (candidate) => exists(candidate),
+        documentationReferenceExists,
       ),
     );
   }
@@ -4721,8 +4737,15 @@ function checkTrellisJournalRecords() {
     : [];
   const workspacePresent = exists('.trellis/workspace');
 
-  if (!workspacePresent && baselineJournalFiles.length === 0) {
-    pass('.trellis/workspace is not present in the working tree or review base; Trellis journal checks skipped.');
+  // The append-only rule below guards against a session being rewritten or
+  // dropped *inside* a journal that the repository still keeps. A working tree
+  // with no journal root at all is a different act: the repository has retired
+  // Trellis journals, and every session is removed at once in a diff no
+  // reviewer can miss. Comparing that against the base would report the
+  // retirement once per historical session and say nothing a reader could act
+  // on, so the family is skipped whenever the root is gone.
+  if (!workspacePresent) {
+    pass('.trellis/workspace is not present in the working tree; Trellis journal checks skipped.');
     return;
   }
 

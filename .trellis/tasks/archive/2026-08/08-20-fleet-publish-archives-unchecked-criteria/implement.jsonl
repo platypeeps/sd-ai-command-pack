@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/tooling/fleet-publish-generated-content.md", "reason": "Establishes the immutable completion-bundle shape (work commit, archive, journal tail) that fixes where the acceptance-criteria tick may be written and why a fourth commit is unrecoverable."}
-{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Defines what the completion-mode receipt accepts as a bookkeeping path; the tick rides in the archive commit and must not invalidate the bundle."}
-{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Governs the documentation path-reference gate the new spec file and the skill edit must satisfy."}
-{"file": ".trellis/spec/tooling/vendored-trellis-compatibility.md", "reason": "The refresh skill's PRD-authoring guidance is bound to the vendored-Trellis floor; tag-emitting guidance is added in that same stage."}

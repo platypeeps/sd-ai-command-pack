@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Canonical filesystem containment, regular-file, symlink, diagnostic, and template-mirror safety."}
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Canonical housekeeping CLI, finish-work receipt, and exact-head eligibility contracts."}

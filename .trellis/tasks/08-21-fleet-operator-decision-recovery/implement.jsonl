@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/review-attempt-state.md", "reason": "The pack's existing precedent for per-attempt state and the phase-rewind trap — reviving a terminal lane is the same class of rewind."}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "How the refusal path must behave when the new revival is attempted on a lane whose result is not operator-decision."}

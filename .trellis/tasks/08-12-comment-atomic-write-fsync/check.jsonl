@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify the scripts/ and templates/scripts/ copies stay byte-identical and the change ships with its version bump."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared verification guidance for confirming a behavior-preserving change actually preserved behavior."}

@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "Verify shell-coverage still reports correctly after the deletions."}
-{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Verify both doc gates green after removing a shipped script."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review standard for the relocated run_pack_source_drift_gates."}
