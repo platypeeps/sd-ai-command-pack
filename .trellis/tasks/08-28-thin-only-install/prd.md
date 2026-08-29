@@ -23,17 +23,17 @@ install sequence a new consumer goes through today:
 5. commit the deletion; flip the registry row; regenerate the candidate ledger.
 
 Two commits and a registry round-trip to reach the state every consumer already runs.
-With this task's PR merged, `docs/fleet/consumers.json` lists 10 consumers and all 10 are
-`mode: thin`; no consumer is fat, and none has been since the last wave in
-`docs/FLEET_ROLLOUT.md`.
+Since PR #586 added `answerbook/mezmo-world-simulator`, `docs/fleet/consumers.json` lists
+10 consumers and all 10 are `mode: thin`; no consumer is fat, and none has been since the
+last wave in `docs/FLEET_ROLLOUT.md`. This task record changes no registry row itself.
 
 The first idea was "make thin the default" — install fat, then convert in the same
 invocation. It was rejected before any code was written because it keeps everything the
-conversion exists to guard (the verdict binding, the worktree-clean rule, the plan-before-
-apply refusals, ~9,250 lines across `installer/thin.py`, `installer/conversion.py`, the
-resweep script and `tests/test_thin_*.py`) in service of a state that no longer exists. The
-verdict answers "is it safe to *remove* these files from a consumer that has them", and a
-fresh install has nothing to remove.
+conversion exists to guard (the verdict binding, the worktree-clean rule, the
+plan-before-apply refusals, ~9,250 lines across `installer/thin.py`,
+`installer/conversion.py`, the resweep script and `tests/test_thin_*.py`) in service of a
+state that no longer exists. The verdict answers "is it safe to *remove* these files from
+a consumer that has them", and a fresh install has nothing to remove.
 
 ## Scope
 
