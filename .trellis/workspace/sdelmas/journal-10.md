@@ -303,3 +303,52 @@ Addressed three independent stability/correctness tasks in one batch and release
 ### Next Steps
 
 - None - task complete
+
+
+## Session 457: Fleet controller and timing correctness: four ledger defects closed
+<!-- trellis-session: v=2 fp=c7405e330a4924cf -->
+
+**Date**: 2026-08-29
+**Task**: Fleet controller and timing correctness: four ledger defects closed
+**Branch**: `task/08-29-fleet-controller-correctness`
+
+### Summary
+
+Four defects that made the fleet rollout's own records disagree with what happened. Three are archived here; the fourth (operator-decision recovery) ships its code but keeps its task open, because its last acceptance criterion reconciles the live ledger outside this repository and needs an approved invocation.
+
+### Main Changes
+
+- Timing runs can complete. 18 of 25 recorded runs stranded active, every one missing a consumer's terminal outcome — because consumer-end appeared nowhere in the sd-fleet-refresh skill. The skill now mandates it, and brackets stages with a new stage-run subcommand that ends the stage in a finally while exiting with the command's own status.
+- The timing completion error names every blocker with its remedial command, report distinguishes a measured run from a hollow one via a derived instrumentation block, and an attempt outliving its monotonic epoch falls back to the wall clock. All 25 recorded runs load and report; 20 did before.
+- A lane parked terminal/operator-decision can rejoin its campaign through resume --decide-consumer, bound to the head the decision was made against. proceed re-enters the lane on a fresh attempt and stamps nothing terminal; decline records the answer and leaves the lane where it is.
+- A head advanced by the lane's own finalization no longer rewinds it. record --finalization-receipt accepts the stage at the new head when the finish-work bundle itself proves the advance; an outside push has no such receipt and still rewinds. The guard's diagnostic named the opposite of what it compares and now names the head the lane holds.
+- integration-only fleet review is reachable. The classifier counted fleet-publish's own task archive and journal as consumer-owned, so every lane of every recent campaign classified remote-review-required. It now admits exactly one archived task directory whose task.json names the branch being classified, plus that record's assignee's index and journal.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adad89dd` | fix(fleet): let timing runs complete and name what is missing |
+| `babdc2c9` | feat(fleet): let an operator-decision lane rejoin its campaign |
+| `a73fc9a2` | fix(fleet): stop every lane tripping pr-head-advanced by construction |
+| `6edea82c` | fix(fleet): make integration-only review reachable |
+| `6ef089ff` | docs(task): apply planning adversarial review findings |
+| `e3fe342b` | chore(task): activate the three fleet-correctness tasks and record their branch |
+| `f2b799c9` | chore(task): drop task-context rows outside the allowed spec/research roots |
+
+### Testing
+
+- [OK] make check exit 0; shipped-surface closure clean
+- [OK] tests.test_fleet_timing 33 tests OK
+- [OK] tests.test_fleet_controller 60 tests OK
+- [OK] tests.test_fleet_review_classify 20 tests OK
+- [OK] pre-archive gate pre_archive_valid for all three archived tasks
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
