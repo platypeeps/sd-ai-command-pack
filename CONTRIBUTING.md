@@ -108,10 +108,23 @@ number.
 ## Main Branch Policy
 
 Every change to `main` goes through a pull request. Merge authority is GitHub
-branch protection on the four CI checks; there is no local pre-push hook, no
-server-side path policy, and no bookkeeping fast lane. A pull-request head and
-a push to `main` run the same four unconditional jobs: the `unittest` matrix,
-`shell-coverage`, `lint`, and `security`.
+branch protection; there is no local pre-push hook, no server-side path policy,
+and no bookkeeping fast lane. A pull-request head and a push to `main` run the
+same four unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
+and `security` — surfacing as six required contexts.
+
+That sentence is only true while protection is actually enforcing, so state the
+condition rather than the conclusion. Protection here is enforcing as of
+2026-08-29: `enforce_admins: true`, `strict: true`, and the six required
+contexts match the six the workflow produces. `enforce_admins` was deliberately
+left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
+which explicitly declined to enable it, and `2026-07-03-chore-push-scope-guard/`,
+which records it being enabled and disabled again the same day). That decision is
+reversed: an exemption for the only account that merges here made the doctrine
+prose, not authority — a direct push to `main` landed on 2026-08-29 precisely
+because nothing server-side stopped it. If protection is ever relaxed again, this
+section is wrong until it is rewritten; `sd-status` reads the live protection
+object and reports the gap instead of trusting this paragraph.
 
 CI intentionally tests the supported Python floor (3.10) and current project
 runtime (3.13), plus macOS on 3.13. Intermediate 3.11/3.12 jobs would duplicate

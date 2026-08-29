@@ -18,7 +18,14 @@ session scratch and not committed. Section numbering follows the accepted plan.
    worth keeping — as opt-in config, not mandatory infrastructure (round 3).
 3. Committed derived state is permanent staleness. Derive at run time or don't exist.
 4. Local gates stricter than GitHub but enforced by prose produce "approved by a lane that never
-   ran". Merge authority = GitHub branch protection; local tooling mirrors it read-only.
+   ran". Merge authority is GitHub branch protection **wherever protection is actually enforcing**;
+   local tooling mirrors it read-only and never claims more than the config provides. Protection
+   that exempts admins is prose, not authority: it stops collaborators and leaves the one author
+   who does 100% of the merging entirely ungated. So the doctrine is conditional by construction —
+   `sd-status` reads the live protection object per repo and reports which of the three legs is
+   missing (no protection at all · protection with `enforce_admins: false` · required contexts that
+   do not match the jobs CI actually runs). Where a leg is missing, that is a *reported gap*, never
+   a silent assumption of safety.
 5. Release train + fleet rollout for a single machine is pure overhead. Machine-scope install from
    one checkout removes versions, ledgers, PATH shadows, fleet refresh.
 
@@ -80,7 +87,7 @@ that busts it. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
 | `sd-review` | sd-check → route() → local providers on exact diff; findings dispositioned locally, never posted; `--scope worktree\|branch\|pr\|planning`, `--challenge` (kimi-challenge or codex adversarial prompt), `--explain`, `--dry-run`, `setup-github` subcommand (opt-in CI routing, r3) |
 | `sd-ship` | Verify acceptance → sd-spec → docs-lint → commit (enumerated paths only, never `add -A`) → push → PR with `Work:` line → request Copilot once per head → settle loop → `gh pr merge --squash -t "<title> (#N)" -b "<body>"` (wip-eraser, r7). **No write after settled-green.** `--pr N`, `--backlog` (ported work-backlog loop, r6 D12), `--agent claude\|codex` + `--jobs N` + `--cap N` + `--dry-run` (autonomous lane, R10-D1), `--tier`, `--no-github` |
 | `sd-spec` | Update `docs/spec/**` on the PR branch; `--retro` appends review-learnings |
-| `sd-status` | Read-only: derived status, open PRs, detected setup + protection gaps (incl. squash-message + rebase-merge flags, r7), resumable-handoff section (pending local packet for this directory + Lane B branches derived from origin), backend availability, legacy residue with exact removal commands, pack banner |
+| `sd-status` | Read-only: derived status, open PRs, detected setup + protection gaps — enforcement state first (`enforce_admins`, required contexts vs the jobs CI runs, PR-review requirement), then squash-message + rebase-merge flags (r7), resumable-handoff section (pending local packet for this directory + Lane B branches derived from origin), backend availability, legacy residue with exact removal commands, pack banner |
 | `sd-deps` | Batch-triage dependabot/renovate PRs |
 | `sd-help` | Runtime catalog of installed sd-* skills + registered plugins |
 | `sd-suggest` | File framework improvements to the configured tracker (gh dedup via list API; local draft deleted on successful filing) — r2 N7 |
@@ -147,7 +154,8 @@ PRs whose author is listed in the planned `sd-review.json` policy file (under `.
 reports and passes, so a non-adopting collaborator can never be blocked by the framework.
 Locally, `sd-ship` enforces all five for you regardless. `mode: minimal` and `guest` refuse
 `sd-review setup-github`, so shared and OSS repos cannot grow the workflow at all. Merge
-authority = GitHub branch protection.
+authority = GitHub branch protection **where it is enforcing** (critique 4); where it is not, the
+pack reports the gap and the honest statement is that nothing enforces merge authority in that repo.
 The backbone ships nothing on UserPromptSubmit/PreToolUse/pre-push and exactly one SessionStart
 hook, `sd-handoff-restore` (R10-D3), which gates nothing. Machine-level hooks outside the pack
 (send guard, aaif guard, cbm-*, rtk, claude-mem) are unchanged except the day-0 guard retarget. `## Log` gains a schema by template,
@@ -372,6 +380,41 @@ Groq/DeepInfra/MiniMax (retire keys after V4 enumeration), Baseten dedicated end
 token (V4 first). **OmniRoute removed entirely (R11-D2, user 2026-08-29)**: no backend row,
 no config key, no leave-alone entry; residue is user-owned removal, listed under M3.
 
+**R11-D3 (user, 2026-08-29) — protection is enforced where it can be, and the doctrine says so.**
+The merge-authority claim was audited against the live GitHub config rather than against the prose
+that asserted it. Result across the 24 non-archived platypeeps repos and the 5 active personal ones:
+
+- **10 platypeeps repos carry branch protection**; three of them exempted admins
+  (`sd-ai-command-pack`, `sd-github-review`, `sd-review-control-plane`). `enforce_admins` was
+  **enabled on all three**; all 10 now read `enforce_admins: true`. This reverses the explicit
+  earlier decision in `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/design.md`
+  ("Do not enable `enforce_admins`") and the same-day enable/disable recorded in
+  `2026-07-03-chore-push-scope-guard/prd.md`. The incident forcing the reversal: a docs-only commit
+  was pushed straight to `main` of this repo on 2026-08-29 in violation of its own CONTRIBUTING,
+  and nothing server-side stopped it — an admin exemption for the only account that merges is not
+  a safety valve, it is the absence of the gate.
+- **13 platypeeps repos have no protection at all**, and protection is deliberately **not** added
+  to them, because for each the cost is real and the benefit is not: `system`, `sven-delmas-vault`,
+  `sd-writing-pack`, and `sdelmas-llm-wiki` take direct pushes from cron/launchd writers (100
+  commits / 0 merge commits in 60 days each — a PR requirement would break the ~30 launchd jobs and
+  15 vault routines that D-doctrine says stay system-owned); `www_platypeeps_com`,
+  `copper-hugo-platypeeps`, `godocs-hugo-platypeeps`, `doc_platypeeps_com`, `company`, and
+  `company-public` are dormant (last commit 2022–2025); `sd-github-review-pilot` and
+  `sd-review-test` are retired at step 4; `testme` has no default branch. `platypeeps/
+  google_workspace_mcp` is the one open call — active PR flow (41 merges/60d), no protection —
+  left to the user rather than changed unilaterally.
+- **All 5 active personal `sdelmas/*` repos are forks** (Trellis, prism, marketplace,
+  google_workspace_mcp, SREGym). Fork-first doctrine governs: a fork's `main` tracks upstream and
+  the patch stack lives on integration branches, so protecting it would fight the flow it exists
+  to serve. No protection added.
+- **No employer/mezmo repo was read or touched** (D7 freeze; collaborators never affected).
+
+Consequence for the prose, and the reason this is a decision and not a chore: the doctrine is now
+stated conditionally everywhere it appears (critique 4, the gates section, the autonomous lane, prd
+requirement 2, this repo's CONTRIBUTING). "Merge authority is branch protection" is true only while
+protection enforces; where it does not, `sd-status` reports the gap (folded into the step-3b brief)
+and no document claims a guarantee the config does not provide.
+
 ### Autonomous backlog lane — `sd-ship --backlog --agent codex` (R10-D1)
 
 The r8 codex burn-down was a README recipe; recipes that need to be remembered do not get run.
@@ -398,7 +441,9 @@ bespoke prompt file) → run under a wall-clock budget → `sd-check` in the wor
 
 Bounds, each mapping to an existing doctrine rather than new policy:
 - **Never merges, never marks ready-for-review.** Merge authority stays GitHub branch protection
-  (critique 4); the lane produces reviewable drafts and nothing else. Settling is a human running
+  where it is enforcing (critique 4) — and the lane's refusal to merge does not depend on that:
+  it never merges even in a repo with no protection at all, which is exactly the repo where the
+  distinction matters; the lane produces reviewable drafts and nothing else. Settling is a human running
   `sd-ship --pr N`. Draft status also makes route() plan the cheap tier, so the lane does not
   spend review budget on work nobody has looked at yet.
 - **One writer per checkout** (Parallelism rule 1) — worktree isolation is the mechanism, and
