@@ -40,7 +40,18 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 - [ ] 0 — kill release train + gate stack
 - [ ] 1 — one copy of every file
 - [ ] 2 — `docs/work` replaces `.trellis`; sd_route.py
-- [ ] 3 — new installer + 12 skills + sd-review backends
+- [ ] 3 — new installer + 12 skills + sd-review backends. **Split into reviewable sub-PRs
+  (2026-08-29): step 3 replaces ~56k LOC of `templates/scripts/` + `installer/` with ~7k under
+  `bin/`; landing that as one pull request would be unreviewable, and the old world must keep
+  working until the new installer is proven. Sub-PRs land on `main` in order, each independently
+  green; 3-c does not begin until all of them have landed, so the "consumers cannot plugin-update
+  between step 1 and step 3" window is unchanged.**
+  - [ ] 3a — `bin/sd_lib.py` + `bin/sd-check`; `bin/sd-handoff` + `bin/sd-handoff-restore` (R10-D3). Additive only.
+  - [ ] 3b — `bin/sd-status` + `bin/sd-pr-state` (read-only, GitHub-derived)
+  - [ ] 3c-review — `bin/sd-review` + provider seam + backends + `sd-review.json` policy
+  - [ ] 3d — the 12 command skills + templates
+  - [ ] 3e — new machine-scope `install.py` + `installed.json` + parity tests; deletes the legacy
+        `templates/scripts/**`, `installer/**`, and `manifest.json` once the E2E passes
 - [ ] 3-c — consumer removal PRs (9) incl. `setup-github` for full-mode repos
 - [ ] 3a / 3b / 3c / 3d / 3e
 - [ ] 4 / 4b
