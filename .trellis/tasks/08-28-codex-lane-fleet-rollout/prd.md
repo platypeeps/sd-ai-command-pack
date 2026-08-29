@@ -114,6 +114,27 @@ The two existing precedents are the pack itself (`codex` + `gito`) and
 lives only in the `sd-github-review` checkout, so that provider set is not
 portable to the other consumers as-is.
 
+### A codex-only set would regress `scope=codebase`
+
+The second-lane question has a real answer, but it is about scope coverage
+rather than failure rescue. The built-in `codex` provider declares
+`"scopes": ["worktree", "branch_delta"]` and does not cover `codebase`. The
+default configuration these eight consumers fall back to today enables `prism`
+and `gito`, both carrying the shared `["worktree", "branch_delta", "codebase"]`
+scope list.
+
+So writing a codex-only `review.json` into a consumer takes away a review mode
+it currently has: with no enabled provider covering the requested scope,
+planning raises `no eligible local review provider satisfies the selected
+policy` and `sd-review scope=codebase` stops working in that repository.
+
+Each consumer therefore needs at least one enabled codebase-capable provider
+alongside `codex` — or an explicit, recorded decision that the repository is
+giving up `scope=codebase`. This is a different requirement from the one the
+failure-behaviour section rules out, and both hold at once: a second lane does
+not make a codex failure locally terminal, and a second lane is still needed to
+keep `codebase` reviewable.
+
 ### The file this task adds is inside the fleet's gito exclusion
 
 All eight target consumers blanket-exclude the directory this task writes into:
@@ -163,9 +184,9 @@ machine without it degrades to the same routed path these consumers use today.
 ## Requirements
 
 1. Decide the provider set each consumer gets and record the decision per
-   consumer rather than assuming one shape fits all nine. A codex-only set is
-   permitted; where a second lane is chosen, record what it is expected to
-   contribute when codex is unavailable.
+   consumer rather than assuming one shape fits all nine. Keep at least one
+   enabled codebase-capable provider unless the consumer explicitly gives up
+   `scope=codebase` and that decision is recorded.
 2. Author `.sd-ai-command-pack/review.json` in each consumer that lacks one,
    with `codex` enabled. Decide `policy.localAdvisorySeverityCeiling`
    separately and per consumer, recording the reason when it is set; omitting
@@ -215,9 +236,11 @@ machine without it degrades to the same routed path these consumers use today.
 2. Every consumer whose config sets `localAdvisorySeverityCeiling` has a
    recorded reason for that choice; consumers that omit it are recorded as
    deliberately strict. A non-null ceiling everywhere is not the target.
-3. Every consumer's config records, in the task's rollout notes, which
-   provider set it received and why — including the deliberate choice where a
-   consumer is codex-only.
+3. Every consumer's config either enables a provider whose `scopes` include
+   `codebase`, or carries a recorded decision that the repository has given up
+   `scope=codebase`. Verify by running `sd-review scope=codebase --plan-only`
+   in at least one rolled-out consumer and confirming it plans rather than
+   raising `no eligible local review provider satisfies the selected policy`.
 4. On at least one canary consumer, a real `sd-review` run over a non-trivial
    branch produces a receipt whose `remoteGate.state` is `eligible` and whose
    selected providers include `codex`, with zero routed rounds. Capture the

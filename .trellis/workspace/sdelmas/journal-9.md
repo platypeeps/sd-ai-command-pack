@@ -1993,4 +1993,4 @@ Filed 08-28-codex-lane-fleet-rollout (P2, planning): the deployment half of movi
 ### Next Steps
 
 - Sequence 08-28-gito-blanket-exclusion-fleet ahead of this task, or narrow each consumer's pattern in the same change
-- Decide the per-consumer provider set before starting; a codex-only set is permitted, and a second lane buys the outcome via _aggregate_outcome rather than routed-skip eligibility
+- Decide the per-consumer provider set before starting; keep a codebase-capable lane, since codex covers only worktree and branch_delta and a codex-only set breaks sd-review scope=codebase
