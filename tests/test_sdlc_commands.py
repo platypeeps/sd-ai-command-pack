@@ -339,7 +339,8 @@ class SdlcCommandsTests(InstallTestCase):
             "bracket every stage with `stage-run`",
             "`reviewer-wait` and `ci-wait`, both started immediately after the",
             # The stranding cause: the skill named no command for closing a lane.
-            "every selected consumer needs `consumer-end --run-id <run-id>",
+            "every selected consumer needs `consumer-end --run-id <run-id> "
+            "--consumer <name> --outcome <outcome>`",
             "report --run-id <run-id> --complete",
             "never changes a delivery gate's authoritative result",
         ):

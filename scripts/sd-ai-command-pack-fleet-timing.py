@@ -124,9 +124,12 @@ ATTEMPT_FIELDS = frozenset(
 # Recorded only when the elapsed time could not be measured with the monotonic
 # clock. Optional rather than required: every attempt written before this field
 # existed is monotonic-measured, and a strict schema that demanded it would
-# orphan the runs already on disk.
+# orphan the runs already on disk. Its absence therefore carries the monotonic
+# case, which is why "monotonic" is not a legal value: admitting it would give
+# the same fact two spellings, and a reader could no longer conclude from the
+# field's presence alone that the measurement fell back to the wall clock.
 ATTEMPT_OPTIONAL_FIELDS = frozenset({"elapsedSource"})
-ELAPSED_SOURCES = frozenset({"monotonic", "wall"})
+ELAPSED_SOURCES = frozenset({"wall"})
 LOCK_FIELDS = frozenset(
     {"schemaVersion", "runId", "repositoryDigest", "pid", "hostname", "acquiredAtWallNs"}
 )
@@ -927,6 +930,13 @@ def run_bracketed_stage(
     end is in a ``finally``, so an early return, a nonzero exit, a missing
     executable, or a signal all close the attempt instead of leaking it.
 
+    The bracket owns the attempt it closes. One reading opens it, so the record's
+    ``updatedAtWallNs`` cannot predate the ``startedWallNs`` written in the same
+    mutation, and a stage that already has an open attempt is refused rather than
+    bracketed: running the command anyway would close somebody else's attempt
+    with this command's outcome, which is the mis-attribution the bracket exists
+    to prevent.
+
     The outcome is measured, never asserted: exit 0 is ``passed``, a nonzero
     exit is ``failed``, and a command that could not run to completion is
     ``interrupted``. A command killed by a signal did not run to completion
@@ -941,17 +951,23 @@ def run_bracketed_stage(
     outcome = "interrupted"
     reason: str | None = "the bracketed command did not run to completion"
     status = 127
-    mutate_state(
+    started = system_reading()
+    _state, opened = mutate_state(
         store,
         run_id,
-        system_reading(),
+        started,
         lambda current: start_stage(
             current,
             consumer_name=consumer_name,
             stage_name=stage_name,
-            reading=system_reading(),
+            reading=started,
         ),
     )
+    if not opened:
+        raise FleetTimingError(
+            "stage already has an open attempt, so this command cannot bracket "
+            "it; end that attempt with stage-end first"
+        )
     try:
         completed = subprocess.run(list(command), check=False)
         status = int(completed.returncode)

@@ -75,7 +75,12 @@
   recorded `interrupted` rather than `failed`: `subprocess` reports that as a
   negative return code, and reading it as an ordinary nonzero exit would file a
   stage nobody finished under the outcome reserved for a gate that ran and said
-  no.
+  no. `stage-run` opens its attempt with a single clock reading, so a record's
+  `updatedAtWallNs` can no longer predate the `startedWallNs` written beside it,
+  and it refuses a stage that already has an open attempt rather than closing
+  somebody else's attempt with this command's outcome. `elapsedSource` accepts
+  only `wall`: absence already carries the monotonic case, and admitting
+  `monotonic` would give one fact two spellings.
 - The timing completion error names what is missing. It reported only the first
   of its two gates and identified neither consumer, stage, nor attempt, so an
   operator who cleared the open attempts met the missing-outcome gate as a fresh

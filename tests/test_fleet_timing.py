@@ -1227,6 +1227,78 @@ class FleetTimingTests(InstallTestCase):
         self.assertIsNotNone(attempt["endedWallNs"])
         self.assertEqual(timing.open_attempts(state), [])
 
+    def test_stage_run_refuses_a_stage_that_already_has_an_open_attempt(self) -> None:
+        """The bracket must close its own attempt, never somebody else's.
+
+        A stage left open by an earlier `stage-start` is the exact state this
+        subcommand exists to prevent, so meeting one is not a licence to run:
+        the `finally` would stamp this command's outcome onto the older attempt
+        and report a stage that passed when the work it timed never finished.
+        The start's own reading is also the record's, so a start can never write
+        an `updatedAtWallNs` older than the `startedWallNs` beside it.
+        """
+
+        timing = self.load_timing()
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = ["--repo", str(repo), "--state-home", str(state_home), "--json"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            timing.main(
+                [
+                    *common,
+                    "init",
+                    "--run-id",
+                    "run-1",
+                    "--target-version",
+                    "0.23.16",
+                    "--consumer",
+                    "canary:10",
+                ]
+            )
+            timing.main(
+                [
+                    *common,
+                    "stage-start",
+                    "--run-id",
+                    "run-1",
+                    "--consumer",
+                    "canary",
+                    "--stage",
+                    "install",
+                ]
+            )
+        reported = io.StringIO()
+        with contextlib.redirect_stdout(reported):
+            status = timing.main(
+                [
+                    *common,
+                    "stage-run",
+                    "--run-id",
+                    "run-1",
+                    "--consumer",
+                    "canary",
+                    "--stage",
+                    "install",
+                    "--",
+                    "true",
+                ]
+            )
+
+        self.assertNotEqual(status, 0)
+        payload = json.loads(reported.getvalue())
+        self.assertEqual(payload["status"], "error")
+        self.assertIn("already has an open attempt", payload["error"])
+        store = timing.timing_store(repo, "run-1", state_home)
+        state = timing.load_state(store, "run-1")
+        stage = state["consumers"][0]["stages"][0]
+        # The older attempt is untouched: still open, and not wearing an
+        # outcome the bracketed command produced.
+        self.assertEqual(len(stage["attempts"]), 1)
+        self.assertIsNone(stage["attempts"][0]["outcome"])
+        self.assertGreaterEqual(
+            state["updatedAtWallNs"], stage["attempts"][0]["startedWallNs"]
+        )
+
     def test_records_written_before_elapsed_source_existed_still_validate(self) -> None:
         """Historical runs must not be orphaned by the new optional field."""
 
