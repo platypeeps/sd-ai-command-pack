@@ -133,3 +133,43 @@ Registered answerbook/mezmo-world-simulator in the fleet registry, converted it 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 453: File the thin-only install task and correct its PRD under review
+<!-- trellis-session: v=2 fp=c96f4ff544dcb389 -->
+
+**Date**: 2026-08-28
+**Task**: File the thin-only install task and correct its PRD under review
+**Branch**: `task/08-28-thin-only-install`
+
+### Summary
+
+Filed the thin-only-install planning task, which proposes making install.py write the thin tree directly and deleting the fat payload plus the conversion and revert machinery. Corrected two defects the PR review found in the PRD: the consumer-count claim was attributed to this PR rather than to PR #586, and a hyphenated term had been split across a line break.
+
+### Main Changes
+
+- Filed .trellis/tasks/08-28-thin-only-install with a PRD covering the five-step fresh-install-then-convert sequence, the rejected make-thin-the-default alternative, and the deletion scope.
+- Reattributed the ten-consumer claim to PR #586, which actually added answerbook/mezmo-world-simulator, and stated explicitly that this task record changes no registry row.
+- Rewrapped the paragraph so plan-before-apply stays on one line instead of rendering as 'plan-before- apply'.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a1dff13` | docs(task): file thin-only install — remove the fat payload and the conversion path |
+| `2629490b` | docs(task): correct the consumer-count attribution and the wrapped plan-before-apply term |
+
+### Testing
+
+- [OK] sd-ai-command-pack-review-preflight.mjs — Review preflight: 0 failure(s), 0 warning(s)
+- [OK] docs/fleet/consumers.json on merged main — count: 10, all thin: True
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- The task stays in `planning`; this session filed the record and fixed its PRD, and
+  implemented nothing. Implementation waits on a review gate and `task.py start`.
