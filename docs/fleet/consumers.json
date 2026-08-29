@@ -314,7 +314,7 @@
           "research-kit render . >/dev/null && research-kit review ."
         ]
       ],
-      "mode": "fat"
+      "mode": "thin"
     }
   ],
   "excludedAliases": [
