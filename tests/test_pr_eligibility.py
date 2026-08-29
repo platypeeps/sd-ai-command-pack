@@ -10,7 +10,7 @@ from typing import Any
 
 import install
 
-SCRIPT_PATH = install.ROOT / "scripts/sd-ai-command-pack-pr-eligibility.py"
+SCRIPT_PATH = install.ROOT / "templates/scripts/sd-ai-command-pack-pr-eligibility.py"
 SPEC = importlib.util.spec_from_file_location("sd_ai_command_pack_pr_eligibility", SCRIPT_PATH)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"cannot load {SCRIPT_PATH}")

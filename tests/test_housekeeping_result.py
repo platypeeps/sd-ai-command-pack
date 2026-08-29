@@ -12,7 +12,7 @@ from pathlib import Path
 
 import install
 
-SCRIPT_PATH = install.ROOT / "scripts/sd-ai-command-pack-housekeeping-result.py"
+SCRIPT_PATH = install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping-result.py"
 SPEC = importlib.util.spec_from_file_location(
     "sd_ai_command_pack_housekeeping_result", SCRIPT_PATH
 )
@@ -22,7 +22,7 @@ result_builder = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = result_builder
 SPEC.loader.exec_module(result_builder)
 
-STATUS_PATH = install.ROOT / "scripts/sd-ai-command-pack-status.py"
+STATUS_PATH = install.ROOT / "templates/scripts/sd-ai-command-pack-status.py"
 STATUS_SPEC = importlib.util.spec_from_file_location(
     "sd_ai_command_pack_status_for_result", STATUS_PATH
 )

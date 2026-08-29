@@ -475,7 +475,7 @@ def load_resweep_module(root: Path):
     """
     import importlib.util
 
-    path = root / "scripts/sd-ai-command-pack-thin-resweep.py"
+    path = root / "templates/scripts/sd-ai-command-pack-thin-resweep.py"
     spec = importlib.util.spec_from_file_location("sd_thin_resweep", path)
     if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
         raise SystemExit(f"error: cannot load {path}")
@@ -603,14 +603,14 @@ def load_install_audit_module(root: Path):
     """
     import importlib.util
 
-    scripts = root / "scripts"
+    scripts = root / "templates" / "scripts"
     path = scripts / "sd-ai-command-pack-install-audit.py"
     spec = importlib.util.spec_from_file_location("sd_install_audit", path)
     if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
         raise SystemExit(f"error: cannot load {path}")
     module = importlib.util.module_from_spec(spec)
     # The audit imports its sibling `sd_ai_command_pack_lib` by bare name,
-    # which resolves only because a direct `python scripts/...` invocation puts
+    # which resolves only because a direct `python <dir>/...` invocation puts
     # that directory on `sys.path[0]`. A spec load gets no such entry, so the
     # import fails partway through `exec_module`. Supplied here and removed
     # again rather than left behind, because this runs inside the installer.

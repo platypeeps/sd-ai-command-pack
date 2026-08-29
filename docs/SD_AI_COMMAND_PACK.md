@@ -811,7 +811,7 @@ surface across committed, staged, unstaged, and non-ignored untracked paths.
 It distinguishes installable, generated, explicitly source-only,
 documentation-only, check-only, retired, and release-evidence nodes. Missing
 or stale relations fail with exact repository-relative paths and the owning
-preparation command (`make generate`, `make sync`, a manifest entry, or an
+preparation command (`make generate`, a manifest entry, or an
 explicit `SOURCE_ONLY_SKILL_REFERENCES` declaration); the validator never runs
 those preparation actions itself. The local pre-publication gate and CI use
 the same helper rather than reconstructing the policy from separate globs.

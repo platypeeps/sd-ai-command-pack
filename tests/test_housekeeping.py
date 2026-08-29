@@ -65,7 +65,7 @@ class HousekeepingTests(InstallTestCase):
     def test_housekeeping_clean_check_fails_closed_on_git_failure(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
-        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        script = str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
         probe = (
             f'eval "$(awk \'/^working_tree_status\\(\\)/,/^}}/\' {script})";'
             f'eval "$(awk \'/^working_tree_is_clean\\(\\)/,/^}}/\' {script})";'
@@ -88,7 +88,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 self._bash_path,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 "--remote",
                 "--upload-pack=/bin/true",
             ],
@@ -106,7 +106,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 self._bash_path,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 "--finish-work-receipt",
                 "--self-test",
             ],
@@ -124,7 +124,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 self._bash_path,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 "--finish-work-receipt",
             ],
             text=True,
@@ -142,7 +142,7 @@ class HousekeepingTests(InstallTestCase):
         the function body, so acceptance never proceeds into side-effecting
         housekeeping stages.
         """
-        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        script = str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
         probe = (
             f'eval "$(awk \'/^validate_finish_work_receipt\\(\\)/,/^}}/\' {script})";'
             'validate_finish_work_receipt "$RECEIPT"'
@@ -244,7 +244,7 @@ class HousekeepingTests(InstallTestCase):
             result = subprocess.run(
                 [
                     self._bash_path,
-                    str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                    str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                     "--finish-work-receipt",
                     temp_dir,
                 ],
@@ -261,7 +261,7 @@ class HousekeepingTests(InstallTestCase):
     def test_housekeeping_default_branch_ignores_gh_null(self) -> None:
         if self._bash_path is None:
             self.skipTest("bash is not available on PATH")
-        script = str(PACK_ROOT / "scripts/sd-ai-command-pack-housekeeping.sh")
+        script = str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh")
         probe = (
             'REMOTE=origin; GITHUB_REPO_SLUG=""; DEFAULT_BRANCH="";'
             "have() { return 0; };"
@@ -1190,7 +1190,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 "bash",
-                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 "--dry-run",
                 "--json",
             ],
@@ -1352,7 +1352,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 "bash",
-                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 *self.finish_work_receipt_args(repo, head_oid),
                 "--json",
             ],
@@ -1402,7 +1402,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 "bash",
-                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 "--finish-work-receipt",
                 str(receipt),
                 "--json",
@@ -2109,7 +2109,7 @@ class HousekeepingTests(InstallTestCase):
         result = subprocess.run(
             [
                 "bash",
-                str(install.ROOT / "scripts/sd-ai-command-pack-housekeeping.sh"),
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
                 "--json",
             ],
             cwd=repo,

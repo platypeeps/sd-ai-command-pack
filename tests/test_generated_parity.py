@@ -957,11 +957,10 @@ class GeneratedParityTests(InstallTestCase):
             "os: macos-latest",
             "unittest-output.log",
             "skipped=[1-9][0-9]*",
-            "python3 -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
-            "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
+            "python3 -m ruff check install.py installer templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
-            "python3 -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
+            "python3 -m mypy installer install.py templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
         ):
             self.assertIn(expected, workflow)
         # Ruff's lint target is inferred from project.requires-python (covered
@@ -991,9 +990,8 @@ class GeneratedParityTests(InstallTestCase):
             self.assertIn(expected, workflow)
         for expected in (
             "python -m pip install -r requirements-dev.txt",
-            "python -m ruff check install.py installer scripts templates/scripts tests",
+            "python -m ruff check install.py installer templates/scripts tests",
             "command -v node >/dev/null 2>&1",
-            "node --check scripts/sd-ai-command-pack-review-preflight.mjs",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
             "warning: node not found; skipping JavaScript syntax checks.",
@@ -1008,20 +1006,22 @@ class GeneratedParityTests(InstallTestCase):
             PACK_ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            '--include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py,scripts/sd_ai_command_pack_fleet_lib.py"',
+            '--include="templates/scripts/sd-ai-command-pack-*.py,'
+            "templates/scripts/sd_ai_command_pack_lib.py,"
+            'templates/scripts/sd_ai_command_pack_fleet_lib.py"',
             coverage_gate,
         )
         self.assertIn("--fail-under=76", coverage_gate)
         for expected in (
-            "scripts/sd-ai-command-pack-check.py 74",
-            "scripts/sd-ai-command-pack-fleet-controller.py 76",
-            "scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
-            "scripts/sd-ai-command-pack-fleet-timing.py 88",
-            "scripts/sd-ai-command-pack-fleet-wave-plan.py 85",
+            "templates/scripts/sd-ai-command-pack-check.py 74",
+            "templates/scripts/sd-ai-command-pack-fleet-controller.py 76",
+            "templates/scripts/sd-ai-command-pack-fleet-finding-classify.py 85",
+            "templates/scripts/sd-ai-command-pack-fleet-timing.py 88",
+            "templates/scripts/sd-ai-command-pack-fleet-wave-plan.py 85",
         ):
             self.assertIn(expected, coverage_gate)
         self.assertIn(
-            "scripts/sd_ai_command_pack_fleet_lib.py 90",
+            "templates/scripts/sd_ai_command_pack_fleet_lib.py 90",
             coverage_gate,
         )
         # The parallel test runner owns the coverage rig contract that used to
@@ -1336,11 +1336,10 @@ class GeneratedParityTests(InstallTestCase):
             "pack JavaScript syntax checks when Node is available",
             "Missing optional tools print warnings",
             "0.72.0 (tag `v0.72.0`) is the terminal release",
-            "Treat `templates/**` as the source of truth",
-            "sd-ai-command-pack-toolchain.sh run-python -- install.py . --force",
+            "`templates/**` holds the one copy of every shipped file",
+            "python3 .github/scripts/generate-command-surfaces.py",
             "Keep Trellis-owned platform files in their Trellis-managed state",
-            "Do not track `.opencode/package.json` or any `.opencode` Bun lockfile",
-            "cd .opencode",
+            "Do not track `templates/.opencode/package.json`",
             "`.claude/settings.local.json`",
             ".trellis/spec/frontend/adapter-guidelines.md",
             ".trellis/spec/backend/manifest-and-filesystem.md",
@@ -1613,9 +1612,9 @@ class GeneratedParityTests(InstallTestCase):
         _, files = install.load_manifest()
         manifest_targets = {file.target.as_posix() for file in files}
         source_only_helpers = {
-            "scripts/sd-ai-command-pack-fleet-controller.py",
-            "scripts/sd-ai-command-pack-fleet-timing.py",
-            "scripts/sd-ai-command-pack-fleet-wave-plan.py",
+            "templates/scripts/sd-ai-command-pack-fleet-controller.py",
+            "templates/scripts/sd-ai-command-pack-fleet-timing.py",
+            "templates/scripts/sd-ai-command-pack-fleet-wave-plan.py",
         }
 
         self.assertTrue(
@@ -1630,9 +1629,6 @@ class GeneratedParityTests(InstallTestCase):
             "templates/.claude/commands/sd/fleet-refresh.md",
             "templates/.gemini/commands/sd/fleet-refresh.toml",
             "templates/.github/prompts/sd-fleet-refresh.prompt.md",
-            ".agents/skills/sd-fleet-refresh/SKILL.md",
-            ".claude/commands/sd/fleet-refresh.md",
-            ".gemini/commands/sd/fleet-refresh.toml",
             ".github/prompts/sd-fleet-refresh.prompt.md",
         ):
             with self.subTest(path=path):

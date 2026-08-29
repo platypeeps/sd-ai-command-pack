@@ -1214,6 +1214,20 @@ SOURCE_ONLY_SKILL_REFERENCES: dict[str, tuple[str, ...]] = {
     "sd-fleet-refresh": ("references/controller-recovery.md",),
 }
 
+# Operator helpers that live beside the shipped payload in templates/scripts/
+# but are never installed: the fleet rollout tooling and the thin-conversion
+# resweep run only from a pack source checkout. Declared here for the same
+# reason as SOURCE_ONLY_SKILL_REFERENCES -- so a source-only helper cannot fall
+# through both the consumer manifest and the shipped-surface closure check
+# without a deliberate entry.
+SOURCE_ONLY_TEMPLATE_SCRIPTS: tuple[str, ...] = (
+    "templates/scripts/sd-ai-command-pack-fleet-controller.py",
+    "templates/scripts/sd-ai-command-pack-fleet-finding-classify.py",
+    "templates/scripts/sd-ai-command-pack-fleet-timing.py",
+    "templates/scripts/sd-ai-command-pack-fleet-wave-plan.py",
+    "templates/scripts/sd-ai-command-pack-thin-resweep.py",
+)
+
 
 def command_installed_targets(
     name: str,
@@ -1252,58 +1266,6 @@ def command_installed_targets(
         if platform in target_families
     )
     return tuple(targets)
-
-
-def source_only_adapter_twins(
-    name: str,
-    short: str,
-    target_families: tuple[str, ...],
-    *,
-    root: Path,
-) -> tuple[tuple[str, str], ...]:
-    """Return (template source, dev-tree target) adapter pairs for one
-    source-only command.
-
-    Source-only commands have no consumer manifest entries, so the dogfood
-    self-install never refreshes their dev-tree adapters. The command-surface
-    generator and the pack drift gate both derive that dev-tree footprint from
-    this one helper. Mirroring the installer's anchor rule, a platform
-    contributes a pair only when its anchor directory exists under ``root``.
-    """
-
-    def neutral_pair(platform: str) -> tuple[str, str]:
-        pattern = PLATFORM_REGISTRY[platform].command_target_pattern
-        if pattern is None:
-            raise RuntimeError(f"platform has no command target pattern: {platform}")
-        return (
-            f"templates/.commands/{name}.md",
-            pattern.format(filename=f"{name}.md", name=short),
-        )
-
-    pairs: list[tuple[str, tuple[str, str]]] = []
-    if "claude" in target_families:
-        path = f".claude/commands/sd/{short}.md"
-        pairs.append(("claude", (f"templates/{path}", path)))
-    if "cursor" in target_families:
-        pairs.append(("cursor", neutral_pair("cursor")))
-    if "gemini" in target_families:
-        path = f".gemini/commands/sd/{short}.toml"
-        pairs.append(("gemini", (f"templates/{path}", path)))
-    if "github" in target_families:
-        path = f".github/prompts/{name}.prompt.md"
-        pairs.append(("github", (f"templates/{path}", path)))
-    if "opencode" in target_families:
-        pairs.append(("opencode", neutral_pair("opencode")))
-    pairs.extend(
-        (platform, neutral_pair(platform))
-        for platform in LATER_NEUTRAL_COMMAND_PLATFORMS
-        if platform in target_families
-    )
-    return tuple(
-        pair
-        for platform, pair in pairs
-        if (root / PLATFORM_REGISTRY[platform].directory).is_dir()
-    )
 
 
 @dataclass(frozen=True)
@@ -1530,34 +1492,10 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         path_pattern=".trellis/audit/report-2026-07-28.md",
         reason="bounded historical audit record",
     ),
-    # The plugin bundles the installer modules its machine-scope engine
-    # imports, so the canonical declaration travels with them. Same file, same
-    # fact, one generated copy: `make generate` writes it and would drop these
-    # allowances' matches with it.
-    CommandSurfaceAllowance(
-        identifier="sd-review-local-all",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-work-designs",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-watch-pr",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
     CommandSurfaceAllowance(
         identifier="sd-full-check",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-full-check",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="sd-full-check",
@@ -1596,11 +1534,6 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
     ),
     CommandSurfaceAllowance(
         identifier="sd-review-local",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-review-local",
         path_pattern="CHANGELOG.md",
         reason="bounded historical release record",
     ),
@@ -1620,19 +1553,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_CUSTOM_COMMAND",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_ALL_GITO_OUT_DIR",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF",
@@ -1640,19 +1563,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_BASE_REF",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_CUSTOM_COMMAND",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF",
@@ -1660,19 +1573,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_BASE_REF",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MAX_ATTEMPTS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE",
@@ -1680,19 +1583,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_MODE",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_OUT_DIR",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
@@ -1700,19 +1593,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_DELAY_SECONDS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_RETRY_MAX_DELAY_SECONDS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS",
@@ -1720,19 +1603,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_GITO_TIMEOUT_SECONDS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_BATCH_SIZE",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK",
@@ -1740,19 +1613,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_FALLBACK",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_CODEBASE_MAX_EMPTY_CHUNK_FAILURES",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE",
@@ -1760,19 +1623,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_EXCLUDE",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_FAIL_ON",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS",
@@ -1780,19 +1633,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MAX_FINDINGS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_MODE",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES",
@@ -1800,19 +1643,9 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_RULES",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_PRISM_TIMEOUT_SECONDS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE",
@@ -1820,29 +1653,14 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SCOPE",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
     ),
     CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_SEMGREP_COMMAND",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
         identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
-    ),
-    CommandSurfaceAllowance(
-        identifier="SD_AI_COMMAND_PACK_REVIEW_LOCAL_TOOLS",
-        path_pattern="plugins/sd/installer/registry.py",
-        reason="generated plugin copy of the canonical retired-surface declaration",
     ),
 )
 
@@ -2447,6 +2265,7 @@ __all__ = [
     "SHARED_SKILL_REFERENCES",
     "SKILL_FANOUT_PLATFORMS",
     "SOURCE_ONLY_COMMAND_NAMES",
+    "SOURCE_ONLY_TEMPLATE_SCRIPTS",
     "SUPERSEDED_COMMANDS",
     "TRELLIS_BLANKET_GITIGNORE_ENTRIES",
     "TRELLIS_GITIGNORE_END",
@@ -2463,7 +2282,6 @@ __all__ = [
     "validate_interaction_registry",
     "validate_command_surface_registry",
     "command_installed_targets",
-    "source_only_adapter_twins",
     "validate_shared_skill_references",
     "validate_source_only_command_names",
     "validate_superseded_commands",

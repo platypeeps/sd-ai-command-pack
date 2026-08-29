@@ -34,7 +34,7 @@ class RecordSessionTests(InstallTestCase):
 
     def test_recorder_journal_detection_handles_failures_and_renames(self) -> None:
         recorder = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-record-session.py",
             "sd_record_session_journals",
         )
         non_git = Path(tempfile.mkdtemp(prefix="sd-non-git-recorder-"))
@@ -87,7 +87,7 @@ class RecordSessionTests(InstallTestCase):
         the workspace so journal and index commits never nominate themselves.
         """
         recorder = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-record-session.py",
             "sd_record_session_derive",
         )
         root = self.make_repo()
@@ -135,7 +135,7 @@ class RecordSessionTests(InstallTestCase):
 
     def test_derive_work_commits_declines_when_the_answer_is_not_obvious(self) -> None:
         recorder = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-record-session.py",
             "sd_record_session_derive_edges",
         )
         root = self.make_repo()
@@ -234,7 +234,7 @@ class RecordSessionTests(InstallTestCase):
 
     def test_record_session_patch_uses_atomic_write(self) -> None:
         recorder = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-record-session.py",
             "sd_record_session_atomic_write",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-recorder-atomic-")
@@ -279,7 +279,7 @@ class RecordSessionTests(InstallTestCase):
         exactly the failure it is there to detect.
         """
         recorder = self.load_module_from_path(
-            PACK_ROOT / "scripts/sd-ai-command-pack-record-session.py",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-record-session.py",
             "sd_record_session_row_anchor",
         )
         tempdir = tempfile.TemporaryDirectory(prefix="sd-recorder-row-")

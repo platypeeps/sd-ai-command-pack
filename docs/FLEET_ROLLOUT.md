@@ -29,8 +29,8 @@ final cohort because its CI feedback loop is materially slower.
 Use the read-only fleet status report before or after rollout activity:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-status.py fleet
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-status.py fleet
 ```
 
 The same command can run from an installed consumer after the machine profile
@@ -47,7 +47,7 @@ a local-only snapshot or `--json` for schema-versioned automation output.
 ## Campaign Controller
 
 Every rollout is planned and advanced through the source-only
-`scripts/sd-ai-command-pack-fleet-controller.py`. The controller validates the
+`templates/scripts/sd-ai-command-pack-fleet-controller.py`. The controller validates the
 immutable pack release, fleet manifest, selected checkout identities, and an
 existing campaign before writing private atomic state outside the repositories.
 It owns canary/wave order, concurrency, attempts, action identities, receipts,
@@ -77,8 +77,8 @@ any consumer action; the controller does not re-run it and exposes no
 Create one safe campaign ID and plan once:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py plan \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-controller.py plan \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> [--consumer <name> ...] [--no-merge] --json
 ```
@@ -96,8 +96,8 @@ finish-work writes before merge, which happens on every lane — record the issu
 action at the new head and pass the finish-work receipt that produced it:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py record \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-controller.py record \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> --action-id <issued-action-id> \
   --consumer <name> --result passed --head <successor-full-sha> \
@@ -117,8 +117,8 @@ publication epoch. Record the issued action against its published SHA and PR as
 a bounded republication retry:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py record \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-controller.py record \
   --repo <absolute-source-root> --campaign <campaign-id> \
   --release <version> --action-id <issued-action-id> \
   --consumer <name> --result retryable-failure \
@@ -177,7 +177,7 @@ the refresh reinstalls its residual):
    thin-aware refresh rejects the flag rather than re-deriving the residual
    from the registry's list. Changing a converted consumer's platform set is a
    `--revert-thin` plus a reviewed reconversion, never a fleet sweep.
-3. Run the printed `python3 scripts/sd-ai-command-pack-install-audit.py --repo
+3. Run the printed `python3 templates/scripts/sd-ai-command-pack-install-audit.py --repo
    <repo> --expected-platform ...` command from this pack checkout, like step 2
    and unlike step 4 — the script path is relative to this repository, and
    `--repo` is what points the audit at the consumer. Record it that way in any
@@ -230,8 +230,8 @@ Initialize one run before preflight using the target version and the selected
 consumer names plus rollout priorities:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
   init --run-id <run-id> --target-version <version> \
   --consumer <name>:<priority> [...]
 ```
@@ -281,8 +281,8 @@ local state path.
 Render a partial report after an interruption:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-timing.py --repo <absolute-source-root> \
   report --run-id <run-id>
 ```
 
@@ -325,8 +325,8 @@ from install, audit, full-check, review, or existing feedback, create a
 temporary schema-version-1 JSON document and run:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-finding-classify.py \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-finding-classify.py \
   --input <temporary-findings.json> --json
 ```
 
@@ -387,8 +387,8 @@ original fleet task from a fresh preflight. A terminal merge-stage
 controller transition:
 
 ```bash
-bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
-  scripts/sd-ai-command-pack-fleet-controller.py resume \
+bash templates/scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  templates/scripts/sd-ai-command-pack-fleet-controller.py resume \
   --repo . --campaign <campaign-id> \
   --recover-consumer <consumer> --corrective-release <version> --json
 ```
@@ -485,7 +485,7 @@ The five steps, and why each precedes the next:
 2. **Refresh** the consumer to that version or later. The kept path now exists
    *in the consumer*, committed. Nothing before this point may reference it.
 3. **Rewrite** the consumer's guards to call the kept path instead of any
-   `scripts/sd-ai-command-pack-*` literal, using `--resolve NAME` for the
+   `templates/scripts/sd-ai-command-pack-*` literal, using `--resolve NAME` for the
    scripts they used to name directly. Safe only after step 2: a rewrite that
    lands first names a file that is not there.
 
@@ -497,7 +497,7 @@ The five steps, and why each precedes the next:
    asserting the resolver through a hand-escaped regex
    (`/\.sd-ai-command-pack\/bin\/…\.py$/`) left the file blocked until the
    assertion became an `endsWith` on the literal.
-4. **Resweep** (`scripts/sd-ai-command-pack-thin-resweep.py <consumer>`). What
+4. **Resweep** (`templates/scripts/sd-ai-command-pack-thin-resweep.py <consumer>`). What
    remains is the residue no runtime resolver reaches — glob patterns in
    instructions prose and change-classifier fixture lists. Each needs
    rewriting or a recorded acceptance; a resolver cannot rewrite a glob.

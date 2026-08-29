@@ -25,7 +25,7 @@ except ModuleNotFoundError as exc:
 
 install = _support.install
 
-SKILL_ROOTS = ("templates/.agents", ".agents")
+SKILL_ROOTS = ("templates/.agents",)
 
 PREPARATION = (
     "When an active task is selected for completion, record any missing "

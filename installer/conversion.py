@@ -570,7 +570,7 @@ CLASSIFIER_DIGEST_PATHS = (
     # as a hit, as an execution surface, and as a citation. Without it, an
     # edit to the surface rule or the glob matcher leaves an existing
     # `clear` verdict valid under an unchanged digest.
-    "scripts/sd-ai-command-pack-thin-resweep.py",
+    "templates/scripts/sd-ai-command-pack-thin-resweep.py",
     # The manifest names the payload and the force-preserved templates;
     # `installer/manifest.py` decides how those rows are read.
     "manifest.json",

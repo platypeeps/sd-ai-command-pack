@@ -33,7 +33,7 @@ InstallTestCase = _support.InstallTestCase
 SCRIPTS = {
     "status": PACK_ROOT / "templates/scripts/sd-ai-command-pack-status.py",
     "surface": PACK_ROOT / "templates/scripts/sd-ai-command-pack-surface-check.py",
-    "controller": PACK_ROOT / "scripts/sd-ai-command-pack-fleet-controller.py",
+    "controller": PACK_ROOT / "templates/scripts/sd-ai-command-pack-fleet-controller.py",
 }
 
 

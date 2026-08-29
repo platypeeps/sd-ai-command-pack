@@ -18,7 +18,7 @@ Path = _support.Path
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
-_ELIGIBILITY_SCRIPT = PACK_ROOT / "scripts/sd-ai-command-pack-pr-eligibility.py"
+_ELIGIBILITY_SCRIPT = PACK_ROOT / "templates/scripts/sd-ai-command-pack-pr-eligibility.py"
 _eligibility_module = None
 
 
@@ -56,7 +56,7 @@ class BookkeepingValidatorTests(InstallTestCase):
         scripts = root / "scripts"
         scripts.mkdir()
         shutil.copy2(
-            PACK_ROOT / "scripts/sd-ai-command-pack-review-preflight.mjs",
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             scripts / "sd-ai-command-pack-review-preflight.mjs",
         )
         self.run_git(root, "add", ".")

@@ -224,7 +224,7 @@ class UpdateSpecKbTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"),
             ],
             cwd=root,
             text=True,
@@ -241,7 +241,7 @@ class UpdateSpecKbTests(InstallTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(PACK_ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py"),
+                str(PACK_ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"),
             ],
             cwd=root,
             text=True,
@@ -299,7 +299,7 @@ class UpdateSpecKbTests(InstallTestCase):
         # reconciles to the same tree without duplicating entries.
         root = self.make_repo()
         (root / "README.md").write_text("# Project\n", encoding="utf-8")
-        script = PACK_ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py"
+        script = PACK_ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py"
 
         def _refresh() -> None:
             result = subprocess.run(
@@ -668,7 +668,7 @@ class UpdateSpecKbTests(InstallTestCase):
     def test_update_spec_kb_normalizes_platform_agents_filenames(self) -> None:
         for script_path, module_name in (
             (
-                install.ROOT / "scripts/sd-ai-command-pack-update-spec-kb.py",
+                install.ROOT / "templates/scripts/sd-ai-command-pack-update-spec-kb.py",
                 "sd_ai_command_pack_update_spec_kb_source_destination_test",
             ),
             (

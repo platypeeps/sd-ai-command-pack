@@ -31,34 +31,6 @@ SECRET_MARKER_PATTERNS = _support.SECRET_MARKER_PATTERNS
 InstallTestCase = _support.InstallTestCase
 
 
-def dogfood_manifest_files(
-    files: list[install.PackFile],
-    root: Path = install.ROOT,
-) -> list[install.PackFile]:
-    dogfood_platforms = {
-        platform
-        for platform, info in install.PLATFORM_REGISTRY.items()
-        if (root / info.directory).is_dir()
-    }
-    return [
-        file
-        for file in files
-        if file.kind != install.MANAGED_BLOCK_KIND
-        and (file.platform == "shared" or file.platform in dogfood_platforms)
-    ]
-
-
-def missing_dogfood_targets(
-    files: list[install.PackFile],
-    root: Path = install.ROOT,
-) -> list[str]:
-    return [
-        file.target.as_posix()
-        for file in files
-        if (root / file.target).is_symlink() or not (root / file.target).is_file()
-    ]
-
-
 class PackDriftTests(InstallTestCase):
     """Tests for source/template drift gates, shipped env vars, and release guards."""
 
@@ -113,111 +85,6 @@ class PackDriftTests(InstallTestCase):
             else:
                 self.fail(f"unexpected script template suffix: {file.source}")
             self.assert_no_secret_markers(file.source)
-
-    def test_tracked_pack_targets_match_templates(self) -> None:
-        # Every dogfood installed twin must exist and match its manifest source
-        # so this repo's own footprint can never drift from the shipped
-        # templates.
-        # (The managed copilot block has its own dedicated full-file test.)
-        _, files = install.load_manifest()
-        required_files = dogfood_manifest_files(files)
-        compared = 0
-        missing = missing_dogfood_targets(required_files)
-        drifted: list[str] = []
-        for file in required_files:
-            installed = install.ROOT / file.target
-            if not installed.is_file():
-                continue
-            compared += 1
-            if installed.read_bytes() != file.source.read_bytes():
-                drifted.append(file.target.as_posix())
-
-        self.assertEqual(missing, [])
-        self.assertGreaterEqual(compared, len(required_files))
-        self.assertEqual(drifted, [])
-
-    def test_source_only_dev_adapters_match_templates(self) -> None:
-        # Source-only commands have no consumer manifest entries, so the
-        # manifest-driven twin gate above is structurally blind to them; the
-        # registry helper enumerates their dev-tree footprint instead.
-        compared = 0
-        missing: list[str] = []
-        drifted: list[str] = []
-        for command in registry.COMMAND_REGISTRY:
-            if command.name not in registry.SOURCE_ONLY_COMMAND_NAMES:
-                continue
-            for source, target in registry.source_only_adapter_twins(
-                command.name,
-                command.short,
-                command.target_families,
-                root=install.ROOT,
-            ):
-                installed = install.ROOT / target
-                if not installed.is_file():
-                    missing.append(target)
-                    continue
-                compared += 1
-                if installed.read_bytes() != (install.ROOT / source).read_bytes():
-                    drifted.append(target)
-
-        self.assertEqual(missing, [])
-        self.assertEqual(drifted, [])
-        self.assertGreaterEqual(compared, 4)
-
-    def test_dogfood_drift_gate_detects_missing_existing_platform_targets(
-        self,
-    ) -> None:
-        root = self.make_repo()
-        (root / ".opencode").mkdir()
-        pack_file = install.PackFile(
-            platform="opencode",
-            kind="command",
-            source=install.ROOT / "templates/.commands/sd-review-pr.md",
-            target=Path(".opencode/commands/sd-review-pr.md"),
-            anchor=Path(".opencode"),
-            install="if-anchor-exists",
-        )
-
-        required = dogfood_manifest_files([pack_file], root)
-
-        self.assertEqual(required, [pack_file])
-        self.assertEqual(
-            missing_dogfood_targets(required, root),
-            [".opencode/commands/sd-review-pr.md"],
-        )
-
-    def test_dogfood_drift_gate_requires_platform_directory(self) -> None:
-        root = self.make_repo()
-        (root / ".opencode").write_text("not a directory\n", encoding="utf-8")
-        pack_file = install.PackFile(
-            platform="opencode",
-            kind="command",
-            source=install.ROOT / "templates/.commands/sd-review-pr.md",
-            target=Path(".opencode/commands/sd-review-pr.md"),
-            anchor=Path(".opencode"),
-            install="if-anchor-exists",
-        )
-
-        self.assertEqual(dogfood_manifest_files([pack_file], root), [])
-
-    def test_dogfood_drift_gate_rejects_symlink_targets(self) -> None:
-        root = self.make_repo()
-        target = root / ".opencode/commands/sd-review-pr.md"
-        target.parent.mkdir(parents=True)
-        target.symlink_to(install.ROOT / "templates/.commands/sd-review-pr.md")
-        pack_file = install.PackFile(
-            platform="opencode",
-            kind="command",
-            source=install.ROOT / "templates/.commands/sd-review-pr.md",
-            target=Path(".opencode/commands/sd-review-pr.md"),
-            anchor=Path(".opencode"),
-            install="if-anchor-exists",
-        )
-
-        self.assertEqual(
-            missing_dogfood_targets([pack_file], root),
-            [".opencode/commands/sd-review-pr.md"],
-        )
 
     def test_tracked_template_sources_match_manifest_sources(self) -> None:
         result = subprocess.run(
@@ -274,6 +141,10 @@ class PackDriftTests(InstallTestCase):
                 ).resolve()
                 for reference in install.SOURCE_ONLY_SKILL_REFERENCES.get(name, ())
             )
+        source_only_template_sources.update(
+            (install.ROOT / relative).resolve()
+            for relative in registry.SOURCE_ONLY_TEMPLATE_SCRIPTS
+        )
 
         self.assertEqual(
             tracked_template_sources,
@@ -297,7 +168,7 @@ class PackDriftTests(InstallTestCase):
     def test_shipped_env_vars_are_documented(self) -> None:
         var_re = re.compile(r"SD_AI_COMMAND_PACK_[A-Z0-9_]+")
         script_vars: set[str] = set()
-        for path in (install.ROOT / "scripts").iterdir():
+        for path in (install.ROOT / "templates/scripts").iterdir():
             if path.suffix in {".sh", ".py", ".mjs"}:
                 script_vars |= set(var_re.findall(path.read_text(encoding="utf-8")))
         skill_vars: set[str] = set()
@@ -332,7 +203,7 @@ class PackDriftTests(InstallTestCase):
         gate = install.ROOT / ".github/scripts/check-shipped-script-coverage.sh"
         gate_text = gate.read_text(encoding="utf-8")
         matches = re.findall(
-            r"^(scripts/(?:sd-ai-command-pack-[^\s]+|sd_ai_command_pack_(?:fleet_)?lib)\.py)\s+([0-9]+)$",
+            r"^(templates/scripts/(?:sd-ai-command-pack-[^\s]+|sd_ai_command_pack_(?:fleet_)?lib)\.py)\s+([0-9]+)$",
             gate_text,
             flags=re.MULTILINE,
         )
@@ -344,16 +215,18 @@ class PackDriftTests(InstallTestCase):
             configured[script] = int(floor)
         helpers = {
             path.relative_to(install.ROOT).as_posix()
-            for path in (install.ROOT / "scripts").glob("sd-ai-command-pack-*.py")
+            for path in (install.ROOT / "templates/scripts").glob("sd-ai-command-pack-*.py")
         }
-        helpers.add("scripts/sd_ai_command_pack_lib.py")
-        helpers.add("scripts/sd_ai_command_pack_fleet_lib.py")
+        helpers.add("templates/scripts/sd_ai_command_pack_lib.py")
+        helpers.add("templates/scripts/sd_ai_command_pack_fleet_lib.py")
 
         self.assertEqual(duplicates, [])
         self.assertEqual(set(configured), helpers)
         self.assertTrue(all(1 <= floor <= 100 for floor in configured.values()))
         self.assertIn(
-            '--include="scripts/sd-ai-command-pack-*.py,scripts/sd_ai_command_pack_lib.py,scripts/sd_ai_command_pack_fleet_lib.py"',
+            '--include="templates/scripts/sd-ai-command-pack-*.py,'
+            'templates/scripts/sd_ai_command_pack_lib.py,'
+            'templates/scripts/sd_ai_command_pack_fleet_lib.py"',
             gate_text,
         )
         self.assertIn("--fail-under=76", gate_text)

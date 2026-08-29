@@ -42,12 +42,10 @@ DEFAULT_FLEET_PIN_PATH = ".sd-ai-command-pack/provenance.json"
 # single omission was the whole reachability defect.
 #
 # This file is deliberately absent from the tuple. It looks like a second
-# blind spot and is not one: it has a manifest row whose `source` is its
-# authoritative `templates/` twin and whose `target` is the root mirror, so
-# `payload_digest` -- which reads `source` -- already moves when the real file
-# is edited. Naming it here would instead hash the `make sync` mirror, a file
-# regenerated from that source: a second, weaker answer to a question
-# `payloadDigest` already answers correctly.
+# blind spot and is not one: it has a manifest row whose `source` is this
+# file, so `payload_digest` -- which reads `source` -- already moves when the
+# file is edited. Naming it here would be a second, weaker answer to a
+# question `payloadDigest` already answers correctly.
 CANDIDATE_VALIDATOR_SOURCES: tuple[str, ...] = (
     "scripts/sd-ai-command-pack-fleet-candidate-check.py",
 )

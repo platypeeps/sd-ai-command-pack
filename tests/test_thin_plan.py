@@ -682,7 +682,7 @@ class InstallAuditModuleTests(unittest.TestCase):
         # the test pass or fail on the runner rather than on the loader.
         import sys
 
-        scripts = str(_support.PACK_ROOT / "scripts")
+        scripts = str(_support.PACK_ROOT / "templates/scripts")
         original = list(sys.path)
         self.addCleanup(lambda: sys.path.__setitem__(slice(None), original))
 

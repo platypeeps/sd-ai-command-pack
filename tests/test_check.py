@@ -788,7 +788,7 @@ class CheckTests(InstallTestCase):
 def _load_check_module():
     import importlib.util
 
-    scripts_dir = PACK_ROOT / "scripts"
+    scripts_dir = PACK_ROOT / "templates/scripts"
     script = scripts_dir / "sd-ai-command-pack-check.py"
     spec = importlib.util.spec_from_file_location("sd_ai_command_pack_check", script)
     if spec is None or spec.loader is None:

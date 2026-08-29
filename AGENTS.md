@@ -33,11 +33,10 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
   deliberately unshipped — no `manifest.json` row, nothing under `templates/` —
   because a shipped file invoking the `codex` CLI registers as undeclared codex
   usage in every consumer. The lane applies to this repository only.
-- Treat `templates/**` as the source of truth for shipped pack payloads.
-  Root-level installed copies for platform directories present in this source
-  checkout are byte-verified mirrors; when changing a shipped script, skill,
-  prompt, command, or guide, update the template side first and keep the
-  installed copy synchronized.
+- `templates/**` holds the one copy of every shipped pack payload. The
+  repository no longer installs itself, so there are no root-level rendered
+  copies to keep synchronized: change the template and you have changed the
+  only copy.
 
 ## Contributor Entry Points
 

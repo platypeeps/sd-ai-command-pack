@@ -16,7 +16,7 @@ unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
-WAVE_PLAN = PACK_ROOT / "scripts/sd-ai-command-pack-fleet-wave-plan.py"
+WAVE_PLAN = PACK_ROOT / "templates/scripts/sd-ai-command-pack-fleet-wave-plan.py"
 
 
 class FleetWavePlanTests(InstallTestCase):

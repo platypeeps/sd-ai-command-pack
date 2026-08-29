@@ -1776,6 +1776,22 @@ def summarize_recovery(classified: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def engine_roots_for(directory: Path) -> tuple[Path, ...]:
+    """Roots that may carry `installer/` for a payload directory.
+
+    An installed arrangement puts the package beside the payload directory:
+    `<root>/scripts` in a vendored consumer, `<root>/bin` under a plugin root.
+    A pack SOURCE checkout keeps its single copy of the payload under
+    `templates/scripts/`, so there the package sits one level further up. Both
+    are returned, nearest first, so an installed arrangement resolves exactly
+    as it did before and the source checkout stops being unreachable.
+    """
+    parent = directory.parent
+    if parent.name == "templates":
+        return (parent, parent.parent)
+    return (parent,)
+
+
 def machine_engine_candidates(
     script: Path, environ: Mapping[str, str]
 ) -> list[tuple[str, Path]]:
@@ -1801,8 +1817,10 @@ def machine_engine_candidates(
     precisely the rung that fails. `PATH` is scanned directly rather than
     through `path_pack_bins()`; the comment on that loop says why.
     """
-    candidates: list[tuple[str, Path]] = [("adjacent", script.resolve().parent.parent)]
-    seen = {str(candidates[0][1])}
+    candidates: list[tuple[str, Path]] = [
+        ("adjacent", root) for root in engine_roots_for(script.resolve().parent)
+    ]
+    seen = {str(root) for _rung, root in candidates}
     seen_entries: set[str] = set()
     matched = 0
     # `PATH` is read here rather than through `path_pack_bins()`, whose
@@ -1821,10 +1839,10 @@ def machine_engine_candidates(
         if not (Path(raw) / TOOLCHAIN_FILENAME).is_file():
             continue
         matched += 1
-        root = Path(raw).resolve().parent
-        if str(root) not in seen:
-            seen.add(str(root))
-            candidates.append(("path", root))
+        for root in engine_roots_for(Path(raw).resolve()):
+            if str(root) not in seen:
+                seen.add(str(root))
+                candidates.append(("path", root))
         if matched == MAX_PATH_PACK_ENTRIES:
             break
     return candidates

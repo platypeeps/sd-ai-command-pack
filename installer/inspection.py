@@ -339,7 +339,7 @@ def run_install_audit(target: Path) -> AuditResult:
     """Run the shipped audit as the single authority for full integrity checks."""
     command = [
         sys.executable,
-        str(ROOT / "scripts/sd-ai-command-pack-install-audit.py"),
+        str(ROOT / "templates/scripts/sd-ai-command-pack-install-audit.py"),
         "--repo",
         str(target),
         "--upstream-manifest",

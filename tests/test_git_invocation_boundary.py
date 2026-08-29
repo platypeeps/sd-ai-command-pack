@@ -23,7 +23,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = ROOT / "scripts"
+SCRIPTS_DIR = ROOT / "templates/scripts"
 LIB_NAME = "sd_ai_command_pack_lib.py"
 
 # The files migrated off hand-built git subprocess environments in A-076

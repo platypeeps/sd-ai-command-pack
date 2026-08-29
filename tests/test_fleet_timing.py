@@ -21,7 +21,7 @@ unittest = _support.unittest
 PACK_ROOT = _support.PACK_ROOT
 InstallTestCase = _support.InstallTestCase
 
-TIMING = PACK_ROOT / "scripts/sd-ai-command-pack-fleet-timing.py"
+TIMING = PACK_ROOT / "templates/scripts/sd-ai-command-pack-fleet-timing.py"
 SECOND = 1_000_000_000
 
 

@@ -4,35 +4,25 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup generate surface-check sync test lint audit full-check check
+.PHONY: setup generate surface-check test lint audit full-check check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
 	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 
-# generate-plugin.py consumes the partition artifact, so it follows
-# partition-surfaces.py.
+# Regenerates the authored command surfaces under templates/ from
+# .github/command-sources/ and installer/registry.py, then re-checks closure.
 generate:
 	@if [ -x "$(VENV_PYTHON)" ]; then \
 		"$(VENV_PYTHON)" .github/scripts/generate-command-surfaces.py; \
-		"$(VENV_PYTHON)" .github/scripts/partition-surfaces.py; \
-		"$(VENV_PYTHON)" .github/scripts/generate-plugin.py; \
-		"$(VENV_PYTHON)" scripts/sd-ai-command-pack-surface-check.py; \
+		"$(VENV_PYTHON)" templates/scripts/sd-ai-command-pack-surface-check.py; \
 	else \
 		"$(PYTHON)" .github/scripts/generate-command-surfaces.py; \
-		"$(PYTHON)" .github/scripts/partition-surfaces.py; \
-		"$(PYTHON)" .github/scripts/generate-plugin.py; \
-		"$(PYTHON)" scripts/sd-ai-command-pack-surface-check.py; \
+		"$(PYTHON)" templates/scripts/sd-ai-command-pack-surface-check.py; \
 	fi
 
 surface-check:
-	"$(PYTHON)" scripts/sd-ai-command-pack-surface-check.py
-
-# Self-sync after payload or doc/spec/task edits: refresh the dogfood
-# install from templates/, then regenerate the spec knowledge base.
-sync:
-	"$(VENV_PYTHON)" install.py . --force
-	"$(VENV_PYTHON)" scripts/sd-ai-command-pack-update-spec-kb.py
+	"$(PYTHON)" templates/scripts/sd-ai-command-pack-surface-check.py
 
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
@@ -46,17 +36,15 @@ test:
 
 # Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
 # parity: the CI lint/security jobs always run the Node and ShellCheck
-# lanes). Mypy covers installer/, the install.py facade, and shipped
-# scripts/*.py; templates/scripts/ twins are byte-identical mirrors kept
-# out of the run so duplicate script names cannot collide. The bash 3.2 lane
+# lanes). Mypy covers installer/, the install.py facade, and the single
+# copy of the payload under templates/scripts/. The bash 3.2 lane
 # parses tracked shell with the interpreter macOS keeps at /bin/bash, so
 # syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
 # a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer scripts templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/summarize_shell_coverage.py
-	"$(VENV_PYTHON)" -m mypy installer install.py scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/generate-plugin.py .github/scripts/partition-surfaces.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m mypy installer install.py templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
 	@if command -v node >/dev/null 2>&1; then \
-		node --check scripts/sd-ai-command-pack-review-preflight.mjs; \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
 		bash .github/scripts/check-opencode-js.sh; \
 	elif [ "$(STRICT)" = "1" ]; then \
@@ -88,10 +76,10 @@ lint:
 # release gate can demand the audit actually ran.
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \
-		"$(VENV_BIN)/bandit" -q -r --severity-level medium install.py installer scripts templates/scripts; \
+		"$(VENV_BIN)/bandit" -q -r --severity-level medium install.py installer templates/scripts; \
 	elif command -v bandit >/dev/null 2>&1; then \
 		printf '%s\n' "warning: $(VENV_BIN)/bandit is missing; using an UNPINNED bandit from PATH ($$(bandit --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
-		bandit -q -r --severity-level medium install.py installer scripts templates/scripts; \
+		bandit -q -r --severity-level medium install.py installer templates/scripts; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: bandit not found and STRICT=1; the Python security audit is required." >&2; \
 		exit 1; \
@@ -111,6 +99,6 @@ audit:
 	fi
 
 full-check:
-	SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash scripts/sd-ai-command-pack-full-check.sh
+	SD_AI_COMMAND_PACK_FULL_CHECK_PRISM=0 SD_AI_COMMAND_PACK_FULL_CHECK_GITO=0 bash templates/scripts/sd-ai-command-pack-full-check.sh
 
 check: test lint audit full-check

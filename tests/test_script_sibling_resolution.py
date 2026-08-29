@@ -38,7 +38,12 @@ InstallTestCase = _support.InstallTestCase
 TEMPLATE_SCRIPTS = PACK_ROOT / "templates/scripts"
 TOOLCHAIN = TEMPLATE_SCRIPTS / "sd-ai-command-pack-toolchain.sh"
 
-PACK_PATH_LITERAL = re.compile(r"scripts/sd[-_]ai[-_]command[-_]pack[A-Za-z0-9_.*-]*")
+# The lookbehind keeps a `templates/scripts/...` mention out of the match: that
+# spelling names the pack's own canonical payload directory, not a repository
+# root a consumer would resolve a sibling against.
+PACK_PATH_LITERAL = re.compile(
+    r"(?<!templates/)scripts/sd[-_]ai[-_]command[-_]pack[A-Za-z0-9_.*-]*"
+)
 
 # filename -> (justification, literals that may appear in it).
 #
@@ -83,6 +88,17 @@ ALLOWED_LITERALS: dict[str, tuple[str, frozenset[str]]] = {
             }
         ),
     ),
+    "sd-ai-command-pack-thin-resweep.py": (
+        "consumer-layout prose: source-only operator tooling that lives beside "
+        "the payload; the remaining literals are comments describing where a "
+        "vendored install puts helpers in the consumer repository it resweeps",
+        frozenset(
+            {
+                "scripts/sd-ai-command-pack-full-check.sh",
+                "scripts/sd-ai-command-pack-review-learnings.py",
+            }
+        ),
+    ),
     "sd-ai-command-pack-pr-body-scope.py": (
         "consumer-layout data: region globs classify changed paths in the "
         "repository whose PR body is being scoped",
@@ -123,12 +139,7 @@ ALLOWED_LITERALS: dict[str, tuple[str, frozenset[str]]] = {
     "sd-ai-command-pack-surface-check.py": (
         "pack-source-only validator: every path names the pack source "
         "repository's own tree, which is always a full checkout",
-        frozenset(
-            {
-                "scripts/sd-ai-command-pack-full-check.sh",
-                "scripts/sd-ai-command-pack-surface-check.py",
-            }
-        ),
+        frozenset({"scripts/sd-ai-command-pack-surface-check.py"}),
     ),
     "sd-ai-command-pack-toolchain.sh": (
         "repository-state report: doctor tells the operator whether the "
@@ -243,7 +254,7 @@ class ShippedScriptSiblingBoundaryTest(unittest.TestCase):
         for name in sorted(OWN_LOCATION_IDIOMS):
             with self.subTest(script=name):
                 self.assertEqual(
-                    (PACK_ROOT / "scripts" / name).read_bytes(),
+                    (PACK_ROOT / "templates/scripts" / name).read_bytes(),
                     (TEMPLATE_SCRIPTS / name).read_bytes(),
                 )
 

@@ -1061,11 +1061,13 @@ class ResolutionTests(MachineInstallerTestCase):
         )
 
     def test_helper_is_found_in_the_second_candidate_directory(self) -> None:
-        """A plugin root serves the helper from `bin/`, not `scripts/`."""
+        """A layout that serves the helper from the second candidate wins."""
 
         with self.forgotten_shared_lib():
             with mock.patch.object(
-                machinescope, "SHARED_LIB_DIRECTORIES", ("no-such-dir", "scripts")
+                machinescope,
+                "SHARED_LIB_DIRECTORIES",
+                ("no-such-dir", "templates/scripts"),
             ):
                 module = machinescope._shared_lib()
 

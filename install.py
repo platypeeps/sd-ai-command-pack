@@ -298,7 +298,7 @@ def configure_fleet_profile(
     *,
     dry_run: bool,
 ) -> Any:
-    scripts_dir = str((pack_source / "scripts").resolve())
+    scripts_dir = str((pack_source / "templates" / "scripts").resolve())
     inserted = scripts_dir not in sys.path
     if inserted:
         sys.path.insert(0, scripts_dir)

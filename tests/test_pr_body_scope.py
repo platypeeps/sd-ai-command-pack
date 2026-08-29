@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = PACK_ROOT / "scripts" / "sd-ai-command-pack-pr-body-scope.py"
+SCRIPT = PACK_ROOT / "templates/scripts" / "sd-ai-command-pack-pr-body-scope.py"
 
 
 def _load_script():

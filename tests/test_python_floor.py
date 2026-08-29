@@ -22,7 +22,7 @@ except ModuleNotFoundError:  # Python < 3.11; tomli is in the pinned closure
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 TESTS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
-TOOLCHAIN = REPO_ROOT / "scripts" / "sd-ai-command-pack-toolchain.sh"
+TOOLCHAIN = REPO_ROOT / "templates/scripts" / "sd-ai-command-pack-toolchain.sh"
 
 
 def declared_floor() -> tuple[int, int]:
