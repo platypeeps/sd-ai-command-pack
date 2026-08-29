@@ -8,8 +8,8 @@
   the release train and plugin marketplace. No further releases follow; the
   fleet refresh, receipt ledger, candidate validator, and `sd-fleet-*` lanes
   stop here. The successor is the same repository re-based on
-  `docs/work/**` artifacts and a machine-scope install
-  (`git clone platypeeps/sd-ai-command-pack && python3 install.py --user`);
+  `docs/work/**` artifacts and a machine-scope install from one checkout (its
+  installer flags are defined in the successor, not in this release);
   its design record lives at `docs/work/2026-08-29-artifacts-as-product/`.
   Nothing in an installed 0.72.0 changes behaviour: the version bump exists so
   that every consumer's `Pack version update check` names this release, and
