@@ -220,7 +220,18 @@ def changed_paths(repo: Path, base_commit: str, head_commit: str) -> tuple[str, 
 
 
 def current_branch(repo: Path) -> str:
-    raw = _git_bytes(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+    # `symbolic-ref --quiet` exits 1 on a detached HEAD and prints nothing,
+    # which is the exact state the empty check below diagnoses. Without the
+    # accepted code the generic git failure is raised first and the actionable
+    # message is unreachable.
+    raw = _git_bytes(
+        repo,
+        "symbolic-ref",
+        "--quiet",
+        "--short",
+        "HEAD",
+        accepted_returncodes={0, 1},
+    )
     branch = raw.decode("utf-8", errors="replace").strip()
     if not branch:
         raise FleetReviewClassificationError(

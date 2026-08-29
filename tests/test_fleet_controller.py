@@ -2907,6 +2907,51 @@ class FleetControllerTests(InstallTestCase):
         self.assertFalse(controller._is_bookkeeping_path(None))
         self.assertFalse(controller._is_bookkeeping_path("/.trellis/x.md"))
 
+    def test_a_finalization_receipt_without_a_head_says_so(self) -> None:
+        """Name the missing argument, not a head mismatch against nothing.
+
+        `--head` is optional on `record`, so a receipt supplied without one
+        reached the comparison with `None` and came back as "does not end at
+        the recorded head" -- which reads as a bad receipt and sends the
+        operator to re-run finish-work instead of adding a flag.
+        """
+
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        action = self.lane_at_merge_eligibility(controller, state)
+        state_home = root.parent / f"{root.name}-controller-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        receipt_path = self.finalization_receipt(
+            root / "finalization.json", base=HEAD, head=OTHER_HEAD
+        )
+
+        status, _output, error = self.run_cli(
+            controller,
+            "record",
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+            "--action-id",
+            action["actionId"],
+            "--release",
+            "0.37.0",
+            "--consumer",
+            "wave-a",
+            "--result",
+            "passed",
+            "--finalization-receipt",
+            str(receipt_path),
+        )
+
+        self.assertNotEqual(status, 0)
+        self.assertIn("requires --head", error)
+
     def test_record_cli_accepts_a_finalization_receipt(self) -> None:
         controller = self.load_controller()
         root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))

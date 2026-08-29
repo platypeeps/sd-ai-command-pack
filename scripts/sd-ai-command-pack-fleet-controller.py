@@ -2443,6 +2443,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise FleetControllerError(
                             "a finalization advance belongs to a consumer lane"
                         )
+                    if args.head is None:
+                        # The receipt proves an advance *to* a head. Without one
+                        # the check downstream compares against None and reports
+                        # a head mismatch, which reads as a bad receipt rather
+                        # than a missing argument.
+                        raise FleetControllerError(
+                            "a finalization advance requires --head naming the "
+                            "head the receipt advanced the lane to"
+                        )
                     lane = next(
                         (
                             item

@@ -601,6 +601,34 @@ class FleetReviewClassifyTests(InstallTestCase):
         self.assertFalse(result.eligible)
         self.assertIn("exactly one archived task directory", result.reasons[0])
 
+    def test_a_detached_head_gets_its_own_diagnosis(self) -> None:
+        """The dedicated message has to be reachable to be worth writing.
+
+        `git symbolic-ref --quiet` exits 1 and prints nothing on a detached
+        HEAD, so without that return code accepted the generic git failure is
+        raised first and the empty-branch check below it is dead.
+        """
+
+        classifier, root, _base_commit, _fleet = self.make_refresh()
+        head = classifier.subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        classifier.subprocess.run(
+            ["git", "checkout", "--detach", head],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+
+        with self.assertRaisesRegex(
+            classifier.FleetReviewClassificationError, "detached HEAD"
+        ):
+            classifier.current_branch(root)
+
 
 if __name__ == "__main__":
     unittest.main()

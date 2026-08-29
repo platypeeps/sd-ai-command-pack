@@ -19,6 +19,10 @@
   second archive directory, another developer's journal, or a workspace change
   with nothing archived behind it all still require remote review.
 
+  A detached consumer checkout now reaches its own diagnosis: `git symbolic-ref
+  --quiet` exits 1 and prints nothing in exactly that state, so without the return
+  code accepted the generic git failure was raised first and the dedicated
+  message was unreachable.
 - A fleet lane no longer trips `pr-head-advanced` by construction. The
   controller modelled a head that moves after review as an outside push and
   rewound the lane to `pr-publication` so publication, review, and eligibility
@@ -37,7 +41,10 @@
   a `startswith` test while naming a file outside the tree, so traversal, empty
   and no-op segments, and backslashes are refused. A head advanced by an outside
   push has no such receipt and still rewinds; the controller runs no repository
-  commands, so nothing here is taken on the caller's word.
+  commands, so nothing here is taken on the caller's word. `--head` is required
+  alongside the receipt: without one the head check compared against `None` and
+  reported a mismatch, which reads as a bad receipt rather than a missing
+  argument.
 - The head guard's diagnostic named the opposite of what it compares. It read
   "receipt head does not match the current PR head" while comparing against the
   lane's *stored* head, at the one moment when the current PR head is
