@@ -334,13 +334,19 @@ but defines no ordering or transition policy:
   consumer's `sd-housekeeping` gate. Complete the dedicated task through
   `sd-finish-work` and retain its exact-head receipt. Compare the resulting
   local and remote PR head with the controller's published head before invoking
-  housekeeping. If finish-work advanced the PR, record the issued merge action
-  as `retryable-failure --reason-code pr-head-advanced` against the old
-  published full head and existing PR number, retain the receipt, and stop this
-  action before housekeeping; the controller will issue a bounded successor
-  publication, review, and eligibility cycle. On the next merge action, when
-  the retained receipt names the unchanged reviewed head, pass it to
-  housekeeping without running finish-work again. The controller alone invokes
+  housekeeping. If finish-work advanced the PR, record the issued action at the
+  new head and pass that same finish-work receipt as
+  `--finalization-receipt <path>`. The controller reads it — a valid schema-1
+  completion bundle whose base is the head this lane recorded, whose head is the
+  one being recorded, and whose delta is task bookkeeping and nothing else — and
+  accepts the stage at the new head instead of rewinding. This is the ordinary
+  case: the journal commit moves the head on every lane, so a rewind here costs
+  three extra receipts on work nothing went wrong in. Reserve
+  `retryable-failure --reason-code pr-head-advanced` against the old published
+  head for a head that moved for some other reason, which is what an absent or
+  non-matching receipt means. On the next merge action, when the retained
+  receipt names the unchanged reviewed head, pass it to housekeeping without
+  running finish-work again. The controller alone invokes
   housekeeping; it never merges in completion order.
   Execute that issued merge without another approval prompt, including when
   the head contains
@@ -389,10 +395,42 @@ requires remote review.
 
 Initialize `scripts/sd-ai-command-pack-fleet-timing.py` before executing the
 controller's preflight action, then bracket the corresponding delivery work.
-Start both `reviewer-wait` and `ci-wait` immediately after the PR exists; end
-`reviewer-wait` when review returns and end `ci-wait` when checks settle. Use
-`report --run-id <run-id> --complete` only after every selected consumer has a
-terminal controller result.
+
+Bracket every stage with `stage-run`, which starts the stage, runs the command,
+and ends it even when the command fails or the lane returns early:
+
+```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-timing.py --json stage-run --run-id <run-id> \
+  [--consumer <name>] --stage <stage> -- <command> [args...]
+```
+
+`stage-run` exits with the bracketed command's own status, so it is transparent
+to the surrounding control flow and needs no separate success check. Reach for
+the `stage-start` / `stage-end` pair only for a wait that is not a single
+command — `reviewer-wait` and `ci-wait`, both started immediately after the PR
+exists, `reviewer-wait` ended when review returns and `ci-wait` when checks
+settle. A stage opened that way is closed on every exit path from the lane,
+including a failure or an early return; an attempt left open blocks completion
+of the whole run.
+
+Every selected consumer needs `consumer-end --run-id <run-id> --consumer <name>
+--outcome <outcome>` as soon as its controller result is terminal, including a
+skip, a park, and a failure — the outcome vocabulary covers each. A lane the
+campaign never touched still needs its terminal outcome recorded; the run cannot
+complete while any consumer's outcome is missing. Use `report --run-id <run-id>
+--complete` only after every consumer has one. Its `instrumentation` block
+reports how many consumers carry measured stages: a completed run whose
+`consumersWithoutStages` is non-empty recorded outcomes but no durations, and
+its stage timings describe only the lanes it names as measured.
 
 Timing remains mandatory internal observability. It is private, resumable, and
 never changes a delivery gate's authoritative result. Do not put paths,
@@ -408,7 +446,9 @@ timing failure pauses new mutation until the last valid record is reconciled.
    read-only report here and issue no consumer action.
 3. Repeatedly call controller `next`. Execute only returned actions, within the
    returned timeout and one-checkout ownership boundary, and record every
-   result before requesting more work.
+   result before requesting more work. Recording a terminal consumer result
+   includes its timing `consumer-end`, in the same step that records the
+   controller result, so no lane is left open behind a finished action.
 4. Before recording a verified finding, run the finding severity gate below.
    Use `review-finding --pack-blocker` for a pack-owned blocker; use the
    controller's normalized non-blocking result for deferred or consumer-local

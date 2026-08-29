@@ -62,6 +62,12 @@ PR_HEAD_REPUBLICATION_STAGES = frozenset(
     {"review", "merge-eligibility", "merge"}
 )
 PR_HEAD_ADVANCED_REASON = "pr-head-advanced"
+RECEIPT_OPTIONAL_FIELDS = frozenset({"finalizationAdvance"})
+FINALIZATION_ADVANCE_FIELDS = {"fromHead", "toHead"}
+# The lane's own finalization writes task bookkeeping and nothing else. Anything
+# outside this prefix means the head moved for some other reason, which is the
+# case the rewind exists for.
+FINALIZATION_ADVANCE_PATH_PREFIX = ".trellis/"
 ACTION_IDENTITY_FIELDS = ("actionId", "attempt", "consumer", "release", "stage")
 SIDE_EFFECT_STAGES = frozenset(
     {"install-update", "pr-publication", "review", "merge"}
@@ -80,7 +86,10 @@ RESULTS = frozenset(
     }
 )
 REASON_REQUIRED = RESULTS - {"passed", "at-target"}
-RECOVERY_KINDS = frozenset({"pack-blocker", "retry-exhausted"})
+RECOVERY_KINDS = frozenset(
+    {"pack-blocker", "retry-exhausted", "operator-decision"}
+)
+OPERATOR_DECISIONS = frozenset({"proceed", "decline"})
 PACK_BLOCKER_RECOVERY_FIELDS = {
     "consumer",
     "correctiveRelease",
@@ -97,6 +106,20 @@ PACK_BLOCKER_RECOVERY_FIELDS = {
 }
 EXHAUSTION_RECOVERY_FIELDS = {
     "consumer",
+    "fromActionId",
+    "fromAttempt",
+    "fromBlocker",
+    "fromStage",
+    "kind",
+    "recordedAt",
+    "toAttempt",
+    "toStage",
+}
+OPERATOR_DECISION_RECOVERY_FIELDS = {
+    "consumer",
+    "decidedBy",
+    "decision",
+    "decisionHead",
     "fromActionId",
     "fromAttempt",
     "fromBlocker",
@@ -461,10 +484,16 @@ class CampaignStore:
                 pass
 
 
-def _strict_fields(value: Mapping[str, Any], fields: set[str], label: str) -> None:
+def _strict_fields(
+    value: Mapping[str, Any],
+    fields: set[str],
+    label: str,
+    *,
+    optional: frozenset[str] = frozenset(),
+) -> None:
     actual = set(value)
     missing = sorted(fields - actual)
-    unknown = sorted(actual - fields)
+    unknown = sorted(actual - fields - optional)
     if missing:
         raise FleetControllerError(f"{label} is missing field: {missing[0]}")
     if unknown:
@@ -540,6 +569,20 @@ def validate_action(value: object, label: str) -> None:
     utc_timestamp(value["issuedAt"], f"{label} issuedAt")
 
 
+def _validate_finalization_advance(
+    value: object, label: str, head: object
+) -> None:
+    if not isinstance(value, dict):
+        raise FleetControllerError(f"{label} must be an object")
+    _strict_fields(value, FINALIZATION_ADVANCE_FIELDS, label)
+    full_sha(value["fromHead"], f"{label} fromHead")
+    full_sha(value["toHead"], f"{label} toHead")
+    if value["fromHead"] == value["toHead"]:
+        raise FleetControllerError(f"{label} did not advance the head")
+    if value["toHead"] != head:
+        raise FleetControllerError(f"{label} toHead must be the receipt head")
+
+
 def _validate_receipt_semantics(
     *,
     result: str,
@@ -601,7 +644,12 @@ def validate_receipt(value: object, label: str) -> None:
             "stage",
         },
         label,
+        optional=RECEIPT_OPTIONAL_FIELDS,
     )
+    if "finalizationAdvance" in value:
+        _validate_finalization_advance(
+            value["finalizationAdvance"], f"{label} finalizationAdvance", value["head"]
+        )
     safe_token(value["actionId"], f"{label} actionId")
     _integer(value["attempt"], f"{label} attempt", 1)
     if value["consumer"] is not None:
@@ -702,7 +750,18 @@ def validate_lane(value: object, label: str) -> None:
     head_epoch: str | None = None
     for index, receipt in enumerate(value["receipts"]):
         validate_receipt(receipt, f"{label} receipts[{index}]")
+        advance = receipt.get("finalizationAdvance")
         if receipt["stage"] == "pr-publication" and receipt["result"] == "passed":
+            head_epoch = receipt["head"]
+        elif advance is not None:
+            # A proven finalization advance moves the epoch without a
+            # republication: the lane recorded this stage one commit past where
+            # it published, and the receipt carries the pair it moved between.
+            if advance["fromHead"] != head_epoch:
+                raise FleetControllerError(
+                    f"{label} receipts[{index}] finalization advance does not "
+                    "start from the publication epoch"
+                )
             head_epoch = receipt["head"]
         elif receipt["stage"] in PR_HEAD_STAGES and receipt["head"] != head_epoch:
             raise FleetControllerError(
@@ -720,9 +779,11 @@ def validate_recovery(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} kind is invalid")
     _strict_fields(
         value,
-        PACK_BLOCKER_RECOVERY_FIELDS
-        if kind == "pack-blocker"
-        else EXHAUSTION_RECOVERY_FIELDS,
+        {
+            "pack-blocker": PACK_BLOCKER_RECOVERY_FIELDS,
+            "retry-exhausted": EXHAUSTION_RECOVERY_FIELDS,
+            "operator-decision": OPERATOR_DECISION_RECOVERY_FIELDS,
+        }[kind],
         label,
     )
     safe_token(value["consumer"], f"{label} consumer")
@@ -744,6 +805,18 @@ def validate_recovery(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} fromStage is invalid")
     if value["toStage"] != value["fromStage"]:
         raise FleetControllerError(f"{label} toStage must match fromStage")
+    if kind != "operator-decision":
+        return
+    if value["decision"] not in OPERATOR_DECISIONS:
+        raise FleetControllerError(f"{label} decision is invalid")
+    safe_token(value["decidedBy"], f"{label} decidedBy")
+    full_sha(value["decisionHead"], f"{label} decisionHead")
+    # A decline records the decision without reviving the lane, so its
+    # toAttempt is the attempt the lane is staying on rather than a new one.
+    if value["decision"] == "decline" and value["toAttempt"] != value["fromAttempt"]:
+        raise FleetControllerError(
+            f"{label} decline must not advance the lane attempt"
+        )
 
 
 def validate_state(state: Mapping[str, Any]) -> None:
@@ -1211,10 +1284,28 @@ def _advance_lane(lane: dict[str, Any], receipt: Mapping[str, Any], no_merge: bo
     stage = lane["stage"]
     prior_head = lane["head"]
     prior_pr_number = lane["prNumber"]
-    if stage in PR_HEAD_STAGES and (
-        prior_head is None or receipt["head"] != prior_head
-    ):
-        raise FleetControllerError("receipt head does not match the current PR head")
+    advance = receipt.get("finalizationAdvance")
+    if stage in PR_HEAD_STAGES and receipt["head"] != prior_head:
+        # A head that moved because the lane finalized itself is the normal case,
+        # not the exception: sd-ship records the review at H, then finish-work
+        # writes the journal commit, so by merge-eligibility the stored head is
+        # always one commit stale. Pricing that as an outside push cost three
+        # extra receipts on every lane. An outside push has no such proof and
+        # still rewinds.
+        proven = (
+            advance is not None
+            and prior_head is not None
+            and advance["fromHead"] == prior_head
+            and advance["toHead"] == receipt["head"]
+        )
+        if not proven:
+            recorded = prior_head or "none yet"
+            raise FleetControllerError(
+                "receipt head does not match the lane's recorded head "
+                f"{recorded}; record this stage at that head, or pass "
+                "--finalization-receipt proving the lane's own finalization "
+                f"advanced it to {receipt['head']}"
+            )
     if receipt["reasonCode"] == PR_HEAD_ADVANCED_REASON and (
         prior_pr_number is None or receipt["prNumber"] != prior_pr_number
     ):
@@ -1294,6 +1385,7 @@ def record_result(
     pack_blocker: bool = False,
     head: str | None = None,
     pr_number: int | None = None,
+    finalization_advance: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     action_id = safe_token(action_id, "action ID")
     if release != state["release"]:
@@ -1328,6 +1420,15 @@ def record_result(
         head=head,
         pr_number=pr_number,
     )
+    if finalization_advance is not None:
+        if consumer is None:
+            raise FleetControllerError(
+                "a finalization advance belongs to a consumer lane"
+            )
+        receipt["finalizationAdvance"] = dict(finalization_advance)
+        _validate_finalization_advance(
+            receipt["finalizationAdvance"], "receipt finalizationAdvance", head
+        )
     if existing is not None:
         if _receipt_core(existing) != _receipt_core(receipt):
             raise FleetControllerError("action already has a conflicting receipt")
@@ -1564,6 +1665,129 @@ def recover_retry_exhausted(
     lane["packBlocker"] = False
     lane["result"] = None
     lane["status"] = "waiting"
+    state["updatedAt"] = utc_now()
+    _refresh_campaign_status(state)
+    validate_state(state)
+    return recovery, True
+
+
+def record_operator_decision(
+    state: dict[str, Any],
+    *,
+    consumer: str,
+    decision: str,
+    decided_by: str,
+    decision_head: str,
+    release: str,
+) -> tuple[dict[str, Any], bool]:
+    """Record the human decision a parked ``operator-decision`` lane waited for.
+
+    The controller parks a lane precisely because a person must choose, and
+    until now that was the one terminal state with no way back: ``--retry-consumer``
+    wants ``ownership-skip``, ``--recover-consumer`` wants a merge-stage pack
+    blocker, and ``--recover-exhausted-consumer`` wants ``retry-exhausted``. A
+    lane parked for a decision could therefore never have the decision recorded,
+    and an operator who chose to proceed had no supported way to finish the lane.
+
+    ``proceed`` re-enters the lane at the stage it parked on, on a fresh attempt,
+    so the remaining stages are issued and recorded through the ordinary receipt
+    chain. It stamps nothing terminal by itself. ``decline`` leaves the lane
+    exactly where it is and records that this was chosen, so a declined lane is
+    distinguishable from one nobody ever answered.
+    """
+
+    consumer = safe_token(consumer, "consumer")
+    decided_by = safe_token(decided_by, "deciding party")
+    full_sha(decision_head, "decision head")
+    if decision not in OPERATOR_DECISIONS:
+        raise FleetControllerError("decision must be proceed or decline")
+    # Compared against the campaign target, not the current pack manifest, for
+    # the same reason exhaustion recovery is: this transition has no corrective
+    # release, and a manifest comparison would make every campaign undecidable
+    # as soon as the installed pack moved past that campaign's release.
+    if release != state["release"]:
+        raise FleetControllerError(
+            "operator decision release does not match campaign release"
+        )
+    try:
+        lane = next(item for item in state["lanes"] if item["name"] == consumer)
+    except StopIteration:
+        raise FleetControllerError("consumer is outside the campaign") from None
+    if not lane["receipts"]:
+        raise FleetControllerError("consumer has no decision receipt to answer")
+    decision_receipt = lane["receipts"][-1]
+    existing = next(
+        (
+            item
+            for item in state["recoveries"]
+            if item["kind"] == "operator-decision"
+            and item["consumer"] == consumer
+            and item["fromActionId"] == decision_receipt["actionId"]
+        ),
+        None,
+    )
+    if existing is not None:
+        if (
+            existing["decision"] != decision
+            or existing["decidedBy"] != decided_by
+            or existing["decisionHead"] != decision_head
+        ):
+            raise FleetControllerError(
+                "this parked action already carries a different operator decision"
+            )
+        return existing, False
+    if lane["status"] != "terminal" or lane["result"] != "operator-decision":
+        raise FleetControllerError(
+            "operator decision requires a terminal operator-decision lane"
+        )
+    if lane["issuedAction"] is not None:
+        raise FleetControllerError("operator decision cannot replace an issued action")
+    if (
+        decision_receipt["stage"] != lane["stage"]
+        or decision_receipt["result"] != "operator-decision"
+        or decision_receipt["reasonCode"] != lane["blocker"]
+        or decision_receipt["attempt"] != lane["attempt"]
+    ):
+        raise FleetControllerError(
+            "operator decision receipt does not match the lane"
+        )
+    # The decision is bound to the head it was made against, so a lane that
+    # moved after the operator looked at it cannot inherit their answer.
+    if lane["head"] is None:
+        raise FleetControllerError(
+            "operator decision requires a lane with a published head"
+        )
+    if lane["head"] != decision_head:
+        raise FleetControllerError(
+            "operator decision head does not match the lane head"
+        )
+    stage = lane["stage"]
+    to_attempt = (
+        _next_stage_attempt(lane, stage)
+        if decision == "proceed"
+        else lane["attempt"]
+    )
+    recovery = {
+        "consumer": consumer,
+        "decidedBy": decided_by,
+        "decision": decision,
+        "decisionHead": decision_head,
+        "fromActionId": decision_receipt["actionId"],
+        "fromAttempt": decision_receipt["attempt"],
+        "fromBlocker": lane["blocker"],
+        "fromStage": stage,
+        "kind": "operator-decision",
+        "recordedAt": utc_now(),
+        "toAttempt": to_attempt,
+        "toStage": stage,
+    }
+    state["recoveries"].append(recovery)
+    if decision == "proceed":
+        lane["attempt"] = to_attempt
+        lane["blocker"] = None
+        lane["packBlocker"] = False
+        lane["result"] = None
+        lane["status"] = "waiting"
     state["updatedAt"] = utc_now()
     _refresh_campaign_status(state)
     validate_state(state)
@@ -1897,6 +2121,94 @@ def _render(value: Mapping[str, Any], as_json: bool) -> None:
         )
 
 
+def _load_finalization_advance(
+    path: Path, *, lane_head: str | None, head: str | None
+) -> dict[str, str]:
+    """Turn a finish-work bundle receipt into a head advance the controller checked.
+
+    The controller runs no repository commands, so "the head advanced by this
+    lane's own finalization" cannot be a caller's word for it. What the caller
+    supplies instead is the receipt the finalization already produced: a
+    schema-1 completion bundle whose base is the head this lane recorded, whose
+    head is the head being recorded now, and whose delta is task bookkeeping and
+    nothing else. Every one of those is read out of the file and compared here.
+    An outside push produces no such receipt and still rewinds the lane.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise FleetControllerError(
+            f"cannot read finalization receipt: {exc}"
+        ) from None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise FleetControllerError(
+            f"finalization receipt is not valid JSON: {exc}"
+        ) from None
+    if not isinstance(data, dict):
+        raise FleetControllerError("finalization receipt must be a JSON object")
+    if data.get("schemaVersion") != 1 or data.get("status") != "valid":
+        raise FleetControllerError(
+            "finalization receipt must be a valid schema-1 result"
+        )
+    if data.get("mode") != "completion":
+        raise FleetControllerError(
+            "finalization receipt must be a completion bundle"
+        )
+    evidence = data.get("evidence")
+    if not isinstance(evidence, dict):
+        raise FleetControllerError("finalization receipt has no evidence")
+    base_oid = evidence.get("baseOid")
+    head_oid = evidence.get("headOid")
+    full_sha(base_oid, "finalization receipt baseOid")
+    full_sha(head_oid, "finalization receipt headOid")
+    if lane_head is None or base_oid != lane_head:
+        raise FleetControllerError(
+            "finalization receipt does not start from the lane's recorded head"
+        )
+    if head_oid != head:
+        raise FleetControllerError(
+            "finalization receipt does not end at the recorded head"
+        )
+    changed = evidence.get("changedPaths")
+    if not isinstance(changed, list) or not changed:
+        raise FleetControllerError("finalization receipt lists no changed paths")
+    for entry in changed:
+        if not _is_bookkeeping_path(entry):
+            raise FleetControllerError(
+                "finalization receipt changes paths outside task bookkeeping"
+            )
+    return {"fromHead": base_oid, "toHead": head_oid}
+
+
+def _is_bookkeeping_path(entry: Any) -> bool:
+    """Answer whether ``entry`` names a path inside the task bookkeeping tree.
+
+    A prefix test alone answers the wrong question. The receipt is operator-
+    supplied evidence and the controller runs no repository command to
+    corroborate it, so ``.trellis/../scripts/x.py`` satisfies ``startswith``
+    while naming a file outside the tree the prefix is supposed to bound. The
+    path is therefore read segment by segment: every segment must be a real
+    name, so traversal (``..``), a no-op segment (``.``), an empty segment from
+    a doubled or trailing separator, a leading ``/``, and a backslash that a
+    Windows-side producer may have written are each refused before the prefix
+    is trusted to mean what it says.
+    """
+
+    if not isinstance(entry, str) or not entry.startswith(
+        FINALIZATION_ADVANCE_PATH_PREFIX
+    ):
+        return False
+    if "\\" in entry:
+        return False
+    segments = entry.split("/")
+    if len(segments) < 2:
+        return False
+    return all(segment not in ("", ".", "..") for segment in segments)
+
+
 def _load_provenance(path: Path) -> dict[str, Any]:
     """Validate a first-class operator-decision provenance file (finding #9).
 
@@ -1972,6 +2284,15 @@ def build_parser() -> argparse.ArgumentParser:
             "required for --result operator-decision"
         ),
     )
+    record.add_argument(
+        "--finalization-receipt",
+        type=Path,
+        help=(
+            "review-preflight final-bundle result proving this lane's own "
+            "finalization advanced the PR head; lets the stage record at the "
+            "new head instead of rewinding to pr-publication"
+        ),
+    )
 
     status = commands.add_parser("status")
     _common(status)
@@ -1988,6 +2309,10 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--corrective-release")
     resume.add_argument("--recover-exhausted-consumer")
     resume.add_argument("--exhausted-action")
+    resume.add_argument("--decide-consumer")
+    resume.add_argument("--decision", choices=sorted(OPERATOR_DECISIONS))
+    resume.add_argument("--decided-by")
+    resume.add_argument("--decision-head")
     resume.add_argument("--resolve-action")
     resume.add_argument("--release")
     resume.add_argument("--consumer")
@@ -2064,6 +2389,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             and args.retry_consumer is None
             and args.recover_consumer is None
             and args.recover_exhausted_consumer is None
+            and args.decide_consumer is None
             and args.resolve_action is None
         ):
             if args.corrective_release is not None:
@@ -2073,6 +2399,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.exhausted_action is not None:
                 raise FleetControllerError(
                     "exhausted-action requires recover-exhausted-consumer"
+                )
+            if (
+                args.decision is not None
+                or args.decided_by is not None
+                or args.decision_head is not None
+            ):
+                raise FleetControllerError(
+                    "decision, decided-by, and decision-head require decide-consumer"
                 )
             _render(resume_report(store.load()), args.json)
             return 0
@@ -2103,6 +2437,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                     provenance = _load_provenance(args.provenance)
                     if reason_code is None:
                         reason_code = provenance["reasonCode"]
+                advance = None
+                if args.finalization_receipt is not None:
+                    if args.consumer is None:
+                        raise FleetControllerError(
+                            "a finalization advance belongs to a consumer lane"
+                        )
+                    if args.head is None:
+                        # The receipt proves an advance *to* a head. Without one
+                        # the check downstream compares against None and reports
+                        # a head mismatch, which reads as a bad receipt rather
+                        # than a missing argument.
+                        raise FleetControllerError(
+                            "a finalization advance requires --head naming the "
+                            "head the receipt advanced the lane to"
+                        )
+                    lane = next(
+                        (
+                            item
+                            for item in state["lanes"]
+                            if item["name"] == args.consumer
+                        ),
+                        None,
+                    )
+                    if lane is None:
+                        raise FleetControllerError(
+                            "receipt consumer is outside the campaign"
+                        )
+                    advance = _load_finalization_advance(
+                        args.finalization_receipt,
+                        lane_head=lane["head"],
+                        head=args.head,
+                    )
                 receipt, changed = record_result(
                     state,
                     action_id=args.action_id,
@@ -2114,6 +2480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     pack_blocker=args.pack_blocker,
                     head=args.head,
                     pr_number=args.pr_number,
+                    finalization_advance=advance,
                 )
                 if changed:
                     store.write(state)
@@ -2139,12 +2506,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.retry_consumer,
                         args.recover_consumer,
                         args.recover_exhausted_consumer,
+                        args.decide_consumer,
                         args.resolve_action,
                     )
                 )
                 if modes > 1:
                     raise FleetControllerError(
                         "resume accepts only one recovery mode"
+                    )
+                if args.decide_consumer is None and (
+                    args.decision is not None
+                    or args.decided_by is not None
+                    or args.decision_head is not None
+                ):
+                    raise FleetControllerError(
+                        "decision, decided-by, and decision-head are valid only "
+                        "with decide-consumer"
                     )
                 if args.retry_consumer is not None:
                     if args.corrective_release is not None:
@@ -2190,6 +2567,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                         state,
                         consumer=args.recover_exhausted_consumer,
                         exhausted_action_id=args.exhausted_action,
+                        release=args.release,
+                    )
+                    resume_receipt = None
+                elif args.decide_consumer is not None:
+                    if args.corrective_release is not None:
+                        raise FleetControllerError(
+                            "corrective-release is valid only with recover-consumer"
+                        )
+                    if args.exhausted_action is not None:
+                        raise FleetControllerError(
+                            "exhausted-action is valid only with recover-exhausted-consumer"
+                        )
+                    if (
+                        args.decision is None
+                        or args.decided_by is None
+                        or args.decision_head is None
+                    ):
+                        raise FleetControllerError(
+                            "decide-consumer requires decision, decided-by, "
+                            "and decision-head"
+                        )
+                    if args.release is None:
+                        raise FleetControllerError("decide-consumer requires release")
+                    recovery, changed = record_operator_decision(
+                        state,
+                        consumer=args.decide_consumer,
+                        decision=args.decision,
+                        decided_by=args.decided_by,
+                        decision_head=args.decision_head,
                         release=args.release,
                     )
                     resume_receipt = None

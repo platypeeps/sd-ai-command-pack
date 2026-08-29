@@ -160,6 +160,33 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(self.lane_for(state, consumer)["result"], "retry-exhausted")
         return action
 
+    def park_for_decision(
+        self,
+        controller,
+        state,
+        *,
+        consumer="canary-a",
+        stage="review",
+        reason_code="remote-reviewer-unavailable-delta-reviewed",
+    ):
+        """Drive a lane to `stage` and park it awaiting a human decision."""
+        self.pass_preflight(controller, state)
+        while self.lane_for(state, consumer)["stage"] != stage:
+            self.pass_lane_action(controller, state)
+        action = self.issued_action_for(controller, state, consumer)
+        controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer=consumer,
+            result="operator-decision",
+            reason_code=reason_code,
+            head=HEAD,
+        )
+        lane = self.lane_for(state, consumer)
+        self.assertEqual((lane["status"], lane["result"]), ("terminal", "operator-decision"))
+        return action
+
     def lane_for(self, state, consumer):
         """Return the lane owned by consumer, independent of lane ordering."""
         for lane in state["lanes"]:
@@ -558,7 +585,9 @@ class FleetControllerTests(InstallTestCase):
                 result="review-finding",
                 reason_code="review-finding",
             )
-        with self.assertRaisesRegex(controller.FleetControllerError, "current PR head"):
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "lane's recorded head"
+        ):
             controller.record_result(
                 state,
                 action_id=action["actionId"],
@@ -568,7 +597,9 @@ class FleetControllerTests(InstallTestCase):
                 reason_code="review-finding",
                 head=OTHER_HEAD,
             )
-        with self.assertRaisesRegex(controller.FleetControllerError, "current PR head"):
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "lane's recorded head"
+        ):
             controller.record_result(
                 state,
                 action_id=action["actionId"],
@@ -2347,6 +2378,624 @@ class FleetControllerTests(InstallTestCase):
                 corrective_release="0.38.0",
                 actual_release="0.38.0",
             )
+    def test_a_decided_lane_rejoins_the_campaign_and_reaches_merged(self) -> None:
+        """The state the controller creates for "a human must decide" was the one
+        terminal state it could not accept a decision for.
+
+        `--retry-consumer` wants `ownership-skip`, `--recover-consumer` wants a
+        merge-stage pack blocker, `--recover-exhausted-consumer` wants
+        `retry-exhausted`. A lane parked on `operator-decision` matched none of
+        them, so an operator who decided to proceed had no supported way to
+        finish it and the ledger stayed wrong forever.
+        """
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        parked = self.park_for_decision(controller, state)
+        receipts_before = copy.deepcopy(state["lanes"][0]["receipts"])
+
+        recovery, changed = controller.record_operator_decision(
+            state,
+            consumer="canary-a",
+            decision="proceed",
+            decided_by="operator-sdelmas",
+            decision_head=HEAD,
+            release="0.37.0",
+        )
+
+        self.assertTrue(changed)
+        lane = state["lanes"][0]
+        self.assertEqual(
+            (lane["status"], lane["result"], lane["stage"]),
+            ("waiting", None, "review"),
+        )
+        self.assertIsNone(lane["blocker"])
+        # Reviving records the decision; it never rewrites what was received.
+        self.assertEqual(lane["receipts"], receipts_before)
+        self.assertEqual(
+            recovery,
+            {
+                "consumer": "canary-a",
+                "decidedBy": "operator-sdelmas",
+                "decision": "proceed",
+                "decisionHead": HEAD,
+                "fromActionId": parked["actionId"],
+                "fromAttempt": parked["attempt"],
+                "fromBlocker": "remote-reviewer-unavailable-delta-reviewed",
+                "fromStage": "review",
+                "kind": "operator-decision",
+                "recordedAt": recovery["recordedAt"],
+                "toAttempt": parked["attempt"] + 1,
+                "toStage": "review",
+            },
+        )
+
+        while self.lane_for(state, "canary-a")["result"] is None:
+            self.pass_lane_action(controller, state)
+
+        lane = state["lanes"][0]
+        self.assertEqual((lane["status"], lane["result"]), ("terminal", "merged"))
+        # The whole chain survives: the pre-decision receipts are still the
+        # prefix of the lane's history, so the ledger shows a lane that was
+        # parked, decided, and completed.
+        self.assertEqual(lane["receipts"][: len(receipts_before)], receipts_before)
+        self.assertEqual(state["recoveries"], [recovery])
+        controller.validate_state(state)
+
+    def test_the_decision_path_refuses_every_other_terminal_result(self) -> None:
+        """Guarded on `operator-decision` exactly as the other three are guarded
+        on their own results."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.park_for_decision(controller, state)
+        lane = state["lanes"][0]
+        others = controller.TERMINAL_RESULTS - {"operator-decision"}
+        self.assertEqual(len(others), 8)
+
+        for result in sorted(others):
+            lane["result"] = result
+            with self.assertRaisesRegex(
+                controller.FleetControllerError,
+                "terminal operator-decision lane",
+            ):
+                controller.record_operator_decision(
+                    state,
+                    consumer="canary-a",
+                    decision="proceed",
+                    decided_by="operator-sdelmas",
+                    decision_head=HEAD,
+                    release="0.37.0",
+                )
+
+        self.assertEqual(state["recoveries"], [])
+
+    def test_reviving_a_lane_reopens_a_complete_campaign(self) -> None:
+        """A campaign is `complete` because every lane is terminal. Reviving one
+        means that is no longer true, and the state must say so rather than
+        reporting a campaign that still has work as finished."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.park_for_decision(controller, state)
+
+        self.assertEqual(state["status"], "complete")
+        controller.validate_state(state)
+        self.assertEqual(controller.issue_next(state), [])
+
+        controller.record_operator_decision(
+            state,
+            consumer="canary-a",
+            decision="proceed",
+            decided_by="operator-sdelmas",
+            decision_head=HEAD,
+            release="0.37.0",
+        )
+
+        self.assertEqual(state["status"], "active")
+        controller.validate_state(state)
+        issued = controller.issue_next(state)
+        self.assertEqual(
+            [(item["consumer"], item["stage"]) for item in issued],
+            [("canary-a", "review")],
+        )
+
+    def test_the_decision_is_bound_to_a_decider_and_a_head(self) -> None:
+        """Who decided, and against which head. A lane that moved after the
+        operator looked at it cannot inherit their answer, and re-answering the
+        same parked action with a different decision is refused rather than
+        silently overwriting the record."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.park_for_decision(controller, state)
+
+        def decide(**overrides):
+            arguments = {
+                "consumer": "canary-a",
+                "decision": "proceed",
+                "decided_by": "operator-sdelmas",
+                "decision_head": HEAD,
+                "release": "0.37.0",
+            }
+            arguments.update(overrides)
+            return controller.record_operator_decision(state, **arguments)
+
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "head does not match the lane head"
+        ):
+            decide(decision_head=OTHER_HEAD)
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "release does not match campaign release"
+        ):
+            decide(release="0.38.0")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "decision must be proceed or decline"
+        ):
+            decide(decision="maybe")
+        self.assertEqual(state["recoveries"], [])
+
+        recovery, changed = decide()
+        self.assertTrue(changed)
+        self.assertEqual(recovery["decidedBy"], "operator-sdelmas")
+        self.assertEqual(recovery["decisionHead"], HEAD)
+
+        # Idempotent for the identical decision, refused for a different one.
+        repeated, changed_again = decide()
+        self.assertFalse(changed_again)
+        self.assertEqual(repeated, recovery)
+        self.assertEqual(state["recoveries"], [recovery])
+
+    def test_declining_to_proceed_is_recorded_and_leaves_the_lane_terminal(
+        self,
+    ) -> None:
+        """Deciding not to proceed must be a recordable answer, not the state
+        reached by nobody ever answering. Both look identical on the lane; only
+        the recovery record tells them apart."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        parked = self.park_for_decision(controller, state)
+        lane_before = copy.deepcopy(state["lanes"][0])
+
+        recovery, changed = controller.record_operator_decision(
+            state,
+            consumer="canary-a",
+            decision="decline",
+            decided_by="operator-sdelmas",
+            decision_head=HEAD,
+            release="0.37.0",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(state["lanes"][0], lane_before)
+        self.assertEqual(state["status"], "complete")
+        self.assertEqual(controller.issue_next(state), [])
+        self.assertEqual(recovery["decision"], "decline")
+        self.assertEqual(recovery["fromActionId"], parked["actionId"])
+        self.assertEqual(recovery["toAttempt"], recovery["fromAttempt"])
+        controller.validate_state(state)
+
+        # Having declined, the operator cannot then quietly proceed on the same
+        # parked action: the answer to one parking is one answer.
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "already carries a different operator decision",
+        ):
+            controller.record_operator_decision(
+                state,
+                consumer="canary-a",
+                decision="proceed",
+                decided_by="operator-sdelmas",
+                decision_head=HEAD,
+                release="0.37.0",
+            )
+
+    def test_resume_cli_drives_the_operator_decision_path(self) -> None:
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.park_for_decision(controller, state)
+        state_home = root.parent / f"{root.name}-controller-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        common = [
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+        ]
+
+        def resume(*arguments):
+            status, output, error = self.run_cli(
+                controller, "resume", *common, *arguments
+            )
+            return status, output, error
+
+        status, _output, error = resume(
+            "--decision", "proceed", "--decided-by", "operator-sdelmas"
+        )
+        self.assertEqual(status, 2)
+        self.assertIn("require decide-consumer", error)
+
+        status, output, _error = resume(
+            "--decide-consumer",
+            "canary-a",
+            "--decision",
+            "proceed",
+            "--decided-by",
+            "operator-sdelmas",
+            "--decision-head",
+            HEAD,
+            "--release",
+            "0.37.0",
+        )
+
+        self.assertEqual(status, 0)
+        payload = output
+        self.assertEqual(payload["recovery"]["kind"], "operator-decision")
+        self.assertEqual(payload["recovery"]["decision"], "proceed")
+        self.assertTrue(payload["changed"])
+        reloaded = store.load()
+        self.assertEqual(reloaded["status"], "active")
+        self.assertEqual(reloaded["lanes"][0]["status"], "waiting")
+
+
+    def finalization_receipt(self, path, *, base, head, paths=(".trellis/workspace/x/journal-1.md",)):
+        """A finish-work completion bundle result, as review-preflight emits it."""
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "kind": "trellis-bookkeeping-validation",
+                    "status": "valid",
+                    "command": "final-bundle",
+                    "mode": "completion",
+                    "reasonCodes": ["completion_bundle_valid"],
+                    "evidence": {
+                        "baseOid": base,
+                        "headOid": head,
+                        "taskDirectories": [],
+                        "changedPaths": list(paths),
+                    },
+                    "findings": [],
+                    "advisories": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def lane_at_merge_eligibility(self, controller, state, *, consumer="wave-a"):
+        """Drive a lane to a waiting merge-eligibility stage at HEAD."""
+        self.pass_preflight(controller, state)
+        while self.lane_for(state, consumer)["stage"] != "merge-eligibility":
+            self.pass_lane_action(controller, state)
+        return self.issued_action_for(controller, state, consumer)
+
+    def test_a_head_advanced_by_the_lanes_own_finalization_does_not_rewind(
+        self,
+    ) -> None:
+        """The head moves on every lane, for the same reason, every time.
+
+        Stage 2 records the review at H. Stage 2b runs finish-work, whose
+        journal commit produces H'. By merge-eligibility the stored head is
+        always one commit stale, so the `pr-head-advanced` rewind — which models
+        someone else pushing to the PR branch — was the normal path, priced as
+        an exception: four records where one was expected.
+        """
+
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        action = self.lane_at_merge_eligibility(controller, state)
+        receipts_before = len(state["lanes"][0]["receipts"])
+        receipt_path = self.finalization_receipt(
+            root / "finalization.json", base=HEAD, head=OTHER_HEAD
+        )
+        advance = controller._load_finalization_advance(
+            receipt_path, lane_head=HEAD, head=OTHER_HEAD
+        )
+
+        receipt, changed = controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="passed",
+            head=OTHER_HEAD,
+            finalization_advance=advance,
+        )
+
+        self.assertTrue(changed)
+        lane = state["lanes"][0]
+        # One receipt, and the lane moved forward rather than back.
+        self.assertEqual(len(lane["receipts"]), receipts_before + 1)
+        self.assertEqual(lane["stage"], "merge")
+        self.assertEqual(lane["head"], OTHER_HEAD)
+        # The chain still says which head each stage validated.
+        self.assertEqual(
+            [
+                (item["stage"], item["head"])
+                for item in lane["receipts"]
+                if item["stage"] in ("pr-publication", "review", "merge-eligibility")
+            ],
+            [
+                ("pr-publication", HEAD),
+                ("review", HEAD),
+                ("merge-eligibility", OTHER_HEAD),
+            ],
+        )
+        self.assertEqual(
+            receipt["finalizationAdvance"], {"fromHead": HEAD, "toHead": OTHER_HEAD}
+        )
+        controller.validate_state(state)
+
+        while self.lane_for(state, "wave-a")["result"] is None:
+            self.pass_lane_action(controller, state, head=OTHER_HEAD)
+        self.assertEqual(state["lanes"][0]["result"], "merged")
+
+    def test_a_head_advanced_by_an_outside_push_still_rewinds(self) -> None:
+        """No finalization receipt, no shortcut: the guard this exists for."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        action = self.lane_at_merge_eligibility(controller, state)
+
+        controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer="wave-a",
+            result="retryable-failure",
+            reason_code=controller.PR_HEAD_ADVANCED_REASON,
+            head=HEAD,
+            pr_number=17,
+        )
+
+        lane = state["lanes"][0]
+        self.assertEqual((lane["stage"], lane["status"]), ("pr-publication", "waiting"))
+
+    def test_the_head_guard_names_what_it_compares(self) -> None:
+        """The message said "the current PR head" at the one moment the current
+        PR head is demonstrably the other one, sending the operator to verify
+        the wrong fact. It now names the head it holds and how to move it."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        action = self.lane_at_merge_eligibility(controller, state)
+
+        with self.assertRaises(controller.FleetControllerError) as caught:
+            controller.record_result(
+                state,
+                action_id=action["actionId"],
+                release="0.37.0",
+                consumer="wave-a",
+                result="passed",
+                head=OTHER_HEAD,
+            )
+
+        message = str(caught.exception)
+        self.assertIn(f"lane's recorded head {HEAD}", message)
+        self.assertIn("--finalization-receipt", message)
+        self.assertIn(OTHER_HEAD, message)
+        self.assertNotIn("current PR head", message)
+
+    def test_the_advance_is_proven_from_the_receipt_not_asserted(self) -> None:
+        """The controller runs no repository commands, so "this was our own
+        finalization" cannot be the caller's word. Every part of the claim is
+        read out of the finish-work receipt and compared: where it starts, where
+        it ends, and that it touched nothing but task bookkeeping."""
+
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        self.lane_at_merge_eligibility(controller, state)
+        path = root / "finalization.json"
+
+        def load(**overrides):
+            arguments = {"base": HEAD, "head": OTHER_HEAD}
+            arguments.update(
+                {key: value for key, value in overrides.items() if key != "mutate"}
+            )
+            self.finalization_receipt(path, **arguments)
+            if "mutate" in overrides:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                overrides["mutate"](payload)
+                path.write_text(json.dumps(payload), encoding="utf-8")
+            return controller._load_finalization_advance(
+                path, lane_head=HEAD, head=OTHER_HEAD
+            )
+
+        self.assertEqual(load(), {"fromHead": HEAD, "toHead": OTHER_HEAD})
+
+        third = "c" * 40
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "does not start from the lane's recorded head"
+        ):
+            load(base=third)
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "does not end at the recorded head"
+        ):
+            load(head=third)
+        # A product change in the delta is exactly the case that must rewind.
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "outside task bookkeeping"
+        ):
+            load(paths=(".trellis/workspace/x/journal-1.md", "src/app.py"))
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "must be a completion bundle"
+        ):
+            load(mutate=lambda payload: payload.__setitem__("mode", "planning"))
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "valid schema-1 result"
+        ):
+            load(mutate=lambda payload: payload.__setitem__("status", "invalid"))
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "lists no changed paths"
+        ):
+            load(paths=())
+
+        path.write_text("not json", encoding="utf-8")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "not valid JSON"
+        ):
+            controller._load_finalization_advance(
+                path, lane_head=HEAD, head=OTHER_HEAD
+            )
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "cannot read finalization receipt"
+        ):
+            controller._load_finalization_advance(
+                root / "absent.json", lane_head=HEAD, head=OTHER_HEAD
+            )
+
+    def test_a_receipt_cannot_escape_the_bookkeeping_tree_by_traversal(self) -> None:
+        """The prefix must bound the tree, not merely start the string.
+
+        The receipt is operator-supplied evidence and the controller runs no
+        repository command to corroborate it, so a prefix test is the whole
+        boundary. `.trellis/../scripts/x.py` passes that test while naming a
+        file outside the tree, which would let a tampered receipt wave a
+        product change past the guard that exists to catch exactly that.
+        """
+
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        self.lane_at_merge_eligibility(controller, state)
+        path = root / "finalization.json"
+
+        escapes = (
+            ".trellis/../scripts/app.py",
+            ".trellis/tasks/../../etc/passwd",
+            ".trellis//workspace/x/journal-1.md",
+            ".trellis/workspace/x/",
+            ".trellis/./workspace/x/journal-1.md",
+            ".trellis/workspace\\x\\journal-1.md",
+            ".trellis/",
+        )
+        for entry in escapes:
+            with self.subTest(entry=entry):
+                self.assertFalse(controller._is_bookkeeping_path(entry))
+                self.finalization_receipt(
+                    path, base=HEAD, head=OTHER_HEAD, paths=(entry,)
+                )
+                with self.assertRaisesRegex(
+                    controller.FleetControllerError, "outside task bookkeeping"
+                ):
+                    controller._load_finalization_advance(
+                        path, lane_head=HEAD, head=OTHER_HEAD
+                    )
+
+        # The ordinary bookkeeping paths a real receipt carries still pass.
+        for entry in (
+            ".trellis/workspace/x/journal-1.md",
+            ".trellis/tasks/archive/2026-08/a-task/task.json",
+        ):
+            self.assertTrue(controller._is_bookkeeping_path(entry))
+        self.assertFalse(controller._is_bookkeeping_path(None))
+        self.assertFalse(controller._is_bookkeeping_path("/.trellis/x.md"))
+
+    def test_a_finalization_receipt_without_a_head_says_so(self) -> None:
+        """Name the missing argument, not a head mismatch against nothing.
+
+        `--head` is optional on `record`, so a receipt supplied without one
+        reached the comparison with `None` and came back as "does not end at
+        the recorded head" -- which reads as a bad receipt and sends the
+        operator to re-run finish-work instead of adding a flag.
+        """
+
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        action = self.lane_at_merge_eligibility(controller, state)
+        state_home = root.parent / f"{root.name}-controller-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        receipt_path = self.finalization_receipt(
+            root / "finalization.json", base=HEAD, head=OTHER_HEAD
+        )
+
+        status, _output, error = self.run_cli(
+            controller,
+            "record",
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+            "--action-id",
+            action["actionId"],
+            "--release",
+            "0.37.0",
+            "--consumer",
+            "wave-a",
+            "--result",
+            "passed",
+            "--finalization-receipt",
+            str(receipt_path),
+        )
+
+        self.assertNotEqual(status, 0)
+        self.assertIn("requires --head", error)
+
+    def test_record_cli_accepts_a_finalization_receipt(self) -> None:
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        action = self.lane_at_merge_eligibility(controller, state)
+        state_home = root.parent / f"{root.name}-controller-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        receipt_path = self.finalization_receipt(
+            root / "finalization.json", base=HEAD, head=OTHER_HEAD
+        )
+
+        status, output, _error = self.run_cli(
+            controller,
+            "record",
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+            "--action-id",
+            action["actionId"],
+            "--release",
+            "0.37.0",
+            "--consumer",
+            "wave-a",
+            "--result",
+            "passed",
+            "--head",
+            OTHER_HEAD,
+            "--finalization-receipt",
+            str(receipt_path),
+        )
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            output["receipt"]["finalizationAdvance"],
+            {"fromHead": HEAD, "toHead": OTHER_HEAD},
+        )
+        reloaded = store.load()
+        self.assertEqual(reloaded["lanes"][0]["stage"], "merge")
+        self.assertEqual(reloaded["lanes"][0]["head"], OTHER_HEAD)
 
 
 if __name__ == "__main__":

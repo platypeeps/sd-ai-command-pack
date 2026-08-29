@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.71.66 - 2026-08-29
+
+### Fixed
+
+- `integration-only` fleet review is reachable. The classifier exists to prove a
+  consumer refresh branch is a pure installer-managed change, and it had never
+  returned `integration-only` for a lane this workflow produces — it could not,
+  because `sd-ai-command-pack-fleet-publish.py` folds the lane's own task archive
+  and the journal recording it into the reviewed head before the classifier ever
+  runs, and those paths counted as consumer-owned. Every lane of every recent
+  campaign classified `remote-review-required` on bookkeeping no human and no
+  product change contributed. The classifier now admits that output, bound to
+  evidence rather than exempting `.trellis/`: exactly one archived task
+  directory may change, its `task.json` at the reviewed head must be `completed`
+  and name the branch being classified, and only that record's assignee's
+  `index.md` and `journal-<n>.md` are admitted with it. An unrelated task edit, a
+  second archive directory, another developer's journal, or a workspace change
+  with nothing archived behind it all still require remote review.
+
+  A detached consumer checkout now reaches its own diagnosis: `git symbolic-ref
+  --quiet` exits 1 and prints nothing in exactly that state, so without the return
+  code accepted the generic git failure was raised first and the dedicated
+  message was unreachable.
+- A fleet lane no longer trips `pr-head-advanced` by construction. The
+  controller modelled a head that moves after review as an outside push and
+  rewound the lane to `pr-publication` so publication, review, and eligibility
+  were re-recorded. But the head moves on every lane for its own reason: review
+  is recorded at H, finish-work then writes the journal commit, and by
+  merge-eligibility the stored head is always one commit stale. The recovery path
+  was the normal path, priced as an exception — four records where one was
+  expected. `record` now takes `--finalization-receipt <path>`, the finish-work
+  completion bundle, and accepts the stage at the new head when the file itself
+  proves the advance: `evidence.baseOid` equal to the lane's recorded head,
+  `evidence.headOid` equal to the head being recorded, and every changed path
+  under `.trellis/`. The accepted pair is kept on the receipt as
+  `finalizationAdvance`, so the chain still names the head each stage validated.
+  Because the receipt is the whole boundary, each changed path is read segment
+  by segment rather than by prefix alone: `.trellis/../scripts/app.py` satisfies
+  a `startswith` test while naming a file outside the tree, so traversal, empty
+  and no-op segments, and backslashes are refused. A head advanced by an outside
+  push has no such receipt and still rewinds; the controller runs no repository
+  commands, so nothing here is taken on the caller's word. `--head` is required
+  alongside the receipt: without one the head check compared against `None` and
+  reported a mismatch, which reads as a bad receipt rather than a missing
+  argument.
+- The head guard's diagnostic named the opposite of what it compares. It read
+  "receipt head does not match the current PR head" while comparing against the
+  lane's *stored* head, at the one moment when the current PR head is
+  demonstrably the other one — GitHub reporting `db7620ef` while the guard
+  demanded `554d0b02`. It now names the head the lane holds and says which head
+  to record at, or which receipt to pass instead.
+
+- A fleet lane parked for a human decision can rejoin its campaign. The
+  controller parks a lane as terminal `operator-decision` precisely because a
+  person must choose, and that was the one terminal state it could not accept a
+  decision for: `--retry-consumer` guards on `ownership-skip`,
+  `--recover-consumer` on a merge-stage pack blocker, and
+  `--recover-exhausted-consumer` on `retry-exhausted`. An operator who decided
+  to proceed had no supported way to finish the lane, and no `--action-id`
+  existed to record against because `next` returns nothing once every lane is
+  terminal. `resume --decide-consumer <name> --decision proceed|decline
+  --decided-by <who> --decision-head <sha> --release <campaign-release>` records
+  the answer. `proceed` re-enters the lane at the stage it parked on, on a fresh
+  attempt, reopening the campaign — it stamps nothing terminal by itself, so a
+  decided lane still needs every receipt any other lane needs. `decline` leaves
+  the lane where it is and records that this was chosen, which is what
+  distinguishes a declined lane from one nobody answered. One parking takes one
+  answer: an identical replay is a no-op and a different decision for the same
+  parked action is refused.
+
+- Fleet timing runs can reach `completed`. Of the 25 recorded runs, 18 stranded
+  `active`: every one was missing a consumer's terminal outcome, because
+  `sd-fleet-refresh` told the operator to bracket delivery work without naming
+  the command that closes a stage or a lane — `consumer-end` appeared nowhere in
+  the skill. The skill now mandates `consumer-end` in the same step that records
+  a terminal controller result, and brackets stages with the new `stage-run`
+  subcommand, which starts the stage, runs the command, and ends it in a
+  `finally` while exiting with the command's own status. An early return in a
+  lane can no longer leave an attempt open. A command killed by a signal is
+  recorded `interrupted` rather than `failed`: `subprocess` reports that as a
+  negative return code, and reading it as an ordinary nonzero exit would file a
+  stage nobody finished under the outcome reserved for a gate that ran and said
+  no. `stage-run` opens its attempt with a single clock reading, so a record's
+  `updatedAtWallNs` can no longer predate the `startedWallNs` written beside it,
+  and it refuses a stage that already has an open attempt rather than closing
+  somebody else's attempt with this command's outcome. `elapsedSource` accepts
+  only `wall`: absence already carries the monotonic case, and admitting
+  `monotonic` would give one fact two spellings. The bracketed command's stdout
+  goes to stderr, so a gate that prints can no longer interleave with the
+  machine-readable result on stdout, and a signal crosses the process boundary
+  as the shell's own `128 + N` rather than the 241 a raw negative status turns
+  into.
+- The timing completion error names what is missing. It reported only the first
+  of its two gates and identified neither consumer, stage, nor attempt, so an
+  operator who cleared the open attempts met the missing-outcome gate as a fresh
+  surprise. It now collects every blocker and names each with its exact remedial
+  command.
+- `report` distinguishes a measured run from an uninstrumented one. Six of the
+  seven previously `completed` runs recorded outcomes and no stages at all, and
+  said nothing about it. The summary now carries a derived `instrumentation`
+  block naming every lane without stages, and the human report prints
+  `instrumented: N/M consumers`. A never-instrumented lane may still complete —
+  its outcome is real controller evidence — but it can no longer read as
+  measured data.
+- A timing attempt that outlived its monotonic epoch could be neither ended nor
+  reported. `time.monotonic_ns()` has no cross-process epoch and every campaign
+  stage is a separate process, so five recorded runs raised "monotonic clock
+  moved backwards during active stage" from `report` itself. Elapsed measurement
+  now falls back to the wall clock and records the optional attempt field
+  `elapsedSource: "wall"`, refusing only when both clocks moved backwards. All
+  25 recorded runs load and report; previously 20 did.
+
 ## 0.71.65 - 2026-08-28
 
 ### Fixed

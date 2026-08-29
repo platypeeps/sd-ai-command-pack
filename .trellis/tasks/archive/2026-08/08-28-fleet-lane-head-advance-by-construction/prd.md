@@ -38,7 +38,8 @@ reached `merged` correctly on 14 receipts; the cost was procedural.
 
 ### The message describes the opposite of what it wants
 
-The guard at `scripts/sd-ai-command-pack-fleet-controller.py:1214-1217`
+The guard at the top of `_advance_lane` in
+`scripts/sd-ai-command-pack-fleet-controller.py`
 compares the receipt head against the lane's *stored* head:
 
 ```python
@@ -55,6 +56,19 @@ reported `headRefOid: db7620ef` while the guard demanded `554d0b02`. The
 behavior is coherent (the receipt reports the stage's failure at the head it was
 working on; republication records the new head), but the wording sends the
 operator to verify the wrong fact.
+
+## Related
+
+`08-28-fleet-integration-only-unreachable` shares one observation with this
+task — the publisher folds finalization output into the reviewed head — and
+nothing else. That one is a *content* defect: the classifier counted the
+publisher's own task archive and journal as consumer-owned, so
+`integration-only` was unreachable. This one is a *sequencing* defect: the head
+moved after the review record, so the eligibility guard rewound the lane.
+Different symptoms, different guards, different fixes; neither implies the
+other. Both are fixed by proving what the publisher wrote, from evidence the
+tool can read rather than a caller's assertion — a finish-work receipt here, an
+archived `task.json` naming this branch there.
 
 ## Requirements
 
@@ -76,11 +90,11 @@ operator to verify the wrong fact.
 
 ## Acceptance Criteria
 
-- [ ] A lane whose head advanced only by its finalization commit reaches merge
+- [x] A lane whose head advanced only by its finalization commit reaches merge
       without rewinding to `pr-publication`, with receipts still naming the head
       each stage validated.
-- [ ] A lane whose head advanced by an outside push still rewinds.
-- [ ] The guard's diagnostic names the lane's recorded head and the head to
+- [x] A lane whose head advanced by an outside push still rewinds.
+- [x] The guard's diagnostic names the lane's recorded head and the head to
       pass; a test asserts the message rather than only the exit status.
-- [ ] The two cases are distinguished by evidence the controller can check, not
+- [x] The two cases are distinguished by evidence the controller can check, not
       by a caller-supplied assertion about which happened.

@@ -7,6 +7,10 @@ except ModuleNotFoundError as exc:
         raise
     from . import install_test_support as _support
 
+import signal
+import subprocess
+import sys
+
 contextlib = _support.contextlib
 io = _support.io
 json = _support.json
@@ -353,8 +357,20 @@ class FleetTimingTests(InstallTestCase):
         active = timing.build_summary(state, self.reading(timing, 5))
         self.assertEqual(active["aggregate"]["activeAttempts"], 1)
         self.assertEqual(active["fleetStages"][0]["elapsedNs"], 3 * SECOND)
-        with self.assertRaisesRegex(timing.FleetTimingError, "active stages"):
+        # The refusal names the exact attempt and the exact command that ends
+        # it. "active stages" said neither, so an operator holding a stranded
+        # run had nowhere to start.
+        with self.assertRaisesRegex(
+            timing.FleetTimingError, r"fleet/preflight#1"
+        ) as blocked:
             timing.complete_state(state, self.reading(timing, 6))
+        message = str(blocked.exception)
+        self.assertIn("stage attempts still open", message)
+        self.assertIn("stage-end --run-id run-1", message)
+        # Both gates are reported at once: the open attempt hid the missing
+        # outcome behind it in every stranded run on disk.
+        self.assertIn("consumers without a terminal outcome", message)
+        self.assertIn("canary", message)
         with self.assertRaisesRegex(timing.FleetTimingError, "fleet-scoped"):
             timing.start_stage(
                 state,
@@ -377,8 +393,12 @@ class FleetTimingTests(InstallTestCase):
             reason=None,
             reading=self.reading(timing, 7),
         )
-        with self.assertRaisesRegex(timing.FleetTimingError, "without consumer outcomes"):
+        with self.assertRaisesRegex(
+            timing.FleetTimingError, "consumers without a terminal outcome"
+        ) as missing:
             timing.complete_state(state, self.reading(timing, 8))
+        self.assertIn("consumer-end --run-id run-1", str(missing.exception))
+        self.assertNotIn("stage attempts still open", str(missing.exception))
         with self.assertRaisesRegex(timing.FleetTimingError, "reason is required"):
             timing.end_consumer(state, name="canary", outcome="blocked", reason=None)
         self.assertTrue(
@@ -407,7 +427,17 @@ class FleetTimingTests(InstallTestCase):
                 reading=self.reading(timing, 11),
             )
 
-    def test_monotonic_clock_cannot_move_backwards(self) -> None:
+    def test_attempt_outliving_its_monotonic_epoch_falls_back_to_the_wall_clock(
+        self,
+    ) -> None:
+        """A reboot must not make an attempt unendable and unreportable.
+
+        A monotonic clock cannot run backwards inside one boot, so a reading
+        below the attempt's origin proves a new epoch rather than a broken
+        clock. Refusing there left five runs on disk that could be neither
+        ended nor reported -- the exact state this task exists to clear.
+        """
+
         timing = self.load_timing()
         state = self.state(timing, ("canary", 10))
         timing.start_stage(
@@ -416,7 +446,37 @@ class FleetTimingTests(InstallTestCase):
             stage_name="audit",
             reading=self.reading(timing, 10),
         )
-        backwards = timing.ClockReading(20 * SECOND, 9 * SECOND)
+        rebooted = timing.ClockReading(20 * SECOND, 9 * SECOND)
+
+        # Reportable across the epoch boundary, measured from the wall clock.
+        summary = timing.build_summary(state, rebooted)
+        self.assertEqual(summary["consumers"][0]["stages"][0]["elapsedNs"], 10 * SECOND)
+
+        timing.end_stage(
+            state,
+            consumer_name="canary",
+            stage_name="audit",
+            outcome="passed",
+            reason=None,
+            reading=rebooted,
+        )
+        attempt = state["consumers"][0]["stages"][0]["attempts"][0]
+        self.assertEqual(attempt["elapsedNs"], 10 * SECOND)
+        # The record says which clock measured it; a monotonic-measured attempt
+        # carries no marker, so historical records keep their exact shape.
+        self.assertEqual(attempt["elapsedSource"], "wall")
+        timing.validate_state(state)
+
+    def test_both_clocks_backwards_refuses_to_invent_a_duration(self) -> None:
+        timing = self.load_timing()
+        state = self.state(timing, ("canary", 10))
+        timing.start_stage(
+            state,
+            consumer_name="canary",
+            stage_name="audit",
+            reading=self.reading(timing, 10),
+        )
+        backwards = timing.ClockReading(1 * SECOND, 9 * SECOND)
 
         with self.assertRaisesRegex(timing.FleetTimingError, "moved backwards"):
             timing.end_stage(
@@ -941,6 +1001,421 @@ class FleetTimingTests(InstallTestCase):
             ),
         )
         self.assertFalse(changed_again)
+
+    def test_a_full_campaign_reaches_completed_through_the_recorded_evidence(
+        self,
+    ) -> None:
+        """Every lane instrumented and ended: the run completes on its own.
+
+        Of the 25 runs on disk, 18 are stranded `active` and every one of them
+        is missing at least one `consumer-end`. This drives the shape the
+        caller is supposed to produce and pins that it terminates.
+        """
+
+        timing = self.load_timing()
+        state = self.state(timing, ("alpha", 20), ("canary", 10))
+        clock = iter(range(2, 400))
+
+        def step() -> object:
+            return self.reading(timing, next(clock))
+
+        timing.start_stage(
+            state, consumer_name=None, stage_name="preflight", reading=step()
+        )
+        timing.end_stage(
+            state,
+            consumer_name=None,
+            stage_name="preflight",
+            outcome="passed",
+            reason=None,
+            reading=step(),
+        )
+        for consumer in ("alpha", "canary"):
+            for stage in ("install", "audit", "local-gate", "pr-creation", "housekeeping"):
+                timing.start_stage(
+                    state, consumer_name=consumer, stage_name=stage, reading=step()
+                )
+                timing.end_stage(
+                    state,
+                    consumer_name=consumer,
+                    stage_name=stage,
+                    outcome="passed",
+                    reason=None,
+                    reading=step(),
+                )
+            timing.end_consumer(
+                state, name=consumer, outcome="refreshed-merged", reason=None
+            )
+
+        self.assertTrue(timing.complete_state(state, step()))
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual(
+            [consumer["outcome"] for consumer in state["consumers"]],
+            ["refreshed-merged", "refreshed-merged"],
+        )
+        summary = timing.build_summary(state, step())
+        self.assertEqual(
+            summary["instrumentation"],
+            {
+                "consumersTotal": 2,
+                "consumersMeasured": 2,
+                "consumersWithoutStages": [],
+            },
+        )
+
+    def test_a_never_instrumented_lane_completes_but_is_marked_unmeasured(
+        self,
+    ) -> None:
+        """The documented decision for a lane that recorded no stage at all.
+
+        Completion is not withheld -- the outcome is real evidence from the
+        controller, and refusing would leave the run stranded forever for a
+        gap that already happened. What the run must not do is let the gap read
+        as measured data, so the report names every unmeasured lane. Six of the
+        seven `completed` runs on disk are hollow in exactly this way and say
+        nothing about it.
+        """
+
+        timing = self.load_timing()
+        state = self.state(timing, ("alpha", 20), ("canary", 10))
+        timing.start_stage(
+            state, consumer_name="alpha", stage_name="install", reading=self.reading(timing, 2)
+        )
+        timing.end_stage(
+            state,
+            consumer_name="alpha",
+            stage_name="install",
+            outcome="passed",
+            reason=None,
+            reading=self.reading(timing, 3),
+        )
+        timing.end_consumer(state, name="alpha", outcome="refreshed-merged", reason=None)
+        timing.end_consumer(state, name="canary", outcome="at-target", reason=None)
+
+        self.assertTrue(timing.complete_state(state, self.reading(timing, 4)))
+        summary = timing.build_summary(state, self.reading(timing, 5))
+        self.assertEqual(
+            summary["instrumentation"],
+            {
+                "consumersTotal": 2,
+                "consumersMeasured": 1,
+                "consumersWithoutStages": ["canary"],
+            },
+        )
+        human = timing.render_human(state, summary)
+        self.assertIn("instrumented: 1/2 consumers", human)
+        self.assertIn("no stages recorded for canary", human)
+
+    def test_stage_run_closes_the_attempt_however_the_command_ends(self) -> None:
+        """The bracket is one control flow, so an early return cannot leak.
+
+        Instrumentation decayed lane by lane through every campaign because the
+        caller was told in prose to remember both halves. Here the end is in a
+        `finally`: success, failure, and a command that never starts all leave
+        the attempt closed, and the command's own status still reaches the
+        caller.
+        """
+
+        timing = self.load_timing()
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = ["--repo", str(repo), "--state-home", str(state_home), "--json"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            timing.main(
+                [
+                    *common,
+                    "init",
+                    "--run-id",
+                    "run-1",
+                    "--target-version",
+                    "0.23.16",
+                    "--consumer",
+                    "canary:10",
+                ]
+            )
+
+        def bracket(stage: str, *command: str) -> int:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return timing.main(
+                    [
+                        *common,
+                        "stage-run",
+                        "--run-id",
+                        "run-1",
+                        "--consumer",
+                        "canary",
+                        "--stage",
+                        stage,
+                        "--",
+                        *command,
+                    ]
+                )
+
+        self.assertEqual(bracket("install", "true"), 0)
+        # An early return in the bracketed work: nonzero exit, stage closed.
+        self.assertEqual(bracket("audit", "sh", "-c", "exit 3"), 3)
+        # A command that never runs at all is still not left open.
+        self.assertEqual(bracket("local-gate", str(repo / "no-such-command")), 127)
+
+        store = timing.timing_store(repo, "run-1", state_home)
+        state = timing.load_state(store, "run-1")
+        stages = {
+            stage["name"]: stage["attempts"][-1]
+            for stage in state["consumers"][0]["stages"]
+        }
+        self.assertEqual(sorted(stages), ["audit", "install", "local-gate"])
+        for attempt in stages.values():
+            self.assertIsNotNone(attempt["endedWallNs"])
+        self.assertEqual(stages["install"]["outcome"], "passed")
+        self.assertEqual(stages["audit"]["outcome"], "failed")
+        self.assertIn("status 3", stages["audit"]["reason"])
+        self.assertEqual(stages["local-gate"]["outcome"], "interrupted")
+        # The reason carries the status, never the command: an operator path
+        # must not reach the record.
+        self.assertNotIn(str(repo), json.dumps(state))
+        self.assertEqual(timing.open_attempts(state), [])
+
+    def test_a_signalled_command_is_recorded_as_interrupted_not_failed(self) -> None:
+        """A killed stage never finished; it did not run and say no.
+
+        `subprocess` reports a signal as a negative return code, and the naive
+        reading -- anything nonzero is `failed` -- files a stage the operator
+        interrupted, or the OOM killer took, under the same outcome as a gate
+        that ran to completion and rejected the consumer. That is the one
+        distinction the outcome exists to carry, so the sign is read.
+        """
+
+        timing = self.load_timing()
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = ["--repo", str(repo), "--state-home", str(state_home), "--json"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            timing.main(
+                [
+                    *common,
+                    "init",
+                    "--run-id",
+                    "run-1",
+                    "--target-version",
+                    "0.23.16",
+                    "--consumer",
+                    "canary:10",
+                ]
+            )
+            status = timing.main(
+                [
+                    *common,
+                    "stage-run",
+                    "--run-id",
+                    "run-1",
+                    "--consumer",
+                    "canary",
+                    "--stage",
+                    "install",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import os, signal; os.kill(os.getpid(), signal.SIGTERM)",
+                ]
+            )
+
+        self.assertEqual(status, -signal.SIGTERM)
+        store = timing.timing_store(repo, "run-1", state_home)
+        state = timing.load_state(store, "run-1")
+        attempt = state["consumers"][0]["stages"][0]["attempts"][-1]
+        self.assertEqual(attempt["outcome"], "interrupted")
+        self.assertIn(f"signal {int(signal.SIGTERM)}", attempt["reason"])
+        self.assertIsNotNone(attempt["endedWallNs"])
+        self.assertEqual(timing.open_attempts(state), [])
+
+    def test_stage_run_refuses_a_stage_that_already_has_an_open_attempt(self) -> None:
+        """The bracket must close its own attempt, never somebody else's.
+
+        A stage left open by an earlier `stage-start` is the exact state this
+        subcommand exists to prevent, so meeting one is not a licence to run:
+        the `finally` would stamp this command's outcome onto the older attempt
+        and report a stage that passed when the work it timed never finished.
+        The start's own reading is also the record's, so a start can never write
+        an `updatedAtWallNs` older than the `startedWallNs` beside it.
+        """
+
+        timing = self.load_timing()
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = ["--repo", str(repo), "--state-home", str(state_home), "--json"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            timing.main(
+                [
+                    *common,
+                    "init",
+                    "--run-id",
+                    "run-1",
+                    "--target-version",
+                    "0.23.16",
+                    "--consumer",
+                    "canary:10",
+                ]
+            )
+            timing.main(
+                [
+                    *common,
+                    "stage-start",
+                    "--run-id",
+                    "run-1",
+                    "--consumer",
+                    "canary",
+                    "--stage",
+                    "install",
+                ]
+            )
+        reported = io.StringIO()
+        with contextlib.redirect_stdout(reported):
+            status = timing.main(
+                [
+                    *common,
+                    "stage-run",
+                    "--run-id",
+                    "run-1",
+                    "--consumer",
+                    "canary",
+                    "--stage",
+                    "install",
+                    "--",
+                    "true",
+                ]
+            )
+
+        self.assertNotEqual(status, 0)
+        payload = json.loads(reported.getvalue())
+        self.assertEqual(payload["status"], "error")
+        self.assertIn("already has an open attempt", payload["error"])
+        store = timing.timing_store(repo, "run-1", state_home)
+        state = timing.load_state(store, "run-1")
+        stage = state["consumers"][0]["stages"][0]
+        # The older attempt is untouched: still open, and not wearing an
+        # outcome the bracketed command produced.
+        self.assertEqual(len(stage["attempts"]), 1)
+        self.assertIsNone(stage["attempts"][0]["outcome"])
+        self.assertGreaterEqual(
+            state["updatedAtWallNs"], stage["attempts"][0]["startedWallNs"]
+        )
+
+    def test_stage_run_keeps_stdout_parseable_and_reports_a_signal_to_the_shell(
+        self,
+    ) -> None:
+        """Two things only a real process boundary can show.
+
+        The bracketed command inherits file descriptors, not `sys.stdout`, so an
+        in-process test cannot see it interleave its output with the JSON result
+        -- and a returned negative status only becomes a wrong exit code once
+        `SystemExit` carries it across that same boundary.
+        """
+
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = [
+            sys.executable,
+            str(TIMING),
+            "--repo",
+            str(repo),
+            "--state-home",
+            str(state_home),
+            "--json",
+        ]
+        subprocess.run(
+            [
+                *common,
+                "init",
+                "--run-id",
+                "run-1",
+                "--target-version",
+                "0.23.16",
+                "--consumer",
+                "canary:10",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        noisy = subprocess.run(
+            [
+                *common,
+                "stage-run",
+                "--run-id",
+                "run-1",
+                "--consumer",
+                "canary",
+                "--stage",
+                "install",
+                "--",
+                "sh",
+                "-c",
+                "echo bracketed-noise; exit 0",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(noisy.returncode, 0)
+        # The gate's own output reached the operator, on the stream that is not
+        # carrying the result.
+        self.assertIn("bracketed-noise", noisy.stderr)
+        self.assertNotIn("bracketed-noise", noisy.stdout)
+        self.assertEqual(json.loads(noisy.stdout)["operation"], "stage-run")
+
+        killed = subprocess.run(
+            [
+                *common,
+                "stage-run",
+                "--run-id",
+                "run-1",
+                "--consumer",
+                "canary",
+                "--stage",
+                "audit",
+                "--",
+                sys.executable,
+                "-c",
+                "import os, signal; os.kill(os.getpid(), signal.SIGTERM)",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        # 128 + SIGTERM, the shell's own spelling -- not the 241 that a raw
+        # negative status turns into on the way through SystemExit.
+        self.assertEqual(killed.returncode, 128 + int(signal.SIGTERM))
+
+    def test_records_written_before_elapsed_source_existed_still_validate(self) -> None:
+        """Historical runs must not be orphaned by the new optional field."""
+
+        timing = self.load_timing()
+        state = self.state(timing, ("canary", 10))
+        timing.start_stage(
+            state,
+            consumer_name="canary",
+            stage_name="audit",
+            reading=self.reading(timing, 2),
+        )
+        timing.end_stage(
+            state,
+            consumer_name="canary",
+            stage_name="audit",
+            outcome="passed",
+            reason=None,
+            reading=self.reading(timing, 3),
+        )
+        attempt = state["consumers"][0]["stages"][0]["attempts"][0]
+        # A monotonic-measured attempt is written exactly as it always was.
+        self.assertNotIn("elapsedSource", attempt)
+        timing.validate_state(self.clone(state))
+
+        attempt["elapsedSource"] = "wall"
+        timing.validate_state(self.clone(state))
+        attempt["elapsedSource"] = "guesswork"
+        with self.assertRaisesRegex(timing.FleetTimingError, "elapsedSource"):
+            timing.validate_state(self.clone(state))
 
     def test_cli_json_and_human_output_hide_local_state_path(self) -> None:
         timing = self.load_timing()

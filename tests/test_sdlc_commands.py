@@ -296,7 +296,13 @@ class SdlcCommandsTests(InstallTestCase):
             "bind it to the refresh branch",
             "dedicated consumer task artifacts",
             "complete the dedicated task through `sd-finish-work`",
-            "record the issued merge action as `retryable-failure --reason-code pr-head-advanced`",
+            # The ordinary case: the journal commit moves the head on every
+            # lane, and the receipt that produced it proves the advance.
+            "record the issued action at the new head and pass that same "
+            "finish-work receipt as `--finalization-receipt <path>`",
+            # The rewind stays, for a head that moved for another reason.
+            "reserve `retryable-failure --reason-code pr-head-advanced` "
+            "against the old published head",
             "pass it to housekeeping without running finish-work again",
         ):
             self.assertIn(pin.casefold(), fleet.casefold())
@@ -330,7 +336,11 @@ class SdlcCommandsTests(InstallTestCase):
         arguments = fleet.split("## Arguments", 1)[1].split("## Timing evidence", 1)[0]
         for pin in (
             "scripts/sd-ai-command-pack-fleet-timing.py",
-            "start both `reviewer-wait` and `ci-wait`",
+            "bracket every stage with `stage-run`",
+            "`reviewer-wait` and `ci-wait`, both started immediately after the",
+            # The stranding cause: the skill named no command for closing a lane.
+            "every selected consumer needs `consumer-end --run-id <run-id> "
+            "--consumer <name> --outcome <outcome>`",
             "report --run-id <run-id> --complete",
             "never changes a delivery gate's authoritative result",
         ):

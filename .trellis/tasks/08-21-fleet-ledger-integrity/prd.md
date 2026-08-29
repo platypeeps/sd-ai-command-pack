@@ -9,7 +9,8 @@ data-entry mistake; each is a missing path in the tooling.
 1. **The timing ledger never completes.** `fleet-timing report --complete`
    answers `cannot complete timing run with active stages`. This is not local
    to one campaign: of the 21 runs under
-   `~/.local/state/sd-ai-command-pack/fleet-timing/`, **15 are still `active`**,
+   `~/.local/state/sd-ai-command-pack/fleet-timing/` on 2026-08-21, **15 are
+   still `active`**,
    the oldest (`refresh-v0-55-0-20260727T005724Z`) from 2026-07-27. Only 6 have
    ever reached `completed`.
 
@@ -25,6 +26,13 @@ both model the happy path, and a lane that leaves it has no supported way back,
 so the honest operator is left with a ledger that understates reality and no
 command that fixes it.
 
+## Children
+
+- `08-21-fleet-timing-never-completes` closes gap 1: the timing ledger that
+  never completes.
+- `08-21-fleet-operator-decision-recovery` closes gap 2: the parked lane that
+  cannot rejoin the campaign.
+
 ## Requirements
 
 - Each child closes one gap and is verifiable on its own. Neither child depends
@@ -33,8 +41,9 @@ command that fixes it.
   transition without evidence. The point of these ledgers is that they are
   derived from receipts; a command that lets an operator assert an outcome
   directly would remove the property being repaired.
-- Historical state must be readable after the change. There are 21 timing runs
-  and several campaign states on disk; a schema change must migrate or tolerate
+- Historical state must be readable after the change. There were 21 timing runs
+  and several campaign states on disk when this was written, and 25 timing runs
+  by the time the timing child landed; a schema change must migrate or tolerate
   them, not orphan them.
 
 ## Acceptance criteria
@@ -49,8 +58,8 @@ command that fixes it.
 
 ## Out of scope
 
-- Backfilling durations for the 15 historically stranded runs. Deciding what to
-  do with them belongs to the timing child; inventing timestamps for them does
-  not.
+- Backfilling durations for the historically stranded runs (15 when this was
+  written; 18 by the time the timing child landed). Deciding what to do with
+  them belongs to the timing child; inventing timestamps for them does not.
 - The 0.71.45 rollout itself. All nine consumers are merged and pinned at
   0.71.45; this task is about the records of that work, not the work.
