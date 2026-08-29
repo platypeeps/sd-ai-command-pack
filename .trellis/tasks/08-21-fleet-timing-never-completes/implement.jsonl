@@ -1,3 +1,1 @@
-{"file": ".trellis/tasks/08-21-fleet-timing-never-completes/prd.md", "reason": "The measured per-lane table and the decay ordering that points at the caller rather than the recorder. Establish that verdict before changing either side."}
-{"file": ".agents/skills/sd-fleet-refresh/SKILL.md", "reason": "The caller under suspicion: where stage-start is invoked and where stage-end and consumer-end are supposed to follow it."}
 {"file": ".trellis/spec/backend/error-handling.md", "reason": "The failure-message requirement — the current bare 'cannot complete timing run with active stages' names neither the lane nor the stage the operator must fix."}
