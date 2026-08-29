@@ -54,12 +54,12 @@ eight pointed into the cloud-synced path and have since been moved to local stor
 
 ## Acceptance Criteria
 
-- [ ] A KB refresh whose target does not respond ends within the configured bound instead of
+- [x] A KB refresh whose target does not respond ends within the configured bound instead of
       blocking indefinitely.
-- [ ] The resulting report names the resolved `.obsidian-kb` target and states that the refresh
+- [x] The resulting report names the resolved `.obsidian-kb` target and states that the refresh
       did not complete.
-- [ ] A healthy refresh is unaffected in behaviour and cost.
-- [ ] The block-versus-degrade decision for housekeeping is documented with its reasoning, and
+- [x] A healthy refresh is unaffected in behaviour and cost.
+- [x] The block-versus-degrade decision for housekeeping is documented with its reasoning, and
       the chosen behaviour is covered by a test.
 
 ## Related
