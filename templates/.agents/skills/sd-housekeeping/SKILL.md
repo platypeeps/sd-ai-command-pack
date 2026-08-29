@@ -161,6 +161,18 @@ unmerged without one, or unknown, each with the holding worktree when there is
 one) and surfaces the actionable classes as follow-ups. Report the advisory
 entries and the classification; do not describe either as a blocker.
 
+The `Merge gate:` line reports which of the two happened, from
+`identity.finishWork` and the anomaly list rather than from the actions: a run
+that merged through the eligibility gate carries a verified receipt, while one
+that found the pull request already `MERGED` carries `provided: true` with
+`verified: false` and the advisory `pull_request_merged_before_run`. Both are
+clean results with the same `pull_request_merge_confirmed` action, and only this
+line separates them. Say `already merged before this run`, never "externally":
+an interrupted earlier housekeeping run that merged and was retried produces the
+same evidence, and the run cannot tell the two apart. A run given no receipt at
+all reports `merged by this run` only when its own merge action is present, and
+otherwise omits the line.
+
 The assistant summary begins `Housekeeping completed cleanly.` only for that
 typed clean result and includes:
 
@@ -172,6 +184,7 @@ Working tree: clean
 Local branches: only <default>
 Remote branches: origin/HEAD, origin/<default>
 PR #<number>: merged at <timestamp>
+Merge gate: <merged by this run|already merged before this run>
 Open PRs: <none|summary>
 Open issues: <none|summary>
 Current Trellis task: <none active|task id + status>

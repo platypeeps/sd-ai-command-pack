@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.71.64 - 2026-08-28
+
+### Fixed
+
+- Housekeeping no longer reports a clean run as though its merge gate had run
+  when the pull request was already merged before the run resolved it. A run
+  handed `--finish-work-receipt` on the branch it was asked to finish, whose
+  first lookup returns `MERGED`, never reaches the eligibility evaluator that
+  consumes the receipt -- and previously discarded it, leaving
+  `identity.finishWork` at the `null` a run offered no receipt at all carries.
+  Such a run now records the advisory `pull_request_merged_before_run` and
+  `identity.finishWork` with `provided: true` and `verified: false`. The
+  wording says the merge happened before this run, never that it was external:
+  an interrupted earlier housekeeping run that merged and was retried with the
+  same receipt is indistinguishable from a merge by another process, and
+  GitHub's `mergedBy` names the same account in both, so it is reported as
+  evidence rather than as an attribution. The verdict stays `clean`, and no
+  merge, eligibility, or deletion gate changed.
+- A successful merge from a linked worktree no longer reports `verdict:
+  blocked` and exits nonzero when the only outstanding condition is a default
+  branch held by another live worktree. Four separate reports followed from
+  that one hold, which housekeeping's own anomaly channel already classifies as
+  advisory: the current-branch expectation fired unconditionally on any branch
+  other than the default; the source-branch holder scan excluded the running
+  worktree, so a branch this checkout could not switch away from read as simply
+  retained; the remote-source-branch check read a tracking ref left stale
+  because the held-branch return skipped past the prune written for exactly
+  that; and the branch classification called the just-merged branch unmerged
+  because merge evidence came only from a local default tip the same hold had
+  blocked from fast-forwarding. Expectations are now resolved against the
+  worktree inventory itself rather than a second list that can drift from it,
+  the prune runs before the deferred-cleanup return, and merge evidence is read
+  from both default tips. Every one of these codes still blocks in its ordinary
+  case, and an unavailable worktree inventory demotes nothing.
+
 ## 0.71.63 - 2026-08-28
 
 ### Fixed

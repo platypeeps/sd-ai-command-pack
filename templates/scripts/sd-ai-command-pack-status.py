@@ -52,6 +52,7 @@ ADVISORY_CALLER_ANOMALY_CODES = frozenset(
     {
         "branch_retained_default_held",
         "default_branch_held_elsewhere",
+        "pull_request_merged_before_run",
     }
 )
 GITHUB_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -558,11 +559,17 @@ def collect_git(
         )
     else:
         state["branchesHeldElsewhere"] = None
-    # Merge evidence for the leftover-branch classification. Reachability from
-    # the *local* default tip, because status never fetches: a default branch
-    # behind its remote is reported as stale evidence rather than silently
-    # answering the question wrongly.
+    # Merge evidence for the leftover-branch classification, read from both
+    # default tips. Status never fetches, so the local tip can be behind: a
+    # branch merged upstream and not yet pulled reads unmerged from it, which is
+    # exactly the state a housekeeping run leaves behind when another worktree
+    # holds the default branch and blocks the fast-forward. The remote-tracking
+    # tip answers that case, and a branch reachable from either tip is merged --
+    # neither is a weaker claim than the other. A default branch behind its
+    # remote is still reported as stale evidence for everything downstream of
+    # the absence claim.
     state["mergedIntoDefault"] = None
+    state["mergedIntoRemoteDefault"] = None
     if isinstance(resolved_default, str) and resolved_default:
         merged = git_output(
             repo,
@@ -574,6 +581,16 @@ def collect_git(
         )
         if merged is not None:
             state["mergedIntoDefault"] = sorted(merged.splitlines())
+        merged_remote = git_output(
+            repo,
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--merged",
+            f"refs/remotes/{remote}/{resolved_default}",
+            "refs/heads",
+        )
+        if merged_remote is not None:
+            state["mergedIntoRemoteDefault"] = sorted(merged_remote.splitlines())
     stash_list = git_output(repo, "stash", "list", "--format=%gd")
     if stash_list is None:
         state["stashCount"] = None
@@ -603,10 +620,30 @@ def collect_git(
             if local_default is not None and remote_default is not None
             else None
         )
+        # Strictly behind, not merely different. A fast-forward would reconcile
+        # this one; a genuine divergence would not, and the two must not share a
+        # severity just because the tips are unequal.
+        state["defaultBehindRemote"] = None
+        if (
+            local_default is not None
+            and remote_default is not None
+            and local_default != remote_default
+        ):
+            state["defaultBehindRemote"] = (
+                git_output(
+                    repo,
+                    "merge-base",
+                    "--is-ancestor",
+                    local_default,
+                    remote_default,
+                )
+                is not None
+            )
     else:
         state["defaultLocalExists"] = False
         state["defaultRemoteExists"] = False
         state["defaultMatchesRemote"] = None
+        state["defaultBehindRemote"] = None
     if remote_url is None:
         anomalies.append(
             (
@@ -2506,12 +2543,13 @@ def classify_local_branches(
     in the listing is classified from that row, because a present row is direct
     evidence and needs no complete listing behind it.
 
-    Merge evidence is reachability from the local default tip. A branch merged
-    by squash or rebase is not reachable and reads unmerged; with its pull
-    request closed it then reads PR-less. That is a false positive on an
-    advisory row, which is why the row names the branch instead of blocking on
-    it -- and why the stale-default gate matters, since it catches the much more
-    common case of a default branch that simply has not been pulled.
+    Merge evidence is reachability from either default tip -- the local branch
+    or its remote-tracking ref -- because a branch merged upstream is merged
+    whether or not this checkout has pulled yet. A branch merged by squash or
+    rebase is reachable from neither and reads unmerged; with its pull request
+    closed it then reads PR-less. That is a false positive on an advisory row,
+    which is why the row names the branch instead of blocking on it -- and why
+    the stale-default gate matters for the absence claim that follows.
     """
 
     default = git.get("defaultBranch")
@@ -2544,7 +2582,12 @@ def classify_local_branches(
         default_evidence = "stale"
 
     merged_value = git.get("mergedIntoDefault")
-    merged = set(merged_value) if isinstance(merged_value, list) else None
+    merged_remote_value = git.get("mergedIntoRemoteDefault")
+    merged = None
+    if isinstance(merged_value, list):
+        merged = set(merged_value)
+    if isinstance(merged_remote_value, list):
+        merged = (merged or set()) | set(merged_remote_value)
     held_rows = git.get("worktrees")
     holders: dict[str, str] = {}
     if isinstance(held_rows, dict) and isinstance(held_rows.get("rows"), list):
@@ -2677,6 +2720,43 @@ def branch_classification_anomalies(
     return anomalies
 
 
+def worktree_holding(
+    git: Mapping[str, Any],
+    branch: str | None,
+    *,
+    exclude_current: bool,
+) -> str | None:
+    """Path of a live worktree with ``branch`` checked out, or ``None``.
+
+    ``exclude_current`` separates the two questions the worktree inventory
+    answers. Reporting *who else* holds a branch must skip the reporting
+    worktree, or every run would name itself. Deciding whether a branch could
+    have been deleted must not: a branch checked out here is exactly as
+    undeletable as one checked out next door, and the checkout that could not
+    switch away is the common case when the default branch is held elsewhere.
+    An unavailable inventory yields ``None`` in both modes, so an unproven hold
+    never demotes anything.
+    """
+
+    if not branch:
+        return None
+    worktrees = git.get("worktrees")
+    if not isinstance(worktrees, dict):
+        return None
+    rows = worktrees.get("rows")
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if not isinstance(row, dict) or row.get("branch") != branch:
+            continue
+        if exclude_current and row.get("current"):
+            continue
+        path = row.get("path")
+        if isinstance(path, str) and path:
+            return path
+    return None
+
+
 def strict_anomalies(
     git: Mapping[str, Any],
     *,
@@ -2720,14 +2800,33 @@ def strict_anomalies(
             )
         )
         return anomalies
+    # One condition, several postconditions. A default branch checked out in
+    # another live worktree cannot be switched to, fast-forwarded, or freed, so
+    # every expectation that follows from those three is deferred rather than
+    # unmet. The caller already classifies the same condition as advisory in its
+    # own anomaly channel; a verdict that blocks here fires on every successful
+    # merge from a worktree and stops carrying information. The evidence is the
+    # worktree inventory itself, not a second list that can drift from it.
+    default_holder = worktree_holding(git, default, exclude_current=True)
     if branch != default:
-        anomalies.append(
-            (
-                "current_branch_unexpected",
-                SEVERITY_BLOCKING,
-                f"current branch is {safe_text(branch or 'detached HEAD')}, expected {safe_text(default)}",
+        if default_holder is None:
+            anomalies.append(
+                (
+                    "current_branch_unexpected",
+                    SEVERITY_BLOCKING,
+                    f"current branch is {safe_text(branch or 'detached HEAD')}, expected {safe_text(default)}",
+                )
             )
-        )
+        else:
+            anomalies.append(
+                (
+                    "current_branch_default_held_elsewhere",
+                    SEVERITY_ADVISORY,
+                    f"current branch is {safe_text(branch or 'detached HEAD')} rather than "
+                    f"{safe_text(default)}, which is checked out in worktree "
+                    f"{safe_text(default_holder, limit=300)}",
+                )
+            )
     if not git.get("defaultLocalExists"):
         anomalies.append(
             (
@@ -2745,13 +2844,27 @@ def strict_anomalies(
             )
         )
     elif git.get("defaultMatchesRemote") is not True:
-        anomalies.append(
-            (
-                "default_branch_diverged",
-                SEVERITY_BLOCKING,
-                f"{safe_text(default)} does not match {safe_text(remote)}/{safe_text(default)}",
+        if default_holder is not None and git.get("defaultBehindRemote") is True:
+            # Strictly behind and held elsewhere: the fast-forward that would
+            # close this gap is the one the holding worktree blocked. Divergence
+            # that a fast-forward would not resolve still blocks.
+            anomalies.append(
+                (
+                    "default_branch_behind_held_elsewhere",
+                    SEVERITY_ADVISORY,
+                    f"{safe_text(default)} is behind {safe_text(remote)}/{safe_text(default)}; "
+                    f"it is checked out in worktree {safe_text(default_holder, limit=300)} "
+                    "and could not be fast-forwarded here",
+                )
             )
-        )
+        else:
+            anomalies.append(
+                (
+                    "default_branch_diverged",
+                    SEVERITY_BLOCKING,
+                    f"{safe_text(default)} does not match {safe_text(remote)}/{safe_text(default)}",
+                )
+            )
     local_branches = git.get("localBranches")
     if (
         source_branch
@@ -2759,20 +2872,7 @@ def strict_anomalies(
         and isinstance(local_branches, list)
         and source_branch in local_branches
     ):
-        held = git.get("branchesHeldElsewhere")
-        holder = None
-        if isinstance(held, list) and source_branch in held:
-            worktrees = git.get("worktrees")
-            if isinstance(worktrees, dict) and isinstance(worktrees.get("rows"), list):
-                for row in worktrees["rows"]:
-                    if (
-                        isinstance(row, dict)
-                        and row.get("branch") == source_branch
-                        and not row.get("current")
-                        and isinstance(row.get("path"), str)
-                    ):
-                        holder = row["path"]
-                        break
+        holder = worktree_holding(git, source_branch, exclude_current=True)
         if holder is not None:
             # Held by a live worktree: deletion was impossible, not skipped.
             # Blocking on a condition the operator cannot resolve is what made
@@ -2783,6 +2883,18 @@ def strict_anomalies(
                     SEVERITY_ADVISORY,
                     f"source branch {safe_text(source_branch)} still exists; it is "
                     f"checked out in worktree {safe_text(holder, limit=300)}",
+                )
+            )
+        elif worktree_holding(git, source_branch, exclude_current=False) is not None:
+            # Held by this checkout, which could not switch away. Deletion was
+            # equally impossible; only the holder differs, and naming it
+            # "elsewhere" would be false.
+            anomalies.append(
+                (
+                    "local_source_branch_held_by_this_worktree",
+                    SEVERITY_ADVISORY,
+                    f"source branch {safe_text(source_branch)} still exists; it is "
+                    "checked out in this worktree",
                 )
             )
         else:

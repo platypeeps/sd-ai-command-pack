@@ -65,6 +65,7 @@ class HousekeepingResultTests(unittest.TestCase):
             "status_exit": 0,
             "repository": Path("/repo"),
             "eligibility_input": None,
+            "finish_work_unverified": False,
             "start_branch": "feature/runtime-contract",
             "default_branch": "main",
             "remote": "origin",

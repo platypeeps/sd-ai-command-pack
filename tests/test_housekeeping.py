@@ -1806,6 +1806,186 @@ class HousekeepingTests(InstallTestCase):
             "feature/cleanup",
         )
 
+    def _run_housekeeping_json(
+        self, repo: Path, stub_bin: Path, *args: str
+    ) -> tuple[subprocess.CompletedProcess[str], dict]:
+        result = subprocess.run(
+            [
+                "bash",
+                str(install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"),
+                "--json",
+                *args,
+            ],
+            cwd=repo,
+            env={
+                **os.environ,
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO": "example/repo",
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        payload = json.loads(result.stdout) if result.stdout.strip() else {}
+        return result, payload
+
+    def test_housekeeping_reports_a_merge_that_predates_the_run(self) -> None:
+        # A receipt was supplied for the branch this run was asked to finish,
+        # and the pull request was already MERGED when the run first resolved
+        # it, so the eligibility gate that consumes the receipt never ran. The
+        # result must not be byte-identical to a cleanup that was offered no
+        # receipt at all.
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_pr_lifecycle_gh_stub(
+            stub_bin, head_oid, "MERGED", merged_by="octocat"
+        )
+
+        result, payload = self._run_housekeeping_json(
+            repo, stub_bin, *self.finish_work_receipt_args(repo, head_oid)
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["outcome"]["verdict"], "clean")
+        self.assertEqual(
+            payload["identity"]["finishWork"], {"provided": True, "verified": False}
+        )
+        self.assertTrue(payload["invocation"]["finishWorkReceiptProvided"])
+        anomalies = {item["code"]: item["message"] for item in payload["anomalies"]}
+        self.assertIn("pull_request_merged_before_run", anomalies)
+        message = anomalies["pull_request_merged_before_run"]
+        self.assertIn("PR #6", message)
+        self.assertIn("2026-06-27T17:00:00Z", message)
+        self.assertIn("mergedBy octocat", message)
+        # The cleanup itself is unchanged and still confirmed.
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertIn("pull_request_merge_confirmed", action_codes)
+        self.assertNotIn("pull_request_merged", action_codes)
+
+    def test_housekeeping_merged_before_run_never_names_an_external_actor(
+        self,
+    ) -> None:
+        # An interrupted earlier housekeeping run that merged and was retried
+        # from the same branch with the same receipt is indistinguishable from a
+        # merge by another process: mergedBy names the same account. The code
+        # and the wording must therefore be identical for both, and neither may
+        # claim the merge was external.
+        messages = []
+        for login in ("octocat", "sd-release-bot"):
+            repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+            self.write_pr_lifecycle_gh_stub(
+                stub_bin, head_oid, "MERGED", merged_by=login
+            )
+            result, payload = self._run_housekeeping_json(
+                repo, stub_bin, *self.finish_work_receipt_args(repo, head_oid)
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            anomalies = {
+                item["code"]: item["message"] for item in payload["anomalies"]
+            }
+            self.assertIn("pull_request_merged_before_run", anomalies)
+            message = anomalies["pull_request_merged_before_run"]
+            self.assertIn("merged before this run resolved it", message)
+            self.assertNotIn("external", message.lower())
+            messages.append(message.replace(f"mergedBy {login}", "mergedBy <login>"))
+        self.assertEqual(messages[0], messages[1])
+
+    def test_housekeeping_merged_pr_without_a_receipt_reports_no_gate_evidence(
+        self,
+    ) -> None:
+        # Ordinary post-merge cleanup: no receipt was offered, so there is
+        # nothing to report as unverified and identity.finishWork stays null.
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        self.write_pr_lifecycle_gh_stub(stub_bin, head_oid, "MERGED")
+
+        result, payload = self._run_housekeeping_json(repo, stub_bin)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["outcome"]["verdict"], "clean")
+        self.assertIsNone(payload["identity"]["finishWork"])
+        self.assertFalse(payload["invocation"]["finishWorkReceiptProvided"])
+        self.assertNotIn(
+            "pull_request_merged_before_run",
+            {item["code"] for item in payload["anomalies"]},
+        )
+
+    def test_housekeeping_merge_with_default_branch_held_is_clean(self) -> None:
+        # Merging from a linked worktree while another holds the default branch
+        # leaves cleanup deferred, not failed. Every unmet expectation here
+        # follows from that one hold, which the anomaly channel already reports
+        # as advisory, so the verdict must not block and the run must exit zero.
+        repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
+        holder = repo.parent / "holder"
+        self.run_git(repo, "worktree", "add", str(holder), "main")
+        marker = repo.parent / "merged-pr"
+        self.write_auto_merge_gh_stub(
+            stub_bin, marker, auto_delete_remote_branch=True
+        )
+
+        result, payload = self._run_housekeeping_json(
+            repo, stub_bin, *self.finish_work_receipt_args(repo, head_oid)
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["outcome"]["verdict"], "clean")
+        self.assertEqual(payload["outcome"]["reasonCodes"], [])
+        action_codes = {item["code"] for item in payload["actions"]}
+        self.assertIn("pull_request_merged", action_codes)
+        self.assertIn("pull_request_merge_confirmed", action_codes)
+        # The deferral stays visible on both channels.
+        anomaly_codes = {item["code"] for item in payload["anomalies"]}
+        self.assertIn("default_branch_held_elsewhere", anomaly_codes)
+        self.assertIn("branch_retained_default_held", anomaly_codes)
+        status_details = {
+            item["code"]: item["severity"]
+            for item in payload["status"]["anomalyDetails"]
+        }
+        for code in (
+            "current_branch_default_held_elsewhere",
+            "local_source_branch_held_by_this_worktree",
+            "default_branch_behind_held_elsewhere",
+        ):
+            self.assertEqual(status_details.get(code), "advisory", status_details)
+        for code in (
+            "current_branch_unexpected",
+            "local_source_branch_retained",
+            "remote_source_branch_retained",
+            "default_branch_diverged",
+            "local_branches_unmerged_without_pr",
+        ):
+            self.assertNotIn(code, status_details)
+        # The prune ran despite the skipped branch deletion, so no stale
+        # tracking ref survives to be read as a retained remote branch.
+        self.assertEqual(
+            subprocess.run(
+                [
+                    "git",
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/remotes/origin/feature/cleanup",
+                ],
+                cwd=repo,
+                check=False,
+            ).returncode,
+            1,
+            "stale remote tracking ref should be pruned",
+        )
+        # The branch this run merged is classified merged, and the follow-up
+        # that names it as deletable is still present.
+        rows = {
+            row["branch"]: row["disposition"]
+            for row in payload["status"]["localBranchClassification"]["rows"]
+        }
+        self.assertEqual(rows.get("feature/cleanup"), "merged")
+        self.assertTrue(
+            any(
+                "feature/cleanup" in item.get("summary", "")
+                for item in payload["status"]["followUps"]
+            ),
+            payload["status"]["followUps"],
+        )
+
     def test_housekeeping_json_marks_unknown_pr_state_indeterminate(self) -> None:
         repo, _, stub_bin, head_oid = self.make_housekeeping_repo()
         # An unexpected lifecycle state must fail closed, not be treated as

@@ -22,6 +22,12 @@ ACTION_CODES=()
 ANOMALIES=()
 ANOMALY_CODES=()
 ELIGIBILITY_JSON=""
+# Set when this run was handed a finish-work receipt on the branch it was asked
+# to finish, and then found the pull request already merged before it could run
+# the eligibility gate. The receipt was supplied and never verified; the result
+# reports exactly that rather than the null it would carry had no receipt been
+# offered at all.
+FINISH_WORK_UNVERIFIED=0
 REFS_REFRESHED=0
 # Set when this run's own Obsidian KB refresh wrote the ignore file, so a
 # later working_tree_dirty anomaly can name the writer instead of leaving the
@@ -636,8 +642,8 @@ view_pr_for_branch() {
   local pr_data
   pr_data="$(
     gh_pr_view \
-      --json number,state,mergedAt,url,headRefName,headRefOid \
-      --jq '[.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | map(if . == null then "" else tostring end) | join("\u001f")' \
+      --json number,state,mergedAt,url,headRefName,headRefOid,mergedBy \
+      --jq '[.number, .state, .mergedAt, .url, .headRefName, .headRefOid, (.mergedBy.login // "")] | map(if . == null then "" else tostring end) | join("\u001f")' \
       -- "$branch" \
       2>/dev/null ||
       true
@@ -648,8 +654,8 @@ view_pr_for_branch() {
   fi
 
   gh_pr_list --state merged --head="$branch" --limit 1 \
-    --json number,state,mergedAt,url,headRefName,headRefOid \
-    --jq '.[0] | select(. != null) | [.number, .state, .mergedAt, .url, .headRefName, .headRefOid] | map(if . == null then "" else tostring end) | join("\u001f")' \
+    --json number,state,mergedAt,url,headRefName,headRefOid,mergedBy \
+    --jq '.[0] | select(. != null) | [.number, .state, .mergedAt, .url, .headRefName, .headRefOid, (.mergedBy.login // "")] | map(if . == null then "" else tostring end) | join("\u001f")' \
     2>/dev/null ||
     true
 }
@@ -931,6 +937,34 @@ maybe_merge_ready_open_pr() {
 # the head identities that guard the destructive Git operations. The caller
 # supplies the resolved PR identity so the working tree is inspected exactly
 # once per run.
+# Bring the remote-tracking refs back in line with the remote after a merge this
+# run performed but could not follow with local branch cleanup. The deletion
+# path below already prunes for this reason: a remote configured to drop the
+# head branch at merge time does so after the initial fetch/prune ran, leaving a
+# stale refs/remotes/<remote>/<branch> that the final report reads as a retained
+# remote branch. The held-default-branch return skips that path, so the prune
+# runs here instead. This is bookkeeping, not one of the gates: a fetch removes
+# only tracking refs whose remote counterpart is already gone, and it refreshes
+# the default-branch tip that the downstream merge evidence is read from, so the
+# branch this run just merged is not reported as unmerged.
+refresh_remote_refs_after_deferred_cleanup() {
+  local branch="$1"
+
+  if [ "$DRY_RUN" -ne 0 ]; then
+    return 0
+  fi
+  if ! run_network_git fetch --prune "$REMOTE"; then
+    add_anomaly remote_prune_failed "git fetch --prune $REMOTE failed while refreshing remote refs after the deferred branch cleanup"
+    return 0
+  fi
+  REFS_REFRESHED=1
+  if git show-ref --verify --quiet "refs/remotes/$REMOTE/$branch"; then
+    add_action remote_refs_refreshed "refreshed $REMOTE refs after the deferred branch cleanup"
+  else
+    add_action remote_refs_pruned "pruned stale $REMOTE/$branch tracking ref"
+  fi
+}
+
 cleanup_merged_branch() {
   local branch="$1"
   local pr_number="$2"
@@ -966,6 +1000,7 @@ cleanup_merged_branch() {
     else
       add_anomaly branch_switch_incomplete "still on $branch; skipped branch deletion"
     fi
+    refresh_remote_refs_after_deferred_cleanup "$branch"
     return 0
   fi
 
@@ -1038,6 +1073,38 @@ cleanup_merged_branch() {
   fi
 }
 
+# Record that the pull request was already merged when this run first resolved
+# it, for a run that was handed a finish-work receipt on the very branch it was
+# asked to finish. The receipt is the caller's claim that this invocation owns
+# the merge; a MERGED first lookup means the eligibility gate that consumes the
+# receipt never ran, and the result would otherwise be byte-identical to an
+# ordinary post-merge cleanup that was offered no receipt at all.
+#
+# The condition is advisory and stays advisory: the merge cannot be undone, the
+# cleanup that follows it is correct, and nothing here is a defect in this run.
+# It is also deliberately unattributed. An interrupted earlier housekeeping run
+# that merged and was retried from the same branch with the same receipt is
+# indistinguishable from a merge by another process, and mergedBy names the same
+# account in both cases -- so the code and its message say "before this run",
+# never "external", and mergedBy is reported as GitHub's evidence rather than as
+# a claim about who acted.
+note_merge_predates_run() {
+  local branch="$1"
+  local pr_number="$2"
+  local pr_merged_at="$3"
+  local pr_merged_by="$4"
+  local merged_by_note=""
+
+  if [ -z "$FINISH_WORK_RECEIPT" ] || [ "$START_BRANCH" != "$branch" ]; then
+    return 0
+  fi
+  FINISH_WORK_UNVERIFIED=1
+  if [ -n "$pr_merged_by" ]; then
+    merged_by_note="; GitHub reports mergedBy $pr_merged_by"
+  fi
+  add_anomaly pull_request_merged_before_run "PR #$pr_number for $branch was merged before this run resolved it (mergedAt ${pr_merged_at:-unreported}); the supplied finish-work receipt was never verified, so this run did not perform the merge${merged_by_note}"
+}
+
 # Resolve one bounded PR identity and lifecycle state for the current feature
 # branch, then route on that state so housekeeping stays the sole owner of the
 # merge-then-cleanup transition:
@@ -1058,6 +1125,7 @@ route_branch_pr_lifecycle() {
   local pr_url
   local pr_head
   local pr_head_oid
+  local pr_merged_by
   local anomalies_before
 
   if [ -z "$branch" ]; then
@@ -1077,7 +1145,7 @@ route_branch_pr_lifecycle() {
     add_anomaly pull_request_unavailable "unable to resolve GitHub PR metadata for $branch; no PR was found or gh failed, so the branch was left untouched"
     return 0
   fi
-  IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid <<<"$pr_data"
+  IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid pr_merged_by <<<"$pr_data"
 
   case "$pr_state" in
     OPEN)
@@ -1091,7 +1159,7 @@ route_branch_pr_lifecycle() {
         add_anomaly pull_request_unavailable "unable to re-resolve GitHub PR metadata for $branch after the merge attempt; left the branch untouched"
         return 0
       fi
-      IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid <<<"$pr_data"
+      IFS="$FIELD_SEPARATOR" read -r pr_number pr_state pr_merged_at pr_url pr_head pr_head_oid pr_merged_by <<<"$pr_data"
       if [ "$pr_state" = "MERGED" ]; then
         cleanup_merged_branch "$branch" "$pr_number" "$pr_merged_at" "$pr_url" "$pr_head" "$pr_head_oid"
       elif [ "${#ANOMALIES[@]}" -eq "$anomalies_before" ]; then
@@ -1099,6 +1167,7 @@ route_branch_pr_lifecycle() {
       fi
       ;;
     MERGED)
+      note_merge_predates_run "$branch" "$pr_number" "$pr_merged_at" "$pr_merged_by"
       cleanup_merged_branch "$branch" "$pr_number" "$pr_merged_at" "$pr_url" "$pr_head" "$pr_head_oid"
       ;;
     CLOSED)
@@ -1219,6 +1288,9 @@ emit_json_result() {
   fi
   if [ -n "$DEPENDENCY_PR" ]; then
     result_args+=(--dependency-pr-number "$DEPENDENCY_PR")
+  fi
+  if [ "$FINISH_WORK_UNVERIFIED" -eq 1 ]; then
+    result_args+=(--finish-work-unverified)
   fi
   if [ -n "$ELIGIBILITY_JSON" ]; then
     eligibility_file="${status_file%/*}/eligibility.json"
