@@ -118,7 +118,7 @@ condition rather than the conclusion. Protection here is enforcing as of
 2026-08-29: `enforce_admins: true`, `strict: true`, and the six required
 contexts match the six the workflow produces. `enforce_admins` was deliberately
 left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
-which explicitly declined to enable it, and `2026-07-03-chore-push-scope-guard/`,
+which explicitly declined to enable it, and `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/`,
 which records it being enabled and disabled again the same day). That decision is
 reversed: an exemption for the only account that merges here made the doctrine
 prose, not authority — a direct push to `main` landed on 2026-08-29 precisely

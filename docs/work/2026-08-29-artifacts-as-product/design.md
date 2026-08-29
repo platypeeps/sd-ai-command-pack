@@ -22,10 +22,11 @@ session scratch and not committed. Section numbering follows the accepted plan.
    local tooling mirrors it read-only and never claims more than the config provides. Protection
    that exempts admins is prose, not authority: it stops collaborators and leaves the one author
    who does 100% of the merging entirely ungated. So the doctrine is conditional by construction —
-   `sd-status` reads the live protection object per repo and reports which of the three legs is
-   missing (no protection at all · protection with `enforce_admins: false` · required contexts that
-   do not match the jobs CI actually runs). Where a leg is missing, that is a *reported gap*, never
-   a silent assumption of safety.
+   `sd-status` reads the live protection object per repo and reports every enforcement dimension
+   that is missing — the same set the step-3b brief specifies: no protection at all ·
+   `enforce_admins: false` · `strict: false` (so a green check on a stale base still merges) ·
+   required contexts that do not match the jobs CI actually runs · no PR-review requirement. Any
+   one of them missing is a *reported gap*, never a silent assumption of safety.
 5. Release train + fleet rollout for a single machine is pure overhead. Machine-scope install from
    one checkout removes versions, ledgers, PATH shadows, fleet refresh.
 
@@ -389,7 +390,7 @@ that asserted it. Result across the 24 non-archived platypeeps repos and the 5 a
   **enabled on all three**; all 10 now read `enforce_admins: true`. This reverses the explicit
   earlier decision in `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/design.md`
   ("Do not enable `enforce_admins`") and the same-day enable/disable recorded in
-  `2026-07-03-chore-push-scope-guard/prd.md`. The incident forcing the reversal: a docs-only commit
+  `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/prd.md`. The incident forcing the reversal: a docs-only commit
   was pushed straight to `main` of this repo on 2026-08-29 in violation of its own CONTRIBUTING,
   and nothing server-side stopped it — an admin exemption for the only account that merges is not
   a safety valve, it is the absence of the gate.
