@@ -62,6 +62,12 @@ PR_HEAD_REPUBLICATION_STAGES = frozenset(
     {"review", "merge-eligibility", "merge"}
 )
 PR_HEAD_ADVANCED_REASON = "pr-head-advanced"
+RECEIPT_OPTIONAL_FIELDS = frozenset({"finalizationAdvance"})
+FINALIZATION_ADVANCE_FIELDS = {"fromHead", "toHead"}
+# The lane's own finalization writes task bookkeeping and nothing else. Anything
+# outside this prefix means the head moved for some other reason, which is the
+# case the rewind exists for.
+FINALIZATION_ADVANCE_PATH_PREFIX = ".trellis/"
 ACTION_IDENTITY_FIELDS = ("actionId", "attempt", "consumer", "release", "stage")
 SIDE_EFFECT_STAGES = frozenset(
     {"install-update", "pr-publication", "review", "merge"}
@@ -478,10 +484,16 @@ class CampaignStore:
                 pass
 
 
-def _strict_fields(value: Mapping[str, Any], fields: set[str], label: str) -> None:
+def _strict_fields(
+    value: Mapping[str, Any],
+    fields: set[str],
+    label: str,
+    *,
+    optional: frozenset[str] = frozenset(),
+) -> None:
     actual = set(value)
     missing = sorted(fields - actual)
-    unknown = sorted(actual - fields)
+    unknown = sorted(actual - fields - optional)
     if missing:
         raise FleetControllerError(f"{label} is missing field: {missing[0]}")
     if unknown:
@@ -557,6 +569,20 @@ def validate_action(value: object, label: str) -> None:
     utc_timestamp(value["issuedAt"], f"{label} issuedAt")
 
 
+def _validate_finalization_advance(
+    value: object, label: str, head: object
+) -> None:
+    if not isinstance(value, dict):
+        raise FleetControllerError(f"{label} must be an object")
+    _strict_fields(value, FINALIZATION_ADVANCE_FIELDS, label)
+    full_sha(value["fromHead"], f"{label} fromHead")
+    full_sha(value["toHead"], f"{label} toHead")
+    if value["fromHead"] == value["toHead"]:
+        raise FleetControllerError(f"{label} did not advance the head")
+    if value["toHead"] != head:
+        raise FleetControllerError(f"{label} toHead must be the receipt head")
+
+
 def _validate_receipt_semantics(
     *,
     result: str,
@@ -618,7 +644,12 @@ def validate_receipt(value: object, label: str) -> None:
             "stage",
         },
         label,
+        optional=RECEIPT_OPTIONAL_FIELDS,
     )
+    if "finalizationAdvance" in value:
+        _validate_finalization_advance(
+            value["finalizationAdvance"], f"{label} finalizationAdvance", value["head"]
+        )
     safe_token(value["actionId"], f"{label} actionId")
     _integer(value["attempt"], f"{label} attempt", 1)
     if value["consumer"] is not None:
@@ -719,7 +750,18 @@ def validate_lane(value: object, label: str) -> None:
     head_epoch: str | None = None
     for index, receipt in enumerate(value["receipts"]):
         validate_receipt(receipt, f"{label} receipts[{index}]")
+        advance = receipt.get("finalizationAdvance")
         if receipt["stage"] == "pr-publication" and receipt["result"] == "passed":
+            head_epoch = receipt["head"]
+        elif advance is not None:
+            # A proven finalization advance moves the epoch without a
+            # republication: the lane recorded this stage one commit past where
+            # it published, and the receipt carries the pair it moved between.
+            if advance["fromHead"] != head_epoch:
+                raise FleetControllerError(
+                    f"{label} receipts[{index}] finalization advance does not "
+                    "start from the publication epoch"
+                )
             head_epoch = receipt["head"]
         elif receipt["stage"] in PR_HEAD_STAGES and receipt["head"] != head_epoch:
             raise FleetControllerError(
@@ -1242,10 +1284,28 @@ def _advance_lane(lane: dict[str, Any], receipt: Mapping[str, Any], no_merge: bo
     stage = lane["stage"]
     prior_head = lane["head"]
     prior_pr_number = lane["prNumber"]
-    if stage in PR_HEAD_STAGES and (
-        prior_head is None or receipt["head"] != prior_head
-    ):
-        raise FleetControllerError("receipt head does not match the current PR head")
+    advance = receipt.get("finalizationAdvance")
+    if stage in PR_HEAD_STAGES and receipt["head"] != prior_head:
+        # A head that moved because the lane finalized itself is the normal case,
+        # not the exception: sd-ship records the review at H, then finish-work
+        # writes the journal commit, so by merge-eligibility the stored head is
+        # always one commit stale. Pricing that as an outside push cost three
+        # extra receipts on every lane. An outside push has no such proof and
+        # still rewinds.
+        proven = (
+            advance is not None
+            and prior_head is not None
+            and advance["fromHead"] == prior_head
+            and advance["toHead"] == receipt["head"]
+        )
+        if not proven:
+            recorded = prior_head or "none yet"
+            raise FleetControllerError(
+                "receipt head does not match the lane's recorded head "
+                f"{recorded}; record this stage at that head, or pass "
+                "--finalization-receipt proving the lane's own finalization "
+                f"advanced it to {receipt['head']}"
+            )
     if receipt["reasonCode"] == PR_HEAD_ADVANCED_REASON and (
         prior_pr_number is None or receipt["prNumber"] != prior_pr_number
     ):
@@ -1325,6 +1385,7 @@ def record_result(
     pack_blocker: bool = False,
     head: str | None = None,
     pr_number: int | None = None,
+    finalization_advance: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     action_id = safe_token(action_id, "action ID")
     if release != state["release"]:
@@ -1359,6 +1420,15 @@ def record_result(
         head=head,
         pr_number=pr_number,
     )
+    if finalization_advance is not None:
+        if consumer is None:
+            raise FleetControllerError(
+                "a finalization advance belongs to a consumer lane"
+            )
+        receipt["finalizationAdvance"] = dict(finalization_advance)
+        _validate_finalization_advance(
+            receipt["finalizationAdvance"], "receipt finalizationAdvance", head
+        )
     if existing is not None:
         if _receipt_core(existing) != _receipt_core(receipt):
             raise FleetControllerError("action already has a conflicting receipt")
@@ -2051,6 +2121,70 @@ def _render(value: Mapping[str, Any], as_json: bool) -> None:
         )
 
 
+def _load_finalization_advance(
+    path: Path, *, lane_head: str | None, head: str | None
+) -> dict[str, str]:
+    """Turn a finish-work bundle receipt into a head advance the controller checked.
+
+    The controller runs no repository commands, so "the head advanced by this
+    lane's own finalization" cannot be a caller's word for it. What the caller
+    supplies instead is the receipt the finalization already produced: a
+    schema-1 completion bundle whose base is the head this lane recorded, whose
+    head is the head being recorded now, and whose delta is task bookkeeping and
+    nothing else. Every one of those is read out of the file and compared here.
+    An outside push produces no such receipt and still rewinds the lane.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise FleetControllerError(
+            f"cannot read finalization receipt: {exc}"
+        ) from None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise FleetControllerError(
+            f"finalization receipt is not valid JSON: {exc}"
+        ) from None
+    if not isinstance(data, dict):
+        raise FleetControllerError("finalization receipt must be a JSON object")
+    if data.get("schemaVersion") != 1 or data.get("status") != "valid":
+        raise FleetControllerError(
+            "finalization receipt must be a valid schema-1 result"
+        )
+    if data.get("mode") != "completion":
+        raise FleetControllerError(
+            "finalization receipt must be a completion bundle"
+        )
+    evidence = data.get("evidence")
+    if not isinstance(evidence, dict):
+        raise FleetControllerError("finalization receipt has no evidence")
+    base_oid = evidence.get("baseOid")
+    head_oid = evidence.get("headOid")
+    full_sha(base_oid, "finalization receipt baseOid")
+    full_sha(head_oid, "finalization receipt headOid")
+    if lane_head is None or base_oid != lane_head:
+        raise FleetControllerError(
+            "finalization receipt does not start from the lane's recorded head"
+        )
+    if head_oid != head:
+        raise FleetControllerError(
+            "finalization receipt does not end at the recorded head"
+        )
+    changed = evidence.get("changedPaths")
+    if not isinstance(changed, list) or not changed:
+        raise FleetControllerError("finalization receipt lists no changed paths")
+    for entry in changed:
+        if not isinstance(entry, str) or not entry.startswith(
+            FINALIZATION_ADVANCE_PATH_PREFIX
+        ):
+            raise FleetControllerError(
+                "finalization receipt changes paths outside task bookkeeping"
+            )
+    return {"fromHead": base_oid, "toHead": head_oid}
+
+
 def _load_provenance(path: Path) -> dict[str, Any]:
     """Validate a first-class operator-decision provenance file (finding #9).
 
@@ -2124,6 +2258,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "First-class provenance file (JSON object with a 'reasonCode' token); "
             "required for --result operator-decision"
+        ),
+    )
+    record.add_argument(
+        "--finalization-receipt",
+        type=Path,
+        help=(
+            "review-preflight final-bundle result proving this lane's own "
+            "finalization advanced the PR head; lets the stage record at the "
+            "new head instead of rewinding to pr-publication"
         ),
     )
 
@@ -2270,6 +2413,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                     provenance = _load_provenance(args.provenance)
                     if reason_code is None:
                         reason_code = provenance["reasonCode"]
+                advance = None
+                if args.finalization_receipt is not None:
+                    if args.consumer is None:
+                        raise FleetControllerError(
+                            "a finalization advance belongs to a consumer lane"
+                        )
+                    lane = next(
+                        (
+                            item
+                            for item in state["lanes"]
+                            if item["name"] == args.consumer
+                        ),
+                        None,
+                    )
+                    if lane is None:
+                        raise FleetControllerError(
+                            "receipt consumer is outside the campaign"
+                        )
+                    advance = _load_finalization_advance(
+                        args.finalization_receipt,
+                        lane_head=lane["head"],
+                        head=args.head,
+                    )
                 receipt, changed = record_result(
                     state,
                     action_id=args.action_id,
@@ -2281,6 +2447,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     pack_blocker=args.pack_blocker,
                     head=args.head,
                     pr_number=args.pr_number,
+                    finalization_advance=advance,
                 )
                 if changed:
                     store.write(state)

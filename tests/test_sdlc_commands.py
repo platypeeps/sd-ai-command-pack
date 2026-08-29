@@ -296,7 +296,13 @@ class SdlcCommandsTests(InstallTestCase):
             "bind it to the refresh branch",
             "dedicated consumer task artifacts",
             "complete the dedicated task through `sd-finish-work`",
-            "record the issued merge action as `retryable-failure --reason-code pr-head-advanced`",
+            # The ordinary case: the journal commit moves the head on every
+            # lane, and the receipt that produced it proves the advance.
+            "record the issued action at the new head and pass that same "
+            "finish-work receipt as `--finalization-receipt <path>`",
+            # The rewind stays, for a head that moved for another reason.
+            "reserve `retryable-failure --reason-code pr-head-advanced` "
+            "against the old published head",
             "pass it to housekeeping without running finish-work again",
         ):
             self.assertIn(pin.casefold(), fleet.casefold())

@@ -76,11 +76,11 @@ operator to verify the wrong fact.
 
 ## Acceptance Criteria
 
-- [ ] A lane whose head advanced only by its finalization commit reaches merge
+- [x] A lane whose head advanced only by its finalization commit reaches merge
       without rewinding to `pr-publication`, with receipts still naming the head
       each stage validated.
-- [ ] A lane whose head advanced by an outside push still rewinds.
-- [ ] The guard's diagnostic names the lane's recorded head and the head to
+- [x] A lane whose head advanced by an outside push still rewinds.
+- [x] The guard's diagnostic names the lane's recorded head and the head to
       pass; a test asserts the message rather than only the exit status.
-- [ ] The two cases are distinguished by evidence the controller can check, not
+- [x] The two cases are distinguished by evidence the controller can check, not
       by a caller-supplied assertion about which happened.

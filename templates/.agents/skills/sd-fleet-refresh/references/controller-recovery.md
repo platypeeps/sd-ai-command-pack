@@ -189,7 +189,20 @@ open.
 ## Ordinary Merge-Finalization Successor
 
 A valid `sd-finish-work` completion receipt that advances the existing PR head
-is not a terminal corrective-recovery case. On a controller version that
+is not a recovery case at all. It is the ordinary shape of every lane: the
+review is recorded at H, finalization writes the journal commit, and the stage
+after it works at H'. Record that stage at the new head and pass the same
+receipt as `--finalization-receipt <path>`. The controller re-reads it and
+accepts the advance only when the file itself proves it — schema 1, `status:
+valid`, `mode: completion`, `evidence.baseOid` equal to the lane's recorded
+head, `evidence.headOid` equal to the head being recorded, and every
+`evidence.changedPaths` entry under `.trellis/`. The accepted pair is kept on
+the receipt as `finalizationAdvance`, so the chain still shows which head each
+stage validated. Nothing is asserted: the controller runs no repository
+commands, and a caller who merely claims the advance is refused.
+
+A head that moved for any other reason — an outside push to the PR branch —
+produces no such receipt and keeps the rewind. On a controller version that
 accepts `pr-head-advanced` at merge, record the issued merge action against its
 old published full head and existing PR number as `retryable-failure` with that
 reason. Preserve the new finish-work commit and receipt; do not call

@@ -191,10 +191,30 @@ start fails closed. `status` and `validate` are read-only. After interruption,
 `resume` exposes reconciliation evidence for issued actions rather than
 reissuing install, PR, review, or merge side effects.
 
-If review remediation, merge-eligibility remediation, or required finish-work
-before merge advances an existing PR, do not record the successor SHA against
-the old publication epoch. Record the issued action against its published SHA
-and PR as a bounded republication retry:
+When the lane's own finalization advances the PR — the journal commit that
+finish-work writes before merge, which happens on every lane — record the issued
+action at the new head and pass the finish-work receipt that produced it:
+
+```bash
+bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \
+  scripts/sd-ai-command-pack-fleet-controller.py record \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --release <version> --action-id <issued-action-id> \
+  --consumer <name> --result passed --head <successor-full-sha> \
+  --finalization-receipt <finish-work-receipt.json> --json
+```
+
+The controller accepts the advance only from the receipt itself: schema 1,
+`status: valid`, `mode: completion`, `evidence.baseOid` equal to the lane's
+recorded head, `evidence.headOid` equal to the head being recorded, and every
+`evidence.changedPaths` entry under `.trellis/`. The accepted pair stays on the
+receipt as `finalizationAdvance`, so the chain still shows which head each stage
+validated. This is the ordinary path and costs one record.
+
+If the head advanced for any other reason — an outside push to the PR branch —
+there is no such receipt. Do not record the successor SHA against the old
+publication epoch. Record the issued action against its published SHA and PR as
+a bounded republication retry:
 
 ```bash
 bash scripts/sd-ai-command-pack-toolchain.sh run-python -- \

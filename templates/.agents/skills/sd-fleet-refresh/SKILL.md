@@ -335,13 +335,19 @@ but defines no ordering or transition policy:
   consumer's `sd-housekeeping` gate. Complete the dedicated task through
   `sd-finish-work` and retain its exact-head receipt. Compare the resulting
   local and remote PR head with the controller's published head before invoking
-  housekeeping. If finish-work advanced the PR, record the issued merge action
-  as `retryable-failure --reason-code pr-head-advanced` against the old
-  published full head and existing PR number, retain the receipt, and stop this
-  action before housekeeping; the controller will issue a bounded successor
-  publication, review, and eligibility cycle. On the next merge action, when
-  the retained receipt names the unchanged reviewed head, pass it to
-  housekeeping without running finish-work again. The controller alone invokes
+  housekeeping. If finish-work advanced the PR, record the issued action at the
+  new head and pass that same finish-work receipt as
+  `--finalization-receipt <path>`. The controller reads it — a valid schema-1
+  completion bundle whose base is the head this lane recorded, whose head is the
+  one being recorded, and whose delta is task bookkeeping and nothing else — and
+  accepts the stage at the new head instead of rewinding. This is the ordinary
+  case: the journal commit moves the head on every lane, so a rewind here costs
+  three extra receipts on work nothing went wrong in. Reserve
+  `retryable-failure --reason-code pr-head-advanced` against the old published
+  head for a head that moved for some other reason, which is what an absent or
+  non-matching receipt means. On the next merge action, when the retained
+  receipt names the unchanged reviewed head, pass it to housekeeping without
+  running finish-work again. The controller alone invokes
   housekeeping; it never merges in completion order.
   Execute that issued merge without another approval prompt, including when
   the head contains

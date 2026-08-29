@@ -4,6 +4,29 @@
 
 ### Fixed
 
+- A fleet lane no longer trips `pr-head-advanced` by construction. The
+  controller modelled a head that moves after review as an outside push and
+  rewound the lane to `pr-publication` so publication, review, and eligibility
+  were re-recorded. But the head moves on every lane for its own reason: review
+  is recorded at H, finish-work then writes the journal commit, and by
+  merge-eligibility the stored head is always one commit stale. The recovery path
+  was the normal path, priced as an exception — four records where one was
+  expected. `record` now takes `--finalization-receipt <path>`, the finish-work
+  completion bundle, and accepts the stage at the new head when the file itself
+  proves the advance: `evidence.baseOid` equal to the lane's recorded head,
+  `evidence.headOid` equal to the head being recorded, and every changed path
+  under `.trellis/`. The accepted pair is kept on the receipt as
+  `finalizationAdvance`, so the chain still names the head each stage validated.
+  A head advanced by an outside push has no such receipt and still rewinds; the
+  controller runs no repository commands, so nothing here is taken on the
+  caller's word.
+- The head guard's diagnostic named the opposite of what it compares. It read
+  "receipt head does not match the current PR head" while comparing against the
+  lane's *stored* head, at the one moment when the current PR head is
+  demonstrably the other one — GitHub reporting `db7620ef` while the guard
+  demanded `554d0b02`. It now names the head the lane holds and says which head
+  to record at, or which receipt to pass instead.
+
 - A fleet lane parked for a human decision can rejoin its campaign. The
   controller parks a lane as terminal `operator-decision` precisely because a
   person must choose, and that was the one terminal state it could not accept a
