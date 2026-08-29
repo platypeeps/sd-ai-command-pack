@@ -199,13 +199,27 @@ class AbsentTests(CheckFixture):
         )
 
 
+def witness_snippet(witness: pathlib.Path) -> str:
+    """A Python snippet that creates `witness`, as one shell word.
+
+    The two quoting layers are separate and must stay that way: `!r` produces
+    the Python string literal, and the caller wraps the whole snippet in
+    `shlex.quote` for the shell. Quoting for the shell first and then taking
+    `!r` would bake the shell quotes into the Python string, so a path that
+    needed quoting would be created under a different name -- and every
+    assertion below that the command did NOT run would pass for the wrong
+    reason.
+    """
+    return f"open({str(witness)!r}, 'w').close()"
+
+
 class DryRunTests(CheckFixture):
     def test_prints_the_plan_and_runs_nothing(self) -> None:
         root = self.make_repo()
         witness = root / "witness"
         self.declare(
             root,
-            check=f"{PY} -c \"open({shlex.quote(str(witness))!r}, 'w').close()\"",
+            check=f"{PY} -c {shlex.quote(witness_snippet(witness))}",
         )
         completed = self.run_check(root, "--dry-run")
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -235,7 +249,7 @@ class OnlyTests(CheckFixture):
         witness = root / "witness"
         self.declare(
             root,
-            check=f"{PY} -c \"open({shlex.quote(str(witness))!r}, 'w').close()\"",
+            check=f"{PY} -c {shlex.quote(witness_snippet(witness))}",
             lint=f"{PY} -c pass",
         )
         result = self.run_json(root, "--only", "lint")
