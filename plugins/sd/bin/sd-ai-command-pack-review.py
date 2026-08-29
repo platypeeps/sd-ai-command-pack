@@ -1205,11 +1205,21 @@ def _reset_remote_dispatch(path: Path, state: dict[str, Any]) -> None:
     The abandoned dispatch stays in the record, marked, so the history shows
     what happened. It never counted toward the attempt sequence: the router was
     never told about it, so there is nothing for a ``rerequestOf`` to name.
+
+    A dispatch that produced a durable receipt is refused rather than cleared.
+    Nothing about it is abandoned, and the receipt is the attempt's remote
+    evidence -- the thing this control exists to preserve, not to discard.
     """
 
     # Adopt first, or a pre-ledger dispatch is cleared without ever being
     # recorded: it has no row to mark, so the history this promises to keep
     # would be exactly the history that is lost.
+    if state.get("remoteReceipt") is not None:
+        raise ReviewError(
+            "the recorded remote dispatch has a durable receipt, so there is "
+            "nothing abandoned to reset; that receipt is the attempt's remote "
+            "evidence and clearing it would re-dispatch over a completed review"
+        )
     stored = state.get("remoteRequest")
     if isinstance(stored, dict):
         _adopt_legacy_dispatch(path, state, stored)
@@ -1361,6 +1371,10 @@ def _mark_dispatch_fulfilled(
     for row in dispatches:
         if row["correlationId"] == request.get("correlationId"):
             row["fulfilled"] = True
+            # A receipt for a dispatch the deadline had already given up on
+            # settles the question the abandonment was a guess about. Leaving
+            # the mark would say both things at once about one dispatch.
+            row["abandoned"] = False
     return dispatches
 
 

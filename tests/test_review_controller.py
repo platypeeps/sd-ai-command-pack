@@ -3704,6 +3704,60 @@ class ReviewControllerTests(InstallTestCase):
         # The evidence `--attempt-id` would have thrown away is still here.
         self.assertEqual(after["local"], before["local"])
 
+    def test_reset_is_refused_over_a_durable_receipt(self) -> None:
+        """The control preserves remote evidence; it must not be able to drop it.
+
+        A completed attempt keeps its stored request, so the "nothing to reset"
+        guard did not fire and the reset cleared the receipt along with it --
+        discarding the attempt's remote evidence and re-dispatching over a
+        review that had already finished.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(controller, root, scope="pr")
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        before = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIsNotNone(before["remoteReceipt"])
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(controller.ReviewError, "durable receipt"):
+            controller._reset_remote_dispatch(state_path, state)
+
+        after = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(after["remoteReceipt"], before["remoteReceipt"])
+
+    def test_a_receipt_after_the_deadline_clears_the_abandoned_mark(self) -> None:
+        """One dispatch must not be recorded as both abandoned and fulfilled.
+
+        The deadline's judgment is a guess that the router will never answer. A
+        receipt settles it, so the mark it left is no longer true of that row.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["remoteDispatches"][0]["dispatchedAt"] -= 4_000
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), _dispatch = self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        self.assertEqual((code, report["status"]), (3, "failed"))
+        marked = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertTrue(marked["remoteDispatches"][0]["abandoned"])
+
+        # The router answers late. The dispatch was not abandoned after all.
+        self.run_with_mocks(controller, root, scope="pr")
+        settled = json.loads(state_path.read_text(encoding="utf-8"))
+        record = settled["remoteDispatches"][0]
+        self.assertTrue(record["fulfilled"])
+        self.assertFalse(record["abandoned"])
+
     def test_reset_is_refused_when_there_is_no_dispatch_to_clear(self) -> None:
         """Silently succeeding would let the control paper over a wrong theory."""
 
