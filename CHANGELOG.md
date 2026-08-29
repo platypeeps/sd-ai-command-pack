@@ -80,7 +80,11 @@
   and it refuses a stage that already has an open attempt rather than closing
   somebody else's attempt with this command's outcome. `elapsedSource` accepts
   only `wall`: absence already carries the monotonic case, and admitting
-  `monotonic` would give one fact two spellings.
+  `monotonic` would give one fact two spellings. The bracketed command's stdout
+  goes to stderr, so a gate that prints can no longer interleave with the
+  machine-readable result on stdout, and a signal crosses the process boundary
+  as the shell's own `128 + N` rather than the 241 a raw negative status turns
+  into.
 - The timing completion error names what is missing. It reported only the first
   of its two gates and identified neither consumer, stage, nor attempt, so an
   operator who cleared the open attempts met the missing-outcome gate as a fresh

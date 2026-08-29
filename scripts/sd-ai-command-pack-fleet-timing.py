@@ -913,6 +913,26 @@ def open_attempts(state: Mapping[str, Any]) -> list[str]:
     return labels
 
 
+def _bracketed_output() -> int | None:
+    """Send the bracketed command's stdout to this process's stderr.
+
+    This subcommand writes the machine-readable result on stdout, and the
+    bracketed command inherits that stream by default -- so a gate that prints
+    anything at all interleaves with the JSON and breaks the caller parsing it.
+    Its output still belongs on the operator's terminal, so it moves to stderr
+    rather than being captured: a stage that takes ten minutes must stream while
+    it runs, not surface at the end.
+
+    ``None`` means inherit, which is the honest answer for a stderr with no file
+    descriptor -- a stream nothing can redirect is not one a caller is parsing.
+    """
+
+    try:
+        return sys.stderr.fileno()
+    except (AttributeError, ValueError, OSError):
+        return None
+
+
 def run_bracketed_stage(
     store: TimingStore,
     run_id: str,
@@ -969,7 +989,9 @@ def run_bracketed_stage(
             "it; end that attempt with stage-end first"
         )
     try:
-        completed = subprocess.run(list(command), check=False)
+        completed = subprocess.run(
+            list(command), check=False, stdout=_bracketed_output()
+        )
         status = int(completed.returncode)
         if status == 0:
             outcome, reason = "passed", None
@@ -1491,4 +1513,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # A negative status is a signal, and an exit status cannot carry one:
+    # `SystemExit(-15)` leaves the shell reading 241. The shell's own convention
+    # for "killed by signal N" is `128 + N`, so that is what crosses the process
+    # boundary, while `main` keeps returning the raw value it measured.
+    _status = main()
+    raise SystemExit(128 - _status if _status < 0 else _status)

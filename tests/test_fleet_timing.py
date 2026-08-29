@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
     from . import install_test_support as _support
 
 import signal
+import subprocess
 import sys
 
 contextlib = _support.contextlib
@@ -1298,6 +1299,93 @@ class FleetTimingTests(InstallTestCase):
         self.assertGreaterEqual(
             state["updatedAtWallNs"], stage["attempts"][0]["startedWallNs"]
         )
+
+    def test_stage_run_keeps_stdout_parseable_and_reports_a_signal_to_the_shell(
+        self,
+    ) -> None:
+        """Two things only a real process boundary can show.
+
+        The bracketed command inherits file descriptors, not `sys.stdout`, so an
+        in-process test cannot see it interleave its output with the JSON result
+        -- and a returned negative status only becomes a wrong exit code once
+        `SystemExit` carries it across that same boundary.
+        """
+
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = [
+            sys.executable,
+            str(TIMING),
+            "--repo",
+            str(repo),
+            "--state-home",
+            str(state_home),
+            "--json",
+        ]
+        subprocess.run(
+            [
+                *common,
+                "init",
+                "--run-id",
+                "run-1",
+                "--target-version",
+                "0.23.16",
+                "--consumer",
+                "canary:10",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        noisy = subprocess.run(
+            [
+                *common,
+                "stage-run",
+                "--run-id",
+                "run-1",
+                "--consumer",
+                "canary",
+                "--stage",
+                "install",
+                "--",
+                "sh",
+                "-c",
+                "echo bracketed-noise; exit 0",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(noisy.returncode, 0)
+        # The gate's own output reached the operator, on the stream that is not
+        # carrying the result.
+        self.assertIn("bracketed-noise", noisy.stderr)
+        self.assertNotIn("bracketed-noise", noisy.stdout)
+        self.assertEqual(json.loads(noisy.stdout)["operation"], "stage-run")
+
+        killed = subprocess.run(
+            [
+                *common,
+                "stage-run",
+                "--run-id",
+                "run-1",
+                "--consumer",
+                "canary",
+                "--stage",
+                "audit",
+                "--",
+                sys.executable,
+                "-c",
+                "import os, signal; os.kill(os.getpid(), signal.SIGTERM)",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        # 128 + SIGTERM, the shell's own spelling -- not the 241 that a raw
+        # negative status turns into on the way through SystemExit.
+        self.assertEqual(killed.returncode, 128 + int(signal.SIGTERM))
 
     def test_records_written_before_elapsed_source_existed_still_validate(self) -> None:
         """Historical runs must not be orphaned by the new optional field."""
