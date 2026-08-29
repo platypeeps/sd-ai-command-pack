@@ -539,8 +539,17 @@ run_sd_ai_command_pack_surface_check() {
     warn "python3 not found on PATH; skipping shipped-surface closure check."
     return 0
   fi
+  # Other installer repositories carry the same generic markers; only the
+  # pack's own source tree asserts its name in manifest.json.
+  if ! grep -Eq '"name"[[:space:]]*:[[:space:]]*"sd-ai-command-pack"' "$REPO_ROOT/manifest.json"; then
+    printf 'Shipped-surface closure: manifest identity is not sd-ai-command-pack; skipping.\n'
+    return 0
+  fi
 
-  run "SD shipped-surface closure" python3 "$script"
+  local release_base_ref
+  release_base_ref="$(full_check_base_ref)"
+  SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF="${SD_AI_COMMAND_PACK_FULL_CHECK_RELEASE_BASE_REF:-$release_base_ref}" \
+    run "SD shipped-surface closure" python3 "$script"
 }
 
 run_sd_ai_command_pack_pr_body_scope_check() {
