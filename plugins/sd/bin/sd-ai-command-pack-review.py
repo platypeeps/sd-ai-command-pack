@@ -45,6 +45,9 @@ MAX_TEXT = 1200
 MAX_POLLS = 30
 MAX_POLL_SECONDS = 60
 MAX_ROUNDS = 10
+# A dispatch the router never fulfils has to stop being "pending" at some
+# point, or the attempt is wedged in a state that claims to be resumable.
+MAX_RECEIPT_DEADLINE_SECONDS = 86_400
 MAX_REMOTE_LATENCY_MS = 86_400_000
 OID_RE = re.compile(r"[0-9a-f]{40}\Z")
 SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
@@ -211,7 +214,13 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
 
     dispositions: dict[str, str] = {}
     for value in values:
-        identifier, separator, remainder = value.rpartition("=")
+        # Split on the FIRST "=" and take everything after it verbatim. The id
+        # ends at that separator by construction -- no identifier this pack
+        # mints can contain "=", since SAFE_ID_RE admits only alphanumerics and
+        # ".", "_", "-" -- while a reason or a citation path routinely does:
+        # this pack's own argument vocabulary is key=value, so the natural way
+        # to say why a finding was accepted names `input=` or `exclude=`.
+        identifier, separator, remainder = value.partition("=")
         disposition, marker, citation = remainder.partition("@")
         if (
             not separator
@@ -222,17 +231,6 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, str]:
             or (disposition in {"miscited", "accepted"} and not citation)
             or (disposition not in {"miscited", "accepted"} and marker)
         ):
-            # rpartition splits on the LAST "=", so a citation path containing
-            # "=" is cut in the wrong place and arrives above as nonsense.
-            # Diagnose that on its own terms rather than reporting it as an
-            # unsupported disposition. Inspected only on the failure path, so a
-            # legitimate id containing "=" never reaches it.
-            _, _, tail = value.partition("=")
-            verb, tail_marker, rest = tail.partition("@")
-            if tail_marker and verb == "miscited" and "=" in rest:
-                raise ReviewError("a miscited citation path cannot contain '='")
-            if tail_marker and verb == "accepted" and "=" in rest:
-                raise ReviewError("an accepted reason cannot contain '='")
             raise ReviewError(
                 "local dispositions must use <stable-id>=rebutted, "
                 "<stable-id>=miscited@<path>:<line>, or <stable-id>=accepted@<reason>"
@@ -390,12 +388,19 @@ def load_review_configuration(repo: Path) -> tuple[dict[str, Any], dict[str, Any
         minimum=1,
         maximum=MAX_ROUNDS,
     )
+    receipt_deadline = _bounded_integer(
+        raw_remote.get("receiptDeadlineSeconds", 1_800),
+        field="remoteIntegration receiptDeadlineSeconds",
+        minimum=60,
+        maximum=MAX_RECEIPT_DEADLINE_SECONDS,
+    )
     remote = {
         "requirement": requirement,
         "descriptorPath": descriptor.as_posix(),
         "receiptPolls": polls,
         "pollSeconds": poll_seconds,
         "roundLimit": round_limit,
+        "receiptDeadlineSeconds": receipt_deadline,
     }
     normalized = {**value, "remoteIntegration": remote}
     return normalized, remote
@@ -747,6 +752,7 @@ def _load_or_create_state(
         "capability": None,
         "remoteRequest": None,
         "remoteReceipt": None,
+        "remoteDispatches": [],
         "remoteDispositions": {},
         "observation": None,
         "updatedAt": int(time.time()),
@@ -1184,6 +1190,140 @@ def _router_local_summary(
         ):
             raise ReviewError(f"local receipt {field} is invalid")
     return summary
+
+
+def _reset_remote_dispatch(path: Path, state: dict[str, Any]) -> None:
+    """Clear an unfulfilled remote dispatch, and nothing else.
+
+    The documented way out of a dispatch that will never complete was a fresh
+    ``--attempt-id``, which discards the attempt's accumulated local and remote
+    review evidence -- the audit trail the receipt exists to keep -- as the
+    price of getting past a protocol failure. This clears the recorded request
+    so the next invocation dispatches again, and leaves the local receipt and
+    the stored remote dispositions where they are.
+
+    The abandoned dispatch stays in the record, marked, so the history shows
+    what happened. It never counted toward the attempt sequence: the router was
+    never told about it, so there is nothing for a ``rerequestOf`` to name.
+    """
+
+    dispatches = _remote_dispatches(state)
+    pending = [row for row in dispatches if not row["fulfilled"] and not row["abandoned"]]
+    if not pending and state.get("remoteRequest") is None:
+        raise ReviewError(
+            "there is no recorded remote dispatch to reset"
+        )
+    for row in pending:
+        row["abandoned"] = True
+    _advance(
+        path,
+        state,
+        "capability",
+        remoteRequest=None,
+        remoteReceipt=None,
+        remoteDispatches=dispatches,
+    )
+
+
+def _remote_dispatches(state: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read the record of remote dispatches this attempt has actually made.
+
+    A state written before this field existed has none, which is the same
+    answer as a state that never dispatched, so absence needs no migration.
+    """
+
+    value = state.get("remoteDispatches")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ReviewError("recorded remote dispatches are invalid")
+    records: list[dict[str, Any]] = []
+    for row in value:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("correlationId"), str)
+            or not isinstance(row.get("logicalDispatchId"), str)
+            or not isinstance(row.get("attempt"), int)
+            or isinstance(row.get("attempt"), bool)
+            or row["attempt"] < 1
+            or not isinstance(row.get("dispatchedAt"), int)
+            or isinstance(row.get("dispatchedAt"), bool)
+            or not isinstance(row.get("fulfilled"), bool)
+            or not isinstance(row.get("abandoned"), bool)
+        ):
+            raise ReviewError("recorded remote dispatches are invalid")
+        records.append(dict(row))
+    return records
+
+
+def _remote_attempt(state: Mapping[str, Any]) -> int:
+    """The next remote attempt number, counted from dispatches that landed.
+
+    `--attempt` counts review rounds, and most of them may never route: a round
+    that blocks locally returns before the routing branch is reached. Forwarding
+    it as `request.attempt` told the router this was the fifth attempt in a
+    sequence that had never started, and the router refused -- correctly, since
+    an attempt above 1 has to name the prior attempt it re-requests.
+
+    Only a dispatch whose receipt arrived counts. One the router never fulfilled
+    left nothing behind for a `rerequestOf` to identify, so it is not an attempt
+    the router knows about and must not shift the sequence.
+    """
+
+    return 1 + sum(1 for row in _remote_dispatches(state) if row["fulfilled"])
+
+
+def _record_dispatch(
+    path: Path, state: dict[str, Any], request: Mapping[str, Any]
+) -> None:
+    dispatches = _remote_dispatches(state)
+    dispatches.append(
+        {
+            "attempt": int(request["attempt"]),
+            "correlationId": str(request["correlationId"]),
+            "logicalDispatchId": str(request["logicalDispatchId"]),
+            "dispatchedAt": int(time.time()),
+            "fulfilled": False,
+            "abandoned": False,
+        }
+    )
+    _advance(path, state, "route-dispatched", remoteDispatches=dispatches)
+
+
+def _mark_dispatch_fulfilled(
+    state: dict[str, Any], request: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    # Keyed on the correlation id, which is fresh per request. The logical
+    # dispatch id is a digest of repository, pull request, head, and attempt --
+    # every one of them unchanged across a re-dispatch of the same attempt --
+    # so matching on it would mark an abandoned dispatch fulfilled by the
+    # receipt that arrived for its replacement.
+    dispatches = _remote_dispatches(state)
+    for row in dispatches:
+        if row["correlationId"] == request.get("correlationId"):
+            row["fulfilled"] = True
+    return dispatches
+
+
+def _dispatch_deadline_passed(
+    state: Mapping[str, Any], request: Mapping[str, Any], deadline: int
+) -> int | None:
+    """Return the age of an overdue unfulfilled dispatch, or ``None``.
+
+    Nothing else bounds this wait. The poll loop bounds one invocation, and the
+    rerun the skill prescribes starts a fresh one, so a dispatch the router will
+    never fulfil reports `pending` forever -- a typed result that says
+    "resumable" over a request that cannot complete.
+    """
+
+    for row in _remote_dispatches(state):
+        if row["correlationId"] != request.get("correlationId"):
+            continue
+        if row["fulfilled"] or row["abandoned"]:
+            return None
+        age = int(time.time()) - row["dispatchedAt"]
+        return age if age >= deadline else None
+    return None
 
 
 def _remote_request(
@@ -1838,12 +1978,25 @@ def _collect_observation(
         in {"fail", "pending", "cancel"}
     ]
     matching_checks = [item for item in checks if item.get("name") in check_names]
+    # This reader answers what a reviewer still has to act on, so an outdated
+    # thread is excluded: its comment was left against an earlier head, and the
+    # finding it names is by construction no longer in the diff being reviewed.
+    # `sd-ai-command-pack-pr-eligibility.py` answers what GitHub will let a
+    # merge do and counts outdated threads, because GitHub's
+    # conversation-resolution requirement does. Both are right about their own
+    # subject; the count below is reported beside the outdated one so the two
+    # readings can be told apart instead of read as a contradiction.
     unresolved = (
         [
             row
             for row in threads
             if not row["resolved"] and not row["outdated"] and row["comments"]
         ]
+        if "inline-comment" in channels
+        else []
+    )
+    outdated_unresolved = (
+        [row for row in threads if not row["resolved"] and row["outdated"]]
         if "inline-comment" in channels
         else []
     )
@@ -1918,6 +2071,7 @@ def _collect_observation(
             "total": len(threads),
             "fetched": threads_fetched,
             "unresolved": len(unresolved),
+            "outdatedUnresolved": len(outdated_unresolved),
             "items": unresolved[:100],
         },
         "conversationComments": matching_conversation[:100],
@@ -2049,6 +2203,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--attempt", type=int, default=1)
     parser.add_argument("--round-extension-authorized", action="store_true")
     parser.add_argument("--attempt-id")
+    parser.add_argument("--reset-remote-dispatch", action="store_true")
     parser.add_argument("--artifact-root")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
@@ -2118,6 +2273,8 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         attempt_id=attempt_id,
         identity=identity,
     )
+    if args.reset_remote_dispatch:
+        _reset_remote_dispatch(state_path, state)
     supplied_dispositions = _parse_remote_dispositions(args.remote_disposition)
     stored_dispositions = state.get("remoteDispositions", {})
     if not isinstance(stored_dispositions, dict) or any(
@@ -2368,7 +2525,7 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             repository=repository,
             pr=pr,
             route=args.remote,
-            attempt=args.attempt,
+            attempt=_remote_attempt(state),
             local_summary=local_summary,
             policy_reference=str(capability["actionReference"]),
         )
@@ -2391,7 +2548,13 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 diagnostic="remote dispatch outcome still requires durable reconciliation",
                 limitations=("remote-dispatch-reconciliation-required",),
             )
-        _advance(state_path, state, "receipt", remoteReceipt=existing)
+        _advance(
+            state_path,
+            state,
+            "receipt",
+            remoteReceipt=existing,
+            remoteDispatches=_mark_dispatch_fulfilled(state, request),
+        )
 
     if state.get("remoteReceipt") is None and state.get("phase") == "route-intent":
         existing = _query_receipt(
@@ -2401,7 +2564,13 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             request=request,
         )
         if existing is not None:
-            _advance(state_path, state, "receipt", remoteReceipt=existing)
+            _advance(
+                state_path,
+                state,
+                "receipt",
+                remoteReceipt=existing,
+                remoteDispatches=_mark_dispatch_fulfilled(state, request),
+            )
         else:
             try:
                 _dispatch(repo, workflow=str(capability["workflow"]["path"]), request=request)
@@ -2413,7 +2582,7 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     diagnostic=_bounded(error),
                     limitations=("remote-dispatch-reconciliation-required",),
                 )
-            _advance(state_path, state, "route-dispatched")
+            _record_dispatch(state_path, state, request)
 
     stored_receipt = state.get("remoteReceipt")
     if stored_receipt is None or _receipt_in_flight(stored_receipt):
@@ -2442,13 +2611,44 @@ def run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             if index + 1 < polls:
                 time.sleep(int(remote_config["pollSeconds"]))
         if receipt is None:
+            overdue = _dispatch_deadline_passed(
+                state, request, int(remote_config["receiptDeadlineSeconds"])
+            )
+            if overdue is not None:
+                dispatches = _remote_dispatches(state)
+                for row in dispatches:
+                    if row["correlationId"] == request.get("correlationId"):
+                        row["abandoned"] = True
+                _advance(
+                    state_path,
+                    state,
+                    "route-dispatched",
+                    remoteDispatches=dispatches,
+                )
+                return 3, _report(
+                    state=state,
+                    status="failed",
+                    diagnostic=(
+                        "routed-review dispatch produced no durable receipt "
+                        f"within {overdue}s; re-dispatch with "
+                        "--reset-remote-dispatch, which keeps this attempt's "
+                        "local and remote review evidence"
+                    ),
+                    limitations=("remote-dispatch-abandoned",),
+                )
             return 3, _report(
                 state=state,
                 status="pending",
                 diagnostic="routed-review dispatch is recorded but its durable receipt is not visible yet",
                 limitations=("receipt-pending",),
             )
-        _advance(state_path, state, "receipt", remoteReceipt=receipt)
+        _advance(
+            state_path,
+            state,
+            "receipt",
+            remoteReceipt=receipt,
+            remoteDispatches=_mark_dispatch_fulfilled(state, request),
+        )
 
     receipt = state["remoteReceipt"]
     if not isinstance(receipt, dict):

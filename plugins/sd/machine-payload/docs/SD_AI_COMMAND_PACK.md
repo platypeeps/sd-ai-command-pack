@@ -1043,10 +1043,14 @@ replaces the defaults entirely, so it must list `codex` itself to use that lane.
 
 The optional `.sd-ai-command-pack/review.json` `remoteIntegration` object
 accepts only `requirement` (`optional|required`), a repository-contained
-`descriptorPath`, and bounded `receiptPolls`, `pollSeconds`, and `roundLimit`
-integers. Unknown keys, unsafe paths, and out-of-range values are invalid in
-both the controller and the local-stage parser, so one configuration digest
-binds local and remote policy. An evidence-backed successor-head re-entry
+`descriptorPath`, and bounded `receiptPolls`, `pollSeconds`, `roundLimit`, and
+`receiptDeadlineSeconds` integers. Unknown keys, unsafe paths, and out-of-range
+values are invalid in both the controller and the local-stage parser, so one
+configuration digest binds local and remote policy. `receiptDeadlineSeconds`
+bounds how long an accepted dispatch may go without a durable receipt before
+the attempt reports `failed` with `remote-dispatch-abandoned` instead of
+`pending`; `--reset-remote-dispatch` then clears that dispatch alone, keeping
+the attempt's local receipt and stored remote dispositions. An evidence-backed successor-head re-entry
 (`--successor bookkeeping` with matching `--bookkeeping-evidence`, under
 automatic local provider selection — an explicit `--local` override or a
 combined `--family-evidence` payload skips the planning branch that

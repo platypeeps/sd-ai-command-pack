@@ -2147,7 +2147,7 @@ class HousekeepingTests(InstallTestCase):
             graphql_body=(
                 "  args=\" $* \"\n"
                 "  if [[ \"$args\" == *\"cursor=PAGE2\"* ]]; then\n"
-                "    printf '%s\\n' '{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":{\"nodes\":[{\"isResolved\":false}],\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null}}}}}}'\n"
+                "    printf '%s\\n' '{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":{\"nodes\":[{\"isResolved\":false,\"isOutdated\":false}],\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null}}}}}}'\n"
                 "  else\n"
                 "    printf '%s\\n' '{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":{\"nodes\":[],\"pageInfo\":{\"hasNextPage\":true,\"endCursor\":\"PAGE2\"}}}}}}'\n"
                 "  fi\n"

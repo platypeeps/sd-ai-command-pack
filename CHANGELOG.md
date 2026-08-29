@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.71.67 - 2026-08-29
+
+### Fixed
+
+- A local disposition can name a `key=value` argument. `--local-disposition`
+  split its token on the *last* `=`, so `L-3=accepted@the corpus is input= minus
+  exclude=` put the verb and the reason into the identifier and arrived at the
+  vocabulary check as nonsense; each parser then re-read the token on the
+  failure path solely to report `an accepted reason cannot contain '='`. This
+  pack's own argument vocabulary is `key=value`, so the reasons a reviewer
+  actually writes name `input=`, `exclude=`, `sensitivity=` — and `accepted` is
+  the one ground that concedes the finding is real, leaving the stated basis as
+  the only thing a later reader can check, so paraphrasing it degraded the exact
+  artifact the ground produces. The split now takes the first `=` and everything
+  after it verbatim, in the controller and the stage both. No identifier can
+  contain `=` — `SAFE_ID_RE` and `ID_RE` admit neither — so the capability the
+  last-`=` split protected was unreachable while the cost fell on every reason
+  and path that names an argument. (#591)
+- The two review-thread readers say which rule they applied.
+  `sd-ai-command-pack-review.py` excludes an outdated thread, because its
+  finding was left against an earlier head and is no longer in the diff;
+  `sd-ai-command-pack-pr-eligibility.py` counts it, because GitHub's
+  conversation-resolution requirement does. Both are right about their own
+  subject, and reading `unresolved: 0` from one and `unresolvedCount: 2` from
+  the other two minutes apart at one head read as a contradiction that stopped
+  `sd-ship` between Stage 2 and Stage 3 with no way to tell the disagreement
+  from a new finding. Neither rule changes; each reader now reports the outdated
+  count beside the unresolved one, states its rule where it applies it, and the
+  `merge_blocked_conversation` diagnostic names the outdated share so an
+  operator verifies and resolves instead of hunting for a defect that is not
+  there. (#590)
+- The remote attempt number is counted from dispatches, not review rounds.
+  `--attempt` counts rounds, most of which may never route — a round that blocks
+  locally returns before the routing branch — and forwarding it as
+  `request.attempt` told the router that a sequence which had never started was
+  on its fifth attempt. The router refused it: an attempt above 1 has to name
+  the prior attempt it re-requests, and there was none. The controller now
+  records each dispatch it makes and numbers the next request from the ones that
+  produced a receipt.
+- A routed-review dispatch that is never fulfilled reaches a terminal state.
+  Nothing bounded the wait: the poll loop bounds one invocation and the
+  prescribed rerun starts a fresh one, so a request the router rejected reported
+  `pending` on every later invocation and never re-dispatched — correctly, since
+  dispatch is idempotent by design — leaving the run wedged behind a typed
+  result that claimed to be resumable. Past the new
+  `remoteIntegration.receiptDeadlineSeconds` the attempt reports `failed` with
+  the `remote-dispatch-abandoned` limitation, and `--reset-remote-dispatch`
+  clears that dispatch alone so the next invocation routes again. The previous
+  way out was a fresh `--attempt-id`, which discards the attempt's local and
+  remote review evidence — the audit trail the receipt exists to keep — as the
+  price of getting past a protocol failure. (#589)
+
 ## 0.71.66 - 2026-08-29
 
 ### Fixed

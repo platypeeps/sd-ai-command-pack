@@ -111,13 +111,26 @@ def thread_page(
     *,
     has_next: bool = False,
     cursor: str | None = None,
+    outdated: list[bool] | None = None,
 ) -> dict[str, Any]:
+    """Build one page of review threads.
+
+    ``nodes`` carries each thread's ``isResolved``; ``outdated`` its
+    ``isOutdated``, defaulting to a page where nothing is outdated. Both are
+    required fields on the wire -- the reader fails closed on a node missing
+    either -- so a fixture cannot omit one and still be representative.
+    """
+
+    flags = outdated if outdated is not None else [False] * len(nodes)
     return {
         "data": {
             "repository": {
                 "pullRequest": {
                     "reviewThreads": {
-                        "nodes": [{"isResolved": value} for value in nodes],
+                        "nodes": [
+                            {"isResolved": value, "isOutdated": stale}
+                            for value, stale in zip(nodes, flags, strict=True)
+                        ],
                         "pageInfo": {
                             "hasNextPage": has_next,
                             "endCursor": cursor,
@@ -529,6 +542,74 @@ class PrEligibilityTests(unittest.TestCase):
         self.assertEqual(result["reasonCodes"], ["review_threads_unresolved"])
         self.assertEqual(result["reviewThreads"]["pageCount"], 2)
         self.assertEqual(result["reviewThreads"]["unresolvedCount"], 1)
+
+    def test_the_outdated_share_is_reported_and_named_in_the_diagnostic(self) -> None:
+        """The two readers disagree by design; the output has to say so.
+
+        `sd-review` excludes outdated threads because their findings are no
+        longer in the diff, and this reader counts them because GitHub's
+        conversation-resolution requirement does. Reported bare, the two counts
+        read as a contradiction and the diagnostic sends an operator hunting
+        for a finding the review stage has just called clean.
+        """
+
+        runner = FixtureRunner(self.repo)
+        runner.thread_pages = [
+            thread_page(
+                [True, True, False, False],
+                outdated=[False, False, True, True],
+            )
+        ]
+        result = self.evaluate(self.local_request(), runner)
+
+        self.assertEqual(result["reviewThreads"]["totalCount"], 4)
+        self.assertEqual(result["reviewThreads"]["unresolvedCount"], 2)
+        self.assertEqual(result["reviewThreads"]["outdatedUnresolvedCount"], 2)
+        self.assertIn("all outdated against earlier heads", result["diagnostic"])
+
+        mixed = FixtureRunner(self.repo)
+        mixed.thread_pages = [
+            thread_page([False, False], outdated=[True, False])
+        ]
+        partial = self.evaluate(self.local_request(), mixed)
+
+        self.assertEqual(partial["reviewThreads"]["outdatedUnresolvedCount"], 1)
+        self.assertIn("1 of them outdated against earlier heads", partial["diagnostic"])
+
+        # Nothing outdated: the diagnostic keeps its original wording rather
+        # than growing a clause that says zero.
+        plain = FixtureRunner(self.repo)
+        plain.thread_pages = [thread_page([False])]
+        unaffected = self.evaluate(self.local_request(), plain)
+
+        self.assertEqual(unaffected["reviewThreads"]["outdatedUnresolvedCount"], 0)
+        self.assertNotIn("outdated", unaffected["diagnostic"])
+
+    def test_a_thread_node_without_is_outdated_fails_closed(self) -> None:
+        """The rule needs the field, so a node missing it is not evidence."""
+
+        runner = FixtureRunner(self.repo)
+        runner.thread_pages = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [{"isResolved": False}],
+                                "pageInfo": {
+                                    "hasNextPage": False,
+                                    "endCursor": None,
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+        result = self.evaluate(self.local_request(), runner)
+
+        self.assertEqual(result["status"], "indeterminate")
+        self.assertEqual(result["reasonCodes"], ["review_threads_unavailable"])
 
     def test_pr_and_thread_provider_failures_are_indeterminate(self) -> None:
         pr_runner = FixtureRunner(self.repo)
@@ -1236,7 +1317,7 @@ class PrEligibilityTests(unittest.TestCase):
             {"data": {}},
             {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": {}, "pageInfo": {}}}}}},
             thread_page([True], has_next=True, cursor=None),
-            {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [{"isResolved": "yes"}], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}},
+            {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [{"isResolved": "yes", "isOutdated": False}], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}},
         )
         for page in malformed_pages:
             with self.subTest(page=page):
