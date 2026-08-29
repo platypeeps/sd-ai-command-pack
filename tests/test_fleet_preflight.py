@@ -148,6 +148,7 @@ class FleetPreflightTests(InstallTestCase):
                 "platypeeps/sd-github-review",
                 "platypeeps/se-ai-command-pack",
                 "answerbook/mezmo_benchmark",
+                "answerbook/mezmo-world-simulator",
             },
         )
         for consumer in by_slug.values():
@@ -168,6 +169,7 @@ class FleetPreflightTests(InstallTestCase):
             "platypeeps/rwbp-website": expected_map_prepare,
             "platypeeps/sd-github-review": (("npm", "ci"),),
             "platypeeps/se-ai-command-pack": (),
+            "answerbook/mezmo-world-simulator": (),
         }
         for name, consumer in by_slug.items():
             expected_prepare = expected_prepares.get(name)
@@ -205,11 +207,12 @@ class FleetPreflightTests(InstallTestCase):
                 "sd-github-review",
                 "people-profiles",
                 "anomaly-metric-creator",
+                "mezmo-world-simulator",
             ],
         )
         self.assertEqual(
             [consumer.rollout_priority for consumer in consumers],
-            [10, 20, 30, 40, 50, 60, 70, 80, 90],
+            [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         )
 
         rollout_policy = fleet.fleet_lib.load_fleet_rollout_policy(
@@ -229,7 +232,7 @@ class FleetPreflightTests(InstallTestCase):
                     "se-ai-command-pack",
                     "sd-github-review",
                 ),
-                ("people-profiles", "anomaly-metric-creator"),
+                ("people-profiles", "anomaly-metric-creator", "mezmo-world-simulator"),
             ],
         )
         self.assertEqual(rollout_policy.cohorts[1].max_concurrency, 2)
