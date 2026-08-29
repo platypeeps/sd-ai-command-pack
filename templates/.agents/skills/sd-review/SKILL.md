@@ -191,6 +191,27 @@ parses, the disposition ids, the unreachable provider — then rerun the unchang
 attempt. A fresh `--attempt-id` is not the remedy: it discards the attempt's
 local and remote review evidence along with the stale verdict.
 
+One failure needs its own control. When the router never produces a durable
+receipt for a dispatch that was accepted, the attempt reports `pending`
+indefinitely and never re-dispatches, because dispatch is idempotent by design.
+Past `receiptDeadlineSeconds` the controller stops calling that resumable and
+reports `failed` with the `remote-dispatch-abandoned` limitation. Rerun the
+unchanged attempt once with `--reset-remote-dispatch`, which clears the
+recorded dispatch and nothing else: the attempt keeps its local receipt and its
+stored remote dispositions, and the next invocation dispatches again. The
+abandoned dispatch stays in the record, marked, and does not advance the remote
+attempt sequence — the router was never told about it, so there is nothing for
+a later re-request to name. Use it only against that limitation; a delayed
+receipt is still a resume, not a reset. An attempt whose dispatch predates the
+dispatch record is adopted into it on the next invocation, and its deadline runs
+from that invocation rather than from the original dispatch, which nothing in
+such a state records.
+
+The remote attempt number is not `--attempt`. `--attempt` counts review rounds,
+most of which may never route, while the router numbers the dispatches it
+actually received. The controller derives one from the other; do not raise
+`--attempt` to make a remote request look like a re-request.
+
 Three coordinator-only evidence flags are not public invocation controls. After
 replying with a verified rebuttal to a receipt-declared conversation finding or
 changes-requested review that has no resolvable thread, rerun the unchanged

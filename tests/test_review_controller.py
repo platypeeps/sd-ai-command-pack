@@ -1462,6 +1462,87 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(observation["status"], "clean")
         self.assertEqual(observation["reviewThreads"]["unresolved"], 0)
 
+    def test_the_observation_reports_the_outdated_threads_it_excludes(self) -> None:
+        """The exclusion is correct; leaving it silent is what caused the row.
+
+        `pr-eligibility` counts an unresolved thread whether or not it is
+        outdated, because GitHub's conversation-resolution requirement does.
+        This reader excludes outdated ones because their findings are no longer
+        in the diff. Reading `unresolved: 0` here and `unresolvedCount: 2`
+        there, minutes apart at one head, looks like a contradiction until both
+        say which rule they applied.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        pr = self.pr(controller, root)
+        receipt = {
+            "selectedRoute": "copilot",
+            "backend": {
+                "reviewAuthors": [],
+                "checkNames": [],
+                "findingChannels": ["inline-comment"],
+            },
+            "dispatch": {"status": "requested", "phase": "observed"},
+        }
+        rows = [
+            {
+                "id": f"thread-{index}",
+                "isResolved": resolved,
+                "isOutdated": outdated,
+                "comments": {
+                    "nodes": [
+                        {
+                            "id": f"comment-{index}",
+                            "url": "https://example.test/c",
+                            "body": "A finding",
+                            "path": "SKILL.md",
+                            "line": 45,
+                            "author": {
+                                "login": "review-bot[bot]",
+                                "__typename": "Bot",
+                            },
+                        }
+                    ],
+                    "pageInfo": {"hasNextPage": False},
+                },
+            }
+            for index, (resolved, outdated) in enumerate(
+                ((True, False), (True, False), (False, True), (False, True))
+            )
+        ]
+        thread_payload = [
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {"reviewThreads": {"nodes": rows}}
+                    }
+                }
+            }
+        ]
+
+        def fake_gh(_args, *, context, **_kwargs):
+            if context == "collect paginated review threads":
+                return thread_payload
+            if context == "collect pull request checks":
+                return []
+            return []
+
+        with mock.patch.object(controller, "_gh_json", side_effect=fake_gh):
+            observation = controller._collect_observation(
+                root,
+                pr=pr,
+                receipt=receipt,
+                receipt_check_name="sd-github-review/receipt",
+            )
+
+        threads = observation["reviewThreads"]
+        self.assertEqual(threads["total"], 4)
+        self.assertEqual(threads["unresolved"], 0)
+        self.assertEqual(threads["items"], [])
+        # The two the other reader will count, named here rather than inferred.
+        self.assertEqual(threads["outdatedUnresolved"], 2)
+
     def test_review_thread_pagination_rejects_more_than_one_thousand_rows(self) -> None:
         controller = self.load_controller()
         root = self.make_repo()
@@ -1677,6 +1758,8 @@ class ReviewControllerTests(InstallTestCase):
         observation: dict[str, object] | None = None,
         check_status: str = "passed",
         local_receipt_extra: dict[str, object] | None = None,
+        extra_args: tuple[str, ...] = (),
+        receipt_always_absent: bool = False,
     ):
         pr = self.pr(controller, root) if scope == "pr" else None
         args = controller.parse_args(
@@ -1691,6 +1774,7 @@ class ReviewControllerTests(InstallTestCase):
                 str(self.artifact_root(root)),
                 "--json",
                 *(["--pr-number", "42"] if scope == "pr" else []),
+                *extra_args,
             ]
         )
         local = self.local_report(
@@ -1748,7 +1832,10 @@ class ReviewControllerTests(InstallTestCase):
             if len(patches) == 2:
                 return controller.run(args), None
             with patches[2], patches[3], patches[4] as query, patches[5] as dispatch, patches[6]:
-                if receipt is None:
+                if receipt is None and receipt_always_absent:
+                    query.side_effect = None
+                    query.return_value = None
+                elif receipt is None:
                     calls = 0
 
                     def routed_receipt(*_args, **kwargs):
@@ -2499,7 +2586,6 @@ class ReviewControllerTests(InstallTestCase):
 
         for token, expected in (
             ("id-1=miscited", "<path>:<line>"),
-            ("id-1=miscited@a=b.py:3", "cannot contain '='"),
             # 0.71.51 added a third ground, so the generic message now lists
             # three and the trailing "or" moved. Matched on the part that does
             # not move rather than re-pinning a sentence that grows.
@@ -2510,6 +2596,24 @@ class ReviewControllerTests(InstallTestCase):
                 with self.assertRaises(controller.ReviewError) as caught:
                     controller._parse_local_dispositions([token])
                 self.assertIn(expected, str(caught.exception))
+
+    def test_the_controller_forwards_a_key_value_payload_verbatim(self) -> None:
+        """The gate must pass through a payload naming an argument.
+
+        The controller is a gate: a value it rejects never reaches the stage
+        that owns the grammar. Pinning acceptance here as well as in the stage
+        is what keeps the option reachable through the documented entry point.
+        """
+
+        controller = self.load_controller()
+
+        reason = "the corpus is input= minus exclude="
+        self.assertEqual(
+            controller._parse_local_dispositions(
+                [f"id-1=accepted@{reason}", "id-2=miscited@a=b.py:3"]
+            ),
+            {"id-1": f"accepted@{reason}", "id-2": "miscited@a=b.py:3"},
+        )
 
     def branch_review_args(self, controller, root: Path, artifacts: Path, *extra: str):
         """A repeatable `scope=branch` invocation against one attempt.
@@ -3396,6 +3500,275 @@ class ReviewControllerTests(InstallTestCase):
         self.assertEqual(len(state_files), 1)
         state = json.loads(state_files[0].read_text(encoding="utf-8"))
         self.assertEqual(state["phase"], "ready")
+
+    def test_the_remote_attempt_counts_dispatches_not_rounds(self) -> None:
+        """Round five of a run that never routed is remote attempt one.
+
+        `--attempt` counts review rounds, and a round that blocks locally
+        returns before the routing branch is reached. Forwarding it told the
+        router this was the fifth attempt of a sequence that had never started,
+        and the router refused it -- an attempt above 1 has to name the prior
+        attempt it re-requests, and there was none.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            extra_args=("--attempt", "5"),
+        )
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        dispatch.assert_called_once()
+        self.assertEqual(dispatch.call_args.kwargs["request"]["attempt"], 1)
+
+        state = json.loads(
+            next(self.artifact_root(root).glob("review-*.json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        # The dispatch is recorded, and the receipt that arrived marks it
+        # fulfilled -- that record, not the round counter, is what a second
+        # remote attempt would be numbered from.
+        self.assertEqual(len(state["remoteDispatches"]), 1)
+        self.assertEqual(state["remoteDispatches"][0]["attempt"], 1)
+        self.assertTrue(state["remoteDispatches"][0]["fulfilled"])
+
+    def test_an_unfulfilled_dispatch_stops_being_pending_at_the_deadline(self) -> None:
+        """A dispatch that will never complete must not claim to be resumable.
+
+        Nothing bounded this wait: the poll loop bounds one invocation, and the
+        rerun the skill prescribes starts a fresh one, so a request the router
+        rejected reported `pending` on every later invocation and never
+        re-dispatched -- correctly, since dispatch is idempotent by design.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            receipt_always_absent=True,
+        )
+
+        self.assertEqual((code, report["status"]), (3, "pending"))
+        self.assertEqual(report["limitations"], ["receipt-pending"])
+
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        record = state["remoteDispatches"][0]
+        record["dispatchedAt"] -= 4_000
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            receipt_always_absent=True,
+        )
+
+        self.assertEqual((code, report["status"]), (3, "failed"))
+        self.assertEqual(report["limitations"], ["remote-dispatch-abandoned"])
+        self.assertIn("--reset-remote-dispatch", report["diagnostic"])
+
+    def test_a_pre_ledger_dispatch_is_adopted_so_the_deadline_reaches_it(
+        self,
+    ) -> None:
+        """The states that provoked the wedge must not be the ones it misses.
+
+        A state written before the ledger existed records its dispatch only as a
+        `route-dispatched` phase over a stored `remoteRequest`. The deadline
+        matches on the ledger, so without adoption those states -- the exact
+        population the bound was written for -- keep reporting `pending`.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+
+        # Rewrite the state into its pre-ledger shape: the phase and the stored
+        # request, with the dispatch recorded nowhere else.
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        request = state["remoteRequest"]
+        del state["remoteDispatches"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            receipt_always_absent=True,
+        )
+
+        # Adopted, not abandoned: the clock starts at the upgrade, so a dispatch
+        # that may still be live is not terminated on the first run that sees it.
+        self.assertEqual((code, report["status"]), (3, "pending"))
+        adopted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(adopted["remoteDispatches"]), 1)
+        record = adopted["remoteDispatches"][0]
+        self.assertEqual(record["correlationId"], request["correlationId"])
+        self.assertFalse(record["fulfilled"] or record["abandoned"])
+
+        # And the anchor holds still, so the deadline now reaches it.
+        record["dispatchedAt"] -= 4_000
+        state_path.write_text(json.dumps(adopted), encoding="utf-8")
+        (code, report), _dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            receipt_always_absent=True,
+        )
+
+        self.assertEqual((code, report["status"]), (3, "failed"))
+        self.assertEqual(report["limitations"], ["remote-dispatch-abandoned"])
+
+    def test_resetting_a_pre_ledger_dispatch_still_records_it(self) -> None:
+        """Reset promises the abandoned dispatch stays in the record.
+
+        A pre-ledger state has no row to mark, so clearing it without adopting
+        it first would drop the one dispatch the record exists to show -- and
+        the states that need the reset most are exactly the pre-ledger ones.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        request = state["remoteRequest"]
+        del state["remoteDispatches"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            extra_args=("--reset-remote-dispatch",),
+        )
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        dispatch.assert_called_once()
+        after = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(after["remoteDispatches"]), 2)
+        adopted = after["remoteDispatches"][0]
+        self.assertEqual(adopted["correlationId"], request["correlationId"])
+        self.assertTrue(adopted["abandoned"])
+        self.assertFalse(adopted["fulfilled"])
+        # It never counted toward the sequence, so the replacement is still 1.
+        self.assertEqual(after["remoteDispatches"][1]["attempt"], 1)
+
+    def test_resetting_the_dispatch_keeps_the_attempts_evidence(self) -> None:
+        """The escape from a dead dispatch must not cost the audit trail.
+
+        The documented workaround was a fresh `--attempt-id`, which discards the
+        attempt's accumulated local and remote review evidence -- the record the
+        receipt exists to keep -- as the price of getting past a protocol
+        failure.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        before = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIsNotNone(before["remoteRequest"])
+        self.assertIsNotNone(before["local"])
+
+        (code, report), dispatch = self.run_with_mocks(
+            controller,
+            root,
+            scope="pr",
+            extra_args=("--reset-remote-dispatch",),
+        )
+
+        self.assertEqual((code, report["status"]), (0, "ready"))
+        # It dispatched again rather than replaying the dead request.
+        dispatch.assert_called_once()
+        after = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(after["remoteDispatches"]), 2)
+        self.assertTrue(after["remoteDispatches"][0]["abandoned"])
+        self.assertFalse(after["remoteDispatches"][0]["fulfilled"])
+        # The abandoned one was never an attempt the router knew about, so it
+        # does not shift the sequence.
+        self.assertEqual(after["remoteDispatches"][1]["attempt"], 1)
+        # The evidence `--attempt-id` would have thrown away is still here.
+        self.assertEqual(after["local"], before["local"])
+
+    def test_reset_is_refused_over_a_durable_receipt(self) -> None:
+        """The control preserves remote evidence; it must not be able to drop it.
+
+        A completed attempt keeps its stored request, so the "nothing to reset"
+        guard did not fire and the reset cleared the receipt along with it --
+        discarding the attempt's remote evidence and re-dispatching over a
+        review that had already finished.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(controller, root, scope="pr")
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        before = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertIsNotNone(before["remoteReceipt"])
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(controller.ReviewError, "durable receipt"):
+            controller._reset_remote_dispatch(state_path, state)
+
+        after = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(after["remoteReceipt"], before["remoteReceipt"])
+
+    def test_a_receipt_after_the_deadline_clears_the_abandoned_mark(self) -> None:
+        """One dispatch must not be recorded as both abandoned and fulfilled.
+
+        The deadline's judgment is a guess that the router will never answer. A
+        receipt settles it, so the mark it left is no longer true of that row.
+        """
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        state_path = next(self.artifact_root(root).glob("review-*.json"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["remoteDispatches"][0]["dispatchedAt"] -= 4_000
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        (code, report), _dispatch = self.run_with_mocks(
+            controller, root, scope="pr", receipt_always_absent=True
+        )
+        self.assertEqual((code, report["status"]), (3, "failed"))
+        marked = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertTrue(marked["remoteDispatches"][0]["abandoned"])
+
+        # The router answers late. The dispatch was not abandoned after all.
+        self.run_with_mocks(controller, root, scope="pr")
+        settled = json.loads(state_path.read_text(encoding="utf-8"))
+        record = settled["remoteDispatches"][0]
+        self.assertTrue(record["fulfilled"])
+        self.assertFalse(record["abandoned"])
+
+    def test_reset_is_refused_when_there_is_no_dispatch_to_clear(self) -> None:
+        """Silently succeeding would let the control paper over a wrong theory."""
+
+        controller = self.load_controller()
+        root = self.make_repo()
+        state = {"remoteRequest": None, "remoteDispatches": []}
+
+        with self.assertRaisesRegex(
+            controller.ReviewError, "no recorded remote dispatch"
+        ):
+            controller._reset_remote_dispatch(root / "unused.json", state)
 
     def test_report_reads_remote_latency_from_durable_observation_state(self) -> None:
         controller = self.load_controller()

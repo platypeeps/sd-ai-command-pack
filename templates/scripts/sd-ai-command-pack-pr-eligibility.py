@@ -57,7 +57,7 @@ REQUEST_FIELDS = frozenset(
 REVIEW_THREADS_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!,$cursor:String){"
     "repository(owner:$owner,name:$name){pullRequest(number:$number){"
-    "reviewThreads(first:100,after:$cursor){nodes{isResolved}"
+    "reviewThreads(first:100,after:$cursor){nodes{isResolved isOutdated}"
     "pageInfo{hasNextPage endCursor}}}}}"
 )
 
@@ -722,6 +722,24 @@ def query_pr_head(repo: Path, slug: str, pr_number: int, runner: Runner) -> str 
     return head if isinstance(head, str) and COMMIT_RE.fullmatch(head) else None
 
 
+def _outdated_note(threads: Mapping[str, int]) -> str:
+    """Name the outdated share, so the operator knows what to look for.
+
+    Without it the diagnostic sends someone hunting for a finding that the
+    review stage has just reported as clean: an outdated thread is one whose
+    comment was left against an earlier head, so the finding it names may well
+    be fixed in the diff already and the remaining work is to verify and
+    resolve, not to change code.
+    """
+
+    outdated = threads.get("outdatedUnresolvedCount") or 0
+    if not outdated:
+        return ""
+    if outdated == threads["unresolvedCount"]:
+        return ", all outdated against earlier heads"
+    return f", {outdated} of them outdated against earlier heads"
+
+
 def collect_threads(
     repo: Path,
     slug: str,
@@ -733,6 +751,7 @@ def collect_threads(
     page_count = 0
     total_count = 0
     unresolved_count = 0
+    outdated_unresolved_count = 0
     while True:
         args = [
             "gh",
@@ -762,13 +781,17 @@ def collect_threads(
         if not isinstance(nodes, list) or not isinstance(page_info, Mapping):
             raise EligibilityInputError("review thread query result is incomplete")
         for node in nodes:
-            if not isinstance(node, Mapping) or not isinstance(
-                node.get("isResolved"), bool
+            if (
+                not isinstance(node, Mapping)
+                or not isinstance(node.get("isResolved"), bool)
+                or not isinstance(node.get("isOutdated"), bool)
             ):
                 raise EligibilityInputError("review thread query contains invalid nodes")
             total_count += 1
             if not node["isResolved"]:
                 unresolved_count += 1
+                if node["isOutdated"]:
+                    outdated_unresolved_count += 1
         page_count += 1
         has_next = page_info.get("hasNextPage")
         end_cursor = page_info.get("endCursor")
@@ -784,10 +807,18 @@ def collect_threads(
         ):
             raise EligibilityInputError("review thread pagination is incomplete")
         cursor = end_cursor
+    # This reader answers what GitHub will let a merge do, and GitHub's
+    # conversation-resolution requirement counts an unresolved thread whether or
+    # not it is outdated. `sd-review` answers a different question -- what a
+    # reviewer still has to act on -- and an outdated thread's finding is by
+    # construction no longer in the diff, so it excludes them. Both are right
+    # about their own subject, and the two counts read as a contradiction only
+    # because neither used to say which rule it applied. This one does now.
     return {
         "pageCount": page_count,
         "totalCount": total_count,
         "unresolvedCount": unresolved_count,
+        "outdatedUnresolvedCount": outdated_unresolved_count,
     }
 
 
@@ -916,7 +947,7 @@ def classify_non_clean_merge_state(
                 ["merge_blocked_conversation"],
                 f"PR #{number} is mergeable with checks green but blocked; "
                 f"resolve {threads['unresolvedCount']} unresolved review "
-                "thread(s), then re-run",
+                f"thread(s){_outdated_note(threads)}, then re-run",
             )
         settled = recheck_merge_state(repo, slug, number, runner, sleeper)
         evidence["mergeStateRecheck"] = {
@@ -1092,7 +1123,12 @@ def evaluate_dependency_request(
             "blockingCount": blocking_checks,
             "successfulCount": successful_checks,
         },
-        "reviewThreads": {"pageCount": 0, "totalCount": 0, "unresolvedCount": None},
+        "reviewThreads": {
+            "pageCount": 0,
+            "totalCount": 0,
+            "unresolvedCount": None,
+            "outdatedUnresolvedCount": None,
+        },
         "routedReview": {
             "status": "deferred",
             "reason": "unified receipt schema is owned by the routed-review integration task",
@@ -1204,7 +1240,8 @@ def evaluate_dependency_request(
         return finish(
             "blocked",
             ["review_threads_unresolved"],
-            f"PR #{requested_number} has {thread_evidence['unresolvedCount']} unresolved review thread(s); skipped auto-merge",
+            f"PR #{requested_number} has {thread_evidence['unresolvedCount']} unresolved review "
+            f"thread(s){_outdated_note(thread_evidence)}; skipped auto-merge",
         )
     return finish(
         "eligible",
@@ -1279,7 +1316,12 @@ def evaluate_request(
         },
         "pullRequest": None,
         "checks": {"items": [], "blockingCount": None, "successfulCount": None},
-        "reviewThreads": {"pageCount": 0, "totalCount": 0, "unresolvedCount": None},
+        "reviewThreads": {
+            "pageCount": 0,
+            "totalCount": 0,
+            "unresolvedCount": None,
+            "outdatedUnresolvedCount": None,
+        },
         "routedReview": {
             "status": "deferred",
             "reason": "unified receipt schema is owned by the routed-review integration task",
@@ -1561,7 +1603,8 @@ def evaluate_request(
         return finish(
             "blocked",
             ["review_threads_unresolved"],
-            f"PR #{pr_number} has {thread_evidence['unresolvedCount']} unresolved review thread(s); skipped auto-merge",
+            f"PR #{pr_number} has {thread_evidence['unresolvedCount']} unresolved review "
+            f"thread(s){_outdated_note(thread_evidence)}; skipped auto-merge",
         )
 
     return finish(
@@ -1613,7 +1656,12 @@ def invalid_result(
         },
         "pullRequest": None,
         "checks": {"items": [], "blockingCount": None, "successfulCount": None},
-        "reviewThreads": {"pageCount": 0, "totalCount": 0, "unresolvedCount": None},
+        "reviewThreads": {
+            "pageCount": 0,
+            "totalCount": 0,
+            "unresolvedCount": None,
+            "outdatedUnresolvedCount": None,
+        },
         "routedReview": {
             "status": "deferred",
             "reason": "unified receipt schema is owned by the routed-review integration task",

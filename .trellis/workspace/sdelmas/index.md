@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-10.md`
-- **Total Sessions**: 457
+- **Total Sessions**: 458
 - **Last Active**: 2026-08-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-10.md` | ~342 | Active |
+| `journal-10.md` | ~387 | Active |
 | `journal-9.md` | ~1996 | Archived |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
@@ -38,6 +38,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 458 | 2026-08-29 | Review coordinator correctness: disposition reasons, outdated threads, remote attempt sequencing | `a3da4ea1`, `c837881b`, `00e28d78`, `e83874a7`, `1ac9f293` | `task/08-29-review-coordinator-correctness` |
 | 457 | 2026-08-29 | Fleet controller and timing correctness: four ledger defects closed | `adad89dd`, `babdc2c9`, `a73fc9a2`, `6edea82c`, `6ef089ff`, `e3fe342b`, `f2b799c9` | `task/08-29-fleet-controller-correctness` |
 | 456 | 2026-08-28 | Bound the KB refresh, stop reading branch names as paths, classify remote-only branches | `ababa981`, `8747dba6`, `8c89a6cb`, `b7b5ee54` | `task/08-28-bookkeeping-integrity` |
 | 455 | 2026-08-28 | Housekeeping report fidelity: unverified receipts and worktree-held merges | `11b4eab6`, `0767551d`, `0a653aee` | `task/08-28-housekeeping-report-fidelity` |

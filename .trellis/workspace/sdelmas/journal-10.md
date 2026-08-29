@@ -352,3 +352,46 @@ Four defects that made the fleet rollout's own records disagree with what happen
 ### Next Steps
 
 - None - task complete
+
+
+## Session 458: Review coordinator correctness: disposition reasons, outdated threads, remote attempt sequencing
+<!-- trellis-session: v=2 fp=8abcb4511ff63902 -->
+
+**Date**: 2026-08-29
+**Task**: Review coordinator correctness: disposition reasons, outdated threads, remote attempt sequencing
+**Branch**: `task/08-29-review-coordinator-correctness`
+
+### Summary
+
+Fixed three independent review-coordinator defects reported from an sd-work-backlog run against platypeeps/se-ai-command-pack PR #278 on pack 0.71.62, shipped as 0.71.67.
+
+### Main Changes
+
+- Split --local-disposition on the first = so a reason or citation path may name a key=value argument (#591)
+- Both thread readers now report the outdated count beside the unresolved one, and the eligibility diagnostic names it, so their differing rules stop reading as a contradiction (#590)
+- Derived the remote request attempt from a dispatch ledger in state, bounded an unfulfilled dispatch at receiptDeadlineSeconds, and added --reset-remote-dispatch as the evidence-preserving remedy (#589)
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3da4ea1` | fix(review): correct three review-coordinator defects |
+| `c837881b` | chore(task): record branch metadata for the review-coordinator tasks |
+| `00e28d78` | chore(task): archive 08-29-disposition-reason-equals |
+| `e83874a7` | chore(task): archive 08-29-outdated-thread-disagreement |
+| `1ac9f293` | chore(task): archive 08-29-remote-attempt-sequencing |
+
+### Testing
+
+- [OK] .venv/bin/python -m unittest tests.test_review_controller tests.test_review_stage — Ran 198 tests, OK
+- [OK] .venv/bin/python -m unittest tests.test_pr_eligibility — Ran 44 tests, OK
+- [OK] make check — exit 0; shipped-surface closure: clean
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

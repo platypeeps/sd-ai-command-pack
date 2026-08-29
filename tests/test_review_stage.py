@@ -2756,6 +2756,52 @@ class ReviewStageTests(InstallTestCase):
             receipt["disposition"]["localDispositions"], {identifier: "miscited"}
         )
 
+    def test_a_disposition_payload_may_name_a_key_value_argument(self) -> None:
+        """The reasons a reviewer actually writes contain "=".
+
+        This pack's own argument vocabulary is key=value, so an acceptance
+        reason names `input=` or `exclude=` -- and `accepted` is the one ground
+        that concedes the finding is real, leaving the stated basis as the only
+        thing a later reader can check. Refusing "=" forced that basis to be
+        paraphrased, which degraded the exact artifact the ground produces.
+        """
+
+        root = self.make_repo()
+        self.write_config(root, modes=("finding", "clean"))
+        blocked = self.report(self.run_stage(root, "equals", "--local", "prism"))
+        identifier = blocked["receipt"]["findings"][0]["id"]
+        reason = "the corpus is input= minus exclude="
+
+        receipt = self.report(
+            self.run_stage(
+                root,
+                "equals",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=accepted@{reason}",
+            )
+        )["receipt"]
+        finding = receipt["findings"][0]
+
+        self.assertEqual(finding["disposition"], "accepted")
+        # Byte-identical: the audit record says what the reviewer said.
+        self.assertEqual(finding["dispositionReason"], reason)
+
+        cited = self.report(
+            self.run_stage(
+                root,
+                "equals-path",
+                "--local",
+                "prism",
+                "--local-disposition",
+                f"{identifier}=miscited@a=b.py:3",
+            )
+        )["receipt"]["findings"][0]
+
+        self.assertEqual(cited["disposition"], "miscited")
+        self.assertEqual(cited["dispositionCitation"], {"path": "a=b.py", "line": 3})
+
     def test_miscited_releases_a_high_finding_that_otherwise_blocks(self) -> None:
         """T10: one test, both halves -- the ground works and the gate is real."""
 
@@ -2807,7 +2853,6 @@ class ReviewStageTests(InstallTestCase):
             ("abc=miscited@src/app.py:0", "line is out of range"),
             ("abc=miscited@../secret.py:3", "unsafe or unbounded"),
             ("abc=miscited@/etc/passwd:3", "unsafe or unbounded"),
-            ("abc=miscited@a=b.py:3", "cannot contain '='"),
             # 0.71.51 gave `accepted` an @ payload too, so the old
             # "only miscited accepts a citation" wording became false.
             ("abc=rebutted@src/app.py:3", "only miscited and accepted accept"),
@@ -3217,12 +3262,6 @@ class ReviewStageTests(InstallTestCase):
             ("abc=accepted@" + "x" * 501, "reason is unsafe or unbounded"),
             ("abc=accepted@why\tnot", "reason is unsafe or unbounded"),
             ("abc=accepted@why\nnot", "reason is unsafe or unbounded"),
-            # rpartition splits on the LAST "=", so a reason containing one
-            # moves the split point and the id silently absorbs
-            # "...=accepted@<prefix>". Without its own diagnostic this surfaces
-            # as an unrelated complaint about a mangled id, which is what a
-            # plain typo would produce.
-            ("abc=accepted@a=b", "an accepted reason cannot contain '='"),
         )
         for index, (token, expected) in enumerate(cases):
             with self.subTest(token=token):

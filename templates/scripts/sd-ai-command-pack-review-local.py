@@ -285,6 +285,7 @@ REMOTE_INTEGRATION_KEYS = frozenset(
         "receiptPolls",
         "pollSeconds",
         "roundLimit",
+        "receiptDeadlineSeconds",
     }
 )
 SUBSTANTIVE_SUFFIXES = frozenset(
@@ -437,6 +438,7 @@ def _default_config() -> dict[str, Any]:
             "receiptPolls": 6,
             "pollSeconds": 5,
             "roundLimit": 5,
+            "receiptDeadlineSeconds": 1_800,
         },
     }
 
@@ -502,6 +504,17 @@ def _parse_remote_integration(value: object) -> dict[str, Any]:
             field="remoteIntegration roundLimit",
             minimum=1,
             maximum=10,
+        ),
+        # How long a recorded remote dispatch may go unfulfilled before the
+        # controller stops calling it pending. The stage does not route, but the
+        # two loaders normalize one shared file and their outputs are compared
+        # digest-for-digest, so a key one knows and the other does not is a
+        # configuration split, not a local addition.
+        "receiptDeadlineSeconds": _bounded_integer(
+            value.get("receiptDeadlineSeconds", 1_800),
+            field="remoteIntegration receiptDeadlineSeconds",
+            minimum=60,
+            maximum=86_400,
         ),
     }
 
@@ -2634,10 +2647,12 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, dict[str, Any]
 
     dispositions: dict[str, dict[str, Any]] = {}
     for value in values:
-        # rpartition splits on the LAST "=" so that an id containing "=" keeps
-        # parsing exactly as it does today. The citation therefore rides inside
-        # the value, and the id grammar below is unchanged.
-        identifier, separator, remainder = value.rpartition("=")
+        # Split on the FIRST "=" and take everything after it verbatim. No id
+        # can contain "=" -- ID_RE admits only lowercase alphanumerics and the
+        # separators ".", "_", "-" -- while a citation path or an acceptance
+        # reason routinely does, because this pack's own argument vocabulary is
+        # key=value and arguments are what findings are usually about.
+        identifier, separator, remainder = value.partition("=")
         disposition, marker, citation = remainder.partition("@")
         if (
             not separator
@@ -2670,20 +2685,8 @@ def _parse_local_dispositions(values: Sequence[str]) -> dict[str, dict[str, Any]
 
 
 def _reject_local_disposition(value: str) -> NoReturn:
-    """Raise for an unparseable ``--local-disposition``, diagnosing the `=` trap.
+    """Raise for an unparseable ``--local-disposition``."""
 
-    A citation path containing "=" is cut in the wrong place by the rpartition
-    above, so it arrives at the vocabulary check as nonsense and would otherwise
-    be reported as an unsupported disposition. The value is only inspected here,
-    on the failure path, so a legitimate id containing "=" never reaches it.
-    """
-
-    _, _, tail = value.partition("=")
-    verb, marker, rest = tail.partition("@")
-    if marker and verb == "miscited" and "=" in rest:
-        raise ReviewInputError("a miscited citation path cannot contain '='")
-    if marker and verb == "accepted" and "=" in rest:
-        raise ReviewInputError("an accepted reason cannot contain '='")
     raise ReviewInputError(
         "local dispositions must use <stable-id>=rebutted, "
         "<stable-id>=miscited@<path>:<line>, or <stable-id>=accepted@<reason>"
@@ -2702,8 +2705,9 @@ def _parse_accepted_reason(reason: str) -> dict[str, Any]:
     otherwise: the point is that the receipt carries a signed statement where
     it would otherwise carry a fabricated rebuttal.
 
-    A reason containing "=" never reaches here. ``rpartition`` upstream splits
-    on the last one, so it is diagnosed in ``_reject_local_disposition``.
+    A reason may contain "=". The split upstream takes the first one, so
+    everything after the verb's ``@`` arrives here verbatim -- which is the
+    point: the reasons a reviewer actually writes name arguments.
     """
 
     if not reason:
