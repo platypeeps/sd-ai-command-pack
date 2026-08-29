@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-29T00:20:05Z",
+  "validatedAt": "2026-08-29T00:28:49Z",
   "packVersion": "0.71.63",
   "payloadDigest": "sha256:dc80bb40bd1dc69cf5a99d4e401238d12fae6b5ad1bfe499181cc389e7797131",
-  "fleetManifestDigest": "sha256:e91c6aec6a8c50fe0a830b1c5f85868e11ddd461ad6a35c40e0cc8d031a01c9a",
+  "fleetManifestDigest": "sha256:7c7ff1e71f80e0e4909b6da6df10165834372f3747291e30d539deae2f32fde6",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
@@ -204,7 +204,7 @@
     {
       "name": "mezmo-world-simulator",
       "github": "answerbook/mezmo-world-simulator",
-      "baseCommit": "d89e9eb721a4da3ba7f6466ede3f5d3dba30b6a8",
+      "baseCommit": "337df5c18259cc31ebfd71e8b2fe7288553d5765",
       "status": "passed",
       "prepares": [],
       "checks": [
