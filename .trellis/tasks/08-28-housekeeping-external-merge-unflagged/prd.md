@@ -98,11 +98,18 @@ run cannot un-merge, and the verdict should not block on it.
   resolves the PR as `MERGED` before any merge attempt of its own, the result records
   that the receipt was supplied and not verified. `identity.finishWork` must not be
   `null` in that case; it carries at least `provided: true` and `verified: false`.
-- The same run records that the merge was not performed by this gate. An advisory
-  anomaly code (working name `pull_request_merged_externally`) names the PR, its
-  `mergedAt`, and, where GitHub reports it, the merging actor. It is advisory: the verdict
-  stays `clean` when nothing else is wrong, because the cleanup was correct and the
-  condition is not one the run can resolve.
+- The same run records that the merge was not performed by this invocation. An advisory
+  anomaly code (working name `pull_request_merged_before_run`) names the PR and its
+  `mergedAt`, and carries GitHub's `mergedBy` login as reported evidence, not as an
+  attribution. It is advisory: the verdict stays `clean` when nothing else is wrong,
+  because the cleanup was correct and the condition is not one the run can resolve.
+- The anomaly claims no more than the run can prove. A `MERGED` first lookup is equally
+  consistent with a merge by another process and with an earlier housekeeping invocation
+  that merged, then stopped before cleanup, and was retried from the feature branch with
+  the same receipt. `mergedBy` is the same account in both cases. The code and its
+  message therefore say *before this run*, never *external*, and the origin case above is
+  identified as an external merge from the other session's transcript, not from anything
+  housekeeping could observe.
 - The skill's expected-clean report gains one line that makes the distinction visible to a
   reader who never opens the JSON: which of merged-by-this-gate or
   merged-before-this-gate applies to the PR it names.
@@ -118,6 +125,9 @@ run cannot un-merge, and the verdict should not block on it.
 - Preventing another process from merging the PR. GitHub permissions own that.
 - Failing the run, blocking the verdict, or refusing cleanup when the merge was external.
   The Git state is what it is; hiding it behind a blocked verdict helps nobody.
+- Attributing the merge to an actor or process. Housekeeping cannot distinguish a foreign
+  merge from its own interrupted earlier run, and a code that claimed to would be wrong on
+  every retry.
 - Verifying the discarded receipt against the merged head after the fact. The receipt's
   head may legitimately equal the merged PR head, but a post-hoc match does not mean the
   gate ran, and reporting it as verified would recreate the ambiguity this task removes.
@@ -127,12 +137,15 @@ run cannot un-merge, and the verdict should not block on it.
 
 - [ ] A test reproduces the observed shape — feature branch, valid receipt supplied, PR
       resolves `MERGED` on first lookup — and asserts `identity.finishWork.provided` is
-      true, `identity.finishWork.verified` is false, and an advisory external-merge anomaly
-      is present. It fails against the current code.
+      true, `identity.finishWork.verified` is false, and the advisory merged-before-run
+      anomaly is present. It fails against the current code.
 - [ ] The same test asserts `outcome.verdict` is `clean` and the exit status is zero, so the
       new evidence does not block.
 - [ ] A test pins case 1: the same `MERGED` lookup with no receipt supplied produces no
-      external-merge anomaly and `identity.finishWork` stays `null`.
+      merged-before-run anomaly and `identity.finishWork` stays `null`.
+- [ ] A test pins the retry shape: an interrupted run that merged and a retry from the
+      feature branch with the same receipt yields the same advisory code with the same
+      neutral wording, and nothing in the result names an external actor.
 - [ ] `test_housekeeping_requires_finish_work_receipt_before_auto_merge` and
       `test_housekeeping_rejects_stale_finish_work_receipt_before_auto_merge` still pass
       unchanged; the `OPEN` route is not touched.
