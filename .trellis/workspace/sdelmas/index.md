@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-10.md`
-- **Total Sessions**: 450
+- **Total Sessions**: 451
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-10.md` | ~42 | Active |
+| `journal-10.md` | ~83 | Active |
 | `journal-9.md` | ~1996 | Archived |
 | `journal-8.md` | ~2008 | Archived |
 | `journal-7.md` | ~1939 | Archived |
@@ -38,6 +38,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 451 | 2026-08-28 | Adopt codex + gito as the rollout's default provider set | `6f6a15be`, `4ed524e3` | `task/08-28-codex-lane-fleet-rollout` |
 | 450 | 2026-08-28 | Work the codex-lane rollout PRD through its review cycle | `0711f0bb`, `3985dfdc`, `3a6a628b`, `96f170d8`, `5b48dce5`, `0b241722` | `task/08-28-codex-lane-fleet-rollout` |
 | 449 | 2026-08-28 | File the codex-lane fleet rollout task | `59dae771` | `task/08-28-codex-lane-fleet-rollout` |
 | 448 | 2026-08-28 | Review fixes on the amended worktree-held verdict PRD | `19483de1` | `task/08-28-hk-verdict-prd-amend` |
