@@ -7,6 +7,9 @@ except ModuleNotFoundError as exc:
         raise
     from . import install_test_support as _support
 
+import signal
+import sys
+
 contextlib = _support.contextlib
 io = _support.io
 json = _support.json
@@ -1169,6 +1172,59 @@ class FleetTimingTests(InstallTestCase):
         # The reason carries the status, never the command: an operator path
         # must not reach the record.
         self.assertNotIn(str(repo), json.dumps(state))
+        self.assertEqual(timing.open_attempts(state), [])
+
+    def test_a_signalled_command_is_recorded_as_interrupted_not_failed(self) -> None:
+        """A killed stage never finished; it did not run and say no.
+
+        `subprocess` reports a signal as a negative return code, and the naive
+        reading -- anything nonzero is `failed` -- files a stage the operator
+        interrupted, or the OOM killer took, under the same outcome as a gate
+        that ran to completion and rejected the consumer. That is the one
+        distinction the outcome exists to carry, so the sign is read.
+        """
+
+        timing = self.load_timing()
+        repo = self.make_git_repo_without_trellis()
+        state_home = repo.parent / f"{repo.name}-state"
+        common = ["--repo", str(repo), "--state-home", str(state_home), "--json"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            timing.main(
+                [
+                    *common,
+                    "init",
+                    "--run-id",
+                    "run-1",
+                    "--target-version",
+                    "0.23.16",
+                    "--consumer",
+                    "canary:10",
+                ]
+            )
+            status = timing.main(
+                [
+                    *common,
+                    "stage-run",
+                    "--run-id",
+                    "run-1",
+                    "--consumer",
+                    "canary",
+                    "--stage",
+                    "install",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import os, signal; os.kill(os.getpid(), signal.SIGTERM)",
+                ]
+            )
+
+        self.assertEqual(status, -signal.SIGTERM)
+        store = timing.timing_store(repo, "run-1", state_home)
+        state = timing.load_state(store, "run-1")
+        attempt = state["consumers"][0]["stages"][0]["attempts"][-1]
+        self.assertEqual(attempt["outcome"], "interrupted")
+        self.assertIn(f"signal {int(signal.SIGTERM)}", attempt["reason"])
+        self.assertIsNotNone(attempt["endedWallNs"])
         self.assertEqual(timing.open_attempts(state), [])
 
     def test_records_written_before_elapsed_source_existed_still_validate(self) -> None:

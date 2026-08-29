@@ -2861,6 +2861,52 @@ class FleetControllerTests(InstallTestCase):
                 root / "absent.json", lane_head=HEAD, head=OTHER_HEAD
             )
 
+    def test_a_receipt_cannot_escape_the_bookkeeping_tree_by_traversal(self) -> None:
+        """The prefix must bound the tree, not merely start the string.
+
+        The receipt is operator-supplied evidence and the controller runs no
+        repository command to corroborate it, so a prefix test is the whole
+        boundary. `.trellis/../scripts/x.py` passes that test while naming a
+        file outside the tree, which would let a tampered receipt wave a
+        product change past the guard that exists to catch exactly that.
+        """
+
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))
+        self.lane_at_merge_eligibility(controller, state)
+        path = root / "finalization.json"
+
+        escapes = (
+            ".trellis/../scripts/app.py",
+            ".trellis/tasks/../../etc/passwd",
+            ".trellis//workspace/x/journal-1.md",
+            ".trellis/workspace/x/",
+            ".trellis/./workspace/x/journal-1.md",
+            ".trellis/workspace\\x\\journal-1.md",
+            ".trellis/",
+        )
+        for entry in escapes:
+            with self.subTest(entry=entry):
+                self.assertFalse(controller._is_bookkeeping_path(entry))
+                self.finalization_receipt(
+                    path, base=HEAD, head=OTHER_HEAD, paths=(entry,)
+                )
+                with self.assertRaisesRegex(
+                    controller.FleetControllerError, "outside task bookkeeping"
+                ):
+                    controller._load_finalization_advance(
+                        path, lane_head=HEAD, head=OTHER_HEAD
+                    )
+
+        # The ordinary bookkeeping paths a real receipt carries still pass.
+        for entry in (
+            ".trellis/workspace/x/journal-1.md",
+            ".trellis/tasks/archive/2026-08/a-task/task.json",
+        ):
+            self.assertTrue(controller._is_bookkeeping_path(entry))
+        self.assertFalse(controller._is_bookkeeping_path(None))
+        self.assertFalse(controller._is_bookkeeping_path("/.trellis/x.md"))
+
     def test_record_cli_accepts_a_finalization_receipt(self) -> None:
         controller = self.load_controller()
         root, _fleet, _manifest, state = self.state(controller, selected=("wave-a",))

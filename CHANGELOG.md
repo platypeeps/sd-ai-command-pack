@@ -32,9 +32,12 @@
   `evidence.headOid` equal to the head being recorded, and every changed path
   under `.trellis/`. The accepted pair is kept on the receipt as
   `finalizationAdvance`, so the chain still names the head each stage validated.
-  A head advanced by an outside push has no such receipt and still rewinds; the
-  controller runs no repository commands, so nothing here is taken on the
-  caller's word.
+  Because the receipt is the whole boundary, each changed path is read segment
+  by segment rather than by prefix alone: `.trellis/../scripts/app.py` satisfies
+  a `startswith` test while naming a file outside the tree, so traversal, empty
+  and no-op segments, and backslashes are refused. A head advanced by an outside
+  push has no such receipt and still rewinds; the controller runs no repository
+  commands, so nothing here is taken on the caller's word.
 - The head guard's diagnostic named the opposite of what it compares. It read
   "receipt head does not match the current PR head" while comparing against the
   lane's *stored* head, at the one moment when the current PR head is
@@ -68,7 +71,11 @@
   a terminal controller result, and brackets stages with the new `stage-run`
   subcommand, which starts the stage, runs the command, and ends it in a
   `finally` while exiting with the command's own status. An early return in a
-  lane can no longer leave an attempt open.
+  lane can no longer leave an attempt open. A command killed by a signal is
+  recorded `interrupted` rather than `failed`: `subprocess` reports that as a
+  negative return code, and reading it as an ordinary nonzero exit would file a
+  stage nobody finished under the outcome reserved for a gate that ran and said
+  no.
 - The timing completion error names what is missing. It reported only the first
   of its two gates and identified neither consumer, stage, nor attempt, so an
   operator who cleared the open attempts met the missing-outcome gate as a fresh

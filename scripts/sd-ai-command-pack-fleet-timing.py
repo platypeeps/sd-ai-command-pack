@@ -929,8 +929,13 @@ def run_bracketed_stage(
 
     The outcome is measured, never asserted: exit 0 is ``passed``, a nonzero
     exit is ``failed``, and a command that could not run to completion is
-    ``interrupted``. The reason carries the exit status only -- never the
-    command, which would put operator paths into the record.
+    ``interrupted``. A command killed by a signal did not run to completion
+    either: ``subprocess`` reports that as a negative return code, and reading
+    it as an ordinary nonzero exit would file a killed command under ``failed``
+    -- the one outcome the caller uses to tell "the stage ran and said no" from
+    "the stage never finished". The reason carries the exit status or signal
+    number only -- never the command, which would put operator paths into the
+    record.
     """
 
     outcome = "interrupted"
@@ -952,6 +957,12 @@ def run_bracketed_stage(
         status = int(completed.returncode)
         if status == 0:
             outcome, reason = "passed", None
+        elif status < 0:
+            outcome = "interrupted"
+            reason = (
+                "the bracketed command was terminated by signal "
+                f"{-status}"
+            )
         else:
             outcome = "failed"
             reason = f"the bracketed command exited with status {status}"

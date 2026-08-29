@@ -2176,13 +2176,37 @@ def _load_finalization_advance(
     if not isinstance(changed, list) or not changed:
         raise FleetControllerError("finalization receipt lists no changed paths")
     for entry in changed:
-        if not isinstance(entry, str) or not entry.startswith(
-            FINALIZATION_ADVANCE_PATH_PREFIX
-        ):
+        if not _is_bookkeeping_path(entry):
             raise FleetControllerError(
                 "finalization receipt changes paths outside task bookkeeping"
             )
     return {"fromHead": base_oid, "toHead": head_oid}
+
+
+def _is_bookkeeping_path(entry: Any) -> bool:
+    """Answer whether ``entry`` names a path inside the task bookkeeping tree.
+
+    A prefix test alone answers the wrong question. The receipt is operator-
+    supplied evidence and the controller runs no repository command to
+    corroborate it, so ``.trellis/../scripts/x.py`` satisfies ``startswith``
+    while naming a file outside the tree the prefix is supposed to bound. The
+    path is therefore read segment by segment: every segment must be a real
+    name, so traversal (``..``), a no-op segment (``.``), an empty segment from
+    a doubled or trailing separator, a leading ``/``, and a backslash that a
+    Windows-side producer may have written are each refused before the prefix
+    is trusted to mean what it says.
+    """
+
+    if not isinstance(entry, str) or not entry.startswith(
+        FINALIZATION_ADVANCE_PATH_PREFIX
+    ):
+        return False
+    if "\\" in entry:
+        return False
+    segments = entry.split("/")
+    if len(segments) < 2:
+        return False
+    return all(segment not in ("", ".", "..") for segment in segments)
 
 
 def _load_provenance(path: Path) -> dict[str, Any]:
