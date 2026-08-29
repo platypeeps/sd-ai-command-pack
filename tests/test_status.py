@@ -358,6 +358,159 @@ class StatusTests(InstallTestCase):
             ).hexdigest()
         return snapshot
 
+    def _held_default_git(self, **overrides):
+        """A post-merge snapshot with the default branch held by a worktree.
+
+        The reporting worktree is on the source branch because it could not
+        switch away; the holder is a second, live worktree. Every override
+        exists so a single field can be flipped back to its ordinary value and
+        the expectation it drives re-checked in isolation.
+        """
+
+        git = {
+            "branch": "feature/cleanup",
+            "workingTree": {"state": "clean"},
+            "defaultBranch": "main",
+            "defaultLocalExists": True,
+            "defaultRemoteExists": True,
+            "defaultMatchesRemote": False,
+            "defaultBehindRemote": True,
+            "localBranches": ["main", "feature/cleanup"],
+            "remoteBranches": ["origin/main"],
+            "worktrees": {
+                "status": "ok",
+                "rows": [
+                    {
+                        "path": "/repos/wt-a",
+                        "branch": "feature/cleanup",
+                        "current": True,
+                    },
+                    {"path": "/repos/primary", "branch": "main", "current": False},
+                ],
+            },
+        }
+        git.update(overrides)
+        return git
+
+    def _strict(self, git, **kwargs):
+        status = self.load_status_module()
+        params = {
+            "default": "main",
+            "remote": "origin",
+            "source_branch": "feature/cleanup",
+            "keep_remote_branch": False,
+            "dry_run": False,
+        }
+        params.update(kwargs)
+        return {
+            code: severity for code, severity, _ in status.strict_anomalies(git, **params)
+        }
+
+    def test_held_default_branch_demotes_only_its_own_consequences(self) -> None:
+        codes = self._strict(self._held_default_git())
+
+        self.assertEqual(codes.get("current_branch_default_held_elsewhere"), "advisory")
+        self.assertEqual(
+            codes.get("local_source_branch_held_by_this_worktree"), "advisory"
+        )
+        self.assertEqual(codes.get("default_branch_behind_held_elsewhere"), "advisory")
+        self.assertNotIn("current_branch_unexpected", codes)
+        self.assertNotIn("local_source_branch_retained", codes)
+        self.assertNotIn("default_branch_diverged", codes)
+        self.assertNotIn("remote_source_branch_retained", codes)
+        self.assertFalse([code for code, severity in codes.items() if severity != "advisory"])
+
+    def test_unheld_default_branch_keeps_every_expectation_blocking(self) -> None:
+        # The same shape with nothing holding the default branch: the run simply
+        # did not finish, and each code keeps its ordinary blocking severity.
+        codes = self._strict(
+            self._held_default_git(
+                worktrees={
+                    "status": "ok",
+                    "rows": [
+                        {
+                            "path": "/repos/wt-a",
+                            "branch": "feature/cleanup",
+                            "current": True,
+                        }
+                    ],
+                }
+            )
+        )
+
+        self.assertEqual(codes.get("current_branch_unexpected"), "blocking")
+        self.assertEqual(codes.get("default_branch_diverged"), "blocking")
+        self.assertNotIn("current_branch_default_held_elsewhere", codes)
+        self.assertNotIn("default_branch_behind_held_elsewhere", codes)
+
+    def test_source_branch_with_no_holder_still_blocks(self) -> None:
+        codes = self._strict(
+            self._held_default_git(
+                worktrees={
+                    "status": "ok",
+                    "rows": [
+                        {"path": "/repos/primary", "branch": "main", "current": False},
+                        {"path": "/repos/wt-a", "branch": None, "current": True},
+                    ],
+                }
+            )
+        )
+
+        self.assertEqual(codes.get("local_source_branch_retained"), "blocking")
+        self.assertNotIn("local_source_branch_held_by_this_worktree", codes)
+
+    def test_genuinely_retained_remote_branch_still_blocks_when_default_is_held(
+        self,
+    ) -> None:
+        codes = self._strict(
+            self._held_default_git(
+                remoteBranches=["origin/main", "origin/feature/cleanup"]
+            )
+        )
+
+        self.assertEqual(codes.get("remote_source_branch_retained"), "blocking")
+
+    def test_diverged_default_branch_still_blocks_when_it_is_not_behind(self) -> None:
+        # Held elsewhere, but the local tip is not an ancestor of the remote
+        # tip: a fast-forward would not have reconciled this, so the deferred
+        # cleanup does not explain it.
+        codes = self._strict(self._held_default_git(defaultBehindRemote=False))
+
+        self.assertEqual(codes.get("default_branch_diverged"), "blocking")
+        self.assertNotIn("default_branch_behind_held_elsewhere", codes)
+
+    def test_unavailable_worktree_inventory_demotes_nothing(self) -> None:
+        codes = self._strict(
+            self._held_default_git(worktrees={"status": "unavailable", "rows": None})
+        )
+
+        self.assertEqual(codes.get("current_branch_unexpected"), "blocking")
+        self.assertEqual(codes.get("local_source_branch_retained"), "blocking")
+        self.assertEqual(codes.get("default_branch_diverged"), "blocking")
+
+    def test_branch_merged_only_into_the_remote_default_is_classified_merged(
+        self,
+    ) -> None:
+        # The local default could not be fast-forwarded because another worktree
+        # holds it, so the merge this run performed is reachable only from the
+        # remote-tracking tip. Reading merge evidence from the local tip alone
+        # reported the just-merged branch as unmerged with no open pull request.
+        status = self.load_status_module()
+        git = self._held_default_git(
+            mergedIntoDefault=["main"],
+            mergedIntoRemoteDefault=["main", "feature/cleanup"],
+        )
+        classification = status.classify_local_branches(
+            git, {"openPrsStatus": "available", "openPrs": []}
+        )
+
+        rows = {row["branch"]: row["disposition"] for row in classification["rows"]}
+        self.assertEqual(rows["feature/cleanup"], "merged")
+        self.assertEqual(
+            status.branch_classification_anomalies(classification),
+            [],
+        )
+
     def test_resolve_repo_accepts_file_within_repository(self) -> None:
         root = self.make_status_repo()
         status = self.load_status_module()

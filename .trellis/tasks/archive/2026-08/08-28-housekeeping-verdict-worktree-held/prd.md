@@ -174,25 +174,25 @@ through a second door.
 
 ## Acceptance criteria
 
-- [ ] A test reproduces the observed shape — merge confirmed, default branch held by another
+- [x] A test reproduces the observed shape — merge confirmed, default branch held by another
       worktree, source branch retained — and asserts `verdict` is not `blocked` and the exit
       status is zero. It fails against the current code.
-- [ ] The same test asserts the advisory anomalies and the retained-branch follow-up are still
+- [x] The same test asserts the advisory anomalies and the retained-branch follow-up are still
       present in the result, so the demotion did not silence the condition.
-- [ ] A source branch retained with **no** worktree holding it still yields a blocking verdict,
+- [x] A source branch retained with **no** worktree holding it still yields a blocking verdict,
       pinned by its own test so the fix cannot over-reach.
-- [ ] `current_branch_unexpected` still blocks when the current branch differs from the default
+- [x] `current_branch_unexpected` still blocks when the current branch differs from the default
       for a reason unrelated to a held default branch.
-- [ ] A branch held by the current worktree is treated as held; a test covers that path
+- [x] A branch held by the current worktree is treated as held; a test covers that path
       specifically, since the existing `not row.get("current")` guard is what excludes it.
-- [ ] A run against a remote with auto-delete-on-merge, whose default branch is held elsewhere,
+- [x] A run against a remote with auto-delete-on-merge, whose default branch is held elsewhere,
       leaves no stale remote-tracking ref for the merged source branch, and therefore does not
       raise `remote_source_branch_retained`. The test asserts the prune ran despite the skipped
       branch deletion.
-- [ ] `remote_source_branch_retained` still blocks when the remote branch genuinely exists.
-- [ ] The merged source branch is not classified `unmerged-without-pull-request` after its own
+- [x] `remote_source_branch_retained` still blocks when the remote branch genuinely exists.
+- [x] The merged source branch is not classified `unmerged-without-pull-request` after its own
       merge, so `local_branches_unmerged_without_pr` does not name it.
-- [ ] All four copies of every changed script stay byte-identical and `make generate` reports
+- [x] All four copies of every changed script stay byte-identical and `make generate` reports
       `shipped-surface closure: clean`.
 
 ## Related

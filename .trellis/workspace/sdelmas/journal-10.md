@@ -212,3 +212,50 @@ Filed the planning task for housekeeping's silent clean verdict when a PR is alr
 
 - The task stays in `planning`; this session filed the record and implemented nothing.
   Implementation waits on a review gate and `task.py start`.
+
+
+## Session 455: Housekeeping report fidelity: unverified receipts and worktree-held merges
+<!-- trellis-session: v=2 fp=6fb00f40f98b9c7b -->
+
+**Date**: 2026-08-28
+**Task**: Housekeeping report fidelity: unverified receipts and worktree-held merges
+**Branch**: `task/08-28-housekeeping-report-fidelity`
+
+### Summary
+
+Fixed two housekeeping defects in which the typed result disagreed with the evidence behind it: a finish-work receipt silently discarded when the pull request was already merged, and a successful worktree merge reporting verdict blocked because the default branch was held elsewhere.
+
+### Main Changes
+
+- MERGED-on-first-lookup with a supplied receipt now records the advisory pull_request_merged_before_run and identity.finishWork {provided: true, verified: false}, so a run that merged through the eligibility gate is no longer byte-identical to one that found the merge already done.
+- Wording is deliberately unattributed -- merged before this run, never external -- because an interrupted earlier housekeeping run that merged and was retried is indistinguishable from a merge by another process; mergedBy is reported as GitHub evidence via a seventh view_pr_for_branch field that degrades to empty.
+- strict_anomalies resolves the default branch holder from the worktree inventory itself and demotes only that hold's own consequences: current_branch_default_held_elsewhere, local_source_branch_held_by_this_worktree, and default_branch_behind_held_elsewhere.
+- worktree_holding(exclude_current=) separates who else holds a branch from whether deletion was possible; the previous 'and not row.get("current")' condition was right for the first question and wrong as the gate for the second.
+- refresh_remote_refs_after_deferred_cleanup runs before the held-default-branch return, restoring the prune that the return skipped along with the deletion it was written to follow.
+- Merge evidence is now read from both default tips (mergedIntoDefault plus mergedIntoRemoteDefault), so the branch a run just merged upstream stops being classified unmerged-without-pull-request when the local fast-forward was blocked.
+- Bumped the pack to 0.71.64 with a CHANGELOG entry; the release payload gate requires it whenever shipped files change.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `11b4eab6` | fix(housekeeping): make the result carry what the merge gate actually did |
+| `0767551d` | chore(task): archive 08-28-housekeeping-external-merge-unflagged |
+| `0a653aee` | chore(task): archive 08-28-housekeeping-verdict-worktree-held |
+
+### Testing
+
+- [OK] make check exit 0 (test, lint, audit, full-check)
+- [OK] make generate: shipped-surface closure clean; all four copies of each changed script byte-identical
+- [OK] test_housekeeping_reports_a_merge_that_predates_the_run and test_housekeeping_merge_with_default_branch_held_is_clean fail against HEAD's pre-fix scripts, verified by restoring them and re-running
+- [OK] Six over-reach pins in tests/test_status.py hold every blocking code blocking in its ordinary case
+- [OK] PR #592 CI all green; Copilot review generated no comments
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

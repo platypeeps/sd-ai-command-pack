@@ -1154,7 +1154,7 @@ class InstallTestCase(unittest.TestCase):
         (stub_bin / "gh").chmod(0o755)
 
     def write_pr_lifecycle_gh_stub(
-        self, stub_bin: Path, head_oid: str, state: str
+        self, stub_bin: Path, head_oid: str, state: str, merged_by: str = ""
     ) -> None:
         """Write a gh stub that reports a fixed PR lifecycle ``state``.
 
@@ -1163,15 +1163,17 @@ class InstallTestCase(unittest.TestCase):
         the script's ``--jq`` would produce). A non-``MERGED`` state carries an
         empty ``mergedAt``. An empty ``state`` makes both ``gh pr view`` and the
         merged ``gh pr list`` fallback return nothing, so the branch has no
-        resolvable PR. ``repo view`` and the ``issue``/``pr list`` status probes
-        always answer so the downstream status collector never sees an
-        unexpected invocation.
+        resolvable PR. ``merged_by`` is the login GitHub reports for the merge;
+        the empty default reproduces a response that carries no ``mergedBy``.
+        ``repo view`` and the ``issue``/``pr list`` status probes always answer
+        so the downstream status collector never sees an unexpected invocation.
         """
         if state:
             merged_at = "2026-06-27T17:00:00Z" if state == "MERGED" else ""
             view_body = (
                 f"  printf '6\\037{state}\\037{merged_at}\\037"
-                f"https://example.test/pr/6\\037feature/cleanup\\037{head_oid}\\n'\n"
+                f"https://example.test/pr/6\\037feature/cleanup\\037{head_oid}"
+                f"\\037{merged_by}\\n'\n"
             )
         else:
             view_body = "  exit 0\n"

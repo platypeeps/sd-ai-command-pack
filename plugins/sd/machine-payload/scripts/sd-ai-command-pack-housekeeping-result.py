@@ -63,6 +63,11 @@ ADVISORY_ANOMALY_CODES = frozenset(
     {
         "branch_retained_default_held",
         "default_branch_held_elsewhere",
+        # The pull request was already merged when the run first resolved it,
+        # so the finish-work receipt it was handed was never verified. The run
+        # cannot un-merge, and the cleanup it went on to do was correct, so this
+        # reports what the gate did not do without blocking on it.
+        "pull_request_merged_before_run",
     }
 )
 INDETERMINATE_ANOMALY_CODES = frozenset(
@@ -392,6 +397,11 @@ def build_result(args: argparse.Namespace) -> dict[str, Any]:
     pull_request = None if eligibility is None else eligibility.get("pullRequest")
     heads = None if eligibility is None else eligibility.get("head")
     finish_work = None if eligibility is None else eligibility.get("finishWork")
+    if finish_work is None and args.finish_work_unverified:
+        # A receipt was supplied and the eligibility gate that recomputes it
+        # never ran. ``None`` here is the value a run with no receipt at all
+        # carries, which is the one thing this must not be confused with.
+        finish_work = {"provided": True, "verified": False}
     return {
         "schemaVersion": SCHEMA_VERSION,
         "toolVersion": TOOL_VERSION,
@@ -440,6 +450,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--status-error", nargs=2)
     parser.add_argument("--status-exit", type=int, required=True)
     parser.add_argument("--eligibility-input", type=Path)
+    parser.add_argument("--finish-work-unverified", action="store_true")
     parser.add_argument("--start-branch")
     parser.add_argument("--default-branch")
     parser.add_argument("--remote", required=True)
