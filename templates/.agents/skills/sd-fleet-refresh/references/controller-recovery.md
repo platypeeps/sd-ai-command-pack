@@ -223,6 +223,53 @@ option, state the tradeoff, and bind the answer to the exact campaign,
 consumer, head/PR, and action. Noninteractive execution records
 `operator-decision` and parks safely instead of inferring consent.
 
+Once the operator has decided, record the decision against the exact head it
+was made on. This is the only supported way a parked lane rejoins a campaign:
+
+```bash
+SD_PACK_TOOLCHAIN=""
+for candidate in "${SD_AI_COMMAND_PACK_TOOLCHAIN:-}" \
+  "scripts/sd-ai-command-pack-toolchain.sh" \
+  "$HOME/.agents/bin/sd-ai-command-pack-toolchain.sh"; do
+  if [ -f "$candidate" ]; then SD_PACK_TOOLCHAIN="$candidate"; break; fi
+done
+[ -n "$SD_PACK_TOOLCHAIN" ] || { printf '%s\n' "error: sd-ai-command-pack toolchain not found; checked SD_AI_COMMAND_PACK_TOOLCHAIN, scripts/, and \$HOME/.agents/bin. Reinstall the command pack." >&2; exit 1; }
+
+bash "$SD_PACK_TOOLCHAIN" run-python -- \
+  sd-ai-command-pack-fleet-controller.py resume \
+  --repo <absolute-source-root> --campaign <campaign-id> \
+  --decide-consumer <name> --decision <proceed|decline> \
+  --decided-by <who-or-what-decided> \
+  --decision-head <full-sha the decision was made against> \
+  --release <campaign-target-version> --json
+```
+
+`--release` is the campaign's own target version, not the current
+`manifest.json` version, for the same reason exhaustion recovery uses it: this
+transition has no corrective release, and a manifest comparison would make
+every campaign undecidable as soon as the installed pack moved on.
+
+The transition is valid only for a terminal `operator-decision` lane whose
+latest receipt is that stage's `operator-decision` at the lane's attempt and
+reason code, and whose published head equals `--decision-head`. A lane that
+moved after the operator looked at it cannot inherit their answer.
+
+`proceed` re-enters the lane at the stage it parked on, on a fresh attempt, and
+the campaign leaves `complete` because a lane is no longer terminal. It stamps
+nothing terminal by itself: the remaining stages are issued and recorded
+through the ordinary receipt chain, so a decided lane cannot become `merged`
+without the receipts every other lane needs.
+
+`decline` leaves the lane exactly where it is and records that this was chosen,
+so a declined lane is distinguishable from one nobody ever answered. One
+parking takes one answer: replaying the identical decision returns the existing
+record and changes nothing, while a different decision for the same parked
+action is refused rather than silently overwriting it.
+
+Every decision is recorded append-only in `recoveries` as an `operator-decision`
+row carrying `decidedBy`, `decision`, and `decisionHead`, alongside the
+`retry-exhausted` and `pack-blocker` rows.
+
 ## Timing Anomalies
 
 A timing failure never changes controller or delivery evidence. Pause new

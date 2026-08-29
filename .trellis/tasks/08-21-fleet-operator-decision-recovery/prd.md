@@ -56,22 +56,33 @@ for.
 
 ## Acceptance criteria
 
-- [ ] A test parks a lane as `terminal` / `operator-decision`, revives it
+- [x] A test parks a lane as `terminal` / `operator-decision`, revives it
       through the new path, records the remaining stages, and asserts the lane
       ends `merged` with its receipt chain intact.
-- [ ] A test asserts the revival is refused for a lane whose `result` is not
+- [x] A test asserts the revival is refused for a lane whose `result` is not
       `operator-decision`, matching how the existing three guards refuse.
-- [ ] A test asserts a revived lane makes the campaign non-`complete`, and that
+- [x] A test asserts a revived lane makes the campaign non-`complete`, and that
       `validate` passes both before and after.
-- [ ] A test asserts the decision is durably recorded on the lane, including the
+- [x] A test asserts the decision is durably recorded on the lane, including the
       head it was made against.
-- [ ] A test asserts declining to proceed is recordable and leaves the lane
+- [x] A test asserts declining to proceed is recordable and leaves the lane
       terminal.
 - [ ] The real `mezmo_benchmark` lane in campaign
       `refresh-0-71-45-20260821T234057Z` is reconciled to `merged` at head
       `ab677900066966d392f898ff0e18686f0966e4fc` through the new path, with no
       hand-edit of the state file.
-- [ ] `make check` passes.
+      **Blocked on operator approval, not on the code.** The new path was run
+      against the live ledger and the sandbox refused the write: it mutates
+      `~/.local/state/sd-ai-command-pack/fleet-campaigns/` outside this
+      repository. The lane was read first and matches every guard — terminal
+      `operator-decision`, stage `review`, attempt 2, head `ab677900`, and a
+      latest receipt that is that stage's `operator-decision` with blocker
+      `remote-reviewer-unavailable-delta-reviewed`. The reconciliation is one
+      `resume --decide-consumer mezmo_benchmark --decision proceed` followed by
+      recording `merge-eligibility`, `merge`, and `post-merge-verification` from
+      the evidence already cited in Context. It needs an approved invocation,
+      which this session cannot grant itself.
+- [x] `make check` passes.
 
 ## Out of scope
 

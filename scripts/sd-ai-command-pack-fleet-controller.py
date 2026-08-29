@@ -80,7 +80,10 @@ RESULTS = frozenset(
     }
 )
 REASON_REQUIRED = RESULTS - {"passed", "at-target"}
-RECOVERY_KINDS = frozenset({"pack-blocker", "retry-exhausted"})
+RECOVERY_KINDS = frozenset(
+    {"pack-blocker", "retry-exhausted", "operator-decision"}
+)
+OPERATOR_DECISIONS = frozenset({"proceed", "decline"})
 PACK_BLOCKER_RECOVERY_FIELDS = {
     "consumer",
     "correctiveRelease",
@@ -97,6 +100,20 @@ PACK_BLOCKER_RECOVERY_FIELDS = {
 }
 EXHAUSTION_RECOVERY_FIELDS = {
     "consumer",
+    "fromActionId",
+    "fromAttempt",
+    "fromBlocker",
+    "fromStage",
+    "kind",
+    "recordedAt",
+    "toAttempt",
+    "toStage",
+}
+OPERATOR_DECISION_RECOVERY_FIELDS = {
+    "consumer",
+    "decidedBy",
+    "decision",
+    "decisionHead",
     "fromActionId",
     "fromAttempt",
     "fromBlocker",
@@ -720,9 +737,11 @@ def validate_recovery(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} kind is invalid")
     _strict_fields(
         value,
-        PACK_BLOCKER_RECOVERY_FIELDS
-        if kind == "pack-blocker"
-        else EXHAUSTION_RECOVERY_FIELDS,
+        {
+            "pack-blocker": PACK_BLOCKER_RECOVERY_FIELDS,
+            "retry-exhausted": EXHAUSTION_RECOVERY_FIELDS,
+            "operator-decision": OPERATOR_DECISION_RECOVERY_FIELDS,
+        }[kind],
         label,
     )
     safe_token(value["consumer"], f"{label} consumer")
@@ -744,6 +763,18 @@ def validate_recovery(value: object, label: str) -> None:
         raise FleetControllerError(f"{label} fromStage is invalid")
     if value["toStage"] != value["fromStage"]:
         raise FleetControllerError(f"{label} toStage must match fromStage")
+    if kind != "operator-decision":
+        return
+    if value["decision"] not in OPERATOR_DECISIONS:
+        raise FleetControllerError(f"{label} decision is invalid")
+    safe_token(value["decidedBy"], f"{label} decidedBy")
+    full_sha(value["decisionHead"], f"{label} decisionHead")
+    # A decline records the decision without reviving the lane, so its
+    # toAttempt is the attempt the lane is staying on rather than a new one.
+    if value["decision"] == "decline" and value["toAttempt"] != value["fromAttempt"]:
+        raise FleetControllerError(
+            f"{label} decline must not advance the lane attempt"
+        )
 
 
 def validate_state(state: Mapping[str, Any]) -> None:
@@ -1570,6 +1601,129 @@ def recover_retry_exhausted(
     return recovery, True
 
 
+def record_operator_decision(
+    state: dict[str, Any],
+    *,
+    consumer: str,
+    decision: str,
+    decided_by: str,
+    decision_head: str,
+    release: str,
+) -> tuple[dict[str, Any], bool]:
+    """Record the human decision a parked ``operator-decision`` lane waited for.
+
+    The controller parks a lane precisely because a person must choose, and
+    until now that was the one terminal state with no way back: ``--retry-consumer``
+    wants ``ownership-skip``, ``--recover-consumer`` wants a merge-stage pack
+    blocker, and ``--recover-exhausted-consumer`` wants ``retry-exhausted``. A
+    lane parked for a decision could therefore never have the decision recorded,
+    and an operator who chose to proceed had no supported way to finish the lane.
+
+    ``proceed`` re-enters the lane at the stage it parked on, on a fresh attempt,
+    so the remaining stages are issued and recorded through the ordinary receipt
+    chain. It stamps nothing terminal by itself. ``decline`` leaves the lane
+    exactly where it is and records that this was chosen, so a declined lane is
+    distinguishable from one nobody ever answered.
+    """
+
+    consumer = safe_token(consumer, "consumer")
+    decided_by = safe_token(decided_by, "deciding party")
+    full_sha(decision_head, "decision head")
+    if decision not in OPERATOR_DECISIONS:
+        raise FleetControllerError("decision must be proceed or decline")
+    # Compared against the campaign target, not the current pack manifest, for
+    # the same reason exhaustion recovery is: this transition has no corrective
+    # release, and a manifest comparison would make every campaign undecidable
+    # as soon as the installed pack moved past that campaign's release.
+    if release != state["release"]:
+        raise FleetControllerError(
+            "operator decision release does not match campaign release"
+        )
+    try:
+        lane = next(item for item in state["lanes"] if item["name"] == consumer)
+    except StopIteration:
+        raise FleetControllerError("consumer is outside the campaign") from None
+    if not lane["receipts"]:
+        raise FleetControllerError("consumer has no decision receipt to answer")
+    decision_receipt = lane["receipts"][-1]
+    existing = next(
+        (
+            item
+            for item in state["recoveries"]
+            if item["kind"] == "operator-decision"
+            and item["consumer"] == consumer
+            and item["fromActionId"] == decision_receipt["actionId"]
+        ),
+        None,
+    )
+    if existing is not None:
+        if (
+            existing["decision"] != decision
+            or existing["decidedBy"] != decided_by
+            or existing["decisionHead"] != decision_head
+        ):
+            raise FleetControllerError(
+                "this parked action already carries a different operator decision"
+            )
+        return existing, False
+    if lane["status"] != "terminal" or lane["result"] != "operator-decision":
+        raise FleetControllerError(
+            "operator decision requires a terminal operator-decision lane"
+        )
+    if lane["issuedAction"] is not None:
+        raise FleetControllerError("operator decision cannot replace an issued action")
+    if (
+        decision_receipt["stage"] != lane["stage"]
+        or decision_receipt["result"] != "operator-decision"
+        or decision_receipt["reasonCode"] != lane["blocker"]
+        or decision_receipt["attempt"] != lane["attempt"]
+    ):
+        raise FleetControllerError(
+            "operator decision receipt does not match the lane"
+        )
+    # The decision is bound to the head it was made against, so a lane that
+    # moved after the operator looked at it cannot inherit their answer.
+    if lane["head"] is None:
+        raise FleetControllerError(
+            "operator decision requires a lane with a published head"
+        )
+    if lane["head"] != decision_head:
+        raise FleetControllerError(
+            "operator decision head does not match the lane head"
+        )
+    stage = lane["stage"]
+    to_attempt = (
+        _next_stage_attempt(lane, stage)
+        if decision == "proceed"
+        else lane["attempt"]
+    )
+    recovery = {
+        "consumer": consumer,
+        "decidedBy": decided_by,
+        "decision": decision,
+        "decisionHead": decision_head,
+        "fromActionId": decision_receipt["actionId"],
+        "fromAttempt": decision_receipt["attempt"],
+        "fromBlocker": lane["blocker"],
+        "fromStage": stage,
+        "kind": "operator-decision",
+        "recordedAt": utc_now(),
+        "toAttempt": to_attempt,
+        "toStage": stage,
+    }
+    state["recoveries"].append(recovery)
+    if decision == "proceed":
+        lane["attempt"] = to_attempt
+        lane["blocker"] = None
+        lane["packBlocker"] = False
+        lane["result"] = None
+        lane["status"] = "waiting"
+    state["updatedAt"] = utc_now()
+    _refresh_campaign_status(state)
+    validate_state(state)
+    return recovery, True
+
+
 def resolve_reconciliation(
     state: dict[str, Any],
     *,
@@ -1988,6 +2142,10 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--corrective-release")
     resume.add_argument("--recover-exhausted-consumer")
     resume.add_argument("--exhausted-action")
+    resume.add_argument("--decide-consumer")
+    resume.add_argument("--decision", choices=sorted(OPERATOR_DECISIONS))
+    resume.add_argument("--decided-by")
+    resume.add_argument("--decision-head")
     resume.add_argument("--resolve-action")
     resume.add_argument("--release")
     resume.add_argument("--consumer")
@@ -2064,6 +2222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             and args.retry_consumer is None
             and args.recover_consumer is None
             and args.recover_exhausted_consumer is None
+            and args.decide_consumer is None
             and args.resolve_action is None
         ):
             if args.corrective_release is not None:
@@ -2073,6 +2232,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.exhausted_action is not None:
                 raise FleetControllerError(
                     "exhausted-action requires recover-exhausted-consumer"
+                )
+            if (
+                args.decision is not None
+                or args.decided_by is not None
+                or args.decision_head is not None
+            ):
+                raise FleetControllerError(
+                    "decision, decided-by, and decision-head require decide-consumer"
                 )
             _render(resume_report(store.load()), args.json)
             return 0
@@ -2139,12 +2306,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.retry_consumer,
                         args.recover_consumer,
                         args.recover_exhausted_consumer,
+                        args.decide_consumer,
                         args.resolve_action,
                     )
                 )
                 if modes > 1:
                     raise FleetControllerError(
                         "resume accepts only one recovery mode"
+                    )
+                if args.decide_consumer is None and (
+                    args.decision is not None
+                    or args.decided_by is not None
+                    or args.decision_head is not None
+                ):
+                    raise FleetControllerError(
+                        "decision, decided-by, and decision-head are valid only "
+                        "with decide-consumer"
                     )
                 if args.retry_consumer is not None:
                     if args.corrective_release is not None:
@@ -2190,6 +2367,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                         state,
                         consumer=args.recover_exhausted_consumer,
                         exhausted_action_id=args.exhausted_action,
+                        release=args.release,
+                    )
+                    resume_receipt = None
+                elif args.decide_consumer is not None:
+                    if args.corrective_release is not None:
+                        raise FleetControllerError(
+                            "corrective-release is valid only with recover-consumer"
+                        )
+                    if args.exhausted_action is not None:
+                        raise FleetControllerError(
+                            "exhausted-action is valid only with recover-exhausted-consumer"
+                        )
+                    if (
+                        args.decision is None
+                        or args.decided_by is None
+                        or args.decision_head is None
+                    ):
+                        raise FleetControllerError(
+                            "decide-consumer requires decision, decided-by, "
+                            "and decision-head"
+                        )
+                    if args.release is None:
+                        raise FleetControllerError("decide-consumer requires release")
+                    recovery, changed = record_operator_decision(
+                        state,
+                        consumer=args.decide_consumer,
+                        decision=args.decision,
+                        decided_by=args.decided_by,
+                        decision_head=args.decision_head,
                         release=args.release,
                     )
                     resume_receipt = None

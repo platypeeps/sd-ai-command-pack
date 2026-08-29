@@ -160,6 +160,33 @@ class FleetControllerTests(InstallTestCase):
         self.assertEqual(self.lane_for(state, consumer)["result"], "retry-exhausted")
         return action
 
+    def park_for_decision(
+        self,
+        controller,
+        state,
+        *,
+        consumer="canary-a",
+        stage="review",
+        reason_code="remote-reviewer-unavailable-delta-reviewed",
+    ):
+        """Drive a lane to `stage` and park it awaiting a human decision."""
+        self.pass_preflight(controller, state)
+        while self.lane_for(state, consumer)["stage"] != stage:
+            self.pass_lane_action(controller, state)
+        action = self.issued_action_for(controller, state, consumer)
+        controller.record_result(
+            state,
+            action_id=action["actionId"],
+            release="0.37.0",
+            consumer=consumer,
+            result="operator-decision",
+            reason_code=reason_code,
+            head=HEAD,
+        )
+        lane = self.lane_for(state, consumer)
+        self.assertEqual((lane["status"], lane["result"]), ("terminal", "operator-decision"))
+        return action
+
     def lane_for(self, state, consumer):
         """Return the lane owned by consumer, independent of lane ordering."""
         for lane in state["lanes"]:
@@ -2347,6 +2374,280 @@ class FleetControllerTests(InstallTestCase):
                 corrective_release="0.38.0",
                 actual_release="0.38.0",
             )
+    def test_a_decided_lane_rejoins_the_campaign_and_reaches_merged(self) -> None:
+        """The state the controller creates for "a human must decide" was the one
+        terminal state it could not accept a decision for.
+
+        `--retry-consumer` wants `ownership-skip`, `--recover-consumer` wants a
+        merge-stage pack blocker, `--recover-exhausted-consumer` wants
+        `retry-exhausted`. A lane parked on `operator-decision` matched none of
+        them, so an operator who decided to proceed had no supported way to
+        finish it and the ledger stayed wrong forever.
+        """
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        parked = self.park_for_decision(controller, state)
+        receipts_before = copy.deepcopy(state["lanes"][0]["receipts"])
+
+        recovery, changed = controller.record_operator_decision(
+            state,
+            consumer="canary-a",
+            decision="proceed",
+            decided_by="operator-sdelmas",
+            decision_head=HEAD,
+            release="0.37.0",
+        )
+
+        self.assertTrue(changed)
+        lane = state["lanes"][0]
+        self.assertEqual(
+            (lane["status"], lane["result"], lane["stage"]),
+            ("waiting", None, "review"),
+        )
+        self.assertIsNone(lane["blocker"])
+        # Reviving records the decision; it never rewrites what was received.
+        self.assertEqual(lane["receipts"], receipts_before)
+        self.assertEqual(
+            recovery,
+            {
+                "consumer": "canary-a",
+                "decidedBy": "operator-sdelmas",
+                "decision": "proceed",
+                "decisionHead": HEAD,
+                "fromActionId": parked["actionId"],
+                "fromAttempt": parked["attempt"],
+                "fromBlocker": "remote-reviewer-unavailable-delta-reviewed",
+                "fromStage": "review",
+                "kind": "operator-decision",
+                "recordedAt": recovery["recordedAt"],
+                "toAttempt": parked["attempt"] + 1,
+                "toStage": "review",
+            },
+        )
+
+        while self.lane_for(state, "canary-a")["result"] is None:
+            self.pass_lane_action(controller, state)
+
+        lane = state["lanes"][0]
+        self.assertEqual((lane["status"], lane["result"]), ("terminal", "merged"))
+        # The whole chain survives: the pre-decision receipts are still the
+        # prefix of the lane's history, so the ledger shows a lane that was
+        # parked, decided, and completed.
+        self.assertEqual(lane["receipts"][: len(receipts_before)], receipts_before)
+        self.assertEqual(state["recoveries"], [recovery])
+        controller.validate_state(state)
+
+    def test_the_decision_path_refuses_every_other_terminal_result(self) -> None:
+        """Guarded on `operator-decision` exactly as the other three are guarded
+        on their own results."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(controller)
+        self.park_for_decision(controller, state)
+        lane = state["lanes"][0]
+        others = controller.TERMINAL_RESULTS - {"operator-decision"}
+        self.assertEqual(len(others), 8)
+
+        for result in sorted(others):
+            lane["result"] = result
+            with self.assertRaisesRegex(
+                controller.FleetControllerError,
+                "terminal operator-decision lane",
+            ):
+                controller.record_operator_decision(
+                    state,
+                    consumer="canary-a",
+                    decision="proceed",
+                    decided_by="operator-sdelmas",
+                    decision_head=HEAD,
+                    release="0.37.0",
+                )
+
+        self.assertEqual(state["recoveries"], [])
+
+    def test_reviving_a_lane_reopens_a_complete_campaign(self) -> None:
+        """A campaign is `complete` because every lane is terminal. Reviving one
+        means that is no longer true, and the state must say so rather than
+        reporting a campaign that still has work as finished."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.park_for_decision(controller, state)
+
+        self.assertEqual(state["status"], "complete")
+        controller.validate_state(state)
+        self.assertEqual(controller.issue_next(state), [])
+
+        controller.record_operator_decision(
+            state,
+            consumer="canary-a",
+            decision="proceed",
+            decided_by="operator-sdelmas",
+            decision_head=HEAD,
+            release="0.37.0",
+        )
+
+        self.assertEqual(state["status"], "active")
+        controller.validate_state(state)
+        issued = controller.issue_next(state)
+        self.assertEqual(
+            [(item["consumer"], item["stage"]) for item in issued],
+            [("canary-a", "review")],
+        )
+
+    def test_the_decision_is_bound_to_a_decider_and_a_head(self) -> None:
+        """Who decided, and against which head. A lane that moved after the
+        operator looked at it cannot inherit their answer, and re-answering the
+        same parked action with a different decision is refused rather than
+        silently overwriting the record."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.park_for_decision(controller, state)
+
+        def decide(**overrides):
+            arguments = {
+                "consumer": "canary-a",
+                "decision": "proceed",
+                "decided_by": "operator-sdelmas",
+                "decision_head": HEAD,
+                "release": "0.37.0",
+            }
+            arguments.update(overrides)
+            return controller.record_operator_decision(state, **arguments)
+
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "head does not match the lane head"
+        ):
+            decide(decision_head=OTHER_HEAD)
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "release does not match campaign release"
+        ):
+            decide(release="0.38.0")
+        with self.assertRaisesRegex(
+            controller.FleetControllerError, "decision must be proceed or decline"
+        ):
+            decide(decision="maybe")
+        self.assertEqual(state["recoveries"], [])
+
+        recovery, changed = decide()
+        self.assertTrue(changed)
+        self.assertEqual(recovery["decidedBy"], "operator-sdelmas")
+        self.assertEqual(recovery["decisionHead"], HEAD)
+
+        # Idempotent for the identical decision, refused for a different one.
+        repeated, changed_again = decide()
+        self.assertFalse(changed_again)
+        self.assertEqual(repeated, recovery)
+        self.assertEqual(state["recoveries"], [recovery])
+
+    def test_declining_to_proceed_is_recorded_and_leaves_the_lane_terminal(
+        self,
+    ) -> None:
+        """Deciding not to proceed must be a recordable answer, not the state
+        reached by nobody ever answering. Both look identical on the lane; only
+        the recovery record tells them apart."""
+
+        controller = self.load_controller()
+        _root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        parked = self.park_for_decision(controller, state)
+        lane_before = copy.deepcopy(state["lanes"][0])
+
+        recovery, changed = controller.record_operator_decision(
+            state,
+            consumer="canary-a",
+            decision="decline",
+            decided_by="operator-sdelmas",
+            decision_head=HEAD,
+            release="0.37.0",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(state["lanes"][0], lane_before)
+        self.assertEqual(state["status"], "complete")
+        self.assertEqual(controller.issue_next(state), [])
+        self.assertEqual(recovery["decision"], "decline")
+        self.assertEqual(recovery["fromActionId"], parked["actionId"])
+        self.assertEqual(recovery["toAttempt"], recovery["fromAttempt"])
+        controller.validate_state(state)
+
+        # Having declined, the operator cannot then quietly proceed on the same
+        # parked action: the answer to one parking is one answer.
+        with self.assertRaisesRegex(
+            controller.FleetControllerError,
+            "already carries a different operator decision",
+        ):
+            controller.record_operator_decision(
+                state,
+                consumer="canary-a",
+                decision="proceed",
+                decided_by="operator-sdelmas",
+                decision_head=HEAD,
+                release="0.37.0",
+            )
+
+    def test_resume_cli_drives_the_operator_decision_path(self) -> None:
+        controller = self.load_controller()
+        root, _fleet, _manifest, state = self.state(
+            controller, selected=("canary-a",)
+        )
+        self.park_for_decision(controller, state)
+        state_home = root.parent / f"{root.name}-controller-state"
+        store = controller.CampaignStore(root, "campaign-1", state_home)
+        with store.locked():
+            store.write(state)
+        common = [
+            "--repo",
+            str(root),
+            "--campaign",
+            "campaign-1",
+            "--state-home",
+            str(state_home),
+            "--json",
+        ]
+
+        def resume(*arguments):
+            status, output, error = self.run_cli(
+                controller, "resume", *common, *arguments
+            )
+            return status, output, error
+
+        status, _output, error = resume(
+            "--decision", "proceed", "--decided-by", "operator-sdelmas"
+        )
+        self.assertEqual(status, 2)
+        self.assertIn("require decide-consumer", error)
+
+        status, output, _error = resume(
+            "--decide-consumer",
+            "canary-a",
+            "--decision",
+            "proceed",
+            "--decided-by",
+            "operator-sdelmas",
+            "--decision-head",
+            HEAD,
+            "--release",
+            "0.37.0",
+        )
+
+        self.assertEqual(status, 0)
+        payload = output
+        self.assertEqual(payload["recovery"]["kind"], "operator-decision")
+        self.assertEqual(payload["recovery"]["decision"], "proceed")
+        self.assertTrue(payload["changed"])
+        reloaded = store.load()
+        self.assertEqual(reloaded["status"], "active")
+        self.assertEqual(reloaded["lanes"][0]["status"], "waiting")
 
 
 if __name__ == "__main__":

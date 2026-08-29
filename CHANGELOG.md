@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- A fleet lane parked for a human decision can rejoin its campaign. The
+  controller parks a lane as terminal `operator-decision` precisely because a
+  person must choose, and that was the one terminal state it could not accept a
+  decision for: `--retry-consumer` guards on `ownership-skip`,
+  `--recover-consumer` on a merge-stage pack blocker, and
+  `--recover-exhausted-consumer` on `retry-exhausted`. An operator who decided
+  to proceed had no supported way to finish the lane, and no `--action-id`
+  existed to record against because `next` returns nothing once every lane is
+  terminal. `resume --decide-consumer <name> --decision proceed|decline
+  --decided-by <who> --decision-head <sha> --release <campaign-release>` records
+  the answer. `proceed` re-enters the lane at the stage it parked on, on a fresh
+  attempt, reopening the campaign — it stamps nothing terminal by itself, so a
+  decided lane still needs every receipt any other lane needs. `decline` leaves
+  the lane where it is and records that this was chosen, which is what
+  distinguishes a declined lane from one nobody answered. One parking takes one
+  answer: an identical replay is a no-op and a different decision for the same
+  parked action is refused.
+
 - Fleet timing runs can reach `completed`. Of the 25 recorded runs, 18 stranded
   `active`: every one was missing a consumer's terminal outcome, because
   `sd-fleet-refresh` told the operator to bracket delivery work without naming
