@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "validatedAt": "2026-08-28T16:22:46Z",
+  "validatedAt": "2026-08-29T00:28:49Z",
   "packVersion": "0.71.63",
   "payloadDigest": "sha256:dc80bb40bd1dc69cf5a99d4e401238d12fae6b5ad1bfe499181cc389e7797131",
-  "fleetManifestDigest": "sha256:20e951ecab44192c5f8b08b56a35d7518243b6cfa9a5a0dbb82c3a4133931d98",
+  "fleetManifestDigest": "sha256:7c7ff1e71f80e0e4909b6da6df10165834372f3747291e30d539deae2f32fde6",
   "validatorDigest": "sha256:d2f49ca474939564b150ab495cf42ce31e46e2922bab078a187ca9cbebbe753b",
   "consumers": [
     {
@@ -68,7 +68,7 @@
     {
       "name": "rwbp-website",
       "github": "platypeeps/rwbp-website",
-      "baseCommit": "d6c7c2702f501af9627c490c6a8ae454eddbb313",
+      "baseCommit": "3eca78574f350fefb1e272746d43c89389511381",
       "status": "passed",
       "prepares": [
         [
@@ -114,7 +114,7 @@
     {
       "name": "se-ai-command-pack",
       "github": "platypeeps/se-ai-command-pack",
-      "baseCommit": "e56eb55835e546270a12d872d22bff839ee06ea4",
+      "baseCommit": "07860c0f966578dfe82fca3a6f048567a1d2ba32",
       "status": "passed",
       "prepares": [],
       "checks": [
@@ -129,7 +129,7 @@
     {
       "name": "sd-github-review",
       "github": "platypeeps/sd-github-review",
-      "baseCommit": "4906b280e662fa409c56de3508c59f62f96581d0",
+      "baseCommit": "c2f583954978bd16321bd5db292b4a447b27b5bc",
       "status": "passed",
       "prepares": [
         [
@@ -197,6 +197,21 @@
         [
           "python3",
           "tools/check_copilot_instruction_contract.py"
+        ]
+      ],
+      "reasons": []
+    },
+    {
+      "name": "mezmo-world-simulator",
+      "github": "answerbook/mezmo-world-simulator",
+      "baseCommit": "337df5c18259cc31ebfd71e8b2fe7288553d5765",
+      "status": "passed",
+      "prepares": [],
+      "checks": [
+        [
+          "bash",
+          "-c",
+          "research-kit render . >/dev/null && research-kit review ."
         ]
       ],
       "reasons": []
