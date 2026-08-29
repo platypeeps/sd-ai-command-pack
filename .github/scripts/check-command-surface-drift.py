@@ -44,8 +44,8 @@ IGNORED_PARTS = frozenset(
         ".obsidian-kb",
         ".pytest_cache",
         ".ruff_cache",
-        ".trellis/tasks",
-        ".trellis/workspace",
+        "docs/work",
+        "tests/fixtures/trellis-scripts",
         ".venv",
         "__pycache__",
         "build",
@@ -54,7 +54,7 @@ IGNORED_PARTS = frozenset(
         "vendor",
     }
 )
-IGNORED_PREFIXES = (".trellis/.backup-",)
+IGNORED_PREFIXES: tuple[str, ...] = ()
 SKILL_PUBLIC_ROOTS = tuple(
     dict.fromkeys(
         (

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/surface-retirement-doc-gates.md", "reason": "Verify both doc gates are green, including in files the deletion never touched."}
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify the registry row is enforcing and RETIRED_TARGETS covers all 24 consumer-side targets."}

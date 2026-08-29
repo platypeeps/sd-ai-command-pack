@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/index.md", "reason": "Topology validation codes (task_topology_missing, _not_reciprocal, _ambiguous) the acceptance criteria assert against."}
-{"file": ".trellis/spec/backend/index.md", "reason": "Test conventions for parent/child fixtures and for asserting a failed rename leaves no partial state."}

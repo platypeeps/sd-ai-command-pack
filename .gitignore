@@ -36,14 +36,6 @@ coverage/
 !.env.ci
 !.env.test
 
-# Trellis local/runtime state.
-.trellis/.developer
-.trellis/.backup-*
-.trellis/worktrees/
-.trellis/.template-hashes.json
-.trellis/.runtime/
-.trellis/.cache/
-
 # Review/build artifacts.
 .build/
 code-review-report.json

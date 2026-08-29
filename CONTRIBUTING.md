@@ -176,11 +176,11 @@ behavior changes and the patch number for compatible fixes or documentation.
   npm packages. If that changes, keep the manifest minimal and commit the
   lockfile.
 - Put machine-specific Claude permissions in the ignored
-  `.claude/settings.local.json`, not Trellis-owned `.claude/settings.json`.
+  `.claude/settings.local.json`, not tracked `.claude/settings.json`.
 
 ## Specs To Read First
 
-- [Adapter guidelines](.trellis/spec/frontend/adapter-guidelines.md) for adding
+- [Adapter guidelines](docs/spec/frontend/adapter-guidelines.md) for adding
   or changing platform adapters.
-- [Manifest and filesystem](.trellis/spec/backend/manifest-and-filesystem.md)
+- [Manifest and filesystem](docs/spec/backend/manifest-and-filesystem.md)
   for installer, manifest, provenance, local-only, and audit behavior.

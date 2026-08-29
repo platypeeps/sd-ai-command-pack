@@ -1,3 +1,0 @@
-{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Apply the registry, generated adapter, structured interaction, local-review, and lifecycle composition contracts."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Compose the typed check, exact-scope local stage, receipt, learning, and family-gate contracts without weakening them."}
-{"file":".trellis/spec/backend/manifest-and-filesystem.md","reason":"Keep shipped scripts, generated surfaces, installed mirrors, and manifest provenance synchronized."}

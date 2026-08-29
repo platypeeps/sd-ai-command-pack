@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "Names the c8 coverage lane that measures scripts/sd-ai-command-pack-review-preflight.mjs, the file this task changes."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines the preflight command used as this task's gate and the expectations for tests that exercise the generic JavaScript review preflight."}

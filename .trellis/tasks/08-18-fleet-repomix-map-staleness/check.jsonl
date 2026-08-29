@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality bar the deterministic gate enforces; frames whether a fix that changes lane behavior needs new coverage or only a contract test."}
-{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "Defines which CI lanes select which files, so a change to fleet lane behavior can be verified in the lane that actually runs it."}

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review standard for the change: test depth, assertion points, and what counts as demonstrated rather than asserted."}
-{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "The coordinator is covered by a runtime coverage lane with a per-file floor, so new branches must land with tests or the lane fails."}

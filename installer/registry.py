@@ -1483,16 +1483,6 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         reason="retired-target cleanup regression fixture",
     ),
     CommandSurfaceAllowance(
-        identifier="sd-watch-pr",
-        path_pattern=".trellis/audit/ledger.md",
-        reason="bounded historical audit record",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-watch-pr",
-        path_pattern=".trellis/audit/report-2026-07-28.md",
-        reason="bounded historical audit record",
-    ),
-    CommandSurfaceAllowance(
         identifier="sd-full-check",
         path_pattern="installer/registry.py",
         reason="canonical retired-surface declaration",
@@ -1504,23 +1494,8 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
     ),
     CommandSurfaceAllowance(
         identifier="sd-full-check",
-        path_pattern=".trellis/audit/ledger.md",
-        reason="bounded historical audit record",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-full-check",
         path_pattern="tests/test_retired_targets.py",
         reason="retired-target cleanup regression fixture",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-full-check",
-        path_pattern=".trellis/audit/report-2026-07-19.md",
-        reason="bounded historical audit record",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-full-check",
-        path_pattern=".trellis/audit/report-2026-07-28.md",
-        reason="bounded historical audit record",
     ),
     CommandSurfaceAllowance(
         identifier="sd-full-check",
@@ -1536,11 +1511,6 @@ COMMAND_SURFACE_ALLOWANCES: tuple[CommandSurfaceAllowance, ...] = (
         identifier="sd-review-local",
         path_pattern="CHANGELOG.md",
         reason="bounded historical release record",
-    ),
-    CommandSurfaceAllowance(
-        identifier="sd-review-local",
-        path_pattern=".trellis/audit/ledger.md",
-        reason="bounded historical audit record",
     ),
     CommandSurfaceAllowance(
         identifier="sd-review-local",

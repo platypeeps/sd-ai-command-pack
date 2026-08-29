@@ -1341,8 +1341,8 @@ class GeneratedParityTests(InstallTestCase):
             "Keep Trellis-owned platform files in their Trellis-managed state",
             "Do not track `templates/.opencode/package.json`",
             "`.claude/settings.local.json`",
-            ".trellis/spec/frontend/adapter-guidelines.md",
-            ".trellis/spec/backend/manifest-and-filesystem.md",
+            "docs/spec/frontend/adapter-guidelines.md",
+            "docs/spec/backend/manifest-and-filesystem.md",
         ):
             self.assertIn(expected, contributing)
         for target in (

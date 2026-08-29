@@ -1,2 +1,0 @@
-{"file":".trellis/spec/frontend/adapter-guidelines.md","reason":"Defines the canonical resumable orchestration, generated-skill ownership, lifecycle transition, and evidence reconciliation contracts."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Guides the state flow across helper CLI, durable ledger, shared skill, generated mirrors, and status consumers."}

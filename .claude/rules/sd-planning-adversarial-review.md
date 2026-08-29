@@ -1,9 +1,10 @@
 # SD planning adversarial review
 
-When the current run creates or materially updates an active Trellis task's
-`prd.md`, `design.md`, or `implement.md`, capture the pre-edit existence and
-content hashes for those files. At the planning convergence boundary, before
-requesting implementation approval or running `task.py start`, read and follow
+When the current run creates or materially updates an active work item's
+`prd.md`, `design.md`, or `implement.md` under `docs/work/`, capture the
+pre-edit existence and content hashes for those files. At the planning
+convergence boundary, before requesting implementation approval or moving the
+item to `in_progress`, read and follow
 [`../sd-ai-command-pack/planning-adversarial-review.md`](../sd-ai-command-pack/planning-adversarial-review.md).
 
 Apply that contract once per coherent planning edit batch. Do not claim

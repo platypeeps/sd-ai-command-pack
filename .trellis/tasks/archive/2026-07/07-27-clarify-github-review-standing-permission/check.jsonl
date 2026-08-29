@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify source-template authority, generated reference parity, and the no-repeat-prompt interaction contract."}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify the standing-authority wording is clear, bounded, consistent, and covered by focused tests."}

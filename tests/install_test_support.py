@@ -1444,8 +1444,12 @@ class InstallTestCase(unittest.TestCase):
         )
 
     def _seed_trellis_session_tooling(self, root: Path) -> None:
+        # Vendored under tests/fixtures rather than read from the repository:
+        # this repository keeps its own artifacts in docs/work and has no
+        # .trellis tree, while the record-session wrapper still has to be
+        # exercised against the real Trellis session scripts a consumer runs.
         shutil.copytree(
-            PACK_ROOT / ".trellis/scripts",
+            Path(__file__).resolve().parent / "fixtures/trellis-scripts",
             root / ".trellis/scripts",
             ignore=shutil.ignore_patterns("__pycache__"),
         )

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify the two updated controller-contract sites match shipped behavior and that no remaining recovery-row claim contradicts the tagged-union record."}
-{"file": ".trellis/tasks/07-29-recover-retry-exhausted-fleet-lanes/research/planning-adversarial-review.md", "reason": "Check each addressed concern against the implementation and confirm no unresolved blocker was bypassed."}

@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/tooling/fleet-publish-generated-content.md", "reason": "Check that the tick lands inside the archive commit and the H1..H3 delta stays .trellis-only, per the ordering contract this spec pins."}
-{"file": ".trellis/spec/tooling/runtime-coverage-lanes.md", "reason": "Shipped-script coverage lanes apply to the publish helper; new branches need the coverage the make test gate demands."}
-{"file": ".trellis/spec/tooling/bookkeeping-validator.md", "reason": "Verify the completion receipt still validates after prd.md is rewritten in place before archive."}

@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""One-shot converter from this repo's `.trellis/` tree into `docs/work` + `docs/spec`.
+
+Temporary: this script exists only to perform the migration once and is deleted
+once the last consumer has been converted. It enumerates everything it touches
+from the filesystem -- there is no hard-coded task list -- so re-running it on a
+partially converted tree produces the same result.
+
+What it carries over
+    .trellis/tasks/archive/<YYYY-MM>/<task>/  ->  docs/work/archive/<YYYY-MM>/<date>-<slug>/
+    .trellis/tasks/<task>/                    ->  docs/work/<date>-<slug>/
+    .trellis/spec/**                          ->  docs/spec/**
+
+Per item it keeps prd.md, plus design.md and implement.md when they exist, and
+gives every prd.md YAML frontmatter (title, status, created, and branch when the
+task record names one). Everything else in a task directory is Trellis runtime
+state -- task.json, the *.jsonl context manifests, research/ -- and is dropped;
+when a task carried research notes, their names are folded into a `## References`
+list in prd.md so the bodies stay recoverable from git history.
+
+Journals, audit ledgers, agents, workflow.md, config.yaml and the runtime tree are
+deliberately not imported (decision D9): git history keeps them and nothing in the
+new workflow reads them.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import re
+import shutil
+import subprocess  # nosec B404 - git is invoked with a fixed argv, never a shell
+import sys
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DIR_DATE_PREFIX_RE = re.compile(r"^(\d{2})-(\d{2})-(?P<slug>.+)$")
+ARCHIVE_MONTH_RE = re.compile(r"^(?P<year>\d{4})-(?P<month>\d{2})$")
+SCRIPT_REF_RE = re.compile(r"(?<![\w./-])scripts/([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+# Runtime files a task directory carries that have no place in docs/work.
+RUNTIME_NAMES = {"task.json"}
+KEPT_DOCS = ("prd.md", "design.md", "implement.md")
+STATUS_BY_TRELLIS = {
+    "planning": "planning",
+    "in_progress": "in_progress",
+    "completed": "done",
+    "done": "done",
+}
+
+
+class MigrationError(RuntimeError):
+    """A condition the operator has to resolve before the import can proceed."""
+
+
+def yaml_scalar(value: str) -> str:
+    """Render `value` as a frontmatter scalar the flat-scalar parser can read.
+
+    Titles routinely contain a colon ("PARKED: ..."), which an unquoted scalar
+    cannot carry, so anything ambiguous is emitted double-quoted.
+    """
+    needs_quotes = (
+        value != value.strip()
+        or not value
+        or value[0] in "-?:,[]{}#&*!|>'\"%@`"
+        or ": " in value
+        or value.endswith(":")
+        or " #" in value
+    )
+    if not needs_quotes:
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def git_added_date(repo: pathlib.Path, path: pathlib.Path) -> str | None:
+    """Date of the commit that first added `path`, or None when git cannot say."""
+    try:
+        result = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [
+                "git",
+                "log",
+                "--diff-filter=A",
+                "--format=%ad",
+                "--date=short",
+                "--",
+                str(path.relative_to(repo)),
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    dates = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return dates[-1] if dates else None
+
+
+def derive_created(
+    repo: pathlib.Path, source: pathlib.Path, record: dict[str, object], fallback_year: str
+) -> str:
+    """Creation date for an item: the task record, then the directory name, then git."""
+    created = record.get("createdAt")
+    if isinstance(created, str) and DATE_RE.match(created):
+        return created
+
+    match = DIR_DATE_PREFIX_RE.match(source.name)
+    if match:
+        return f"{fallback_year}-{match.group(1)}-{match.group(2)}"
+
+    from_git = git_added_date(repo, source)
+    if from_git and DATE_RE.match(from_git):
+        return from_git
+
+    raise MigrationError(f"cannot date {source}: no createdAt, no name prefix, no git record")
+
+
+def derive_slug(source: pathlib.Path) -> str:
+    match = DIR_DATE_PREFIX_RE.match(source.name)
+    if match and match.group("slug"):
+        return match.group("slug")
+    return source.name
+
+
+def read_record(source: pathlib.Path) -> dict[str, object]:
+    task_json = source / "task.json"
+    if not task_json.is_file():
+        return {}
+    try:
+        loaded = json.loads(task_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise MigrationError(f"{task_json} is not readable JSON: {error}") from error
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def derive_title(record: dict[str, object], body: str, slug: str) -> str:
+    """Title from the task record, else the prd's first heading, else the slug."""
+    title = record.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    for line in body.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return slug.replace("-", " ")
+
+
+def dropped_references(source: pathlib.Path) -> list[str]:
+    """Names of task files that are neither kept documents nor runtime bookkeeping."""
+    extras: list[str] = []
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source)
+        name = relative.name
+        if str(relative) in KEPT_DOCS or name in RUNTIME_NAMES or name.endswith(".jsonl"):
+            continue
+        extras.append(str(relative))
+    return extras
+
+
+def frontmatter(title: str, status: str, created: str, branch: str | None) -> str:
+    lines = [
+        "---",
+        f"title: {yaml_scalar(title)}",
+        f"status: {status}",
+        f"created: {created}",
+    ]
+    if branch:
+        lines.append(f"branch: {yaml_scalar(branch)}")
+    lines.append("---")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def references_block(source_label: str, names: list[str]) -> str:
+    lines = [
+        "",
+        "## References",
+        "",
+        "Research notes that lived beside this item's Trellis record and were not carried",
+        f"into docs/work. Recover the bodies from git history under {source_label}:",
+        "",
+    ]
+    lines.extend(f"- {name}" for name in names)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def strip_existing_frontmatter(body: str) -> str:
+    """Drop a leading `---` block so a re-run does not stack two of them."""
+    if not body.startswith("---\n"):
+        return body
+    end = body.find("\n---\n", 4)
+    if end == -1:
+        return body
+    return body[end + len("\n---\n") :].lstrip("\n")
+
+
+def import_item(
+    repo: pathlib.Path, source: pathlib.Path, destination: pathlib.Path, status: str, created: str
+) -> None:
+    record = read_record(source)
+    prd_path = source / "prd.md"
+    if not prd_path.is_file():
+        raise MigrationError(f"{source} has no prd.md")
+
+    body = strip_existing_frontmatter(prd_path.read_text(encoding="utf-8"))
+    if not body.endswith("\n"):
+        body += "\n"
+
+    slug = derive_slug(source)
+    title = derive_title(record, body, slug)
+    branch = record.get("branch")
+    branch_value = branch.strip() if isinstance(branch, str) and branch.strip() else None
+
+    extras = dropped_references(source)
+    if extras:
+        body += references_block(f"`{source.relative_to(repo)}`", extras)
+
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "prd.md").write_text(
+        frontmatter(title, status, created, branch_value) + body, encoding="utf-8"
+    )
+
+    for name in ("design.md", "implement.md"):
+        candidate = source / name
+        if candidate.is_file():
+            shutil.copyfile(candidate, destination / name)
+
+
+def rewrite_spec_text(repo: pathlib.Path, text: str) -> str:
+    """Repoint spec references the tree move invalidated.
+
+    Two rewrites, both decided by what is on disk rather than by a fixed list:
+    the spec's own home moved out of `.trellis/`, and the shipped helpers moved
+    from `scripts/` to `templates/scripts/` in the preceding step.
+    """
+    text = text.replace(".trellis/spec/", "docs/spec/")
+
+    def repoint(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if (repo / "scripts" / name).exists():
+            return match.group(0)
+        if (repo / "templates" / "scripts" / name).exists():
+            return f"templates/scripts/{name}"
+        return match.group(0)
+
+    return SCRIPT_REF_RE.sub(repoint, text)
+
+
+def import_spec(repo: pathlib.Path, source_root: pathlib.Path, destination_root: pathlib.Path) -> int:
+    count = 0
+    for path in sorted(source_root.rglob("*")):
+        if not path.is_file():
+            continue
+        target = destination_root / path.relative_to(source_root)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix == ".md":
+            target.write_text(
+                rewrite_spec_text(repo, path.read_text(encoding="utf-8")), encoding="utf-8"
+            )
+        else:
+            shutil.copyfile(path, target)
+        count += 1
+    return count
+
+
+def unique_destination(parent: pathlib.Path, name: str, claimed: set[pathlib.Path]) -> pathlib.Path:
+    candidate = parent / name
+    suffix = 2
+    while candidate in claimed:
+        candidate = parent / f"{name}-{suffix}"
+        suffix += 1
+    claimed.add(candidate)
+    return candidate
+
+
+def migrate(repo: pathlib.Path) -> dict[str, int]:
+    tasks_root = repo / ".trellis" / "tasks"
+    work_root = repo / "docs" / "work"
+    if not tasks_root.is_dir():
+        raise MigrationError(f"{tasks_root} does not exist; nothing to migrate")
+
+    claimed: set[pathlib.Path] = set()
+    counts = {"active": 0, "archived": 0, "spec": 0, "references": 0}
+
+    active_sources = sorted(
+        path for path in tasks_root.iterdir() if path.is_dir() and path.name != "archive"
+    )
+    for source in active_sources:
+        record = read_record(source)
+        raw_status = record.get("status")
+        status = STATUS_BY_TRELLIS.get(raw_status if isinstance(raw_status, str) else "", "planning")
+        created = derive_created(repo, source, record, fallback_year=str(_year_hint(repo, source)))
+        name = f"{created}-{derive_slug(source)}"
+        import_item(repo, source, unique_destination(work_root, name, claimed), status, created)
+        counts["active"] += 1
+        counts["references"] += 1 if dropped_references(source) else 0
+
+    archive_root = tasks_root / "archive"
+    if archive_root.is_dir():
+        for month_dir in sorted(path for path in archive_root.iterdir() if path.is_dir()):
+            if not ARCHIVE_MONTH_RE.match(month_dir.name):
+                raise MigrationError(f"unexpected archive bucket {month_dir}")
+            target_month = work_root / "archive" / month_dir.name
+            for source in sorted(path for path in month_dir.iterdir() if path.is_dir()):
+                record = read_record(source)
+                created = derive_created(
+                    repo, source, record, fallback_year=month_dir.name.split("-")[0]
+                )
+                name = f"{created}-{derive_slug(source)}"
+                import_item(
+                    repo, source, unique_destination(target_month, name, claimed), "done", created
+                )
+                counts["archived"] += 1
+                counts["references"] += 1 if dropped_references(source) else 0
+
+    spec_root = repo / ".trellis" / "spec"
+    if spec_root.is_dir():
+        counts["spec"] = import_spec(repo, spec_root, repo / "docs" / "spec")
+
+    return counts
+
+
+def _year_hint(repo: pathlib.Path, source: pathlib.Path) -> int:
+    """Year to pair with a `MM-DD-` directory prefix when the record has no date."""
+    from_git = git_added_date(repo, source)
+    if from_git and DATE_RE.match(from_git):
+        return int(from_git[:4])
+    return 1970
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--repo",
+        type=pathlib.Path,
+        default=pathlib.Path(__file__).resolve().parent.parent,
+        help="repository root holding .trellis (default: this script's repository)",
+    )
+    args = parser.parse_args(argv)
+    repo = args.repo.resolve()
+
+    try:
+        counts = migrate(repo)
+    except MigrationError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    total = counts["active"] + counts["archived"]
+    print(
+        f"imported {total} work item(s): {counts['active']} active, "
+        f"{counts['archived']} archived; {counts['references']} carried a References list"
+    )
+    print(f"imported {counts['spec']} spec file(s) into docs/spec")
+    print("remaining step: delete .trellis/ once the import is reviewed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "The port edits skill/adapter prose across generated surfaces; adapter authoring rules govern how a skill section may be added without breaking generation."}
-{"file": ".trellis/spec/tooling/review-attempt-state.md", "reason": "sd-review drives the review coordinator; the trusted-caller path must not corrupt per-attempt state or trip the phase-rewind trap."}
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Confirms why relocating the recheck into sd-fleet-refresh (0 manifest entries) adds no plugin-closure exception."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Baseline quality bar for the new validation code paths."}

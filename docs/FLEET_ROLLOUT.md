@@ -474,7 +474,7 @@ A consumer's own guards reference pack scripts by path. Everything under
 `scripts/` is machine-scope, so conversion removes it and the resweep counts
 every surviving reference as a blocker — and one blocker blocks as hard as
 ninety. Since 0.71.11 the layout resolver also installs to
-`.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py`, which is
+`.sd-ai-command-pack/bin/sd-ai-command-pack-review-layout.py` [absent: target-repo install path], which is
 `consumer-config` and therefore survives conversion. That is the path a guard
 should name.
 

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Rules for changing sd-ai-command-pack-review-preflight.mjs and its template twin, including the fail-closed posture for preflight configuration."}
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Template-to-root mirror obligations for shipped pack payloads, which this change must satisfy for both copies of the preflight script."}

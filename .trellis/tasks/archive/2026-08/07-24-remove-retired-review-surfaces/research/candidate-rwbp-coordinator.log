@@ -1,8 +1,0 @@
-candidate validation failed for 1 consumer(s); ledger was not updated
-sd-ai-command-pack candidate: 0.65.0
-failed  P10 platypeeps/rwbp-coordinator (6.1s)
-  candidate check 1 failed with exit 1: node scripts/check-review-churn.mjs
-Review-churn guard failed:
-- docs/SD_AI_COMMAND_PACK.md: expected SD AI command-pack docs to include the review-local runner
-- docs/SD_AI_COMMAND_PACK.md: expected SD AI command-pack docs to include the consolidated full-codebase review mode
-- .sd-ai-command-pack/installed-targets.txt: expected SD AI command-pack installed-targets snapshot to include the review-local runner

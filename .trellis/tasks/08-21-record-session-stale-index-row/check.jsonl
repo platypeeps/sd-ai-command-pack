@@ -1,3 +1,0 @@
-{"file": ".trellis/tasks/08-21-record-session-stale-index-row/prd.md", "reason": "The eight acceptance criteria, including the ones a superficial test would miss: the no-trailing-newline count, the retry path, and 'no byte outside the block changed'."}
-{"file": ".trellis/tasks/08-21-record-session-stale-index-row/implement.md", "reason": "The review gates, in particular that a test asserting only 'the number changed' passes against a wrong-by-one implementation and does not satisfy criterion 1."}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "What to check the skip paths against — exit status, stderr shape, and that a missing or marker-less index.md cannot fail a run that succeeds today."}

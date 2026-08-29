@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "The check must confirm if-not-exists still protects a customized consumer, so the manifest install-policy contract is the standard to verify the new upgrade path against."}
-{"file": ".trellis/spec/guides/index.md", "reason": "R3 turns on whether a skipped consumer is actually reported. These verification rules -- verify against source, and treat under-claiming as the loop-ending failure -- are the standard for judging a report that claims the fleet is current."}

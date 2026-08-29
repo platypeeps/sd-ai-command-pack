@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Provider schema, argv-adapter safety rules, and the parallel execution model the new lanes plug into."}
-{"file": ".trellis/spec/tooling/index.md", "reason": "Review configuration surface, receipt fields, and the shipped-surface and release-gate rules for changing provider defaults."}

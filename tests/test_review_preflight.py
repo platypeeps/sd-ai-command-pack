@@ -4004,6 +4004,10 @@ assert.deepEqual(
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("removes historical Session 1 from HEAD", result.stdout)
 
+        # Removing the whole journal root is the one deletion the gate does not
+        # report: it is a repository retiring Trellis journals, visible in the
+        # diff as every session at once, not a session being edited away inside
+        # a journal the repository still keeps.
         shutil.rmtree(root / ".trellis/workspace")
         result = subprocess.run(
             [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
@@ -4015,8 +4019,10 @@ assert.deepEqual(
             check=False,
         )
 
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("removes historical Session 1 from HEAD", result.stdout)
+        self.assertNotIn("removes historical Session 1 from HEAD", result.stdout)
+        self.assertIn(
+            ".trellis/workspace is not present in the working tree", result.stdout
+        )
 
     def test_review_preflight_allows_configured_linux_service_users(self) -> None:
         node = shutil.which("node")

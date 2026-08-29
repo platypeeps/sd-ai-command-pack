@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""Lint the tracked documentation footprint of the sd-ai-command-pack workflow.
+
+Five rules, no more (adding a sixth is a decision record, not a patch):
+
+1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
+                    `prd.md` whose frontmatter carries a title, a known status,
+                    and a creation date that agrees with the directory name.
+2. Ready         -- an item that claims to be workable can be worked: it states
+                    acceptance criteria, carries no open BLOCKING line, and,
+                    when `in_progress`, records the branch it lives on.
+3. Decision shape - a decision record is dated, titled, has a known status, and
+                    actually states a decision.
+4. Spec index    -- every spec directory has an `index.md` that links each of
+                    its siblings, so no page can be reached only by guessing.
+5. PR link       -- a pull request names the item it advances, that item exists,
+                    and nothing in it is still unchecked; or it says
+                    `Work: none - <reason>` and means it.
+
+Rules 1 through 4 read the tree. Rule 5 needs the pull request body, so it runs
+only when `--pr-body` supplies one and reports itself as not run otherwise.
+
+Exits 0 when every rule that ran passed, 1 when any of them failed, and 2 when
+the arguments themselves were wrong.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import re
+import sys
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+ITEM_DIR_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
+DECISION_FILE_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+ARCHIVE_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+ACCEPTANCE_HEADING_RE = re.compile(r"^#{1,6}\s+.*acceptance criteri", re.IGNORECASE)
+DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
+UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s+\[ \]")
+BLOCKING_RE = re.compile(r"\bBLOCKING\b")
+MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+WORK_LINE_RE = re.compile(r"^Work:[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
+WORK_NONE_RE = re.compile(r"^none\s+-\s+(?P<reason>\S.*)$")
+
+ITEM_STATUSES = ("planning", "ready", "in_progress", "done")
+WORKABLE_STATUSES = ("ready", "in_progress")
+DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
+ITEM_DOCUMENTS = ("prd.md", "design.md", "implement.md")
+
+
+class Report:
+    """Collected findings, so every rule runs before anything is printed."""
+
+    def __init__(self) -> None:
+        self.failures: list[str] = []
+        self.notes: list[str] = []
+
+    def fail(self, location: str, message: str) -> None:
+        self.failures.append(f"{location}: {message}")
+
+    def note(self, message: str) -> None:
+        self.notes.append(message)
+
+
+def parse_frontmatter(text: str) -> dict[str, str] | None:
+    """Read a leading `---` block of flat `key: value` scalars.
+
+    Deliberately not a YAML parser: the frontmatter this lints is a handful of
+    flat scalars, and depending on PyYAML would make a stdlib-only tool a tool
+    with an install step.
+    """
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    fields: dict[str, str] = {}
+    for line in text[4:end].split("\n"):
+        if not line.strip():
+            continue
+        key, separator, value = line.partition(":")
+        if not separator:
+            continue
+        fields[key.strip()] = _unquote(value.strip())
+    return fields
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        inner = value[1:-1]
+        return inner.replace('\\"', '"').replace("\\\\", "\\") if value[0] == '"' else inner
+    return value
+
+
+def item_directories(work_root: pathlib.Path) -> list[pathlib.Path]:
+    """Every work item, active or archived, enumerated from the filesystem."""
+    if not work_root.is_dir():
+        return []
+    found = [path for path in work_root.iterdir() if path.is_dir() and path.name != "archive"]
+    archive = work_root / "archive"
+    if archive.is_dir():
+        for month in archive.iterdir():
+            if month.is_dir():
+                found.extend(path for path in month.iterdir() if path.is_dir())
+    return sorted(found)
+
+
+def check_shape(work_root: pathlib.Path, report: Report) -> None:
+    """Rule 1."""
+    archive = work_root / "archive"
+    if archive.is_dir():
+        for month in sorted(archive.iterdir()):
+            if month.is_dir() and not ARCHIVE_MONTH_RE.match(month.name):
+                report.fail(str(month), "archive buckets are named YYYY-MM")
+
+    for item in item_directories(work_root):
+        match = ITEM_DIR_RE.match(item.name)
+        if not match:
+            report.fail(str(item), "a work item directory is named <YYYY-MM-DD>-<slug>")
+            continue
+
+        prd = item / "prd.md"
+        if not prd.is_file():
+            report.fail(str(item), "every work item has a prd.md")
+            continue
+
+        for path in sorted(item.iterdir()):
+            if path.is_dir():
+                report.fail(str(path), "a work item holds documents, not subdirectories")
+            elif path.name not in ITEM_DOCUMENTS:
+                report.fail(
+                    str(path),
+                    "a work item holds prd.md, design.md and implement.md only",
+                )
+
+        fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
+        if fields is None:
+            report.fail(str(prd), "prd.md opens with a --- frontmatter block")
+            continue
+        if not fields.get("title"):
+            report.fail(str(prd), "frontmatter needs a non-empty title")
+        status = fields.get("status", "")
+        if status not in ITEM_STATUSES:
+            report.fail(str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}")
+        created = fields.get("created", "")
+        if not DATE_RE.match(created):
+            report.fail(str(prd), f"created {created!r} is not a YYYY-MM-DD date")
+        elif created != match.group("date"):
+            report.fail(str(prd), f"created {created} disagrees with the directory date")
+
+
+def check_ready(work_root: pathlib.Path, report: Report) -> None:
+    """Rule 2."""
+    for item in item_directories(work_root):
+        prd = item / "prd.md"
+        if not prd.is_file():
+            continue
+        text = prd.read_text(encoding="utf-8")
+        fields = parse_frontmatter(text)
+        if fields is None:
+            continue
+        status = fields.get("status", "")
+        if status not in WORKABLE_STATUSES:
+            continue
+
+        if not any(ACCEPTANCE_HEADING_RE.match(line) for line in text.split("\n")):
+            report.fail(str(prd), f"a {status} item states acceptance criteria")
+        for number, line in enumerate(text.split("\n"), start=1):
+            if BLOCKING_RE.search(line):
+                report.fail(f"{prd}:{number}", f"a {status} item has no open BLOCKING line")
+        if status == "in_progress" and not fields.get("branch"):
+            report.fail(str(prd), "an in_progress item records the branch it lives on")
+
+
+def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
+    """Rule 3."""
+    if not decisions_root.is_dir():
+        report.note(f"rule 3 decision shape: no {decisions_root} directory, nothing to check")
+        return
+
+    records = sorted(path for path in decisions_root.rglob("*.md") if path.is_file())
+    for record in records:
+        if record.name == "index.md":
+            continue
+        match = DECISION_FILE_RE.match(record.name)
+        if not match:
+            report.fail(str(record), "a decision record is named <YYYY-MM-DD>-<slug>.md")
+            continue
+        text = record.read_text(encoding="utf-8")
+        fields = parse_frontmatter(text)
+        if fields is None:
+            report.fail(str(record), "a decision record opens with a --- frontmatter block")
+            continue
+        if not fields.get("title"):
+            report.fail(str(record), "frontmatter needs a non-empty title")
+        status = fields.get("status", "")
+        if status not in DECISION_STATUSES:
+            report.fail(
+                str(record), f"status {status!r} is not one of {', '.join(DECISION_STATUSES)}"
+            )
+        date = fields.get("date", "")
+        if not DATE_RE.match(date):
+            report.fail(str(record), f"date {date!r} is not a YYYY-MM-DD date")
+        elif date != match.group("date"):
+            report.fail(str(record), f"date {date} disagrees with the filename date")
+        if not any(DECISION_HEADING_RE.match(line) for line in text.split("\n")):
+            report.fail(str(record), "a decision record states its decision under a Decision heading")
+
+    report.note(f"rule 3 decision shape: checked {len(records)} record(s)")
+
+
+def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
+    """Rule 4."""
+    if not spec_root.is_dir():
+        report.note(f"rule 4 spec index: no {spec_root} directory, nothing to check")
+        return
+
+    directories = sorted(
+        {path.parent for path in spec_root.rglob("*.md") if path.is_file()}
+    )
+    for directory in directories:
+        pages = sorted(
+            path.name
+            for path in directory.iterdir()
+            if path.is_file() and path.suffix == ".md" and path.name != "index.md"
+        )
+        index = directory / "index.md"
+        if not index.is_file():
+            report.fail(str(directory), "every spec directory has an index.md")
+            continue
+        if not pages:
+            continue
+        linked = {
+            target.split("#", 1)[0].rsplit("/", 1)[-1]
+            for target in MARKDOWN_LINK_RE.findall(index.read_text(encoding="utf-8"))
+        }
+        for page in pages:
+            if page not in linked:
+                report.fail(str(index), f"index does not link {page}")
+
+    report.note(f"rule 4 spec index: checked {len(directories)} spec directory(ies)")
+
+
+def check_pr_link(
+    repo: pathlib.Path, work_root: pathlib.Path, body: str | None, report: Report
+) -> None:
+    """Rule 5."""
+    if body is None:
+        report.note("rule 5 PR link: no --pr-body supplied, not run")
+        return
+
+    matches = WORK_LINE_RE.findall(body)
+    if not matches:
+        report.fail("pull request body", "needs a Work: line naming the item it advances")
+        return
+    if len(matches) > 1:
+        report.fail("pull request body", f"has {len(matches)} Work: lines; exactly one is allowed")
+        return
+
+    value = matches[0]
+    none_match = WORK_NONE_RE.match(value)
+    if none_match:
+        report.note(f"rule 5 PR link: no work item, reason {none_match.group('reason')!r}")
+        return
+    if value.startswith("none"):
+        report.fail("pull request body", "Work: none needs a reason, written `none - <reason>`")
+        return
+    if not value:
+        report.fail("pull request body", "Work: line is empty")
+        return
+
+    candidate = (repo / value).resolve()
+    try:
+        candidate.relative_to(work_root.resolve())
+    except ValueError:
+        report.fail("pull request body", f"Work: {value} is not a path under {work_root}")
+        return
+    if not candidate.is_dir():
+        report.fail("pull request body", f"Work: {value} does not resolve to a work item")
+        return
+
+    unchecked = []
+    for document in sorted(candidate.glob("*.md")):
+        for number, line in enumerate(document.read_text(encoding="utf-8").split("\n"), start=1):
+            if UNCHECKED_BOX_RE.match(line):
+                unchecked.append(f"{document.relative_to(repo)}:{number}")
+    if unchecked:
+        report.fail(
+            "pull request body",
+            f"Work: {value} still has {len(unchecked)} unchecked box(es), first at {unchecked[0]}",
+        )
+        return
+
+    report.note(f"rule 5 PR link: {value} resolves with no unchecked boxes")
+
+
+def run(
+    repo: pathlib.Path,
+    work_dir: str,
+    spec_dir: str,
+    decisions_dir: str,
+    pr_body: str | None,
+) -> Report:
+    report = Report()
+    repo = repo.resolve()
+    work_root = repo / work_dir
+    if not work_root.is_dir():
+        report.fail(str(work_root), "the work directory does not exist")
+        return report
+
+    check_shape(work_root, report)
+    check_ready(work_root, report)
+    report.note(f"rules 1-2 work items: checked {len(item_directories(work_root))} item(s)")
+    check_decisions(repo / decisions_dir, report)
+    check_spec_index(repo / spec_dir, report)
+    check_pr_link(repo, work_root, pr_body, report)
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Lint docs/work, docs/spec and docs/decisions.")
+    parser.add_argument(
+        "--repo",
+        type=pathlib.Path,
+        default=pathlib.Path(__file__).resolve().parent.parent,
+        help="repository root to lint (default: this script's repository)",
+    )
+    parser.add_argument("--work-dir", default="docs/work", help="work item root, repo-relative")
+    parser.add_argument("--spec-dir", default="docs/spec", help="spec root, repo-relative")
+    parser.add_argument(
+        "--decisions-dir", default="docs/decisions", help="decision record root, repo-relative"
+    )
+    parser.add_argument(
+        "--pr-body",
+        type=pathlib.Path,
+        help="file holding the pull request body; enables rule 5",
+    )
+    args = parser.parse_args(argv)
+
+    body: str | None = None
+    if args.pr_body is not None:
+        try:
+            body = args.pr_body.read_text(encoding="utf-8")
+        except OSError as error:
+            print(f"error: cannot read --pr-body: {error}", file=sys.stderr)
+            return 2
+
+    report = run(args.repo, args.work_dir, args.spec_dir, args.decisions_dir, body)
+    for note in report.notes:
+        print(note)
+    for failure in report.failures:
+        print(f"FAIL {failure}", file=sys.stderr)
+    if report.failures:
+        print(f"sd-docs-lint: {len(report.failures)} failure(s)", file=sys.stderr)
+        return 1
+    print("sd-docs-lint: clean")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

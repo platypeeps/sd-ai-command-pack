@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/adapter-guidelines.md", "reason": "Verify public result compatibility, exact-head receipt authority, docs, and focused tests."}
-{"file": ".trellis/spec/backend/manifest-and-filesystem.md", "reason": "Verify template/root byte parity and shipped payload closure."}
