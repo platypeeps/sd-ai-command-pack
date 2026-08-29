@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""Run the repository's own checks and report a typed result.
+
+sd-check owns no checks of its own. It asks `sd_lib.detect_entrypoints` how
+this repository spells `check`, `test` and `lint` -- the `CLAUDE.local.md`
+block if it says, otherwise the Makefile, Taskfile, package.json, Cargo.toml or
+pyproject.toml it finds -- runs what it found, and reports one result per name.
+
+Four statuses, and only one of them is a failure:
+
+  pass      the command ran and exited 0
+  fail      the command ran and exited non-zero, or timed out
+  skipped   an entrypoint exists but this run deliberately did not use it
+            (the repo's aggregate `check` covers it, or `--only` excluded it)
+  absent    this repository has no such entrypoint
+
+`absent` is not `skipped` and neither is a failure: a repository with no lint
+target is not a repository that failed lint.
+
+Exit 0 when nothing failed, 1 when a check failed, 2 when the invocation or the
+configuration was wrong. A controlled error prints a sentence, never a
+traceback. sd-check itself writes nothing, changes no git state, and makes no
+network call; whatever the repo's own check command does is the repo's business.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+import time
+from typing import TextIO
+
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+import sd_lib  # noqa: E402
+
+PASS = "pass"
+FAIL = "fail"
+SKIPPED = "skipped"
+ABSENT = "absent"
+
+DEFAULT_TIMEOUT_SECONDS = 900
+OUTPUT_TAIL_CHARS = 4000
+SCHEMA_VERSION = 1
+
+
+class UsageError(Exception):
+    """An invocation or configuration fault: exit 2, no traceback."""
+
+
+def _tail(text: str) -> tuple[str, bool]:
+    if len(text) <= OUTPUT_TAIL_CHARS:
+        return text, False
+    return text[-OUTPUT_TAIL_CHARS:], True
+
+
+def plan(
+    detection: sd_lib.Detection, only: str | None
+) -> list[dict[str, object]]:
+    """Decide, before running anything, what each name's outcome will be.
+
+    The aggregate rule: when a repository defines its own `check`, that is the
+    entrypoint it wants run, and running `test` and `lint` after it would repeat
+    work the aggregate already did. They are reported `skipped`, not hidden --
+    and `--only lint` still runs one of them on demand.
+    """
+    commands = detection.commands
+    if only is not None and only not in commands:
+        known = ", ".join(commands) or "none"
+        raise UsageError(f"--only {only}: not a detected entrypoint (detected: {known})")
+
+    entries: list[dict[str, object]] = []
+    for name in sd_lib.CHECK_NAMES:
+        command = commands.get(name)
+        if command is None:
+            entries.append(
+                {"name": name, "command": None, "status": ABSENT, "reason": "no entrypoint"}
+            )
+            continue
+        if only is not None and name != only:
+            entries.append(
+                {
+                    "name": name,
+                    "command": command,
+                    "status": SKIPPED,
+                    "reason": f"--only {only}",
+                }
+            )
+            continue
+        if only is None and name != "check" and "check" in commands:
+            entries.append(
+                {
+                    "name": name,
+                    "command": command,
+                    "status": SKIPPED,
+                    "reason": "covered by the check entrypoint",
+                }
+            )
+            continue
+        entries.append({"name": name, "command": command, "status": None, "reason": ""})
+    return entries
+
+
+def run_one(
+    command: list[str], root: pathlib.Path, timeout: int
+) -> tuple[str, int | None, float, str, str, str]:
+    """Run one check. Output is captured and attributed, never interleaved."""
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(  # fixed argv, no shell
+            command,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return FAIL, None, time.monotonic() - started, "", "", f"timed out after {timeout}s"
+    except OSError as error:
+        return FAIL, None, time.monotonic() - started, "", "", f"cannot run {command[0]}: {error}"
+    duration = time.monotonic() - started
+    status = PASS if completed.returncode == 0 else FAIL
+    return status, completed.returncode, duration, completed.stdout, completed.stderr, ""
+
+
+def overall(statuses: list[str]) -> str:
+    if FAIL in statuses:
+        return FAIL
+    if PASS in statuses:
+        return PASS
+    if all(status == ABSENT for status in statuses):
+        return ABSENT
+    return SKIPPED
+
+
+def execute(
+    root: pathlib.Path,
+    detection: sd_lib.Detection,
+    only: str | None,
+    dry_run: bool,
+    timeout: int,
+) -> dict[str, object]:
+    entries = plan(detection, only)
+    checks: list[dict[str, object]] = []
+    for entry in entries:
+        record: dict[str, object] = {
+            "name": entry["name"],
+            "command": entry["command"],
+            "status": entry["status"],
+            "exit_code": None,
+            "duration_seconds": 0.0,
+            "reason": entry["reason"],
+            "stdout": "",
+            "stderr": "",
+            "output_truncated": False,
+        }
+        if entry["status"] is None:
+            command = entry["command"]
+            assert isinstance(command, list)
+            if dry_run:
+                record["status"] = SKIPPED
+                record["reason"] = "dry run"
+            else:
+                status, code, duration, out, err, note = run_one(command, root, timeout)
+                out_tail, out_cut = _tail(out)
+                err_tail, err_cut = _tail(err)
+                record.update(
+                    status=status,
+                    exit_code=code,
+                    duration_seconds=round(duration, 3),
+                    reason=note,
+                    stdout=out_tail,
+                    stderr=err_tail,
+                    output_truncated=out_cut or err_cut,
+                )
+        checks.append(record)
+
+    statuses = [str(record["status"]) for record in checks]
+    return {
+        "tool": "sd-check",
+        "schema": SCHEMA_VERSION,
+        "repo": str(root),
+        "source": detection.source,
+        "origin": str(detection.origin) if detection.origin else None,
+        "detected": detection.reason,
+        "dry_run": dry_run,
+        "status": SKIPPED if dry_run and detection.commands else overall(statuses),
+        "checks": checks,
+    }
+
+
+def render(result: dict[str, object], stream: TextIO) -> None:
+    """Human output: one line per name, then any failing output, attributed."""
+    write = stream.write
+    source = result["source"] or "none"
+    write(f"sd-check: {result['repo']}\n")
+    write(f"  entrypoints: {source} ({result['detected']})\n")
+    checks = result["checks"]
+    assert isinstance(checks, list)
+    for record in checks:
+        command = record["command"]
+        shown = " ".join(command) if isinstance(command, list) else "-"
+        note = f"  ({record['reason']})" if record["reason"] else ""
+        write(
+            f"  {str(record['name']):<6} {str(record['status']):<8}"
+            f" {float(record['duration_seconds']):6.1f}s  {shown}{note}\n"
+        )
+    for record in checks:
+        if record["status"] != FAIL:
+            continue
+        write(f"\n--- {record['name']} (exit {record['exit_code']}) ---\n")
+        for channel in ("stdout", "stderr"):
+            text = str(record[channel])
+            if text.strip():
+                write(f"[{channel}]\n{text.rstrip()}\n")
+    if result["dry_run"]:
+        write("sd-check: dry run, nothing executed\n")
+    else:
+        write(f"sd-check: {result['status']}\n")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sd-check",
+        description="Run this repository's own check entrypoints and report a typed result.",
+    )
+    parser.add_argument("--repo", type=pathlib.Path, help="directory inside the repo (default: cwd)")
+    parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
+    parser.add_argument("--dry-run", action="store_true", help="print what would run, then exit 0")
+    parser.add_argument("--only", metavar="NAME", help=f"run one of {', '.join(sd_lib.CHECK_NAMES)}")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=f"per-check timeout (default: {DEFAULT_TIMEOUT_SECONDS})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.timeout <= 0:
+            raise UsageError("--timeout takes a positive number of seconds")
+        if args.only is not None and args.only not in sd_lib.CHECK_NAMES:
+            raise UsageError(
+                f"--only {args.only}: not one of {', '.join(sd_lib.CHECK_NAMES)}"
+            )
+        root = sd_lib.repo_root(args.repo)
+        if root is None:
+            where = args.repo if args.repo is not None else pathlib.Path.cwd()
+            raise UsageError(f"{where} is not inside a git repository")
+        detection = sd_lib.detect_entrypoints(root)
+        result = execute(root, detection, args.only, args.dry_run, args.timeout)
+    except sd_lib.ConfigError as error:
+        print(f"sd-check: error: {error}", file=sys.stderr)
+        return 2
+    except UsageError as error:
+        print(f"sd-check: error: {error}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        render(result, sys.stdout)
+    if args.dry_run:
+        return 0
+    return 1 if result["status"] == FAIL else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

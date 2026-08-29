@@ -31,6 +31,12 @@ import pathlib
 import re
 import sys
 
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+from sd_lib import parse_frontmatter  # noqa: E402
+
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ITEM_DIR_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
 DECISION_FILE_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
@@ -61,36 +67,6 @@ class Report:
 
     def note(self, message: str) -> None:
         self.notes.append(message)
-
-
-def parse_frontmatter(text: str) -> dict[str, str] | None:
-    """Read a leading `---` block of flat `key: value` scalars.
-
-    Deliberately not a YAML parser: the frontmatter this lints is a handful of
-    flat scalars, and depending on PyYAML would make a stdlib-only tool a tool
-    with an install step.
-    """
-    if not text.startswith("---\n"):
-        return None
-    end = text.find("\n---", 3)
-    if end == -1:
-        return None
-    fields: dict[str, str] = {}
-    for line in text[4:end].split("\n"):
-        if not line.strip():
-            continue
-        key, separator, value = line.partition(":")
-        if not separator:
-            continue
-        fields[key.strip()] = _unquote(value.strip())
-    return fields
-
-
-def _unquote(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        inner = value[1:-1]
-        return inner.replace('\\"', '"').replace("\\\\", "\\") if value[0] == '"' else inner
-    return value
 
 
 def item_directories(work_root: pathlib.Path) -> list[pathlib.Path]:
