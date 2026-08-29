@@ -135,6 +135,40 @@ failure-behaviour section rules out, and both hold at once: a second lane does
 not make a codex failure locally terminal, and a second lane is still needed to
 keep `codebase` reviewable.
 
+### The default set is `codex` + `gito`
+
+`gito` is the second lane, and the choice is not a coin flip: the builtin
+`prism` adapter is actively unsuitable, for reasons already measured and
+written down in the chunked-prism review script carried by the
+`sd-github-review` checkout.
+
+- `NeedsChunking` gates on its own `ChunkThreshold` constant of 100 KB rather
+  than on `ChunkMaxBytes`, so a delta under 100 KB never reaches
+  `SplitIntoChunks` and the configured chunk size is never consulted. Measured
+  on a 47.5 KB, 8-file delta: one unchunked request returned 15 findings in
+  81.7s, three 20 KB chunks returned 19 in 51.9s. In the degenerate band a
+  110 KB, 23-file delta returned `[]` in 3.2s with 4 output tokens, while the
+  same prompt over one 14 KB file returned 8 findings.
+- `.prism/rules.json` is never loaded, because `LoadRules("")` returns nil and
+  the pack never passes `--rules`. Every one of the eight consumers has a
+  `.prism` directory, so each has focus areas, severity overrides, and required
+  checks that the builtin adapter would silently ignore.
+
+Both failures are silent: the review exits zero and prints a finding count
+either way. Ordinary branches live in exactly the band where this misfires, so
+`prism`'s cheaper `costTier` buys degraded output rather than savings.
+
+`gito` is also what both working precedents already chose — the pack runs
+`codex` + `gito`, and `sd-github-review` runs `codex` + `prism-chunked` +
+`gito` with the builtin `prism` explicitly `enabled: false`. All nine
+repositories already carry a `.gito/config.toml`, so nothing new has to be
+configured.
+
+Adopt `codex` + `gito` as the default for every consumer. A consumer departs
+from it only with a recorded reason. Porting that chunked-prism script into a
+consumer is a later upgrade for repositories whose `.prism` rules earn it, not
+part of this rollout.
+
 ### The file this task adds is inside the fleet's gito exclusion
 
 All eight target consumers blanket-exclude the directory this task writes into:
@@ -183,10 +217,10 @@ machine without it degrades to the same routed path these consumers use today.
 
 ## Requirements
 
-1. Decide the provider set each consumer gets and record the decision per
-   consumer rather than assuming one shape fits all nine. Keep at least one
-   enabled codebase-capable provider unless the consumer explicitly gives up
-   `scope=codebase` and that decision is recorded.
+1. Give every consumer `codex` + `gito` unless a recorded reason says
+   otherwise. Do not use the builtin `prism` adapter as the second lane. Keep
+   at least one enabled codebase-capable provider unless the consumer
+   explicitly gives up `scope=codebase` and that decision is recorded.
 2. Author `.sd-ai-command-pack/review.json` in each consumer that lacks one,
    with `codex` enabled. Decide `policy.localAdvisorySeverityCeiling`
    separately and per consumer, recording the reason when it is set; omitting
