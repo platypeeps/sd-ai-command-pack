@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -704,6 +706,11 @@ class HousekeepingTests(InstallTestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
         )
         function_source = (
+            # The real bounded runner, not a stub: the exit status the bound
+            # produces is part of the contract these probes exercise.
+            f'. {str(install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh")!r};'
+            'HOUSEKEEPING_KB_TIMEOUT_SECONDS="${KB_TIMEOUT:-60}";'
+            f'eval "$(awk \'/^obsidian_kb_target\\(\\)/,/^}}/\' {script})";'
             f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
         )
 
@@ -803,6 +810,11 @@ class HousekeepingTests(InstallTestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
         )
         function_source = (
+            # The real bounded runner, not a stub: the exit status the bound
+            # produces is part of the contract these probes exercise.
+            f'. {str(install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh")!r};'
+            'HOUSEKEEPING_KB_TIMEOUT_SECONDS="${KB_TIMEOUT:-60}";'
+            f'eval "$(awk \'/^obsidian_kb_target\\(\\)/,/^}}/\' {script})";'
             f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
         )
 
@@ -956,6 +968,83 @@ class HousekeepingTests(InstallTestCase):
         failed_status = probe(status_lines=[], status_rc=1, kb_write=0)
         self.assertIn("detail=[]", failed_status)
 
+    def test_housekeeping_kb_refresh_timeout_degrades_and_names_the_target(
+        self,
+    ) -> None:
+        """A stalled `.obsidian-kb` target must not stall the whole run.
+
+        The helper writes through the symlink, so a target on a cloud-synced
+        filesystem can block in the kernel rather than returning an error. The
+        bound ends the step; the run continues because the KB is a regenerable
+        mirror the merge never reads, and the anomaly names the resolved target
+        because a stalled run has no other way to surface it.
+        """
+
+        if self._bash_path is None:
+            self.skipTest("bash is not available on PATH")
+        script = str(
+            install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
+        )
+        function_source = (
+            f'. {str(install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh")!r};'
+            'HOUSEKEEPING_KB_TIMEOUT_SECONDS="${KB_TIMEOUT:-60}";'
+            f'eval "$(awk \'/^obsidian_kb_target\\(\\)/,/^}}/\' {script})";'
+            f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            toolchain = scripts_dir / "sd-ai-command-pack-toolchain.sh"
+            helper = scripts_dir / "sd-ai-command-pack-update-spec-kb.py"
+            helper.write_text("# fixture\n", encoding="utf-8")
+            # Stands in for a write that blocks instead of failing.
+            toolchain.write_text(
+                "#!/usr/bin/env bash\nsleep 30\n",
+                encoding="utf-8",
+            )
+            vault = root / "vault-kb"
+            vault.mkdir()
+            (root / ".obsidian-kb").symlink_to(vault)
+
+            probe = (
+                "ACTIONS=(); ANOMALIES=(); DRY_RUN=0;"
+                f"SCRIPT_DIR={str(scripts_dir)!r};"
+                'add_action() { ACTIONS+=("$*"); };'
+                'add_anomaly() { ANOMALIES+=("$*"); };'
+                f"{function_source}"
+                "refresh_obsidian_kb; rc=$?;"
+                'printf "rc=%s\\nactions=%s\\nanomalies=%s\\n" '
+                '"$rc" "${ACTIONS[*]-}" "${ANOMALIES[*]-}"'
+            )
+
+            started = time.monotonic()
+            timed_out = subprocess.run(
+                [self._bash_path, "-c", probe],
+                cwd=root,
+                env={**os.environ, "KB_TIMEOUT": "1"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            elapsed = time.monotonic() - started
+
+            # Degrade, not block: the same reasoning as the read-only case.
+            self.assertEqual(timed_out.returncode, 0, timed_out.stdout)
+            self.assertIn("rc=0", timed_out.stdout)
+            self.assertIn("kb_refresh_timed_out", timed_out.stdout)
+            self.assertIn("did not complete within 1s", timed_out.stdout)
+            # The resolved target, not the symlink name, is the operator's lead.
+            self.assertIn(str(vault), timed_out.stdout)
+            self.assertIn(
+                "SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS",
+                timed_out.stdout,
+            )
+            # The bound actually ends the step rather than waiting out the stub.
+            self.assertLess(elapsed, 20, timed_out.stdout)
+
     def test_housekeeping_kb_ignore_write_flag_tracks_helper_write_states(
         self,
     ) -> None:
@@ -965,6 +1054,11 @@ class HousekeepingTests(InstallTestCase):
             install.ROOT / "templates/scripts/sd-ai-command-pack-housekeeping.sh"
         )
         function_source = (
+            # The real bounded runner, not a stub: the exit status the bound
+            # produces is part of the contract these probes exercise.
+            f'. {str(install.ROOT / "templates/scripts/sd-ai-command-pack-shell-lib.sh")!r};'
+            'HOUSEKEEPING_KB_TIMEOUT_SECONDS="${KB_TIMEOUT:-60}";'
+            f'eval "$(awk \'/^obsidian_kb_target\\(\\)/,/^}}/\' {script})";'
             f'eval "$(awk \'/^refresh_obsidian_kb\\(\\)/,/^}}/\' {script})";'
         )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+
 try:
     import install_test_support as _support
 except ModuleNotFoundError as exc:
@@ -2120,11 +2122,30 @@ class StatusTests(InstallTestCase):
         )
         return status, git
 
-    def github_evidence(self, *, status_value="available", prs=()):
+    def github_evidence(
+        self,
+        *,
+        status_value="available",
+        prs=(),
+        closed_prs=(),
+        closed_status=None,
+    ):
         return {
             "openPrs": list(prs),
             "openPrsStatus": status_value,
+            "closedPrs": list(closed_prs),
+            "closedPrsStatus": closed_status or status_value,
         }
+
+    def remote_only_branch(self, root, name: str, *, merged: bool = False) -> None:
+        """Leave `name` on the remote with no local ref, as an abandonment does."""
+
+        if merged:
+            self.run_git(root, "branch", name)
+        else:
+            self.unmerged_branch(root, name)
+        self.run_git(root, "push", "origin", name)
+        self.run_git(root, "branch", "-D", name)
 
     def unmerged_branch(self, root, name: str) -> None:
         self.run_git(root, "switch", "-c", name)
@@ -2137,6 +2158,255 @@ class StatusTests(InstallTestCase):
         return {
             row["branch"]: row["disposition"] for row in classification["rows"]
         }
+
+    def test_remote_only_branch_is_classified(self) -> None:
+        """A branch with no local ref is classified by nothing else."""
+
+        root = self.make_status_repo()
+        self.remote_only_branch(root, "feat/abandoned")
+
+        status, git = self.collect_git_for(root)
+        classification = status.classify_remote_branches(git, self.github_evidence())
+
+        self.assertEqual(classification["status"], "ok")
+        self.assertEqual(
+            self.dispositions(classification),
+            {"origin/feat/abandoned": "unmerged-without-pull-request"},
+        )
+        # The local classifier sees nothing here, which is the defect: without
+        # the remote pass the branch reaches no row, follow-up, or anomaly.
+        self.assertEqual(
+            status.classify_local_branches(git, self.github_evidence())["rows"],
+            [],
+        )
+
+    def test_remote_branch_with_closed_unmerged_pr_is_distinguished(self) -> None:
+        root = self.make_status_repo()
+        self.remote_only_branch(root, "feat/closed-pr")
+        self.remote_only_branch(root, "feat/never-had-one")
+
+        status, git = self.collect_git_for(root)
+        classification = status.classify_remote_branches(
+            git,
+            self.github_evidence(
+                closed_prs=[
+                    {"number": 570, "head": "feat/closed-pr", "merged": False},
+                ]
+            ),
+        )
+
+        # "Someone decided not to ship this" and "nobody ever opened one" call
+        # for different operator action, so they are different dispositions.
+        self.assertEqual(
+            self.dispositions(classification),
+            {
+                "origin/feat/closed-pr": "unmerged-with-closed-pull-request",
+                "origin/feat/never-had-one": "unmerged-without-pull-request",
+            },
+        )
+        rows = {row["branch"]: row for row in classification["rows"]}
+        self.assertEqual(rows["origin/feat/closed-pr"]["pullRequest"], 570)
+
+        codes = dict(
+            status.branch_classification_anomalies(classification, scope="remote")
+        )
+        self.assertIn("remote_branches_pull_request_closed_unmerged", codes)
+        self.assertIn(
+            "origin/feat/closed-pr",
+            codes["remote_branches_pull_request_closed_unmerged"],
+        )
+        # Status never fetches, so an advisory row must not read as a claim
+        # about the remote as it is right now.
+        self.assertIn(
+            "cached remote-tracking refs",
+            codes["remote_branches_pull_request_closed_unmerged"],
+        )
+        self.assertIn("remote_branches_unmerged_without_pr", codes)
+
+    def test_remote_branch_reachable_from_default_reads_merged(self) -> None:
+        """Merge evidence must come from a ref that can witness it.
+
+        The local classifier walks `--merged refs/heads`, which no remote-only
+        ref appears in; reusing it here would report every remote branch
+        unmerged.
+        """
+
+        root = self.make_status_repo()
+        self.remote_only_branch(root, "chore/already-merged", merged=True)
+
+        status, git = self.collect_git_for(root)
+        self.assertNotIn(
+            "origin/chore/already-merged",
+            git.get("mergedIntoDefault") or [],
+        )
+        classification = status.classify_remote_branches(git, self.github_evidence())
+
+        self.assertEqual(
+            self.dispositions(classification),
+            {"origin/chore/already-merged": "merged"},
+        )
+        self.assertEqual(
+            status.branch_classification_anomalies(classification, scope="remote"),
+            [],
+        )
+
+    def test_truncated_pr_evidence_leaves_remote_rows_unknown(self) -> None:
+        root = self.make_status_repo()
+        self.remote_only_branch(root, "feat/unknowable")
+
+        status, git = self.collect_git_for(root)
+        max_items = status.MAX_ITEMS
+        classification = status.classify_remote_branches(
+            git,
+            self.github_evidence(
+                prs=[
+                    {"number": index, "head": f"other/{index}"}
+                    for index in range(max_items)
+                ]
+            ),
+        )
+
+        # A full page proves nothing about a branch missing from it: the
+        # absence claim is withheld, exactly as it is for a local branch.
+        self.assertEqual(
+            self.dispositions(classification),
+            {"origin/feat/unknowable": "unknown"},
+        )
+        self.assertEqual(
+            classification["evidence"]["pullRequests"], "pr_evidence_truncated"
+        )
+        codes = dict(
+            status.branch_classification_anomalies(classification, scope="remote")
+        )
+        self.assertIn("remote_branches_pr_state_unknown", codes)
+        self.assertIn("pr_evidence_truncated", codes["remote_branches_pr_state_unknown"])
+        self.assertIn("not a claim", codes["remote_branches_pr_state_unknown"])
+
+        closed_truncated = status.classify_remote_branches(
+            git,
+            self.github_evidence(
+                closed_prs=[
+                    {"number": index, "head": f"other/{index}", "merged": True}
+                    for index in range(max_items)
+                ]
+            ),
+        )
+        self.assertEqual(
+            self.dispositions(closed_truncated),
+            {"origin/feat/unknowable": "unknown"},
+        )
+
+    def test_branch_on_both_sides_yields_exactly_one_row(self) -> None:
+        root = self.make_status_repo()
+        self.unmerged_branch(root, "feat/still-local")
+        self.run_git(root, "push", "origin", "feat/still-local")
+
+        status, git = self.collect_git_for(root)
+        self.assertIn("origin/feat/still-local", git["remoteBranches"])
+        local = status.classify_local_branches(git, self.github_evidence())
+        remote = status.classify_remote_branches(git, self.github_evidence())
+
+        self.assertEqual(
+            self.dispositions(local),
+            {"feat/still-local": "unmerged-without-pull-request"},
+        )
+        self.assertEqual(remote["rows"], [])
+
+    def test_default_branch_and_head_are_excluded_from_remote_rows(self) -> None:
+        root = self.make_status_repo()
+
+        status, git = self.collect_git_for(root)
+        self.assertIn("origin/HEAD", git["remoteBranches"])
+        self.assertIn("origin/main", git["remoteBranches"])
+        classification = status.classify_remote_branches(git, self.github_evidence())
+
+        self.assertEqual(classification["rows"], [])
+
+    def test_json_report_exposes_remote_branch_rows(self) -> None:
+        root = self.make_status_repo()
+        self.remote_only_branch(root, "feat/abandoned")
+
+        result = self.run_status(root, "--json", "--no-network")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        payload = json.loads(result.stdout)
+
+        classification = payload["remoteBranchClassification"]
+        self.assertEqual(classification["status"], "ok")
+        self.assertEqual(
+            [row["branch"] for row in classification["rows"]],
+            ["origin/feat/abandoned"],
+        )
+        # --no-network leaves no pull-request evidence, so the absence claim is
+        # withheld rather than asserted.
+        self.assertEqual(
+            classification["rows"][0]["disposition"],
+            "unknown",
+        )
+
+    def test_status_collector_issues_no_network_git_command(self) -> None:
+        """Status is read-only and never fetches; this enumerates, not greps.
+
+        Every git argv the collector can build is read off the AST, so a new
+        network or mutating subcommand fails here rather than silently shipping.
+        """
+
+        source = (
+            PACK_ROOT / "templates/scripts/sd-ai-command-pack-status.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        read_only = {
+            "for-each-ref",
+            "log",
+            "ls-files",
+            "ls-remote",
+            "merge-base",
+            "remote",
+            "rev-parse",
+            "show-ref",
+            "stash",
+            "status",
+            "symbolic-ref",
+            "worktree",
+        }
+
+        def first_subcommand(values: list[str]) -> str | None:
+            for value in values:
+                if value.startswith("-"):
+                    continue
+                return value
+            return None
+
+        seen: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            args: list[str] | None = None
+            if isinstance(node.func, ast.Name) and node.func.id == "git_output":
+                args = [
+                    arg.value
+                    for arg in node.args[1:]
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                ]
+            elif node.args and isinstance(node.args[0], ast.List):
+                literals = [
+                    element.value
+                    for element in node.args[0].elts
+                    if isinstance(element, ast.Constant)
+                    and isinstance(element.value, str)
+                ]
+                if literals[:1] != ["git"]:
+                    continue
+                args = literals[1:]
+            if not args:
+                continue
+            subcommand = first_subcommand(args)
+            if subcommand and subcommand != "-C":
+                seen.add(subcommand)
+
+        self.assertTrue(seen)
+        self.assertEqual(seen - read_only, set())
+        for forbidden in ("fetch", "pull", "push", "prune"):
+            self.assertNotIn(forbidden, seen)
 
     def test_branch_dispositions_separate_merged_unmerged_and_prless(self) -> None:
         root = self.make_status_repo()

@@ -163,6 +163,10 @@ const ABSENT_PATH_MARKER_PATTERN =
 // shared literal a persistent `lastIndex`, so alternating callers would see
 // alternating results for identical input.
 const LINE_SUFFIX_PATTERN = /(?::~?\d+(?:-\d+)?(?:,~?\d+(?:-\d+)?)*)+$/;
+// An extension on the final segment: the other shape, besides a line citation,
+// that marks a reference as a location rather than a name. The extension must
+// begin with a letter so a version-like tail (`docs/v1.2`) is not read as one.
+const PATH_EXTENSION_PATTERN = /\.[A-Za-z][A-Za-z0-9]*$/;
 // The pack's own file-naming convention in its two forms: hyphens for
 // executables, underscores for importable Python modules. Prose routinely
 // drops the prefix -- `review.py` naming the tracked file whose basename is
@@ -5365,8 +5369,28 @@ export function shouldCheckDocumentationPathReference(target, kind = 'code-span'
     return true;
   }
 
+  // A configured prefix marks a path CLAIM only when the tail is shaped like a
+  // location. `apps/`, `docs/`, `scripts/`, and `tests/` are also ordinary Git
+  // branch-name prefixes, and `docs/<slug>` is a common branch convention, so
+  // an unconditional accept here failed documents for naming a branch -- while
+  // the same document's `origin/<slug>` passed untouched, because `origin/` is
+  // not a configured prefix, making the gate's behaviour on a branch name an
+  // accident of its leading segment. The tail decides instead of the head: a
+  // line or range citation, or a file extension on the final segment. A branch
+  // name carries neither, and both tests are pure SHAPE, exactly like the
+  // bare-filename rule below.
+  //
+  // The cost is deliberate and is the reason the `[absent: ...]` marker was not
+  // reused: that marker asserts a *path* is intentionally absent, which is a
+  // false claim to make about a branch. An extensionless directory reference
+  // (`docs/fleet`) is now read as a name rather than a location and is no
+  // longer checked; cite a file inside it, or add a line citation, to keep it
+  // checked.
   if (referencePrefixes.some((prefix) => normalized.startsWith(prefix))) {
-    return true;
+    if (LINE_SUFFIX_PATTERN.test(normalized)) {
+      return true;
+    }
+    return PATH_EXTENSION_PATTERN.test(normalized.slice(normalized.lastIndexOf('/') + 1));
   }
 
   // A bare filename — one carrying no `/` — is checked only when it is cited as

@@ -644,7 +644,19 @@ classified as merged, unmerged with an open pull request, unmerged without one,
 or unknown, carrying the worktree holding it when one does; the
 unmerged-without verdict is asserted only from pull request evidence that was
 available, untruncated, and current, and anything else reports unknown with its
-reason. Anomalies carry a stable code and a `blocking` or `advisory` severity in
+reason. Branches that exist on the configured remote with no local ref are
+classified the same way in `remoteBranchClassification`, so an abandoned branch
+that was never checked out here — or was deleted locally — is still reported.
+Their merge evidence is reachability from the remote default tip over
+`refs/remotes`, since the local-only walk cannot witness a ref with no local
+branch, and they carry one extra disposition: a pull request that was *closed
+unmerged* is reported as such rather than as "no pull request", because
+deliberate abandonment and never-opened call for different action. `HEAD`, the
+default branch, and any branch that also exists locally are excluded, so every
+branch yields exactly one row. These rows are advisory: status never fetches, so
+they are read from cached remote-tracking refs and the anomaly text says so, and
+a squash- or rebase-merged branch is reachable from no tip and reads unmerged
+here exactly as a local one does. Anomalies carry a stable code and a `blocking` or `advisory` severity in
 `anomalyDetails`, parallel to the `anomalies` message list. Only blocking
 entries make `--expect-clean` exit nonzero or make the human header read
 `attention`; advisory entries print under the same `Anomalies` heading with an
@@ -973,6 +985,17 @@ tracked files resolves rather than failing. A bare filename with no line suffix
 stays unchecked, because prose uses a filename as a noun far more often than as
 a path. `bareReferenceExtensions` in that config widens the extensions a bare
 filename may carry, and a malformed value leaves the built-in set in force.
+
+A reference under one of the configured `referencePrefixes` is validated on the
+same location-versus-name distinction: it must carry a line or line-range
+suffix, or a file extension on its final segment. `apps/`, `docs/`, `scripts/`,
+and `tests/` are also ordinary Git branch-name prefixes, so naming the branch
+`docs/<slug>` in prose is not a path claim and is not checked — matching how
+`origin/<slug>`, whose prefix is not configured, has always been treated. Do not
+reach for `[absent: ...]` to name a branch: that marker asserts a path is
+intentionally missing, which is untrue of a branch. The same rule leaves an
+extensionless directory reference such as `docs/fleet` unchecked; cite a file
+inside it, or add a line citation, when you want the gate to verify it.
 
 A documentation reference that is deliberately unresolvable — a path in another
 repository, a path the prose exists to say is missing, a hypothetical in a
@@ -2164,6 +2187,13 @@ of bypassing the cache contract.
   block their auto-merge.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_GITHUB_REPO`: explicit `owner/repo` slug when the
   selected remote URL cannot be parsed as a GitHub repository.
+- `SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS`: seconds to allow the
+  Obsidian KB refresh before ending it and continuing. Defaults to `60`; `0`
+  disables the bound. The refresh writes through `.obsidian-kb`, and a target on
+  a cloud-synced filesystem can block in the kernel instead of failing, which
+  would otherwise stall the whole housekeeping run. Exhausting the bound reports
+  the advisory `kb_refresh_timed_out` anomaly, naming the resolved target, and
+  the run continues: the KB is a regenerable mirror that the merge never reads.
 - `SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY`: auto-merge strategy: `merge`,
   `squash`, or `rebase`. Defaults to `merge`.
 

@@ -4700,6 +4700,90 @@ assert.deepEqual(
         )
         self.assertNotIn("references missing path notes.rst:3", malformed.stdout)
 
+    def test_review_preflight_does_not_read_a_branch_name_as_a_path(self) -> None:
+        """A branch name is not a path claim, whatever its leading segment.
+
+        `apps/`, `docs/`, `scripts/`, and `tests/` are configured reference
+        prefixes and also ordinary Git branch-name prefixes, so an
+        unconditional prefix accept made the gate's behaviour on a branch name
+        an accident of its first segment: `docs/<slug>` failed while
+        `origin/<slug>` was never considered.
+        """
+
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/cite.md").write_text(
+            "Filed on `docs/file-review-and-kb-defects`, which followed\n"
+            "`origin/feat/codex-local-review-lane`. Two more colliding\n"
+            "prefixes: `scripts/fix-the-thing` and `tests/flaky-repro`.\n"
+            "A real citation that must still fail: `docs/definitely-missing.md`.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        # The genuine missing file under docs/ still fails: the fix narrows the
+        # shape that counts as a path claim, it does not silence real findings.
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "references missing path docs/definitely-missing.md",
+            result.stdout,
+        )
+        # docs/<branch> and origin/<branch> are now treated identically.
+        self.assertNotIn("docs/file-review-and-kb-defects", result.stdout)
+        self.assertNotIn("origin/feat/codex-local-review-lane", result.stdout)
+        # Not special-cased to docs/: two further configured prefixes.
+        self.assertNotIn("scripts/fix-the-thing", result.stdout)
+        self.assertNotIn("tests/flaky-repro", result.stdout)
+
+    def test_review_preflight_keeps_checking_located_prefix_references(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not available on PATH")
+
+        root = self.make_repo()
+        result = self.run_install(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        (root / "docs/cite.md").write_text(
+            "Extension tail: `docs/definitely-missing.md`.\n"
+            "Line tail on an extensionless target: `docs/missing-directory:12`.\n"
+            "Version-like tail is a name, not an extension: `docs/release-v1.2`.\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [node, "scripts/sd-ai-command-pack-review-preflight.mjs"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "references missing path docs/definitely-missing.md",
+            result.stdout,
+        )
+        # A line citation makes an extensionless target a location claim.
+        self.assertIn("references missing path docs/missing-directory:12", result.stdout)
+        # `.2` is not an extension: a trailing number cannot make a name a path.
+        self.assertNotIn("docs/release-v1.2", result.stdout)
+
     def test_review_preflight_absent_marker_does_not_leak_across_files(
         self,
     ) -> None:

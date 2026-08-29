@@ -73,7 +73,14 @@ reinterpret them as shell text.
    classification (each branch other than the default reported as merged,
    unmerged with an open pull request, unmerged without one, or unknown, plus
    the worktree holding it when one does; incomplete, truncated, or stale pull
-   request evidence reports unknown and never a false "no pull request"),
+   request evidence reports unknown and never a false "no pull request"), the
+   matching remote-only branch classification (every branch on the configured
+   remote with no local ref, excluding `HEAD` and the default branch, reported
+   as merged, unmerged with an open pull request, unmerged with a pull request
+   that was closed unmerged, unmerged without one, or unknown; a branch present
+   on both sides is reported once, as a local row, and the remote rows are
+   advisory and read from cached remote-tracking refs, which status never
+   fetches),
    installed pack and Trellis versions, the helper-resolution row (which
    toolchain the shared bootstrap reaches, its install root, every `PATH` entry
    holding a pack toolchain in `PATH` order, and a `bound`, `shadowed`, or

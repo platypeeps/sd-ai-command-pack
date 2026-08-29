@@ -15,6 +15,12 @@ FINISH_WORK_RECEIPT=""
 DEPENDENCY_PR=""
 MERGE_STRATEGY="${SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY:-merge}"
 HOUSEKEEPING_GIT_TIMEOUT_SECONDS=60
+# The Obsidian KB refresh writes through the .obsidian-kb symlink, which may
+# point at any filesystem the operator chose -- including a cloud-synced
+# directory whose unmaterialized writes block in the kernel rather than
+# failing. A healthy refresh of a large repository KB is well under a second,
+# so this bound is a wide backstop, not a performance budget.
+HOUSEKEEPING_KB_TIMEOUT_SECONDS="${SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS:-60}"
 HOUSEKEEPING_GH_TIMEOUT_SECONDS=120
 
 ACTIONS=()
@@ -68,6 +74,9 @@ Options:
 Environment:
   SD_AI_COMMAND_PACK_HOUSEKEEPING_MERGE_STRATEGY
                           Default merge strategy when --merge-strategy is not set.
+  SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS
+                          Seconds to allow the Obsidian KB refresh before ending
+                          it and continuing. Defaults to 60; 0 disables the bound.
 EOF
 }
 
@@ -366,6 +375,24 @@ run_gh() {
   run_command_with_timeout "$HOUSEKEEPING_GH_TIMEOUT_SECONDS" gh "$@"
 }
 
+# Report where .obsidian-kb actually leads, bounded and control-character free.
+# A refresh that never returns is almost always a property of the *target*
+# rather than of this repository, and the target is the one thing the operator
+# cannot see from the run's output.
+obsidian_kb_target() {
+  local link=".obsidian-kb"
+  local target=""
+  if [ -L "$link" ]; then
+    target="$(readlink "$link" 2>/dev/null || true)"
+  elif [ -d "$link" ]; then
+    target="$link (a directory, not a symlink)"
+  fi
+  if [ -z "$target" ]; then
+    target="unresolved"
+  fi
+  printf '%s' "$target" | tr -d '[:cntrl:]' | cut -c1-300
+}
+
 refresh_obsidian_kb() {
   local toolchain="$SCRIPT_DIR/sd-ai-command-pack-toolchain.sh"
   local helper="$SCRIPT_DIR/sd-ai-command-pack-update-spec-kb.py"
@@ -377,14 +404,20 @@ refresh_obsidian_kb() {
     return 1
   fi
   local refresh_output
+  # Bounded: the helper writes through .obsidian-kb, and a target on a
+  # cloud-synced filesystem blocks in the kernel instead of returning an error.
+  # Without a bound that stall is the whole gate's stall, and the operator sees
+  # only this section's banner. No cheap write probe precedes it: a probe would
+  # be a second write against the same unresponsive target, and the bound
+  # already ends the step either way.
   if [ "$DRY_RUN" -eq 1 ]; then
-    if refresh_output="$(bash "$toolchain" run-python -- "$helper" --dry-run 2>&1)"; then
+    if refresh_output="$(run_command_with_timeout "$HOUSEKEEPING_KB_TIMEOUT_SECONDS" bash "$toolchain" run-python -- "$helper" --dry-run 2>&1)"; then
       refresh_status=0
     else
       refresh_status=$?
     fi
   else
-    if refresh_output="$(bash "$toolchain" run-python -- "$helper" 2>&1)"; then
+    if refresh_output="$(run_command_with_timeout "$HOUSEKEEPING_KB_TIMEOUT_SECONDS" bash "$toolchain" run-python -- "$helper" 2>&1)"; then
       refresh_status=0
     else
       refresh_status=$?
@@ -424,6 +457,18 @@ refresh_obsidian_kb() {
   if [ "$refresh_status" -eq 2 ] &&
     grep -Eqi 'errno 13|permission denied|errno 30|read-only file system|eacces|erofs' <<<"$refresh_output"; then
     add_action kb_refresh_skipped "Obsidian KB refresh skipped: the .obsidian-kb target (or its linked vault) is read-only. The KB copy folder is regenerable; make it writable and re-run: sd-ai-command-pack-toolchain.sh run-python -- sd-ai-command-pack-update-spec-kb.py"
+    return 0
+  fi
+
+  # A refresh that exhausted its bound degrades rather than blocks, for the same
+  # reason the read-only case does: the KB is a regenerable mirror that the
+  # merge does not read, so an unrelated filesystem condition must not become a
+  # merge outage. It is reported as an anomaly rather than an action because
+  # nothing was refreshed, and it is advisory because the operator cannot
+  # repoint the symlink from inside this run. The message names the resolved
+  # target, which is the fact the stalled run could not otherwise surface.
+  if [ "$refresh_status" -eq 124 ]; then
+    add_anomaly kb_refresh_timed_out "Obsidian KB refresh did not complete within ${HOUSEKEEPING_KB_TIMEOUT_SECONDS}s and was ended; .obsidian-kb resolves to $(obsidian_kb_target). A target on a cloud-synced or otherwise unresponsive filesystem blocks rather than failing; repoint it at local storage, or raise SD_AI_COMMAND_PACK_HOUSEKEEPING_KB_TIMEOUT_SECONDS, then re-run: sd-ai-command-pack-toolchain.sh run-python -- sd-ai-command-pack-update-spec-kb.py"
     return 0
   fi
 
