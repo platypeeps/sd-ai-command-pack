@@ -76,14 +76,36 @@ the other. Cross-reference them rather than merging them.
   forces `remote-review-required`.
 - Do not weaken the classifier by allowing `.trellis/**` wholesale.
 
+## Decision
+
+**(a): the classifier's allowlist recognizes the publisher's own finalization
+output.** Retiring the eligibility path would have thrown away a working
+contract for one bug in it. Every fact `integration-only` asserts — that the
+branch is a pure installer-managed change — is still true of these lanes; the
+six paths that failed them are written by
+`sd-ai-command-pack-fleet-publish.py` itself, as the archive and journal its own
+record-session step produces. The contract was correct and the allowlist was
+incomplete.
+
+The admission is evidence-bound rather than a `.trellis/` exemption, which is
+what keeps it narrow. Exactly one archived task directory may change in the
+diff; its `task.json` at the reviewed head must be `completed` and name the very
+branch being classified, which is what makes it *this lane's* task rather than
+any archived task; and only that record's `assignee`'s `index.md` and
+`journal-<n>.md` are admitted alongside it. Nothing else under `.trellis/`
+is admitted, so an unrelated task edit, a second archive directory, another
+developer's journal, or a workspace change with no archive behind it all still
+force `remote-review-required` — each covered by its own test.
+
 ## Acceptance Criteria
 
-- [ ] The intended contract is decided and recorded, with the reasoning stated.
-- [ ] If (a): a lane carrying only installer receipts, deterministic preparation
+- [x] The intended contract is decided and recorded, with the reasoning stated.
+- [x] If (a): a lane carrying only installer receipts, deterministic preparation
       output, and its own task archive plus journal classifies `integration-only`.
-- [ ] If (a): a lane that additionally edits an unrelated `.trellis/` task still
+- [x] If (a): a lane that additionally edits an unrelated `.trellis/` task still
       classifies `remote-review-required`, covered by a regression test.
-- [ ] If (b): the eligibility path and its callers are removed, and no caller is
+- [x] If (b): the eligibility path and its callers are removed, and no caller is
       left asking a question that cannot be answered affirmatively.
-- [ ] The decision is cross-referenced from
+      *(Not applicable: (a) was chosen. See Decision.)*
+- [x] The decision is cross-referenced from
       `08-28-fleet-lane-head-advance-by-construction`.

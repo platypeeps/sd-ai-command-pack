@@ -47,6 +47,16 @@ RECEIPT_PATHS = frozenset(
     }
 )
 FULL_COMMIT_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
+ARCHIVE_ROOT = ".trellis/tasks/archive/"
+ARCHIVE_TASK_RE = re.compile(
+    r"^\.trellis/tasks/archive/(?P<month>\d{4}-\d{2})/(?P<slug>[A-Za-z0-9._-]+)/"
+)
+WORKSPACE_ROOT = ".trellis/workspace/"
+WORKSPACE_FILE_RE = re.compile(
+    r"^\.trellis/workspace/(?P<developer>[A-Za-z0-9._-]+)/"
+    r"(?:index\.md|journal-\d+\.md)$"
+)
+TRELLIS_ROOT = ".trellis/"
 
 
 class FleetReviewClassificationError(RuntimeError):
@@ -207,6 +217,86 @@ def changed_paths(repo: Path, base_commit: str, head_commit: str) -> tuple[str, 
         "--",
     )
     return _decode_git_paths(raw, "consumer refresh diff")
+
+
+def current_branch(repo: Path) -> str:
+    raw = _git_bytes(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+    branch = raw.decode("utf-8", errors="replace").strip()
+    if not branch:
+        raise FleetReviewClassificationError(
+            "consumer checkout is on a detached HEAD, so the lane's own task "
+            "cannot be identified"
+        )
+    return branch
+
+
+def publisher_bookkeeping_paths(
+    repo: Path, head_commit: str, trellis_paths: Sequence[str]
+) -> frozenset[str]:
+    """Admit the publisher's own finalization output, and nothing else under `.trellis/`.
+
+    `sd-ai-command-pack-fleet-publish.py` folds the lane's task archive and the
+    journal it records into the reviewed head before this classifier ever runs,
+    so those paths appeared in every lane's diff and `integration-only` was
+    unreachable by construction: no human and no product change contributed
+    them, and yet they were counted as consumer-owned.
+
+    The admission is evidence-bound, not a `.trellis/` exemption. Exactly one
+    archived task directory may change; its `task.json` at the reviewed head
+    must be `completed` and name this very branch, which is what makes it *this
+    lane's* task rather than any archived task; and only that task's assignee's
+    `index.md` and `journal-<n>.md` are admitted alongside it. An unrelated
+    Trellis edit smuggled into the same branch still has no proof and still
+    forces `remote-review-required`.
+    """
+
+    if not trellis_paths:
+        return frozenset()
+    slugs = set()
+    for path in trellis_paths:
+        match = ARCHIVE_TASK_RE.match(path)
+        if match is not None:
+            slugs.add(f"{ARCHIVE_ROOT}{match['month']}/{match['slug']}/")
+    if len(slugs) != 1:
+        raise FleetReviewClassificationError(
+            "expected exactly one archived task directory for this lane, found "
+            f"{len(slugs)}"
+        )
+    archive_prefix = next(iter(slugs))
+    raw = _git_bytes(repo, "show", f"{head_commit}:{archive_prefix}task.json")
+    try:
+        record = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise FleetReviewClassificationError(
+            f"archived task record is unreadable at {archive_prefix}task.json: {exc}"
+        ) from exc
+    if not isinstance(record, dict):
+        raise FleetReviewClassificationError(
+            f"archived task record is not an object at {archive_prefix}task.json"
+        )
+    if record.get("status") != "completed":
+        raise FleetReviewClassificationError(
+            f"archived task at {archive_prefix} is not completed"
+        )
+    branch = current_branch(repo)
+    if record.get("branch") != branch:
+        raise FleetReviewClassificationError(
+            f"archived task at {archive_prefix} belongs to another branch, "
+            "so it is not this lane's own finalization"
+        )
+    assignee = record.get("assignee")
+    if not isinstance(assignee, str) or not assignee:
+        raise FleetReviewClassificationError(
+            f"archived task at {archive_prefix} names no assignee"
+        )
+    workspace_prefix = f"{WORKSPACE_ROOT}{assignee}/"
+    admitted = set()
+    for path in trellis_paths:
+        if path.startswith(archive_prefix):
+            admitted.add(path)
+        elif path.startswith(workspace_prefix) and WORKSPACE_FILE_RE.match(path):
+            admitted.add(path)
+    return frozenset(admitted)
 
 
 def run_install_inspection(repo: Path) -> dict[str, object]:
@@ -416,6 +506,13 @@ def classify_review(
             raise FleetReviewClassificationError(
                 "consumer branch has no committed refresh changes"
             )
+        trellis_paths = tuple(
+            path for path in diff_paths if path.startswith(TRELLIS_ROOT)
+        )
+        allowed_set |= publisher_bookkeeping_paths(
+            resolved_repo, head_commit, trellis_paths
+        )
+        allowed = tuple(sorted(allowed_set))
         disallowed = tuple(sorted(set(diff_paths) - allowed_set))
         if disallowed:
             raise FleetReviewClassificationError(

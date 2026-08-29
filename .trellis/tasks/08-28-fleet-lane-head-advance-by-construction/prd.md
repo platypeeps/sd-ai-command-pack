@@ -56,6 +56,19 @@ behavior is coherent (the receipt reports the stage's failure at the head it was
 working on; republication records the new head), but the wording sends the
 operator to verify the wrong fact.
 
+## Related
+
+`08-28-fleet-integration-only-unreachable` shares one observation with this
+task — the publisher folds finalization output into the reviewed head — and
+nothing else. That one is a *content* defect: the classifier counted the
+publisher's own task archive and journal as consumer-owned, so
+`integration-only` was unreachable. This one is a *sequencing* defect: the head
+moved after the review record, so the eligibility guard rewound the lane.
+Different symptoms, different guards, different fixes; neither implies the
+other. Both are fixed by proving what the publisher wrote, from evidence the
+tool can read rather than a caller's assertion — a finish-work receipt here, an
+archived `task.json` naming this branch there.
+
 ## Requirements
 
 - Treat a head that advanced by the lane's own finalization commit distinctly

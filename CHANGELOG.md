@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- `integration-only` fleet review is reachable. The classifier exists to prove a
+  consumer refresh branch is a pure installer-managed change, and it had never
+  returned `integration-only` for a lane this workflow produces — it could not,
+  because `sd-ai-command-pack-fleet-publish.py` folds the lane's own task archive
+  and the journal recording it into the reviewed head before the classifier ever
+  runs, and those paths counted as consumer-owned. Every lane of every recent
+  campaign classified `remote-review-required` on bookkeeping no human and no
+  product change contributed. The classifier now admits that output, bound to
+  evidence rather than exempting `.trellis/`: exactly one archived task
+  directory may change, its `task.json` at the reviewed head must be `completed`
+  and name the branch being classified, and only that record's assignee's
+  `index.md` and `journal-<n>.md` are admitted with it. An unrelated task edit, a
+  second archive directory, another developer's journal, or a workspace change
+  with nothing archived behind it all still require remote review.
+
 - A fleet lane no longer trips `pr-head-advanced` by construction. The
   controller modelled a head that moves after review as an outside push and
   rewound the lane to `pr-publication` so publication, review, and eligibility
