@@ -54,7 +54,7 @@ lint-mypy-paths:
 # LINT_MYPY_PATHS above -- installer/, the install.py facade, the single copy
 # of the payload under templates/scripts/, and the bin/ tools. The bash 3.2 lane
 # parses tracked shell with the interpreter macOS keeps at /bin/bash, so
-# syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
+# syntax that only bash 3.2 rejects fails here, which is the only place it can:
 # a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
 	"$(VENV_PYTHON)" -m ruff check $(LINT_RUFF_PATHS)

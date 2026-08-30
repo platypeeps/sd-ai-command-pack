@@ -141,12 +141,16 @@ The macOS 3.13 leg is **temporarily dropped** (R11-D4, 2026-08-29). It ran
 Linux rate, so the rollout was paying that on roughly fifteen more pull
 requests. It is a cost saving, not a latency one: the run is bounded by
 `Shell coverage` at 13m40s, so wall-clock time is unchanged. What is lost
-is named rather than waved away: macOS-only Python behaviour, filesystem
-case-insensitivity, and platform-specific path handling are unverified until
-it returns. What still covers macOS meanwhile: the bash 3.2 syntax gate in
-`lint` runs against `/bin/bash`, which is the macOS interpreter, and the
-maintainer's own `make check` runs on macOS before every push. Restored at
-step 7.
+is named rather than waved away: with the leg gone, **no CI job runs on macOS
+at all**, so macOS-only Python behaviour, filesystem case-insensitivity, and
+platform-specific path handling are unverified in CI until it returns. The only
+remaining macOS coverage is the maintainer's own `make check` before a push --
+one machine, not a gate.
+
+An earlier draft of this paragraph also claimed the bash 3.2 syntax gate in
+`lint` covered macOS in CI. It does not: **no CI job invokes
+`check-bash32-syntax.sh`**, and the `lint` job runs on `ubuntu-latest`. That
+gate has only ever run in a local `make lint`. Restored at step 7.
 
 ## Release And Payload Rules
 

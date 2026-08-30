@@ -701,12 +701,19 @@ enforcement dimensions `sd-status` reports, and changing the set changes what th
 asserts. `sd-status` needs no edit -- it reads the live protection object rather than a stored
 list, which is the design behaving as intended.
 
-What is lost, named rather than waved away: macOS-only Python behaviour, filesystem
-case-insensitivity, and platform-specific path handling are unverified in CI until the leg
-returns. What still covers macOS meanwhile: the bash 3.2 syntax gate in `lint` runs against
-`/bin/bash`, the interpreter macOS ships, and the maintainer's `make check` runs on macOS before
-every push -- which is how several defects in this rollout were already caught locally rather
-than in CI.
+What is lost, named rather than waved away: with the leg gone, **no CI job runs on macOS at all**,
+so macOS-only Python behaviour, filesystem case-insensitivity, and platform-specific path handling
+are unverified in CI until it returns. The only remaining macOS coverage is the maintainer's own
+`make check` -- which is how several defects in this rollout were caught locally rather than in
+CI, but it is one machine, not a gate.
+
+A second correction to this record, found in review: the first draft claimed the bash 3.2 syntax
+gate in `lint` still covered macOS. It does not. **No CI job invokes `check-bash32-syntax.sh`** --
+the `lint` job runs ruff, mypy, `node --check` and the opencode check, on `ubuntu-latest`, and the
+gate runs only in a local `make lint`. Worse, the script's own skip warning told Linux contributors
+that "the macOS CI leg still enforces them", which was false before this change too: the macOS leg
+ran `unittest`, never this script. That message is corrected here rather than left to mislead, and
+the same stale claim is fixed in the Makefile and README.
 
 Restore criterion (standing rule 1 applied to a removal rather than an addition): the leg and its
 required context come back at **step 7**, which already carries "verify protection" on its

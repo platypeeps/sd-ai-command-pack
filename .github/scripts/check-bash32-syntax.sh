@@ -4,7 +4,7 @@
 # The local gates parse shell with whichever bash sits on PATH. On a machine
 # carrying Homebrew bash 5 that hides constructs only bash 3.2 rejects — an
 # apostrophe in a comment inside a "$( ... )" substitution, for one — until the
-# macOS CI leg fails minutes later, quoting a line number at the end of the
+# maintainer's own macOS run fails later, quoting a line number at the end of the
 # file rather than the defect.
 #
 # Scripts are enumerated from the tracked set at run time (every "*.sh" plus
@@ -97,7 +97,7 @@ if [ -z "$BASH32" ]; then
     exit 1
   fi
   printf '%s\n' \
-    "warning: no bash 3.2 interpreter found; skipping bash 3.2 syntax checks (the macOS CI leg still enforces them)."
+    "warning: no bash 3.2 interpreter found; skipping bash 3.2 syntax checks. Nothing in CI runs this gate, so the check is genuinely skipped here -- run it on a machine with bash 3.2, or set STRICT=1 to make its absence an error."
   exit 0
 fi
 
