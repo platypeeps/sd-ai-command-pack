@@ -1017,8 +1017,7 @@ class GeneratedParityTests(InstallTestCase):
             "python3 -m pip install --require-hashes -r requirements-dev.txt",
             "bash .github/scripts/run-tests.sh",
             "python3 -m coverage combine",
-            'python3 -m coverage report --include="install.py,installer/*"'
-            " --fail-under=100",
+            "bash .github/scripts/check-installer-coverage.sh",
             "bash .github/scripts/check-shipped-script-coverage.sh",
         ):
             self.assertIn(expected, workflow)
@@ -1031,8 +1030,7 @@ class GeneratedParityTests(InstallTestCase):
             "warning: node not found; skipping JavaScript syntax checks.",
             "bash .github/scripts/run-tests.sh",
             "python -m coverage combine",
-            'python -m coverage report --include="install.py,installer/*"'
-            " --fail-under=100",
+            "PYTHON_BIN=python bash .github/scripts/check-installer-coverage.sh",
             "PYTHON_BIN=python bash .github/scripts/check-shipped-script-coverage.sh",
         ):
             self.assertIn(expected, readme)

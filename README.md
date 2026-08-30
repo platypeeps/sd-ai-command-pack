@@ -767,13 +767,17 @@ fi
 bash .github/scripts/check-bash32-syntax.sh
 bash .github/scripts/run-tests.sh
 python -m coverage combine
-python -m coverage report --include="install.py,installer/*" --fail-under=100
+PYTHON_BIN=python bash .github/scripts/check-installer-coverage.sh
 PYTHON_BIN=python bash .github/scripts/check-shipped-script-coverage.sh
 ```
 
 Two coverage gates run: the `--fail-under=100` gate measures the installer
 (`install.py` plus the `installer/` package, lines and branches; this is also
-the default scope of a bare `coverage report`), and a second gate measures the
+the default scope of a bare `coverage report`). It enumerates that surface from
+`git ls-files` at run time rather than from a glob, so a new module cannot land
+outside the measured set, and it refuses to run below a declared file floor, so
+deleting installer code cannot quietly shrink what the 100% certifies. A second
+gate measures the
 shipped Python helpers under `scripts/`: an aggregate 76% floor plus a
 per-file floor listed in `.github/scripts/check-shipped-script-coverage.sh`.
 Set each per-file floor at or just below the current measured helper coverage

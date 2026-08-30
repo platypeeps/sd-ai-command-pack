@@ -66,7 +66,7 @@ jobs:
         run: python3 -m coverage combine
 
       - name: Report installer coverage (gate 100%)
-        run: python3 -m coverage report --include="install.py,installer/*" --fail-under=100
+        run: bash .github/scripts/check-installer-coverage.sh
 
       - name: Report shipped-scripts coverage
         run: bash .github/scripts/check-shipped-script-coverage.sh
