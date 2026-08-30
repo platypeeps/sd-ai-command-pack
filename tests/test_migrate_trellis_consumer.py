@@ -223,6 +223,33 @@ class SurfaceNameTests(FixtureCase):
         )
 
 
+class PromptAdapterTests(FixtureCase):
+    """`.github/prompts/` is a render location, so `.github` must be walked there.
+
+    It was not in the render vocabulary, so `.github/prompts` never made
+    `.github` a walked location: 19 `sd-*.prompt.md` adapters per repository
+    were never enumerated, and so were never offered to any authority at all.
+    A keep would at least have been reported; this was silence.
+    """
+
+    def test_a_framework_prompt_adapter_is_deleted_on_name(self) -> None:
+        _write(
+            self.fixture.repo,
+            ".github/prompts/sd-check.prompt.md",
+            "prose that never says the framework's other name\n",
+        )
+        self.fixture.seal()
+        verdict = self.fixture.verdict(".github/prompts/sd-check.prompt.md")
+        self.assertEqual(("delete", "surface-name"), (verdict.action, verdict.authority))
+
+    def test_a_repo_own_prompt_beside_it_is_kept(self) -> None:
+        _write(self.fixture.repo, ".github/prompts/finish-work.prompt.md", "ours\n")
+        _write(self.fixture.repo, ".github/prompts/sd-ship.prompt.md", "theirs\n")
+        self.fixture.seal()
+        self.assertEqual("keep", self.fixture.verdict(".github/prompts/finish-work.prompt.md").action)
+        self.assertEqual("delete", self.fixture.verdict(".github/prompts/sd-ship.prompt.md").action)
+
+
 class AgentsFileTests(FixtureCase):
     BLOCKS = (
         "<!-- TRELLIS:START -->\ntrellis prose\n<!-- TRELLIS:END -->\n"

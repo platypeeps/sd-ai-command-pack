@@ -421,7 +421,23 @@ def _year_hint(repo: pathlib.Path, source: pathlib.Path) -> int:
 
 # The subdirectories an installer renders into. A tree is recognised by
 # having one, which is what makes the set derivable instead of remembered.
-PLATFORM_SUBDIRS = ("skills", "agents", "commands", "rules", "hooks", "lib", "plugins")
+#
+# The tree set is derived; this vocabulary is not, and that is the seam the
+# derivation cannot close. `prompts` was missing, so `.github/prompts` never
+# made `.github` a walked location and 19 `sd-*.prompt.md` adapters per
+# repository -- 171 across the nine consumers -- were never enumerated at all.
+# No authority declined them; nothing ever offered them to one. When an
+# installer renders into a subdirectory not named here, add it.
+PLATFORM_SUBDIRS = (
+    "skills",
+    "agents",
+    "commands",
+    "rules",
+    "prompts",
+    "hooks",
+    "lib",
+    "plugins",
+)
 # `.github/` is the one tree here that is also the repository's own, so it is
 # walked only where an installer renders. Every other tree exists because a
 # tool made it, and is walked whole -- which is how `.claude/rules/` and
@@ -593,7 +609,7 @@ def hash_authority_gap(repo: pathlib.Path, verdicts: list[Verdict]) -> str | Non
 
 
 def is_framework_surface(path: str, trees: tuple[str, ...]) -> bool:
-    """A `skills/`, `agents/` or `commands/` entry the framework owns by name.
+    """A `skills/`, `agents/`, `commands/` or `prompts/` entry it owns by name.
 
     The prefixes are the framework's own namespaces, so a name is decisive
     here in a way it is not for a loose runtime file: nothing a consumer wrote
@@ -616,7 +632,11 @@ def is_framework_surface(path: str, trees: tuple[str, ...]) -> bool:
         # `.claude/sd-ai-command-pack/` -- the framework's own name as the
         # directory, one level up from where the surfaces live.
         return True
-    if parts[0] not in ("skills", "agents", "commands", "rules"):
+    # Narrower than PLATFORM_SUBDIRS on purpose: `hooks/`, `lib/` and
+    # `plugins/` hold loose runtime files whose names carry no namespace, so
+    # they are reached by content instead. A `prompts/` entry does carry one --
+    # `sd-check.prompt.md` is as much a framework name as `sd-check/` is.
+    if parts[0] not in ("skills", "agents", "commands", "rules", "prompts"):
         return False
     return _framework_name(parts[1])
 
