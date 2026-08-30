@@ -1294,6 +1294,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"\nsd-review: {result['status']}\n")
 
 
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -1325,7 +1326,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # One subcommand, dispatched before the main parser sees the arguments.
+    # `add_subparsers` would have made every existing invocation positional-first
+    # and broken `sd-review --scope pr`; this keeps the default surface exactly
+    # as it was and gives the subcommand its own parser.
+    if raw and raw[0] == "setup-github":
+        import sd_setup_github
+
+        # The seam named at SETUP_GITHUB_SEAM, handed over rather than reached
+        # into: the installer gets `load_policy` and `BACKENDS` and nothing
+        # else of this file. It lives in its own module because it *writes* a
+        # file, and `tests/test_sd_review_boundary.py` proves this one does not.
+        return sd_setup_github.main(raw[1:], load_policy=load_policy, backends=BACKENDS)
+    args = build_parser().parse_args(raw)
     try:
         if args.timeout <= 0:
             raise UsageError("--timeout takes a positive number of seconds")
