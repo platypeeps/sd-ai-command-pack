@@ -788,9 +788,12 @@ behavioral tests and syntax/lint gates rather than a coverage number; CI
 also runs `shellcheck -S warning` over every tracked shell script and the git
 hooks. `make lint` additionally parses that same tracked set with bash 3.2
 (`/bin/bash` on macOS) via `.github/scripts/check-bash32-syntax.sh`, so a
-construct only bash 3.2 rejects fails locally rather than on the macOS CI leg;
-platforms without bash 3.2 print a visible skip line and `STRICT=1` makes the
-missing interpreter fatal. Consumers exempt the vendored pack shell from line
+construct only bash 3.2 rejects fails before the push. The same gate runs in
+CI: the `bash32` job builds bash 3.2 from source -- no Linux distro ships it --
+verifies the binary really reports 3.2, and runs the gate under `STRICT=1`, so
+a missing interpreter fails the job instead of skipping it. Locally, platforms
+without bash 3.2 print a visible skip line and `STRICT=1` makes the missing
+interpreter fatal. Consumers exempt the vendored pack shell from line
 review ("reviewed upstream"), so upstream lint rigor and focused subprocess
 tests are the compensating controls.
 

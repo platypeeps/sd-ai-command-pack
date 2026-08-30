@@ -671,6 +671,81 @@ merged se-* skills/agents rename to sd-* at step 5** — single namespace, colli
 - R9: D1 **decided: keep** the unused gmail token (user 2026-08-29) · D2 2-key role vocabulary · **D3 day-0 guard retarget — DONE 2026-08-29** · D4–D7 per
   Workspace section
 
+**R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
+
+Corrected before merge, because the first version of this record was wrong. The claim was that
+`unittest (macos-latest, 3.13)` at 12m18s is the long pole in every CI run. It is not. Measured on
+the run for #604: `Shell coverage` takes 13m40s and the run's wall clock was 13m45s, so the run is
+bounded by shell coverage and dropping macOS buys **approximately zero latency**. The per-job
+numbers were read without checking which job actually bounded the run.
+
+What the drop does buy is cost: GitHub bills macOS runners at ten times the Linux rate, and the
+leg is 12m18s on every pull request in a rollout with roughly fifteen left to land. That is a real
+saving, and it is the honest reason to do it -- but it is not the reason originally given, and the
+decision to drop the leg was taken on the wrong one.
+
+The genuine latency lever, now that it is measured, is `Shell coverage` at 13m40s. It is not
+touched here: it is the kcov lane that publishes the shell-coverage baseline, and trading it away
+would cost real coverage rather than duplicate runner time. Named so the next person does not
+repeat the same mistake in the other direction.
+
+Two things change together, and the order is load-bearing. Branch protection lists the six
+contexts as **required**, so removing the job first would leave a required context that can never
+report again and every subsequent pull request would block forever -- including the one removing
+it, since a pull request's CI runs the workflow from its own branch. So protection is relaxed to
+five contexts **before** the workflow change merges, never after.
+
+This is a decision record rather than a chore precisely because R11-D3 made required contexts
+part of the merge-authority claim: "the required contexts match the jobs CI runs" is one of the
+enforcement dimensions `sd-status` reports, and changing the set changes what the doctrine
+asserts. `sd-status` needs no edit -- it reads the live protection object rather than a stored
+list, which is the design behaving as intended.
+
+What is lost, named rather than waved away: with the leg gone, **no CI job runs on macOS at all**,
+so macOS-only Python behaviour, filesystem case-insensitivity, and platform-specific path handling
+are unverified in CI until it returns. The only remaining macOS coverage is the maintainer's own
+`make check` -- which is how several defects in this rollout were caught locally rather than in
+CI, but it is one machine, not a gate.
+
+A second correction to this record, found in review: the first draft claimed the bash 3.2 syntax
+gate in `lint` still covered macOS. It does not. **No CI job invokes `check-bash32-syntax.sh`** --
+the `lint` job runs ruff, mypy, `node --check` and the opencode check, on `ubuntu-latest`, and the
+gate ran only in a local `make lint`. Worse, the script's own skip warning told Linux contributors
+that "the macOS CI leg still enforces them", which was false before this change too: the macOS leg
+ran `unittest`, never this script.
+
+**R11-D5 (user, 2026-08-29) -- the bash 3.2 gate now runs in CI.** Finding the gap above was the
+reason to close it rather than document it. A `bash32` job builds bash 3.2.57 from source, since no
+Linux distribution packages it, and runs `check-bash32-syntax.sh` with `STRICT=1` so the
+no-interpreter path fails the job instead of skipping. Three details are load-bearing and were each
+established by running them, not assumed:
+
+- **The build needs `-j1`.** bash 3.2's Makefile races under parallel make: a `-j$(nproc)` build
+  failed once and succeeded twice on the same input. Nondeterminism is the worst property a gate can
+  have, so the build is serial and cached per version.
+- **bash 3.2 predates aarch64** and its `config.sub` cannot recognise the host, so it does not build
+  there. The x86_64 GitHub runners are fine; this is why the job has no matrix.
+- **The job verifies the binary reports 3.2 before running the gate.** Without that, a wrong
+  interpreter would turn the whole job into a green no-op -- the exact failure mode the gate exists
+  to prevent.
+
+Verified in an `ubuntu:24.04` container against the real tracked set, in both directions: clean tree
+gives `14 tracked shell scripts accepted` and exit 0; a planted apostrophe inside a `$( ... )`
+substitution -- the construct named at the top of the script -- is **accepted by bash 5** and
+rejected by bash 3.2, failing the gate with exit 1. A gate only proven in the passing direction is
+not proven.
+
+Scope, stated so it is not overread: this covers bash 3.2 *syntax*, one real slice of macOS
+compatibility. macOS-only Python behaviour, filesystem case-insensitivity, and platform path
+handling remain unverified in CI until the leg returns at step 7. The stale claim is fixed in the
+Makefile, README, CONTRIBUTING, and the quality-guidelines spec alongside the script itself.
+
+Restore criterion (standing rule 1 applied to a removal rather than an addition): the leg and its
+required context come back at **step 7**, which already carries "verify protection" on its
+checklist. If step 7 lands without the leg restored, the rollout has quietly kept a temporary
+measure, and CONTRIBUTING's "restored at step 7" sentence becomes the falsifiable record that it
+did not.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).

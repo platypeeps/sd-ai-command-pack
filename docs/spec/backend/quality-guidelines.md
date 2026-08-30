@@ -1985,6 +1985,11 @@ leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 > `warning: no bash 3.2 interpreter found` and exits 0 rather than passing
 > silently; `STRICT=1` makes that state fatal, and `SD_AI_COMMAND_PACK_BASH32`
 > overrides the interpreter search.
+>
+> CI enforces the same gate in the `bash32` job. No Linux distribution packages
+> bash 3.2, so the job builds 3.2.57 from source (cached per version), asserts
+> the binary really reports 3.2 before trusting it, and runs the gate with
+> `STRICT=1` — the skip path is a failure there, never a silent pass.
 
 Add or update tests when changing:
 
