@@ -141,9 +141,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
         render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
         Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
-- [ ] 3-c — consumer removal PRs (8); removal only
+- [ ] 3-c — consumer removal PRs (9); removal only
       - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
-      - [ ] the eight removal pull requests themselves
+      - [x] the nine removal pull requests, opened 2026-08-30 (never merged unasked)
 
       **`setup-github` leaves 3-c and becomes its own step** (user, 2026-08-30), reversing the
       R3-D16 shape that had each full-mode repository's removal PR also carry the routing
@@ -161,6 +161,13 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       (which step 4 retires) and `se-ai-command-pack` (which step 5 folds). The ninth in the
       plan is `mezmo_benchmark`, frozen under D7 and not read. `ai/Trellis` also matches the
       probe and is not a consumer — it is the upstream fork the payload came from.
+
+      **Then nine.** `mezmo-world-simulator` was added to the wave by the user on
+      2026-08-30 — it carries both installers, 312 tracked framework files, and an
+      `AGENTS.md` that is 57 of 57 framework lines. It is an employer repository, so the
+      D7 freeze is what kept it out; the user lifted the freeze for this one repository
+      and for this one purpose, and `mezmo_benchmark` stays frozen and unread. Its pull
+      request is opened, not merged, like the other eight.
 
       **Removal needs three authorities, and only two installers left receipts.** Three
       installers wrote into these trees. The pack's own receipt covers 2 of loadsmith's 228
@@ -213,12 +220,25 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       consumer's test suite has negatively affected their pull requests, and that is the one
       thing this conversion may not do.
 
-      Measured across all eight, applied to throwaway clones: 7,418 files removed, 7 edited,
-      886 work items and 182 spec files imported, 160 dangling references reported, zero
-      deletions outside the framework prefixes, zero empty directories left. All 249 survivors
-      are repo-own skills the carve-out protects (`playwright`, `security-threat-model`,
-      `amc-server-compatibility`, `loadsmith-swift-app`, `hoa-manager-payload-tenant-safety`,
-      `rwbp-next-payload`) or files edited since install.
+      **The sixth defect was not a kept list — it was an authority that lived outside git.**
+      `.trellis/.template-hashes.json` is gitignored in six of the nine consumers, so the
+      throwaway clones the trial ran in had it (they were made from working directories) and
+      the pull-request worktrees did not. The tool did not fail: `trellis_hashes()` returned an
+      empty map, every file that map would have condemned fell through to `no authority reaches
+      it`, and the plan printed `keep 27` for `people-profiles` as though that were a result.
+      Comparing the wave's keep counts against the trial's is what surfaced it: 412 keeps in
+      the worktrees against 259 for the same nine repositories once the map is in place. The
+      tool now refuses when Trellis is installed, the map is unusable, and something actually fell through as a result; the remedy is to copy the file
+      in from a checkout where Trellis is installed, never to regenerate it from the files it
+      is meant to judge. A missing authority is not a licence to guess, and a silent
+      downgrade to `keep` is a half-removal wearing a success message.
+
+      Measured across all nine, applied in worktrees off `origin/main`: 7,883 files removed,
+      7 edited, 888 work items and 198 spec files imported, 172 dangling references reported,
+      zero deletions outside the framework prefixes, zero empty directories left. All 259
+      survivors are repo-own skills the carve-out protects (`playwright`,
+      `security-threat-model`, `amc-server-compatibility`, `loadsmith-swift-app`,
+      `hoa-manager-payload-tenant-safety`, `rwbp-next-payload`) or files edited since install.
 - [ ] P1 / P2 / P3 / P4 / P5 — platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b

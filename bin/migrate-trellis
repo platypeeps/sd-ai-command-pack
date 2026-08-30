@@ -433,6 +433,7 @@ ROUTER_WORKFLOWS = ("ai-review-router.yml", "sd-review.yml")
 TOMBSTONE_TAG = "v0.72.0"
 PACK_RECEIPT = ".sd-ai-command-pack"
 TRELLIS_HASHES = ".trellis/.template-hashes.json"
+NO_AUTHORITY = "no authority reaches it"
 AGENTS_FILE = "AGENTS.md"
 # Two installers wrote marked blocks into a consumer's AGENTS.md, with
 # different markers. Both are removed; the prose around them is the
@@ -554,6 +555,43 @@ def trellis_hashes(repo: pathlib.Path) -> dict[str, str]:
     return hashes if isinstance(hashes, dict) else {}
 
 
+def hash_authority_gap(repo: pathlib.Path, verdicts: list[Verdict]) -> str | None:
+    """Refuse rather than half-remove when Trellis's hash file is missing.
+
+    `.trellis/.template-hashes.json` is the authority for every file Trellis
+    installed into the platform trees, and most consumers gitignore it -- so a
+    fresh clone or worktree does not carry it, `trellis_hashes()` returns an
+    empty map, and the files it would have condemned fall through to
+    "no authority reaches it" and are kept. The plan then reads like a success
+    while removing a fraction of what it should: measured 2026-08-30,
+    `people-profiles` kept 27 files that way and reported nothing wrong.
+
+    The three conditions are all load-bearing. Trellis has to be installed
+    here at all, or there is nothing for the map to authorize. The map has to
+    be unusable. And something has to have actually fallen through -- a
+    repository where every file was reached by a receipt or a name loses
+    nothing to the missing map, and refusing there would be ceremony.
+
+    A missing authority is not a licence to guess, and not a reason to proceed
+    quietly either, so this is a refusal carrying its remedy: copy the file in
+    from a checkout where Trellis is installed. Never regenerate it from what
+    is on disk -- a hash map derived from the files it is meant to judge would
+    authorize every one of them.
+    """
+    if trellis_hashes(repo):
+        return None
+    if not tracked_files(repo, ".trellis"):
+        return None
+    orphans = [v for v in verdicts if v.authority == "none" and v.reason == NO_AUTHORITY]
+    if not orphans:
+        return None
+    state = "carries no readable `hashes` map" if (repo / TRELLIS_HASHES).exists() else "is missing"
+    return (
+        f"{TRELLIS_HASHES} {state}, and {len(orphans)} file(s) fell through to "
+        f"'{NO_AUTHORITY}' as a result"
+    )
+
+
 def is_framework_surface(path: str, trees: tuple[str, ...]) -> bool:
     """A `skills/`, `agents/` or `commands/` entry the framework owns by name.
 
@@ -672,7 +710,7 @@ def classify_four_trees(
                     Verdict(rel, "delete", "name+content", "platform runtime naming Trellis")
                 )
                 continue
-        verdicts.append(Verdict(rel, "keep", "none", "no authority reaches it"))
+        verdicts.append(Verdict(rel, "keep", "none", NO_AUTHORITY))
     return verdicts
 
 
@@ -1068,6 +1106,16 @@ def run_consumer(repo: pathlib.Path, pack_repo: pathlib.Path, *, apply: bool) ->
 
     verdicts = consumer_plan(repo, pack_repo)
     report_consumer_plan(verdicts, sys.stdout)
+
+    gap = hash_authority_gap(repo, verdicts)
+    if gap is not None:
+        print(
+            f"error: {gap}. The removal would be silently partial. It is "
+            "gitignored in most consumers, so copy it in from a checkout "
+            "where Trellis is installed and run again.",
+            file=sys.stderr,
+        )
+        return 1
 
     doomed = {v.path for v in verdicts if v.action == "delete"}
     dangling = dangling_references(repo, doomed)
