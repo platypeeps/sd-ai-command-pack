@@ -806,8 +806,10 @@ used to run here -- release preparation, the candidate ledger, the payload
 gate, the CI scope classifier, and the post-merge auto-tag job -- has been
 deleted rather than left dormant.
 
-CI is exactly four unconditional checks on every pull request and every push
-to `main`: the `unittest` matrix, `shell-coverage`, `lint`, and `security`.
+CI is exactly five unconditional checks on every pull request and every push
+to `main`: the `unittest` matrix, `shell-coverage`, `lint`, `bash 3.2 syntax`,
+and `security`. They surface as six required contexts, because the `unittest`
+matrix reports one per Python version.
 Merge authority is GitHub branch protection on those checks; there is no
 aggregate context, no bookkeeping fast lane, and no direct-to-main path policy
 beyond what branch protection enforces.

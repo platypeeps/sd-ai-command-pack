@@ -746,6 +746,78 @@ checklist. If step 7 lands without the leg restored, the rollout has quietly kep
 measure, and CONTRIBUTING's "restored at step 7" sentence becomes the falsifiable record that it
 did not.
 
+**R11-D6 (user, 2026-08-30) -- the `Shell coverage` job is deleted at the step-3 sub-PR 3e,
+because what it measures ceases to exist.**
+
+The question was whether the kcov lane's need goes away and how soon. Both halves have sharp
+answers: it goes to zero rather than to "less", and it happens in the pull request immediately
+after 3d.
+
+**Which 3e.** `implement.md` currently spends the letters `3a`-`3e` twice -- once on the step-3
+sub-PRs and once on the platform sweep in the master table -- so the label alone is ambiguous. This
+record means the **step-3 sub-PR**: new machine-scope `install.py` + `installed.json` + parity
+tests, which deletes `templates/scripts/**`, `installer/**`, and `manifest.json`. It does not mean
+the master table's agent-hygiene row. That collision is a defect in its own right and is left
+standing here rather than silently resolved, because renaming steps mid-rollout invalidates
+references in landed pull requests; it needs its own decision.
+
+**The lane measures exactly one directory.** Its kcov include filter is the string
+`sd-ai-command-pack-`, which matches the seven shell files under `templates/scripts/` and nothing
+else. 3e deletes that directory. The replacement world in `bin/` is ten tracked files, every one of
+them Python, none matching the prefix. After 3e there is no shipped shell in the repository to
+measure. This is not a coverage reduction to be weighed against its cost; the subject matter is
+gone.
+
+The seven `.github/scripts/*.sh` files survive 3e and are **not** a reason to keep the lane: the
+prefix never matched them, so they are unmeasured today, and deleting the job loses nothing that is
+currently measured. Repointing kcov at them was considered and rejected -- it would measure CI
+harness rather than shipped product, which is the kind of gate that exists to keep a number alive
+rather than to catch a defect.
+
+Left in place, the job does not merely become pointless, it becomes a blocker.
+`report-shell-coverage.sh` fails hard on a zero measurement (`error: no kcov run directories`,
+exit 1) deliberately, to catch silent plumbing breakage. With `templates/scripts/` gone that guard
+fires on every run, and `Shell coverage` is a required context under `enforce_admins: true`.
+
+**Ordering is load-bearing, and it is the R11-D4 trap again.** A pull request's CI runs the
+workflow from its own branch, so a 3e deleting the payload and the job together would produce no
+`Shell coverage` context, leave a required check permanently unreported, and block itself and every
+pull request after it, with no admin bypass. Protection therefore drops to five required contexts
+**before** the 3e workflow change merges, never after. Both directions of this trap have now been
+observed rather than theorised: dropping the macOS leg on 2026-08-29 required relaxing protection
+first, and adding `bash 3.2 syntax` on 2026-08-30 immediately flipped an open pull request from
+CLEAN to BLOCKED for want of a context its branch could not yet produce.
+
+**This settles a question R11-D4 deliberately left open.** That record named `Shell coverage` at
+13m40s as the run's true long pole -- the genuine latency lever, where the macOS leg was only a cost
+lever -- and declined to touch it because "trading it away would cost real coverage rather than
+duplicate runner time." At 3e the objection expires: the coverage traded away is coverage of
+nothing. Wall clock falls from roughly 13m45s to whatever `unittest (ubuntu-latest, 3.13)` costs.
+That is a consequence, not the justification, and the distinction is the one R11-D4 got wrong the
+first time.
+
+**Scope of the removal, enumerated rather than estimated.** The first draft of this record listed
+two files and was wrong by an order of magnitude; `git grep` finds the lane referenced in twenty
+tracked files. The executable machinery is `kcov-bash-shim.sh` (73 lines),
+`report-shell-coverage.sh` (61) and `summarize_shell_coverage.py` (103), with
+`tests/test_summarize_shell_coverage.py` (141) and the spec
+`docs/spec/tooling/runtime-coverage-lanes.md` (97) -- about 475 lines before counting the
+references in `tests.yml`, the `Makefile`, `README.md`, `CONTRIBUTING.md`, two further specs, and
+five test modules. The four `SD_AI_COMMAND_PACK_KCOV_*` variables and `SD_AI_COMMAND_PACK_TEST_BASH`
+go with it. Those variables are documented, which `CONTRIBUTING.md` makes stable public surface, but
+0.72.0 is the terminal release and post-0.72.0 payload edits are unversioned, so no bump is owed.
+The 3e pull request enumerates this set from `git grep` at the time it is written rather than from
+this paragraph, which will have aged.
+
+Restore criterion (standing rule 1 applied to a removal). The lane returns before shipped shell
+does, enforced as an invariant rather than promised in prose: 3e lands a test asserting that no
+tracked shell file exists outside `.github/scripts/`. The test must enumerate shell the way
+`check-bash32-syntax.sh` already does -- every tracked `*.sh` **plus** any tracked file whose
+shebang names a shell -- because an extensionless script is exactly what a suffix-only check would
+miss. Re-introducing shipped shell then fails CI until this decision is revisited and the lane
+restored. If that test is ever deleted rather than satisfied, this record is the falsifiable
+evidence that the removal was quietly widened.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).

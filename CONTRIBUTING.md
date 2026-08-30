@@ -124,12 +124,15 @@ in CI at all (R11-D5).
 
 That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
-2026-08-29: `enforce_admins: true` and `strict: true`. The required-context set
-is the one dimension currently out of step: protection lists the five contexts
-that survived the macOS drop, and the workflow now produces six.
-`bash 3.2 syntax` runs and reports on every pull request but is not yet
-required, so a red result there does not block a merge until it is added to the
-protection object. Stated here as a
+2026-08-30: `enforce_admins: true`, `strict: true`, and the six required
+contexts match the six the workflow produces. `bash 3.2 syntax` was added to
+the protection object on 2026-08-30, closing the one dimension that was out of
+step while R11-D5 was landing: for the few hours between the workflow change
+merging and that addition, the gate reported on every pull request without
+blocking a red one. Adding it is also what flipped the then-open #607 from
+CLEAN to BLOCKED until its branch carried the workflow that produces the
+context -- the required-context ordering trap, observed in the additive
+direction. Stated here as a
 known gap rather than papered over — `sd-status` reports it from the live
 protection object, which is the design working as intended. `enforce_admins` was deliberately
 left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,

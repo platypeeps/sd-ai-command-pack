@@ -40,7 +40,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 - [x] 0 — kill release train + gate stack. Verified 2026-08-29 by re-running the step's own
   check rather than by memory: the four unconditional jobs (`unittest`, `shell-coverage`,
   `lint`, `security`) are all that remain in `.github/workflows/`, and the release, payload-gate,
-  `ci-result`, `main-push-scope` and auto-tag jobs are gone. **The stated check was
+  `ci-result`, `main-push-scope` and auto-tag jobs are gone. (A fifth job, `bash 3.2 syntax`,
+  was added on 2026-08-29 by R11-D5 — after this verification, and not a restoration of any
+  deleted gate. `shell-coverage` goes at 3e per R11-D6, returning the count to four.) **The stated check was
   `candidate-validation` greps = 0 and it is 2**, so the gap is named instead of ticked past:
   `bin/sd-status` carries the string because it *detects* legacy residue by that name, and
   `templates/scripts/sd-ai-command-pack-review-preflight.mjs` is old-world payload that 3e
