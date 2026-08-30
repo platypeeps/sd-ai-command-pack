@@ -141,9 +141,17 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
         render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
         Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
-- [ ] 3-c — consumer removal PRs (8) incl. `setup-github` for full-mode repos
+- [ ] 3-c — consumer removal PRs (8); removal only
       - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
       - [ ] the eight removal pull requests themselves
+
+      **`setup-github` leaves 3-c and becomes its own step** (user, 2026-08-30), reversing the
+      R3-D16 shape that had each full-mode repository's removal PR also carry the routing
+      workflow. Two reasons, one practical and one structural. `sd-review setup-github` is
+      unbuilt — `bin/sd-review:69` is a seam, not an implementation — so pairing them blocks a
+      removal that is ready on a feature that is not. And a pull request that deletes a
+      thousand files is already the largest thing a reviewer will read this rollout; adding an
+      opt-in CI lane to it means the two cannot be reverted apart.
 
       Recorded before the wave, because measuring the consumers changed four things the
       plan row asserted.
@@ -167,7 +175,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 
       **The removal was going to delete the artifacts.** `--consumer` short-circuited before
       the import that the default mode has always run, so the plan deleted `.trellis/tasks`
-      outright: 887 work items across the eight repositories, none of which have a `docs/work`
+      outright: 886 work items across the eight repositories, none of which have a `docs/work`
       yet. That is the product, not the packaging. The import now runs first and both modes
       read one `planned_imports()` — counting for the plan and enumerating for the run out of
       two code paths is how a plan starts describing something other than what happens.

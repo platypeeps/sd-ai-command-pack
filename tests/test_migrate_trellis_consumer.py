@@ -92,7 +92,7 @@ class ConsumerFixture:
         with listing.open("a", encoding="utf-8") as handle:
             handle.write(target + "\n")
         manifest = self.repo / migrate_trellis.PACK_RECEIPT / "manifest.json"
-        rows = json.loads(manifest.read_text())["files"] if manifest.exists() else []
+        rows = json.loads(manifest.read_text(encoding="utf-8"))["files"] if manifest.exists() else []
         rows.append({"source": source, "target": target})
         manifest.write_text(json.dumps({"files": rows}, indent=2) + "\n", encoding="utf-8")
 
@@ -231,7 +231,7 @@ class AgentsFileTests(FixtureCase):
         verdict = self.fixture.verdict("AGENTS.md")
         self.assertEqual("edit", verdict.action)
         migrate_trellis.apply_consumer_plan(self.fixture.repo, [verdict])
-        text = (self.fixture.repo / "AGENTS.md").read_text()
+        text = (self.fixture.repo / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("ours before.", text)
         self.assertIn("ours after.", text)
         for begin, end in migrate_trellis.AGENTS_MARKERS:
