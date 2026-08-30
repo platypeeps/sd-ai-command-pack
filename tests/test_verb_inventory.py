@@ -30,8 +30,16 @@ BIN = REPO_ROOT / "bin"
 REPO_PATH_OPTIONS = frozenset({"--repo", "--repo-path", "--root", "--checkout", "--directory"})
 
 
-def commands() -> list[pathlib.Path]:
-    """Every sd-* command on disk, migration tools excluded."""
+def scanned_files() -> list[pathlib.Path]:
+    """Everything in `bin/` except the migration tools.
+
+    Deliberately wider than the 12 commands: it also catches the library
+    modules (`sd_lib.py`, `sd_route.py`), which is the point. Those are
+    underscore-named, so a `sd-`-prefix filter would drop them from the scan
+    and lose coverage exactly where a repo-path argument would do the most
+    damage -- a root resolved wrongly in the shared library is wrong for every
+    command that imports it.
+    """
 
     return sorted(
         path
@@ -60,13 +68,24 @@ def option_strings(tree: ast.AST) -> set[str]:
 
 class InventoryTests(unittest.TestCase):
     def test_the_inventory_is_not_empty(self) -> None:
-        # If `commands()` ever returns nothing -- a moved directory, a renamed
+        # If the scan ever returns nothing -- a moved directory, a renamed
         # prefix -- every other test here passes vacuously. Fail loudly instead.
-        self.assertGreater(len(commands()), 5, "bin/ enumerated to almost nothing")
+        self.assertGreater(len(scanned_files()), 5, "bin/ enumerated to almost nothing")
+
+    def test_the_scan_actually_reaches_commands(self) -> None:
+        """Non-empty is not enough: it must contain dash-named commands.
+
+        `scanned_files()` is wide on purpose, so a `bin/` holding only library
+        modules would still satisfy the count above while covering no command
+        at all. This pins the half that the count cannot see.
+        """
+
+        dash_named = [p.name for p in scanned_files() if p.name.startswith("sd-")]
+        self.assertGreater(len(dash_named), 5, f"no sd-* commands in the scan: {dash_named}")
 
     def test_no_command_accepts_a_repository_path(self) -> None:
         offenders: list[str] = []
-        for path in commands():
+        for path in scanned_files():
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError):
@@ -76,14 +95,17 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(offenders, [], "R10-D6: sd-* commands resolve the repo from cwd only")
 
     def test_every_command_resolves_the_root_from_cwd(self) -> None:
-        """`repo_root` is called, and it is called with nothing to point it away.
+        """Where `repo_root` is called, it is called with nothing to point it away.
 
-        Weaker than the option check on purpose: this catches a command that
-        reads a root out of an environment variable or a config key instead of
-        adding a flag for it, which is the same violation wearing a hat.
+        Scoped honestly: files that never mention `repo_root(` are skipped, so
+        this proves nothing about a command that resolves a root some other
+        way. It is the option check above that carries the weight; this one
+        adds the case where someone keeps `repo_root` but feeds it a value read
+        from config or the environment instead of adding a flag -- the same
+        violation wearing a hat.
         """
 
-        for path in commands():
+        for path in scanned_files():
             source = path.read_text(encoding="utf-8", errors="replace")
             if "repo_root(" not in source:
                 continue
