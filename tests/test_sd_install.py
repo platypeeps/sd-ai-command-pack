@@ -885,6 +885,55 @@ class StatusTests(InstallerHarness):
         _, output = self.run_cli("--status")
         self.assertIn("1 missing", output)
 
+    def _committed_checkout(self) -> Path:
+        """A real git checkout in the scratch home, at a known clean commit.
+
+        `--status` reports dirtiness by asking git about the *serving* checkout,
+        so a test that installs from this repository reports whatever the
+        developer's working tree happens to be. That is not a test, it is a
+        reading of the room: locally the tree was dirty and the branch was
+        covered, on a clean CI checkout it was not, and the 100% gate failed
+        with `bin/sd_install.py 519 1 196 1 99% 824`. Both sides of the branch
+        are pinned here against a checkout this test owns.
+        """
+        checkout = self.home / "serving"
+        folder = checkout / "skills" / "sd-probe"
+        folder.mkdir(parents=True)
+        (folder / sd_install.SKILL_FILE).write_text(
+            "---\nname: sd-probe\n---\n\nprobe\n", encoding="utf-8"
+        )
+        for argv in (
+            ("init", "-q"),
+            ("config", "user.email", "t@example.invalid"),
+            ("config", "user.name", "t"),
+            ("add", "-A"),
+            ("commit", "-q", "-m", "probe"),
+        ):
+            subprocess.run(
+                ["git", *argv], cwd=checkout, check=True, capture_output=True
+            )
+        return checkout
+
+    def _status_of(self, checkout: Path) -> str:
+        ctx = sd_install.Context(
+            checkout=checkout, home=self.home, environ=dict(os.environ)
+        )
+        installed = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, installed), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_status(ctx, out), 0)
+        return out.getvalue()
+
+    def test_a_clean_serving_checkout_is_not_reported_dirty(self):
+        self.assertNotIn("checkout is dirty", self._status_of(self._committed_checkout()))
+
+    def test_a_dirty_serving_checkout_is_reported(self):
+        checkout = self._committed_checkout()
+        (checkout / "skills" / "sd-probe" / sd_install.SKILL_FILE).write_text(
+            "---\nname: sd-probe\n---\n\nedited\n", encoding="utf-8"
+        )
+        self.assertIn("checkout is dirty", self._status_of(checkout))
+
     def test_status_names_legacy_residue(self):
         legacy = self.home / ".agents" / "skills" / "sd-old" / "SKILL.md"
         legacy.parent.mkdir(parents=True)
