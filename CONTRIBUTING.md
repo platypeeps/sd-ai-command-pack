@@ -113,7 +113,10 @@ Every change to `main` goes through a pull request. Merge authority is GitHub
 branch protection; there is no local pre-push hook, no server-side path policy,
 and no bookkeeping fast lane. A pull-request head and a push to `main` run the
 same five unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
-`bash32`, and `security` — producing six contexts. Two changes landed on
+`bash 3.2 syntax`, and `security` — producing six contexts. Contexts are named
+by a job's `name:`, not its YAML key, so the bash lane is required as
+`bash 3.2 syntax` and never as `bash32`; requiring the key would pin a context
+that never reports and block every pull request. Two changes landed on
 2026-08-29 and moved in opposite directions: the macOS leg was dropped for the
 duration of the artifacts-as-product rollout (R11-D4, restored at step 7), and
 `bash32` was added because the bash 3.2 syntax gate turned out never to have run
@@ -123,9 +126,10 @@ That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
 2026-08-29: `enforce_admins: true` and `strict: true`. The required-context set
 is the one dimension currently out of step: protection lists the five contexts
-that survived the macOS drop, and the workflow now produces six. `bash32` runs
-and reports on every pull request but is not yet required, so a red `bash32` does
-not block a merge until it is added to the protection object. Stated here as a
+that survived the macOS drop, and the workflow now produces six.
+`bash 3.2 syntax` runs and reports on every pull request but is not yet
+required, so a red result there does not block a merge until it is added to the
+protection object. Stated here as a
 known gap rather than papered over — `sd-status` reports it from the live
 protection object, which is the design working as intended. `enforce_admins` was deliberately
 left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,

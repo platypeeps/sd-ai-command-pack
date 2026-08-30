@@ -211,6 +211,10 @@ jobs:
     # interpreter into a failure rather than a pass.
     env:
       BASH32_VERSION: "3.2.57"
+      # Pinned so the gate cannot be changed by whatever the mirror serves.
+      # A CI gate that builds an unverified download is a gate an upstream
+      # change can silently redefine.
+      BASH32_SHA256: "3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4"
 
     steps:
       - name: Check out repository
@@ -234,6 +238,7 @@ jobs:
           work="$(mktemp -d)"
           curl -fsSL -o "$work/bash.tar.gz" \
             "https://ftp.gnu.org/gnu/bash/bash-${BASH32_VERSION}.tar.gz"
+          echo "${BASH32_SHA256}  $work/bash.tar.gz" | sha256sum -c -
           tar xzf "$work/bash.tar.gz" -C "$work"
           cd "$work/bash-${BASH32_VERSION}"
           ./configure --without-bash-malloc --disable-nls -q
