@@ -46,7 +46,9 @@ one engineer plus agents.
 
 1. The unit of work is a git-tracked artifact set (`prd.md`, optional `design.md` /
    `implement.md`) under `docs/work/<date>-<slug>/`; no runtime state is committed.
-2. Merge authority is GitHub branch protection; local tooling mirrors it read-only.
+2. Merge authority is GitHub branch protection **where protection is enforcing**; local
+   tooling mirrors it read-only and reports the gap where it is not, rather than asserting a
+   guarantee the config does not provide.
 3. The framework never edits a tracked repo file for its own purpose; the entire
    tracked footprint in a consuming repo is `<work>/**` (+ opt-in CI workflow files).
 4. Collaborators never adopt the framework: CI checks report-and-pass for unlisted
