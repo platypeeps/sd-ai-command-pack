@@ -191,6 +191,15 @@ class WorkflowContentTests(SetupFixture):
         # fails on its first run in every consumer at once.
         self.assertTrue((REPO_ROOT / setup.ACTION_SUBPATH / "action.yml").is_file())
 
+    def test_the_action_points_origin_head_at_the_pull_request_base(self) -> None:
+        # The first run of this lane failed with "cannot resolve a base branch":
+        # a pull-request checkout is a detached HEAD with no `origin/HEAD` and
+        # no local `main`, which is exactly what `sd-review` looks for. Asserted
+        # because the failure is invisible until a real pull request runs it.
+        action = (REPO_ROOT / setup.ACTION_SUBPATH / "action.yml").read_text(encoding="utf-8")
+        self.assertIn('git remote set-head origin "${GITHUB_BASE_REF}"', action)
+        self.assertIn("fetch-depth: 0", setup.workflow_text("./x"))
+
 
 class ReplacementTests(SetupFixture):
     def test_rerunning_reports_unchanged(self) -> None:

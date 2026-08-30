@@ -22,6 +22,17 @@ runs:
         SD_REVIEW_SCOPE: ${{ inputs.scope }}
       run: |
         set -euo pipefail
+        # `actions/checkout` leaves a detached HEAD and no `origin/HEAD`, and
+        # `sd-review` resolves its base from `origin/HEAD` before falling back
+        # to a local `main` or `master` -- neither of which a pull-request
+        # checkout has. The first run of this action failed on exactly that:
+        # "cannot resolve a base branch". `fetch-depth: 0` has already fetched
+        # every branch, so pointing the symref at this pull request's real base
+        # is a local write with no network and no credentials, and it is more
+        # accurate than assuming `main`.
+        if [ -n "${GITHUB_BASE_REF:-}" ]; then
+          git remote set-head origin "${GITHUB_BASE_REF}"
+        fi
         # `--explain` resolves the subject, runs `route()`, and prints the plan.
         # It reaches no network and starts no provider: the local review lane is
         # a workstation lane, and this action exists to say what that lane would
