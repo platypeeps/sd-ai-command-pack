@@ -1,0 +1,978 @@
+#!/usr/bin/env python3
+"""Read-only status for the repository you are standing in.
+
+There is no repo-path argument and no fleet walk (R10-D6): the repository is
+the one enclosing the current working directory, full stop. Sessions stick to
+their repos, and a status command that could be pointed anywhere is how a
+session stops sticking. The dashboard is the cross-repo view; this is not it.
+
+Nothing here is written. Not the repo, not the state directory, not a cache.
+Every section derives its answer at run time from the filesystem, from git, or
+from GitHub, because committed derived state is permanent staleness.
+
+Eight sections, in the order a human wants them:
+
+  pack        the checkout these tools came from
+  work        derived item status from `docs/work`, counted; `--parked` lists
+              the items the age sweep parked, read from their own frontmatter
+  prs         open pull requests, via the same code path as `sd-pr-state`
+  setup       mode and the detected check entrypoints
+  protection  branch-protection *enforcement*, gap by gap, plus the two r7
+              merge-settings flags
+  handoff     the pending local packet for this directory (read, never
+              consumed) and the Lane B carrier branches on origin
+  backends    which review backends are installed, names only
+  residue     legacy leftovers, each with the exact command that removes it
+
+The protection section is the one that matters. The doctrine is that merge
+authority is GitHub branch protection *wherever protection is actually
+enforcing*; protection that exempts admins is prose, not authority, and a
+non-strict required check is a green tick on a base that moved. So this
+section reports enforcement state rather than mere presence, and every missing
+leg prints as a named gap. That is what makes the doctrine conditional in
+tooling instead of only in prose.
+
+A gap is a report, not a failure: this command exits 0 whether or not it found
+any. Exit 2 is reserved for an invocation or configuration fault, which prints
+a sentence and never a traceback.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import itertools
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess  # nosec B404 - fixed argv git reads, never a shell
+import sys
+from typing import Any, TextIO
+
+#: Read-only means read-only, and importing a sibling module would otherwise
+#: leave a `bin/__pycache__` behind. Set before the first sibling import.
+sys.dont_write_bytecode = True
+
+_BIN = pathlib.Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+    sys.path.insert(0, str(_BIN))
+
+import sd_lib  # noqa: E402
+
+SCHEMA_VERSION = 1
+GIT_TIMEOUT_SECONDS = 15
+
+
+def _sibling(name: str, module_name: str) -> Any:
+    """Import a sibling tool in `bin/` that has no `.py` suffix.
+
+    The alternative is copying its logic, and two copies of "is this PR
+    mergeable" drift the first time one of them is fixed. `sd-pr-state` and
+    `sd-handoff` are modules of definitions with a `__main__` guard, so
+    importing them runs nothing.
+    """
+    path = _BIN / name
+    loader = importlib.machinery.SourceFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_file_location(module_name, str(path), loader=loader)
+    if spec is None:  # pragma: no cover - a bin/ layout this broken cannot run
+        raise sd_lib.ConfigError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    loader.exec_module(module)
+    return module
+
+
+pr_state = _sibling("sd-pr-state", "sd_pr_state")
+handoff = _sibling("sd-handoff", "sd_handoff")
+
+
+class UsageError(Exception):
+    """An invocation fault: exit 2, one sentence, never a traceback."""
+
+
+def _git(args: list[str], cwd: pathlib.Path) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+# --------------------------------------------------------------------------
+# 1. Pack banner
+# --------------------------------------------------------------------------
+
+
+def pack_banner() -> dict[str, Any]:
+    """Which checkout these tools were executed from, and where it stands.
+
+    Worth a line of its own because the commonest confusing status report is a
+    correct report produced by the wrong copy of the tools.
+    """
+    root = _BIN.parent
+    return {
+        "root": str(root),
+        "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"], root),
+        "head": _git(["rev-parse", "--short", "HEAD"], root),
+        # `--no-optional-locks` because a plain `git status` refreshes the
+        # index on disk, and a read-only tool does not get to write the index.
+        "dirty": bool(_git(["--no-optional-locks", "status", "--porcelain"], root)),
+    }
+
+
+# --------------------------------------------------------------------------
+# 2. Work items
+# --------------------------------------------------------------------------
+
+
+def work_section(root: pathlib.Path) -> dict[str, Any]:
+    items = sd_lib.work_items(root)
+    counts: dict[str, int] = {}
+    listed = []
+    for item in items:
+        counts[item.status] = counts.get(item.status, 0) + 1
+        listed.append(
+            {
+                "slug": item.slug,
+                "path": str(item.path.relative_to(root)),
+                "title": item.title,
+                "status": item.status,
+                "branch": item.branch,
+                "archived": item.archived,
+                "parked": item.parked,
+                "inconsistencies": list(item.inconsistencies),
+            }
+        )
+    parked = [entry for entry in listed if entry["parked"]]
+    active = [entry for entry in listed if not entry["archived"]]
+    return {
+        "total": len(listed),
+        "active": len(active),
+        "counts": counts,
+        "items": listed,
+        "parked": parked,
+    }
+
+
+# --------------------------------------------------------------------------
+# 4. Detected setup
+# --------------------------------------------------------------------------
+
+
+def setup_section(root: pathlib.Path) -> dict[str, Any]:
+    try:
+        declared = sd_lib.mode(root)
+        mode_error = ""
+    except sd_lib.ConfigError as error:
+        declared, mode_error = sd_lib.DEFAULT_MODE, str(error)
+    try:
+        detection = sd_lib.detect_entrypoints(root)
+        detect_error = ""
+    except sd_lib.ConfigError as error:
+        detection = sd_lib.Detection(None, None, {}, str(error))
+        detect_error = str(error)
+    return {
+        "mode": declared,
+        "mode_error": mode_error,
+        "source": detection.source,
+        "origin": str(detection.origin) if detection.origin else None,
+        "detected": detection.reason,
+        "entrypoints": {name: list(argv) for name, argv in detection.commands.items()},
+        "error": detect_error,
+    }
+
+
+# --------------------------------------------------------------------------
+# 5. Protection -- the enforcement state, gap by gap
+# --------------------------------------------------------------------------
+
+_KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*):\s*(?P<value>.*?)\s*$")
+_ITEM_RE = re.compile(r"^(?P<indent>\s*)-\s*(?P<rest>.*?)\s*$")
+
+PR_TRIGGERS = ("pull_request", "pull_request_target")
+
+
+def _scalar(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _significant(text: str) -> list[str]:
+    """Non-blank, non-comment lines, right-stripped. Enough YAML for job names.
+
+    A workflow file's job list is a handful of nested mappings, and PyYAML is
+    not stdlib. This reads the shape workflows actually have -- the same
+    bargain `sd_lib._taskfile_tasks` already makes -- and every construct it
+    cannot resolve becomes a stated note rather than a silent wrong answer.
+    """
+    return [
+        line.rstrip()
+        for line in text.split("\n")
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _children(lines: list[str], index: int) -> list[str]:
+    base = _indent(lines[index])
+    out = []
+    for line in lines[index + 1 :]:
+        if _indent(line) <= base:
+            break
+        out.append(line)
+    return out
+
+
+def _entries(lines: list[str]) -> list[tuple[int, str, str]]:
+    """`(offset, key, inline value)` for the mapping keys at the top indent."""
+    if not lines:
+        return []
+    base = _indent(lines[0])
+    found = []
+    for offset, line in enumerate(lines):
+        if _indent(line) != base:
+            continue
+        match = _KEY_RE.match(line)
+        if match:
+            found.append((offset, match.group("key"), match.group("value")))
+    return found
+
+
+def _field(lines: list[str], key: str) -> str | None:
+    for _, name, value in _entries(lines):
+        if name == key:
+            return value
+    return None
+
+
+def _sub(lines: list[str], key: str) -> list[str]:
+    for offset, name, _ in _entries(lines):
+        if name == key:
+            return _children(lines, offset)
+    return []
+
+
+def _inline_list(value: str) -> list[str] | None:
+    text = value.strip()
+    if text.startswith("[") and text.endswith("]"):
+        return [_scalar(part) for part in text[1:-1].split(",") if part.strip()]
+    return None
+
+
+def _sequence(lines: list[str], inline: str) -> list[str]:
+    parsed = _inline_list(inline)
+    if parsed is not None:
+        return parsed
+    if not lines:
+        return []
+    base = _indent(lines[0])
+    return [
+        _scalar(match.group("rest"))
+        for line in lines
+        if _indent(line) == base and (match := _ITEM_RE.match(line))
+    ]
+
+
+def _mappings(lines: list[str]) -> list[dict[str, str]]:
+    """A `- key: value` block list, each entry keeping its key order."""
+    if not lines:
+        return []
+    base = _indent(lines[0])
+    found: list[dict[str, str]] = []
+    for line in lines:
+        item = _ITEM_RE.match(line)
+        if item and _indent(line) == base:
+            current: dict[str, str] = {}
+            found.append(current)
+            inner = _KEY_RE.match(item.group("rest"))
+            if inner:
+                current[inner.group("key")] = _scalar(inner.group("value"))
+            continue
+        if not found or _indent(line) <= base:
+            continue
+        match = _KEY_RE.match(line)
+        if match:
+            found[-1][match.group("key")] = _scalar(match.group("value"))
+    return found
+
+
+def _matrix_names(matrix: list[str]) -> tuple[list[str], bool]:
+    """Matrix suffixes as GitHub renders them, and whether that is approximate.
+
+    Plain axes cross-multiply in declaration order; an `include:`-only matrix
+    names one check per entry, in that entry's key order. A matrix with both is
+    where GitHub's merge rules stop being reproducible from the file alone, so
+    that case is answered *and flagged* rather than quietly guessed.
+    """
+    axes: dict[str, list[str]] = {}
+    includes: list[dict[str, str]] = []
+    for offset, key, inline in _entries(matrix):
+        if key == "exclude":
+            continue
+        if key == "include":
+            includes = _mappings(_children(matrix, offset))
+            continue
+        values = _sequence(_children(matrix, offset), inline)
+        if values:
+            axes[key] = values
+    if axes:
+        combos = [tuple(values) for values in itertools.product(*axes.values())]
+        approximate = bool(includes)
+    else:
+        combos = [tuple(entry.values()) for entry in includes if entry]
+        approximate = False
+    return [", ".join(combo) for combo in combos if combo], approximate
+
+
+def workflow_checks(root: pathlib.Path) -> tuple[set[str], list[str]]:
+    """The check names `.github/workflows/**` produces on a pull request."""
+    directory = root / ".github" / "workflows"
+    produced: set[str] = set()
+    notes: list[str] = []
+    if not directory.is_dir():
+        return produced, ["no .github/workflows directory, so this repo produces no checks"]
+    paths = sorted(
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix in (".yml", ".yaml")
+    )
+    for path in paths:
+        try:
+            lines = _significant(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError as error:
+            notes.append(f"{path.name}: unreadable ({error})")
+            continue
+        triggers = _triggers(lines)
+        if triggers and not triggers & set(PR_TRIGGERS):
+            continue
+        for job_id, body in _jobs(lines):
+            _job_names(path.name, job_id, body, produced, notes)
+    return produced, notes
+
+
+def _triggers(lines: list[str]) -> set[str]:
+    """The workflow's event names; an empty set means "could not tell"."""
+    for offset, key, inline in _entries(lines):
+        if key not in ("on", "true"):  # a YAML 1.1 loader would fold `on` to true
+            continue
+        parsed = _sequence(_children(lines, offset), inline)
+        if parsed:
+            return set(parsed)
+        return {name for _, name, _ in _entries(_children(lines, offset))}
+    return set()
+
+
+def _jobs(lines: list[str]) -> list[tuple[str, list[str]]]:
+    for offset, key, _ in _entries(lines):
+        if key == "jobs":
+            block = _children(lines, offset)
+            return [
+                (name, _children(block, index)) for index, name, _ in _entries(block)
+            ]
+    return []
+
+
+def _job_names(
+    filename: str, job_id: str, body: list[str], produced: set[str], notes: list[str]
+) -> None:
+    if _field(body, "uses") is not None:
+        notes.append(
+            f"{filename}: job {job_id} calls a reusable workflow; "
+            "its check names live in the called file and are not derived here"
+        )
+        return
+    display = _scalar(_field(body, "name") or "") or job_id
+    matrix = _sub(_sub(body, "strategy"), "matrix")
+    suffixes, approximate = _matrix_names(matrix) if matrix else ([], False)
+    if approximate:
+        notes.append(
+            f"{filename}: job {job_id} mixes matrix axes with include:, "
+            "so its derived names are approximate"
+        )
+    names = [f"{display} ({suffix})" for suffix in suffixes] or [display]
+    if any("${{" in name for name in names):
+        notes.append(
+            f"{filename}: job {job_id} names contain a ${{{{ }}}} expression "
+            "that only the runner can resolve"
+        )
+        return
+    if _field(body, "if") is not None:
+        notes.append(
+            f"{filename}: job {job_id} is conditional (if:); a required context "
+            "it does not report stays pending forever"
+        )
+    produced.update(names)
+
+
+def _protection_gaps(
+    protection: dict[str, Any], default_branch: str, produced: set[str], notes: list[str]
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    gaps: list[dict[str, str]] = []
+    checks = protection.get("required_status_checks") or {}
+    reviews = protection.get("required_pull_request_reviews")
+    admins = protection.get("enforce_admins") or {}
+
+    if not (admins.get("enabled") if isinstance(admins, dict) else admins):
+        gaps.append(
+            {
+                "id": "enforce_admins",
+                "gap": (
+                    f"enforce_admins is off on {default_branch}: every rule below stops "
+                    "collaborators and exempts the admins who do the merging. "
+                    "Protection that exempts admins is prose, not authority."
+                ),
+            }
+        )
+    if not isinstance(checks, dict) or not checks:
+        gaps.append(
+            {
+                "id": "required_checks",
+                "gap": f"no required status checks on {default_branch}: a red PR still merges",
+            }
+        )
+        contexts: list[str] = []
+    else:
+        contexts = [str(name) for name in checks.get("contexts") or []]
+        if not checks.get("strict"):
+            gaps.append(
+                {
+                    "id": "strict",
+                    "gap": (
+                        "required checks are not strict: a green check run against a "
+                        "stale base still merges, so main can go red on a merge that "
+                        "was never tested against it"
+                    ),
+                }
+            )
+    missing = sorted(set(contexts) - produced)
+    extra = sorted(produced - set(contexts))
+    if missing:
+        gaps.append(
+            {
+                "id": "required_not_produced",
+                "gap": (
+                    "required contexts no workflow in this repo produces: "
+                    + ", ".join(missing)
+                    + " -- each one blocks every PR until an external app reports it"
+                ),
+            }
+        )
+    if extra:
+        gaps.append(
+            {
+                "id": "produced_not_required",
+                "gap": (
+                    "checks this repo runs but does not require: "
+                    + ", ".join(extra)
+                    + " -- they can go red without blocking a merge"
+                ),
+            }
+        )
+    if not isinstance(reviews, dict):
+        gaps.append(
+            {
+                "id": "reviews",
+                "gap": f"no pull-request review is required on {default_branch}",
+            }
+        )
+        approvals = 0
+    else:
+        approvals = int(reviews.get("required_approving_review_count") or 0)
+        if approvals < 1:
+            gaps.append(
+                {
+                    "id": "reviews",
+                    "gap": (
+                        "a review requirement exists but asks for 0 approving reviews, "
+                        "so it gates nothing"
+                    ),
+                }
+            )
+    detail = {
+        "enforce_admins": bool(admins.get("enabled")) if isinstance(admins, dict) else False,
+        "strict": bool(checks.get("strict")) if isinstance(checks, dict) else False,
+        "required_contexts": sorted(contexts),
+        "produced_contexts": sorted(produced),
+        "required_not_produced": missing,
+        "produced_not_required": extra,
+        "required_approving_review_count": approvals,
+        "workflow_notes": notes,
+    }
+    return gaps, detail
+
+
+def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
+    """The two r7 merge-settings flags, reported beside the protection gaps.
+
+    They are not branch protection -- they are what the merge button does when
+    a human presses it -- but they decide whether `wip:` subjects from a Lane B
+    carrier branch reach main's history, so they are reported here or nowhere.
+    """
+    title = str(repo.get("squash_merge_commit_title") or "")
+    message = str(repo.get("squash_merge_commit_message") or "")
+    flags: list[dict[str, Any]] = [
+        {
+            "id": "squash_message",
+            "value": f"{title or '?'} / {message or '?'}",
+            "flagged": title != "PR_TITLE" or message == "COMMIT_MESSAGES",
+            "gap": (
+                f"squash commits are built from {title or '?'} / {message or '?'}, so a "
+                "carrier branch's `wip:` subjects land in main's history when the merge "
+                "runs through the web UI; set the title to PR_TITLE and the message to "
+                "PR_BODY or BLANK"
+            ),
+        },
+        {
+            "id": "rebase_merge",
+            "value": "allowed" if repo.get("allow_rebase_merge") else "disallowed",
+            "flagged": bool(repo.get("allow_rebase_merge")),
+            "gap": (
+                "rebase merging is allowed, which replays every branch commit onto main "
+                "verbatim -- `wip:` subjects included; disable it and leave squash"
+            ),
+        },
+    ]
+    return flags
+
+
+def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
+    produced, notes = workflow_checks(root)
+    result: dict[str, Any] = {
+        "available": False,
+        "reason": gh["reason"] or "",
+        "default_branch": None,
+        "protected": None,
+        "gaps": [],
+        "merge_settings": [],
+        "detail": {"produced_contexts": sorted(produced), "workflow_notes": notes},
+    }
+    if not gh["available"]:
+        return result
+    slug = str(gh["slug"])
+    repo, error = pr_state.gh_json(["api", f"repos/{slug}"], root)
+    if error or not isinstance(repo, dict):
+        result["reason"] = error or f"gh api repos/{slug} did not return an object"
+        return result
+    default_branch = str(repo.get("default_branch") or "main")
+    result.update(available=True, reason="", default_branch=default_branch)
+    result["merge_settings"] = _merge_settings(repo)
+
+    protection, error = pr_state.gh_json(
+        ["api", f"repos/{slug}/branches/{default_branch}/protection"], root
+    )
+    if not isinstance(protection, dict):
+        # 404 is the answer, not an outage: this branch has no protection.
+        result["protected"] = False
+        result["gaps"] = [
+            {
+                "id": "unprotected",
+                "gap": (
+                    f"{default_branch} has no branch protection at all: nothing that "
+                    "can push is stopped by anything, and no local lane can supply the "
+                    "authority the config does not"
+                ),
+            }
+        ]
+        result["detail"]["read_error"] = error
+        return result
+    result["protected"] = True
+    gaps, detail = _protection_gaps(protection, default_branch, produced, notes)
+    result["gaps"] = gaps
+    result["detail"] = detail
+    return result
+
+
+# --------------------------------------------------------------------------
+# 6. Resumable handoffs
+# --------------------------------------------------------------------------
+
+
+def handoff_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
+    """The pending packet for this directory, *read* -- never consumed.
+
+    Consuming is `sd-handoff --show`'s job and only its job: a packet loads
+    exactly once, and a status report that ate it would make the restart it
+    exists for come up empty. So this opens the file, reads it, and closes it.
+    """
+    resolved, _ = handoff.resolve_root(None, environ)
+    path = handoff.packet_path(resolved, environ)
+    packet: dict[str, Any] = {
+        "directory": resolved,
+        "path": str(path),
+        "pending": False,
+        "detail": "",
+    }
+    if not path.is_file():
+        packet["detail"] = "no packet written for this directory"
+    else:
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            loaded = None
+            packet["detail"] = f"packet is unreadable: {error}"
+        if isinstance(loaded, dict):
+            consumed = loaded.get("consumed")
+            packet.update(
+                pending=not consumed,
+                consumed=consumed,
+                created=loaded.get("created"),
+                expires=loaded.get("expires"),
+                item=loaded.get("item"),
+                summary=loaded.get("summary"),
+                age=handoff.age_line(loaded),
+                detail=(
+                    f"consumed at {consumed}" if consumed else "pending; load it with "
+                    "`sd-handoff --show`, or /clear and the SessionStart hook takes it"
+                ),
+            )
+    return {"packet": packet, "carriers": carrier_branches(root)}
+
+
+def carrier_branches(root: pathlib.Path) -> list[dict[str, str]]:
+    """Lane B carriers on origin: remote branches whose tip is a `wip:` commit.
+
+    Derived from origin's refs as this checkout currently knows them -- run
+    `git fetch` first if you want them newer. There is no list of carrier
+    branches anywhere, and there must not be: the commit subject is the record.
+    """
+    listing = _git(
+        [
+            "for-each-ref",
+            "--format=%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(contents:subject)",
+            "refs/remotes/origin",
+        ],
+        root,
+    )
+    carriers = []
+    for line in (listing or "").split("\n"):
+        parts = line.split("\t")
+        if len(parts) != 4 or not parts[3].startswith("wip:"):
+            continue
+        carriers.append(
+            {"branch": parts[0], "head": parts[1], "age": parts[2], "subject": parts[3]}
+        )
+    return carriers
+
+
+# --------------------------------------------------------------------------
+# 7. Backend availability
+# --------------------------------------------------------------------------
+
+#: Review backends and the executable each one is. Names only, never values:
+#: this section says whether a lane could run, not what its credentials are.
+BACKENDS = (
+    ("codex", "codex"),
+    ("kimi", "kimi"),
+    ("antigravity", "agy"),
+    ("copilot", "gh"),
+    ("prism", "prism"),
+    ("gito", "gito"),
+)
+
+
+def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
+    """Which lanes are installed, and where it is cheap to tell, authenticated.
+
+    Deliberately shallow: this asks the filesystem and, for `gh`, the one local
+    command that answers without a network call. It is not a substitute for the
+    review lane's own preflights, which are the only thing that can say a
+    backend will actually run -- and which land with `sd-review` at step 3c.
+    Authentication is reported as a state, never as a credential.
+    """
+    found = []
+    for name, executable in BACKENDS:
+        if shutil.which(executable) is None:
+            state = "absent"
+        elif name == "copilot":
+            state = "present" if pr_state.gh_authenticated(root) else "unauthenticated"
+        elif name == "codex":
+            state = (
+                "present"
+                if (pathlib.Path.home() / ".codex" / "auth.json").is_file()
+                else "unauthenticated"
+            )
+        else:
+            state = "present"
+        found.append({"backend": name, "command": executable, "state": state})
+    return found
+
+
+# --------------------------------------------------------------------------
+# 8. Legacy residue
+# --------------------------------------------------------------------------
+
+#: Each row is `(id, relative glob, sentence, exact removal command)`. A
+#: detector without a command to run is a nag, so every row carries one.
+RESIDUE = (
+    (
+        "trellis",
+        ".trellis",
+        "the Trellis state directory the pack replaced with docs/work",
+        "git rm -r --cached --ignore-unmatch .trellis && rm -rf .trellis",
+    ),
+    (
+        "pack-state",
+        ".sd-ai-command-pack",
+        "an in-tree pack state directory; the pack keeps nothing in the tree",
+        "rm -rf .sd-ai-command-pack",
+    ),
+    (
+        "githooks",
+        ".githooks",
+        "the retired gate stack's hooks directory",
+        "git config --unset core.hooksPath; git rm -r --ignore-unmatch .githooks",
+    ),
+    (
+        "vendored-scripts",
+        "scripts/sd-ai-command-pack-*",
+        "vendored copies of the legacy shipped scripts",
+        "git rm -r --ignore-unmatch 'scripts/sd-ai-command-pack-*'",
+    ),
+    (
+        "router-workflow",
+        ".github/workflows/sd-ai-command-pack-*.y*ml",
+        "the retired sd-github-review router workflow",
+        "git rm --ignore-unmatch '.github/workflows/sd-ai-command-pack-*.y*ml'",
+    ),
+    (
+        "candidate-ledger",
+        ".github/candidate-validation*",
+        "the retired release-train candidate ledger",
+        "git rm -r --ignore-unmatch '.github/candidate-validation*'",
+    ),
+)
+
+
+def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
+    found = []
+    for name, pattern, why, command in RESIDUE:
+        matches = sorted(str(path.relative_to(root)) for path in root.glob(pattern))
+        if matches:
+            found.append(
+                {"id": name, "paths": matches, "why": why, "remove": command}
+            )
+    hooks_path = _git(["config", "--get", "core.hooksPath"], root)
+    if hooks_path:
+        found.append(
+            {
+                "id": "hooks-path",
+                "paths": [hooks_path],
+                "why": "this checkout still routes git hooks through a configured path",
+                "remove": "git config --unset core.hooksPath",
+            }
+        )
+    return found
+
+
+# --------------------------------------------------------------------------
+# Assembly and output
+# --------------------------------------------------------------------------
+
+
+def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str, Any]:
+    gh = pr_state.probe(root)
+    pulls = pr_state.collect(root, limit)
+    return {
+        "tool": "sd-status",
+        "schema": SCHEMA_VERSION,
+        "repo": str(root),
+        "pack": pack_banner(),
+        "work": work_section(root),
+        "pull_requests": pulls,
+        "setup": setup_section(root),
+        "protection": protection_section(root, gh),
+        "handoff": handoff_section(root, environ),
+        "backends": backends_section(root),
+        "residue": residue_section(root),
+    }
+
+
+def _render_pack(result: dict[str, Any], write: Any) -> None:
+    pack = result["pack"]
+    dirty = ", dirty" if pack["dirty"] else ""
+    write(f"sd-status: {result['repo']}\n")
+    write(f"  pack: {pack['root']} ({pack['branch']} @ {pack['head']}{dirty})\n")
+
+
+#: A backlog of a hundred `planning` items is a real state of the world (it is
+#: what the step-7 sweep exists to drain) but printing all hundred buries every
+#: section under it. Items being worked are always listed; the rest are listed
+#: to this many and then counted. The counts line above never elides anything.
+LISTED_ITEMS = 20
+_ACTIVE_FIRST = ("in_progress", "ready", "unknown")
+
+
+def _render_work(work: dict[str, Any], write: Any) -> None:
+    write("\nwork items\n")
+    if not work["total"]:
+        write("  none under docs/work\n")
+        return
+    counts = ", ".join(f"{name} {count}" for name, count in sorted(work["counts"].items()))
+    write(f"  {work['total']} items ({work['active']} active): {counts}\n")
+    live = [entry for entry in work["items"] if not entry["archived"]]
+    shown = [entry for entry in live if entry["status"] in _ACTIVE_FIRST]
+    rest = [entry for entry in live if entry["status"] not in _ACTIVE_FIRST]
+    for entry in shown + rest[:LISTED_ITEMS]:
+        mark = "  parked" if entry["parked"] else ""
+        write(f"  {entry['status']:<12} {entry['slug']}{mark}\n")
+        for problem in entry["inconsistencies"]:
+            write(f"    ! {problem}\n")
+    if len(rest) > LISTED_ITEMS:
+        write(f"  ... and {len(rest) - LISTED_ITEMS} more not being worked\n")
+    if work["parked"]:
+        write(f"  {len(work['parked'])} parked; see `sd-status --parked`\n")
+
+
+def _render_protection(section: dict[str, Any], write: Any) -> None:
+    write("\nprotection\n")
+    if not section["available"]:
+        write(f"  unavailable: {section['reason']}\n")
+    else:
+        branch = section["default_branch"]
+        if not section["gaps"]:
+            write(f"  {branch}: protection is fully enforcing -- admins included, "
+                  "checks strict and matched, review required\n")
+        for gap in section["gaps"]:
+            write(f"  GAP [{gap['id']}] {gap['gap']}\n")
+        for flag in section["merge_settings"]:
+            label = "FLAG" if flag["flagged"] else "ok  "
+            body = flag["gap"] if flag["flagged"] else f"{flag['id']}: {flag['value']}"
+            write(f"  {label} {body}\n")
+    for note in section["detail"].get("workflow_notes") or []:
+        write(f"  note: {note}\n")
+
+
+def _render_handoff(section: dict[str, Any], write: Any) -> None:
+    write("\nresumable handoffs\n")
+    packet = section["packet"]
+    if packet["pending"]:
+        write(f"  packet: pending ({packet.get('age')}) for {packet['directory']}\n")
+        write(f"    item: {packet.get('item')}  summary: {packet.get('summary')}\n")
+        write(f"    {packet['detail']}\n")
+    else:
+        write(f"  packet: {packet['detail']}\n")
+    for carrier in section["carriers"]:
+        write(f"  carrier: {carrier['branch']} @ {carrier['head']} "
+              f"({carrier['age']}) {carrier['subject']}\n")
+    if not section["carriers"]:
+        write("  carrier: no `wip:` branches on origin\n")
+
+
+def render(result: dict[str, Any], stream: TextIO) -> None:
+    write = stream.write
+    _render_pack(result, write)
+    _render_work(result["work"], write)
+
+    write("\nopen pull requests\n")
+    pr_state.render_pulls(result["pull_requests"], stream)
+
+    setup = result["setup"]
+    write("\ndetected setup\n")
+    write(f"  mode: {setup['mode']}\n")
+    if setup["mode_error"]:
+        write(f"  ! {setup['mode_error']}\n")
+    write(f"  entrypoints: {setup['source'] or 'none'} ({setup['detected']})\n")
+    for name, argv in setup["entrypoints"].items():
+        write(f"    {name:<6} {' '.join(argv)}\n")
+
+    _render_protection(result["protection"], write)
+    _render_handoff(result["handoff"], write)
+
+    write("\nbackends\n")
+    for entry in result["backends"]:
+        write(f"  {entry['backend']:<12} {entry['state']}\n")
+
+    write("\nlegacy residue\n")
+    if not result["residue"]:
+        write("  none found\n")
+    for entry in result["residue"]:
+        write(f"  {entry['id']}: {', '.join(entry['paths'])} -- {entry['why']}\n")
+        write(f"    remove: {entry['remove']}\n")
+
+
+def render_parked(work: dict[str, Any], stream: TextIO) -> None:
+    parked = work["parked"]
+    if not parked:
+        write = stream.write
+        write("sd-status: no work item carries a `parked:` line\n")
+        return
+    stream.write(f"sd-status: {len(parked)} parked work items\n")
+    for entry in parked:
+        stream.write(f"  {entry['parked']:<24} {entry['path']}\n")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sd-status",
+        description=(
+            "Read-only status for the repository enclosing the current "
+            "directory. Derives everything; stores nothing."
+        ),
+    )
+    parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
+    parser.add_argument(
+        "--parked",
+        action="store_true",
+        help="list only the work items the age sweep parked, from their own frontmatter",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=pr_state.DEFAULT_LIMIT,
+        metavar="N",
+        help=f"most pull requests to list (default: {pr_state.DEFAULT_LIMIT})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.limit <= 0:
+            raise UsageError("--limit takes a positive number of pull requests")
+        root = sd_lib.repo_root()
+        if root is None:
+            raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        if args.parked:
+            work = work_section(root)
+            if args.json:
+                print(json.dumps(
+                    {"tool": "sd-status", "schema": SCHEMA_VERSION, "repo": str(root),
+                     "parked": work["parked"]},
+                    indent=2, sort_keys=True,
+                ))
+            else:
+                render_parked(work, sys.stdout)
+            return 0
+        result = collect(root, dict(os.environ), args.limit)
+    except sd_lib.ConfigError as error:
+        print(f"sd-status: error: {error}", file=sys.stderr)
+        return 2
+    except UsageError as error:
+        print(f"sd-status: error: {error}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        render(result, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

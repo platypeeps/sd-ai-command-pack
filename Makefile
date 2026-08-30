@@ -42,8 +42,8 @@ test:
 # syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
 # a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer bin/migrate-trellis bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
-	"$(VENV_PYTHON)" -m mypy installer install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m ruff check install.py installer bin/migrate-trellis bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-status templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m mypy installer install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-status templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
 	@if command -v node >/dev/null 2>&1; then \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
 		bash .github/scripts/check-opencode-js.sh; \

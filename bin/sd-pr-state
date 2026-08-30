@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""GitHub-derived pull-request state for the repository you are standing in.
+
+Every fact here is read live from GitHub through `gh` and printed. Nothing is
+cached, nothing is written, and there is no repo-path argument: the repository
+is the one enclosing the current working directory and nothing else (R10-D6).
+A stored answer to "is this PR mergeable" is a wrong answer waiting to be
+read, so this tool would rather be slow than stale.
+
+For each pull request it reports: number, title, head branch, draft status,
+mergeable and merge-state, the check rollup bucketed by outcome, the review
+decision, and how many commits the head is behind its base.
+
+The three ways this cannot work -- `gh` is not installed, `gh` is not
+authenticated, the repository has no GitHub remote -- are *reported
+conditions*, not failures. Each prints a sentence naming what to do about it
+and exits 0. Only a usage error exits non-zero (2). There is no exit code that
+means "your PR is red"; read the report for that.
+
+sd-status imports this module rather than re-deriving any of it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import shutil
+import subprocess  # nosec B404 - fixed argv gh/git reads, never a shell
+import sys
+from typing import Any, TextIO
+
+#: Read-only means read-only, and importing `sd_lib` would otherwise leave a
+#: `bin/__pycache__` behind. Set before the first sibling import.
+sys.dont_write_bytecode = True
+
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+import sd_lib  # noqa: E402
+
+SCHEMA_VERSION = 1
+GH_TIMEOUT_SECONDS = 60
+DEFAULT_LIMIT = 30
+
+#: Everything `gh pr list` is asked for, in one call. One round trip per run
+#: plus one comparison per pull request is the whole network budget.
+PR_FIELDS = (
+    "number",
+    "title",
+    "headRefName",
+    "baseRefName",
+    "isDraft",
+    "mergeable",
+    "mergeStateStatus",
+    "reviewDecision",
+    "headRepositoryOwner",
+    "url",
+    "statusCheckRollup",
+)
+
+#: Check outcomes collapsed into the buckets a human acts on. Anything
+#: unrecognised lands in `other` rather than being silently counted as green.
+_BUCKETS = {
+    "SUCCESS": "success",
+    "FAILURE": "failure",
+    "ERROR": "failure",
+    "TIMED_OUT": "failure",
+    "STARTUP_FAILURE": "failure",
+    "ACTION_REQUIRED": "failure",
+    "CANCELLED": "cancelled",
+    "STALE": "cancelled",
+    "SKIPPED": "skipped",
+    "NEUTRAL": "skipped",
+    "PENDING": "pending",
+    "QUEUED": "pending",
+    "IN_PROGRESS": "pending",
+    "WAITING": "pending",
+    "REQUESTED": "pending",
+    "EXPECTED": "pending",
+}
+BUCKET_ORDER = ("success", "failure", "pending", "cancelled", "skipped", "other")
+
+NO_GH = "gh is not installed; install it (`brew install gh`) to read PR state"
+NO_AUTH = "gh is installed but not authenticated; run `gh auth login`"
+NO_REMOTE = "this repository has no GitHub remote, so there is nothing to read from GitHub"
+
+
+class UsageError(Exception):
+    """An invocation fault: exit 2, one sentence, never a traceback."""
+
+
+# --------------------------------------------------------------------------
+# Talking to gh
+# --------------------------------------------------------------------------
+
+
+def _run(argv: list[str], root: pathlib.Path) -> tuple[int, str, str]:
+    """Run one fixed-argv command in `root`. A missing binary is exit 127."""
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            argv,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "", f"{argv[0]} timed out after {GH_TIMEOUT_SECONDS}s"
+    except OSError as error:
+        return 127, "", f"cannot run {argv[0]}: {error}"
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def gh_json(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+    """Run `gh <args>` expecting JSON. Returns (payload, error-sentence)."""
+    code, out, err = _run(["gh", *args], root)
+    if code != 0:
+        detail = (err or out).strip().splitlines()
+        return None, detail[0] if detail else f"gh {args[0]} exited {code}"
+    try:
+        return json.loads(out or "null"), ""
+    except json.JSONDecodeError as error:
+        return None, f"gh {args[0]} did not return JSON: {error}"
+
+
+def canonical_remote(root: pathlib.Path) -> str | None:
+    """Origin's URL, or None when there is no origin."""
+    code, out, _ = _run(["git", "remote", "get-url", "origin"], root)
+    if code != 0:
+        return None
+    return out.strip() or None
+
+
+def remote_slug(root: pathlib.Path) -> str | None:
+    """`owner/repo` for origin when origin is on GitHub, else None.
+
+    Parsed from the URL rather than asked of `gh`, so the "no GitHub remote"
+    condition stays answerable without a network call or an authenticated CLI.
+    """
+    url = canonical_remote(root)
+    if not url:
+        return None
+    text = url.strip()
+    if text.endswith(".git"):
+        text = text[: -len(".git")]
+    text = text.rstrip("/")
+    for prefix in (
+        "git@github.com:",
+        "ssh://git@github.com/",
+        "git://github.com/",
+        "https://github.com/",
+        "http://github.com/",
+    ):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+            break
+    else:
+        return None
+    parts = [part for part in text.split("/") if part]
+    return "/".join(parts[:2]) if len(parts) >= 2 else None
+
+
+def gh_authenticated(root: pathlib.Path) -> bool:
+    """Whether `gh` has a usable credential. Never reads or reports the value."""
+    if shutil.which("gh") is None:
+        return False
+    code, _, _ = _run(["gh", "auth", "status"], root)
+    return code == 0
+
+
+def probe(root: pathlib.Path) -> dict[str, Any]:
+    """Can this run read GitHub at all, and if not, why not."""
+    slug = remote_slug(root)
+    if shutil.which("gh") is None:
+        return {"available": False, "reason": NO_GH, "slug": slug}
+    if slug is None:
+        return {"available": False, "reason": NO_REMOTE, "slug": None}
+    if not gh_authenticated(root):
+        return {"available": False, "reason": NO_AUTH, "slug": slug}
+    return {"available": True, "reason": "", "slug": slug}
+
+
+# --------------------------------------------------------------------------
+# Deriving one pull request's state
+# --------------------------------------------------------------------------
+
+
+def _outcome(entry: dict[str, Any]) -> str:
+    """A rollup entry's bucket. CheckRuns carry `conclusion`, contexts `state`."""
+    raw = entry.get("conclusion") or entry.get("state") or entry.get("status") or ""
+    return _BUCKETS.get(str(raw).upper(), "other")
+
+
+def rollup_buckets(rollup: Any) -> dict[str, int]:
+    """Bucket a statusCheckRollup by outcome. Unknown outcomes are `other`."""
+    counts: dict[str, int] = {}
+    for entry in rollup or []:
+        if isinstance(entry, dict):
+            bucket = _outcome(entry)
+            counts[bucket] = counts.get(bucket, 0) + 1
+    return counts
+
+
+def failing_checks(rollup: Any) -> list[str]:
+    """Names of the checks in the `failure` bucket, so the report can say."""
+    return [
+        str(entry.get("name") or entry.get("context") or "?")
+        for entry in rollup or []
+        if isinstance(entry, dict) and _outcome(entry) == "failure"
+    ]
+
+
+def head_ref(pull: dict[str, Any], slug: str) -> str:
+    """The head as the compare endpoint spells it: `owner:branch` across a fork."""
+    branch = str(pull.get("headRefName") or "")
+    owner = pull.get("headRepositoryOwner") or {}
+    login = str(owner.get("login") or "") if isinstance(owner, dict) else ""
+    base_owner = slug.split("/", 1)[0]
+    return f"{login}:{branch}" if login and login != base_owner else branch
+
+
+def behind_by(root: pathlib.Path, slug: str, pull: dict[str, Any]) -> int | None:
+    """Commits the head is behind its base, or None when GitHub will not say.
+
+    `mergeStateStatus == BEHIND` only ever appears when the branch carries
+    strict required status checks, so it cannot answer this for a repository
+    without protection -- which is exactly the repository where being behind
+    goes unnoticed. The comparison endpoint answers it for every repository.
+    """
+    base = str(pull.get("baseRefName") or "")
+    head = head_ref(pull, slug)
+    if not base or not head:
+        return None
+    payload, _ = gh_json(
+        ["api", f"repos/{slug}/compare/{base}...{head}", "--jq", "{behind_by:.behind_by}"],
+        root,
+    )
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("behind_by")
+    return value if isinstance(value, int) else None
+
+
+def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
+    rollup = pull.get("statusCheckRollup")
+    return {
+        "number": pull.get("number"),
+        "title": pull.get("title"),
+        "url": pull.get("url"),
+        "head": pull.get("headRefName"),
+        "base": pull.get("baseRefName"),
+        "draft": bool(pull.get("isDraft")),
+        "mergeable": pull.get("mergeable") or "UNKNOWN",
+        "merge_state": pull.get("mergeStateStatus") or "UNKNOWN",
+        "review_decision": pull.get("reviewDecision") or "NONE",
+        "checks": rollup_buckets(rollup),
+        "checks_total": len(rollup) if isinstance(rollup, list) else 0,
+        "failing": failing_checks(rollup),
+        "behind_by": behind_by(root, slug, pull),
+    }
+
+
+def collect(root: pathlib.Path, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
+    """The open pull requests for this repository, or why there are none to show."""
+    found = probe(root)
+    result: dict[str, Any] = {
+        "available": found["available"],
+        "reason": found["reason"],
+        "repo": found["slug"],
+        "pull_requests": [],
+    }
+    if not found["available"]:
+        return result
+    slug = str(found["slug"])
+    payload, error = gh_json(
+        ["pr", "list", "--state", "open", "--limit", str(limit),
+         "--json", ",".join(PR_FIELDS)],
+        root,
+    )
+    if error or not isinstance(payload, list):
+        result["available"] = False
+        result["reason"] = error or "gh pr list did not return a list of pull requests"
+        return result
+    result["pull_requests"] = [
+        describe(pull, root, slug) for pull in payload if isinstance(pull, dict)
+    ]
+    return result
+
+
+# --------------------------------------------------------------------------
+# Output
+# --------------------------------------------------------------------------
+
+
+def check_summary(record: dict[str, Any]) -> str:
+    counts = record["checks"]
+    if not counts:
+        return "no checks"
+    return " ".join(f"{name}:{counts[name]}" for name in BUCKET_ORDER if counts.get(name))
+
+
+def render_pulls(result: dict[str, Any], stream: TextIO, indent: str = "  ") -> None:
+    """The pull-request block. sd-status prints this same function's output."""
+    write = stream.write
+    if not result["available"]:
+        write(f"{indent}unavailable: {result['reason']}\n")
+        return
+    pulls = result["pull_requests"]
+    if not pulls:
+        write(f"{indent}no open pull requests\n")
+        return
+    for record in pulls:
+        flags = []
+        if record["draft"]:
+            flags.append("draft")
+        if record["mergeable"] == "CONFLICTING":
+            flags.append("conflicting")
+        behind = record["behind_by"]
+        if isinstance(behind, int) and behind > 0:
+            flags.append(f"behind base by {behind}")
+        suffix = f"  [{', '.join(flags)}]" if flags else ""
+        write(f"{indent}#{record['number']} {record['title']}{suffix}\n")
+        write(
+            f"{indent}  head {record['head']} -> {record['base']}"
+            f"  merge-state {record['merge_state']}"
+            f"  review {record['review_decision']}\n"
+        )
+        write(f"{indent}  checks: {check_summary(record)}\n")
+        if record["failing"]:
+            write(f"{indent}  failing: {', '.join(record['failing'])}\n")
+
+
+def render(result: dict[str, Any], stream: TextIO) -> None:
+    stream.write(f"sd-pr-state: {result['repo'] or result['root']}\n")
+    render_pulls(result, stream)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sd-pr-state",
+        description=(
+            "Live GitHub pull-request state for the repository enclosing the "
+            "current directory. Reads only; stores nothing."
+        ),
+    )
+    parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        metavar="N",
+        help=f"most pull requests to list (default: {DEFAULT_LIMIT})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.limit <= 0:
+            raise UsageError("--limit takes a positive number of pull requests")
+        root = sd_lib.repo_root()
+        if root is None:
+            raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+    except UsageError as error:
+        print(f"sd-pr-state: error: {error}", file=sys.stderr)
+        return 2
+
+    result = collect(root, args.limit)
+    result.update(tool="sd-pr-state", schema=SCHEMA_VERSION, root=str(root))
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        render(result, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
