@@ -37,9 +37,19 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 ## Step checklist
 
 - [x] M0 — tombstone 0.72.0 (#596, tag v0.72.0 at fea7e133)
-- [ ] 0 — kill release train + gate stack
-- [ ] 1 — one copy of every file
-- [ ] 2 — `docs/work` replaces `.trellis`; sd_route.py
+- [x] 0 — kill release train + gate stack. Verified 2026-08-29 by re-running the step's own
+  check rather than by memory: the four unconditional jobs (`unittest`, `shell-coverage`,
+  `lint`, `security`) are all that remain in `.github/workflows/`, and the release, payload-gate,
+  `ci-result`, `main-push-scope` and auto-tag jobs are gone. **The stated check was
+  `candidate-validation` greps = 0 and it is 2**, so the gap is named instead of ticked past:
+  `bin/sd-status` carries the string because it *detects* legacy residue by that name, and
+  `templates/scripts/sd-ai-command-pack-review-preflight.mjs` is old-world payload that 3e
+  deletes. Neither is a gate. When 3e lands, the second hit goes and only the detector is left.
+- [x] 1 — one copy of every file. Check was "≤2 copies of the review script"; `git ls-files
+  templates` matches exactly 2 (`review-local.py`, `review-preflight.mjs`), and tag `v0.72.0`
+  exists, which was the precondition for landing this at all.
+- [x] 2 — `docs/work` replaces `.trellis`; sd_route.py. `ls .trellis` fails, `bin/sd_route.py`
+  and `tests/test_sd_route.py` are in place, and `sd-docs-lint` reports clean on this repo.
 - [ ] 3 — new installer + 12 skills + sd-review backends. **Split into reviewable sub-PRs
   (2026-08-29): step 3 replaces ~56k LOC of `templates/scripts/` + `installer/` with ~7k under
   `bin/`; landing that as one pull request would be unreviewable, and the old world must keep
@@ -57,7 +67,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     dispositioned locally and never posted. `setup-github` is deliberately **not** in this
     PR (it writes workflow files into other repos); the seam it will need is named
     `SETUP_GITHUB_SEAM` in `bin/sd-review`.
-  - [ ] 3c-cwd — **R10-D6 follow-up, found while reviewing 3c-review.** Two shipped sd-*
+  - [x] 3c-cwd — **R10-D6 follow-up, found while reviewing 3c-review.** Two shipped sd-*
     commands take a repository path: `bin/sd-check --repo` and `bin/sd-docs-lint --repo`.
     R10-D6 says every sd-* command resolves its repo from cwd only, and `bin/sd-review`
     already holds that line with a structural test. Remove both options and land the
