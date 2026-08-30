@@ -189,7 +189,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       **The removal was going to delete the artifacts.** `--consumer` short-circuited before
       the import that the default mode has always run, so the plan deleted `.trellis/tasks`
       outright: 886 work items across the eight repositories, none of which have a `docs/work`
-      yet. That is the product, not the packaging. The import now runs first and both modes
+      yet — eight because that was the wave when the count was taken; `sd-github-review`
+      joined it nine minutes later and brought 18 more item directories with it. That is the
+      product, not the packaging. The import now runs first and both modes
       read one `planned_imports()` — counting for the plan and enumerating for the run out of
       two code paths is how a plan starts describing something other than what happens.
 
