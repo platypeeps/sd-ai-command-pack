@@ -582,7 +582,8 @@ this machine; successor `agy` 1.1.22 installed, authenticated, first-class headl
   confidence — recorded as such). V3′ = plan-wide 5h-refresh quota treated as one shared budget;
   silent model-downgrade runs flagged degraded. **P2 gate** before wiring: non-TTY stdout smoke;
   fail → try pty wrapper → else delete the row (diversity from codex/kimi/local instead).
-- **R9b-D3** step 3a: delete 19 gemini TOMLs, re-render 0 (`test ! -e ~/.gemini/commands/sd`);
+- **R9b-D3** step P1 (the platform sweep, renamed from `3a` on 2026-08-30):
+  delete 19 gemini TOMLs, re-render 0 (`test ! -e ~/.gemini/commands/sd`);
   OpenCode delete 19 / render 12; also sweep the three candidate skill roots for auto-converted
   `sd-*` residue (expect 0).
 - **R9b-D4** R2-D22 reversed: Antigravity **supported** (backend + probe-gated render). N5
@@ -753,13 +754,18 @@ The question was whether the kcov lane's need goes away and how soon. Both halve
 answers: it goes to zero rather than to "less", and it happens in the pull request immediately
 after 3d.
 
-**Which 3e.** `implement.md` currently spends the letters `3a`-`3e` twice -- once on the step-3
-sub-PRs and once on the platform sweep in the master table -- so the label alone is ambiguous. This
-record means the **step-3 sub-PR**: new machine-scope `install.py` + `installed.json` + parity
-tests, which deletes `templates/scripts/**`, `installer/**`, and `manifest.json`. It does not mean
-the master table's agent-hygiene row. That collision is a defect in its own right and is left
-standing here rather than silently resolved, because renaming steps mid-rollout invalidates
-references in landed pull requests; it needs its own decision.
+**Which 3e -- and the collision resolved (R11-D7, user, 2026-08-30).** `implement.md` spent the
+letters `3a`-`3e` twice: once on the step-3 sub-PRs and once on the platform sweep in the master
+table. The label alone was ambiguous, so this record means the **step-3 sub-PR**: new machine-scope
+`install.py` + `installed.json` + parity tests, which deletes `templates/scripts/**`,
+`installer/**`, and `manifest.json`.
+
+The collision is resolved by renaming the platform sweep to `P1`-`P5`, not the sub-PRs. The
+asymmetry decides it rather than taste: five merged pull requests already cite the sub-PR letters in
+their titles (#601 and #602 as `3a`, #603 `3b`, #604 `3c-review`, #607 `3d`), while the platform
+sweep's rows are cited in no landed pull request and every one of them is unstarted. Git history
+cannot be rewritten to match a renamed step, so the side with zero landed references is the side
+that moves. `P` is chosen because it cannot collide with any step number.
 
 **The lane measures exactly one directory.** Its kcov include filter is the string
 `sd-ai-command-pack-`, which matches the seven shell files under `templates/scripts/` and nothing
