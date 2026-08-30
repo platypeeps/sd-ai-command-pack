@@ -673,11 +673,21 @@ merged se-* skills/agents rename to sd-* at step 5** — single namespace, colli
 
 **R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
 
-Measured, not guessed: `unittest (macos-latest, 3.13)` runs 12m18s against ubuntu 3.10's 6m09s
-and ubuntu 3.13's 9m16s, making it the long pole in every CI run. The rollout has roughly fifteen
-more pull requests to land, so the leg costs something on the order of an hour of pure latency
-across the remaining ratchet, on a suite where 79,500 of 84,814 test lines exist only to test the
-old world that step 3e deletes.
+Corrected before merge, because the first version of this record was wrong. The claim was that
+`unittest (macos-latest, 3.13)` at 12m18s is the long pole in every CI run. It is not. Measured on
+the run for #604: `Shell coverage` takes 13m40s and the run's wall clock was 13m45s, so the run is
+bounded by shell coverage and dropping macOS buys **approximately zero latency**. The per-job
+numbers were read without checking which job actually bounded the run.
+
+What the drop does buy is cost: GitHub bills macOS runners at ten times the Linux rate, and the
+leg is 12m18s on every pull request in a rollout with roughly fifteen left to land. That is a real
+saving, and it is the honest reason to do it -- but it is not the reason originally given, and the
+decision to drop the leg was taken on the wrong one.
+
+The genuine latency lever, now that it is measured, is `Shell coverage` at 13m40s. It is not
+touched here: it is the kcov lane that publishes the shell-coverage baseline, and trading it away
+would cost real coverage rather than duplicate runner time. Named so the next person does not
+repeat the same mistake in the other direction.
 
 Two things change together, and the order is load-bearing. Branch protection lists the six
 contexts as **required**, so removing the job first would leave a required context that can never

@@ -137,8 +137,10 @@ version-specific defect provides evidence that endpoint coverage is
 insufficient.
 
 The macOS 3.13 leg is **temporarily dropped** (R11-D4, 2026-08-29). It ran
-12m18s against ubuntu's 6–9m and was the long pole in every run, and the
-rollout pays that latency on roughly fifteen more pull requests. What is lost
+12m18s on every pull request, and GitHub bills macOS runners at ten times the
+Linux rate, so the rollout was paying that on roughly fifteen more pull
+requests. It is a cost saving, not a latency one: the run is bounded by
+`Shell coverage` at 13m40s, so wall-clock time is unchanged. What is lost
 is named rather than waved away: macOS-only Python behaviour, filesystem
 case-insensitivity, and platform-specific path handling are unverified until
 it returns. What still covers macOS meanwhile: the bash 3.2 syntax gate in
