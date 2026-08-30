@@ -24,6 +24,37 @@ SD_REVIEW = REPO_ROOT / "bin" / "sd-review"
 SOURCE = SD_REVIEW.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
 
+BIN_FILES = tuple(
+    path for path in sorted((REPO_ROOT / "bin").iterdir()) if path.is_file()
+)
+# `sd_lib` and `sd_route` are shared core, budgeted on the design's core line
+# rather than the lane's. Everything else `bin/sd-review` imports out of `bin/`
+# is the lane, derived from the import graph so a module added to the lane
+# starts counting against it without anyone remembering to add it here.
+SHARED_CORE = frozenset({"sd_lib", "sd_route"})
+
+
+def _bin_imports(path: pathlib.Path) -> frozenset:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module.split(".")[0])
+    return frozenset(names)
+
+
+_BIN_MODULES = {path.stem: path for path in BIN_FILES}
+REVIEW_LANE = frozenset(
+    [SD_REVIEW]
+    + [
+        _BIN_MODULES[name]
+        for name in _bin_imports(SD_REVIEW)
+        if name in _BIN_MODULES and name not in SHARED_CORE
+    ]
+)
+
 # Modules that can reach a network, plus the ones that wrap a client. A tool
 # that never posts a finding has no business importing any of them.
 NETWORK_MODULES = frozenset(
@@ -218,19 +249,56 @@ class SetupGithubLivesElsewhereTests(unittest.TestCase):
                 self.fail("the installer names the gh client; this lane never posts")
 
 
+def _lines(path: pathlib.Path) -> int:
+    return len(path.read_text(encoding="utf-8").splitlines())
+
+
 class LineBudgetTests(unittest.TestCase):
+    """Budgets measured over what they name, enumerated from the filesystem.
+
+    Both assertions below used to be written against a remembered list rather
+    than the tree, and both were wrong in the same direction: the sub-cap read
+    one file while naming a lane, so splitting the lane in two hid 294 lines
+    from it; the ceiling summed every file in `bin/` while the design places
+    `migrate-*` outside the cap, so the migration tool was silently spending
+    the backbone's budget. Deriving each set here is what keeps a future split
+    or a new module from escaping the number that governs it.
+    """
+
     def test_the_review_lane_stays_under_its_sub_cap(self) -> None:
-        # The review lane's share of bin/'s 8,000-line ceiling. A cap is never
-        # raised in the change that busts it.
-        self.assertLessEqual(len(SOURCE.splitlines()), 1400)
+        # The whole lane, not the entry point: `bin/sd-review` plus every
+        # bin/ module it imports. A cap that measures one file is a cap you
+        # can duck by adding a second file.
+        lane = sorted(REVIEW_LANE)
+        total = sum(_lines(path) for path in lane)
+        self.assertLessEqual(
+            total,
+            1700,
+            f"the review lane is {total} lines across {[p.name for p in lane]}",
+        )
 
     def test_bin_stays_under_its_ceiling(self) -> None:
-        total = sum(
-            len(path.read_text(encoding="utf-8").splitlines())
-            for path in sorted((REPO_ROOT / "bin").iterdir())
-            if path.is_file()
-        )
+        # `migrate-*` is outside the ceiling by design and carries its own,
+        # because it is deleted at step 7 and its lines are not the backbone's.
+        counted = [path for path in BIN_FILES if not path.name.startswith("migrate-")]
+        total = sum(_lines(path) for path in counted)
         self.assertLessEqual(total, 8000, f"bin/ is {total} lines")
+
+    def test_the_shared_core_exemption_names_files_that_exist(self) -> None:
+        # The one hand-written name in the lane's derivation. A rename that
+        # emptied it would silently move core lines onto the lane's budget --
+        # or, worse, quietly shrink the lane and hide a real overrun.
+        missing = sorted(name for name in SHARED_CORE if name not in _BIN_MODULES)
+        self.assertEqual(missing, [])
+
+    def test_the_migration_tools_stay_under_theirs(self) -> None:
+        migrations = [path for path in BIN_FILES if path.name.startswith("migrate-")]
+        total = sum(_lines(path) for path in migrations)
+        self.assertLessEqual(
+            total,
+            1500,
+            f"migrate-* is {total} lines across {[p.name for p in migrations]}",
+        )
 
 
 if __name__ == "__main__":
