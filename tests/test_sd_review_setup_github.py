@@ -186,6 +186,16 @@ class WorkflowContentTests(SetupFixture):
         for absent in ("requested_reviewers", "gh pr review", "pull-requests:", "GITHUB_TOKEN"):
             self.assertNotIn(absent, text)
 
+    def test_the_header_describes_a_policy_that_may_not_be_there(self) -> None:
+        # Found in review of the first consumer install: the header named
+        # `.github/sd-review.json` as the thing `route()` runs over, in a
+        # repository that has no such file. Most repositories will not have
+        # one -- the built-in default is the normal case -- so the generated
+        # comment has to describe both arms or it misleads by default.
+        header = setup.workflow_text("./x").split("name: sd-review route")[0]
+        self.assertIn(".github/sd-review.json", header)
+        self.assertIn("built-in default", header)
+
     def test_the_action_referenced_exists_in_this_checkout(self) -> None:
         # A workflow naming an action path that is not shipped is a lane that
         # fails on its first run in every consumer at once.
