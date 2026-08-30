@@ -45,7 +45,9 @@ ShellCheck lanes.
 `make lint` also parses every tracked shell script with bash 3.2 — the
 interpreter macOS keeps at `/bin/bash` — through
 `.github/scripts/check-bash32-syntax.sh`, so syntax that only bash 3.2 rejects
-fails before the push instead of on the macOS CI leg minutes later. The script
+fails before the push. That gate matters more while the macOS CI leg is
+dropped (R11-D4): it is now the only automated check that runs anything
+against the interpreter macOS actually ships. The script
 list is enumerated from `git ls-files` at run time, never maintained inside the
 gate. A platform with no bash 3.2 (any Linux) prints
 `warning: no bash 3.2 interpreter found` and passes; `STRICT=1` turns that
@@ -111,12 +113,14 @@ Every change to `main` goes through a pull request. Merge authority is GitHub
 branch protection; there is no local pre-push hook, no server-side path policy,
 and no bookkeeping fast lane. A pull-request head and a push to `main` run the
 same four unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
-and `security` — surfacing as six required contexts.
+and `security` — surfacing as five required contexts. It was six until
+2026-08-29, when the macOS leg was dropped for the duration of the
+artifacts-as-product rollout (R11-D4); it is restored at step 7.
 
 That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
-2026-08-29: `enforce_admins: true`, `strict: true`, and the six required
-contexts match the six the workflow produces. `enforce_admins` was deliberately
+2026-08-29: `enforce_admins: true`, `strict: true`, and the five required
+contexts match the five the workflow produces. `enforce_admins` was deliberately
 left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
 which explicitly declined to enable it, and `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/`,
 which records it being enabled and disabled again the same day). That decision is
@@ -127,10 +131,20 @@ section is wrong until it is rewritten; `sd-status` reads the live protection
 object and reports the gap instead of trusting this paragraph.
 
 CI intentionally tests the supported Python floor (3.10) and current project
-runtime (3.13), plus macOS on 3.13. Intermediate 3.11/3.12 jobs would duplicate
-the same compatibility interval while increasing Actions cost; add one only
-when a version-specific defect provides evidence that endpoint coverage is
+runtime (3.13). Intermediate 3.11/3.12 jobs would duplicate the same
+compatibility interval while increasing Actions cost; add one only when a
+version-specific defect provides evidence that endpoint coverage is
 insufficient.
+
+The macOS 3.13 leg is **temporarily dropped** (R11-D4, 2026-08-29). It ran
+12m18s against ubuntu's 6–9m and was the long pole in every run, and the
+rollout pays that latency on roughly fifteen more pull requests. What is lost
+is named rather than waved away: macOS-only Python behaviour, filesystem
+case-insensitivity, and platform-specific path handling are unverified until
+it returns. What still covers macOS meanwhile: the bash 3.2 syntax gate in
+`lint` runs against `/bin/bash`, which is the macOS interpreter, and the
+maintainer's own `make check` runs on macOS before every push. Restored at
+step 7.
 
 ## Release And Payload Rules
 

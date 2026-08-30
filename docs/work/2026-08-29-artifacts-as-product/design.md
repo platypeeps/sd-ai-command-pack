@@ -671,6 +671,39 @@ merged se-* skills/agents rename to sd-* at step 5** — single namespace, colli
 - R9: D1 **decided: keep** the unused gmail token (user 2026-08-29) · D2 2-key role vocabulary · **D3 day-0 guard retarget — DONE 2026-08-29** · D4–D7 per
   Workspace section
 
+**R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
+
+Measured, not guessed: `unittest (macos-latest, 3.13)` runs 12m18s against ubuntu 3.10's 6m09s
+and ubuntu 3.13's 9m16s, making it the long pole in every CI run. The rollout has roughly fifteen
+more pull requests to land, so the leg costs something on the order of an hour of pure latency
+across the remaining ratchet, on a suite where 79,500 of 84,814 test lines exist only to test the
+old world that step 3e deletes.
+
+Two things change together, and the order is load-bearing. Branch protection lists the six
+contexts as **required**, so removing the job first would leave a required context that can never
+report again and every subsequent pull request would block forever -- including the one removing
+it, since a pull request's CI runs the workflow from its own branch. So protection is relaxed to
+five contexts **before** the workflow change merges, never after.
+
+This is a decision record rather than a chore precisely because R11-D3 made required contexts
+part of the merge-authority claim: "the required contexts match the jobs CI runs" is one of the
+enforcement dimensions `sd-status` reports, and changing the set changes what the doctrine
+asserts. `sd-status` needs no edit -- it reads the live protection object rather than a stored
+list, which is the design behaving as intended.
+
+What is lost, named rather than waved away: macOS-only Python behaviour, filesystem
+case-insensitivity, and platform-specific path handling are unverified in CI until the leg
+returns. What still covers macOS meanwhile: the bash 3.2 syntax gate in `lint` runs against
+`/bin/bash`, the interpreter macOS ships, and the maintainer's `make check` runs on macOS before
+every push -- which is how several defects in this rollout were already caught locally rather
+than in CI.
+
+Restore criterion (standing rule 1 applied to a removal rather than an addition): the leg and its
+required context come back at **step 7**, which already carries "verify protection" on its
+checklist. If step 7 lands without the leg restored, the rollout has quietly kept a temporary
+measure, and CONTRIBUTING's "restored at step 7" sentence becomes the falsifiable record that it
+did not.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).
