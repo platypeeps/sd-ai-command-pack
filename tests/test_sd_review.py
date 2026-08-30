@@ -565,5 +565,26 @@ class CliTests(ReviewFixture):
         self.assertIn("not valid JSON", finished.stderr)
 
 
+class EnabledBackendTests(unittest.TestCase):
+    """A row ships enabled only after its argv was checked against the real CLI.
+
+    codex and prism were: `codex exec` with the hardened invocation, and
+    `prism review range|codebase ... --format json`, both read off the installed
+    binaries' help. gito's and kimi's transcribed spellings were wrong (gito
+    takes `--what`, has no `--json`, and writes a report folder; `kimi review`
+    is not a subcommand at all), so they ship disabled. Re-enabling one means
+    editing this test too, which is the point: it is the record of what was
+    verified, not a summary of what is intended.
+    """
+
+    def test_only_verified_argv_rows_ship_enabled(self) -> None:
+        enabled = {row.name for row in sd_review.BACKENDS if row.enabled}
+        self.assertEqual(enabled, {"codex", "prism"})
+
+    def test_every_disabled_row_says_why(self) -> None:
+        for row in sd_review.BACKENDS:
+            if not row.enabled:
+                self.assertTrue(row.disabled_reason.strip(), f"{row.name} is silently off")
+
 if __name__ == "__main__":
     unittest.main()

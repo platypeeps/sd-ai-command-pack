@@ -203,9 +203,20 @@ BACKENDS: tuple[Backend, ...] = (
     ),
     Backend(
         "gito", "local CLI over an openai-compatible service", "local", "per-file",
-        "deep fallback", "argv", True, "",
+        "deep fallback", "none", False,
+        "the row was written from the design's transcription, and gito 4.4.4's real "
+        "surface does not match it: the ref to review is `--what/-w` (not `--head`), "
+        "there is no `--json`, and the report lands in a folder given by `--out`. "
+        "Re-enable with a verified argv and a reader for that report, not before",
     ),
-    Backend("kimi", "argv", "local", "low", "--challenge, fan-out", "argv", True, ""),
+    Backend(
+        "kimi", "argv", "local", "low", "--challenge, fan-out", "none", False,
+        "`kimi review` is not a subcommand -- the CLI is prompt-driven "
+        "(`kimi -p <prompt> --output-format text|stream-json`), so the transcribed "
+        "`kimi review --range ... --json` cannot run. `stream-json` is an agent event "
+        "stream, not a findings array, so enabling this row needs a reader as well as "
+        "an argv",
+    ),
     Backend(
         "antigravity", "local CLI", "local",
         "$0 conditional on a paid subscription and a training opt-out",
@@ -797,9 +808,14 @@ def argv_backend_argv(backend: Backend, root: pathlib.Path, subject: Subject) ->
     """Argv for the generic seam rows.
 
     These exist to prove the seam is a seam: one table row, one argv builder,
-    one JSON reader, no branch anywhere else in the pipeline. Only codex's
-    invocation has been exercised end to end; a row here that turns out to spell
-    its flags differently is a one-line change in one place, which is the point.
+    one JSON reader, no branch anywhere else in the pipeline.
+
+    Checked against the installed CLIs rather than transcribed: prism's
+    `review range <range> --format json` and `review codebase --paths ...
+    --format json` are real, so its row ships enabled. gito's and kimi's were
+    not, and their rows ship disabled with the mismatch named -- their branches
+    stay here because re-enabling one is meant to be an edit in this function
+    and its table row, nowhere else.
     """
 
     if subject.scope in ("branch", "pr"):
