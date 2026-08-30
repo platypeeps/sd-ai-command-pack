@@ -954,7 +954,6 @@ class GeneratedParityTests(InstallTestCase):
         for expected in (
             "runs-on: ${{ matrix.os }}",
             "fail-fast: false",
-            "os: macos-latest",
             "unittest-output.log",
             "skipped=[1-9][0-9]*",
             # The workflow reads the linter scope from the Makefile instead of
@@ -966,6 +965,23 @@ class GeneratedParityTests(InstallTestCase):
             "python3 -m mypy $(make -s lint-mypy-paths)",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
+        ):
+            self.assertIn(expected, workflow)
+        # R11-D4 drops the macOS leg for the artifacts-as-product rollout and
+        # restores it at step 7. The assertion is inverted rather than deleted so
+        # the restore has to be a deliberate edit here: if the leg comes back and
+        # this line does not, CI fails and says which one is stale.
+        self.assertNotIn("os: macos-latest", workflow)
+        # R11-D5: the bash 3.2 gate runs in CI, not only in a local `make lint`.
+        # It went unenforced for its whole existence because nothing asserted a
+        # job invoked it -- the script was present, documented, and dead. These
+        # pin the three parts that make the job real rather than decorative: it
+        # runs the gate, STRICT=1 turns the Linux no-interpreter skip into a
+        # failure, and the interpreter is checked to be 3.2 before it is trusted.
+        for expected in (
+            "bash .github/scripts/check-bash32-syntax.sh",
+            'STRICT: "1"',
+            "refusing to run the gate",
         ):
             self.assertIn(expected, workflow)
         # Whatever the Makefile declares is what CI lints. Derived, not restated.
@@ -1301,9 +1317,11 @@ class GeneratedParityTests(InstallTestCase):
             workflow,
             r"uses: actions/(?:checkout|setup-python)@v\d+",
         )
+        # Five jobs check out, four of them also set up Python -- bash32 needs a
+        # C toolchain, not an interpreter.
         self.assertEqual(
             workflow.count("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"),
-            4,
+            5,
         )
         self.assertEqual(
             workflow.count(
@@ -1311,12 +1329,14 @@ class GeneratedParityTests(InstallTestCase):
             ),
             4,
         )
-        # 0.72.0 is the terminal release: CI is exactly the four unconditional
+        # 0.72.0 is the terminal release: CI is exactly these unconditional
         # checks, with no scope classifier, aggregate, payload gate, main-push
-        # guard, or auto-tag job in front of or behind them.
+        # guard, or auto-tag job in front of or behind them. bash32 joined at
+        # R11-D5, which found the bash 3.2 gate had never run in CI at all.
         jobs = yaml.safe_load(workflow)["jobs"]
         self.assertEqual(
-            list(jobs), ["unittest", "shell-coverage", "lint", "security"]
+            list(jobs),
+            ["unittest", "shell-coverage", "lint", "bash32", "security"],
         )
         for job in jobs.values():
             self.assertNotIn("needs", job)

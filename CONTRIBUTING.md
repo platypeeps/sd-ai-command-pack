@@ -112,15 +112,22 @@ number.
 Every change to `main` goes through a pull request. Merge authority is GitHub
 branch protection; there is no local pre-push hook, no server-side path policy,
 and no bookkeeping fast lane. A pull-request head and a push to `main` run the
-same four unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
-and `security` — surfacing as five required contexts. It was six until
-2026-08-29, when the macOS leg was dropped for the duration of the
-artifacts-as-product rollout (R11-D4); it is restored at step 7.
+same five unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
+`bash32`, and `security` — producing six contexts. Two changes landed on
+2026-08-29 and moved in opposite directions: the macOS leg was dropped for the
+duration of the artifacts-as-product rollout (R11-D4, restored at step 7), and
+`bash32` was added because the bash 3.2 syntax gate turned out never to have run
+in CI at all (R11-D5).
 
 That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
-2026-08-29: `enforce_admins: true`, `strict: true`, and the five required
-contexts match the five the workflow produces. `enforce_admins` was deliberately
+2026-08-29: `enforce_admins: true` and `strict: true`. The required-context set
+is the one dimension currently out of step: protection lists the five contexts
+that survived the macOS drop, and the workflow now produces six. `bash32` runs
+and reports on every pull request but is not yet required, so a red `bash32` does
+not block a merge until it is added to the protection object. Stated here as a
+known gap rather than papered over — `sd-status` reports it from the live
+protection object, which is the design working as intended. `enforce_admins` was deliberately
 left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
 which explicitly declined to enable it, and `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/`,
 which records it being enabled and disabled again the same day). That decision is
@@ -147,10 +154,16 @@ platform-specific path handling are unverified in CI until it returns. The only
 remaining macOS coverage is the maintainer's own `make check` before a push --
 one machine, not a gate.
 
-An earlier draft of this paragraph also claimed the bash 3.2 syntax gate in
-`lint` covered macOS in CI. It does not: **no CI job invokes
-`check-bash32-syntax.sh`**, and the `lint` job runs on `ubuntu-latest`. That
-gate has only ever run in a local `make lint`. Restored at step 7.
+An earlier draft of this paragraph claimed the bash 3.2 syntax gate in `lint`
+covered macOS in CI. It did not -- no CI job invoked `check-bash32-syntax.sh`
+at all, and that gate had only ever run in a local `make lint`. Finding that
+gap is what prompted closing it: the **`bash32`** job now builds bash 3.2 from
+source and runs the gate under `STRICT=1`.
+
+That covers bash 3.2 *syntax*, which is a real slice of macOS compatibility and
+not the whole of it. macOS-only Python behaviour, filesystem
+case-insensitivity, and platform path handling stay unverified in CI until the
+macOS leg is restored at step 7.
 
 ## Release And Payload Rules
 

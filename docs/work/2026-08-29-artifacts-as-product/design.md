@@ -710,10 +710,35 @@ CI, but it is one machine, not a gate.
 A second correction to this record, found in review: the first draft claimed the bash 3.2 syntax
 gate in `lint` still covered macOS. It does not. **No CI job invokes `check-bash32-syntax.sh`** --
 the `lint` job runs ruff, mypy, `node --check` and the opencode check, on `ubuntu-latest`, and the
-gate runs only in a local `make lint`. Worse, the script's own skip warning told Linux contributors
+gate ran only in a local `make lint`. Worse, the script's own skip warning told Linux contributors
 that "the macOS CI leg still enforces them", which was false before this change too: the macOS leg
-ran `unittest`, never this script. That message is corrected here rather than left to mislead, and
-the same stale claim is fixed in the Makefile and README.
+ran `unittest`, never this script.
+
+**R11-D5 (user, 2026-08-29) -- the bash 3.2 gate now runs in CI.** Finding the gap above was the
+reason to close it rather than document it. A `bash32` job builds bash 3.2.57 from source, since no
+Linux distribution packages it, and runs `check-bash32-syntax.sh` with `STRICT=1` so the
+no-interpreter path fails the job instead of skipping. Three details are load-bearing and were each
+established by running them, not assumed:
+
+- **The build needs `-j1`.** bash 3.2's Makefile races under parallel make: a `-j$(nproc)` build
+  failed once and succeeded twice on the same input. Nondeterminism is the worst property a gate can
+  have, so the build is serial and cached per version.
+- **bash 3.2 predates aarch64** and its `config.sub` cannot recognise the host, so it does not build
+  there. The x86_64 GitHub runners are fine; this is why the job has no matrix.
+- **The job verifies the binary reports 3.2 before running the gate.** Without that, a wrong
+  interpreter would turn the whole job into a green no-op -- the exact failure mode the gate exists
+  to prevent.
+
+Verified in an `ubuntu:24.04` container against the real tracked set, in both directions: clean tree
+gives `14 tracked shell scripts accepted` and exit 0; a planted apostrophe inside a `$( ... )`
+substitution -- the construct named at the top of the script -- is **accepted by bash 5** and
+rejected by bash 3.2, failing the gate with exit 1. A gate only proven in the passing direction is
+not proven.
+
+Scope, stated so it is not overread: this covers bash 3.2 *syntax*, one real slice of macOS
+compatibility. macOS-only Python behaviour, filesystem case-insensitivity, and platform path
+handling remain unverified in CI until the leg returns at step 7. The stale claim is fixed in the
+Makefile, README, CONTRIBUTING, and the quality-guidelines spec alongside the script itself.
 
 Restore criterion (standing rule 1 applied to a removal rather than an addition): the leg and its
 required context come back at **step 7**, which already carries "verify protection" on its

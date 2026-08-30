@@ -53,9 +53,11 @@ lint-mypy-paths:
 # lanes). Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
 # LINT_MYPY_PATHS above -- installer/, the install.py facade, the single copy
 # of the payload under templates/scripts/, and the bin/ tools. The bash 3.2 lane
-# parses tracked shell with the interpreter macOS keeps at /bin/bash, so
-# syntax that only bash 3.2 rejects fails here, which is the only place it can:
-# a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
+# parses tracked shell with the interpreter macOS keeps at /bin/bash, so syntax
+# that only bash 3.2 rejects fails before the push. The bash32 CI job enforces
+# the same lane on a bash 3.2 it builds itself, so this is a fast local echo of
+# a real gate rather than the only place it runs. A platform without bash 3.2
+# prints a skip line; STRICT=1 makes it fatal.
 lint:
 	"$(VENV_PYTHON)" -m ruff check $(LINT_RUFF_PATHS)
 	"$(VENV_PYTHON)" -m mypy $(LINT_MYPY_PATHS)

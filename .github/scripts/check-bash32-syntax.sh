@@ -3,9 +3,13 @@
 #
 # The local gates parse shell with whichever bash sits on PATH. On a machine
 # carrying Homebrew bash 5 that hides constructs only bash 3.2 rejects — an
-# apostrophe in a comment inside a "$( ... )" substitution, for one — until the
-# maintainer's own macOS run fails later, quoting a line number at the end of the
-# file rather than the defect.
+# apostrophe in a comment inside a "$( ... )" substitution, for one — and the
+# error, when it surfaces, quotes a line number at the end of the file rather
+# than the defect.
+#
+# This runs in two places: a local "make lint", and the bash32 CI job, which
+# builds bash 3.2 from source (no Linux distro packages it) and invokes this
+# script with STRICT=1 so a missing interpreter fails instead of skipping.
 #
 # Scripts are enumerated from the tracked set at run time (every "*.sh" plus
 # any tracked git hook carrying a shell shebang), never from a list kept here,
@@ -97,7 +101,7 @@ if [ -z "$BASH32" ]; then
     exit 1
   fi
   printf '%s\n' \
-    "warning: no bash 3.2 interpreter found; skipping bash 3.2 syntax checks. Nothing in CI runs this gate, so the check is genuinely skipped here -- run it on a machine with bash 3.2, or set STRICT=1 to make its absence an error."
+    "warning: no bash 3.2 interpreter found; skipping bash 3.2 syntax checks here. The bash32 CI job builds bash 3.2 and runs this gate under STRICT=1, so the lane is enforced there even though this run skipped it. Set STRICT=1 to make the absence an error locally too."
   exit 0
 fi
 
