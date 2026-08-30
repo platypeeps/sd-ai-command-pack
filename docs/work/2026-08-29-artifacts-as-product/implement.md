@@ -17,7 +17,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **2** | `docs/work` replaces `.trellis` in pack; land sd_route.py + fixtures; delete hooks, journals, TRELLIS blocks | `ls .trellis` fails; sd-docs-lint green |
 | **3** | Pack PR: new installer (M1 `--adopt-legacy`) + 12 skills + sd-review backends | scratch-repo sd-ship E2E; installer parity test green |
 | **3-c** | Consumer PRs, **one per repo**, removal only (M2): trellis payload, router removal via `--remove-legacy`, dotfiles, path rewrites, across the 9 repos of the wave — a tenth, `mezmo_benchmark`, is frozen under D7 and gets no PR | per repo: zero trellis/router greps; CI green |
-| **3-d** | `sd-review setup-github`: build the subcommand behind the `SETUP_GITHUB_SEAM` at `bin/sd-review:69`, prove the routed lane green on the pack itself, then one opt-in PR per remaining `mode: full` repo | `setup-github` refuses in `minimal`/`guest` (R10-D5) and over a legacy footprint without `--remove-legacy`; one routed PR per full-mode repo shows a `route()` plan in the check output |
+| **3-d** | `sd-review setup-github`: build the subcommand behind `SETUP_GITHUB_SEAM` in `bin/sd-review`, prove the routed lane green on the pack itself, then one opt-in PR per remaining `mode: full` repo | `setup-github` refuses in `minimal`/`guest` (R10-D5) and over a legacy footprint without `--remove-legacy`; one routed PR per full-mode repo shows a `route()` plan in the check output |
 | **P1** | Cross-platform sweep: delete 19 legacy gemini TOMLs (render 0 — r9b) + 19 opencode entries before re-render | `test ! -e ~/.gemini/commands/sd`; opencode `grep -c '^sd-'` = 12; 3 antigravity skill roots free of `sd-*` residue |
 | **P2** | Vendor kimi agents ×5 + codex-rescue + 3 codex skills → uninstall kimi/codex plugins (kills both Stop gates) | vendored agents resolve post-uninstall |
 | **P3** | installed.json canonicalization; dashboard lands on :8768 beside system one | `curl :8768/api/state` ≥10 repos; --dump diff empty |
@@ -170,7 +170,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             polish something already on its way out. Named here rather than left as a silent
             gap in the count.
 - [ ] 3-d — `sd-review setup-github`, its own step
-      - [x] the subcommand behind `SETUP_GITHUB_SEAM` (`bin/sd-review:69`) — #615. The
+      - [x] the subcommand behind `SETUP_GITHUB_SEAM` in `bin/sd-review` — #615. The
             dispatch in `bin/sd-review` is three lines; the installer is
             `bin/sd_setup_github.py`, a module of its own because two guards said so and
             neither was loosened to fit. The review lane's then-1,400-line sub-cap fired at
