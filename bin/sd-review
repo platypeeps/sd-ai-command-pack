@@ -19,8 +19,9 @@ only outbound calls are `git`, `sd-check`, and the provider CLIs, each through
 one injectable runner. `tests/test_sd_review_boundary.py` asserts the absence
 rather than trusting this paragraph. Publishing findings to GitHub is the CI
 lane's business, and the CI lane is installed by `sd-review setup-github`,
-which is a separate tool and a separate pull request. The seam it will need is
-named `SETUP_GITHUB_SEAM` below; it is a comment, not an implementation.
+which lands in a separate module for exactly that reason: it writes a workflow
+file, and the proof above is a structural read of *this* file. What lives here
+is three lines of dispatch at the seam named `SETUP_GITHUB_SEAM` below.
 
 **The repository comes from the current directory (R10-D6).** There is no
 `--repo` argument and there will not be one: a session that can be pointed at
@@ -61,12 +62,12 @@ if _BIN not in sys.path:
 import sd_lib  # noqa: E402
 import sd_route  # noqa: E402
 
-# The hook `sd-review setup-github` will need, when it is built in its own pull
-# request: a way to serialise the resolved policy and the backend table into a
-# workflow file, and a way to ask which backends carry lane "github". Both read
-# from `BACKENDS` and `load_policy` unchanged. Nothing else in this file is
+# The hook `bin/sd_setup_github.py` reaches through, and the whole of it: a way
+# to serialise the resolved policy and the backend table into a workflow file,
+# and a way to ask which backends carry lane "github". Both read from
+# `BACKENDS` and `load_policy` unchanged. Nothing else in this file is
 # involved, and nothing in this file writes a workflow.
-SETUP_GITHUB_SEAM = "load_policy + BACKENDS; see the separate setup-github PR"
+SETUP_GITHUB_SEAM = "load_policy + BACKENDS; consumed by bin/sd_setup_github.py"
 
 POLICY_RELATIVE_PATH = pathlib.Path(".github") / "sd-review.json"
 SCOPES = ("worktree", "branch", "pr", "planning")

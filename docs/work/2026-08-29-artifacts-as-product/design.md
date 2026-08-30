@@ -69,11 +69,11 @@ sd-ai-command-pack/
 
 **LOC discipline (one decision record, restated after the feasibility audit):** bin/ ceiling
 **8,000** (accepted by user 2026-08-29). Itemized: core (sd_lib, sd_route, sd-check, docs-lint, pr-state, status, spec,
-trackers incl. ~90 lifted Jira LOC) ~1,800 · review lane **1,400 sub-cap** · r2 dashboard
+trackers incl. ~90 lifted Jira LOC) ~1,800 · review lane **1,700 sub-cap** (R11-D8) · r2 dashboard
 glue/index +900 · r4 sd-map +400 · r5 plugin/store **1,400 sub-cap** · r7 Lane B handoff +120 ·
 R10-D3 packet writer + restore hook + identity checks +250 · R10-D1 worktree/codex-exec/budget/
 draft-PR lane +450 · R10-D2 draft-convert +40 · 45-day sweep +40 · google.accounts resolution
-+50 · env reads +20 = **~6,870**, leaving ~1,100 headroom. The earlier 6,000 and 6,500 figures
++50 · env reads +20 = **~7,170**, leaving ~830 headroom. The earlier 6,000 and 6,500 figures
 were both busted on paper; setting 8,000 now is the honest number, still <1/11 of today's 95k.
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
 ceiling until then. dashboard/ ≤ **2,500** (credible: 457 lifted + one JS file). Caps are CI tests; a cap is never raised in the PR
@@ -676,6 +676,46 @@ merged se-* skills/agents rename to sd-* at step 5** — single namespace, colli
   check) · D8b.2 Baseten disabled/gap-gated · D8b.4 key retirements after V4 enumeration
 - R9: D1 **decided: keep** the unused gmail token (user 2026-08-29) · D2 2-key role vocabulary · **D3 day-0 guard retarget — DONE 2026-08-29** · D4–D7 per
   Workspace section
+
+**R11-D8 (2026-08-30) — the review lane's sub-cap is 1,700, and the guard now measures the lane.**
+
+Raised in a change that does not need the room, which is the only honest time to raise a cap.
+The 1,400 sub-cap was set before `setup-github` was designed, and the itemization above never
+budgeted the installer on a line of its own: it was assumed to fit inside the review lane's
+share. It does not. `bin/sd-review` is 1,367 lines and `bin/sd_setup_github.py` is 294, so the
+lane is **1,661** against a 1,400 budget.
+
+The reason this was invisible is the defect worth recording. The guard was
+`test_the_review_lane_stays_under_its_sub_cap`, and it measured `bin/sd-review` — one file,
+while naming a lane. So when step 3-d split the installer into its own module, the number fell
+from 1,589 to 1,367 and the guard went green on a lane that had grown by 294 lines. The split
+was right for its own reason — `tests/test_sd_review_boundary.py` proves `bin/sd-review` never
+writes and never posts by reading that file structurally, and an installer inside it would have
+made the proof unprovable — but a cap you can duck by adding a second file is not a cap.
+
+Two things therefore change together, and the order matters: the guard is corrected first to
+enumerate the lane from the import graph (`bin/sd-review` plus every `bin/` module it imports
+that is not shared core), and *then* the number is set to what the corrected guard measures plus
+room for one more small module. Setting 1,700 while the guard still read one file would have
+been a number with nothing behind it.
+
+Two neighbouring guards were wrong in the same way and are fixed in the same change, since the
+fault is one habit rather than three bugs:
+
+- `test_bin_stays_under_its_ceiling` summed **every** file in `bin/`, including
+  `bin/migrate-trellis`. The paragraph above places `migrate-*` outside the ceiling with its own
+  1,500 budget, so the migration tool was spending 1,250 lines of the backbone's 8,000. Excluding
+  it moves the measured total from 7,526 to **6,276** — and that slack is real rather than
+  invented, which matters because the next two commands (`sd-spec`, `sd-map`) would otherwise
+  have busted a ceiling they were always inside.
+- `migrate-*`'s own 1,500 ceiling was promised here and **had no test at all**. It has one now;
+  `bin/migrate-trellis` is 1,250.
+
+Parked, with a trigger rather than a date: the core line above reads ~1,800 for eight commands,
+and the five that exist already total 2,776 — `bin/sd-status` alone is 978. The itemization is
+stale, not the ceiling, and re-deriving it against a half-built `bin/` would replace one estimate
+with another. Trigger: the next command to land under `bin/` re-derives the core line from the
+files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
 
 **R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
 

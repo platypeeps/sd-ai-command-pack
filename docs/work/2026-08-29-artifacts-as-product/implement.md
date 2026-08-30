@@ -78,7 +78,12 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     filesystem and asserts no sd-* command accepts a repo path, rather than checking the
     files someone remembered to list. `migrate-*` is out of scope: a migration tool
     targeting a consumer checkout is what it is for, and it is deleted at step 7.
-  - [ ] 3d — the 12 command skills + templates
+  - [x] 3d — the 12 command skills + templates (#607). Twelve directories under `skills/`,
+        one per command, and the five templates `sd-plan` renders (`prd`, `design`,
+        `implement`, `decision`, `work-README`). The frontmatter contract is a test:
+        `tests/test_skill_frontmatter.py` verifies every documented flag exists in the tool
+        the skill names, reading the `bin/` modules that tool imports so a surface split
+        across files is read whole.
   - [x] 3e — machine-scope installer + `installed.json` + parity tests; deletes the legacy render
         payload. Landed as two commits in one pull request: `feat` adds `bin/sd_install.py` and
         `tests/test_sd_install.py`, `refactor!` deletes what it replaces. Reviewable apart,
@@ -142,14 +147,85 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
         render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
         Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
-- [ ] 3-c — consumer removal PRs (9); removal only
+  - [ ] 3f — the scratch-repo end-to-end this step's own check names. The table row at the
+        top of this file gates step 3 on "scratch-repo sd-ship E2E; installer parity test
+        green". The parity test has been green since 3e. **The end-to-end has not been run**,
+        and 3-c went ahead of it. Recorded as an open box rather than absorbed into a ticked
+        parent, because a step marked done on a check that never ran is the exact failure
+        critique 4 exists to end. Half of the verification section's step-3 paragraph is
+        already covered by fixtures — a markdown-only change plans `skip`
+        (`test_documentation_only_change_plans_skip`) and an unmatched change falls back to
+        the default tier (`test_an_unmatched_change_falls_back_to_the_default_tier`), both in
+        `tests/test_sd_route.py`. The uncovered half needs an agent driving `sd-plan` and
+        `sd-ship` in a scratch repository that already has `docs/adr/` and a Makefile, ending
+        in a merged pull request and an adoption-purity assertion (B5a): `git status
+        --porcelain` shows only `<work>/**`.
+- [x] 3-c — consumer removal PRs (9); removal only
       - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
-      - [x] the nine removal pull requests, opened 2026-08-30 (never merged unasked)
-      - [ ] the follow-up pass: references the removal left behind, one PR per repo
+      - [x] the nine removal pull requests, opened 2026-08-30 and merged the same day on the
+            user's word, never unasked
+      - [x] the follow-up pass: references the removal left behind, one PR per repo — eight
+            of the nine, all merged 2026-08-30. `sd-github-review` is the one exception and a
+            deliberate one: step 4 archives that repository, so a residue pass there would
+            polish something already on its way out. Named here rather than left as a silent
+            gap in the count.
 - [ ] 3-d — `sd-review setup-github`, its own step
-      - [ ] the subcommand behind `SETUP_GITHUB_SEAM` (`bin/sd-review:69`)
-      - [ ] the routed lane proven green on the pack repository first
-      - [ ] one opt-in PR per remaining `mode: full` repository
+      - [x] the subcommand behind `SETUP_GITHUB_SEAM` (`bin/sd-review:69`) — #615. The
+            dispatch in `bin/sd-review` is three lines; the installer is
+            `bin/sd_setup_github.py`, a module of its own because two guards said so and
+            neither was loosened to fit. The review lane's then-1,400-line sub-cap fired at
+            1,589 (the cap and the guard behind it are corrected below, R11-D8),
+            and `tests/test_sd_review_boundary.py` proves `bin/sd-review` never posts and
+            never writes by reading it as text and as an AST — an installer living inside
+            that file would have made the proof unprovable rather than merely false.
+      - [x] the routed lane proven green on the pack repository first — run 33338797058, the
+            `route` check, printing `tier deep  category review-lane` for this repository's
+            own pull request. It failed on its first real run: `cannot resolve a base branch:
+            no origin/HEAD, and neither main nor master exists`. `actions/checkout` leaves a
+            detached HEAD, and `persist-credentials: false` means nothing can fetch a
+            symbolic ref. Fixed with `git remote set-head origin "${GITHUB_BASE_REF}"` — a
+            purely local write needing no credentials — and the line is asserted by a test.
+            No local test could have found this, which is the argument for proving the lane
+            on the pack before offering it to any other repository.
+      - [ ] one opt-in PR per remaining `mode: full` repository — six of them:
+            `anomaly-metric-creator`, `hoa-manager`, `loadsmith`, `people-profiles`,
+            `rwbp-coordinator`, `rwbp-website`. `mezmo-world-simulator` is an employer
+            repository and gets none. `sd-github-review` is retired at step 4 and
+            `se-ai-command-pack` is folded at step 5, so neither grows a workflow it would
+            only lose again. Named by ownership rather than read from configuration:
+            `~/.config/sd-ai-command-pack/config.json` has no repository entries yet, so no
+            repository declares a mode at all. `setup-github`'s own `minimal`/`guest` refusal
+            is what will enforce the distinction once they do; today it is a list in this file,
+            which is why it is written out repository by repository rather than as a count.
+
+      **The lane is report-only** (user, 2026-08-30). It prints the `route()` plan to the job
+      log and the step summary; it requests no reviewer and posts no comment. That is what
+      keeps the opt-in workflow inside P6 — a repository that installs it gains a check that
+      observes and never acts — and it means a routing defect costs a wrong line of output
+      rather than a wrong review on somebody's pull request.
+
+      **Three line-budget guards were measuring something other than what they named
+      (R11-D8).** Found while writing the sentence above that credits the 1,400 sub-cap with
+      forcing the split — the claim did not survive being checked. The sub-cap read
+      `bin/sd-review` alone, so moving 294 lines into `bin/sd_setup_github.py` took the number
+      from 1,589 to 1,367 and the guard went green on a lane that had **grown**. The lane is
+      1,661 against a 1,400 budget; a cap you can duck by adding a second file is not a cap.
+      The ceiling guard summed every file in `bin/` including `bin/migrate-trellis`, which the
+      design places outside it — 1,250 lines of the backbone's 8,000 spent by a tool deleted at
+      step 7. And `migrate-*`'s own 1,500 ceiling, promised in the design, had no test at all.
+
+      All three now enumerate their set: the lane from `bin/sd-review`'s import graph minus
+      shared core, the ceiling and the migration budget by partitioning `bin/` on disk. Each
+      was proven to bite by breaking it — the lane fails at 1,660, the shared-core exemption
+      fails on a misspelt module name. The sub-cap then moves to 1,700, in a change that does
+      not need the room; the guard was corrected first and the number set to what it measures,
+      because 1,700 against a one-file guard would have been a number with nothing behind it.
+
+      Parked with a trigger, not a date: the design's core line reads ~1,800 for eight
+      commands and the five that exist already total 2,776. That is a stale estimate rather
+      than a busted ceiling — `bin/` is 6,276 once `migrate-*` is excluded — and re-deriving it
+      against a half-built `bin/` would swap one guess for another. The next command to land
+      under `bin/` re-derives it.
 
       **`setup-github` leaves 3-c and becomes its own step** (user, 2026-08-30), reversing the
       R3-D16 shape that had each full-mode repository's removal PR also carry the routing
