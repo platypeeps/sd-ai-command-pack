@@ -99,6 +99,10 @@ class NeverPostsTests(unittest.TestCase):
             "typing",
             "sd_lib",
             "sd_route",
+            # The installer, imported inside the one dispatch branch. It is in
+            # this repository and is itself held to the never-posts assertions
+            # below, so it widens the allow-list without widening the boundary.
+            "sd_setup_github",
         }
         self.assertEqual(sorted(imported_names() - allowed), [])
 
@@ -159,11 +163,59 @@ class RepoFromCwdTests(unittest.TestCase):
         self.assertIn("sd_lib.repo_root(None)", SOURCE)
 
 
-class SetupGithubIsNotHereTests(unittest.TestCase):
-    def test_the_seam_is_named_but_no_subcommand_exists(self) -> None:
+class SetupGithubLivesElsewhereTests(unittest.TestCase):
+    """The installer landed at step 3-d; the boundary it must respect did not move.
+
+    This class replaced one that asserted no subcommand existed. It exists now
+    because `setup-github` *writes a workflow file*, and the proof above --
+    "nothing here is opened for writing" -- is a structural read of this one
+    file. Keeping the installer in `bin/sd_setup_github.py` is what lets that
+    proof stay literal instead of growing an exception, so these assertions are
+    about where the code is, not about whether it exists.
+    """
+
+    def test_the_dispatch_is_here_and_the_implementation_is_not(self) -> None:
         self.assertIn("SETUP_GITHUB_SEAM", SOURCE)
-        self.assertNotIn("add_subparsers", SOURCE)
+        self.assertIn("sd_setup_github", SOURCE)
+        # No subparsers: they would make every existing invocation
+        # positional-first and break `sd-review --scope pr`. Asserted against
+        # the call graph, not the text, so the prose explaining the choice is
+        # not itself a violation of it.
+        calls = [
+            node
+            for node in ast.walk(TREE)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_subparsers"
+        ]
+        self.assertEqual(calls, [])
+        # The workflow this pack installs is named in the installer, never here.
         self.assertNotIn("sd-review-route.yml", SOURCE)
+
+    def test_the_installer_module_exists_and_is_the_one_that_writes(self) -> None:
+        installer = (REPO_ROOT / "bin" / "sd_setup_github.py").read_text(encoding="utf-8")
+        self.assertIn("sd-review-route.yml", installer)
+        self.assertEqual(installer.count(".write_text("), 1)
+
+    def test_the_installer_never_posts_either(self) -> None:
+        installer = (REPO_ROOT / "bin" / "sd_setup_github.py").read_text(encoding="utf-8")
+        tree = ast.parse(installer)
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+        offending = sorted(
+            name for name in imported
+            if name in NETWORK_MODULES or name.split(".")[0] in NETWORK_MODULES
+        )
+        self.assertEqual(offending, [])
+        lowered = installer.lower()
+        self.assertEqual([f for f in POSTING_FRAGMENTS if f in lowered], [])
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value == "gh":
+                self.fail("the installer names the gh client; this lane never posts")
 
 
 class LineBudgetTests(unittest.TestCase):

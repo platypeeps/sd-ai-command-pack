@@ -89,16 +89,31 @@ non-removable deny-list — a path in it is never skipped no matter what
 
 ## setup-github
 
-`sd-review setup-github` installs the opt-in CI routing lane
-(`.github/workflows/sd-review-route.yml` + the policy file). It is **not
-implemented in `bin/sd-review` yet** — the code carries a named seam
-(`SETUP_GITHUB_SEAM`) and a separate PR builds it. When it exists:
+`sd-review setup-github` installs the opt-in CI routing lane, one file:
+`.github/workflows/sd-review-route.yml`. The code lives in
+`bin/sd_setup_github.py`, reached through the `SETUP_GITHUB_SEAM` dispatch in
+`bin/sd-review`, and it is the only surface in this lane that writes.
 
-- **`mode: minimal` and `mode: guest` refuse it.** Shared and OSS repos cannot
-  grow the workflow at all. Do not hand-write the workflow to get around that.
-- It will preflight and refuse over a legacy footprint without
-  `--remove-legacy` -- a flag that does not exist yet either, and lands with
-  the subcommand.
+**What the lane does is report.** It resolves the pull request's diff, runs
+`route()` over the policy, and prints the plan into the check output and the
+job summary. It requests no reviewer, posts no comment, and holds
+`contents: read`, so it cannot change a pull request's outcome. Asking a remote
+reviewer for a review is a separate change with its own decision record — do
+not add it to the workflow by hand.
+
+Three refusals:
+
+- **`mode: minimal` and `mode: guest` refuse it** (R10-D5). Shared and OSS
+  repositories cannot grow the workflow at all. Do not hand-write the workflow
+  to get around that.
+- **A legacy sd-github-review footprint refuses without `--remove-legacy`.**
+  Two routers in one repository is how a change gets reviewed twice and read
+  once.
+- **A dirty pack checkout refuses to pin itself.** The workflow names the
+  action by commit; `--pin SHA` names a different one deliberately.
+
+Other flags: `--dry-run` (print what would be written, write nothing), `--json`,
+`--force` (replace an existing workflow that differs).
 
 ## Never
 

@@ -24,6 +24,7 @@ silently invokes itself.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import unittest
 
@@ -164,6 +165,30 @@ class DocumentedFlagTests(unittest.TestCase):
                 found.append((path.parent.name, path, tool))
         return found
 
+    def tool_source(self, tool: pathlib.Path) -> str:
+        """The tool's text, plus that of every `bin/` module it imports.
+
+        A surface is not always one file. `sd-review` dispatches `setup-github`
+        into `bin/sd_setup_github.py`, and that module owns four of the flags
+        the skill documents; reading only the entry point would have reported
+        them as undocumented-in-the-tool. The imports are enumerated from the
+        source rather than listed here, so a second split needs no edit.
+        """
+
+        text = tool.read_text(encoding="utf-8", errors="replace")
+        parts = [text]
+        for node in ast.walk(ast.parse(text)):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            for name in names:
+                module = REPO_ROOT / "bin" / f"{name}.py"
+                if module.is_file():
+                    parts.append(module.read_text(encoding="utf-8", errors="replace"))
+        return "\n".join(parts)
+
     def test_there_are_implemented_surfaces_to_check(self) -> None:
         # Guards the loop below from passing by finding nothing.
         self.assertGreaterEqual(len(self.implemented()), 4)
@@ -199,7 +224,7 @@ class DocumentedFlagTests(unittest.TestCase):
 
         flag = re.compile(r"`(--[a-z][a-z-]+)")
         for name, skill, tool in self.implemented():
-            source = tool.read_text(encoding="utf-8", errors="replace")
+            source = self.tool_source(tool)
             body = skill.read_text(encoding="utf-8")
             for option in sorted(set(flag.findall(body))):
                 # A skill may say a flag does NOT exist; that sentence names it.

@@ -1,0 +1,46 @@
+name: sd-review route
+description: >-
+  Report a pull request's routing plan. Requests no reviewer, posts no comment,
+  and writes nothing to the repository it runs against.
+
+inputs:
+  scope:
+    description: >-
+      Which diff to route. `pr` measures the branch against its merge base with
+      the base branch, which is what a pull request is.
+    required: false
+    default: pr
+
+runs:
+  using: composite
+  steps:
+    - name: Report the routing plan
+      shell: bash
+      env:
+        # Interpolating an input straight into `run:` is how a workflow gets a
+        # shell injection; it arrives as an environment variable instead.
+        SD_REVIEW_SCOPE: ${{ inputs.scope }}
+      run: |
+        set -euo pipefail
+        # `actions/checkout` leaves a detached HEAD and no `origin/HEAD`, and
+        # `sd-review` resolves its base from `origin/HEAD` before falling back
+        # to a local `main` or `master` -- neither of which a pull-request
+        # checkout has. The first run of this action failed on exactly that:
+        # "cannot resolve a base branch". `fetch-depth: 0` has already fetched
+        # every branch, so pointing the symref at this pull request's real base
+        # is a local write with no network and no credentials, and it is more
+        # accurate than assuming `main`.
+        if [ -n "${GITHUB_BASE_REF:-}" ]; then
+          git remote set-head origin "${GITHUB_BASE_REF}"
+        fi
+        # `--explain` resolves the subject, runs `route()`, and prints the plan.
+        # It reaches no network and starts no provider: the local review lane is
+        # a workstation lane, and this action exists to say what that lane would
+        # do, not to do it here.
+        plan="$(python3 "${GITHUB_ACTION_PATH}/../../bin/sd-review" --scope "${SD_REVIEW_SCOPE}" --explain)"
+        printf '%s\n' "${plan}"
+        {
+          printf '## sd-review route\n\n```\n'
+          printf '%s\n' "${plan}"
+          printf '```\n'
+        } >> "${GITHUB_STEP_SUMMARY}"
