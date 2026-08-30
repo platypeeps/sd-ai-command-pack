@@ -17,6 +17,7 @@ retired) are skipped rather than failing the scan.
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -61,19 +62,51 @@ RETIRED_PATTERNS = (
 )
 
 
+def visible_to_git() -> set[str] | None:
+    """Repo-relative paths git does not ignore, or None if git cannot answer.
+
+    The scan below walks the filesystem, and one of its roots is `.claude/`.
+    Agent worktrees live at `.claude/worktrees/<id>/` -- a whole second checkout
+    of this repo, ignored via `.git/info/exclude` -- so rglob descended into it
+    and reported the retired selector against archived work items belonging to
+    another branch. The suite failed for a reason that had nothing to do with
+    the working tree, which is the worst kind of red.
+
+    Filtering through git fixes the class rather than that one directory: any
+    ignored scratch path under a shipped root is now invisible here, and the
+    project's own doctrine encourages worktrees, so this will recur otherwise.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {entry for entry in out.split("\0") if entry}
+
+
 def shipped_files() -> list[Path]:
+    visible = visible_to_git()
     files: list[Path] = []
     for root in SHIPPED_ROOTS:
         base = REPO_ROOT / root
         if not base.is_dir():
             continue
-        files.extend(
-            path
-            for path in sorted(base.rglob("*"))
-            if path.is_file()
-            and path.suffix in TEXT_SUFFIXES
-            and not path.relative_to(REPO_ROOT).as_posix().startswith(EXCLUDED_PREFIXES)
-        )
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
+                continue
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if relative.startswith(EXCLUDED_PREFIXES):
+                continue
+            # None means git could not be consulted; scan everything rather
+            # than silently checking nothing.
+            if visible is not None and relative not in visible:
+                continue
+            files.append(path)
     return files
 
 
