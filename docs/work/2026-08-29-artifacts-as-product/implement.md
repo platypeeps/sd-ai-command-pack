@@ -141,7 +141,84 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
         render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
         Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
-- [ ] 3-c — consumer removal PRs (9) incl. `setup-github` for full-mode repos
+- [ ] 3-c — consumer removal PRs (8); removal only
+      - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
+      - [ ] the eight removal pull requests themselves
+
+      **`setup-github` leaves 3-c and becomes its own step** (user, 2026-08-30), reversing the
+      R3-D16 shape that had each full-mode repository's removal PR also carry the routing
+      workflow. Two reasons, one practical and one structural. `sd-review setup-github` is
+      unbuilt — `bin/sd-review:69` is a seam, not an implementation — so pairing them blocks a
+      removal that is ready on a feature that is not. And a pull request that deletes a
+      thousand files is already the largest thing a reviewer will read this rollout; adding an
+      opt-in CI lane to it means the two cannot be reverted apart.
+
+      Recorded before the wave, because measuring the consumers changed four things the
+      plan row asserted.
+
+      **There are eight consumers, not nine.** Enumerated from disk by looking for
+      `.trellis/` or `.sd-ai-command-pack/`: six live repositories plus `sd-github-review`
+      (which step 4 retires) and `se-ai-command-pack` (which step 5 folds). The ninth in the
+      plan is `mezmo_benchmark`, frozen under D7 and not read. `ai/Trellis` also matches the
+      probe and is not a consumer — it is the upstream fork the payload came from.
+
+      **Removal needs three authorities, and only two installers left receipts.** Three
+      installers wrote into these trees. The pack's own receipt covers 2 of loadsmith's 228
+      four-tree files; Trellis's `.template-hashes.json` covers 51. What closes the gap is the
+      consumer's own `.sd-ai-command-pack/manifest.json` — 740 source-to-target rows — read
+      against the `v0.72.0` tombstone blobs, which is the whole reason M0 had to be tagged
+      before step 1. Authorities in descending strength: receipt plus tombstone byte-compare,
+      Trellis hash match, then name alone for the framework's own `trellis*` / `sd-*`
+      namespaces. A file no authority reaches is kept and reported, never guessed at, and a
+      receipted file whose bytes drifted is kept too — an edit is the one signal that says a
+      human wanted it.
+
+      **The removal was going to delete the artifacts.** `--consumer` short-circuited before
+      the import that the default mode has always run, so the plan deleted `.trellis/tasks`
+      outright: 886 work items across the eight repositories, none of which have a `docs/work`
+      yet. That is the product, not the packaging. The import now runs first and both modes
+      read one `planned_imports()` — counting for the plan and enumerating for the run out of
+      two code paths is how a plan starts describing something other than what happens.
+
+      **Every remaining defect was one kept list or another, and they were found by measuring
+      rather than by testing.** The pattern is worth naming once because it recurred five times
+      in a single sitting:
+
+      - *The four platform trees* were a constant. There are five — nothing had heard of
+        `.codex/`, which carries Trellis agents, hooks and its own copy of the
+        `security-best-practices` skill the same constant deleted from the other four. Nor of
+        `.github/agents/`, nor of the nested `.github/copilot/hooks/`. The set is now derived:
+        a tree is whatever directly contains a render subdirectory, at one level or two, minus
+        the two trees `wholesale_verdicts` already owns entire. That found 531 files the
+        constant walked past.
+      - *Empty-directory pruning* walked its own list of trees, which had drifted past
+        `.prism/` and `.gito/`. It derives the set from the paths actually deleted now.
+      - *`AGENTS.md` markers* were coded against a spelling no repository uses. The real files
+        carry two marked blocks, and in `sd-github-review` all 57 lines sit inside them, so the
+        verdict there is `delete` — a plan that says `edit` and then unlinks the file is
+        describing something else.
+      - *`.opencode/package.json`* drew two verdicts, a keep and a delete, from two
+        classifiers; and the surviving rule asked what the file contained before asking whether
+        anything it configures survives, so a two-line `{"type": "module"}` was left as the
+        sole occupant of an emptied tree.
+      - *An empty pathspec list* made `git ls-files` enumerate the whole repository. That one
+        the tests caught, which is the only reason it is in this list rather than in a
+        consumer's pull request.
+
+      **Surviving files that name a deleted path are reported, never rewritten.** 160 of them
+      across the eight: Swift sources citing a spec path in a comment,
+      `scripts/check_review_readiness.sh`, `tests/review-guard.test.mjs`, a repository's own
+      `.instructions.md`. They are the repository's own files and correctly left alone — which
+      is exactly why they have to be surfaced, because a removal that silently breaks a
+      consumer's test suite has negatively affected their pull requests, and that is the one
+      thing this conversion may not do.
+
+      Measured across all eight, applied to throwaway clones: 7,418 files removed, 7 edited,
+      886 work items and 182 spec files imported, 160 dangling references reported, zero
+      deletions outside the framework prefixes, zero empty directories left. All 249 survivors
+      are repo-own skills the carve-out protects (`playwright`, `security-threat-model`,
+      `amc-server-compatibility`, `loadsmith-swift-app`, `hoa-manager-payload-tenant-safety`,
+      `rwbp-next-payload`) or files edited since install.
 - [ ] P1 / P2 / P3 / P4 / P5 — platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b
