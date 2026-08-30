@@ -78,8 +78,69 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     files someone remembered to list. `migrate-*` is out of scope: a migration tool
     targeting a consumer checkout is what it is for, and it is deleted at step 7.
   - [ ] 3d — the 12 command skills + templates
-  - [ ] 3e — new machine-scope `install.py` + `installed.json` + parity tests; deletes the legacy
-        `templates/scripts/**`, `installer/**`, and `manifest.json` once the E2E passes
+  - [x] 3e — machine-scope installer + `installed.json` + parity tests; deletes the legacy render
+        payload. Landed as two commits in one pull request: `feat` adds `bin/sd_install.py` and
+        `tests/test_sd_install.py`, `refactor!` deletes what it replaces. Reviewable apart,
+        atomic on merge. **365 files, 183,494 deletions against 1,343 insertions.**
+
+        Six things worth recording, because each was a call rather than a mechanical step.
+
+        **The deleted set was larger than the row above predicted.** The row named
+        `templates/scripts/**`; the whole of `templates/` is render payload — 175 files, 64,142
+        lines — and keeping the other 143 would have left committed per-platform copies with no
+        generator, which is the committed-derived-state failure this rollout exists to end. Found
+        by enumerating the tracked tree rather than by following test failures one at a time, and
+        that enumeration is also what surfaced `.github/skills/trellis-*` (43 files),
+        `.github/prompts/`, `.github/command-sources/`, `docs/fleet/`, `generated/`, `plugins/`
+        and `.claude-plugin/`.
+
+        **Scope was held at what this commit orphaned, and the rest named rather than swept.**
+        Deleted here: the two generated command surfaces whose generator this step removes, and
+        two orphaned root doc copies. Left standing: trellis, fleet and plugin residue, which
+        steps 4 and 7 own. Widening a deletion because the tree is already open is how a
+        reviewable pull request becomes an unreviewable one. `docs/FLEET_ROLLOUT.md`,
+        `docs/fleet/**`, and `docs/spec/**` therefore still describe machinery that no longer
+        exists; `CONTRIBUTING.md` says so rather than letting a reader find out.
+
+        **`bin/migrate-trellis` keeps its `templates/scripts/` reference and is correct.** It
+        probes for that path in a *consumer* checkout, not in this one, so the deletion does not
+        reach it. Checked rather than assumed, because it is the one surviving `bin/` file naming
+        a deleted path.
+
+        **The coverage floor moved from files to statements.** `check-installer-coverage.sh`
+        guarded a 17-file surface with `MIN_FILES=17`; against a one-file surface a file floor
+        catches nothing — the module can be gutted to a stub and still satisfy it. `MIN_STATEMENTS=450`
+        is now the floor that can actually fail (the surface is 513), and `MIN_FILES=1` survives
+        as the cheaper check with the readable message if the file is deleted outright. Coverage
+        is 100% line and branch, reached by writing tests rather than by lowering the gate: the
+        first full run measured 76%.
+
+        **`--home` escaped its sandbox three times, and only the third fix is structural.** All
+        three are one bug: a second source of truth about where "home" is. (1) Git's global config
+        is per-user, not per-`$HOME`-argument, so an unsandboxed `core.excludesFile` lookup reaches
+        the real home whatever `--home` says — patched by threading a `sandboxed` flag through the
+        excludes helpers. (2) A test then constructed a `Context` without that flag and appended
+        `CLAUDE.local.md` to the developer's actual global excludes; `sandboxed` became a derived
+        property, `home != expanduser("~")`, which a caller cannot forget. (3) CI caught the third:
+        the XDG variables. `main()` rewrote both roots under `--home`, which protected callers that
+        came through `main()` and not the tests, which build a `Context` directly —
+        `RendererParityTests` asked `platform_homes(scratch_home, os.environ)` where the surfaces
+        should be and, on a runner with `XDG_CONFIG_HOME=/home/runner/.config` set, was told the
+        runner's real home. The install itself stayed contained; the question about it did not.
+
+        Two things are worth carrying forward from that. The escape was invisible locally because
+        both XDG variables are unset on this machine, so both sides agreed — reproducing it took
+        `XDG_CONFIG_HOME=... XDG_STATE_HOME=... make check`, which now passes with the variables
+        set *and* unset. And the entrypoint fix was the wrong shape twice running: a rule enforced
+        where it is convenient protects the path someone remembered. `xdg_root()` enforces
+        containment where the roots are resolved, so a sandboxed run honours an XDG override only
+        while it stays inside the given home, and an unsandboxed one is left alone — including the
+        unusual but legitimate XDG root outside `$HOME`, which is not this installer's to redirect.
+
+        **The no-shipped-shell invariant R11-D6 requires is `tests/test_no_shipped_shell.py`.**
+        It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
+        render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
+        Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
 - [ ] 3-c — consumer removal PRs (9) incl. `setup-github` for full-mode repos
 - [ ] P1 / P2 / P3 / P4 / P5 — platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)

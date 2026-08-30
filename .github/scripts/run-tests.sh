@@ -82,15 +82,9 @@ rm -f .coverage .coverage.*
 : > unittest-output.log
 
 # Largest test file first (size approximates runtime) to shorten the tail.
-# Skip tests/test_install.py: it is an empty compatibility facade
-# (load_tests returns no suite), so `unittest tests.test_install` exits 5.
 modules=()
 while IFS= read -r path; do
-  base="$(basename "$path" .py)"
-  if [ "$base" = "test_install" ]; then
-    continue
-  fi
-  modules+=("tests.$base")
+  modules+=("tests.$(basename "$path" .py)")
 done < <(ls -S tests/test_*.py 2>/dev/null)
 
 if [ "${#modules[@]}" -eq 0 ]; then

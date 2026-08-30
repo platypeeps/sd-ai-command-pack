@@ -17,7 +17,7 @@ Policy shape (every key optional unless noted)::
       "tiers": {"skip": [], "cheap": ["codex"], "deep": ["codex", "prism"]},
       "default_tier": "standard",
       "categories": [
-        {"name": "installer", "required": true, "paths": ["installer/**"],
+        {"name": "tooling", "required": true, "paths": ["bin/**"],
          "tier": "deep"}
       ],
       "docs_skip": ["docs/**", "*.md"],

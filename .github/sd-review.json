@@ -9,10 +9,10 @@
   },
   "default_tier": "standard",
   "categories": [
-    {"name": "installer", "required": true, "paths": ["install.py", "installer/**"], "tier": "deep"},
+    {"name": "installer", "required": true, "paths": ["bin/sd_install.py"], "tier": "deep"},
     {"name": "review-lane", "required": true, "paths": ["bin/sd-review", "bin/sd_route.py"], "tier": "deep"},
     {"name": "shared-library", "required": true, "paths": ["bin/sd_lib.py"], "tier": "standard"},
-    {"name": "tooling", "required": false, "paths": ["bin/**", "templates/scripts/**", ".github/scripts/**"], "tier": "standard"},
+    {"name": "tooling", "required": false, "paths": ["bin/**", ".github/scripts/**"], "tier": "standard"},
     {"name": "docs", "required": false, "paths": ["docs/**", "*.md"], "tier": "cheap"}
   ],
   "docs_skip": ["docs/**", "*.md"],
@@ -20,8 +20,7 @@
   "sensitive": [
     ".github/workflows/**",
     ".github/sd-review.json",
-    "install.py",
-    "installer/**",
+    "bin/sd_install.py",
     "bin/sd-review"
   ],
   "large_change_lines": 800,

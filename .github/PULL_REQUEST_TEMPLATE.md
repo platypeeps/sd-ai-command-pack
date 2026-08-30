@@ -12,7 +12,7 @@ is only files the pack itself installs, does not need one. -->
 <!-- Focused checks first, then the local gate. -->
 
 - [ ] Focused local checks:
-- [ ] Local gate: `bash scripts/sd-ai-command-pack-full-check.sh`
+- [ ] Local gate: `make check`
 
 ## Pre-PR checklist
 

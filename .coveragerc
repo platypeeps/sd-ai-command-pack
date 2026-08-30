@@ -1,41 +1,24 @@
 [run]
-# Keep the 100% line-and-branch gate focused on the installer. Helper scripts are covered
-# by focused unit/subprocess tests and syntax checks, but many branches
-# intentionally depend on optional local CLIs such as Prism, Gito, GitHub, and
-# Trellis and are not part of this strict installer coverage metric.
+# The 100% line-and-branch gate covers the installer and nothing else. That was
+# true before step 3e too -- the gate named `install.py` and `installer/*` -- but
+# the surface it points at is now one file instead of seventeen, because the
+# eighteen-platform fleet installer was replaced by a machine-scope renderer.
+#
+# The other bin/ tools stay out on the same reasoning as before: many of their
+# branches depend on optional local CLIs (codex, gh, prism, gito) and a 100%
+# demand there would be met by mocking the interesting parts away. They are
+# covered by focused unit tests instead.
 include =
-    install.py
-    installer/*
-    templates/scripts/sd-ai-command-pack-*.py
-    templates/scripts/sd_ai_command_pack_lib.py
-    templates/scripts/sd_ai_command_pack_fleet_lib.py
+    bin/sd_install.py
     .github/scripts/*.py
-    */scripts/sd-ai-command-pack-*.py
-    */scripts/sd_ai_command_pack_lib.py
-    */scripts/sd_ai_command_pack_fleet_lib.py
-    */.github/scripts/*.py
 parallel = True
 branch = True
 
-[paths]
-# The symlink-execution test runs the entry through a temp-dir symlink;
-# map that recorded path back onto the real entry file.
-entry =
-    install.py
-    */install.py
-# Shipped helper scripts execute as installed copies inside temp consumer
-# repos; map every copy back onto the one canonical source tree,
-# templates/scripts/. Installed copies are byte-identical so line numbers
-# align.
-helper_scripts =
-    templates/scripts/
-    */scripts/
-
 [report]
-# Default report scope stays the strict installer gate; the shipped-scripts
-# gate passes its own --include/--fail-under on the command line.
+# Default report scope is the strict installer gate. check-installer-coverage.sh
+# passes its own --include/--fail-under, and is the thing CI and `make test`
+# actually run.
 include =
-    install.py
-    installer/*
+    bin/sd_install.py
 show_missing = True
 fail_under = 100
