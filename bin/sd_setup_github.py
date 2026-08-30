@@ -152,6 +152,14 @@ jobs:
       - name: Check out the pull request
         uses: {CHECKOUT_ACTION} # {CHECKOUT_VERSION}
         with:
+          # The pull request's head, not the default `refs/pull/N/merge`.
+          # GitHub does not create the merge ref for a pull request with
+          # conflicts, so the default would fail this job at checkout on
+          # exactly the pull requests that are already having a bad day -- an
+          # advisory lane must never be the thing that makes one look worse.
+          # It is also what `route()` wants: it diffs `base...HEAD`, so the
+          # head commit is the subject and the merge commit is a detour.
+          ref: ${{{{ github.event.pull_request.head.sha }}}}
           # `route()` measures the branch against its merge base, which a
           # shallow clone does not contain.
           fetch-depth: 0

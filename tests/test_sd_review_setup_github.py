@@ -216,6 +216,17 @@ class WorkflowContentTests(SetupFixture):
             "group: sd-review-route-${{ github.event.pull_request.number }}", text
         )
 
+    def test_the_lane_checks_out_the_head_not_the_merge_ref(self) -> None:
+        # `actions/checkout` defaults to `refs/pull/N/merge` on a
+        # `pull_request` event, and GitHub does not create that ref for a
+        # pull request with conflicts -- so the default fails this job at
+        # checkout on exactly the pull requests already in trouble. An
+        # advisory lane that reddens a conflicted pull request is the
+        # framework making someone's pull request worse, which is the one
+        # thing it must never do.
+        text = setup.workflow_text("./x")
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", text)
+
     def test_the_action_referenced_exists_in_this_checkout(self) -> None:
         # A workflow naming an action path that is not shipped is a lane that
         # fails on its first run in every consumer at once.
