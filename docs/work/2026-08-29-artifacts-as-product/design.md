@@ -657,7 +657,12 @@ merged se-* skills/agents rename to sd-* at step 5** — single namespace, colli
   D17 intents vs immediate commit · D19 Sessions tab + claude-mem · D22 superseded by R9b-D4
   (Antigravity supported)
 - R3: D10/D-C1 **decided: JSON** for all pack-owned config/manifests (see storage table) · D13
-  system collectors → index · D16 **revised (user, 2026-08-29): pack first, then the other `mode: full` repos in the same initial trial** — pack PR proves the route action green once, then one `setup-github` PR per remaining full-mode platypeeps repo lands in the same step-3-c wave; no prolonged single-repo trial · D20 fork/dependabot red-check
+  system collectors → index · D16 **revised (user, 2026-08-29): pack first, then the other `mode: full` repos in the same initial trial** — pack PR proves the route action green once, then one `setup-github` PR per remaining full-mode platypeeps repo lands in the same step-3-c wave; no prolonged single-repo trial — **revised again (user, 2026-08-30): `setup-github` leaves
+  the 3-c wave and becomes step 3-d.** The pairing blocked a removal that was ready on a
+  subcommand that is unbuilt (`bin/sd-review:69` is a seam), and it welded an opt-in CI lane
+  to the largest deletion PR of the rollout so the two could not be reverted apart. The
+  ordering D16 argued for survives inside 3-d: pack first, then one PR per remaining
+  full-mode repository, no prolonged single-repo trial · D20 fork/dependabot red-check
 - R5: D1 vault SoR · D3 sdw adversarial gate deletes only after round-3 review ships · D7
   two-machine vault: migrate personal machine only
 - R6: **D10 claude-mem keep-whole (a)** vs fork-trim (b) · D11 vendor kimi/codex agents then

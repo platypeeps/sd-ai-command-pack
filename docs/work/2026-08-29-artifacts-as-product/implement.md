@@ -16,7 +16,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **1** | One copy of every file (delete twins, mirrors, generators). Consumers cannot plugin-update between here and step 3 — acceptable **only because M0 is the terminal release**; M0 must be tagged before this lands | ≤2 copies of review script; M0 tag exists |
 | **2** | `docs/work` replaces `.trellis` in pack; land sd_route.py + fixtures; delete hooks, journals, TRELLIS blocks | `ls .trellis` fails; sd-docs-lint green |
 | **3** | Pack PR: new installer (M1 `--adopt-legacy`) + 12 skills + sd-review backends | scratch-repo sd-ship E2E; installer parity test green |
-| **3-c** | Consumer PRs, **one per repo** (M2, 9 repos: trellis payload, router removal via `--remove-legacy`, dotfiles, path rewrites; for `mode: full` repos the same PR carries `sd-review setup-github` output — R3-D16 revised, pack PR proven green first) | per repo: zero trellis/router greps; CI green; full-mode repos: one routed PR each shows a `route()` plan in the check output |
+| **3-c** | Consumer PRs, **one per repo**, removal only (M2): trellis payload, router removal via `--remove-legacy`, dotfiles, path rewrites, across the 9 repos of the wave — a tenth, `mezmo_benchmark`, is frozen under D7 and gets no PR | per repo: zero trellis/router greps; CI green |
+| **3-d** | `sd-review setup-github`: build the subcommand behind the `SETUP_GITHUB_SEAM` at `bin/sd-review:69`, prove the routed lane green on the pack itself, then one opt-in PR per remaining `mode: full` repo | `setup-github` refuses in `minimal`/`guest` (R10-D5) and over a legacy footprint without `--remove-legacy`; one routed PR per full-mode repo shows a `route()` plan in the check output |
 | **P1** | Cross-platform sweep: delete 19 legacy gemini TOMLs (render 0 — r9b) + 19 opencode entries before re-render | `test ! -e ~/.gemini/commands/sd`; opencode `grep -c '^sd-'` = 12; 3 antigravity skill roots free of `sd-*` residue |
 | **P2** | Vendor kimi agents ×5 + codex-rescue + 3 codex skills → uninstall kimi/codex plugins (kills both Stop gates) | vendored agents resolve post-uninstall |
 | **P3** | installed.json canonicalization; dashboard lands on :8768 beside system one | `curl :8768/api/state` ≥10 repos; --dump diff empty |
@@ -144,6 +145,11 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 - [ ] 3-c — consumer removal PRs (9); removal only
       - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
       - [x] the nine removal pull requests, opened 2026-08-30 (never merged unasked)
+      - [ ] the follow-up pass: references the removal left behind, one PR per repo
+- [ ] 3-d — `sd-review setup-github`, its own step
+      - [ ] the subcommand behind `SETUP_GITHUB_SEAM` (`bin/sd-review:69`)
+      - [ ] the routed lane proven green on the pack repository first
+      - [ ] one opt-in PR per remaining `mode: full` repository
 
       **`setup-github` leaves 3-c and becomes its own step** (user, 2026-08-30), reversing the
       R3-D16 shape that had each full-mode repository's removal PR also carry the routing
@@ -183,7 +189,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       **The removal was going to delete the artifacts.** `--consumer` short-circuited before
       the import that the default mode has always run, so the plan deleted `.trellis/tasks`
       outright: 886 work items across the eight repositories, none of which have a `docs/work`
-      yet. That is the product, not the packaging. The import now runs first and both modes
+      yet — eight because that was the wave when the count was taken; `sd-github-review`
+      joined it nine minutes later and brought 18 more item directories with it. That is the
+      product, not the packaging. The import now runs first and both modes
       read one `planned_imports()` — counting for the plan and enumerating for the run out of
       two code paths is how a plan starts describing something other than what happens.
 
