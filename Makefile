@@ -28,7 +28,7 @@ test:
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	"$(VENV_PYTHON)" -m coverage combine
-	"$(VENV_PYTHON)" -m coverage report --include="install.py,installer/*" --fail-under=100
+	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-installer-coverage.sh
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-coverage.sh
 	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-shipped-script-docs.sh
 	"$(VENV_PYTHON)" .github/scripts/check-helper-resolution.py
