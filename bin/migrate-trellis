@@ -878,6 +878,30 @@ def opencode_stub_verdict(repo: pathlib.Path, doomed: set[str]) -> Verdict | Non
     return Verdict(rel, "delete", "structured", "configures a tree with nothing left in it")
 
 
+def schema_dependency_verdict(repo: pathlib.Path, doomed: set[str]) -> Verdict | None:
+    """`.prism/rules.schema.json` stays as long as the rules file it describes does.
+
+    Both arrived from the installer, so both are framework surface by name --
+    but `rules.json` is kept in six of the nine consumers because they edited
+    it, and it opens with `"$schema": "rules.schema.json"`. Deleting the schema
+    out from under a file the removal deliberately preserved leaves the
+    consumer with a config that no longer validates, and in
+    `rwbp-coordinator` it broke `npm run lint`, which reads both.
+
+    The rule is the one `opencode_stub_verdict` already applies from the other
+    direction: ask whether anything that needs the file survives, not what the
+    file is. Here the dependent is a single named file rather than a whole
+    tree, because a schema has exactly one consumer.
+    """
+    rel = ".prism/rules.schema.json"
+    rules = ".prism/rules.json"
+    if not (repo / rel).exists():
+        return None
+    if not (repo / rules).exists() or rules in doomed:
+        return None
+    return Verdict(rel, "keep", "none", "the rules file it validates survives")
+
+
 def tree_config_verdicts(repo: pathlib.Path, doomed: set[str]) -> list[Verdict]:
     """A platform tree's own top-level config, which no subdirectory walk sees.
 
@@ -993,6 +1017,10 @@ def consumer_plan(repo: pathlib.Path, pack_repo: pathlib.Path) -> list[Verdict]:
     stub = opencode_stub_verdict(repo, doomed)
     if stub is not None:
         verdicts.append(stub)
+    schema = schema_dependency_verdict(repo, doomed)
+    if schema is not None:
+        verdicts = [v for v in verdicts if v.path != schema.path]
+        verdicts.append(schema)
     verdicts.extend(tree_config_verdicts(repo, doomed))
 
     return sorted(verdicts, key=lambda v: (v.action, v.path))

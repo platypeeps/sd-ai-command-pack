@@ -416,6 +416,29 @@ class HashAuthorityTests(FixtureCase):
         self.assertFalse((self.fixture.repo / ".claude").exists())
 
 
+class SchemaDependencyTests(FixtureCase):
+    """A kept file's schema is not spare payload."""
+
+    def test_the_schema_stays_while_the_rules_file_it_validates_does(self) -> None:
+        self.fixture.ship("templates/prism/rules.json", ".prism/rules.json", "shipped\n")
+        self.fixture.ship(
+            "templates/prism/rules.schema.json", ".prism/rules.schema.json", "schema\n"
+        )
+        _write(self.fixture.repo, ".prism/rules.json", '{"$schema": "rules.schema.json"}\n')
+        self.fixture.seal()
+        self.assertEqual("keep", self.fixture.verdict(".prism/rules.json").action)
+        self.assertEqual("keep", self.fixture.verdict(".prism/rules.schema.json").action)
+
+    def test_the_schema_goes_when_the_rules_file_does(self) -> None:
+        self.fixture.ship("templates/prism/rules.json", ".prism/rules.json", "shipped\n")
+        self.fixture.ship(
+            "templates/prism/rules.schema.json", ".prism/rules.schema.json", "schema\n"
+        )
+        self.fixture.seal()
+        self.assertEqual("delete", self.fixture.verdict(".prism/rules.json").action)
+        self.assertEqual("delete", self.fixture.verdict(".prism/rules.schema.json").action)
+
+
 class EmptyDirectoryTests(FixtureCase):
     def test_pruning_follows_the_deletions_rather_than_a_list_of_trees(self) -> None:
         """`.prism/` and `.gito/` were the two a hand-kept tree list had missed."""
