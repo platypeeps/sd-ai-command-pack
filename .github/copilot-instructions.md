@@ -1,13 +1,11 @@
 # Repository Copilot Instructions
 
-This repository is the sd-ai-command-pack source. The installed pack copies at
-the repository root (for example `.claude/commands/sd/**`,
-`.agents/skills/sd-*/**`, `.github/prompts/sd-*`, and
-`.opencode/commands/sd-*`) are byte-verified mirrors of `templates/**` for the
-platform directories present in this source checkout, enforced by the full-check
-pack source drift gates and the test suite. Review the `templates/` side of a
-change once and treat the mirrored root copy as generated output; do not repeat
-the same finding on both copies.
+This repository is the sd-ai-command-pack source. There are no generated
+mirrors in it: step 3e deleted the per-platform copies and the generator that
+produced them, so every file here is authored. `skills/sd-*/SKILL.md` is the
+payload and `bin/` is the tooling; `bin/sd_install.py --user` renders the former onto a
+machine at install time. Review each file once — there is no second copy of
+anything to also comment on.
 
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:START -->
 ## Trellis And SD AI Command Pack Review Guidance
@@ -88,20 +86,12 @@ the same finding on both copies.
   sd-ai-command-pack repository before release; review this repo's
   integration (PR metadata, repo-owned files, wiring) rather than
   re-reviewing the vendored file contents line by line.
-- Source-only SD pack surfaces are intentionally absent from consumer
-  installs. `SOURCE_ONLY_ALLOWED_PACK_FILES` is an audit allowlist for
-  pack-like files permitted in the `sd-ai-command-pack` source checkout; it is
-  not a required consumer-target list. Before reporting a missing pack file in
-  a consumer, verify the path is listed in
-  `.sd-ai-command-pack/manifest.json` and
-  `.sd-ai-command-pack/installed-targets.txt`, confirm any vouched target hash
-  in `.sd-ai-command-pack/provenance.json`, and run
-  `python3 scripts/sd-ai-command-pack-install-audit.py`. If the path is not an
-  installed target and the audit passes, do not report its absence as a defect.
-- `docs/SD_AI_COMMAND_PACK.md` may describe source-checkout-only operator workflows.
-  References to source-only scripts are valid when the surrounding
-  section explicitly labels the workflow or command source-only;
-  do not require those scripts to exist in a consumer checkout.
+- Nothing from this pack is installed into a consuming repository any more.
+  Step 3e replaced the fleet installer with a machine-scope renderer, so there
+  is no manifest, no installed-targets receipt, no provenance file, and no
+  install audit to consult. A pack file being absent from a repository is the
+  expected state, not a defect: the only thing this framework puts in a
+  repository is what somebody deliberately wrote under `docs/work/`.
 <!-- SD-AI-COMMAND-PACK:COPILOT-GUIDANCE:END -->
 
 <!-- TRELLIS:COPILOT-GUIDANCE:START -->

@@ -9,8 +9,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 # Repository tooling only: an accidental `pip install .` must produce an
-# empty distribution, so package auto-discovery (which would pick up
-# installer/) stays disabled.
+# empty distribution, so package auto-discovery stays disabled. There is no
+# importable package here -- `bin/sd_install.py` is loaded by path, not
+# imported -- and this must keep being true if one ever lands.
 [tool.setuptools]
 packages = []
 

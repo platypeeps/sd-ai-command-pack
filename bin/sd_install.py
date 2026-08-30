@@ -671,7 +671,22 @@ class Context:
     home: Path
     environ: dict[str, str]
     dry_run: bool = False
-    sandboxed: bool = False
+
+    @property
+    def sandboxed(self) -> bool:
+        """True whenever this run targets somewhere other than the real home.
+
+        Derived rather than passed, because the one thing that can escape a
+        scratch install is git's global config: it is per-user, not
+        per-`$HOME`-argument, so an unsandboxed lookup finds the real
+        `~/.gitignore_global` no matter which home the renders are going to.
+        Deriving it from the home itself means a Context built anywhere -- the
+        CLI, a test, a future caller -- cannot get this wrong by forgetting a
+        flag. An earlier version took it as a field and a test promptly built a
+        Context without it, appending a line to the developer's actual global
+        excludes.
+        """
+        return self.home != Path(os.path.expanduser("~"))
 
     @property
     def homes(self) -> list[PlatformHome]:
@@ -967,13 +982,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         environ["XDG_CONFIG_HOME"] = str(home / ".config")
 
     checkout = Path(__file__).resolve().parent.parent
-    ctx = Context(
-        checkout=checkout,
-        home=home,
-        environ=environ,
-        dry_run=dry_run,
-        sandboxed=home_arg is not None,
-    )
+    ctx = Context(checkout=checkout, home=home, environ=environ, dry_run=dry_run)
 
     if mode == "user":
         return cmd_user(ctx, out)

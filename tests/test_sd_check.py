@@ -37,10 +37,17 @@ class CheckFixture(unittest.TestCase):
     def make_repo(self, name: str = "repo") -> pathlib.Path:
         root = self.tmp / name
         root.mkdir(parents=True)
+        # `core.excludesFile` is set per-repo to nowhere because the machine
+        # running these tests may have the pack installed, and the one line the
+        # installer puts in the user's global excludes is `CLAUDE.local.md` --
+        # the very file the purity test expects `git status` to report as
+        # untracked. Without this the fixture inherits the developer's global
+        # excludes and the assertion below silently depends on machine state.
         for args in (
             ("init", "-b", "main"),
             ("config", "user.email", "test@example.com"),
             ("config", "user.name", "Test User"),
+            ("config", "core.excludesFile", "/dev/null"),
         ):
             subprocess.run(
                 ["git", *args], cwd=str(root), check=True, capture_output=True, text=True

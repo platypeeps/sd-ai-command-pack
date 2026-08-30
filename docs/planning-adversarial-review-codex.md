@@ -5,9 +5,9 @@ This appendix extends section 2 of the shipped planning contract,
 That contract is the entry point; read it first. This file adds a second
 review lane on top of it.
 
-**This document is not part of the shipped payload.** It carries no
-`manifest.json` row and lives outside `templates/`, so it reaches no consumer
-and applies only to planning work done in this repository. That is deliberate:
+**This document is not part of the shipped payload.** The installer renders
+`skills/**/SKILL.md` and nothing else, so a file under `docs/` reaches no
+consumer and applies only to planning work done in this repository. That is deliberate:
 the lane it describes invokes the `codex` CLI, and a shipped file saying so
 registers as undeclared codex usage in every consumer that never declared the
 platform — which is all of them. Keeping the lane here removes that marker

@@ -769,14 +769,16 @@ that moves. `P` is chosen because it cannot collide with any step number.
 
 **The lane measures exactly one directory.** Its kcov include filter is the string
 `sd-ai-command-pack-`, which matches the seven shell files under `templates/scripts/` and nothing
-else. 3e deletes that directory. The replacement world in `bin/` is ten tracked files, every one of
-them Python, none matching the prefix. After 3e there is no shipped shell in the repository to
+else. 3e deletes that directory. The replacement world in `bin/` is eleven tracked files, every one
+of them Python, none matching the prefix. After 3e there is no shipped shell in the repository to
 measure. This is not a coverage reduction to be weighed against its cost; the subject matter is
 gone.
 
-The seven `.github/scripts/*.sh` files survive 3e and are **not** a reason to keep the lane: the
+The surviving `.github/scripts/*.sh` files are **not** a reason to keep the lane: the
 prefix never matched them, so they are unmeasured today, and deleting the job loses nothing that is
-currently measured. Repointing kcov at them was considered and rejected -- it would measure CI
+currently measured. (Written as "the seven" before 3e ran. Three survive, not seven -- the other
+four were harnesses for payload this step deletes, so they went with their subjects. Corrected
+rather than left, because the count is the kind of detail a later reader would take as measured.) Repointing kcov at them was considered and rejected -- it would measure CI
 harness rather than shipped product, which is the kind of gate that exists to keep a number alive
 rather than to catch a defect.
 

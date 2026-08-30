@@ -23,16 +23,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The shipped surface is now `skills/` plus this repo's own docs. The nine
+# roots this tuple used to name were the eighteen-platform render payload and
+# the generated command surfaces; step 3e deleted them, and the installer
+# renders from `skills/` at install time rather than from committed copies. So
+# there is exactly one authored tree to scan, which is the point.
 SHIPPED_ROOTS = (
-    "templates",
+    "skills",
     "docs",
-    ".agents",
-    ".claude",
-    ".codex",
-    ".gemini",
-    ".opencode",
-    ".github/prompts",
-    ".github/command-sources",
 )
 
 # The only carve-out inside a shipped root: work items are the history of the
@@ -129,8 +127,8 @@ class SelectorContractDriftTests(unittest.TestCase):
 
     def test_scan_covers_the_authored_status_surface(self) -> None:
         scanned = {path.relative_to(REPO_ROOT).as_posix() for path in shipped_files()}
-        self.assertIn("templates/.agents/skills/sd-status/SKILL.md", scanned)
-        self.assertIn("templates/.agents/skills/sd-housekeeping/SKILL.md", scanned)
+        self.assertIn("skills/sd-status/SKILL.md", scanned)
+        self.assertIn("skills/sd-plan/templates/prd.md", scanned)
 
 
 if __name__ == "__main__":

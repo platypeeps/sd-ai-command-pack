@@ -12,23 +12,23 @@ Instructions for AI assistants working in this repository.
   [docs/planning-adversarial-review-codex.md](docs/planning-adversarial-review-codex.md)
   in addition to the shipped planning contract. It adds a second, independent
   Codex review lane and amends sections 3 through 5 of that contract. It is
-  deliberately unshipped — no `manifest.json` row, nothing under `templates/` —
-  because a shipped file invoking the `codex` CLI registers as undeclared codex
-  usage in every consumer. The lane applies to this repository only.
-- `templates/**` holds the one copy of every shipped pack payload. The
-  repository no longer installs itself, so there are no root-level rendered
-  copies to keep synchronized: change the template and you have changed the
+  deliberately not part of the rendered payload — it is not a `skills/sd-*`
+  surface — because a rendered file invoking the `codex` CLI would register as
+  undeclared codex usage everywhere it landed. The lane applies to this
+  repository only.
+- `skills/**` holds the one copy of the payload. Nothing renders into this
+  repository, so there are no copies to keep synchronized: change the skill and
+  you have changed the
   only copy.
 
 ## Contributor Entry Points
 
 - Read [CONTRIBUTING.md](CONTRIBUTING.md), then run `make check` before
   publishing a change.
-- Read [docs/spec/frontend/adapter-guidelines.md](docs/spec/frontend/adapter-guidelines.md)
-  before changing commands, prompts, skills, or platform adapters.
-- Read [docs/spec/backend/manifest-and-filesystem.md](docs/spec/backend/manifest-and-filesystem.md)
-  before changing the installer, manifest, provenance, audit, or filesystem
-  behavior.
+- Read [docs/work/2026-08-29-artifacts-as-product/design.md](docs/work/2026-08-29-artifacts-as-product/design.md)
+  before changing the installer or the command set. The `docs/spec/**` pages on
+  adapters, manifests, and provenance describe the pre-3e model and are stale
+  until later steps reach them.
 - Planning artifacts live in [docs/work](docs/work/README.md): one directory per
   item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
   is the whole tracked footprint of the workflow.
@@ -59,12 +59,9 @@ To see which wrappers this repository actually has, list the installed skills
 rather than relying on a list written down somewhere: they are the pack's
 `sd-*` skills, and the pack's own help surface enumerates them at runtime.
 
-The pack verifies that this block matches the version it shipped — `install.py
-<repo> --check` reports `refresh-required` if the text between the markers
-drifts. It does **not** verify the routing against this repository's installed
-skills, and deliberately names none: the block routes by intent so that there
-is nothing in it that a later release or a thin conversion could make false.
-
-Managed by the SD AI Command Pack. Edits outside this block are preserved;
-edits inside it are replaced on the next install.
+Nothing verifies or rewrites this block any more. The machine-scope installer
+never edits a tracked repository file, `AGENTS.md` included, so what follows is
+hand-maintained like the rest of the document. It deliberately names no
+individual command: the block routes by intent, so there is nothing in it that a
+change to the command set could make false.
 <!-- SD-AI-COMMAND-PACK:ROUTING:END -->

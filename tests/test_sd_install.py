@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -213,59 +214,90 @@ class OtherPeoplesFilesTests(InstallerHarness):
 
 
 class ReconciliationTests(InstallerHarness):
-    """A retired surface must actually disappear; an edited one must not."""
+    """A retired surface must actually disappear; an edited one must not.
 
-    def add_surface(self, name: str = "sd-zzz-probe") -> Path:
-        folder = REPO_ROOT / "skills" / name
-        folder.mkdir(parents=True)
-        self.addCleanup(
-            lambda: subprocess.run(["rm", "-rf", str(folder)], check=False)
+    These run against a synthetic checkout rather than the real one. An earlier
+    version created a probe surface under the repository's own `skills/` and
+    removed it afterwards, which raced `test_sd_check`'s purity assertion under
+    the parallel runner -- that suite checks the working tree is clean, and for
+    a few seconds it was not. A test that dirties the repository to prove
+    something about the installer is testing the wrong thing anyway: the
+    installer takes a checkout as input, so the input should be a fixture.
+    """
+
+    def make_checkout(self, *names: str) -> Path:
+        checkout = self.home / "checkout"
+        for name in names:
+            folder = checkout / "skills" / name
+            folder.mkdir(parents=True)
+            (folder / sd_install.SKILL_FILE).write_text(
+                f"---\nname: {name}\n---\n\nprobe surface\n", encoding="utf-8"
+            )
+        return checkout
+
+    def context(self, checkout: Path) -> "sd_install.Context":
+        return sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={
+                "XDG_STATE_HOME": str(self.home / ".local" / "state"),
+                "XDG_CONFIG_HOME": str(self.home / ".config"),
+            },
         )
-        (folder / "SKILL.md").write_text(
-            f"---\nname: {name}\n---\n\nprobe surface\n", encoding="utf-8"
-        )
-        return folder
+
+    def install(self, checkout: Path) -> str:
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 0)
+        return out.getvalue()
+
+    def rendered(self, name: str) -> list[Path]:
+        return [
+            home.target_for(name)
+            for home in sd_install.platform_homes(self.home, dict(os.environ))
+        ]
 
     def test_a_retired_surface_is_removed_from_every_platform(self):
-        folder = self.add_surface()
-        self.install()
-        homes = sd_install.platform_homes(self.home, dict(os.environ))
-        rendered = [home.target_for(folder.name) for home in homes]
-        for target in rendered:
+        checkout = self.make_checkout("sd-kept", "sd-retired")
+        self.install(checkout)
+        targets = self.rendered("sd-retired")
+        for target in targets:
             self.assertTrue(target.exists())
 
-        subprocess.run(["rm", "-rf", str(folder)], check=True)
-        self.install()
-        for target in rendered:
-            self.assertFalse(target.exists(), f"{target} survived the surface removal")
+        subprocess.run(
+            ["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True
+        )
+        self.install(checkout)
+        for target in targets:
+            self.assertFalse(target.exists(), f"{target} survived the removal")
+        self.assertTrue(self.rendered("sd-kept")[0].exists())
 
     def test_a_hand_edited_render_is_kept_and_reported(self):
-        folder = self.add_surface()
-        self.install()
-        homes = sd_install.platform_homes(self.home, dict(os.environ))
-        edited = homes[0].target_for(folder.name)
+        checkout = self.make_checkout("sd-kept", "sd-retired")
+        self.install(checkout)
+        edited = self.rendered("sd-retired")[0]
         edited.write_text("someone edited this\n", encoding="utf-8")
 
-        subprocess.run(["rm", "-rf", str(folder)], check=True)
-        rc, output = self.install()
-        self.assertEqual(rc, 0)
+        subprocess.run(
+            ["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True
+        )
+        output = self.install(checkout)
         self.assertTrue(edited.exists(), "an edited file was deleted")
         self.assertIn("modified since it was installed", output)
 
     def test_a_corrupt_receipt_deletes_nothing(self):
         """The receipt is the delete authority, so an unreadable one grants none."""
-        folder = self.add_surface()
-        self.install()
-        homes = sd_install.platform_homes(self.home, dict(os.environ))
-        orphan = homes[0].target_for(folder.name)
+        checkout = self.make_checkout("sd-kept", "sd-retired")
+        self.install(checkout)
+        orphan = self.rendered("sd-retired")[0]
 
         receipt = (
             self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
         )
         receipt.write_text("{ truncated", encoding="utf-8")
-        subprocess.run(["rm", "-rf", str(folder)], check=True)
-        rc, _ = self.install()
-        self.assertEqual(rc, 0)
+        subprocess.run(
+            ["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True
+        )
+        self.install(checkout)
         self.assertTrue(
             orphan.exists(),
             "a file was deleted on the authority of a receipt that would not parse",
@@ -302,6 +334,19 @@ class SandboxContainmentTests(InstallerHarness):
             sandboxed=True,
         )
         self.assertEqual(resolved, self.home / ".config" / "git" / "ignore")
+
+    def test_any_home_but_the_real_one_is_sandboxed(self):
+        """Derived, not passed -- a Context cannot forget to be contained."""
+        ctx = sd_install.Context(
+            checkout=REPO_ROOT, home=self.home, environ={}
+        )
+        self.assertTrue(ctx.sandboxed)
+        real = sd_install.Context(
+            checkout=REPO_ROOT,
+            home=Path(os.path.expanduser("~")),
+            environ={},
+        )
+        self.assertFalse(real.sandboxed)
 
     def test_every_written_path_is_under_the_given_home(self):
         self.install()
@@ -341,8 +386,13 @@ class LocalBlockTests(InstallerHarness):
         repo = self.make_repo()
         target = repo / sd_install.LOCAL_BLOCK_FILE
         target.write_text("committed by mistake\n", encoding="utf-8")
+        # -f because the machine running these tests may well have the pack
+        # installed, and the one line the installer adds to the global excludes
+        # is exactly this filename. Git refusing to add it is the doctrine
+        # working; the test needs it tracked anyway to prove the refusal.
         subprocess.run(
-            ["git", "-C", str(repo), "add", sd_install.LOCAL_BLOCK_FILE], check=True
+            ["git", "-C", str(repo), "add", "-f", sd_install.LOCAL_BLOCK_FILE],
+            check=True,
         )
         with self.assertRaises(SystemExit) as caught:
             sd_install.write_local_block(repo)
@@ -493,3 +543,702 @@ class CommandLineTests(InstallerHarness):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GitContextTests(InstallerHarness):
+    """`git_context` describes the serving checkout, and must not raise.
+
+    Every field it reports is diagnostic, so a git that is absent, broken, or
+    pointed at a non-repository has to degrade to empty strings rather than
+    take the whole command down with it.
+    """
+
+    def test_a_non_repository_reports_empty_fields(self):
+        context = sd_install.git_context(self.home)
+        self.assertEqual(context["commit"], "")
+        self.assertEqual(context["branch"], "")
+        self.assertFalse(context["dirty"])
+
+    def test_a_missing_git_binary_is_not_fatal(self):
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=OSError("no git here")
+        ):
+            context = sd_install.git_context(REPO_ROOT)
+        self.assertEqual(context, {"commit": "", "branch": "", "dirty": False})
+
+    def test_a_dirty_checkout_is_reported(self):
+        repo = self.home / "dirty"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        (repo / "file.txt").write_text("untracked\n", encoding="utf-8")
+        self.assertTrue(sd_install.git_context(repo)["dirty"])
+
+
+class ExcludesTests(InstallerHarness):
+    """The unsandboxed path, which the machine's real install takes."""
+
+    def test_a_configured_excludes_file_is_honoured(self):
+        """Writing our line into git's default while `core.excludesFile` names
+        somewhere else would leave it configured and ignored."""
+        configured = self.home / "somewhere" / "else"
+        completed = subprocess.CompletedProcess([], 0, stdout=f"{configured}\n", stderr="")
+        with unittest.mock.patch("subprocess.run", return_value=completed):
+            resolved = sd_install.excludes_file(self.home, {})
+        self.assertEqual(resolved, configured)
+
+    def test_an_unconfigured_excludes_file_falls_back_to_the_xdg_default(self):
+        completed = subprocess.CompletedProcess([], 1, stdout="", stderr="")
+        with unittest.mock.patch("subprocess.run", return_value=completed):
+            resolved = sd_install.excludes_file(
+                self.home, {"XDG_CONFIG_HOME": str(self.home / "cfg")}
+            )
+        self.assertEqual(resolved, self.home / "cfg" / "git" / "ignore")
+
+    def test_a_missing_git_binary_falls_back_rather_than_raising(self):
+        with unittest.mock.patch("subprocess.run", side_effect=OSError("no git")):
+            resolved = sd_install.excludes_file(self.home, {})
+        self.assertEqual(resolved, self.home / ".config" / "git" / "ignore")
+
+    def test_the_line_is_appended_to_a_file_with_no_trailing_newline(self):
+        target = self.home / "ignore"
+        target.write_text("*.log", encoding="utf-8")
+        self.assertTrue(sd_install.ensure_excludes_line(target))
+        self.assertEqual(
+            target.read_text(encoding="utf-8"),
+            f"*.log\n{sd_install.EXCLUDES_LINE}\n",
+        )
+
+    def test_a_dry_run_reports_the_change_without_making_it(self):
+        target = self.home / "ignore"
+        self.assertTrue(sd_install.ensure_excludes_line(target, dry_run=True))
+        self.assertFalse(target.exists())
+
+    def test_the_config_is_only_set_when_nothing_is_configured(self):
+        calls = []
+
+        def record(args, **kwargs):
+            calls.append(args)
+            if "--get" in args:
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        with unittest.mock.patch("subprocess.run", side_effect=record):
+            sd_install.set_excludes_config(self.home / "ignore")
+        self.assertEqual(len(calls), 2, "the config was not written")
+        self.assertIn("core.excludesFile", calls[1])
+
+    def test_an_existing_config_is_left_alone(self):
+        completed = subprocess.CompletedProcess([], 0, stdout="/somewhere\n", stderr="")
+        with unittest.mock.patch(
+            "subprocess.run", return_value=completed
+        ) as run:
+            sd_install.set_excludes_config(self.home / "ignore")
+        self.assertEqual(run.call_count, 1, "an existing core.excludesFile was rewritten")
+
+    def test_a_dry_run_does_not_write_the_config(self):
+        completed = subprocess.CompletedProcess([], 1, stdout="", stderr="")
+        with unittest.mock.patch("subprocess.run", return_value=completed) as run:
+            sd_install.set_excludes_config(self.home / "ignore", dry_run=True)
+        self.assertEqual(run.call_count, 1)
+
+    def test_a_missing_git_binary_is_survivable(self):
+        with unittest.mock.patch("subprocess.run", side_effect=OSError("no git")):
+            sd_install.set_excludes_config(self.home / "ignore")
+
+
+class ReceiptTests(InstallerHarness):
+    def test_a_missing_or_unreadable_receipt_reads_as_empty(self):
+        self.assertEqual(sd_install.read_receipt(self.home / "absent.json"), {})
+        broken = self.home / "broken.json"
+        broken.write_text("{ nope", encoding="utf-8")
+        self.assertEqual(sd_install.read_receipt(broken), {})
+
+    def test_a_receipt_that_is_not_an_object_reads_as_empty(self):
+        listy = self.home / "list.json"
+        listy.write_text("[1, 2, 3]", encoding="utf-8")
+        self.assertEqual(sd_install.read_receipt(listy), {})
+
+    def test_malformed_owned_entries_are_ignored(self):
+        self.assertEqual(sd_install.owned_entries({"owned": "not a list"}), [])
+        self.assertEqual(
+            sd_install.owned_entries({"owned": ["a string", {"no": "path"}]}), []
+        )
+
+    def test_the_receipt_is_replaced_atomically(self):
+        target = self.home / "state" / "installed.json"
+        sd_install.write_receipt(target, {"schema": 1})
+        sd_install.write_receipt(target, {"schema": 2})
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["schema"], 2)
+        self.assertEqual(
+            sorted(p.name for p in target.parent.iterdir()),
+            ["installed.json"],
+            "a scratch file was left behind",
+        )
+
+
+class PruneTests(InstallerHarness):
+    def test_an_entry_with_no_path_or_an_absent_file_is_skipped_silently(self):
+        skipped = sd_install.prune_stale(
+            [
+                {"path": 42, "sha256": "x"},
+                {"path": str(self.home / "gone"), "sha256": "x"},
+                {"path": str(self.home / "s"), "kind": "hook"},
+            ],
+            set(),
+        )
+        self.assertEqual(skipped, [])
+
+    def test_an_unreadable_file_is_reported_rather_than_deleted(self):
+        target = self.home / "unreadable"
+        target.write_text("body\n", encoding="utf-8")
+        entry = {"path": str(target), "sha256": "whatever"}
+        with unittest.mock.patch.object(
+            Path, "read_bytes", side_effect=OSError(13, "Permission denied")
+        ):
+            skipped = sd_install.prune_stale([entry], set())
+        self.assertEqual(len(skipped), 1)
+        self.assertIn("unreadable", skipped[0][1])
+        self.assertTrue(target.exists())
+
+    def test_a_failed_removal_is_reported_rather_than_swallowed(self):
+        target = self.home / "stuck"
+        body = b"body\n"
+        target.write_bytes(body)
+        entry = {"path": str(target), "sha256": sd_install.digest(body)}
+        with unittest.mock.patch.object(
+            Path, "unlink", side_effect=OSError(1, "Operation not permitted")
+        ):
+            skipped = sd_install.prune_stale([entry], set())
+        self.assertEqual(len(skipped), 1)
+        self.assertIn("could not remove", skipped[0][1])
+
+    def test_a_dry_run_deletes_nothing(self):
+        target = self.home / "kept"
+        body = b"body\n"
+        target.write_bytes(body)
+        sd_install.prune_stale(
+            [{"path": str(target), "sha256": sd_install.digest(body)}],
+            set(),
+            dry_run=True,
+        )
+        self.assertTrue(target.exists())
+
+    def test_directory_pruning_stops_at_the_first_non_empty_parent(self):
+        nest = self.home / "a" / "b" / "c"
+        nest.mkdir(parents=True)
+        (self.home / "a" / "keep.txt").write_text("x", encoding="utf-8")
+        sd_install.prune_empty_dirs(nest)
+        self.assertFalse((self.home / "a" / "b").exists())
+        self.assertTrue((self.home / "a").exists(), "a populated parent was removed")
+
+
+class HookEdgeCaseTests(InstallerHarness):
+    def settings_path(self) -> Path:
+        path = self.home / ".claude" / "settings.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_a_non_object_settings_file_is_refused(self):
+        path = self.settings_path()
+        path.write_text("[]", encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            sd_install.install_hook(path, "cmd")
+        self.assertIn("not a JSON object", str(caught.exception))
+
+    def test_a_non_object_hooks_key_is_refused(self):
+        path = self.settings_path()
+        path.write_text(json.dumps({"hooks": []}), encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            sd_install.install_hook(path, "cmd")
+        self.assertIn("non-object 'hooks'", str(caught.exception))
+
+    def test_a_non_list_session_start_is_refused(self):
+        path = self.settings_path()
+        path.write_text(json.dumps({"hooks": {"SessionStart": {}}}), encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            sd_install.install_hook(path, "cmd")
+        self.assertIn("non-list", str(caught.exception))
+
+    def test_a_matcher_group_with_a_non_list_hooks_key_is_refused(self):
+        path = self.settings_path()
+        path.write_text(
+            json.dumps(
+                {"hooks": {"SessionStart": [{"matcher": "startup", "hooks": {}}]}}
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaises(SystemExit) as caught:
+            sd_install.install_hook(path, "cmd")
+        self.assertIn("non-list 'hooks'", str(caught.exception))
+
+    def test_a_dry_run_registers_nothing(self):
+        path = self.settings_path()
+        self.assertTrue(sd_install.install_hook(path, "cmd", dry_run=True))
+        self.assertFalse(path.exists())
+
+    def test_removing_from_a_file_that_never_had_the_hook_changes_nothing(self):
+        path = self.settings_path()
+        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        path.write_text("{ broken", encoding="utf-8")
+        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        path.write_text("[]", encoding="utf-8")
+        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        path.write_text(json.dumps({"hooks": []}), encoding="utf-8")
+        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        path.write_text(json.dumps({"hooks": {"SessionStart": {}}}), encoding="utf-8")
+        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        path.write_text(
+            json.dumps({"hooks": {"SessionStart": [{"matcher": "startup"}]}}),
+            encoding="utf-8",
+        )
+        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+
+    def test_groups_for_other_matchers_are_left_untouched(self):
+        path = self.settings_path()
+        other = {"matcher": "resume", "hooks": [{"command": "cmd"}]}
+        path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            other,
+                            {"matcher": "startup", "hooks": [{"command": "cmd"}]},
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(sd_install.remove_hook(path, "cmd"))
+        groups = json.loads(path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+        self.assertEqual(groups, [other], "a matcher we never register on was changed")
+
+    def test_an_already_empty_group_is_preserved_rather_than_swept_up(self):
+        """We remove groups *we* emptied, not ones that arrived empty."""
+        path = self.settings_path()
+        path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {"matcher": "startup", "hooks": []},
+                            {"matcher": "clear", "hooks": [{"command": "cmd"}]},
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(sd_install.remove_hook(path, "cmd"))
+        groups = json.loads(path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+        self.assertEqual(groups, [{"matcher": "startup", "hooks": []}])
+
+    def test_a_dry_run_removal_writes_nothing(self):
+        path = self.settings_path()
+        original = json.dumps(
+            {"hooks": {"SessionStart": [{"matcher": "clear", "hooks": [{"command": "c"}]}]}}
+        )
+        path.write_text(original, encoding="utf-8")
+        self.assertTrue(sd_install.remove_hook(path, "c", dry_run=True))
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+
+class DiscoveryTests(InstallerHarness):
+    def test_a_checkout_with_no_skills_directory_finds_nothing(self):
+        self.assertEqual(sd_install.discover_surfaces(self.home), [])
+
+    def test_a_directory_without_a_skill_file_is_not_a_surface(self):
+        skills = self.home / "skills"
+        (skills / "sd-empty").mkdir(parents=True)
+        (skills / "not-sd").mkdir()
+        (skills / "not-sd" / sd_install.SKILL_FILE).write_text("x", encoding="utf-8")
+        (skills / "loose.md").write_text("x", encoding="utf-8")
+        self.assertEqual(sd_install.discover_surfaces(self.home), [])
+
+    def test_user_refuses_a_checkout_with_no_surfaces(self):
+        out = io.StringIO()
+        ctx = sd_install.Context(
+            checkout=self.home, home=self.home, environ=dict(os.environ)
+        )
+        self.assertEqual(sd_install.cmd_user(ctx, out), 1)
+        self.assertIn("is this the pack checkout?", out.getvalue())
+
+
+class StatusTests(InstallerHarness):
+    def test_status_before_any_install_says_so(self):
+        rc, output = self.run_cli("--status")
+        self.assertEqual(rc, 0)
+        self.assertIn("not installed", output)
+
+    def test_status_after_install_reports_the_recorded_commit(self):
+        self.install()
+        rc, output = self.run_cli("--status")
+        self.assertEqual(rc, 0)
+        self.assertIn("checkout:", output)
+        self.assertIn("0 missing, 0 modified", output)
+
+    def test_status_counts_a_missing_render(self):
+        self.install()
+        homes = sd_install.platform_homes(self.home, dict(os.environ))
+        target = next(homes[0].root.glob("sd-*/SKILL.md"))
+        target.unlink()
+        _, output = self.run_cli("--status")
+        self.assertIn("1 missing", output)
+
+    def test_status_names_legacy_residue(self):
+        legacy = self.home / ".agents" / "skills" / "sd-old" / "SKILL.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("old\n", encoding="utf-8")
+        receipt = (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "machine"
+            / "machine-receipt.json"
+        )
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps(
+                {"files": [{"family": "agents-skills", "path": "sd-old/SKILL.md"}]}
+            ),
+            encoding="utf-8",
+        )
+        _, output = self.run_cli("--status")
+        self.assertIn("old fleet installer", output)
+
+    def test_a_receipt_with_no_files_key_enumerates_nothing(self):
+        receipt = (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "machine"
+            / "machine-receipt.json"
+        )
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps({"schemaVersion": 1}), encoding="utf-8")
+        self.assertEqual(
+            sd_install.legacy_targets(
+                self.home,
+                {"XDG_STATE_HOME": str(self.home / ".local" / "state")},
+            ),
+            [],
+        )
+
+    def test_malformed_legacy_rows_are_skipped(self):
+        receipt = (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "machine"
+            / "machine-receipt.json"
+        )
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps(
+                {
+                    "files": [
+                        "a string",
+                        {"family": "agents-bin"},
+                        {"family": 7, "path": "x"},
+                        {"family": "agents-bin", "path": "tool", "digest": 9},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        found = sd_install.legacy_targets(
+            self.home, {"XDG_STATE_HOME": str(self.home / ".local" / "state")}
+        )
+        self.assertEqual(found, [(self.home / ".agents" / "bin" / "tool", "")])
+
+
+class PullBehaviourTests(InstallerHarness):
+    def context(self, checkout: Path, **kwargs) -> "sd_install.Context":
+        return sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={
+                "XDG_STATE_HOME": str(self.home / ".local" / "state"),
+                "XDG_CONFIG_HOME": str(self.home / ".config"),
+            },
+            **kwargs,
+        )
+
+    def make_main_checkout(self) -> Path:
+        repo = self.home / "serving"
+        repo.mkdir()
+        run = lambda *a: subprocess.run(  # noqa: E731
+            ["git", "-C", str(repo), *a], check=True, capture_output=True
+        )
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "t@example.com")
+        run("config", "user.name", "Test")
+        (repo / "file.txt").write_text("body\n", encoding="utf-8")
+        run("add", "file.txt")
+        run("commit", "-qm", "initial")
+        return repo
+
+    def test_pull_refuses_a_dirty_checkout(self):
+        repo = self.make_main_checkout()
+        (repo / "file.txt").write_text("changed\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_pull(self.context(repo), out), 1)
+        self.assertIn("uncommitted changes", out.getvalue())
+
+    def test_pull_refuses_off_main(self):
+        repo = self.make_main_checkout()
+        subprocess.run(
+            ["git", "-C", str(repo), "checkout", "-q", "-b", "sidebranch"],
+            check=True,
+            capture_output=True,
+        )
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_pull(self.context(repo), out), 1)
+        self.assertIn("not main", out.getvalue())
+
+    def test_a_dry_run_pull_does_not_touch_git(self):
+        repo = self.make_main_checkout()
+        out = io.StringIO()
+        rc = sd_install.cmd_pull(self.context(repo, dry_run=True), out)
+        self.assertEqual(rc, 0)
+        self.assertIn("would fast-forward", out.getvalue())
+
+    def test_a_failed_fast_forward_is_reported_with_git_stderr(self):
+        repo = self.make_main_checkout()
+        out = io.StringIO()
+        rc = sd_install.cmd_pull(self.context(repo), out)
+        self.assertEqual(rc, 1, "a repo with no remote should fail to pull")
+        self.assertIn("git pull --ff-only failed", out.getvalue())
+
+    def test_a_successful_pull_re_renders(self):
+        completed = subprocess.CompletedProcess([], 0, stdout="Already up to date.\n", stderr="")
+        real = subprocess.run
+
+        def fake(args, **kwargs):
+            if "pull" in args:
+                return completed
+            return real(args, **kwargs)
+
+        ctx = self.context(REPO_ROOT)
+        out = io.StringIO()
+        with unittest.mock.patch("subprocess.run", side_effect=fake):
+            with unittest.mock.patch.object(
+                sd_install, "git_context", return_value={"branch": "main", "commit": "a", "dirty": False}
+            ):
+                rc = sd_install.cmd_pull(ctx, out)
+        self.assertEqual(rc, 0)
+        self.assertIn("rendered", out.getvalue())
+
+
+class RepoCommandTests(InstallerHarness):
+    def test_repo_defaults_to_the_working_directory(self):
+        repo = self.home / "here"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        cwd = os.getcwd()
+        os.chdir(repo)
+        try:
+            rc, output = self.run_cli("--repo")
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(rc, 0)
+        self.assertIn("added the sd block", output)
+
+    def test_a_dry_run_repo_writes_nothing(self):
+        repo = self.home / "dry"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        rc, output = self.run_cli("--repo", str(repo), "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertIn("would have added", output)
+        self.assertFalse((repo / sd_install.LOCAL_BLOCK_FILE).exists())
+
+    def test_a_path_that_is_not_a_repository_still_gets_a_block(self):
+        """`--repo` is about the local config file, not about git.
+
+        A directory that is not a repository has nothing tracked, so the
+        tracked-file refusal cannot fire and the block is simply written.
+        """
+        plain = self.home / "plain"
+        plain.mkdir()
+        self.assertEqual(sd_install.write_local_block(plain), "added")
+
+    def test_a_missing_git_binary_does_not_report_a_file_as_tracked(self):
+        with unittest.mock.patch("subprocess.run", side_effect=OSError("no git")):
+            self.assertFalse(sd_install.path_is_tracked(self.home, "anything"))
+
+
+class UninstallEdgeCaseTests(InstallerHarness):
+    def test_a_dry_run_uninstall_removes_nothing(self):
+        self.install()
+        rc, output = self.run_cli("--uninstall", "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertIn("would remove", output)
+        homes = sd_install.platform_homes(self.home, dict(os.environ))
+        self.assertTrue(any(homes[0].root.glob("sd-*")))
+
+    def test_an_undeletable_receipt_does_not_fail_the_command(self):
+        self.install()
+        with unittest.mock.patch.object(
+            Path, "unlink", side_effect=OSError(1, "nope")
+        ):
+            rc, _ = self.run_cli("--uninstall")
+        self.assertEqual(rc, 0)
+
+
+class AdoptLegacyEdgeCaseTests(InstallerHarness):
+    def test_a_dry_run_removes_nothing(self):
+        legacy = self.home / ".agents" / "skills" / "sd-old" / "SKILL.md"
+        legacy.parent.mkdir(parents=True)
+        body = b"old\n"
+        legacy.write_bytes(body)
+        receipt = (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "machine"
+            / "machine-receipt.json"
+        )
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps(
+                {
+                    "files": [
+                        {
+                            "family": "agents-skills",
+                            "path": "sd-old/SKILL.md",
+                            "digest": sd_install.digest(body),
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, output = self.run_cli("--adopt-legacy", "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertIn("would remove 1", output)
+        self.assertTrue(legacy.exists())
+
+
+class UsageTests(InstallerHarness):
+    def test_help_prints_usage_and_succeeds(self):
+        for flag in ("-h", "--help"):
+            out = io.StringIO()
+            self.assertEqual(sd_install.main([flag], out=out), 0)
+            self.assertIn("usage:", out.getvalue())
+
+    def test_home_without_a_directory_is_refused(self):
+        out = io.StringIO()
+        self.assertEqual(sd_install.main(["--user", "--home"], out=out), 2)
+        self.assertIn("--home needs a directory", out.getvalue())
+
+
+class StateRootTests(unittest.TestCase):
+    """`state_home` must agree with the other bin/ tools, byte for byte.
+
+    It is deliberately a copy of `bin/sd-handoff`'s helper rather than an
+    import: the handoff tools have to work with no installer present at all,
+    and sharing a module would make the installer a dependency of the thing it
+    installs. A copy is only safe while it behaves identically, so both
+    branches are pinned here.
+    """
+
+    def test_an_absolute_xdg_state_home_is_honoured(self):
+        self.assertEqual(
+            sd_install.state_home({"XDG_STATE_HOME": "/somewhere/state"}),
+            Path("/somewhere/state"),
+        )
+
+    def test_an_unset_or_relative_value_falls_back_to_local_state(self):
+        expected = Path(os.path.expanduser("~")) / ".local" / "state"
+        self.assertEqual(sd_install.state_home({}), expected)
+        self.assertEqual(sd_install.state_home({"XDG_STATE_HOME": ""}), expected)
+        self.assertEqual(
+            sd_install.state_home({"XDG_STATE_HOME": "relative/path"}), expected
+        )
+
+    def test_the_receipt_hangs_off_the_state_root(self):
+        self.assertEqual(
+            sd_install.receipt_path({"XDG_STATE_HOME": "/s"}),
+            Path("/s") / sd_install.STATE_DIR / sd_install.RECEIPT_NAME,
+        )
+
+
+class RemainingBranchTests(InstallerHarness):
+    def test_removing_the_hook_keeps_unrelated_hook_events(self):
+        """`hooks` is only dropped when SessionStart was the last thing in it."""
+        path = self.home / ".claude" / "settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [{"matcher": "Bash", "hooks": []}],
+                        "SessionStart": [
+                            {"matcher": "clear", "hooks": [{"command": "ours"}]}
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(sd_install.remove_hook(path, "ours"))
+        hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+        self.assertEqual(list(hooks), ["PreToolUse"])
+
+    def test_an_empty_configured_excludes_path_falls_through(self):
+        """`git config --get` can exit 0 with an empty value."""
+        completed = subprocess.CompletedProcess([], 0, stdout="\n", stderr="")
+        with unittest.mock.patch("subprocess.run", return_value=completed):
+            resolved = sd_install.excludes_file(self.home, {})
+        self.assertEqual(resolved, self.home / ".config" / "git" / "ignore")
+
+    def test_status_counts_a_modified_render(self):
+        self.install()
+        homes = sd_install.platform_homes(self.home, dict(os.environ))
+        target = next(homes[0].root.glob("sd-*/SKILL.md"))
+        target.write_text("edited by hand\n", encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn("1 modified", output)
+
+    def test_status_on_a_clean_checkout_says_nothing_about_dirtiness(self):
+        out = io.StringIO()
+        ctx = sd_install.Context(
+            checkout=REPO_ROOT,
+            home=self.home,
+            environ={"XDG_STATE_HOME": str(self.home / ".local" / "state")},
+        )
+        with unittest.mock.patch.object(
+            sd_install,
+            "git_context",
+            return_value={"commit": "abc", "branch": "main", "dirty": False},
+        ):
+            sd_install.write_receipt(ctx.receipt, {"checkout": "x", "commit": "abc"})
+            sd_install.cmd_status(ctx, out)
+        self.assertNotIn("dirty", out.getvalue())
+
+    def test_uninstall_handles_a_receipt_with_no_hook_entry(self):
+        body = b"body\n"
+        orphan = self.home / "orphan.md"
+        orphan.write_bytes(body)
+        sd_install.write_receipt(
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json",
+            {
+                "schema": 1,
+                "owned": [
+                    {"path": str(orphan), "sha256": sd_install.digest(body), "kind": "skill"}
+                ],
+            },
+        )
+        rc, output = self.run_cli("--uninstall")
+        self.assertEqual(rc, 0)
+        self.assertIn("removed 1 file", output)
+        self.assertFalse(orphan.exists())
+
+    def test_without_home_the_real_home_is_used(self):
+        """Read-only: `--status` never writes, so the real home is safe to probe."""
+        out = io.StringIO()
+        rc = sd_install.main(["--status"], out=out)
+        self.assertEqual(rc, 0)
+        self.assertIn("surfaces:", out.getvalue())
+
+    def test_pull_is_reachable_from_the_command_line(self):
+        """Dispatch coverage, with git_context stubbed so the outcome does not
+        depend on which branch the checkout running the tests happens to be on."""
+        out = io.StringIO()
+        with unittest.mock.patch.object(
+            sd_install,
+            "git_context",
+            return_value={"commit": "abc", "branch": "sidebranch", "dirty": False},
+        ):
+            rc = sd_install.main(["--pull", "--home", str(self.home)], out=out)
+        self.assertEqual(rc, 1)
+        self.assertIn("not main", out.getvalue())

@@ -68,91 +68,6 @@ jobs:
       - name: Report installer coverage (gate 100%)
         run: bash .github/scripts/check-installer-coverage.sh
 
-      - name: Report shipped-scripts coverage
-        run: bash .github/scripts/check-shipped-script-coverage.sh
-
-      - name: Check shipped-script doc coverage
-        run: bash .github/scripts/check-shipped-script-docs.sh
-
-      - name: Check pack-helper resolution rule
-        run: python3 .github/scripts/check-helper-resolution.py
-
-      - name: Check shipped-script modes
-        run: python3 .github/scripts/check-shipped-script-modes.py
-
-  shell-coverage:
-    name: Shell coverage
-    runs-on: ubuntu-latest
-    # kcov wraps every bash the suite spawns, so the run is ~10 min plus the
-    # from-source kcov build; give it headroom over the standard 15.
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-
-      - name: Install test dependencies
-        run: python3 -m pip install --require-hashes -r requirements-dev.txt
-
-      - name: Install kcov
-        # kcov is no longer packaged for Ubuntu 24.04, and the prebuilt v42
-        # binary links libopcodes-2.38 (binutils 2.38), absent on noble
-        # (binutils 2.42). Build from a pinned kcov commit instead so the
-        # binary is ABI-correct for whatever runner image is current. The
-        # clone is pinned by asserting HEAD equals the expected commit, and
-        # `kcov --version` smoke-tests the built binary.
-        env:
-          KCOV_REPO: https://github.com/SimonKagstrom/kcov.git
-          KCOV_REF: v43
-          KCOV_COMMIT: a39874f938ce13f7a65f253120d1ec946b349ffe
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ pkg-config \
-            binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev libssl-dev
-          git clone --depth 1 --branch "$KCOV_REF" "$KCOV_REPO" /tmp/kcov-src
-          got="$(git -C /tmp/kcov-src rev-parse HEAD)"
-          if [ "$got" != "$KCOV_COMMIT" ]; then
-            printf 'error: kcov %s resolved to %s, expected %s\n' \
-              "$KCOV_REF" "$got" "$KCOV_COMMIT" >&2
-            exit 1
-          fi
-          cmake -S /tmp/kcov-src -B /tmp/kcov-build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/kcov-build
-          sudo cmake --install /tmp/kcov-build
-          kcov --version
-
-      - name: Measure shipped shell coverage
-        # Routes the bash the subprocess tests spawn through kcov-bash-shim.sh
-        # so kcov records which lines of the shipped shell the suite reaches.
-        # This is a measurement-only lane: no floor is enforced (measure before
-        # gating), and the report step fails only on a zero-line measurement.
-        env:
-          SD_AI_COMMAND_PACK_TEST_BASH: ${{ github.workspace }}/.github/scripts/kcov-bash-shim.sh
-          SD_AI_COMMAND_PACK_REAL_BASH: /usr/bin/bash
-          SD_AI_COMMAND_PACK_KCOV_DIR: ${{ runner.temp }}/kcov-shell
-          SD_AI_COMMAND_PACK_KCOV_INCLUDE: sd-ai-command-pack-
-        run: |
-          set -euo pipefail
-          mkdir -p "$SD_AI_COMMAND_PACK_KCOV_DIR"
-          python3 -m unittest discover -s tests -p 'test_*.py'
-
-      - name: Report shipped shell coverage
-        if: always()
-        env:
-          SD_AI_COMMAND_PACK_KCOV_DIR: ${{ runner.temp }}/kcov-shell
-        run: bash .github/scripts/report-shell-coverage.sh
-
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -170,11 +85,6 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-
       - name: Install lint dependencies
         run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
@@ -187,12 +97,6 @@ jobs:
 
       - name: Mypy (pack Python)
         run: python3 -m mypy $(make -s lint-mypy-paths)
-
-      - name: Review preflight JavaScript syntax
-        run: node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
-
-      - name: OpenCode JavaScript syntax
-        run: bash .github/scripts/check-opencode-js.sh
 
   bash32:
     name: bash 3.2 syntax
@@ -296,11 +200,13 @@ jobs:
       - name: Install security scanners
         run: python3 -m pip install --require-hashes -r requirements-security.txt
 
-      # Scans pack-owned shipped Python only. Trellis-vendored hook adapters
-      # and the unshipped test suite are out of scope; the gate blocks on
-      # medium+ severity so subprocess-to-git/gh Low findings stay advisory.
-      - name: Bandit (shipped Python)
-        run: bandit -q -r --severity-level medium install.py installer templates/scripts
+      # Scans pack-owned Python only. After step 3e that is bin/: nothing is
+      # shipped into consumer repos any more, so "shipped Python" and "the
+      # tools this repo owns" became the same set. The unshipped test suite
+      # stays out of scope; the gate blocks on medium+ severity so
+      # subprocess-to-git/gh Low findings stay advisory.
+      - name: Bandit (pack Python)
+        run: bandit -q -r --severity-level medium bin
 
       - name: Zizmor (workflow security)
         run: zizmor --offline .github/workflows/
