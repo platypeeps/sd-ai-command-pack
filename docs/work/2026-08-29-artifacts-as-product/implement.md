@@ -141,7 +141,51 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
         render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
         Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
-- [ ] 3-c — consumer removal PRs (9) incl. `setup-github` for full-mode repos
+- [ ] 3-c — consumer removal PRs (8) incl. `setup-github` for full-mode repos
+      - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
+      - [ ] the eight removal pull requests themselves
+
+      Recorded before the wave, because measuring the consumers changed four things the
+      plan row asserted.
+
+      **There are eight consumers, not nine.** Enumerated from disk by looking for
+      `.trellis/` or `.sd-ai-command-pack/`: six live repositories plus `sd-github-review`
+      (which step 4 retires) and `se-ai-command-pack` (which step 5 folds). The ninth in the
+      plan is `mezmo_benchmark`, frozen under D7 and not read. `ai/Trellis` also matches the
+      probe and is not a consumer — it is the upstream fork the payload came from.
+
+      **Removal needs three authorities, and only two installers left receipts.** Three
+      installers wrote into these trees. The pack's own receipt covers 2 of loadsmith's 228
+      four-tree files; Trellis's `.template-hashes.json` covers 51. What closes the gap is the
+      consumer's own `.sd-ai-command-pack/manifest.json` — 740 source-to-target rows — read
+      against the `v0.72.0` tombstone blobs, which is the whole reason M0 had to be tagged
+      before step 1. Authorities in descending strength: receipt plus tombstone byte-compare,
+      Trellis hash match, then name alone for the framework's own `trellis*` / `sd-*`
+      namespaces. A file no authority reaches is kept and reported, never guessed at, and a
+      receipted file whose bytes drifted is kept too — an edit is the one signal that says a
+      human wanted it.
+
+      **The removal was going to delete the artifacts.** `--consumer` short-circuited before
+      the import that the default mode has always run, so the plan deleted `.trellis/tasks`
+      outright: 887 work items across the eight repositories, none of which have a `docs/work`
+      yet. That is the product, not the packaging. The import now runs first and both modes
+      read one `planned_imports()` — counting for the plan and enumerating for the run out of
+      two code paths is how a plan starts describing something other than what happens.
+
+      **Three defects the dry runs surfaced, each a second source of truth.** `AGENTS.md` was
+      coded against a marker spelling no repository uses; the real files carry two marked
+      blocks (`TRELLIS:*` and `SD-AI-COMMAND-PACK:ROUTING:*`), and in `sd-github-review` all 57
+      lines are inside them, so the verdict there is `delete` — a plan that says `edit` and
+      then unlinks the file is describing something else. `.opencode/package.json` drew two
+      verdicts, a keep and a delete, from two classifiers. And empty-directory pruning walked a
+      hand-kept list of trees that had already drifted past `.prism/` and `.gito/`; it now
+      derives the set from the paths actually deleted.
+
+      Measured across all eight, applied to throwaway clones: 6,887 files removed, 7 edited,
+      886 work items and 182 spec files imported, zero deletions outside the framework
+      prefixes, zero empty directories left. The surviving keeps are the repo-own skills the carve-out
+      protects (`playwright`, `security-threat-model`, and each repository's own), plus files
+      edited since install.
 - [ ] P1 / P2 / P3 / P4 / P5 — platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b
