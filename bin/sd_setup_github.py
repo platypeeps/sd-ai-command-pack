@@ -117,8 +117,9 @@ def workflow_text(action_ref: str) -> str:
 # Installed by `sd-review setup-github`. Opt-in: nothing installs this file, and
 # deleting it removes the lane.
 #
-# What it does: resolves this pull request's diff, runs `route()` over the
-# repository's `.github/sd-review.json` policy, and prints the resulting plan.
+# What it does: resolves this pull request's diff, runs `route()` over this
+# repository's review policy -- `.github/sd-review.json` when that file exists,
+# the built-in default when it does not -- and prints the resulting plan.
 #
 # What it does not do: it requests no reviewer, posts no comment, sets no label,
 # and holds `contents: read` and nothing else, so it cannot affect this pull
@@ -133,10 +134,20 @@ on:
 permissions:
   contents: read
 
+# A superseded plan is a stale plan: when a pull request is pushed to twice in
+# quick succession, the older run is describing a diff that no longer exists.
+concurrency:
+  group: sd-review-route-${{{{ github.event.pull_request.number }}}}
+  cancel-in-progress: true
+
 jobs:
   route:
     name: route
     runs-on: ubuntu-latest
+    # The work is a diff and a pure function over it, measured in seconds. This
+    # ceiling is not a budget, it is the point at which a hung runner stops
+    # costing a repository capacity for a job that reports and nothing more.
+    timeout-minutes: 10
     steps:
       - name: Check out the pull request
         uses: {CHECKOUT_ACTION} # {CHECKOUT_VERSION}
