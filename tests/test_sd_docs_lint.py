@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import os
 import pathlib
 import tempfile
 import unittest
 from types import ModuleType
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+@contextlib.contextmanager
+def in_directory(path: pathlib.Path):
+    """Run the body with `path` as the working directory, then put it back."""
+
+    previous = pathlib.Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
 LINT_PATH = REPO_ROOT / "bin" / "sd-docs-lint"
 
 
@@ -293,12 +308,18 @@ class RepositoryTests(unittest.TestCase):
         self.assertIsNone(lint.parse_frontmatter("# PRD\n"))
 
     def test_cli_reports_clean_on_this_repository(self) -> None:
-        self.assertEqual(lint.main(["--repo", str(REPO_ROOT)]), 0)
+        # There is no --repo any more (R10-D6): the linter reads cwd, so the
+        # test has to stand in the repository it means to lint.
+        with in_directory(REPO_ROOT):
+            self.assertEqual(lint.main([]), 0)
 
     def test_cli_rejects_an_unreadable_pr_body(self) -> None:
-        self.assertEqual(
-            lint.main(["--repo", str(REPO_ROOT), "--pr-body", str(REPO_ROOT / "no-such-file")]), 2
-        )
+        with in_directory(REPO_ROOT):
+            self.assertEqual(lint.main(["--pr-body", str(REPO_ROOT / "no-such-file")]), 2)
+
+    def test_cli_refuses_outside_a_git_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as raw, in_directory(pathlib.Path(raw)):
+            self.assertEqual(lint.main([]), 2)
 
 
 if __name__ == "__main__":

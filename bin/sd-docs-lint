@@ -35,7 +35,7 @@ _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
-from sd_lib import parse_frontmatter  # noqa: E402
+from sd_lib import parse_frontmatter, repo_root  # noqa: E402
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ITEM_DIR_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
@@ -296,12 +296,6 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lint docs/work, docs/spec and docs/decisions.")
-    parser.add_argument(
-        "--repo",
-        type=pathlib.Path,
-        default=pathlib.Path(__file__).resolve().parent.parent,
-        help="repository root to lint (default: this script's repository)",
-    )
     parser.add_argument("--work-dir", default="docs/work", help="work item root, repo-relative")
     parser.add_argument("--spec-dir", default="docs/spec", help="spec root, repo-relative")
     parser.add_argument(
@@ -314,6 +308,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # R10-D6: cwd, not a flag. The old default was this script's own repository,
+    # so running the linter from inside a consumer checked the pack instead of
+    # the repo the caller was standing in -- a wrong answer, silently.
+    root = repo_root(None)
+    if root is None:
+        print(f"error: {pathlib.Path.cwd()} is not inside a git repository", file=sys.stderr)
+        return 2
+
     body: str | None = None
     if args.pr_body is not None:
         try:
@@ -322,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: cannot read --pr-body: {error}", file=sys.stderr)
             return 2
 
-    report = run(args.repo, args.work_dir, args.spec_dir, args.decisions_dir, body)
+    report = run(root, args.work_dir, args.spec_dir, args.decisions_dir, body)
     for note in report.notes:
         print(note)
     for failure in report.failures:
