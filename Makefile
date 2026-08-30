@@ -39,8 +39,8 @@ test:
 # the workflow carried its own hand-copied list until 2026-08-29 and had
 # silently omitted every bin/ file, so each tool added since sd_route.py was
 # lint-clean locally and unlinted in CI. Derive it, do not duplicate it.
-LINT_RUFF_PATHS := install.py installer bin/migrate-trellis bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-status templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
-LINT_MYPY_PATHS := installer install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-status templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+LINT_RUFF_PATHS := install.py installer bin/migrate-trellis bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-review bin/sd-status templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+LINT_MYPY_PATHS := installer install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-review bin/sd-status templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
 
 .PHONY: lint-ruff-paths lint-mypy-paths
 lint-ruff-paths:

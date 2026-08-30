@@ -47,12 +47,16 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   green; 3-c does not begin until all of them have landed, so the "consumers cannot plugin-update
   between step 1 and step 3" window is unchanged.**
   - [x] 3a — `bin/sd_lib.py` + `bin/sd-check` (#601); `bin/sd-handoff` + `bin/sd-handoff-restore` (#602, R10-D3). Additive only.
-  - [ ] 3b — `bin/sd-status` + `bin/sd-pr-state` (read-only, GitHub-derived). `sd-status` reports
+  - [x] 3b — `bin/sd-status` + `bin/sd-pr-state` (#603). Read-only, GitHub-derived. `sd-status` reports
     branch-protection **enforcement state**, not just presence: `enforce_admins`, `strict`, the
     required contexts diffed against the checks the repo's workflows actually produce, and the
     PR-review requirement. Each missing leg prints as a named gap. This is what makes the
     merge-authority doctrine conditional in tooling rather than only in prose (critique 4).
-  - [ ] 3c-review — `bin/sd-review` + provider seam + backends + `sd-review.json` policy
+  - [ ] 3c-review — `bin/sd-review` + provider seam + backends + `sd-review.json` policy.
+    The local lane only: `sd-check` → `route()` → backends on the exact diff → findings
+    dispositioned locally and never posted. `setup-github` is deliberately **not** in this
+    PR (it writes workflow files into other repos); the seam it will need is named
+    `SETUP_GITHUB_SEAM` in `bin/sd-review`.
   - [ ] 3d — the 12 command skills + templates
   - [ ] 3e — new machine-scope `install.py` + `installed.json` + parity tests; deletes the legacy
         `templates/scripts/**`, `installer/**`, and `manifest.json` once the E2E passes

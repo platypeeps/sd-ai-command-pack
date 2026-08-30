@@ -1,0 +1,1337 @@
+#!/usr/bin/env python3
+"""Review one exact change with local providers, and dispose of what they find locally.
+
+The pipeline is four steps and no more:
+
+  1. `sd-check` runs this repository's own deterministic gate. A failing gate is
+     a failing review; no model is asked to guess at a change that does not build.
+  2. `sd_route.route` decides, from policy data alone, which tier the change is
+     in and which providers that tier chains. This tool never re-derives that
+     decision -- `route` is a pure function with its own fixtures.
+  3. The selected backends run on the *exact* diff the router was shown. Not the
+     branch when the scope said worktree, not HEAD when the scope said branch.
+  4. Findings are dispositioned here, against this repository's severity floor,
+     and printed. They are never posted.
+
+**Nothing here writes to a network.** There is no pull-request comment, no review
+submission, no label, no check-run update, and no HTTP client of any kind: the
+only outbound calls are `git`, `sd-check`, and the provider CLIs, each through
+one injectable runner. `tests/test_sd_review_boundary.py` asserts the absence
+rather than trusting this paragraph. Publishing findings to GitHub is the CI
+lane's business, and the CI lane is installed by `sd-review setup-github`,
+which is a separate tool and a separate pull request. The seam it will need is
+named `SETUP_GITHUB_SEAM` below; it is a comment, not an implementation.
+
+**The repository comes from the current directory (R10-D6).** There is no
+`--repo` argument and there will not be one: a session that can be pointed at
+another checkout is a session that reviews the wrong diff.
+
+**Codex is subscription-only (R10-D4).** Every codex invocation is preceded by
+`codex_preflight`, which scrubs the two environment variables the codex CLI
+reads as metered credentials and refuses to run unless `auth.json` says the CLI
+is logged in through ChatGPT with no API key stored. See `codex_preflight` for
+the precedence chain that makes those the right three checks.
+
+Exit codes:
+
+  0  the review ran and nothing blocks
+  1  at least one finding is at or above the policy's severity floor
+  2  the invocation or the policy file was wrong
+  3  a preflight refused (billing safety, unmet backend precondition)
+  4  a backend stopped on its rate limit -- the change is *not* reviewed clean
+  5  the deterministic gate failed, or every selected backend was unavailable
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+from typing import Any, Callable, Mapping, NamedTuple, Sequence, TextIO
+
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+import sd_lib  # noqa: E402
+import sd_route  # noqa: E402
+
+# The hook `sd-review setup-github` will need, when it is built in its own pull
+# request: a way to serialise the resolved policy and the backend table into a
+# workflow file, and a way to ask which backends carry lane "github". Both read
+# from `BACKENDS` and `load_policy` unchanged. Nothing else in this file is
+# involved, and nothing in this file writes a workflow.
+SETUP_GITHUB_SEAM = "load_policy + BACKENDS; see the separate setup-github PR"
+
+POLICY_RELATIVE_PATH = pathlib.Path(".github") / "sd-review.json"
+SCOPES = ("worktree", "branch", "pr", "planning")
+SEVERITIES = ("high", "medium", "low", "unspecified")
+BLOCKING_ORDER = {"high": 3, "medium": 2, "low": 1, "unspecified": 0}
+PLANNING_FILES = ("prd.md", "design.md", "implement.md")
+
+# Provider outcomes. `rate_limited` is deliberately not a flavour of
+# `unavailable` (r8): a quota stop means the provider would have reviewed the
+# change and was stopped by billing state, so the change is unreviewed and the
+# run must say so. An unavailable provider is one the chain may move past.
+CLEAN = "clean"
+FINDINGS = "findings"
+RATE_LIMITED = "rate_limited"
+UNAVAILABLE = "unavailable"
+REFUSED = "refused"
+DISABLED = "disabled"
+NOT_RUN = "not_run"
+
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_USAGE = 2
+EXIT_REFUSED = 3
+EXIT_RATE_LIMITED = 4
+EXIT_GATE = 5
+
+DEFAULT_TIMEOUT_SECONDS = 900
+MAX_FINDINGS = 50
+MAX_OUTPUT_BYTES = 2_000_000
+SCHEMA_VERSION = 1
+
+CODEX_SCHEMA_FILE = "codex-schema.json"
+CODEX_ANSWER_FILE = "codex-answer.json"
+
+# The codex CLI resolves credentials in this order (verified in codex-rs
+# `load_auth()`): CODEX_API_KEY env -> ephemeral -> CODEX_ACCESS_TOKEN env ->
+# auth.json. The first two are metered API paths, so both names are removed
+# from the child environment before every invocation.
+#
+# OPENAI_API_KEY is deliberately NOT in this tuple. The codex CLI does not read
+# it, it is legitimately set in many developers' environments for unrelated
+# tools, and scrubbing it here would be a false refusal that teaches the reader
+# the wrong precedence. Do not "fix" this by adding it -- the field of the same
+# name *inside* auth.json is a real metered path and is checked separately, in
+# `codex_preflight`.
+CODEX_METERED_ENV = ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN")
+
+RATE_LIMIT_MARKERS = (
+    "rate limit",
+    "rate-limit",
+    "rate_limit",
+    "usage limit",
+    "quota exceeded",
+    "too many requests",
+    "http 429",
+    "status 429",
+    " 429 ",
+)
+
+CODEX_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["findings"],
+    "properties": {
+        "findings": {
+            "type": "array",
+            "maxItems": MAX_FINDINGS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "line", "severity", "summary", "family"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "line": {"type": ["integer", "null"]},
+                    "severity": {"enum": list(SEVERITIES)},
+                    "summary": {"type": "string"},
+                    "family": {"type": "string"},
+                },
+            },
+        }
+    },
+}
+
+
+class UsageError(Exception):
+    """An invocation fault: exit 2, one sentence, no traceback."""
+
+
+class PolicyError(Exception):
+    """A malformed or impossible `.github/sd-review.json`: exit 2."""
+
+
+class Refusal(Exception):
+    """A preflight said no. Exit 3, and the message names what was wrong."""
+
+
+# --------------------------------------------------------------------------
+# Backends: rows in a table, not branches in a function.
+# --------------------------------------------------------------------------
+
+
+class Backend(NamedTuple):
+    """One reviewer the pack knows how to name.
+
+    `strategy` is how this lane invokes it: `codex` is the hardened CLI
+    invocation below, `argv` is the generic "run it, read JSON" seam, and
+    `none` means the row is declared but has no implementation behind it.
+
+    A row with `enabled=False` still exists on purpose. A policy may name it,
+    `--explain` reports it, and the run reports why it did not happen -- which
+    is strictly more useful than an unknown-backend error, and is how a
+    probe-gated backend stays visible until its probe is run.
+    """
+
+    name: str
+    kind: str
+    lane: str
+    cost: str
+    role: str
+    strategy: str
+    enabled: bool
+    disabled_reason: str
+
+
+BACKENDS: tuple[Backend, ...] = (
+    Backend(
+        "codex", "local CLI", "local",
+        "$0 (ChatGPT subscription; rate-limited is a distinct outcome)",
+        "heads every chain; default planning-review provider", "codex", True, "",
+    ),
+    Backend(
+        "prism", "local CLI over an openai-compatible service", "local", "~low",
+        "standard fallback", "argv", True, "",
+    ),
+    Backend(
+        "gito", "local CLI over an openai-compatible service", "local", "per-file",
+        "deep fallback", "argv", True, "",
+    ),
+    Backend("kimi", "argv", "local", "low", "--challenge, fan-out", "argv", True, ""),
+    Backend(
+        "antigravity", "local CLI", "local",
+        "$0 conditional on a paid subscription and a training opt-out",
+        "planning/branch diversity", "none", False,
+        "probe P2 (non-TTY stdout under `agy -p --output-format json`) has not been "
+        "run. R9b-D2 says P2 fail -> pty wrapper -> else delete the row, so the row "
+        "stays declared and unimplemented until the probe answers",
+    ),
+    Backend(
+        "exo", "openai-compatible endpoint", "local", "$0", "cheap tiers only",
+        "none", False,
+        "the severity-floor probe has not been run, and R11-D1 requires the model to "
+        "be pinned by name and checked against /v1/models before a call. Reaching an "
+        "endpoint directly is also the one thing this lane deliberately has no seam for",
+    ),
+    Backend(
+        "baseten", "openai-compatible endpoint", "local", "metered", "none", "none", False,
+        "ships disabled per r8b: metered billing behind a gap gate that does not exist yet",
+    ),
+    Backend(
+        "copilot", "github", "github", "credits", "remote default (opt-in)", "none", False,
+        "GitHub-side backend. It reviews on the pull request, which means posting, "
+        "which this lane never does. It is installed by `sd-review setup-github` and "
+        "runs in CI",
+    ),
+    Backend(
+        "greptile", "github", "github", "per-PR", "opt-in", "none", False,
+        "GitHub-side backend, same as copilot: it posts, so it is a CI lane, not a local one",
+    ),
+)
+
+BACKENDS_BY_NAME: dict[str, Backend] = {row.name: row for row in BACKENDS}
+
+
+# --------------------------------------------------------------------------
+# Policy
+# --------------------------------------------------------------------------
+
+# The policy used when `.github/sd-review.json` is absent. It is deliberately
+# conservative: documentation-only changes are free, everything else pays for
+# codex, and anything sensitive or large escalates. A repository that wants a
+# different answer writes the file; a repository that writes nothing still gets
+# a defensible route rather than a crash.
+DEFAULT_POLICY: dict[str, Any] = {
+    "tier_order": ["skip", "cheap", "standard", "deep"],
+    "tiers": {
+        "skip": [],
+        "cheap": ["codex"],
+        "standard": ["codex", "prism"],
+        "deep": ["codex", "prism", "gito"],
+    },
+    "default_tier": "standard",
+    "categories": [
+        {"name": "docs", "required": False, "paths": ["docs/**", "*.md"], "tier": "cheap"},
+    ],
+    "docs_skip": ["docs/**", "*.md"],
+    "never_skip": ["docs/spec/**"],
+    "sensitive": [".github/workflows/**"],
+    "large_change_lines": 800,
+    "authors": [],
+    "severity_floor": "medium",
+    "challenge_providers": ["codex"],
+    "planning_providers": ["codex"],
+}
+
+POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
+_STRING_LIST_KEYS = ("docs_skip", "never_skip", "sensitive", "authors")
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise PolicyError(message)
+
+
+def _string_list(value: object, where: str) -> list[str]:
+    _require(isinstance(value, list), f"{where} must be a list of strings")
+    assert isinstance(value, list)
+    for index, item in enumerate(value):
+        _require(isinstance(item, str), f"{where}[{index}] must be a string")
+        _require(bool(str(item).strip()), f"{where}[{index}] must not be empty")
+    return [str(item) for item in value]
+
+
+def validate_policy(value: object, source: str) -> dict[str, Any]:
+    """Check a loaded policy, naming the offending key on every failure.
+
+    A policy that names a backend this build has never heard of is rejected
+    here rather than at run time: a typo in a tier chain must not silently
+    reduce the providers a change gets reviewed by.
+    """
+
+    _require(isinstance(value, dict), f"{source}: the policy must be a JSON object")
+    assert isinstance(value, dict)
+    unknown = sorted(set(value) - POLICY_KEYS)
+    _require(
+        not unknown,
+        f"{source}: unknown key(s) {', '.join(unknown)}; "
+        f"known keys are {', '.join(sorted(POLICY_KEYS))}",
+    )
+
+    policy: dict[str, Any] = dict(DEFAULT_POLICY)
+    policy.update({key: value[key] for key in value if key != "$schema"})
+
+    order = _string_list(policy["tier_order"], f"{source}: tier_order")
+    _require(bool(order), f"{source}: tier_order must name at least one tier")
+    _require(len(set(order)) == len(order), f"{source}: tier_order must not repeat a tier")
+    policy["tier_order"] = order
+
+    tiers = policy["tiers"]
+    _require(isinstance(tiers, dict), f"{source}: tiers must be an object")
+    assert isinstance(tiers, dict)
+    for tier_name, chain in tiers.items():
+        _require(tier_name in order, f"{source}: tiers.{tier_name} is not in tier_order")
+        named = _string_list(chain, f"{source}: tiers.{tier_name}")
+        for index, provider in enumerate(named):
+            _require(
+                provider in BACKENDS_BY_NAME,
+                f"{source}: tiers.{tier_name}[{index}] names unknown backend "
+                f"{provider!r}; known backends are {', '.join(sorted(BACKENDS_BY_NAME))}",
+            )
+    for tier_name in order:
+        tiers.setdefault(tier_name, [])
+
+    default_tier = policy["default_tier"]
+    _require(isinstance(default_tier, str) and default_tier in order, f"{source}: default_tier must be one of {', '.join(order)}")
+
+    categories = policy["categories"]
+    _require(isinstance(categories, list), f"{source}: categories must be a list")
+    assert isinstance(categories, list)
+    for index, raw in enumerate(categories):
+        where = f"{source}: categories[{index}]"
+        _require(isinstance(raw, dict), f"{where} must be an object")
+        assert isinstance(raw, dict)
+        name = raw.get("name")
+        _require(isinstance(name, str) and bool(name.strip()), f"{where}.name must be a non-empty string")
+        paths = _string_list(raw.get("paths"), f"{where}.paths")
+        _require(bool(paths), f"{where}.paths must name at least one glob")
+        if "tier" in raw:
+            _require(raw["tier"] in order, f"{where}.tier must be one of {', '.join(order)}")
+        if "required" in raw:
+            _require(isinstance(raw["required"], bool), f"{where}.required must be true or false")
+
+    for key in _STRING_LIST_KEYS:
+        policy[key] = _string_list(policy[key], f"{source}: {key}")
+
+    lines = policy["large_change_lines"]
+    _require(
+        isinstance(lines, int) and not isinstance(lines, bool) and lines >= 0,
+        f"{source}: large_change_lines must be a non-negative integer",
+    )
+
+    floor = policy["severity_floor"]
+    _require(isinstance(floor, str) and floor in BLOCKING_ORDER, f"{source}: severity_floor must be one of {', '.join(SEVERITIES)}")
+
+    for key in ("challenge_providers", "planning_providers"):
+        for index, provider in enumerate(_string_list(policy[key], f"{source}: {key}")):
+            _require(
+                provider in BACKENDS_BY_NAME,
+                f"{source}: {key}[{index}] names unknown backend {provider!r}",
+            )
+    return policy
+
+
+def policy_path(root: pathlib.Path) -> pathlib.Path:
+    return root / POLICY_RELATIVE_PATH
+
+
+def load_policy(root: pathlib.Path) -> tuple[dict[str, Any], str]:
+    """The repository's policy and where it came from.
+
+    Returns `(policy, source)`; `source` is the path when the file exists and
+    the string `built-in default` when it does not. A file that exists and is
+    wrong is an error -- never a silent fall back to the default, because the
+    author who wrote it meant it.
+    """
+
+    path = policy_path(root)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return dict(DEFAULT_POLICY), "built-in default"
+    except (IsADirectoryError, NotADirectoryError):
+        raise PolicyError(f"{path} is not a regular file") from None
+    except (OSError, UnicodeDecodeError) as error:
+        raise PolicyError(f"cannot read {path}: {error}") from None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise PolicyError(f"{path}: not valid JSON ({error.msg}, line {error.lineno})") from None
+    return validate_policy(value, str(path)), str(path)
+
+
+# --------------------------------------------------------------------------
+# The subject: one exact change
+# --------------------------------------------------------------------------
+
+
+class Subject(NamedTuple):
+    """Exactly what is under review, resolved once and passed everywhere."""
+
+    scope: str
+    base: str
+    head: str
+    paths: tuple[str, ...]
+    lines: int
+    description: str
+
+
+def _git(root: pathlib.Path, args: list[str]) -> str | None:
+    return sd_lib.git_output(args, root)
+
+
+def _default_base(root: pathlib.Path) -> str:
+    """The ref a branch is measured against.
+
+    `origin/HEAD` when the remote publishes one, then the first of `main` and
+    `master` that resolves. A repository with none of those has no branch scope
+    to review, and says so rather than guessing.
+    """
+
+    remote = _git(root, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
+    if remote and remote.strip().startswith("refs/remotes/"):
+        return remote.strip()[len("refs/remotes/") :]
+    for candidate in ("main", "master"):
+        if _git(root, ["rev-parse", "--verify", "--quiet", candidate]) is not None:
+            return candidate
+    raise UsageError(
+        "cannot resolve a base branch: no origin/HEAD, and neither main nor master exists"
+    )
+
+
+def _numstat(root: pathlib.Path, args: list[str]) -> tuple[list[str], int]:
+    raw = _git(root, ["diff", "--numstat", *args])
+    if raw is None:
+        raise UsageError(f"git diff --numstat {' '.join(args)} failed in {root}")
+    paths: list[str] = []
+    lines = 0
+    for row in raw.splitlines():
+        fields = row.split("\t")
+        if len(fields) != 3:
+            continue
+        added, removed, path = fields
+        paths.append(path)
+        for count in (added, removed):
+            if count.isdigit():
+                lines += int(count)
+    return paths, lines
+
+
+def _untracked(root: pathlib.Path) -> list[str]:
+    raw = _git(root, ["ls-files", "--others", "--exclude-standard"])
+    return [line for line in (raw or "").splitlines() if line]
+
+
+def _count_lines(path: pathlib.Path) -> int:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return sum(1 for _ in handle)
+    except OSError:
+        return 0
+
+
+def resolve_subject(root: pathlib.Path, scope: str) -> Subject:
+    """Turn a scope name into the exact diff the providers will be given.
+
+    Each scope names a different pair of endpoints, and the provider argv is
+    built from this one resolution. That is what makes "the exact diff" a
+    property of the tool rather than a promise in a prompt: there is only one
+    place the endpoints exist.
+    """
+
+    if scope == "worktree":
+        paths, lines = _numstat(root, ["HEAD"])
+        extra = _untracked(root)
+        for path in extra:
+            lines += _count_lines(root / path)
+        return Subject(
+            scope, "HEAD", "worktree", tuple(sorted(set(paths) | set(extra))), lines,
+            "uncommitted working-tree change against HEAD, including untracked files",
+        )
+
+    if scope in ("branch", "pr"):
+        base_ref = _default_base(root)
+        merge_base = _git(root, ["merge-base", "HEAD", base_ref])
+        if not merge_base:
+            raise UsageError(f"cannot find a merge base between HEAD and {base_ref}")
+        head = _git(root, ["rev-parse", "HEAD"]) or "HEAD"
+        paths, lines = _numstat(root, [f"{merge_base}..{head}"])
+        return Subject(
+            scope, merge_base, head, tuple(sorted(set(paths))), lines,
+            f"committed change {merge_base}..{head} (base branch {base_ref})",
+        )
+
+    items = [i for i in sd_lib.work_items(root) if i.status in ("planning", "in_progress")]
+    if not items:
+        raise UsageError(f"no planning or in_progress work item under {sd_lib.WORK_DIR}")
+    planning_paths: list[str] = []
+    lines = 0
+    for item in items:
+        for name in PLANNING_FILES:
+            candidate = pathlib.Path(item.path) / name
+            if candidate.is_file():
+                planning_paths.append(str(candidate.relative_to(root)))
+                lines += _count_lines(candidate)
+    if not planning_paths:
+        raise UsageError("the active work item has no prd.md, design.md or implement.md to review")
+    return Subject(
+        scope, "HEAD", "worktree", tuple(sorted(planning_paths)), lines,
+        "the active work item's planning documents",
+    )
+
+
+# --------------------------------------------------------------------------
+# Codex preflight (R10-D4)
+# --------------------------------------------------------------------------
+
+
+def codex_home() -> pathlib.Path:
+    """Where the codex CLI keeps `auth.json`, honouring `CODEX_HOME`.
+
+    The hardened invocation passes `--ignore-user-config`, which drops
+    `config.toml` but not authentication: auth still resolves through
+    `CODEX_HOME`. So the file this preflight reads is the file that run will
+    authenticate with.
+    """
+
+    raw = os.environ.get("CODEX_HOME") or ""
+    return pathlib.Path(raw) if raw else pathlib.Path.home() / ".codex"
+
+
+def child_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    """The environment a codex child actually gets: the parent, minus metered keys.
+
+    Built by construction rather than by mutating a copy of `os.environ` in
+    place, so a caller cannot forget to pass it and inherit the parent's.
+    """
+
+    return {key: value for key, value in parent.items() if key not in CODEX_METERED_ENV}
+
+
+def scrubbed_names(parent: Mapping[str, str]) -> tuple[str, ...]:
+    """Which metered variable *names* were present and removed. Names only."""
+
+    return tuple(name for name in CODEX_METERED_ENV if name in parent)
+
+
+def _mode_label(value: object) -> str:
+    """A safe rendering of `auth_mode` for an error message.
+
+    `auth_mode` is a mode name, not a credential, but this file must be
+    provably incapable of printing a secret. Anything that is not a short
+    identifier-shaped string is described by type instead of by value.
+    """
+
+    if value is None:
+        return "absent"
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{0,32}", value):
+        return repr(value)
+    return f"<{type(value).__name__}, not a recognised mode name>"
+
+
+def codex_preflight(home: pathlib.Path | None = None) -> pathlib.Path:
+    """Refuse unless this codex run is billed to the ChatGPT subscription.
+
+    The codex CLI resolves credentials as `CODEX_API_KEY` env -> ephemeral ->
+    `CODEX_ACCESS_TOKEN` env -> `auth.json`. Two of those are metered API paths
+    and both are environment variables, so `child_environment` removes them;
+    what is left is `auth.json`, and this function asserts two things about it:
+
+      * `auth_mode` is `chatgpt`, so the run is on the subscription;
+      * the `OPENAI_API_KEY` *field* is null or absent, because a value there is
+        a stored metered credential that the subscription mode would not stop.
+
+    The environment variable of that same name is not consulted and not
+    scrubbed: the codex CLI does not read it, and refusing on it would be a
+    false refusal on any machine that has it set for something else.
+
+    Returns the path it checked. Raises `Refusal` naming what was wrong, and
+    never the value of anything.
+    """
+
+    base = home if home is not None else codex_home()
+    path = base / "auth.json"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise Refusal(
+            f"{path} does not exist, so this run cannot be shown to be on the "
+            "ChatGPT subscription. Run `codex login` and try again"
+        ) from None
+    except (IsADirectoryError, NotADirectoryError):
+        raise Refusal(f"{path} is not a regular file") from None
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise Refusal(f"{path}: not valid JSON ({error.msg}, line {error.lineno})") from None
+    if not isinstance(value, dict):
+        raise Refusal(f"{path}: expected a JSON object")
+    mode = value.get("auth_mode")
+    if mode != "chatgpt":
+        raise Refusal(
+            f"{path}: auth_mode is {_mode_label(mode)}, not 'chatgpt'. codex runs in "
+            "this lane are subscription-only, and any other mode is or may become "
+            "metered API billing"
+        )
+    if value.get("OPENAI_API_KEY") is not None:
+        raise Refusal(
+            f"{path}: the OPENAI_API_KEY field holds a value (not shown). A stored "
+            "API key in auth.json is a metered path, so this lane refuses rather "
+            "than risk billing an API account"
+        )
+    return path
+
+
+def codex_preflight_state(home: pathlib.Path | None = None) -> dict[str, Any]:
+    """Preflight as a report rather than an exception, for `--explain`."""
+
+    try:
+        path = codex_preflight(home)
+    except Refusal as error:
+        return {"ok": False, "auth_file": "", "reason": str(error)}
+    return {"ok": True, "auth_file": str(path), "reason": ""}
+
+
+# --------------------------------------------------------------------------
+# The runner seam
+# --------------------------------------------------------------------------
+
+
+class Completed(NamedTuple):
+    exit_code: int
+    stdout: str
+    stderr: str
+    launched: bool = True
+
+
+Runner = Callable[[Sequence[str], Mapping[str, str], pathlib.Path, int], Completed]
+
+
+def subprocess_runner(
+    argv: Sequence[str],
+    env: Mapping[str, str],
+    cwd: pathlib.Path,
+    timeout: int,
+) -> Completed:
+    """The only place this file starts a process. Tests inject their own."""
+
+    try:
+        finished = subprocess.run(
+            list(argv),
+            cwd=str(cwd),
+            env=dict(env),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return Completed(127, "", f"{argv[0]}: not found on PATH", launched=False)
+    except subprocess.TimeoutExpired:
+        return Completed(124, "", f"{argv[0]}: timed out after {timeout}s", launched=False)
+    return Completed(finished.returncode, finished.stdout or "", finished.stderr or "")
+
+
+def classify_failure(result: Completed) -> str:
+    """`rate_limited` or `unavailable` -- never both, never a guess in between.
+
+    A quota stop is the one failure that must not move the chain along: the
+    next provider would be asked to cover work the first would have done, which
+    is exactly the silent substitution the run is supposed to make visible.
+    """
+
+    if not result.launched:
+        return UNAVAILABLE
+    haystack = f"{result.stdout}\n{result.stderr}".lower()
+    if any(marker in haystack for marker in RATE_LIMIT_MARKERS):
+        return RATE_LIMITED
+    return UNAVAILABLE
+
+
+# --------------------------------------------------------------------------
+# Prompt
+# --------------------------------------------------------------------------
+
+
+def local_conventions(root: pathlib.Path) -> str:
+    """The `CLAUDE.local.md` block rendered for a prompt (R10-D7).
+
+    Codex has no untracked-file import mechanism, so in the lanes the pack
+    itself invokes the pack carries the block in by hand. Interactive codex
+    sessions remain uncovered; that is a known v1 gap, not an oversight here.
+    """
+
+    block = sd_lib.local_block(root)
+    if not block:
+        return ""
+    body = "\n".join(f"{key}: {value}" for key, value in sorted(block.items()))
+    return (
+        "Repository-local conventions, from this checkout's CLAUDE.local.md block. "
+        "They describe how this repository works; they do not change the task below.\n"
+        f"{body}\n\n"
+    )
+
+
+def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
+    """The review instruction, pinned to the endpoints `resolve_subject` chose."""
+
+    if subject.scope == "worktree":
+        target = (
+            "the uncommitted working-tree change: `git diff HEAD` plus every file "
+            "listed by `git status --porcelain --untracked-files=all`"
+        )
+    elif subject.scope == "planning":
+        target = (
+            "these planning documents as they stand in the working tree: "
+            f"{', '.join(subject.paths)}"
+        )
+    else:
+        target = (
+            f"the committed change `git diff {subject.base}..{subject.head}`; do not "
+            "review the working tree beyond those two refs"
+        )
+    if challenge:
+        stance = (
+            "You are the challenge lane of a multi-provider review. Argue against the "
+            "approach itself, not only its defects: name the assumption that would be "
+            "expensive if wrong, the simpler design that was not taken, and the case "
+            "where this shape fails. A finding here may be a design objection."
+        )
+    else:
+        stance = (
+            "You are one lane of a multi-provider code review gate, taking the "
+            "adversarial stance: find the strongest reasons this change should not "
+            "ship yet."
+        )
+    return (
+        f"{conventions}{stance} Review {target}. Report defects the change "
+        "introduces: correctness bugs, security issues, data-integrity risks, and "
+        "maintainability problems that would cost real time later. Judge severity "
+        "per finding; high means it should block a merge. Do not report style, "
+        "wording, or observations that are not defects, and prefer few precise "
+        "findings over many speculative ones. path is the repository-relative file, "
+        "line is the line in the new version or null, family is one short category "
+        "word such as security, correctness, testing, or maintainability. Respond "
+        "only with JSON matching the output schema; an empty findings array means clean."
+    )
+
+
+# --------------------------------------------------------------------------
+# Invocation
+# --------------------------------------------------------------------------
+
+
+def codex_argv(root: pathlib.Path, workdir: pathlib.Path, prompt: str) -> list[str]:
+    """The hardened codex invocation, carried over in intent from review-local.py.
+
+    `--sandbox read-only` bounds the shell the model gets; `--ignore-user-config`
+    drops `~/.codex/config.toml` so no configured MCP server's live credentials
+    are reachable by whatever the reviewed diff talks the model into;
+    `--ignore-rules` drops repository-controlled execpolicy, which is the same
+    trust level as the diff; `--ephemeral` keeps the reviewed source out of the
+    user's codex home; `project_doc_max_bytes=0` stops the reviewed checkout
+    from instructing its own reviewer through AGENTS.md.
+    """
+
+    return [
+        "codex",
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--ephemeral",
+        "-C",
+        str(root),
+        "-c",
+        "project_doc_max_bytes=0",
+        "--output-schema",
+        str(workdir / CODEX_SCHEMA_FILE),
+        "--output-last-message",
+        str(workdir / CODEX_ANSWER_FILE),
+        prompt,
+    ]
+
+
+def argv_backend_argv(backend: Backend, root: pathlib.Path, subject: Subject) -> list[str]:
+    """Argv for the generic seam rows.
+
+    These exist to prove the seam is a seam: one table row, one argv builder,
+    one JSON reader, no branch anywhere else in the pipeline. Only codex's
+    invocation has been exercised end to end; a row here that turns out to spell
+    its flags differently is a one-line change in one place, which is the point.
+    """
+
+    if subject.scope in ("branch", "pr"):
+        range_argument = f"{subject.base}..{subject.head}"
+    else:
+        range_argument = ""
+    if backend.name == "prism":
+        if range_argument:
+            return ["prism", "review", "range", range_argument, "--format", "json"]
+        return ["prism", "review", "codebase", "--paths", ",".join(subject.paths), "--format", "json"]
+    if backend.name == "gito":
+        if range_argument:
+            return ["gito", "review", "--vs", subject.base, "--head", subject.head, "--json"]
+        return ["gito", "review", "--vs", "HEAD", "--json"]
+    return ["kimi", "review", "--range", range_argument or "HEAD", "--json"]
+
+
+def _finding(raw: object) -> dict[str, Any] | None:
+    """Normalise one provider finding, or drop it.
+
+    Two shapes are accepted: the flat one the codex output schema pins, and the
+    nested one prism emits. Anything else is dropped rather than guessed at --
+    a finding whose path or severity had to be invented is not evidence.
+    """
+
+    if not isinstance(raw, dict):
+        return None
+    path = raw.get("path")
+    line = raw.get("line")
+    summary = raw.get("summary") or raw.get("title") or raw.get("message")
+    family = raw.get("family") or raw.get("category") or "unspecified"
+    if path is None:
+        locations = raw.get("locations")
+        location = locations[0] if isinstance(locations, list) and locations else {}
+        if isinstance(location, dict):
+            path = location.get("path")
+            span = location.get("lines")
+            if isinstance(span, dict):
+                line = span.get("start")
+    severity = raw.get("severity")
+    if not isinstance(path, str) or not isinstance(summary, str) or not summary.strip():
+        return None
+    if not isinstance(line, int) or isinstance(line, bool):
+        line = None
+    if severity not in SEVERITIES:
+        severity = "unspecified"
+    return {
+        "path": path,
+        "line": line,
+        "severity": severity,
+        "summary": summary.strip(),
+        "family": str(family),
+    }
+
+
+def parse_findings(text: str) -> list[dict[str, Any]] | None:
+    """Findings from a provider's JSON, or None when it did not answer in JSON."""
+
+    if len(text) > MAX_OUTPUT_BYTES:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+    try:
+        value = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
+        return None
+    findings: list[dict[str, Any]] = []
+    for raw in value["findings"][:MAX_FINDINGS]:
+        normalised = _finding(raw)
+        if normalised is not None:
+            findings.append(normalised)
+    return findings
+
+
+class Outcome(NamedTuple):
+    backend: str
+    status: str
+    findings: tuple[dict[str, Any], ...]
+    detail: str
+    argv: tuple[str, ...]
+    scrubbed: tuple[str, ...]
+
+
+def _outcome(backend: str, status: str, detail: str, argv: Sequence[str] = (), scrubbed: Sequence[str] = ()) -> Outcome:
+    return Outcome(backend, status, (), detail, tuple(argv), tuple(scrubbed))
+
+
+def _failure(backend: str, result: Completed, argv: Sequence[str], scrubbed: Sequence[str]) -> Outcome:
+    status = classify_failure(result)
+    if status == RATE_LIMITED:
+        detail = (
+            f"{backend} stopped on its rate limit (exit {result.exit_code}); the "
+            "change is not reviewed by it and no other provider was substituted"
+        )
+    else:
+        detail = f"{backend} did not produce a usable answer (exit {result.exit_code})"
+    return _outcome(backend, status, detail, argv, scrubbed)
+
+
+def run_backend(
+    backend: Backend,
+    root: pathlib.Path,
+    subject: Subject,
+    prompt: str,
+    runner: Runner,
+    env: Mapping[str, str],
+    timeout: int,
+    codex_auth_home: pathlib.Path | None = None,
+) -> Outcome:
+    """Run one backend on the resolved subject and report a typed outcome."""
+
+    if backend.lane != "local":
+        return _outcome(
+            backend.name,
+            NOT_RUN,
+            f"{backend.name} is a GitHub-lane backend: {backend.disabled_reason}",
+        )
+    if not backend.enabled or backend.strategy == "none":
+        return _outcome(backend.name, DISABLED, backend.disabled_reason)
+
+    if backend.strategy == "codex":
+        try:
+            codex_preflight(codex_auth_home)
+        except Refusal as error:
+            return _outcome(backend.name, REFUSED, str(error))
+        child = child_environment(env)
+        removed = scrubbed_names(env)
+        with tempfile.TemporaryDirectory(prefix="sd-review-") as raw_dir:
+            workdir = pathlib.Path(raw_dir)
+            (workdir / CODEX_SCHEMA_FILE).write_text(
+                json.dumps(CODEX_OUTPUT_SCHEMA), encoding="utf-8"
+            )
+            argv = codex_argv(root, workdir, prompt)
+            result = runner(argv, child, root, timeout)
+            answer = workdir / CODEX_ANSWER_FILE
+            text = answer.read_text(encoding="utf-8") if answer.is_file() else result.stdout
+        findings = parse_findings(text)
+        if result.exit_code != 0 or findings is None:
+            return _failure(backend.name, result, argv, removed)
+        return Outcome(
+            backend.name,
+            FINDINGS if findings else CLEAN,
+            tuple(findings),
+            f"{len(findings)} finding(s)",
+            tuple(argv),
+            removed,
+        )
+
+    argv = argv_backend_argv(backend, root, subject)
+    result = runner(argv, env, root, timeout)
+    findings = parse_findings(result.stdout)
+    if result.exit_code != 0 or findings is None:
+        return _failure(backend.name, result, argv, ())
+    return Outcome(
+        backend.name,
+        FINDINGS if findings else CLEAN,
+        tuple(findings),
+        f"{len(findings)} finding(s)",
+        tuple(argv),
+        (),
+    )
+
+
+# --------------------------------------------------------------------------
+# Disposition -- local, and only local
+# --------------------------------------------------------------------------
+
+
+def dispose(findings: Sequence[Mapping[str, Any]], floor: str) -> list[dict[str, Any]]:
+    """Label each finding `blocking` or `advisory` against the policy floor.
+
+    This is the whole disposition step, and it happens in this process. There
+    is no other consumer: nothing is written to a pull request, a label, a check
+    run, or any file this tool opens for writing.
+    """
+
+    threshold = BLOCKING_ORDER[floor]
+    disposed = []
+    for finding in findings:
+        severity = str(finding.get("severity", "unspecified"))
+        rank = BLOCKING_ORDER.get(severity, 0)
+        record = dict(finding)
+        record["disposition"] = "blocking" if rank > 0 and rank >= threshold else "advisory"
+        disposed.append(record)
+    return disposed
+
+
+# --------------------------------------------------------------------------
+# Pipeline
+# --------------------------------------------------------------------------
+
+
+def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
+    """Step 1: the repository's own deterministic gate, through sd-check."""
+
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--json"]
+    result = runner(argv, env, root, timeout)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        payload = None
+    return {
+        "status": "pass" if result.exit_code == 0 else "fail",
+        "exit_code": result.exit_code,
+        "detail": (result.stderr or "").strip()[-2000:],
+        "checks": payload.get("checks") if isinstance(payload, dict) else None,
+    }
+
+
+def backend_rows() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": row.name,
+            "kind": row.kind,
+            "lane": row.lane,
+            "cost": row.cost,
+            "role": row.role,
+            "enabled": row.enabled,
+            "disabled_reason": row.disabled_reason,
+        }
+        for row in BACKENDS
+    ]
+
+
+def plan_providers(plan: sd_route.Plan, policy: Mapping[str, Any], challenge: bool, scope: str) -> tuple[str, ...]:
+    """The provider chain this run will attempt, in order.
+
+    The router owns the tier. `--challenge` and `planning` scope add the
+    providers policy names for those roles ahead of the chain, without removing
+    what the tier asked for: a challenge run is an extra stance, not a
+    substitute for the review.
+    """
+
+    chain = [str(name) for name in plan.providers]
+    extra: list[str] = []
+    if challenge:
+        extra += [str(name) for name in policy.get("challenge_providers", ())]
+    if scope == "planning":
+        extra += [str(name) for name in policy.get("planning_providers", ())]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for name in extra + chain:
+        if name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    return tuple(ordered)
+
+
+def review(
+    root: pathlib.Path,
+    args: argparse.Namespace,
+    runner: Runner,
+    env: Mapping[str, str],
+    codex_auth_home: pathlib.Path | None = None,
+) -> dict[str, Any]:
+    """The pipeline. Returns one result object; prints nothing."""
+
+    policy, source = load_policy(root)
+    subject = resolve_subject(root, args.scope)
+    plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
+    providers = plan_providers(plan, policy, args.challenge, args.scope)
+    result: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "repo": str(root),
+        "scope": args.scope,
+        "challenge": bool(args.challenge),
+        "draft": bool(args.draft),
+        "policy_source": source,
+        "severity_floor": str(policy["severity_floor"]),
+        "authors": list(policy["authors"]),
+        "subject": {
+            "base": subject.base,
+            "head": subject.head,
+            "lines": subject.lines,
+            "paths": list(subject.paths),
+            "description": subject.description,
+        },
+        "route": {
+            "tier": plan.tier,
+            "providers": list(plan.providers),
+            "category": plan.category,
+            "reason": plan.reason,
+        },
+        "providers": list(providers),
+        "backends": backend_rows(),
+        "codex_preflight": codex_preflight_state(codex_auth_home),
+        "scrubbed_env_names": list(scrubbed_names(env)),
+        "posted": False,
+        "check": None,
+        "outcomes": [],
+        "findings": [],
+        "remaining": [],
+        "status": "planned",
+        "explain_only": bool(args.explain),
+        "dry_run": bool(args.dry_run),
+    }
+
+    if args.explain:
+        result["status"] = "explained"
+        return result
+
+    conventions = local_conventions(root)
+    prompt = build_prompt(subject, args.challenge, conventions)
+    result["local_block_prepended"] = bool(conventions)
+
+    if args.dry_run:
+        result["planned_invocations"] = _planned(providers, root, subject, prompt)
+        result["status"] = "dry_run"
+        return result
+
+    check = run_check(root, runner, env, args.timeout)
+    result["check"] = check
+    if check["status"] == "fail":
+        result["status"] = "gate_failed"
+        return result
+
+    outcomes: list[Outcome] = []
+    stopped = False
+    for name in providers:
+        if stopped:
+            outcomes.append(
+                _outcome(
+                    name,
+                    NOT_RUN,
+                    "a provider ahead of this one stopped on its rate limit; the "
+                    "chain does not silently substitute another provider for it",
+                )
+            )
+            continue
+        outcome = run_backend(
+            BACKENDS_BY_NAME[name],
+            root,
+            subject,
+            prompt,
+            runner,
+            env,
+            args.timeout,
+            codex_auth_home,
+        )
+        outcomes.append(outcome)
+        if outcome.status == RATE_LIMITED:
+            stopped = True
+
+    collected: list[dict[str, Any]] = []
+    for outcome in outcomes:
+        collected.extend(dict(finding, backend=outcome.backend) for finding in outcome.findings)
+    disposed = dispose(collected, str(policy["severity_floor"]))
+    result["outcomes"] = [
+        {
+            "backend": outcome.backend,
+            "status": outcome.status,
+            "detail": outcome.detail,
+            "findings": len(outcome.findings),
+            "scrubbed_env_names": list(outcome.scrubbed),
+        }
+        for outcome in outcomes
+    ]
+    result["findings"] = disposed
+    result["status"] = _overall(outcomes, disposed, providers)
+    result["remaining"] = [
+        outcome.backend for outcome in outcomes if outcome.status in (RATE_LIMITED, NOT_RUN)
+    ]
+    return result
+
+
+def _planned(providers: Sequence[str], root: pathlib.Path, subject: Subject, prompt: str) -> list[dict[str, Any]]:
+    planned: list[dict[str, Any]] = []
+    for name in providers:
+        backend = BACKENDS_BY_NAME[name]
+        if backend.lane != "local" or not backend.enabled or backend.strategy == "none":
+            planned.append({"backend": name, "argv": [], "would_run": False, "reason": backend.disabled_reason})
+            continue
+        if backend.strategy == "codex":
+            argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt)
+        else:
+            argv = argv_backend_argv(backend, root, subject)
+        planned.append({"backend": name, "argv": argv, "would_run": True, "reason": ""})
+    return planned
+
+
+def _overall(outcomes: Sequence[Outcome], disposed: Sequence[Mapping[str, Any]], providers: Sequence[str]) -> str:
+    if any(record.get("disposition") == "blocking" for record in disposed):
+        return "blocking"
+    if any(outcome.status == RATE_LIMITED for outcome in outcomes):
+        return "rate_limited"
+    if any(outcome.status == REFUSED for outcome in outcomes):
+        return "refused"
+    ran = [outcome for outcome in outcomes if outcome.status in (CLEAN, FINDINGS)]
+    if providers and not ran:
+        return "unavailable"
+    if disposed:
+        return "advisory"
+    return "clean" if ran else "skipped"
+
+
+STATUS_EXIT = {
+    "blocking": EXIT_FINDINGS,
+    "rate_limited": EXIT_RATE_LIMITED,
+    "refused": EXIT_REFUSED,
+    "unavailable": EXIT_GATE,
+    "gate_failed": EXIT_GATE,
+}
+
+
+# --------------------------------------------------------------------------
+# Rendering
+# --------------------------------------------------------------------------
+
+
+def render(result: Mapping[str, Any], stream: TextIO) -> None:
+    write = stream.write
+    subject = result["subject"]
+    route = result["route"]
+    write(f"sd-review: {result['repo']}\n")
+    write(f"  scope       {result['scope']}  ({subject['description']})\n")
+    write(f"  subject     {len(subject['paths'])} path(s), {subject['lines']} line(s)\n")
+    write(f"  policy      {result['policy_source']}  (severity floor {result['severity_floor']})\n")
+    write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
+    write(f"  because     {route['reason']}\n")
+    chain = ", ".join(result["providers"]) or "(none: this tier reviews nothing)"
+    write(f"  providers   {chain}\n")
+    preflight = result["codex_preflight"]
+    state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
+    write(f"  codex auth  {state}\n")
+    scrubbed = result["scrubbed_env_names"]
+    present = ", ".join(scrubbed) if scrubbed else "no metered codex variables present"
+    write(f"  env scrub   {present} (names only; values are never read or printed)\n")
+
+    if result.get("explain_only"):
+        write("\nbackends:\n")
+        for row in result["backends"]:
+            mark = "on " if row["enabled"] else "off"
+            write(f"  {mark} {row['name']:<12} {row['lane']:<7} {row['cost']}\n")
+            if not row["enabled"]:
+                write(f"       reason: {row['disabled_reason']}\n")
+        write("\nsd-review: explain only, nothing ran\n")
+        return
+
+    if result.get("dry_run"):
+        write("\nwould run:\n")
+        for planned in result.get("planned_invocations", []):
+            if not planned["would_run"]:
+                write(f"  {planned['backend']}: not run -- {planned['reason']}\n")
+                continue
+            write(f"  {planned['backend']}: {' '.join(planned['argv'])}\n")
+        write("\nsd-review: dry run, nothing executed\n")
+        return
+
+    check = result.get("check")
+    if check:
+        write(f"\ncheck: {check['status']} (exit {check['exit_code']})\n")
+    if result["status"] == "gate_failed":
+        write("sd-review: the repository's own gate failed; no provider was asked\n")
+        return
+
+    write("\noutcomes:\n")
+    for outcome in result["outcomes"]:
+        write(f"  {outcome['backend']:<12} {outcome['status']:<12} {outcome['detail']}\n")
+
+    findings = result["findings"]
+    if findings:
+        write("\nfindings (dispositioned locally; nothing was posted):\n")
+        for finding in findings:
+            where = f"{finding['path']}:{finding['line']}" if finding["line"] else finding["path"]
+            write(
+                f"  [{finding['disposition']}] {finding['severity']:<11} {where}"
+                f"  ({finding['backend']}/{finding['family']})\n"
+                f"      {finding['summary']}\n"
+            )
+    remaining = result.get("remaining") or []
+    if remaining:
+        write(f"\nnot reviewed: {', '.join(remaining)} -- rerun when the quota resets\n")
+    write(f"\nsd-review: {result['status']}\n")
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sd-review",
+        description=(
+            "Review this repository's change with local providers and dispose of "
+            "the findings locally. Nothing is ever posted."
+        ),
+    )
+    parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
+    parser.add_argument("--challenge", action="store_true", help="add the adversarial design-challenge stance")
+    parser.add_argument("--explain", action="store_true", help="print the routing decision and why, then exit without running anything")
+    parser.add_argument("--dry-run", action="store_true", help="print the exact invocations, run nothing")
+    parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
+    # No network call means draft state cannot be read from GitHub; it is stated.
+    parser.add_argument("--draft", action="store_true", help="treat the change as a draft pull request; routing reduces the tier")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=f"per-provider timeout (default: {DEFAULT_TIMEOUT_SECONDS})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.timeout <= 0:
+            raise UsageError("--timeout takes a positive number of seconds")
+        root = sd_lib.repo_root(None)
+        if root is None:
+            raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        result = review(root, args, subprocess_runner, os.environ)
+    except (UsageError, PolicyError, sd_lib.ConfigError) as error:
+        print(f"sd-review: error: {error}", file=sys.stderr)
+        return EXIT_USAGE
+    except Refusal as error:
+        print(f"sd-review: refused: {error}", file=sys.stderr)
+        return EXIT_REFUSED
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        render(result, sys.stdout)
+    if args.explain or args.dry_run:
+        return EXIT_OK
+    return STATUS_EXIT.get(str(result["status"]), EXIT_OK)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
