@@ -125,17 +125,25 @@ in CI at all (R11-D5).
 That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
 2026-08-30: `enforce_admins: true`, `strict: true`, and the six required
-contexts match the six the workflow produces. `bash 3.2 syntax` was added to
-the protection object on 2026-08-30, closing the one dimension that was out of
-step while R11-D5 was landing: for the few hours between the workflow change
-merging and that addition, the gate reported on every pull request without
-blocking a red one. Adding it is also what flipped the then-open #607 from
-CLEAN to BLOCKED until its branch carried the workflow that produces the
-context -- the required-context ordering trap, observed in the additive
-direction. Stated here as a
-known gap rather than papered over — `sd-status` reports it from the live
-protection object, which is the design working as intended. `enforce_admins` was deliberately
-left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
+contexts match the six the workflow produces. No dimension is currently out
+of step.
+
+One was, briefly: `bash 3.2 syntax` began reporting when R11-D5 merged but was
+not added to the protection object until 2026-08-30, so for a few hours a red
+result there did not block a merge. Adding it is also what flipped the
+then-open #607 from CLEAN to BLOCKED, until that branch carried the workflow
+producing the context — the required-context ordering trap in its additive
+direction, the mirror of the removal case R11-D4 sequenced around. Both are
+recorded because the trap has now been hit in both directions within a day.
+
+That window is closed, and this paragraph is not what establishes it:
+`sd-status` reads the live protection object and reports whatever gaps exist at
+the time it runs, rather than trusting anything written here. Which is the
+point — a dated claim in a document is the thing most likely to be wrong, as
+the sentence this one replaces was.
+
+`enforce_admins` was deliberately left off in earlier work
+(see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
 which explicitly declined to enable it, and `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/`,
 which records it being enabled and disabled again the same day). That decision is
 reversed: an exemption for the only account that merges here made the doctrine
