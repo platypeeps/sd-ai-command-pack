@@ -421,7 +421,23 @@ def _year_hint(repo: pathlib.Path, source: pathlib.Path) -> int:
 
 # The subdirectories an installer renders into. A tree is recognised by
 # having one, which is what makes the set derivable instead of remembered.
-PLATFORM_SUBDIRS = ("skills", "agents", "commands", "rules", "hooks", "lib", "plugins")
+#
+# The tree set is derived; this vocabulary is not, and that is the seam the
+# derivation cannot close. `prompts` was missing, so `.github/prompts` never
+# made `.github` a walked location and 19 `sd-*.prompt.md` adapters per
+# repository -- 171 across the nine consumers -- were never enumerated at all.
+# No authority declined them; nothing ever offered them to one. When an
+# installer renders into a subdirectory not named here, add it.
+PLATFORM_SUBDIRS = (
+    "skills",
+    "agents",
+    "commands",
+    "rules",
+    "prompts",
+    "hooks",
+    "lib",
+    "plugins",
+)
 # `.github/` is the one tree here that is also the repository's own, so it is
 # walked only where an installer renders. Every other tree exists because a
 # tool made it, and is walked whole -- which is how `.claude/rules/` and
@@ -433,6 +449,7 @@ ROUTER_WORKFLOWS = ("ai-review-router.yml", "sd-review.yml")
 TOMBSTONE_TAG = "v0.72.0"
 PACK_RECEIPT = ".sd-ai-command-pack"
 TRELLIS_HASHES = ".trellis/.template-hashes.json"
+NO_AUTHORITY = "no authority reaches it"
 AGENTS_FILE = "AGENTS.md"
 # Two installers wrote marked blocks into a consumer's AGENTS.md, with
 # different markers. Both are removed; the prose around them is the
@@ -554,8 +571,45 @@ def trellis_hashes(repo: pathlib.Path) -> dict[str, str]:
     return hashes if isinstance(hashes, dict) else {}
 
 
+def hash_authority_gap(repo: pathlib.Path, verdicts: list[Verdict]) -> str | None:
+    """Refuse rather than half-remove when Trellis's hash file is missing.
+
+    `.trellis/.template-hashes.json` is the authority for every file Trellis
+    installed into the platform trees, and most consumers gitignore it -- so a
+    fresh clone or worktree does not carry it, `trellis_hashes()` returns an
+    empty map, and the files it would have condemned fall through to
+    "no authority reaches it" and are kept. The plan then reads like a success
+    while removing a fraction of what it should: measured 2026-08-30,
+    `people-profiles` kept 27 files that way and reported nothing wrong.
+
+    The three conditions are all load-bearing. Trellis has to be installed
+    here at all, or there is nothing for the map to authorize. The map has to
+    be unusable. And something has to have actually fallen through -- a
+    repository where every file was reached by a receipt or a name loses
+    nothing to the missing map, and refusing there would be ceremony.
+
+    A missing authority is not a licence to guess, and not a reason to proceed
+    quietly either, so this is a refusal carrying its remedy: copy the file in
+    from a checkout where Trellis is installed. Never regenerate it from what
+    is on disk -- a hash map derived from the files it is meant to judge would
+    authorize every one of them.
+    """
+    if trellis_hashes(repo):
+        return None
+    if not tracked_files(repo, ".trellis"):
+        return None
+    orphans = [v for v in verdicts if v.authority == "none" and v.reason == NO_AUTHORITY]
+    if not orphans:
+        return None
+    state = "carries no readable `hashes` map" if (repo / TRELLIS_HASHES).exists() else "is missing"
+    return (
+        f"{TRELLIS_HASHES} {state}, and {len(orphans)} file(s) fell through to "
+        f"'{NO_AUTHORITY}' as a result"
+    )
+
+
 def is_framework_surface(path: str, trees: tuple[str, ...]) -> bool:
-    """A `skills/`, `agents/` or `commands/` entry the framework owns by name.
+    """A `skills/`, `agents/`, `commands/` or `prompts/` entry it owns by name.
 
     The prefixes are the framework's own namespaces, so a name is decisive
     here in a way it is not for a loose runtime file: nothing a consumer wrote
@@ -578,7 +632,11 @@ def is_framework_surface(path: str, trees: tuple[str, ...]) -> bool:
         # `.claude/sd-ai-command-pack/` -- the framework's own name as the
         # directory, one level up from where the surfaces live.
         return True
-    if parts[0] not in ("skills", "agents", "commands", "rules"):
+    # Narrower than PLATFORM_SUBDIRS on purpose: `hooks/`, `lib/` and
+    # `plugins/` hold loose runtime files whose names carry no namespace, so
+    # they are reached by content instead. A `prompts/` entry does carry one --
+    # `sd-check.prompt.md` is as much a framework name as `sd-check/` is.
+    if parts[0] not in ("skills", "agents", "commands", "rules", "prompts"):
         return False
     return _framework_name(parts[1])
 
@@ -672,7 +730,7 @@ def classify_four_trees(
                     Verdict(rel, "delete", "name+content", "platform runtime naming Trellis")
                 )
                 continue
-        verdicts.append(Verdict(rel, "keep", "none", "no authority reaches it"))
+        verdicts.append(Verdict(rel, "keep", "none", NO_AUTHORITY))
     return verdicts
 
 
@@ -840,6 +898,30 @@ def opencode_stub_verdict(repo: pathlib.Path, doomed: set[str]) -> Verdict | Non
     return Verdict(rel, "delete", "structured", "configures a tree with nothing left in it")
 
 
+def schema_dependency_verdict(repo: pathlib.Path, doomed: set[str]) -> Verdict | None:
+    """`.prism/rules.schema.json` stays as long as the rules file it describes does.
+
+    Both arrived from the installer, so both are framework surface by name --
+    but `rules.json` is kept in six of the nine consumers because they edited
+    it, and it opens with `"$schema": "rules.schema.json"`. Deleting the schema
+    out from under a file the removal deliberately preserved leaves the
+    consumer with a config that no longer validates, and in
+    `rwbp-coordinator` it broke `npm run lint`, which reads both.
+
+    The rule is the one `opencode_stub_verdict` already applies from the other
+    direction: ask whether anything that needs the file survives, not what the
+    file is. Here the dependent is a single named file rather than a whole
+    tree, because a schema has exactly one consumer.
+    """
+    rel = ".prism/rules.schema.json"
+    rules = ".prism/rules.json"
+    if not (repo / rel).exists():
+        return None
+    if not (repo / rules).exists() or rules in doomed:
+        return None
+    return Verdict(rel, "keep", "none", "the rules file it validates survives")
+
+
 def tree_config_verdicts(repo: pathlib.Path, doomed: set[str]) -> list[Verdict]:
     """A platform tree's own top-level config, which no subdirectory walk sees.
 
@@ -955,6 +1037,10 @@ def consumer_plan(repo: pathlib.Path, pack_repo: pathlib.Path) -> list[Verdict]:
     stub = opencode_stub_verdict(repo, doomed)
     if stub is not None:
         verdicts.append(stub)
+    schema = schema_dependency_verdict(repo, doomed)
+    if schema is not None:
+        verdicts = [v for v in verdicts if v.path != schema.path]
+        verdicts.append(schema)
     verdicts.extend(tree_config_verdicts(repo, doomed))
 
     return sorted(verdicts, key=lambda v: (v.action, v.path))
@@ -1068,6 +1154,16 @@ def run_consumer(repo: pathlib.Path, pack_repo: pathlib.Path, *, apply: bool) ->
 
     verdicts = consumer_plan(repo, pack_repo)
     report_consumer_plan(verdicts, sys.stdout)
+
+    gap = hash_authority_gap(repo, verdicts)
+    if gap is not None:
+        print(
+            f"error: {gap}. The removal would be silently partial. It is "
+            "gitignored in most consumers, so copy it in from a checkout "
+            "where Trellis is installed and run again.",
+            file=sys.stderr,
+        )
+        return 1
 
     doomed = {v.path for v in verdicts if v.action == "delete"}
     dangling = dangling_references(repo, doomed)

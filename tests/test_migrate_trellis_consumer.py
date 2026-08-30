@@ -10,6 +10,7 @@ count in this file can go stale against the measurements in the work item.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -123,6 +124,14 @@ class FixtureCase(unittest.TestCase):
         self.root = pathlib.Path(self._tmp.name)
         self.fixture = ConsumerFixture(self.root)
 
+    def run_consumer(self, *, apply: bool) -> int:
+        """Same call the CLI makes, with its report kept out of the test output."""
+        with open(os.devnull, "w", encoding="utf-8") as sink:
+            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                return migrate_trellis.run_consumer(
+                    self.fixture.repo, self.fixture.pack, apply=apply
+                )
+
 
 class ReceiptAuthorityTests(FixtureCase):
     def test_untouched_install_is_deleted(self) -> None:
@@ -214,6 +223,33 @@ class SurfaceNameTests(FixtureCase):
         )
 
 
+class PromptAdapterTests(FixtureCase):
+    """`.github/prompts/` is a render location, so `.github` must be walked there.
+
+    It was not in the render vocabulary, so `.github/prompts` never made
+    `.github` a walked location: 19 `sd-*.prompt.md` adapters per repository
+    were never enumerated, and so were never offered to any authority at all.
+    A keep would at least have been reported; this was silence.
+    """
+
+    def test_a_framework_prompt_adapter_is_deleted_on_name(self) -> None:
+        _write(
+            self.fixture.repo,
+            ".github/prompts/sd-check.prompt.md",
+            "prose that never says the framework's other name\n",
+        )
+        self.fixture.seal()
+        verdict = self.fixture.verdict(".github/prompts/sd-check.prompt.md")
+        self.assertEqual(("delete", "surface-name"), (verdict.action, verdict.authority))
+
+    def test_a_repo_own_prompt_beside_it_is_kept(self) -> None:
+        _write(self.fixture.repo, ".github/prompts/finish-work.prompt.md", "ours\n")
+        _write(self.fixture.repo, ".github/prompts/sd-ship.prompt.md", "theirs\n")
+        self.fixture.seal()
+        self.assertEqual("keep", self.fixture.verdict(".github/prompts/finish-work.prompt.md").action)
+        self.assertEqual("delete", self.fixture.verdict(".github/prompts/sd-ship.prompt.md").action)
+
+
 class AgentsFileTests(FixtureCase):
     BLOCKS = (
         "<!-- TRELLIS:START -->\ntrellis prose\n<!-- TRELLIS:END -->\n"
@@ -303,14 +339,6 @@ class StructuredFileTests(FixtureCase):
 class ImportBeforeRemovalTests(FixtureCase):
     """The removal deletes `.trellis/tasks`. The items have to land first."""
 
-    def run_consumer(self, *, apply: bool) -> int:
-        """Same call the CLI makes, with its report kept out of the test output."""
-        with open(os.devnull, "w", encoding="utf-8") as sink:
-            with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                return migrate_trellis.run_consumer(
-                    self.fixture.repo, self.fixture.pack, apply=apply
-                )
-
     def test_apply_imports_every_item_before_deleting_the_tree(self) -> None:
         self.fixture.item("06-01-alpha")
         self.fixture.item("07-02-beta", archive="2026-07")
@@ -354,6 +382,88 @@ class ImportBeforeRemovalTests(FixtureCase):
         self.fixture.seal()
         planned = migrate_trellis.planned_imports(self.fixture.repo)
         self.assertEqual(["06-01-alpha"], [item.source.name for item in planned])
+
+
+class HashAuthorityTests(FixtureCase):
+    """`.template-hashes.json` is gitignored, so a fresh worktree lacks it.
+
+    Losing it does not fail; it quietly downgrades every Trellis-installed
+    file to a keep. The run has to stop instead.
+    """
+
+    def _installed_by_trellis(self) -> None:
+        """A platform file only the hash map could have condemned."""
+        _write(self.fixture.repo, ".trellis/workflow.md", "phases\n")
+        _write(self.fixture.repo, ".claude/skills/generic/SKILL.md", "installed\n")
+
+    def test_a_missing_hash_map_stops_the_run(self) -> None:
+        self._installed_by_trellis()
+        self.fixture.seal()
+        self.assertEqual(1, self.run_consumer(apply=True))
+        self.assertTrue((self.fixture.repo / ".trellis" / "workflow.md").is_file())
+        self.assertTrue((self.fixture.repo / ".claude/skills/generic/SKILL.md").is_file())
+
+    def test_the_dry_run_stops_too(self) -> None:
+        """The plan is the pull-request description; a partial one must not print clean."""
+        self._installed_by_trellis()
+        self.fixture.seal()
+        self.assertEqual(1, self.run_consumer(apply=False))
+
+    def test_the_hash_map_present_lets_the_run_proceed(self) -> None:
+        self._installed_by_trellis()
+        body = (self.fixture.repo / ".claude/skills/generic/SKILL.md").read_bytes()
+        _write(
+            self.fixture.repo,
+            migrate_trellis.TRELLIS_HASHES,
+            json.dumps(
+                {
+                    "__version": 2,
+                    "hashes": {
+                        ".claude/skills/generic/SKILL.md": hashlib.sha256(body).hexdigest()
+                    },
+                }
+            ),
+        )
+        self.fixture.seal()
+        self.assertEqual(0, self.run_consumer(apply=True))
+        self.assertFalse((self.fixture.repo / ".claude/skills/generic/SKILL.md").exists())
+
+    def test_no_trellis_install_needs_no_hash_map(self) -> None:
+        """A repository carrying only the pack has nothing for the map to authorize."""
+        self.fixture.ship("templates/prompt.md", ".github/prompts/x.prompt.md", "shipped\n")
+        self.fixture.seal()
+        self.assertEqual(0, self.run_consumer(apply=True))
+
+    def test_a_missing_map_that_costs_nothing_does_not_stop_the_run(self) -> None:
+        """Every file reached by another authority: the map's absence is free."""
+        _write(self.fixture.repo, ".trellis/workflow.md", "phases\n")
+        _write(self.fixture.repo, ".claude/skills/trellis-review/SKILL.md", "named\n")
+        self.fixture.seal()
+        self.assertEqual(0, self.run_consumer(apply=True))
+        self.assertFalse((self.fixture.repo / ".claude").exists())
+
+
+class SchemaDependencyTests(FixtureCase):
+    """A kept file's schema is not spare payload."""
+
+    def test_the_schema_stays_while_the_rules_file_it_validates_does(self) -> None:
+        self.fixture.ship("templates/prism/rules.json", ".prism/rules.json", "shipped\n")
+        self.fixture.ship(
+            "templates/prism/rules.schema.json", ".prism/rules.schema.json", "schema\n"
+        )
+        _write(self.fixture.repo, ".prism/rules.json", '{"$schema": "rules.schema.json"}\n')
+        self.fixture.seal()
+        self.assertEqual("keep", self.fixture.verdict(".prism/rules.json").action)
+        self.assertEqual("keep", self.fixture.verdict(".prism/rules.schema.json").action)
+
+    def test_the_schema_goes_when_the_rules_file_does(self) -> None:
+        self.fixture.ship("templates/prism/rules.json", ".prism/rules.json", "shipped\n")
+        self.fixture.ship(
+            "templates/prism/rules.schema.json", ".prism/rules.schema.json", "schema\n"
+        )
+        self.fixture.seal()
+        self.assertEqual("delete", self.fixture.verdict(".prism/rules.json").action)
+        self.assertEqual("delete", self.fixture.verdict(".prism/rules.schema.json").action)
 
 
 class EmptyDirectoryTests(FixtureCase):
