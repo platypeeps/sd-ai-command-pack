@@ -25,8 +25,9 @@ jobs:
             python-version: "3.10"
           - os: ubuntu-latest
             python-version: "3.13"
-          - os: macos-latest
-            python-version: "3.13"
+          # macOS is dropped for the duration of the artifacts-as-product
+          # rollout (R11-D4). Restored at step 7, where "verify protection"
+          # already sits on the checklist.
 
     steps:
       - name: Check out repository
@@ -192,6 +193,88 @@ jobs:
 
       - name: OpenCode JavaScript syntax
         run: bash .github/scripts/check-opencode-js.sh
+
+  bash32:
+    name: bash 3.2 syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # macOS ships bash 3.2 as /bin/bash, so every shipped script has to parse
+    # under it. Until now nothing in CI checked that: the gate ran only in a
+    # local `make lint`, and the macOS unittest leg -- now dropped by R11-D4 --
+    # never invoked this script even when it existed. So the constructs bash 3.2
+    # rejects reached main unchallenged whenever the maintainer's local run was
+    # skipped.
+    #
+    # Linux carries no bash 3.2, so the gate would skip silently here. This job
+    # builds one and runs the gate under STRICT=1, which turns a missing
+    # interpreter into a failure rather than a pass.
+    env:
+      BASH32_VERSION: "3.2.57"
+      # Pinned so the gate cannot be changed by whatever the mirror serves.
+      # A CI gate that builds an unverified download is a gate an upstream
+      # change can silently redefine.
+      BASH32_SHA256: "3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore bash 3.2
+        id: bash32-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bash32
+          key: bash32-${{ env.BASH32_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build bash 3.2
+        if: steps.bash32-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bison
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/bash.tar.gz" \
+            "https://ftp.gnu.org/gnu/bash/bash-${BASH32_VERSION}.tar.gz"
+          echo "${BASH32_SHA256}  $work/bash.tar.gz" | sha256sum -c -
+          tar xzf "$work/bash.tar.gz" -C "$work"
+          cd "$work/bash-${BASH32_VERSION}"
+          ./configure --without-bash-malloc --disable-nls -q
+          # bash 3.2 is from 2006 and predates C99-as-default; a current gcc
+          # rejects its declarations without the older dialect. It also predates
+          # aarch64, whose config.sub it cannot recognise -- fine on the x86_64
+          # runners, and the reason this job does not use a matrix.
+          #
+          # -j1 is deliberate. Its Makefile races under parallel make: a -j$(nproc)
+          # build failed here once and succeeded twice, which is the worst
+          # possible behaviour for a gate. The result is cached, so the serial
+          # build is paid once per version, not once per run.
+          make -j1 CFLAGS="-O1 -std=gnu89 -Wno-implicit-function-declaration -Wno-return-mismatch"
+          mkdir -p "$HOME/.cache/bash32"
+          install -m 0755 ./bash "$HOME/.cache/bash32/bash"
+
+      # Never run the gate against an interpreter that is not actually bash 3.2:
+      # a wrong binary here would turn the whole job into a green no-op.
+      - name: Verify the interpreter is bash 3.2
+        run: |
+          set -euo pipefail
+          version="$("$HOME/.cache/bash32/bash" --version | head -n 1)"
+          echo "$version"
+          case "$version" in
+            *"version ${BASH32_VERSION}"*) ;;
+            *) echo "::error::not bash ${BASH32_VERSION}; refusing to run the gate" >&2
+               exit 1 ;;
+          esac
+
+      - name: bash 3.2 syntax gate
+        env:
+          STRICT: "1"
+        run: |
+          set -euo pipefail
+          SD_AI_COMMAND_PACK_BASH32="$HOME/.cache/bash32/bash" \
+            bash .github/scripts/check-bash32-syntax.sh
 
   security:
     runs-on: ubuntu-latest

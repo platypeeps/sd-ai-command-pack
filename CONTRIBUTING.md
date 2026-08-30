@@ -45,7 +45,9 @@ ShellCheck lanes.
 `make lint` also parses every tracked shell script with bash 3.2 — the
 interpreter macOS keeps at `/bin/bash` — through
 `.github/scripts/check-bash32-syntax.sh`, so syntax that only bash 3.2 rejects
-fails before the push instead of on the macOS CI leg minutes later. The script
+fails before the push. That gate matters more while the macOS CI leg is
+dropped (R11-D4): it is now the only automated check that runs anything
+against the interpreter macOS actually ships. The script
 list is enumerated from `git ls-files` at run time, never maintained inside the
 gate. A platform with no bash 3.2 (any Linux) prints
 `warning: no bash 3.2 interpreter found` and passes; `STRICT=1` turns that
@@ -110,13 +112,26 @@ number.
 Every change to `main` goes through a pull request. Merge authority is GitHub
 branch protection; there is no local pre-push hook, no server-side path policy,
 and no bookkeeping fast lane. A pull-request head and a push to `main` run the
-same four unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
-and `security` — surfacing as six required contexts.
+same five unconditional jobs — the `unittest` matrix, `shell-coverage`, `lint`,
+`bash 3.2 syntax`, and `security` — producing six contexts. Contexts are named
+by a job's `name:`, not its YAML key, so the bash lane is required as
+`bash 3.2 syntax` and never as `bash32`; requiring the key would pin a context
+that never reports and block every pull request. Two changes landed on
+2026-08-29 and moved in opposite directions: the macOS leg was dropped for the
+duration of the artifacts-as-product rollout (R11-D4, restored at step 7), and
+`bash32` was added because the bash 3.2 syntax gate turned out never to have run
+in CI at all (R11-D5).
 
 That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
-2026-08-29: `enforce_admins: true`, `strict: true`, and the six required
-contexts match the six the workflow produces. `enforce_admins` was deliberately
+2026-08-29: `enforce_admins: true` and `strict: true`. The required-context set
+is the one dimension currently out of step: protection lists the five contexts
+that survived the macOS drop, and the workflow now produces six.
+`bash 3.2 syntax` runs and reports on every pull request but is not yet
+required, so a red result there does not block a merge until it is added to the
+protection object. Stated here as a
+known gap rather than papered over — `sd-status` reports it from the live
+protection object, which is the design working as intended. `enforce_admins` was deliberately
 left off in earlier work (see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
 which explicitly declined to enable it, and `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/`,
 which records it being enabled and disabled again the same day). That decision is
@@ -127,10 +142,32 @@ section is wrong until it is rewritten; `sd-status` reads the live protection
 object and reports the gap instead of trusting this paragraph.
 
 CI intentionally tests the supported Python floor (3.10) and current project
-runtime (3.13), plus macOS on 3.13. Intermediate 3.11/3.12 jobs would duplicate
-the same compatibility interval while increasing Actions cost; add one only
-when a version-specific defect provides evidence that endpoint coverage is
+runtime (3.13). Intermediate 3.11/3.12 jobs would duplicate the same
+compatibility interval while increasing Actions cost; add one only when a
+version-specific defect provides evidence that endpoint coverage is
 insufficient.
+
+The macOS 3.13 leg is **temporarily dropped** (R11-D4, 2026-08-29). It ran
+12m18s on every pull request, and GitHub bills macOS runners at ten times the
+Linux rate, so the rollout was paying that on roughly fifteen more pull
+requests. It is a cost saving, not a latency one: the run is bounded by
+`Shell coverage` at 13m40s, so wall-clock time is unchanged. What is lost
+is named rather than waved away: with the leg gone, **no CI job runs on macOS
+at all**, so macOS-only Python behaviour, filesystem case-insensitivity, and
+platform-specific path handling are unverified in CI until it returns. The only
+remaining macOS coverage is the maintainer's own `make check` before a push --
+one machine, not a gate.
+
+An earlier draft of this paragraph claimed the bash 3.2 syntax gate in `lint`
+covered macOS in CI. It did not -- no CI job invoked `check-bash32-syntax.sh`
+at all, and that gate had only ever run in a local `make lint`. Finding that
+gap is what prompted closing it: the **`bash32`** job now builds bash 3.2 from
+source and runs the gate under `STRICT=1`.
+
+That covers bash 3.2 *syntax*, which is a real slice of macOS compatibility and
+not the whole of it. macOS-only Python behaviour, filesystem
+case-insensitivity, and platform path handling stay unverified in CI until the
+macOS leg is restored at step 7.
 
 ## Release And Payload Rules
 
