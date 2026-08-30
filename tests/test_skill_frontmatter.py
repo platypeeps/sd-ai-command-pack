@@ -10,9 +10,11 @@ nothing in this repository checked them before this file existed.
 The contract is grounded rather than invented. Measured across the 60 skills
 installed on this machine: `name` and `description` appear in all 60,
 `disable-model-invocation` in 16, `model`/`effort` in 54. The marker is a real
-mechanism in use, not a design aspiration, and `se-help` already ships without
-it -- which matches the design's one stated exception, that help and catalog
-surfaces are skills rather than commands.
+mechanism in use, not a design aspiration. The exception has a measured
+precedent too: `se-help`, this surface's predecessor and still installed at
+`~/.claude/skills/se-help`, carries no marker. It is named here as evidence for
+the rule, not as a surface this suite asserts -- everything below is `sd-*`,
+where `sd-help` is the one skill among eleven commands.
 
 These run without an installer. That is the point: step 3e builds the renderer
 that consumes this tree, so without these assertions the twelve surfaces would
@@ -28,9 +30,11 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SKILLS = REPO_ROOT / "skills"
 
-# The 12 the design names. Pinned deliberately: standing rule 2 makes the verb
-# inventory a CI-tested invariant, so a thirteenth surface fails here until the
-# design record grows to justify it.
+# The eleven commands. With `sd-help` in SKILL_KIND below they are the twelve
+# surfaces the design names -- the split is the taxonomy's, which makes catalog
+# surfaces skills rather than commands. Pinned deliberately: standing rule 2
+# makes the verb inventory a CI-tested invariant, so a thirteenth surface fails
+# here until the design record grows to justify it.
 COMMANDS = frozenset({
     "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
     "sd-deps", "sd-suggest", "sd-skill-adopt", "sd-map", "sd-handoff",
@@ -199,12 +203,25 @@ class DocumentedFlagTests(unittest.TestCase):
             body = skill.read_text(encoding="utf-8")
             for option in sorted(set(flag.findall(body))):
                 # A skill may say a flag does NOT exist; that sentence names it.
-                if f'"{option}"' in source or f"'{option}'" in source:
-                    continue
-                if self.disclaimed(body, option):
-                    continue
+                present = f'"{option}"' in source or f"'{option}'" in source
+                disclaimed = self.disclaimed(body, option)
                 with self.subTest(surface=name, flag=option):
-                    self.fail(f"{name} documents {option}, which bin/{name} does not accept")
+                    if present and disclaimed:
+                        # The skill says the flag is gone and the tool still has
+                        # it. Copilot caught exactly this on #607: the branch
+                        # predated the PR that deleted `--repo`, so the skill's
+                        # "there is no --repo" was false in its own tree. The
+                        # disclaimer path used to `continue` here, which made a
+                        # confident denial the one claim this test never read.
+                        self.fail(
+                            f"{name} says {option} does not exist, but "
+                            f"bin/{name} still accepts it"
+                        )
+                    if not present and not disclaimed:
+                        self.fail(
+                            f"{name} documents {option}, which bin/{name} "
+                            f"does not accept"
+                        )
 
 
 class UnbuiltSurfaceTests(unittest.TestCase):
