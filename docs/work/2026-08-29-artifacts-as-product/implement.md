@@ -46,7 +46,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   working until the new installer is proven. Sub-PRs land on `main` in order, each independently
   green; 3-c does not begin until all of them have landed, so the "consumers cannot plugin-update
   between step 1 and step 3" window is unchanged.**
-  - [ ] 3a — `bin/sd_lib.py` + `bin/sd-check`; `bin/sd-handoff` + `bin/sd-handoff-restore` (R10-D3). Additive only.
+  - [x] 3a — `bin/sd_lib.py` + `bin/sd-check` (#601); `bin/sd-handoff` + `bin/sd-handoff-restore` (#602, R10-D3). Additive only.
   - [ ] 3b — `bin/sd-status` + `bin/sd-pr-state` (read-only, GitHub-derived). `sd-status` reports
     branch-protection **enforcement state**, not just presence: `enforce_admins`, `strict`, the
     required contexts diffed against the checks the repo's workflows actually produce, and the

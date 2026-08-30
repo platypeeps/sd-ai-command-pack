@@ -34,16 +34,31 @@ test:
 	"$(VENV_PYTHON)" .github/scripts/check-helper-resolution.py
 	"$(VENV_PYTHON)" .github/scripts/check-shipped-script-modes.py
 
+# The one definition of what the Python linters cover. CI reads these through
+# the lint-ruff-paths / lint-mypy-paths targets rather than restating them:
+# the workflow carried its own hand-copied list until 2026-08-29 and had
+# silently omitted every bin/ file, so each tool added since sd_route.py was
+# lint-clean locally and unlinted in CI. Derive it, do not duplicate it.
+LINT_RUFF_PATHS := install.py installer bin/migrate-trellis bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-status templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+LINT_MYPY_PATHS := installer install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-status templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+
+.PHONY: lint-ruff-paths lint-mypy-paths
+lint-ruff-paths:
+	@printf '%s\n' "$(LINT_RUFF_PATHS)"
+lint-mypy-paths:
+	@printf '%s\n' "$(LINT_MYPY_PATHS)"
+
 # Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
 # parity: the CI lint/security jobs always run the Node and ShellCheck
-# lanes). Mypy covers installer/, the install.py facade, and the single
-# copy of the payload under templates/scripts/. The bash 3.2 lane
+# lanes). Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
+# LINT_MYPY_PATHS above -- installer/, the install.py facade, the single copy
+# of the payload under templates/scripts/, and the bin/ tools. The bash 3.2 lane
 # parses tracked shell with the interpreter macOS keeps at /bin/bash, so
 # syntax that only bash 3.2 rejects fails here instead of on the macOS CI leg;
 # a platform without bash 3.2 prints a skip line and STRICT=1 makes it fatal.
 lint:
-	"$(VENV_PYTHON)" -m ruff check install.py installer bin/migrate-trellis bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
-	"$(VENV_PYTHON)" -m mypy installer install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+	"$(VENV_PYTHON)" -m ruff check $(LINT_RUFF_PATHS)
+	"$(VENV_PYTHON)" -m mypy $(LINT_MYPY_PATHS)
 	@if command -v node >/dev/null 2>&1; then \
 		node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs; \
 		bash .github/scripts/check-opencode-js.sh; \

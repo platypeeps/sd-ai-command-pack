@@ -957,12 +957,30 @@ class GeneratedParityTests(InstallTestCase):
             "os: macos-latest",
             "unittest-output.log",
             "skipped=[1-9][0-9]*",
-            "python3 -m ruff check install.py installer templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
+            # The workflow reads the linter scope from the Makefile instead of
+            # restating it. These assertions used to pin the restated list
+            # verbatim, which froze the drift in place: the CI copy named no
+            # bin/ path at all, so every tool added there was unlinted in CI
+            # and the test guaranteed nobody could fix it without editing here.
+            "python3 -m ruff check $(make -s lint-ruff-paths)",
+            "python3 -m mypy $(make -s lint-mypy-paths)",
             "node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs",
             "bash .github/scripts/check-opencode-js.sh",
-            "python3 -m mypy installer install.py templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py",
         ):
             self.assertIn(expected, workflow)
+        # Whatever the Makefile declares is what CI lints. Derived, not restated.
+        makefile_text = (PACK_ROOT / "Makefile").read_text(encoding="utf-8")
+        for variable in ("LINT_RUFF_PATHS", "LINT_MYPY_PATHS"):
+            self.assertIn(f"{variable} :=", makefile_text)
+        ruff_scope = next(
+            line.split(":=", 1)[1].split()
+            for line in makefile_text.splitlines()
+            if line.startswith("LINT_RUFF_PATHS :=")
+        )
+        self.assertTrue(
+            [path for path in ruff_scope if path.startswith("bin/")],
+            "the linter scope must cover bin/; it silently did not until 2026-08-29",
+        )
         # Ruff's lint target is inferred from project.requires-python (covered
         # by tests/test_python_floor.py); mypy has no such inference, so its
         # python_version stays written out.
@@ -1357,7 +1375,14 @@ class GeneratedParityTests(InstallTestCase):
             "command -v node >/dev/null 2>&1",
             "warning: node not found; skipping JavaScript syntax checks.",
             "skipped=[1-9][0-9]*",
-            '"$(VENV_PYTHON)" -m mypy installer',
+            # The linter scope lives in one place and both consumers read it.
+            # This used to pin the literal `-m mypy installer ...` invocation,
+            # which is what let the CI copy of the list drift bin/-shaped holes
+            # into itself unnoticed.
+            "LINT_RUFF_PATHS :=",
+            "LINT_MYPY_PATHS :=",
+            '"$(VENV_PYTHON)" -m ruff check $(LINT_RUFF_PATHS)',
+            '"$(VENV_PYTHON)" -m mypy $(LINT_MYPY_PATHS)',
         ):
             self.assertIn(target, makefile)
 

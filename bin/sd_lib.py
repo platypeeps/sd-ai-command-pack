@@ -258,6 +258,10 @@ class WorkItem:
     created: str
     branch: str
     archived: bool
+    #: The frontmatter's `parked:` line verbatim, empty when the item is live.
+    #: The age sweep writes `parked: <date> age-sweep` here and nowhere else --
+    #: parked is a property of the item, never a row in a separate ledger.
+    parked: str = ""
     inconsistencies: tuple[str, ...] = ()
 
 
@@ -330,6 +334,7 @@ def work_item(item_dir: pathlib.Path) -> WorkItem:
         created=fields.get("created", ""),
         branch=fields.get("branch", ""),
         archived=report.archived,
+        parked=fields.get("parked", "").strip(),
         inconsistencies=report.inconsistencies,
     )
 

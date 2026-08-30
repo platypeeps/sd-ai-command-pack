@@ -177,14 +177,15 @@ jobs:
       - name: Install lint dependencies
         run: python3 -m pip install --require-hashes -r requirements-dev.txt
 
+      # Scope comes from the Makefile so there is exactly one definition of it.
+      # This step used to restate the path list and had drifted: it covered no
+      # bin/ file at all, so every tool added there was lint-clean locally and
+      # unlinted here. Read the scope, do not restate it.
       - name: Ruff (pack Python)
-        run: python3 -m ruff check install.py installer templates/scripts tests .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+        run: python3 -m ruff check $(make -s lint-ruff-paths)
 
-      # Mirrors the Makefile lint target's mypy scope: installer/, the
-      # install.py facade, and the single copy of the payload under
-      # templates/scripts/.
       - name: Mypy (pack Python)
-        run: python3 -m mypy installer install.py templates/scripts .github/scripts/check-command-surface-drift.py .github/scripts/check-helper-resolution.py .github/scripts/check-shipped-script-modes.py .github/scripts/summarize_shell_coverage.py
+        run: python3 -m mypy $(make -s lint-mypy-paths)
 
       - name: Review preflight JavaScript syntax
         run: node --check templates/scripts/sd-ai-command-pack-review-preflight.mjs
