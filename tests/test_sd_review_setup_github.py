@@ -192,9 +192,29 @@ class WorkflowContentTests(SetupFixture):
         # repository that has no such file. Most repositories will not have
         # one -- the built-in default is the normal case -- so the generated
         # comment has to describe both arms or it misleads by default.
-        header = setup.workflow_text("./x").split("name: sd-review route")[0]
+        header, delimiter, _ = setup.workflow_text("./x").partition("name: sd-review route")
+        # Without this the split silently returns the whole file and the two
+        # assertions below pass against the body instead of the header.
+        self.assertTrue(delimiter, "the workflow no longer carries the name this splits on")
         self.assertIn(".github/sd-review.json", header)
         self.assertIn("built-in default", header)
+
+    def test_the_lane_cannot_pile_up_or_hang(self) -> None:
+        # Both found in review of the first consumer installs. Neither is a
+        # per-repository convention to be matched: a report-only lane that
+        # leaves superseded runs going, or that can hang a runner for six
+        # hours, is spending a repository's CI capacity to print a plan
+        # nobody is waiting for any more.
+        text = setup.workflow_text("./x")
+        self.assertIn("cancel-in-progress: true", text)
+        self.assertIn("timeout-minutes: 10", text)
+        # `workflow_text` is an f-string, where `{{` renders as `{`. Written
+        # naively, `${{ ... }}` reaches the file as `${ ... }`: not an error,
+        # just a constant group name, so every pull request in a repository
+        # would share one concurrency group and cancel each other's runs.
+        self.assertIn(
+            "group: sd-review-route-${{ github.event.pull_request.number }}", text
+        )
 
     def test_the_action_referenced_exists_in_this_checkout(self) -> None:
         # A workflow naming an action path that is not shipped is a lane that

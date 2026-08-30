@@ -134,10 +134,20 @@ on:
 permissions:
   contents: read
 
+# A superseded plan is a stale plan: when a pull request is pushed to twice in
+# quick succession, the older run is describing a diff that no longer exists.
+concurrency:
+  group: sd-review-route-${{{{ github.event.pull_request.number }}}}
+  cancel-in-progress: true
+
 jobs:
   route:
     name: route
     runs-on: ubuntu-latest
+    # The work is a diff and a pure function over it, measured in seconds. This
+    # ceiling is not a budget, it is the point at which a hung runner stops
+    # costing a repository capacity for a job that reports and nothing more.
+    timeout-minutes: 10
     steps:
       - name: Check out the pull request
         uses: {CHECKOUT_ACTION} # {CHECKOUT_VERSION}
