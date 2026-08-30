@@ -96,7 +96,9 @@ implemented in `bin/sd-review` yet** — the code carries a named seam
 
 - **`mode: minimal` and `mode: guest` refuse it.** Shared and OSS repos cannot
   grow the workflow at all. Do not hand-write the workflow to get around that.
-- It preflights and refuses over a legacy footprint without `--remove-legacy`.
+- It will preflight and refuse over a legacy footprint without
+  `--remove-legacy` -- a flag that does not exist yet either, and lands with
+  the subcommand.
 
 ## Never
 

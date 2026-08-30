@@ -44,7 +44,6 @@ correct, not a gap. `--only lint` still runs one on demand.
 | `--dry-run` | print what would run, exit 0 without running it |
 | `--only NAME` | run exactly one of `check`, `test`, `lint` |
 | `--timeout SECONDS` | per-check timeout, default 900; a timeout is a `fail` |
-| `--repo PATH` | a directory *inside* the current repo (default: cwd) |
 
 ## Exit codes
 
@@ -53,10 +52,11 @@ configuration was wrong (one sentence on stderr, never a traceback).
 
 ## Never
 
-- **Never point `--repo` at another checkout.** It exists as a locator for a
-  subdirectory of the repo you are standing in; sessions stick to their repos
-  (R10-D6). If you need another repo's status, `cd` there in a session that
-  belongs there.
+- **Never try to point sd-check at another checkout.** There is no `--repo` and
+  there will not be one (R10-D6): the repository is resolved from the working
+  directory and nowhere else, and `tests/test_verb_inventory.py` enumerates
+  `bin/` to keep it that way. If you need another repo's result, `cd` there in a
+  session that belongs there.
 - **Never treat sd-check as a gate you can wave through.** `sd-review` runs it
   first, and a failing deterministic gate is a failing review: no model is
   asked to guess at a change that does not build.

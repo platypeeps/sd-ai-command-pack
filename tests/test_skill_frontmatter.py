@@ -138,5 +138,116 @@ class KindMarkerTests(unittest.TestCase):
                 self.assertNotIn("tools", fields, "an agent in the skills tree")
 
 
+class DocumentedFlagTests(unittest.TestCase):
+    """A skill must not document a flag its tool does not have.
+
+    The frontmatter checks above cannot see this: a skill can be perfectly
+    shaped and still describe an option that was removed. That is exactly what
+    happened -- `sd-check`'s skill documented `--repo` hours after #605 deleted
+    it, because the author branched before the fix landed, and every structural
+    test still passed.
+
+    Scoped to the surfaces with a real implementation in `bin/`. For the eight
+    that have no tool yet the design's table is the only source, and asserting
+    against it would pin prose to prose.
+    """
+
+    def implemented(self) -> list[tuple[str, pathlib.Path, pathlib.Path]]:
+        found = []
+        for path in surfaces():
+            tool = REPO_ROOT / "bin" / path.parent.name
+            if tool.is_file():
+                found.append((path.parent.name, path, tool))
+        return found
+
+    def test_there_are_implemented_surfaces_to_check(self) -> None:
+        # Guards the loop below from passing by finding nothing.
+        self.assertGreaterEqual(len(self.implemented()), 4)
+
+    # Phrases that mark a flag as documented-but-absent on purpose. A skill is
+    # allowed -- encouraged -- to say "the design has --push, the code does not",
+    # and the sentence carrying that disclaimer is often the section heading
+    # rather than the line naming the flag. So the window is the flag's line plus
+    # the heading it sits under, which is where a skill states this truthfully.
+    DISCLAIMERS = (
+        "not implemented",
+        "does not exist",
+        "not exist",
+        "no `",
+        "will not be",
+        "when it exists",
+        "yet",
+    )
+
+    def disclaimed(self, body: str, option: str) -> bool:
+        heading = ""
+        for line in body.splitlines():
+            if line.startswith("#"):
+                heading = line
+            if option in line:
+                window = f"{heading}\n{line}".lower()
+                if any(phrase in window for phrase in self.DISCLAIMERS):
+                    return True
+        return False
+
+    def test_every_documented_flag_exists_in_the_tool(self) -> None:
+        import re
+
+        flag = re.compile(r"`(--[a-z][a-z-]+)")
+        for name, skill, tool in self.implemented():
+            source = tool.read_text(encoding="utf-8", errors="replace")
+            body = skill.read_text(encoding="utf-8")
+            for option in sorted(set(flag.findall(body))):
+                # A skill may say a flag does NOT exist; that sentence names it.
+                if f'"{option}"' in source or f"'{option}'" in source:
+                    continue
+                if self.disclaimed(body, option):
+                    continue
+                with self.subTest(surface=name, flag=option):
+                    self.fail(f"{name} documents {option}, which bin/{name} does not accept")
+
+
+class UnbuiltSurfaceTests(unittest.TestCase):
+    """A skill for a tool that does not exist must say so.
+
+    Eight of the twelve surfaces have no `bin/` implementation yet. Their skills
+    are written from the design, and a reader -- human or model -- who takes one
+    at face value will try to run a command that is not there. Saying "not built
+    yet" once is the whole requirement; this test only checks it is said.
+    """
+
+    DISCLOSURES = (
+        "not implemented",
+        "does not exist yet",
+        "not built",
+        "when it exists",
+        "no `bin/",
+        "lands in a later",
+        "lands in a separate",
+    )
+
+    def unbuilt(self) -> list[pathlib.Path]:
+        return [
+            path
+            for path in surfaces()
+            if not (REPO_ROOT / "bin" / path.parent.name).is_file()
+        ]
+
+    def test_there_are_unbuilt_surfaces_to_check(self) -> None:
+        # If every surface gets built this guard fires and the test is deleted,
+        # rather than passing forever over an empty list.
+        self.assertGreater(len(self.unbuilt()), 0)
+
+    def test_unbuilt_surfaces_disclose_it(self) -> None:
+        for path in self.unbuilt():
+            body = path.read_text(encoding="utf-8").lower()
+            with self.subTest(surface=path.parent.name):
+                self.assertTrue(
+                    any(phrase in body for phrase in self.DISCLOSURES),
+                    f"{path.parent.name} documents a tool that does not exist in "
+                    f"bin/ without saying so anywhere in the skill",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
