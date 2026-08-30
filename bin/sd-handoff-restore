@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""SessionStart hook: inject the pending handoff packet for this directory.
+
+Register on the matchers `startup` and `clear`, and on nothing else. The two
+omissions are the design, not an oversight, so read this before "helpfully"
+adding them back:
+
+  * NOT `compact`. A context-compromised session is by definition close to
+    auto-compact. A compact matcher would consume the packet into the dying
+    session, and the `/clear` that follows -- the whole point of the gesture --
+    would find nothing.
+  * NOT `resume`. Resuming continues the old context and has no use for a
+    packet describing it.
+
+`clear` is the load-bearing matcher: it is the deliberate kill-and-restart
+gesture, and a packet reaching it is seconds old. `startup` is where the age
+stamp earns its keep.
+
+This hook gates nothing and blocks nothing. It is fast and silent when there
+is nothing to do -- `SD_HANDOFF_RESTORE=0` in the environment (headless
+`claude -p` cron jobs export it so a 3 a.m. run cannot eat a packet), no
+packet, a consumed packet, an expired packet -- and any internal error exits 0
+silently rather than break session startup.
+
+Identity is hashed on path and verified on content. Before injecting:
+
+  * the recorded `repo.root` must exist and be a prefix of the resolved cwd,
+    else refuse;
+  * the recorded `repo.head_sha` must still resolve as an object here
+    (`git cat-file -e`), else refuse and say why. That is the reused-path
+    case, where a different project now occupies a path a previous project
+    wrote a packet for. It is decisive where comparing remotes is not:
+    switching `origin` to a fork keeps the history, and must still restore.
+  * a differing `repo.remote` injects with a warning line. Never a refusal on
+    its own.
+
+`head_sha` *divergence* -- resolvable but no longer HEAD -- is normal after a
+commit or a rebase. It is context, not a check.
+
+A win is marked consumed by renaming the packet away and writing it back, so
+two sessions racing in one directory cannot both claim it. Injected exactly
+once, then inert.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import os
+import subprocess  # nosec B404 - fixed argv git reads, never a shell
+import sys
+import tempfile
+from pathlib import Path
+
+HOOK_EVENT = "SessionStart"
+
+
+# ---------------------------------------------------------------- git helpers
+
+
+def git(root: str, *args: str) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            ["git", *args],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def canonical_remote(root: str) -> str | None:
+    raw = git(root, "remote", "get-url", "origin")
+    if raw is None:
+        return None
+    url = raw.strip()
+    if not url:
+        return None
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url.rstrip("/")
+
+
+# ------------------------------------------------------------ identity / path
+
+
+def resolve_root(payload: dict, environ: dict[str, str]) -> tuple[str, str]:
+    """Return (normalized worktree root, resolved cwd).
+
+    Payload `.cwd` first, then `$PWD`, then `CLAUDE_PROJECT_DIR` last. The env
+    var is the session's launch directory and is fixed for the session, so
+    preferring it inside a linked worktree would hash a different root than
+    the writer did and the two would never meet.
+    """
+    candidates = [
+        payload.get("cwd") if isinstance(payload.get("cwd"), str) else None,
+        environ.get("PWD"),
+        environ.get("CLAUDE_PROJECT_DIR"),
+    ]
+    raw = ""
+    for candidate in candidates:
+        if candidate and os.path.isdir(candidate):
+            raw = candidate
+            break
+    if not raw:
+        raw = os.getcwd()
+    raw = os.path.realpath(raw)
+    toplevel = git(raw, "rev-parse", "--show-toplevel")
+    if toplevel and toplevel.strip():
+        return os.path.realpath(toplevel.strip()), raw
+    return raw, raw
+
+
+def state_home(environ: dict[str, str]) -> Path:
+    configured = environ.get("XDG_STATE_HOME", "")
+    if configured and os.path.isabs(configured):
+        return Path(configured)
+    return Path(os.path.expanduser("~")) / ".local" / "state"
+
+
+def packet_path(root: str, environ: dict[str, str]) -> Path:
+    directory = state_home(environ) / "sd-ai-command-pack" / "handoff"
+    return directory / f"{hashlib.sha256(root.encode('utf-8')).hexdigest()}.json"
+
+
+def contains(root: str, cwd: str) -> bool:
+    """True when `root` is `cwd` or an ancestor of it."""
+    root = os.path.normpath(root)
+    cwd = os.path.normpath(cwd)
+    return cwd == root or cwd.startswith(root.rstrip(os.sep) + os.sep)
+
+
+# -------------------------------------------------------------------- claiming
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def claim(path: Path, packet: dict) -> bool:
+    """Take exclusive ownership by renaming the packet away, then write it back.
+
+    Two hooks racing in one directory both try to move the same source file;
+    only the first rename can succeed, so only one session restores.
+    """
+    claimed = path.with_name(path.name + f".claim.{os.getpid()}")
+    try:
+        os.rename(path, claimed)
+    except OSError:
+        return False
+    packet["consumed"] = now_iso()
+    body = (json.dumps(packet, indent=2) + "\n").encode("utf-8")
+    try:
+        handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".sd-handoff.")
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(body)
+        os.replace(temporary, path)
+    except OSError:
+        # The claim already succeeded; failing to record it is not a reason to
+        # withhold the context the session is starting up to receive.
+        pass
+    finally:
+        try:
+            os.unlink(claimed)
+        except OSError:
+            pass
+    return True
+
+
+# -------------------------------------------------------------------- render
+
+
+def age_line(created_raw: object) -> str:
+    try:
+        created = dt.datetime.fromisoformat(str(created_raw))
+    except (TypeError, ValueError):
+        return "written at an unreadable time"
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=dt.timezone.utc)
+    seconds = int((dt.datetime.now(dt.timezone.utc) - created).total_seconds())
+    if seconds < 90:
+        return f"written {max(seconds, 0)}s ago"
+    if seconds < 5400:
+        return f"written {seconds // 60}m ago"
+    if seconds < 172800:
+        return f"written {seconds // 3600}h ago"
+    return f"written {seconds // 86400}d ago"
+
+
+def context_for(packet: dict, warnings: list[str]) -> str:
+    repo = packet.get("repo") or {}
+    lines = [
+        "Session handoff packet restored by sd-handoff-restore "
+        f"({age_line(packet.get('created'))}). It was written by the previous "
+        "session in this directory and is loaded exactly once; discount it if "
+        "the age above makes it stale.",
+        "",
+        f"Repository: {repo.get('root')} (branch {repo.get('branch')}, "
+        f"head {repo.get('head_sha')})",
+    ]
+    lines.extend(warnings)
+    lines.append(f"Work item: {packet.get('item') or 'none'}")
+    if packet.get("summary"):
+        lines.extend(["", f"Where things stand: {packet['summary']}"])
+    for field, heading in (
+        ("next", "Next steps"),
+        ("dont", "Already tried, do not repeat"),
+        ("questions", "Open questions"),
+    ):
+        entries = packet.get(field) or []
+        if entries:
+            lines.append("")
+            lines.append(f"{heading}:")
+            lines.extend(f"- {entry}" for entry in entries)
+    files = packet.get("files") or []
+    if files:
+        lines.append("")
+        lines.append("Changed files at handoff time:")
+        lines.extend(f"- {entry}" for entry in files)
+    if packet.get("stash_ref"):
+        lines.extend(["", f"Stashed work: {packet['stash_ref']}"])
+    return "\n".join(lines)
+
+
+def emit(context: str, out) -> None:
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": HOOK_EVENT,
+            "additionalContext": context,
+        }
+    }
+    print(json.dumps(payload), file=out)
+
+
+# ---------------------------------------------------------------------- main
+
+
+def expired(packet: dict) -> bool:
+    raw = packet.get("expires")
+    if not isinstance(raw, str):
+        return False
+    try:
+        moment = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)
+    return dt.datetime.now(dt.timezone.utc) >= moment
+
+
+def run(stdin_text: str, environ: dict[str, str], out) -> int:
+    # Cheapest check first: a cron job that opted out must cost nothing.
+    if environ.get("SD_HANDOFF_RESTORE") == "0":
+        return 0
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    root, cwd = resolve_root(payload, environ)
+    path = packet_path(root, environ)
+    if not path.is_file():
+        return 0
+
+    try:
+        packet = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # A corrupt packet is not the session's problem. Say nothing.
+        return 0
+    if not isinstance(packet, dict) or packet.get("consumed") or expired(packet):
+        return 0
+
+    repo = packet.get("repo")
+    if not isinstance(repo, dict):
+        return 0
+
+    recorded_root = repo.get("root")
+    if not isinstance(recorded_root, str) or not os.path.isdir(recorded_root):
+        emit(
+            "A handoff packet exists for this directory but was not restored: "
+            f"the directory it names ({recorded_root!r}) no longer exists. "
+            "Run `sd-handoff --show` to read and clear it.",
+            out,
+        )
+        return 0
+    if not contains(recorded_root, cwd):
+        emit(
+            "A handoff packet exists for this directory but was not restored: "
+            f"it was written for {recorded_root}, which does not contain the "
+            f"current directory {cwd}. Run `sd-handoff --show` to read and "
+            "clear it.",
+            out,
+        )
+        return 0
+
+    # The reused-path check. A different project now sitting at a path some
+    # earlier project wrote a packet for will not have that project's history.
+    head = repo.get("head_sha")
+    if isinstance(head, str) and head:
+        if git(root, "cat-file", "-e", f"{head}^{{object}}") is None:
+            emit(
+                "A handoff packet exists for this directory but was not "
+                f"restored: the commit it was written against ({head[:12]}) is "
+                "not an object in the repository now at this path, so the "
+                "packet belongs to a different project. Run `sd-handoff "
+                "--show` to read and clear it.",
+                out,
+            )
+            return 0
+
+    warnings: list[str] = []
+    recorded_remote = repo.get("remote")
+    current_remote = canonical_remote(root)
+    if recorded_remote != current_remote:
+        warnings.append(
+            f"WARNING: origin has changed since the packet was written "
+            f"({recorded_remote or 'none'} -> {current_remote or 'none'}). The "
+            "history matches, so this is most likely a fork switch, but check "
+            "before pushing."
+        )
+
+    if not claim(path, packet):
+        # Another session in this directory won the race. Exactly one restores.
+        return 0
+    emit(context_for(packet, warnings), out)
+    return 0
+
+
+def main() -> int:
+    try:
+        try:
+            stdin_text = sys.stdin.read()
+        except (OSError, ValueError):
+            stdin_text = ""
+        return run(stdin_text, dict(os.environ), sys.stdout)
+    except BaseException:  # noqa: BLE001 - a hook never breaks session startup
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

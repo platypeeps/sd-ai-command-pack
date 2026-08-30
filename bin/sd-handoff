@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""Write one local session-handoff packet for this directory, and stop.
+
+The problem this solves is narrow and local: a session becomes
+context-compromised and has to be killed and restarted against the same
+repository on the same machine. Nothing here touches git history, GitHub, or
+CI -- no commit, no push, no PR, no stash. The working tree is left exactly as
+it stands.
+
+Sessions are ephemeral and their ids are worthless across a restart. The one
+thing the dying session and its replacement share is the directory, so the
+directory is the key:
+
+    ~/.local/state/sd-ai-command-pack/handoff/<digest>.json
+
+`<digest>` is the sha256 of the *normalized worktree root*, resolved in this
+order, and the order is the design:
+
+    explicit --cwd  ->  $PWD  ->  CLAUDE_PROJECT_DIR  ->  git rev-parse --show-toplevel
+
+`CLAUDE_PROJECT_DIR` comes last on purpose. It is the session's *launch*
+directory and is fixed for the life of the session, so a writer running inside
+a linked worktree and a restorer that preferred the env var would compute two
+different digests and never meet. Normalizing to the worktree root rather than
+hashing the raw cwd is what lets a session started in `src/foo` find the packet
+a session started at the root wrote. Inside a linked worktree
+`--show-toplevel` yields that worktree's own root, so two worktrees of one
+repository get distinct packets -- which is right, they hold different work.
+Outside a git repository the raw directory path is the identity, so packets
+work in plain directories too.
+
+Hash on path, verify on content. The path has exactly one real collision: a
+different project at a reused path. So the packet records identity fields it
+never hashes -- `repo.root` in plain text (a mismatch should be diagnosable,
+not an opaque hash), `repo.cwd_raw`, `repo.remote`, `repo.head_sha` -- and
+`sd-handoff-restore` checks them before it injects anything.
+
+The 8 KB cap is the anti-journal mechanism, not a formality. This is a packet,
+not a log: a superseded packet is stale by definition, so a new write replaces
+the old one (last writer wins), it is consumed exactly once, and it expires
+after 14 days. Refusing to write an oversized packet is the point; the refusal
+says what to cut.
+
+Exit codes: 0 wrote (or showed) a packet, 1 refused with a stated reason,
+2 a usage error. Never a traceback.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import subprocess  # nosec B404 - fixed argv git reads, never a shell
+import sys
+import tempfile
+from pathlib import Path
+
+SCHEMA = "sd-handoff/1"
+CAP_BYTES = 8192
+EXPIRY_DAYS = 14
+MAX_SUMMARY = 600
+MAX_NEXT = 5
+MAX_DONT = 5
+MAX_QUESTIONS = 3
+# A floor so a working tree with hundreds of dirty paths still produces a
+# packet: the mechanical file list is trimmed to fit the cap before the cap is
+# ever charged against the fields a human actually wrote.
+MIN_FILES = 5
+
+
+class Refusal(Exception):
+    """A stated reason to not write. Exit 1, one line, no traceback."""
+
+
+# ---------------------------------------------------------------- git helpers
+
+
+def git(root: str, *args: str) -> str | None:
+    """Run one read-only git command in `root`; None when it cannot answer."""
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            ["git", *args],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def canonical_remote(root: str) -> str | None:
+    """Origin's URL with the noise removed. Recorded, never hashed."""
+    raw = git(root, "remote", "get-url", "origin")
+    if raw is None:
+        return None
+    url = raw.strip()
+    if not url:
+        return None
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url.rstrip("/")
+
+
+def changed_files(root: str) -> list[str]:
+    """Every path git says differs, derived mechanically and never typed."""
+    found: set[str] = set()
+    porcelain = git(root, "status", "--porcelain")
+    for line in (porcelain or "").splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        # A rename reads `R  old -> new`; the destination is the live path.
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if path:
+            found.add(path)
+    tracked = git(root, "diff", "--name-only")
+    for line in (tracked or "").splitlines():
+        if line.strip():
+            found.add(line.strip())
+    return sorted(found)
+
+
+# ------------------------------------------------------------ identity / path
+
+
+def resolve_root(explicit: str | None, environ: dict[str, str]) -> tuple[str, str]:
+    """Return (normalized worktree root, raw cwd) for this invocation.
+
+    `CLAUDE_PROJECT_DIR` is consulted last; see the module docstring for why
+    preferring it would make a writer and a restorer miss each other.
+    """
+    candidates = [explicit, environ.get("PWD"), environ.get("CLAUDE_PROJECT_DIR")]
+    raw = ""
+    for candidate in candidates:
+        if candidate and os.path.isdir(candidate):
+            raw = candidate
+            break
+    if not raw:
+        raw = os.getcwd()
+    raw = os.path.realpath(raw)
+    toplevel = git(raw, "rev-parse", "--show-toplevel")
+    if toplevel and toplevel.strip():
+        return os.path.realpath(toplevel.strip()), raw
+    # Not a git repository: the directory itself is the identity.
+    return raw, raw
+
+
+def digest_for(root: str) -> str:
+    return hashlib.sha256(root.encode("utf-8")).hexdigest()
+
+
+def state_home(environ: dict[str, str]) -> Path:
+    """`$XDG_STATE_HOME` when it is absolute, else `~/.local/state`."""
+    configured = environ.get("XDG_STATE_HOME", "")
+    if configured and os.path.isabs(configured):
+        return Path(configured)
+    return Path(os.path.expanduser("~")) / ".local" / "state"
+
+
+def packet_path(root: str, environ: dict[str, str]) -> Path:
+    directory = state_home(environ) / "sd-ai-command-pack" / "handoff"
+    return directory / f"{digest_for(root)}.json"
+
+
+# ------------------------------------------------------------------- the file
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def build_packet(args: argparse.Namespace, environ: dict[str, str]) -> dict:
+    root, cwd_raw = resolve_root(args.cwd, environ)
+    created = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    expires = created + dt.timedelta(days=EXPIRY_DAYS)
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    head = git(root, "rev-parse", "HEAD")
+    packet = {
+        "schema": SCHEMA,
+        "created": created.isoformat(),
+        "expires": expires.isoformat(),
+        "consumed": None,
+        "repo": {
+            "root": root,
+            "cwd_raw": cwd_raw,
+            "remote": canonical_remote(root),
+            "label": os.path.basename(root),
+            "branch": branch.strip() if branch else None,
+            "head_sha": head.strip() if head else None,
+        },
+        "item": args.item,
+        "summary": (args.summary or "")[:MAX_SUMMARY],
+        "next": list(args.next or [])[:MAX_NEXT],
+        "dont": list(args.dont or [])[:MAX_DONT],
+        "questions": list(args.question or [])[:MAX_QUESTIONS],
+        "files": changed_files(root),
+    }
+    if args.stash_ref:
+        packet["stash_ref"] = args.stash_ref
+    return packet
+
+
+def render(packet: dict) -> bytes:
+    return (json.dumps(packet, indent=2, sort_keys=False) + "\n").encode("utf-8")
+
+
+def fit_to_cap(packet: dict) -> bytes:
+    """Render within the 8 KB cap, or refuse and say what to cut.
+
+    `files` is derived, not authored, so it is what gets trimmed first: a
+    dirty tree of four hundred paths must not cost the operator their summary.
+    Once the file list is down to its floor the remaining weight is what a
+    human typed, and that is a refusal.
+    """
+    files = list(packet["files"])
+    total = len(files)
+    while True:
+        body = render(packet)
+        if len(body) <= CAP_BYTES:
+            return body
+        listed = [entry for entry in packet["files"] if not entry.startswith("... ")]
+        if len(listed) > MIN_FILES:
+            keep = max(MIN_FILES, len(listed) - max(1, len(listed) // 4))
+            packet["files"] = files[:keep] + [f"... {total - keep} more changed files"]
+            continue
+        break
+    size = len(render(packet))
+    raise Refusal(
+        f"packet is {size} bytes, over the {CAP_BYTES}-byte cap; "
+        "this is a packet, not a journal. Cut the prose: shorten --summary "
+        f"(now {len(packet['summary'])} chars, max {MAX_SUMMARY}) and drop the "
+        f"weakest of {len(packet['next'])} --next / {len(packet['dont'])} --dont "
+        f"/ {len(packet['questions'])} --question entries."
+    )
+
+
+def write_packet(path: Path, body: bytes) -> None:
+    """Replace any previous packet for this directory. Last writer wins."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".sd-handoff.")
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(body)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+# ------------------------------------------------------------------- --show
+
+
+def claim(path: Path) -> dict | None:
+    """Read a packet and take exclusive ownership of it, or return None.
+
+    The claim is the rename: two readers racing in one directory both try to
+    move the same source file away, and only the first can succeed.
+    """
+    try:
+        packet = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(packet, dict):
+        return None
+    claimed = path.with_name(path.name + f".claim.{os.getpid()}")
+    try:
+        os.rename(path, claimed)
+    except OSError:
+        return None
+    packet["consumed"] = now_iso()
+    try:
+        write_packet(path, render(packet))
+    finally:
+        try:
+            os.unlink(claimed)
+        except OSError:
+            pass
+    return packet
+
+
+def age_line(packet: dict) -> str:
+    try:
+        created = dt.datetime.fromisoformat(str(packet.get("created")))
+    except (TypeError, ValueError):
+        return "written at an unreadable time"
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=dt.timezone.utc)
+    seconds = int((dt.datetime.now(dt.timezone.utc) - created).total_seconds())
+    if seconds < 90:
+        return f"written {max(seconds, 0)}s ago"
+    if seconds < 5400:
+        return f"written {seconds // 60}m ago"
+    if seconds < 172800:
+        return f"written {seconds // 3600}h ago"
+    return f"written {seconds // 86400}d ago"
+
+
+def human(packet: dict) -> str:
+    repo = packet.get("repo") or {}
+    lines = [
+        f"sd-handoff packet for {repo.get('root')} ({age_line(packet)})",
+        f"  branch: {repo.get('branch')}  head: {repo.get('head_sha')}",
+        f"  item: {packet.get('item')}",
+        f"  summary: {packet.get('summary')}",
+    ]
+    for field, label in (("next", "next"), ("dont", "dont"), ("questions", "question")):
+        for entry in packet.get(field) or []:
+            lines.append(f"  {label}: {entry}")
+    for entry in packet.get("files") or []:
+        lines.append(f"  file: {entry}")
+    if packet.get("stash_ref"):
+        lines.append(f"  stash_ref: {packet['stash_ref']}")
+    return "\n".join(lines)
+
+
+def show(path: Path, root: str, as_json: bool, out) -> int:
+    if not path.is_file():
+        raise Refusal(f"no handoff packet is pending for {root}")
+    try:
+        pending = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise Refusal(f"the handoff packet for {root} is not readable JSON") from None
+    if not isinstance(pending, dict):
+        raise Refusal(f"the handoff packet for {root} is not a JSON object")
+    if pending.get("consumed"):
+        raise Refusal(
+            f"the handoff packet for {root} was already consumed at "
+            f"{pending['consumed']}; a packet loads exactly once"
+        )
+    packet = claim(path)
+    if packet is None:
+        raise Refusal(f"the handoff packet for {root} was taken by another session")
+    print(json.dumps(packet, indent=2) if as_json else human(packet), file=out)
+    return 0
+
+
+# ---------------------------------------------------------------------- main
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sd-handoff",
+        description="Write the local session-handoff packet for this directory.",
+    )
+    parser.add_argument("--summary", help=f"what is going on, <= {MAX_SUMMARY} chars")
+    parser.add_argument(
+        "--next", action="append", default=[], help=f"next step (<= {MAX_NEXT})"
+    )
+    parser.add_argument(
+        "--dont",
+        action="append",
+        default=[],
+        help=f"a dead end already tried, so it is not tried twice (<= {MAX_DONT})",
+    )
+    parser.add_argument(
+        "--question",
+        action="append",
+        default=[],
+        help=f"an open question (<= {MAX_QUESTIONS})",
+    )
+    parser.add_argument("--item", help="work-item directory; omit when there is none")
+    parser.add_argument("--stash-ref", dest="stash_ref", help="ref under refs/sd-handoff/")
+    parser.add_argument("--cwd", help="resolve the packet for this directory")
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="print the pending packet and consume it (the load path for "
+        "sessions with no SessionStart hook)",
+    )
+    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    return parser
+
+
+def run(argv: list[str], environ: dict[str, str], out) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.show:
+        root, _ = resolve_root(args.cwd, environ)
+        return show(packet_path(root, environ), root, args.json, out)
+
+    for field, limit in (
+        ("next", MAX_NEXT),
+        ("dont", MAX_DONT),
+        ("question", MAX_QUESTIONS),
+    ):
+        given = getattr(args, field) or []
+        if len(given) > limit:
+            print(
+                f"sd-handoff: keeping the first {limit} of {len(given)} --{field} "
+                "entries; a packet is not a backlog",
+                file=sys.stderr,
+            )
+
+    packet = build_packet(args, environ)
+    body = fit_to_cap(packet)
+    path = packet_path(packet["repo"]["root"], environ)
+    write_packet(path, body)
+    if args.json:
+        print(json.dumps({"path": str(path), "bytes": len(body), "packet": packet},
+                         indent=2), file=out)
+    else:
+        print(f"wrote {path} ({len(body)} bytes). Now /clear.", file=out)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return run(list(sys.argv[1:] if argv is None else argv), dict(os.environ), sys.stdout)
+    except Refusal as refusal:
+        print(f"sd-handoff: {refusal}", file=sys.stderr)
+        return 1
+    except SystemExit as exit_request:  # argparse's own usage errors
+        code = exit_request.code
+        return 2 if code not in (0, None) else 0
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        print(f"sd-handoff: {type(error).__name__}: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
