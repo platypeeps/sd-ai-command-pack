@@ -496,24 +496,6 @@ class LegacyReceiptTests(InstallerHarness):
         self.assertIn("no legacy receipt", output)
 
 
-class PullTests(InstallerHarness):
-    def test_pull_refuses_off_main(self):
-        """The serving checkout is what every render points at.
-
-        Fast-forwarding a branch someone is working on would change what is
-        installed on the machine as a side effect of an update.
-        """
-        out = io.StringIO()
-        ctx = sd_install.Context(
-            checkout=REPO_ROOT, home=self.home, environ=dict(os.environ)
-        )
-        branch = sd_install.git_context(REPO_ROOT)["branch"]
-        if branch == "main":
-            self.skipTest("this checkout is on main; the refusal cannot be observed")
-        self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
-        self.assertIn("not main", out.getvalue())
-
-
 class CommandLineTests(InstallerHarness):
     def test_no_mode_prints_usage_and_fails(self):
         out = io.StringIO()
@@ -1026,6 +1008,14 @@ class PullBehaviourTests(InstallerHarness):
         self.assertIn("uncommitted changes", out.getvalue())
 
     def test_pull_refuses_off_main(self):
+        """Against a repository this test creates, never the ambient one.
+
+        A duplicate of this test used to run against `REPO_ROOT` and skip when
+        that checkout happened to be on `main`. On a branch it passed; merged
+        to `main` it skipped, and CI fails any run that skips a test -- so the
+        first red `main` of this rollout was caused by a test asking where it
+        was running instead of building what it needed.
+        """
         repo = self.make_main_checkout()
         subprocess.run(
             ["git", "-C", str(repo), "checkout", "-q", "-b", "sidebranch"],
