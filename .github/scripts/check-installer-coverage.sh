@@ -35,6 +35,13 @@ fi
 tracked_list="$(mktemp)"
 trap 'rm -f "$tracked_list"' EXIT
 
+# The pathspec is deliberately plain rather than `:(glob)`-magic. Git's default
+# pathspec matching runs wildmatch without WM_PATHNAME, so `*` crosses `/` and
+# `installer/*.py` reaches a module in a subpackage such as
+# `installer/sub/mod.py`. Adding `:(glob)` here would switch on WM_PATHNAME,
+# stop `*` at the separator, and silently shrink the measured set -- the exact
+# failure this gate exists to prevent. tests/test_installer_coverage_gate.py
+# pins that behaviour so the subtlety is checked rather than remembered.
 if ! git ls-files -- 'install.py' 'installer/*.py' >"$tracked_list"; then
   printf 'error: git ls-files failed; cannot enumerate the installer surface.\n' >&2
   exit 1
