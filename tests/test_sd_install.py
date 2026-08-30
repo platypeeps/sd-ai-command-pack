@@ -1128,27 +1128,100 @@ class StateRootTests(unittest.TestCase):
     import: the handoff tools have to work with no installer present at all,
     and sharing a module would make the installer a dependency of the thing it
     installs. A copy is only safe while it behaves identically, so both
-    branches are pinned here.
+    branches are pinned here -- plus the containment rule, which this one has
+    and the handoff helper does not, because only this one takes a `--home`.
     """
 
-    def test_an_absolute_xdg_state_home_is_honoured(self):
+    real_home = Path(os.path.expanduser("~"))
+
+    def test_an_absolute_xdg_state_home_is_honoured_for_the_real_home(self):
         self.assertEqual(
-            sd_install.state_home({"XDG_STATE_HOME": "/somewhere/state"}),
+            sd_install.state_home(
+                self.real_home, {"XDG_STATE_HOME": "/somewhere/state"}
+            ),
             Path("/somewhere/state"),
         )
 
     def test_an_unset_or_relative_value_falls_back_to_local_state(self):
-        expected = Path(os.path.expanduser("~")) / ".local" / "state"
-        self.assertEqual(sd_install.state_home({}), expected)
-        self.assertEqual(sd_install.state_home({"XDG_STATE_HOME": ""}), expected)
+        expected = self.real_home / ".local" / "state"
+        self.assertEqual(sd_install.state_home(self.real_home, {}), expected)
         self.assertEqual(
-            sd_install.state_home({"XDG_STATE_HOME": "relative/path"}), expected
+            sd_install.state_home(self.real_home, {"XDG_STATE_HOME": ""}), expected
+        )
+        self.assertEqual(
+            sd_install.state_home(self.real_home, {"XDG_STATE_HOME": "relative/path"}),
+            expected,
         )
 
     def test_the_receipt_hangs_off_the_state_root(self):
         self.assertEqual(
-            sd_install.receipt_path({"XDG_STATE_HOME": "/s"}),
+            sd_install.receipt_path(self.real_home, {"XDG_STATE_HOME": "/s"}),
             Path("/s") / sd_install.STATE_DIR / sd_install.RECEIPT_NAME,
+        )
+
+
+class XdgContainmentTests(unittest.TestCase):
+    """An XDG override must not carry a sandboxed run out of its home.
+
+    This is the third `--home` escape of this rebuild and the one CI caught
+    rather than the developer. The first two were git's global config; this
+    one is the environment. All three had the same shape -- a second source of
+    truth about where "home" is -- so all three are now answered the same way,
+    by deriving the answer from the home that was actually passed.
+
+    The failure is silent in exactly the way that matters: on a machine with
+    the XDG variables unset (this developer's) everything agrees and the tests
+    pass. On a GitHub runner `XDG_CONFIG_HOME` is set, and it pointed a
+    question about a scratch install at `/home/runner/.config`.
+    """
+
+    def setUp(self):
+        self._scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self._scratch.cleanup)
+        self.home = Path(self._scratch.name).resolve()
+        self.outside = {
+            "XDG_CONFIG_HOME": "/home/runner/.config",
+            "XDG_STATE_HOME": "/home/runner/.local/state",
+        }
+
+    def test_an_override_outside_a_sandbox_home_is_refused(self):
+        self.assertEqual(
+            sd_install.config_home(self.home, self.outside), self.home / ".config"
+        )
+        self.assertEqual(
+            sd_install.state_home(self.home, self.outside),
+            self.home / ".local" / "state",
+        )
+
+    def test_an_override_inside_a_sandbox_home_is_honoured(self):
+        """Containment, not blanket refusal: a scratch XDG root is legitimate."""
+        inside = {"XDG_CONFIG_HOME": str(self.home / "cfg")}
+        self.assertEqual(
+            sd_install.config_home(self.home, inside), self.home / "cfg"
+        )
+
+    def test_containment_is_by_path_parts_not_string_prefix(self):
+        """`/tmp/home-2` is not inside `/tmp/home`, however it reads."""
+        sibling = self.home.parent / (self.home.name + "-2")
+        self.assertEqual(
+            sd_install.config_home(self.home, {"XDG_CONFIG_HOME": str(sibling)}),
+            self.home / ".config",
+        )
+
+    def test_every_rendered_root_stays_under_a_sandbox_home(self):
+        """The assertion the CI failure would have needed to be caught here."""
+        for platform in sd_install.platform_homes(self.home, self.outside):
+            self.assertTrue(
+                sd_install._is_within(platform.root, self.home),
+                f"{platform.key} renders to {platform.root}, outside {self.home}",
+            )
+
+    def test_the_real_home_still_honours_an_override_outside_it(self):
+        """Not a sandbox, so not this helper's business to second-guess."""
+        real = Path(os.path.expanduser("~"))
+        self.assertEqual(
+            sd_install.config_home(real, {"XDG_CONFIG_HOME": "/srv/config"}),
+            Path("/srv/config"),
         )
 
 

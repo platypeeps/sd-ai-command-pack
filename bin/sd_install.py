@@ -49,22 +49,81 @@ EXCLUDES_LINE = "CLAUDE.local.md"
 # ------------------------------------------------------------------- location
 
 
-def state_home(environ: dict[str, str]) -> Path:
-    """`$XDG_STATE_HOME` when it is absolute, else `~/.local/state`.
+def sandboxed(home: Path) -> bool:
+    """True whenever `home` is somewhere other than the real home directory.
 
-    Deliberately identical to `bin/sd-handoff`'s helper rather than imported
-    from it: the handoff tools must work with no installer present at all, and
-    a shared module would make the installer a dependency of the thing it
-    installs.
+    Derived from the home itself rather than passed alongside it, because
+    every caller that has to remember a flag is a caller that can forget one,
+    and forgetting this one writes into the developer's real dotfiles.
     """
-    configured = environ.get("XDG_STATE_HOME", "")
+    return home != Path(os.path.expanduser("~"))
+
+
+def xdg_root(var: str, home: Path, environ: dict[str, str], *parts: str) -> Path:
+    """An absolute `$XDG_*_HOME`, or `home/<parts>` when there is none to use.
+
+    `--home DIR` says "treat DIR as $HOME", but an XDG variable holds an
+    absolute path into the *real* home, so honouring one under a scratch
+    install sends part of that install outside the directory the caller named.
+
+    That leak used to be patched at the entrypoint: `main()` rewrote both XDG
+    roots whenever `--home` was given. Which worked, for callers that came
+    through `main()`. CI found the gap on the third attempt at this class of
+    bug -- `RendererParityTests` asks `platform_homes(scratch_home, os.environ)`
+    where the surfaces should be, and on a runner with
+    `XDG_CONFIG_HOME=/home/runner/.config` set it was told `/home/runner`,
+    while the install (through `main()`, with the roots rewritten) had put them
+    in the scratch home. The install stayed contained; the question about it
+    did not, and the parity assertion failed against a path in the runner's
+    real home. On this developer's machine both variables are unset, so both
+    sides agreed and the escape was invisible.
+
+    The fix is the one the two earlier `--home` escapes converged on: resolve
+    it where it is asked rather than where it is convenient. Under a sandbox an
+    override is honoured only while it stays inside the given home. Outside a
+    sandbox it is honoured as set, including the unusual but legitimate case of
+    an XDG root outside `$HOME` -- redirecting that would be this helper
+    inventing a policy rather than closing a leak.
+    """
+    configured = environ.get(var, "")
     if configured and os.path.isabs(configured):
-        return Path(configured)
-    return Path(os.path.expanduser("~")) / ".local" / "state"
+        root = Path(configured)
+        if not sandboxed(home) or _is_within(root, home):
+            return root
+    return home.joinpath(*parts)
 
 
-def receipt_path(environ: dict[str, str]) -> Path:
-    return state_home(environ) / STATE_DIR / RECEIPT_NAME
+def _is_within(path: Path, parent: Path) -> bool:
+    """Containment by path parts, not by string prefix.
+
+    `/tmp/home-2` is not inside `/tmp/home` however much it looks like it.
+    """
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def state_home(home: Path, environ: dict[str, str]) -> Path:
+    """`$XDG_STATE_HOME` when usable, else `<home>/.local/state`.
+
+    Deliberately identical in shape to `bin/sd-handoff`'s helper rather than
+    imported from it: the handoff tools must work with no installer present at
+    all, and a shared module would make the installer a dependency of the
+    thing it installs. It differs in taking the home explicitly, because this
+    one has to honour `--home` and that one has no such flag.
+    """
+    return xdg_root("XDG_STATE_HOME", home, environ, ".local", "state")
+
+
+def config_home(home: Path, environ: dict[str, str]) -> Path:
+    """`$XDG_CONFIG_HOME` when usable, else `<home>/.config`."""
+    return xdg_root("XDG_CONFIG_HOME", home, environ, ".config")
+
+
+def receipt_path(home: Path, environ: dict[str, str]) -> Path:
+    return state_home(home, environ) / STATE_DIR / RECEIPT_NAME
 
 
 @dataclass(frozen=True)
@@ -88,10 +147,7 @@ def platform_homes(home: Path, environ: dict[str, str]) -> list[PlatformHome]:
     P1 checklist counts them with `grep -c '^sd-'`, which only works if the
     names are the filenames.
     """
-    config = environ.get("XDG_CONFIG_HOME", "")
-    config_root = (
-        Path(config) if config and os.path.isabs(config) else home / ".config"
-    )
+    config_root = config_home(home, environ)
     return [
         PlatformHome("claude", home / ".claude" / "skills", "directory"),
         PlatformHome("codex", home / ".codex" / "skills", "directory"),
@@ -404,9 +460,7 @@ def excludes_file(
     entirely and the path is derived from the given home.
     """
     if sandboxed:
-        config = environ.get("XDG_CONFIG_HOME", "")
-        root = Path(config) if config and os.path.isabs(config) else home / ".config"
-        return root / "git" / "ignore"
+        return config_home(home, environ) / "git" / "ignore"
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
             ["git", "config", "--global", "--get", "core.excludesFile"],
@@ -420,9 +474,7 @@ def excludes_file(
         configured = done.stdout.strip()
         if configured:
             return Path(os.path.expanduser(configured))
-    config = environ.get("XDG_CONFIG_HOME", "")
-    root = Path(config) if config and os.path.isabs(config) else home / ".config"
-    return root / "git" / "ignore"
+    return config_home(home, environ) / "git" / "ignore"
 
 
 def ensure_excludes_line(path: Path, *, dry_run: bool = False) -> bool:
@@ -561,15 +613,12 @@ def legacy_targets(home: Path, environ: dict[str, str]) -> list[tuple[Path, str]
     Returns `(path, sha256)` pairs; the digest is what lets `--adopt-legacy`
     refuse to delete a file somebody has since edited.
     """
-    receipt = state_home(environ) / STATE_DIR / Path(*LEGACY_RECEIPT)
+    receipt = state_home(home, environ) / STATE_DIR / Path(*LEGACY_RECEIPT)
     data = read_receipt(receipt)
     rows = data.get("files")
     if not isinstance(rows, list):
         return []
-    config = environ.get("XDG_CONFIG_HOME", "")
-    config_root = (
-        Path(config) if config and os.path.isabs(config) else home / ".config"
-    )
+    config_root = config_home(home, environ)
     roots = {
         family: home.joinpath(*parts)
         for family, parts in LEGACY_FAMILY_ROOTS.items()
@@ -686,7 +735,7 @@ class Context:
         Context without it, appending a line to the developer's actual global
         excludes.
         """
-        return self.home != Path(os.path.expanduser("~"))
+        return sandboxed(self.home)
 
     @property
     def homes(self) -> list[PlatformHome]:
@@ -694,7 +743,7 @@ class Context:
 
     @property
     def receipt(self) -> Path:
-        return receipt_path(self.environ)
+        return receipt_path(self.home, self.environ)
 
     @property
     def settings(self) -> Path:
@@ -970,16 +1019,18 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         print(USAGE, file=out, end="")
         return 2
 
-    # A `--home` override has to move the state root too, or a scratch install
-    # would write its receipt into the real one and a test run would clobber
-    # the machine's actual installation.
     home = Path(home_arg).expanduser().resolve() if home_arg else Path(
         os.path.expanduser("~")
     )
     if home_arg:
+        # `HOME` is exported for the git subprocesses, which read it themselves
+        # and cannot be told a home any other way. The XDG roots used to be
+        # rewritten here as well; they no longer are, because doing it at the
+        # entrypoint only protected callers that came through the entrypoint --
+        # and the tests, which build a Context directly, did not. `xdg_root`
+        # now enforces containment wherever the roots are resolved, so this is
+        # one rule in one place instead of the same rule in two.
         environ["HOME"] = str(home)
-        environ["XDG_STATE_HOME"] = str(home / ".local" / "state")
-        environ["XDG_CONFIG_HOME"] = str(home / ".config")
 
     checkout = Path(__file__).resolve().parent.parent
     ctx = Context(checkout=checkout, home=home, environ=environ, dry_run=dry_run)

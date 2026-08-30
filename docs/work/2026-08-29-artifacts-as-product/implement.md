@@ -115,13 +115,27 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         is 100% line and branch, reached by writing tests rather than by lowering the gate: the
         first full run measured 76%.
 
-        **`--home` escaped its sandbox twice, and the second fix is the structural one.** Git's
-        global config is per-user, not per-`$HOME`-argument, so an unsandboxed `core.excludesFile`
-        lookup reaches the real home whatever `--home` says. The first fix threaded a `sandboxed`
-        flag through the excludes helpers; a test then constructed a `Context` without it and
-        appended `CLAUDE.local.md` to the developer's actual global excludes. `sandboxed` is now a
-        derived property — `home != expanduser("~")` — which a caller cannot forget to pass. A
-        flag a test can omit is not a containment mechanism.
+        **`--home` escaped its sandbox three times, and only the third fix is structural.** All
+        three are one bug: a second source of truth about where "home" is. (1) Git's global config
+        is per-user, not per-`$HOME`-argument, so an unsandboxed `core.excludesFile` lookup reaches
+        the real home whatever `--home` says — patched by threading a `sandboxed` flag through the
+        excludes helpers. (2) A test then constructed a `Context` without that flag and appended
+        `CLAUDE.local.md` to the developer's actual global excludes; `sandboxed` became a derived
+        property, `home != expanduser("~")`, which a caller cannot forget. (3) CI caught the third:
+        the XDG variables. `main()` rewrote both roots under `--home`, which protected callers that
+        came through `main()` and not the tests, which build a `Context` directly —
+        `RendererParityTests` asked `platform_homes(scratch_home, os.environ)` where the surfaces
+        should be and, on a runner with `XDG_CONFIG_HOME=/home/runner/.config` set, was told the
+        runner's real home. The install itself stayed contained; the question about it did not.
+
+        Two things are worth carrying forward from that. The escape was invisible locally because
+        both XDG variables are unset on this machine, so both sides agreed — reproducing it took
+        `XDG_CONFIG_HOME=... XDG_STATE_HOME=... make check`, which now passes with the variables
+        set *and* unset. And the entrypoint fix was the wrong shape twice running: a rule enforced
+        where it is convenient protects the path someone remembered. `xdg_root()` enforces
+        containment where the roots are resolved, so a sandboxed run honours an XDG override only
+        while it stays inside the given home, and an unsandboxed one is left alone — including the
+        unusual but legitimate XDG root outside `$HOME`, which is not this installer's to redirect.
 
         **The no-shipped-shell invariant R11-D6 requires is `tests/test_no_shipped_shell.py`.**
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
