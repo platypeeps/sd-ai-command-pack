@@ -1,9 +1,10 @@
 """Consumer removal: what it deletes, what it refuses to, and in what order.
 
 This is the one surface in the pack that deletes files in somebody else's
-repository -- measured at 6,882 across the eight consumers of step 3-c. Every
-test here builds its own repository rather than reading one of those, so the
-suite says the same thing on a machine that has none of them.
+repository, thousands of them per repository. Every test here builds its own
+repository rather than reading one of the real consumers, so the suite says the
+same thing on a machine that has none of them checked out -- and so that no
+count in this file can go stale against the measurements in the work item.
 """
 
 from __future__ import annotations
@@ -291,15 +292,12 @@ class StructuredFileTests(FixtureCase):
         verdict = self.fixture.verdict(".opencode/package.json")
         self.assertEqual(("delete", "structured"), (verdict.action, verdict.authority))
 
-    def test_package_json_carrying_more_than_the_stub_is_kept(self) -> None:
-        _write(
-            self.fixture.repo,
-            ".opencode/package.json",
-            json.dumps({"name": "ours", "dependencies": {"@opencode-ai/plugin": "^1"}}),
-        )
+    def test_package_json_goes_by_what_survives_not_by_what_it_contains(self) -> None:
+        """A two-line `{"type": "module"}` was surviving an emptied tree."""
+        _write(self.fixture.repo, ".opencode/package.json", json.dumps({"type": "module"}))
         _write(self.fixture.repo, ".opencode/plugins/p.js", "// trellis\n")
         self.fixture.seal()
-        self.assertEqual("keep", self.fixture.verdict(".opencode/package.json").action)
+        self.assertEqual("delete", self.fixture.verdict(".opencode/package.json").action)
 
 
 class ImportBeforeRemovalTests(FixtureCase):
@@ -375,6 +373,70 @@ class EmptyDirectoryTests(FixtureCase):
         self.fixture.seal()
         migrate_trellis.apply_consumer_plan(self.fixture.repo, self.fixture.plan())
         self.assertTrue((self.fixture.repo / ".prism" / "ours.json").is_file())
+
+
+class DerivedTreeTests(FixtureCase):
+    """The tree set is enumerated, because the kept one was wrong."""
+
+    def test_a_tree_no_list_mentioned_is_found_and_classified(self) -> None:
+        _write(self.fixture.repo, ".codex/agents/trellis-check.toml", "name = 'x'\n")
+        _write(self.fixture.repo, ".codex/skills/ours-own-thing/SKILL.md", "ours\n")
+        self.fixture.seal()
+        self.assertIn(".codex", migrate_trellis.platform_trees(self.fixture.repo))
+        self.assertEqual("delete", self.fixture.verdict(".codex/agents/trellis-check.toml").action)
+        self.assertEqual("keep", self.fixture.verdict(".codex/skills/ours-own-thing/SKILL.md").action)
+
+    def test_a_nested_tree_is_read_against_its_own_prefix(self) -> None:
+        """`.github/copilot/hooks/` makes `.github/copilot` the tree, not `.github`."""
+        _write(self.fixture.repo, ".github/copilot/hooks/session-start.py", "# trellis\n")
+        self.fixture.seal()
+        self.assertIn(".github/copilot", migrate_trellis.platform_trees(self.fixture.repo))
+        self.assertEqual(
+            "delete", self.fixture.verdict(".github/copilot/hooks/session-start.py").action
+        )
+
+    def test_the_wholesale_trees_are_not_also_walked(self) -> None:
+        """`.trellis/` has the shape of a platform tree and one owner already."""
+        self.fixture.item("06-01-alpha")
+        _write(self.fixture.repo, ".trellis/agents/trellis-check.md", "x\n")
+        self.fixture.seal()
+        self.assertNotIn(".trellis", migrate_trellis.platform_trees(self.fixture.repo))
+        paths = [v.path for v in self.fixture.plan()]
+        self.assertEqual(sorted(set(paths)), sorted(paths))
+
+    def test_a_framework_named_file_at_a_trees_root_is_reached(self) -> None:
+        _write(self.fixture.repo, ".github/agents/trellis-check.agent.md", "x\n")
+        _write(self.fixture.repo, ".github/sd-github-review.json", "{}\n")
+        _write(self.fixture.repo, ".github/dependabot.yml", "version: 2\n")
+        self.fixture.seal()
+        self.assertEqual("delete", self.fixture.verdict(".github/sd-github-review.json").action)
+        self.assertIsNone(self.fixture.verdict(".github/dependabot.yml"))
+
+    def test_an_empty_tree_set_classifies_nothing(self) -> None:
+        """`git ls-files` with no pathspec lists the whole repository."""
+        _write(self.fixture.repo, "src/main.py", "print(1)\n")
+        self.fixture.seal()
+        self.assertEqual((), migrate_trellis.platform_trees(self.fixture.repo))
+        self.assertIsNone(self.fixture.verdict("src/main.py"))
+
+
+class DanglingReferenceTests(FixtureCase):
+    def test_a_surviving_file_naming_a_deleted_path_is_reported(self) -> None:
+        _write(self.fixture.repo, ".claude/agents/trellis-check.md", "x\n")
+        _write(self.fixture.repo, "scripts/ours.sh", "cat .claude/agents/trellis-check.md\n")
+        _write(self.fixture.repo, "scripts/unrelated.sh", "echo hello\n")
+        self.fixture.seal()
+        doomed = {v.path for v in self.fixture.plan() if v.action == "delete"}
+        found = migrate_trellis.dangling_references(self.fixture.repo, doomed)
+        self.assertEqual([".claude/agents/trellis-check.md"], found["scripts/ours.sh"])
+        self.assertNotIn("scripts/unrelated.sh", found)
+
+    def test_a_file_that_is_itself_being_deleted_is_not_reported(self) -> None:
+        _write(self.fixture.repo, ".claude/agents/trellis-check.md", "x\n")
+        _write(self.fixture.repo, ".claude/agents/trellis-run.md", ".claude/agents/trellis-check.md\n")
+        self.fixture.seal()
+        doomed = {v.path for v in self.fixture.plan() if v.action == "delete"}
+        self.assertEqual({}, migrate_trellis.dangling_references(self.fixture.repo, doomed))
 
 
 class WholesaleTests(FixtureCase):

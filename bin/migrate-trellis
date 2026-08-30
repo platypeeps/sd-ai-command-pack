@@ -419,7 +419,14 @@ def _year_hint(repo: pathlib.Path, source: pathlib.Path) -> int:
 # receipt names but whose bytes drifted is kept too: the consumer edited it,
 # and an edit is the one signal that says a human wanted it.
 
-FOUR_TREES = (".claude", ".agents", ".gemini", ".opencode")
+# The subdirectories an installer renders into. A tree is recognised by
+# having one, which is what makes the set derivable instead of remembered.
+PLATFORM_SUBDIRS = ("skills", "agents", "commands", "rules", "hooks", "lib", "plugins")
+# `.github/` is the one tree here that is also the repository's own, so it is
+# walked only where an installer renders. Every other tree exists because a
+# tool made it, and is walked whole -- which is how `.claude/rules/` and
+# `.claude/sd-ai-command-pack/` come into view at all.
+SHARED_TREES = (".github",)
 FRAMEWORK_SURFACE_PREFIXES = ("trellis", "sd-")
 FRAMEWORK_SURFACE_NAMES = {"security-best-practices"}
 ROUTER_WORKFLOWS = ("ai-review-router.yml", "sd-review.yml")
@@ -444,6 +451,34 @@ class Verdict:
     action: str  # "delete" | "edit" | "keep"
     authority: str
     reason: str
+
+
+def platform_trees(repo: pathlib.Path) -> tuple[str, ...]:
+    """Trees an installer rendered into, enumerated from the repository.
+
+    This was a kept list of four -- `.claude`, `.agents`, `.gemini`,
+    `.opencode` -- and it was wrong in the way kept lists are wrong: it had
+    never heard of `.codex`, so the removal walked past 199 framework files
+    across the eight consumers, including copies of the same
+    `security-best-practices` skill it deleted from the other trees, and the
+    Trellis agents under `.github/agents/`. Deriving the set finds a tree the
+    day an installer invents one.
+    """
+    trees = set()
+    for rel in tracked_files(repo):
+        parts = rel.split("/")
+        if not parts[0].startswith("."):
+            continue
+        # A tree is whatever directly contains a render subdirectory, at one
+        # level or two: `.codex/hooks/` makes `.codex` a tree, and
+        # `.github/copilot/hooks/` makes `.github/copilot` one.
+        for depth in (1, 2):
+            if len(parts) >= depth + 2 and parts[depth] in PLATFORM_SUBDIRS:
+                trees.add("/".join(parts[:depth]))
+    # `.trellis/` and `.sd-ai-command-pack/` match the shape and are not
+    # classified here: `wholesale_verdicts` removes both entire, and a tree
+    # reached by two passes gets two verdicts for every file in it.
+    return tuple(sorted(trees - {".trellis", PACK_RECEIPT}))
 
 
 def tracked_files(repo: pathlib.Path, *specs: str) -> list[str]:
@@ -519,7 +554,7 @@ def trellis_hashes(repo: pathlib.Path) -> dict[str, str]:
     return hashes if isinstance(hashes, dict) else {}
 
 
-def is_framework_surface(path: str) -> bool:
+def is_framework_surface(path: str, trees: tuple[str, ...]) -> bool:
     """A `skills/`, `agents/` or `commands/` entry the framework owns by name.
 
     The prefixes are the framework's own namespaces, so a name is decisive
@@ -536,15 +571,34 @@ def is_framework_surface(path: str) -> bool:
     `security-threat-model`. Those match no prefix and no name, so they fall
     through to "no authority reaches it" and stay (user decision, 2026-08-30).
     """
-    parts = path.split("/")
-    if len(parts) < 3 or parts[0] not in FOUR_TREES:
+    parts = _within_tree(path, trees)
+    if len(parts) < 2:
         return False
-    if parts[1] not in ("skills", "agents", "commands"):
+    if _framework_name(parts[0]):
+        # `.claude/sd-ai-command-pack/` -- the framework's own name as the
+        # directory, one level up from where the surfaces live.
+        return True
+    if parts[0] not in ("skills", "agents", "commands", "rules"):
         return False
-    name = parts[2][:-3] if parts[2].endswith(".md") else parts[2]
-    return name in FRAMEWORK_SURFACE_NAMES or name.startswith(
-        FRAMEWORK_SURFACE_PREFIXES
-    )
+    return _framework_name(parts[1])
+
+
+def _within_tree(path: str, trees: tuple[str, ...]) -> list[str]:
+    """The path's segments below its tree, longest tree first.
+
+    Longest first matters: `.github/copilot/hooks/x.py` belongs to
+    `.github/copilot`, not to `.github`, and reading it against the shorter
+    prefix would put `copilot` where a render subdirectory should be.
+    """
+    for tree in sorted(trees, key=len, reverse=True):
+        if path.startswith(tree + "/"):
+            return path[len(tree) + 1 :].split("/")
+    return []
+
+
+def _framework_name(entry: str) -> bool:
+    name = entry[:-3] if entry.endswith(".md") else entry
+    return name in FRAMEWORK_SURFACE_NAMES or name.startswith(FRAMEWORK_SURFACE_PREFIXES)
 
 
 def names_trellis(path: pathlib.Path) -> bool:
@@ -562,10 +616,18 @@ def classify_four_trees(
     hashes: dict[str, str],
 ) -> list[Verdict]:
     verdicts: list[Verdict] = []
-    for rel in tracked_files(repo, *FOUR_TREES):
+    trees = platform_trees(repo)
+    specs = [
+        f"{tree}/{subdir}" if tree in SHARED_TREES else tree
+        for tree in trees
+        for subdir in (PLATFORM_SUBDIRS if tree in SHARED_TREES else ("",))
+    ]
+    # `git ls-files` with no pathspec lists the entire repository, so an empty
+    # spec list would classify every file in it rather than nothing.
+    for rel in tracked_files(repo, *specs) if specs else []:
         absolute = repo / rel
-        if rel.endswith(("/settings.json", "/package.json")):
-            continue  # structured; handled by settings_verdicts / opencode_stub_verdict
+        if rel.endswith(("/settings.json", "/package.json", "/config.toml", "/hooks.json")):
+            continue  # structured; each has a handler that reads its contents
         if rel in receipt:
             source = sources.get(rel)
             shipped = tombstone_blob(pack_repo, source) if source else None
@@ -592,22 +654,24 @@ def classify_four_trees(
                     Verdict(rel, "keep", "trellis-receipt", "edited since install")
                 )
             continue
-        if is_framework_surface(rel):
+        if is_framework_surface(rel, trees):
             verdicts.append(
                 Verdict(rel, "delete", "surface-name", "framework-owned surface")
             )
             continue
-        parts = rel.split("/")
-        if (
-            len(parts) >= 3
-            and parts[0] in FOUR_TREES
-            and parts[1] in ("hooks", "lib", "plugins")
-            and names_trellis(absolute)
-        ):
-            verdicts.append(
-                Verdict(rel, "delete", "name+content", "platform runtime naming Trellis")
-            )
-            continue
+        parts = _within_tree(rel, trees)
+        if len(parts) >= 2 and parts[0] in ("hooks", "lib", "plugins"):
+            parts = parts[:1] + ["/".join(parts[1:])]
+            if _framework_name(parts[1]):
+                verdicts.append(
+                    Verdict(rel, "delete", "surface-name", "framework-named runtime file")
+                )
+                continue
+            if names_trellis(absolute):
+                verdicts.append(
+                    Verdict(rel, "delete", "name+content", "platform runtime naming Trellis")
+                )
+                continue
         verdicts.append(Verdict(rel, "keep", "none", "no authority reaches it"))
     return verdicts
 
@@ -681,8 +745,10 @@ def _stanza_targets_framework(stanza: object) -> bool:
 
 def settings_verdicts(repo: pathlib.Path) -> list[Verdict]:
     verdicts: list[Verdict] = []
-    for tree in FOUR_TREES:
-        rel = f"{tree}/settings.json"
+    # Enumerated from the repository rather than from the derived tree set: a
+    # tree can carry a settings.json and no render subdirectory at all, and
+    # deriving the list from the trees would then walk straight past it.
+    for rel in tracked_files(repo, ".*/settings.json"):
         path = repo / rel
         if not path.exists():
             continue
@@ -757,27 +823,71 @@ def strip_agents_blocks(text: str) -> str:
 def opencode_stub_verdict(repo: pathlib.Path, doomed: set[str]) -> Verdict | None:
     """`.opencode/package.json` goes only once nothing is left to need it.
 
-    It declares exactly one dependency, `@opencode-ai/plugin`, for the plugins
-    this conversion deletes. Deleting it because it looks orphaned would be a
-    guess; deleting it after confirming every `.opencode/plugins/` file is in
-    the removal set is a consequence.
+    It exists for the OpenCode tree around it -- as a `@opencode-ai/plugin`
+    dependency in five consumers and a bare `{"type": "module"}` in three --
+    so the question is not what it contains but whether anything it configures
+    survives. Deleting it because it looks orphaned would be a guess; deleting
+    it once every other tracked file in the tree is in the removal set is a
+    consequence. An earlier version asked about the payload shape first and so
+    kept a two-line file as the sole survivor of an emptied tree.
     """
     rel = ".opencode/package.json"
-    path = repo / rel
-    if not path.exists():
+    if not (repo / rel).exists():
         return None
-    plugins = [f for f in tracked_files(repo, ".opencode/plugins")]
-    if not plugins or any(f not in doomed for f in plugins):
-        return Verdict(rel, "keep", "none", "OpenCode plugins survive; still needed")
-    try:
-        payload = json.loads(path.read_text())
-    except json.JSONDecodeError:
-        return Verdict(rel, "keep", "none", "not readable JSON")
-    if set(payload) == {"dependencies"} and set(payload["dependencies"]) == {
-        "@opencode-ai/plugin"
-    }:
-        return Verdict(rel, "delete", "structured", "stub for plugins being removed")
-    return Verdict(rel, "keep", "none", "carries more than the plugin stub")
+    rest = [path for path in tracked_files(repo, ".opencode") if path != rel]
+    if rest and not all(path in doomed for path in rest):
+        return Verdict(rel, "keep", "none", "OpenCode content survives; still needed")
+    return Verdict(rel, "delete", "structured", "configures a tree with nothing left in it")
+
+
+def tree_config_verdicts(repo: pathlib.Path, doomed: set[str]) -> list[Verdict]:
+    """A platform tree's own top-level config, which no subdirectory walk sees.
+
+    `.codex/` carries two: a `config.toml` whose first line says it is there
+    for Trellis workflows, and a `hooks.json` that registers the hook scripts
+    under `.codex/hooks/`. The hook registry goes on the same rule as the
+    OpenCode stub -- once everything it points at is in the removal set, it has
+    nothing left to register. A registry still naming a surviving script is
+    kept, because deleting it would silently unregister the consumer's own.
+    """
+    verdicts: list[Verdict] = []
+    for tree in platform_trees(repo):
+        for rel in tracked_files(repo, tree):
+            parts = _within_tree(rel, (tree,))
+            if len(parts) == 1 and _framework_name(parts[0]):
+                # `.github/sd-github-review.json` sits at a tree's root rather
+                # than in a render subdirectory, so no walk below reaches it.
+                verdicts.append(
+                    Verdict(rel, "delete", "surface-name", "framework-named tree config")
+                )
+
+        config = repo / tree / "config.toml"
+        rel = f"{tree}/config.toml"
+        if config.is_file() and names_trellis(config):
+            verdicts.append(
+                Verdict(rel, "delete", "name+content", "platform config naming Trellis")
+            )
+
+        registry = repo / tree / "hooks.json"
+        rel = f"{tree}/hooks.json"
+        if not registry.is_file():
+            continue
+        try:
+            text = registry.read_text()
+        except OSError:
+            continue
+        referenced = [
+            path for path in tracked_files(repo, f"{tree}/hooks") if path in text
+        ]
+        if referenced and all(path in doomed for path in referenced):
+            verdicts.append(
+                Verdict(rel, "delete", "structured", "registers only hooks being removed")
+            )
+        else:
+            verdicts.append(
+                Verdict(rel, "keep", "none", "registers a hook that survives")
+            )
+    return verdicts
 
 
 def wholesale_verdicts(repo: pathlib.Path) -> list[Verdict]:
@@ -818,7 +928,7 @@ def consumer_plan(repo: pathlib.Path, pack_repo: pathlib.Path) -> list[Verdict]:
     outside = [
         rel
         for rel in sorted(receipt)
-        if not rel.startswith(FOUR_TREES)
+        if not rel.startswith(platform_trees(repo))
         and rel != AGENTS_FILE
         and not rel.startswith((".trellis/", f"{PACK_RECEIPT}/"))
         and (repo / rel).exists()
@@ -845,6 +955,7 @@ def consumer_plan(repo: pathlib.Path, pack_repo: pathlib.Path) -> list[Verdict]:
     stub = opencode_stub_verdict(repo, doomed)
     if stub is not None:
         verdicts.append(stub)
+    verdicts.extend(tree_config_verdicts(repo, doomed))
 
     return sorted(verdicts, key=lambda v: (v.action, v.path))
 
@@ -880,6 +991,36 @@ def _prune_empty_directories(repo: pathlib.Path, removed: list[str]) -> None:
     for folder in sorted(candidates, key=lambda path: -len(path.parts)):
         if folder.is_dir() and not any(folder.iterdir()):
             folder.rmdir()
+
+
+PATH_TOKEN_RE = re.compile(r"[\w./-]{4,}")
+
+
+def dangling_references(repo: pathlib.Path, doomed: set[str]) -> dict[str, list[str]]:
+    """Surviving files that name a path this removal deletes.
+
+    These are the repository's own files -- `tools/check_trellis_placeholders.py`
+    in one consumer, `tests/review-guard.test.mjs` in another -- and they are
+    correctly left alone, which is exactly why they have to be reported. A
+    removal that silently breaks a consumer's own test suite has negatively
+    affected their pull requests, which is the one thing this conversion is
+    not allowed to do. Deciding what to do about each is the operator's call
+    in the pull request; finding them is not.
+    """
+    found: dict[str, list[str]] = {}
+    for rel in tracked_files(repo):
+        if rel in doomed or rel.startswith(("docs/work/", "docs/spec/")):
+            continue
+        try:
+            text = (repo / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue  # binary, or gone; neither can carry a readable reference
+        hits = sorted({
+            token for token in PATH_TOKEN_RE.findall(text) if token in doomed
+        })
+        if hits:
+            found[rel] = hits
+    return found
 
 
 def report_consumer_plan(verdicts: list[Verdict], out) -> None:
@@ -927,6 +1068,19 @@ def run_consumer(repo: pathlib.Path, pack_repo: pathlib.Path, *, apply: bool) ->
 
     verdicts = consumer_plan(repo, pack_repo)
     report_consumer_plan(verdicts, sys.stdout)
+
+    doomed = {v.path for v in verdicts if v.action == "delete"}
+    dangling = dangling_references(repo, doomed)
+    for rel, hits in sorted(dangling.items()):
+        shown = ", ".join(hits[:3]) + (" ..." if len(hits) > 3 else "")
+        print(f"  references a removed path: {rel} -> {shown}", file=sys.stdout)
+    if dangling:
+        print(
+            f"  {len(dangling)} surviving file(s) name a path this removal deletes; "
+            "each is the repository's own and is left alone",
+            file=sys.stdout,
+        )
+
     if imports or specs:
         active = sum(1 for item in imports if not item.archived)
         print(

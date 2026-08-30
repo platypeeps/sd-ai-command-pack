@@ -172,20 +172,45 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       read one `planned_imports()` — counting for the plan and enumerating for the run out of
       two code paths is how a plan starts describing something other than what happens.
 
-      **Three defects the dry runs surfaced, each a second source of truth.** `AGENTS.md` was
-      coded against a marker spelling no repository uses; the real files carry two marked
-      blocks (`TRELLIS:*` and `SD-AI-COMMAND-PACK:ROUTING:*`), and in `sd-github-review` all 57
-      lines are inside them, so the verdict there is `delete` — a plan that says `edit` and
-      then unlinks the file is describing something else. `.opencode/package.json` drew two
-      verdicts, a keep and a delete, from two classifiers. And empty-directory pruning walked a
-      hand-kept list of trees that had already drifted past `.prism/` and `.gito/`; it now
-      derives the set from the paths actually deleted.
+      **Every remaining defect was one kept list or another, and they were found by measuring
+      rather than by testing.** The pattern is worth naming once because it recurred five times
+      in a single sitting:
 
-      Measured across all eight, applied to throwaway clones: 6,887 files removed, 7 edited,
-      886 work items and 182 spec files imported, zero deletions outside the framework
-      prefixes, zero empty directories left. The surviving keeps are the repo-own skills the carve-out
-      protects (`playwright`, `security-threat-model`, and each repository's own), plus files
-      edited since install.
+      - *The four platform trees* were a constant. There are five — nothing had heard of
+        `.codex/`, which carries Trellis agents, hooks and its own copy of the
+        `security-best-practices` skill the same constant deleted from the other four. Nor of
+        `.github/agents/`, nor of the nested `.github/copilot/hooks/`. The set is now derived:
+        a tree is whatever directly contains a render subdirectory, at one level or two, minus
+        the two trees `wholesale_verdicts` already owns entire. That found 531 files the
+        constant walked past.
+      - *Empty-directory pruning* walked its own list of trees, which had drifted past
+        `.prism/` and `.gito/`. It derives the set from the paths actually deleted now.
+      - *`AGENTS.md` markers* were coded against a spelling no repository uses. The real files
+        carry two marked blocks, and in `sd-github-review` all 57 lines sit inside them, so the
+        verdict there is `delete` — a plan that says `edit` and then unlinks the file is
+        describing something else.
+      - *`.opencode/package.json`* drew two verdicts, a keep and a delete, from two
+        classifiers; and the surviving rule asked what the file contained before asking whether
+        anything it configures survives, so a two-line `{"type": "module"}` was left as the
+        sole occupant of an emptied tree.
+      - *An empty pathspec list* made `git ls-files` enumerate the whole repository. That one
+        the tests caught, which is the only reason it is in this list rather than in a
+        consumer's pull request.
+
+      **Surviving files that name a deleted path are reported, never rewritten.** 160 of them
+      across the eight: Swift sources citing a spec path in a comment,
+      `scripts/check_review_readiness.sh`, `tests/review-guard.test.mjs`, a repository's own
+      `.instructions.md`. They are the repository's own files and correctly left alone — which
+      is exactly why they have to be surfaced, because a removal that silently breaks a
+      consumer's test suite has negatively affected their pull requests, and that is the one
+      thing this conversion may not do.
+
+      Measured across all eight, applied to throwaway clones: 7,418 files removed, 7 edited,
+      886 work items and 182 spec files imported, 160 dangling references reported, zero
+      deletions outside the framework prefixes, zero empty directories left. All 249 survivors
+      are repo-own skills the carve-out protects (`playwright`, `security-threat-model`,
+      `amc-server-compatibility`, `loadsmith-swift-app`, `hoa-manager-payload-tenant-safety`,
+      `rwbp-next-payload`) or files edited since install.
 - [ ] P1 / P2 / P3 / P4 / P5 — platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b
