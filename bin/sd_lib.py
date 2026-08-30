@@ -122,6 +122,16 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
     return completed.stdout.strip()
 
 
+def git_output(args: list[str], root: pathlib.Path) -> str | None:
+    """`git <args>` in `root`: stripped stdout, or None when git cannot answer.
+
+    The public face of the same read-only query the helpers below use, so a
+    sibling tool that needs one more `git` fact does not grow a second
+    subprocess policy (timeout, no shell, failure-is-None) of its own.
+    """
+    return _git(args, root)
+
+
 def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
     """The enclosing worktree's own root, or None outside a repository.
 

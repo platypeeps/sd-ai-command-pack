@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/platypeeps/sd-ai-command-pack/.github/sd-review.schema.json",
+  "title": "sd-review routing policy",
+  "description": "Policy for `bin/sd-review`, read from `.github/sd-review.json`. JSON, not YAML or TOML, per decision D-C1: PyYAML is not stdlib and tomllib is absent from the 3.9 interpreter at /usr/bin/python3. Every key is optional; an absent key takes the built-in default documented in `DEFAULT_POLICY` in `bin/sd-review`. An absent FILE means the whole built-in default is used. A file that exists and is malformed is an error, never a silent fall back: the author who wrote it meant it. The routing rules themselves are not configurable -- they live in the pure function `route()` in `bin/sd_route.py` and are the same in every repository; this file only supplies the data that function reads.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this schema. Ignored by the reader."
+    },
+    "tier_order": {
+      "type": "array",
+      "description": "Review tiers from cheapest to most expensive. Escalation moves one step to the right and stops at the end; `skip` must be first if the repository wants a free tier at all. Names must be unique.",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "tiers": {
+      "type": "object",
+      "description": "Which backends each tier chains, in order. Every key must appear in `tier_order` and every backend named must exist in the backend table in `bin/sd-review`; a typo is rejected at load time rather than silently reducing the providers a change is reviewed by. A tier missing from this object chains nothing.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "default_tier": {
+      "type": "string",
+      "description": "The tier a change starts at when no category matches. Must be one of `tier_order`."
+    },
+    "categories": {
+      "type": "array",
+      "description": "Path-shaped classes of change, matched required-first: a category with `required: true` outranks any non-required one no matter which order they appear in. The first match names the starting tier.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name", "paths"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "description": "Reported in the routing decision."},
+          "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "Globs; `**` matches across directory separators."},
+          "tier": {"type": "string", "description": "Starting tier for this category. Must be one of `tier_order`."},
+          "required": {"type": "boolean", "description": "Match this category before any non-required one."}
+        }
+      }
+    },
+    "docs_skip": {
+      "type": "array",
+      "description": "Allow-list: a change whose EVERY path matches one of these globs plans `skip`. Safe to widen, because `never_skip` is checked first and always wins.",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "never_skip": {
+      "type": "array",
+      "description": "Deny-list: any path matching one of these globs removes `skip` from the table for that change, whatever `docs_skip` says. This is the non-removable half of the pair -- it is why a repository can declare documentation free and still keep one directory inside it reviewed.",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "sensitive": {
+      "type": "array",
+      "description": "Globs whose presence escalates the tier one step. Workflow files, credentials handling, and installers are the usual entries.",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "large_change_lines": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Added-plus-removed lines above which the tier escalates one step. Default 800."
+    },
+    "authors": {
+      "type": "array",
+      "description": "GitHub logins this repository's framework rules hard-fail for in CI (R10-D5). Everyone else gets a reporting, passing check, so a collaborator who has not adopted the framework can never be blocked by it. The local review lane reads this list and reports it; it is the CI lane, installed separately by `sd-review setup-github`, that acts on it.",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "severity_floor": {
+      "type": "string",
+      "enum": ["high", "medium", "low", "unspecified"],
+      "description": "The severity at which a finding is dispositioned `blocking` rather than `advisory`, and therefore the severity at which `sd-review` exits 1. Findings are dispositioned locally and are never posted anywhere; this only decides how the local run reports them. Default `medium`.",
+      "default": "medium"
+    },
+    "challenge_providers": {
+      "type": "array",
+      "description": "Backends added to the front of the chain when `--challenge` is passed. They are added to the tier's chain, not substituted for it: a challenge run is an extra stance, not a cheaper review.",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "planning_providers": {
+      "type": "array",
+      "description": "Backends added to the front of the chain for `--scope planning`. Defaults to `codex`, which is the designated planning-review provider.",
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}
