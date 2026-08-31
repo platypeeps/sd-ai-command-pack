@@ -63,7 +63,7 @@ one engineer plus agents.
 
 - [ ] M0 tombstone release 0.72.0 tagged; `Pack version update check` on any consumer names it.
 - [ ] Step 0: release/gate jobs deleted; every remaining CI job green.
-- [ ] Steps 1–3: one copy of every shipped file; `.trellis` gone from the pack; new installer + 12 skills land; scratch-repo `sd-plan` → `sd-ship` E2E merges a PR with only `<work>/**` tracked.
+- [x] Steps 1–3: one copy of every shipped file; `.trellis` gone from the pack; new installer + 12 skills land; scratch-repo `sd-plan` → `sd-ship` E2E merges a PR with only `<work>/**` tracked.
 - [ ] Step 3-c: one removal PR per consumer (9); zero trellis/router greps per repo; CI green.
 - [ ] Steps 4–7: routers retired, se-* folded as sd-*, machine cleanup leaves `handoff/`+`intents/` intact, backlog parked, 1.0.0 tagged.
 - [ ] Steps 8–11: plugin interface, sd-writing-pack migrated, vault move last with golden-corpus byte-compare green.

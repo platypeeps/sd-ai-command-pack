@@ -53,12 +53,21 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   exists, which was the precondition for landing this at all.
 - [x] 2 — `docs/work` replaces `.trellis`; sd_route.py. `ls .trellis` fails, `bin/sd_route.py`
   and `tests/test_sd_route.py` are in place, and `sd-docs-lint` reports clean on this repo.
-- [ ] 3 — new installer + 12 skills + sd-review backends. **Split into reviewable sub-PRs
+- [x] 3 — new installer + 12 skills + sd-review backends. **Split into reviewable sub-PRs
   (2026-08-29): step 3 replaces ~56k LOC of `templates/scripts/` + `installer/` with ~7k under
   `bin/`; landing that as one pull request would be unreviewable, and the old world must keep
   working until the new installer is proven. Sub-PRs land on `main` in order, each independently
   green; 3-c does not begin until all of them have landed, so the "consumers cannot plugin-update
   between step 1 and step 3" window is unchanged.**
+
+  **Closed 2026-08-30, on the row's own check and not a proxy for it.** The table row gates
+  step 3 on "scratch-repo sd-ship E2E; installer parity test green". The parity test has been
+  green since 3e; the end-to-end ran at 3f in two halves — the local stages in a fixture, the
+  push/PR/settle/merge sequence against `platypeeps/sd-e2e-scratch` — and its findings are
+  recorded there rather than summarized away. All seven sub-items are ticked — 3a, 3b,
+  3c-review, 3c-cwd, 3d, 3e, 3f — each against the check it named, except 3c-cwd, which named
+  no check because it was not a planned sub-item at all: it is the R10-D6 follow-up found while
+  reviewing 3c-review, and it carries its own evidence in its entry.
   - [x] 3a — `bin/sd_lib.py` + `bin/sd-check` (#601); `bin/sd-handoff` + `bin/sd-handoff-restore` (#602, R10-D3). Additive only.
   - [x] 3b — `bin/sd-status` + `bin/sd-pr-state` (#603). Read-only, GitHub-derived. `sd-status` reports
     branch-protection **enforcement state**, not just presence: `enforce_admins`, `strict`, the
@@ -147,12 +156,12 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         It enumerates tracked files from git and flags shell by suffix *or* shebang, asserts the
         render surface under `skills/` is markdown only, and confines shell to `.github/scripts/`.
         Verified by breaking it: staging one `.sh` under `skills/` fails all three assertions.
-  - [ ] 3f — the scratch-repo end-to-end this step's own check names. The table row at the
+  - [x] 3f — the scratch-repo end-to-end this step's own check names. The table row at the
         top of this file gates step 3 on "scratch-repo sd-ship E2E; installer parity test
-        green". The parity test has been green since 3e. **The end-to-end has not been run**,
-        and 3-c went ahead of it. Recorded as an open box rather than absorbed into a ticked
-        parent, because a step marked done on a check that never ran is the exact failure
-        critique 4 exists to end. Half of the verification section's step-3 paragraph is
+        green". The parity test has been green since 3e. **The end-to-end had not been run when
+        this box was opened**, and 3-c went ahead of it. It was kept as an open box rather than
+        absorbed into a ticked parent, because a step marked done on a check that never ran is
+        the exact failure critique 4 exists to end; the tick below is the check having run. Half of the verification section's step-3 paragraph is
         already covered by fixtures — a markdown-only change plans `skip`
         (`test_documentation_only_change_plans_skip`) and an unmatched change falls back to
         the default tier (`test_an_unmatched_change_falls_back_to_the_default_tier`), both in
@@ -189,10 +198,29 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         lacking a `.gitignore` any real Python repository has, not a pack defect — the fixture
         was corrected and the correction is recorded here rather than quietly re-measured.
 
-        **Still open, and this is why the box is not ticked:** the half that ends *in a merged
-        pull request* has not run. It needs a live GitHub repository, so it is a deliberate
-        stop rather than an oversight. Everything the local stages can prove is proven; the
-        `sd-ship` push/PR/settle/merge sequence is not.
+        **The remaining half ran the same day, against a live repository.** A throwaway
+        private repository, `platypeeps/sd-e2e-scratch`, took the same fixture, and the
+        `sd-ship` push/PR/settle/merge sequence ran end to end: pull request #1 opened with a
+        `Work:` line resolving to the item, Copilot requested once for head `048d0889`, and the
+        squash merge landed as `0d6e93dd` with an explicit `-t`/`-b`, so `git log main
+        --format=%s | grep -c '^wip:'` is 0. B5a was re-measured on the merged `main` rather
+        than on the branch: seven tracked files, `git status --porcelain` empty, and zero
+        tracked paths matching `.trellis`, `.claude`, `.sd-*`, or the pack's name — the only
+        thing the flow added to somebody else's repository is `docs/work/`.
+
+        The settle loop earned the round trip. Copilot's one inline comment was correct: the
+        pull request's own motivation is a caller who wants no terminal punctuation and used
+        `rstrip("!")` to get it, and that was the single path with no test — also the path
+        where `rstrip` is wrong, because a name ending in `!` loses a character it owns. The
+        test was added, `make check` stayed green, the thread got a reply naming the fix
+        commit, and only then did the merge run.
+
+        **What this run does not prove, stated rather than implied:** the scratch repository
+        has no branch protection and no CI checks at all, so the merge was gated on
+        mergeability and a human reading the review, and nothing else. That is the honest
+        shape of critique 4's conditional doctrine rather than a hole in the exercise — the
+        settle loop's behaviour against required contexts is what the six consumer pull
+        requests of 3-c exercised, in repositories that do enforce them.
 - [x] 3-c — consumer removal PRs (9); removal only
       - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
       - [x] the nine removal pull requests, opened 2026-08-30 and merged the same day on the
