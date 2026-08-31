@@ -905,6 +905,9 @@ dashboard returns to GET-only — which is where P3 already left it, so the reve
 rather than a rewrite.
 
 **R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
+*Superseded in part: the step-7 restore is postponed to a manual trigger at the end of the
+rollout — see the amendment at the end of this record. The drop itself stands unchanged, and
+the "step 7" wording below is the original decision, kept as written.*
 
 Corrected before merge, because the first version of this record was wrong. The claim was that
 `unittest (macos-latest, 3.13)` at 12m18s is the long pole in every CI run. It is not. Measured on
@@ -978,6 +981,32 @@ required context come back at **step 7**, which already carries "verify protecti
 checklist. If step 7 lands without the leg restored, the rollout has quietly kept a temporary
 measure, and CONTRIBUTING's "restored at step 7" sentence becomes the falsifiable record that it
 did not.
+
+**Amendment (user, 2026-08-31) -- the restore is postponed past step 7 and becomes a manual
+trigger.** The user will restore the leg by hand when the rollout is done, rather than at step 7.
+The reason to do it is straightforward: step 7 is not the end of the work -- steps 8 through 11
+still land pull requests, so restoring a ten-times-cost runner leg at step 7 pays for it on every
+one of them, which is the same argument that dropped the leg in the first place. Deferring to the
+actual end of the rollout is the consistent position, not a new one.
+
+What this costs, and it is worth naming because the paragraph above is what pays: **the deadline
+was the mechanism.** Standing rule 1 asks a removal to carry a criterion that fails loudly if
+ignored, and "step 7" was falsifiable precisely because step 7 is a dated event someone has to
+close out. "When we are done" is not: nothing trips if it never happens, and the rollout can end
+with the temporary measure quietly permanent. That is the user's call and it is recorded as their
+call; what remains is that the absence stays visible rather than silent. So the CONTRIBUTING and
+README paragraphs keep saying, in the present tense and with no date attached, that **no CI job
+runs on macOS at all** and that macOS-only Python behaviour, filesystem case-insensitivity, and
+platform path handling are unverified in CI. Those sentences are now the whole of the record. They
+do not expire, which is the point: a reader arriving at any later date sees a live gap rather than
+a promise whose due date has passed.
+
+Step 7's checklist loses the restore line. It keeps "verify protection", which is a separate
+obligation and unaffected. The ordering constraint is not cancelled, only deferred with the work:
+whenever the leg does come back, branch protection gains the sixth required context **after** the
+workflow change merges and the job has reported once, never before -- the mirror of the relax-first
+ordering that removing it required, and for the same reason. A required context that has never
+reported blocks every pull request including the one that would fix it.
 
 **R11-D6 (user, 2026-08-30) -- the `Shell coverage` job is deleted at the step-3 sub-PR 3e,
 because what it measures ceases to exist.**

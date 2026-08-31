@@ -905,7 +905,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 - [ ] 4b-iv — `sd-plan --from gh:o/r#N|jira:KEY` seeds `## References`
 - [ ] 5 / 5b
 - [ ] 6 / 6b
-- [ ] 7 — tag 1.0.0
+- [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
+  manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
+  so step 7 keeps "verify protection" and nothing else changes here.
 - [ ] 8 / 9 / 10 / 11
 
 ## Risks (consolidated)
