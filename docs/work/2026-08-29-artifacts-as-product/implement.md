@@ -1407,7 +1407,72 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     and system returns only dated history and one deliberate lineage comment;
     `dashboard.py` compiles. In this repository, `ls .github/` is down to
     `scripts/`, `workflows/`, and five files, none of them Trellis.
-- [ ] 6 / 6b
+- [x] 6 — 2026-08-31. M3, the machine cleanup. Deletion by name, because the
+  receipt grants no authority over any of it: these directories were written by
+  the fleet installer the receipt replaced, so `--uninstall` would correctly
+  refuse to touch them. That is the reason the plan says "by name" rather than
+  "receipt-driven" for this half.
+  - **Nothing read them.** Checked before deleting, across the pack's `bin/`,
+    `tests/`, `skills/` and `agents/`, the whole `~/repos/system` tree, and every
+    installed render on all four platform homes: **zero references** to
+    `work-loops`, `fleet-timing`, or `fleet-campaigns`.
+  - Deleted under `~/.local/state/sd-ai-command-pack/`: `work-loops/` (10
+    digest-keyed loop states, newest 2026-08-29), `fleet-timing/` and
+    `fleet-campaigns/` (release-refresh timings back to 0.55.2 in July), and
+    `machine/`, which was **already empty**. State root is now exactly
+    `handoff/` and `installed.json` — nothing else.
+  - **`handoff/` survived with its pre-step timestamps** (created 2026-08-29
+    18:55, mtime 18:56), which is the check: not "the directory exists" — a
+    delete-and-recreate would satisfy that — but that it was never touched.
+    `intents/` does not exist yet; the dashboard creates it at 6b, so there was
+    nothing to protect and the record says so rather than claiming a pass.
+  - The plan's real check here was "a packet written before the step is
+    restorable after", and `handoff/` was empty, so that check had no subject.
+    Ran the mechanism end-to-end against the post-cleanup state root instead:
+    `sd-handoff --cwd <scratch>` wrote a 703-byte packet, `--show` read it back,
+    and a second `--show` refused — *"a packet loads exactly once"*. Probe
+    packet removed; `handoff/` back to empty.
+  - **Plugin rows: 7 → 0.** One user-scope and six project-scope rows for
+    `sd@sd-ai-command-pack 0.71.62`, all pointing at the same cache install. The
+    user row went through `claude plugin uninstall`. The six project rows did
+    **not**, and the reason is a standing constraint: run from a project
+    directory, the CLI *creates* a `.claude/settings.json` holding
+    `{"enabledPlugins": {}}` in a repository that had none — the framework
+    altering a repo file for its own purpose. Verified by running it once in
+    `anomaly-metric-creator` and watching `git status` go from clean to
+    `?? .claude/settings.json`; the stub was removed and that repository is
+    clean again. The remaining five rows were removed from the global
+    `installed_plugins.json`, which is where they actually live, touching no
+    repository. `claude plugin list` agrees: four plugins left, none of them sd.
+  - Marketplace registration and the 0.71.62 cache install removed with it. The
+    M0 tombstone is unaffected — it is a published release on GitHub, not a
+    local registration, so the reach-back signal for the second machine still
+    stands.
+  - **Both spellings, zero.** `find` over `$HOME` for `work-loops`/`work_loops`,
+    `fleet-timing`/`fleet_timing`, `fleet-campaigns`/`fleet_campaigns`, and for
+    an underscore `sd_ai_command_pack` root under `.local`, `.cache`, `.config`:
+    nothing.
+  - **The re-render, which the status line asked for.** `--status` reported
+    "3 modified". They were not hand edits: the three `sd-skill-adopt` renders
+    (claude, codex, opencode) were stale against 5b-i's rewrite of that skill.
+    `--pull` re-rendered; `--status` now reads the merged commit with **0
+    missing, 0 modified**, 76 surfaces on each of three platforms.
+  - **OmniRoute residue (R11-D2) is already gone**, so the list this step was to
+    print is empty: `~/repos/ai/OmniRoute`, `~/repos/system/local-OmniRoute`,
+    and `~/repos/platypeeps/omniroute-test` are all absent, `~/.claude.json`
+    holds no matching project entry, and no `OMNIROUTE_*` name is exported.
+    Recorded as a finding, not claimed as a deletion this step performed.
+  - **Left alone, and named rather than swept.** Three orphaned plugin cache
+    trees survive their uninstalled plugins — `kimi-marketplace` (45M),
+    `google-gemini` (8.6M), `openai-codex` (320K) — plus two `temp_git_*`
+    directories and a `google-gemini` marketplace stanza in
+    `~/.claude/settings.json`. They belong to steps 3a/3b, whose checks asked
+    whether the vendored agents still resolve, not whether the cache was swept.
+    Separately, three of the four plugin `bin` directories on that file's `PATH`
+    point at versions that no longer exist — including the claude-mem one, which
+    names 13.13.1 while 13.18.0 is installed. All of it is user-owned; listed
+    here for a decision rather than deleted under a step that did not ask for it.
+- [ ] 6b — dashboard swap to :8767 behind the parity checklist.
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
