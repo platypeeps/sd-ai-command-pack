@@ -1157,9 +1157,75 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `prd.md` the four sibling class letters), each caught; two more on the
     fold guards (remove four folded skills, restore a `# SE ` title), each
     caught.
-- [ ] 5-iv — vault-side retarget of the 8 callers in 2 routines, **before** any
-  deletion; then delete the old `se-*` renders from `~/.claude/skills`,
-  `~/.codex/skills`, `~/.claude/agents` and `~/.codex/agents`
+- [x] 5-iv — 2026-08-31. Retarget, install, delete, in that order. Two of the
+  three enumerations I started from were wrong, and both were wrong the same
+  way: written from the plan instead of read off the machine.
+
+  - The vault half was smaller than the plan implied and needed no decision.
+    Eight tokens in two Scheduled Task files — `se-research` ×6, `se-scan` ×2 in
+    `market-watch` and `blog-idea-accept` — retargeted and committed before
+    anything was deleted, because `market-watch` runs unattended at 03:00 and a
+    routine naming a skill that no longer exists fails into whatever the session
+    improvises. The "five live vault docs citing `se-ai-command-pack`" I had
+    flagged as a decision are not callers: `VAULT-STRUCTURE.md` and `Schema.md`
+    name the old pack **inside a retarget note dated 2026-08-30**, which is the
+    sentence explaining what moved; `Vault Map.md`, `Schema.md:105` and
+    `vault-normalize.py:202` carry it as a **project-slug vocabulary value**, and
+    deleting the slug would orphan every note already tagged with it. Left alone,
+    deliberately.
+  - The Codex agent lane is retired (user, 2026-08-31). Five hand-written
+    `~/.codex/agents/se-*.toml` had no producer in the new pack, and the
+    alternative was a TOML emitter — the first non-verbatim render in a pack
+    whose whole install is byte copies, and a translation layer whose output
+    could only be checked by asserting the translation ran. Cost checked before
+    proposing it rather than after: three folded skills name the agent trio, and
+    all three make the delegation optional (`sd-typed-holes` says "optionally
+    delegate", `sd-research` says a unit "may be dispatched"), so a Codex session
+    degrades to running the passes inline. Nothing in `~/.codex/config.toml`
+    referenced them.
+  - **Two roots the plan did not know about**, found by running the old pack's
+    own `remove --dry-run` instead of deleting the four paths from the checklist:
+    `~/.config/agents/skills/` held 196 files, and `~/.se-ai-command-pack/` held
+    the receipt. 599 files removed in total; the dry-run was first checked to
+    contain zero `sd-` paths. The remover preserved two agents whose content
+    differed from what it installed — `se-claim-verifier` and `se-source-reader`,
+    the same two whose installed `tools:` had drifted from their templates, which
+    is how 5-i found them — plus 56 `.bak` files it never owned. Deleted by hand
+    after confirming the `sd-*` successors carry identical tool sets.
+  - **The enumeration I got wrong, and only found by breaking it.** I swept the
+    vault and `~/repos/system` for callers and deleted. `sd-writing-pack` points
+    an `Agent` at `~/.claude/skills/se-research/SKILL.md` and
+    `~/.claude/skills/se-fact-check/SKILL.md` by absolute path, from four
+    pipeline steps — so the delete broke it, and the doctrine this step is built
+    on ("retarget before deletion") was satisfied for two consumers out of three.
+    Fixed in `sd-writing-pack@1010ec4`: `sd-research`, `sd-fact-check`,
+    `sd-propose-skills` across eight files. The lesson is the same one as the H1
+    miss in 5-iii, in a different shape: a sweep over the consumers I could name
+    cannot find the consumer I did not think of. The check that would have caught
+    it is grepping for the *installed paths* about to be deleted, machine-wide,
+    rather than for the skill names in the repositories I had in mind.
+  - The break exposed a claim that was false before the fold. Four places in
+    `sd-writing-pack` said these skills carry `disable-model-invocation: true`
+    and are therefore slash commands the pipeline cannot fire. The evidence
+    against that is in the pack the claim was written about:
+    `~/repos/platypeeps/se-ai-command-pack/tests/test_generate.py:320` asserts
+    the marker is **absent** from `se-research`. That checkout is archived at
+    step 7, so the claim carries forward here instead —
+    `KindMarkerTests.test_skills_do_not` asserts every surface that is not one of
+    the eleven commands, `sd-research` and `sd-fact-check` among them, carries no
+    `disable-model-invocation`. The sub-agent handoff
+    is still right — a research pass reads a great deal and none of it belongs in
+    the pipeline's context — so the mechanism stayed and the reason was corrected.
+    Same for `model: opus`, which the frontmatter never pinned.
+  - Checks, run: `ls ~/.claude/skills | grep -c '^se-'` = 0, same for
+    `~/.codex/skills` and `~/.config/opencode/commands`; `~/.claude/agents` holds
+    5 `sd-*` and 0 `se-*`; `~/.codex/agents`, `~/.config/agents` and
+    `~/.se-ai-command-pack/` no longer exist. 76 surfaces render to three
+    platforms. `grep -rn 'se-research\|se-scan' 'System/Scheduled Tasks/'` = 0,
+    and `sd-research`/`sd-scan` both resolve. Every `~/.claude/skills/<name>`
+    path in `sd-writing-pack`'s live surfaces now points at a directory that
+    exists. **Not verified:** the next unattended `market-watch` run at 03:00 —
+    that is tomorrow's evidence, and nothing here can stand in for it.
 - [ ] 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a

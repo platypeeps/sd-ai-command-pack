@@ -42,6 +42,10 @@ instructions embedded in a quoted string, and producing that would be a
 translation layer — the one thing this renderer refuses to be, since a
 translated file cannot be checked by comparing bytes. The limit is a test, not
 a note: `tests/test_sd_agents.py` asserts nothing lands in `~/.codex/agents`.
+The pack neither renders there nor removes what it finds there; what the test
+guarantees is that the installer writes nothing, not that the directory is
+absent. The three skills naming the agent trio all make the delegation optional,
+so a Codex session runs those passes inline rather than losing them.
 
 Antigravity is deliberately **not** rendered. Its skill format is byte-identical
 to Claude's, but which of three candidate roots `agy` actually loads is
