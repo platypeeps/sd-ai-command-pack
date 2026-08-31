@@ -542,7 +542,47 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `agents/` directory would not have installed anywhere — but building the lane with
     nothing to put in it is machinery ahead of need (standing rule 1). It belongs to
     step 5, which folds five real `se-*` agents and gives the lane its first content.
-- [ ] P3 / P4 / P5 — rest of the platform sweep (renamed from `3a`–`3e` on 2026-08-30;
+- [x] P3 — 2026-08-30, in two PRs because the step has two unrelated halves and a
+      five-line ordering fix does not belong in the same review as a new server.
+  - **installed.json canonicalization (#627).** `owned` was written in render order and
+    agreed across runs by accident; sorting it by path after the hook row is appended
+    makes the receipt a diffable artifact rather than one whose rows churn when the
+    render loop is nested the other way. Verified: two runs of the same checkout write
+    identical bytes, and the live receipt's 47 rows are sorted.
+  - **Dashboard on :8768.** Both named checks pass against the running server:
+    `curl :8768/api/state` reports **78 repos** (the check asks for ≥10), and
+    `sd-dashboard index --dump` twice is byte-identical. `:8767` answered 200 throughout,
+    so the two dashboards coexist as the 3c-to-6b window requires. `POST /api/state`
+    returns 501 — the handler implements `do_GET` and nothing else, which is the design
+    rather than an omission: a server that cannot write cannot drift into committing,
+    pushing, or running agents on a page load, and the test asserts the absence of
+    `do_POST`/`do_PUT`/`do_DELETE` so a future tab cannot quietly add one.
+  - 372 lines across `dashboard/` and `bin/sd-dashboard`, against the design's 2,500 cap.
+    22 tests over real git repositories in a scratch root — a mocked git would only prove
+    the mock agrees with itself.
+  - **Deliberately not built, so the gap is a record and not a discovery later:**
+    - Three of the five verbs. `install` (the LaunchAgent), `item set-status` (the intents
+      lane) and `export --obsidian` land with the tabs they serve, under the parity
+      checklist. Shipping them as stubs would put three verbs in an inventory that is
+      supposed to be a promise.
+    - Eight of the nine tabs, the `dashboard.d/*.py` plugin contract, and RUN_ALLOWLIST.
+      P3's checks name `/api/state` and the dump; the tabs are 4b and 6b work.
+    - The SQLite index. `sd-dashboard index` collects and reports; it writes no store,
+      because step 4b is where the schema and names are reconciled and inventing a
+      JSON one here would be a second store to migrate.
+  - **D14 is still undecided, so the server binds loopback.** That is the option that
+    cannot expose the fleet while the decision is open; widening it is a decision record,
+    not a flag somebody sets in passing. Today's tailnet PWA writes remain on `:8767`
+    until 6b, so nothing regresses yet.
+  - The repo root comes from `SD_REPO_ROOT`, never from an argument. R10-D6 holds here
+    like everywhere else: the dashboard reads many repos and is aimed at none, and a test
+    asserts no verb grows `--repo`/`--root`/`--checkout`/`--directory`.
+  - Noted, not fixed: `LINT_RUFF_PATHS`/`LINT_MYPY_PATHS` in the Makefile are still a
+    hand-maintained list directly under a comment explaining that a hand-maintained list
+    is how every `bin/` file went unlinted in CI until 2026-08-29. `dashboard/` and
+    `bin/sd-dashboard` are added to both, but the next file added will face the same
+    trap. Deriving the list is its own change.
+- [ ] P4 / P5 — rest of the platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b
 - [ ] 5 / 5b
