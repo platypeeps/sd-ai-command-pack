@@ -1385,6 +1385,21 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     so the file is deleted outright; and ruff's `extend-exclude` named
     `.github/skills` and `tests/fixtures/trellis-scripts`, the second of which
     was also already gone.
+  - **`.github/copilot-instructions.md` was the other half, and Copilot found
+    it.** The review flagged two deleted paths the file still named. Enumerating
+    every path it named found the real state: of the vendored-payload families
+    it listed — `.trellis/scripts/**`, platform skill and command trees under
+    seventeen tool directories, `.github/copilot/**`, `scripts/trellis-*.sh`,
+    `.gito/`, `.prism/`, `.sd-ai-command-pack/`, `docs/SD_AI_COMMAND_PACK.md` —
+    **not one still exists as tracked content**, and `scripts/` is not a
+    directory in this repository at all. So the primary Copilot instruction
+    surface was telling the reviewer, on every pull request in this rollout, to
+    treat as untouchable vendored payload a set of files that is empty, and
+    offering a handoff-comment protocol for routing fixes upstream to a Trellis
+    that is gone. Rewritten to what is true: no file here is a copy, so there is
+    no file to decline to review on ownership grounds. The two guidance markers
+    went with it — nothing reads them. My own grep had missed this file because
+    I truncated the enumeration with `head -30`; the finding is Copilot's.
   - Checks, run: `routine_skill_drift` **1 → 0** (the vault's own normalizer
     caught the intermediate state — a `.job` pointing at a deleted `SKILL.md` —
     and cleared once the system-repo half landed); `machine-setup.sh status`
