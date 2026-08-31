@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -127,11 +128,20 @@ class ContractTests(unittest.TestCase):
                 self.assertNotIn("disable-model-invocation", fields)
 
     def test_no_agent_still_names_the_retired_framework(self) -> None:
+        """`se-` as a name, not as three letters inside a hyphenated word.
+
+        A bare substring search rejects `case-sensitive` and `false-positives`
+        too -- the same false-positive class that turned up while surveying the
+        vault for real callers. The lookbehind is what makes this a check for
+        the retired prefix rather than for the letters.
+        """
+
+        retired = re.compile(r"(?<![\w-])se-[a-z0-9]")
         for path in agent_files():
             with self.subTest(agent=path.name):
                 text = path.read_text(encoding="utf-8")
                 self.assertNotIn("Trellis", text)
-                self.assertNotIn("se-", text)
+                self.assertIsNone(retired.search(text), f"{path.name} still names se-*")
 
 
 class RenderTests(unittest.TestCase):
