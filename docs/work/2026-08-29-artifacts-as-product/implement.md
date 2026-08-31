@@ -990,7 +990,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     A converter nobody can byte-check is worse than a documented gap, so the gap is
     documented in the README and pinned by a test asserting nothing lands in
     `~/.codex/agents`. The five `se-*.toml` files there are old-pack renders; what
-    to do about them is 5-iii's call, and it is a real one — deleting them without a
+    to do about them is 5-iv's call, and it is a real one — deleting them without a
     replacement loses the Codex agent lane.
   - **The `sandbox_mode` question step 5 owns, answered:** the key is *absent* from
     all five `~/.codex/agents/se-*.toml`. Nothing enforced read-only there; the
@@ -1018,8 +1018,58 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - Checks, run: `make check` exits 0 — 24 shards, 24 `OK`, including 11 new tests
     in `test_sd_agents`. Three mutations introduced (drop a `tools:` block, give the
     claim verifier `Write`, and the earlier render-kind change), each caught.
-- [ ] 5-ii — fold the 65 skills (62 mechanical, 3 artifact-named)
-- [ ] 5-iii — vault-side retarget of the 8 callers in 2 routines, **before** any
+- [x] 5-ii — 2026-08-31. What the 65 skills need before they can arrive: the
+      installer ships a skill's companion files, and a companion cited by many
+      skills is stored once. Landed ahead of the fold, on fixtures, so the payload
+      pull request is a rename and nothing else. (Renumbered: the vault retarget is
+      now 5-iv.)
+  - **The gap that forced this.** The old pack's skills carry `references/` and
+    `scripts/` directories — 54 of the installed 67 have one — and this installer
+    copied `templates/*.md` and nothing else. Folding as-is would have shipped 65
+    skills whose instructions cite files that were never installed: the model is
+    told to read `references/source-standards.md`, the read fails, and the run
+    continues on whatever it remembered. Found by looking at the source tree before
+    writing the rename script, not after.
+  - **Extras are now derived, not named.** Every file under a skill directory
+    renders at the path it already has. A skill that grows a `scripts/` ships it
+    without the installer learning the word — the same rule the surface discovery
+    itself follows.
+  - **One stored copy, fanned out by citation.** Three files carry most of the
+    references: `source-standards.md` is cited 90 times, `argument-vocabulary.md`
+    55, `personal-profile-contract.md` 21. The upstream layout keeps them in
+    `_shared/references/` and its installer copies them into each citing skill, so
+    the machine has 54 copies and the repository has one. Committing the fan-out
+    instead would put the same paragraph in git fifty-four times — "four copies of
+    every shipped script" is on the diagnosis table this rebuild exists to answer.
+    So `skills/_shared/references/` holds one copy and the render fans out.
+  - **Driven by the citation, never by a list.** A file lands in a skill because
+    that skill's text says `references/<name>.md`. A skill that stops citing one
+    stops shipping it, with nothing to remember and no list to go stale. Pinned by
+    a test asserting a non-citing skill gets no `references/` directory at all;
+    mutation-tested by making the fan-out copy everything, which fails two tests.
+  - **A skill's own file wins over the shared one of the same name**, so a skill
+    that needs its own variant keeps it. Mutation-tested.
+  - **The citation pattern has a boundary.** `docs/references/x.md` names a file in
+    somebody's repository, not a companion; without the lookbehind the installer
+    would hunt the shared directory every time a skill mentioned another project's
+    path. This is the third time in two days that a bare substring match was the
+    defect — the vault survey's `se-positives`, the agent test's `case-sensitive`,
+    and now this — so it was written with the boundary rather than fixed into one.
+  - **An unresolvable citation is reported, not fatal.** Same reasoning
+    `sd-dashboard` uses for a tracker it cannot reach: the other seventy skills
+    install correctly, and refusing all of them because one cites a missing file
+    would make the installer withhold what it can still do. CI holds the number at
+    zero — `test_skill_companions` fails on any citation this checkout cannot
+    resolve — so the warning is for a checkout mid-edit, not a licence.
+  - **Receipt kind renamed `template:` → `companion:`**, because these are
+    references and scripts now and a kind naming one of the three reads as a bug in
+    the other two. Kind is metadata; `prune` keys on the path, so an existing
+    receipt rewrites its rows without touching a file.
+  - Checks, run: `make check` exits 0 — 25 shards, 25 `OK`, including 11 new tests
+    in `test_skill_companions`. Three mutations introduced (copy every shared file,
+    let shared win over local, drop the citation boundary), each caught.
+- [ ] 5-iii — fold the 65 skills (62 mechanical, 3 artifact-named)
+- [ ] 5-iv — vault-side retarget of the 8 callers in 2 routines, **before** any
   deletion; then delete the old `se-*` renders from `~/.claude/skills`,
   `~/.codex/skills`, `~/.claude/agents` and `~/.codex/agents`
 - [ ] 5b
