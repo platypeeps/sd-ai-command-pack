@@ -570,10 +570,17 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     - The SQLite index. `sd-dashboard index` collects and reports; it writes no store,
       because step 4b is where the schema and names are reconciled and inventing a
       JSON one here would be a second store to migrate.
-  - **D14 is still undecided, so the server binds loopback.** That is the option that
-    cannot expose the fleet while the decision is open; widening it is a decision record,
-    not a flag somebody sets in passing. Today's tailnet PWA writes remain on `:8767`
-    until 6b, so nothing regresses yet.
+  - **D14 bound loopback because it was undecided; it is now decided as (c)** — see
+    R11-D10 in `design.md` (user, 2026-08-31). P3 shipped the option that cannot expose
+    the fleet while a decision is open, which was correct then and is what a decision
+    record, not a flag somebody sets in passing, was owed. The consequence lands at 6b,
+    not here: the replacement takes `:8767` with the tailnet reach and the token-gated
+    writes the phone uses today. Until then this file's `do_GET`-only assertion in
+    `tests/test_sd_dashboard.py` stays exactly as written — it is what stops a tab
+    quietly growing a write endpoint in the meantime — and 6b replaces it with the
+    stronger one (writes exist, Host-allowlisted, token-gated, no CORS header emitted)
+    rather than deleting it. Today's tailnet PWA writes remain on `:8767` until then, so
+    nothing regresses in either direction.
   - The repo root comes from `SD_REPO_ROOT`, never from an argument. R10-D6 holds here
     like everywhere else: the dashboard reads many repos and is aimed at none, and a test
     asserts no verb grows `--repo`/`--root`/`--checkout`/`--directory`.
@@ -732,8 +739,10 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 - Step 0 is the largest PR (pure deletion); mitigated by all-remaining-jobs-green check.
 - Regrowth: same author, 2,968 commits/60d. Defenses: standing rules, CI LOC caps, no release
   train, r7's measured journal-rebirth checks, per-mechanism deletion criteria.
-- Two dashboards during 3c→6b window (parity checklist owns swap date). Phone-write regression only
-  if D14 picks (a)/(b); (c) is the proposed default.
+- Two dashboards during 3c→6b window (parity checklist owns swap date). D14 is decided as (c)
+  (R11-D10), so the phone-write regression risk is closed; what replaces it is the narrower risk
+  that 6b carries the writes without carrying all three guards, which is why its check asserts
+  Host allowlist, token, and CORS absence rather than asserting the endpoints exist.
 - Codex/Copilot-CLI sessions run without per-repo local guidance in v1 (D15/D16 accepted).
 - Autonomous lane is the plan's only unattended writer. Bounded by worktree isolation, draft-
   only PRs, `--cap`, and wall-clock budgets — but a bad run still costs review attention on

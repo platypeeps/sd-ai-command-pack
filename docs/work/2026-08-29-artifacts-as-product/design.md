@@ -197,9 +197,9 @@ mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes
 Sessions tab = `git worktree list` + running sd-* processes (replaces Trellis `.runtime/sessions`
 — the Trellis-hooks answer: **no hook carries over**). Lands on **:8768 beside** the system
 dashboard; per-tab parity checklist gates the swap to :8767 at step 6b. Deferred behind standing
-rule 1: FTS/Search, log streaming, session launcher. D14 decides phone access (today's tailnet
-iOS PWA writes are live — loopback-only is a knowing regression; option (c) keeps ack/queue-set
-POSTs under token).
+rule 1: FTS/Search, log streaming, session launcher. Phone access is **decided as (c)** — see
+R11-D10 below; the swap at 6b carries today's tailnet reach and its token-gated writes rather
+than regressing them.
 
 ### Review routing + pluggable backends (r3; revises D4)
 
@@ -761,6 +761,52 @@ and the ones that exist already total 2,811 (2,776 until #620) — `bin/sd-statu
 stale, not the ceiling, and re-deriving it against a half-built `bin/` would replace one estimate
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
+
+**R11-D10 (user, 2026-08-31) — D14 resolves to (c): the phone keeps its writes, and the
+GET-only assertion is temporary by design.**
+
+Three D14s exist across the rounds and only one was open. `r7 D14` (no sd-* command may depend on
+claude-mem) and `R8 D14` (OmniRoute removed, R11-D2) were already decided; this is `r2 D14`, phone
+access, and it is the one thing that blocked step 6b.
+
+**What was actually measured, because the obvious framing was wrong.** Both dashboards bind
+`127.0.0.1`. The binding is not the difference between them. The system dashboard reaches the phone
+through `tailscale serve` — tailnet-only HTTPS, never `funnel` — terminating in front of that
+loopback socket, and it guards the reach with three things rather than one: a Host-header allowlist
+covering the loopback names plus this node's own MagicDNS names, a per-process token required on
+every mutating request (`X-Dashboard-Token`, checked at `dashboard.py:1662` immediately after
+`host_ok()`), and the deliberate absence of CORS headers, so a page on another origin cannot obtain
+the preflight it would need to send that header at all. Three write endpoints ride on that:
+`POST /api/update`, `/api/ack`, `/api/refresh`.
+
+**The decision.** At 6b the replacement takes `:8767` *with* the tailnet reach and *with* those
+writes, under the same three guards. Options (a) loopback-only and (b) tailnet read-only were both
+available and both were regressions of a working daily surface — the iOS PWA is in live use, and
+removing ack and queue-set from it would mean picking up a laptop to do what a thumb does now.
+A framework that makes an existing workflow worse in order to keep its own invariant tidy has the
+priority backwards.
+
+**The cost, stated rather than discovered later.** P3 shipped `dashboard/server.py` with `do_GET`
+and nothing else, and `tests/test_sd_dashboard.py` asserts the *absence* of `do_POST`, `do_PUT` and
+`do_DELETE`. That assertion is now known to be temporary, and it stays exactly as it is until 6b —
+it is correct today and it is what stops a tab quietly growing a write endpoint in the meantime.
+At 6b it is not deleted but **replaced by a stronger one**: that every mutating handler refuses a
+request failing the Host allowlist, refuses one without the token, and that no CORS header is ever
+emitted. "No writes" is easy to assert and easy to lose; "writes exist and are guarded three ways"
+is the assertion that has to survive.
+
+Two things this does **not** license. The server still never commits, pushes, or runs an agent: the
+r2 rule that every UI mutation maps 1:1 to a `bin/` command through RUN_ALLOWLIST is untouched, and
+status flips remain intents applied by the next `sd-plan`/`sd-ship` sweep rather than a working-tree
+write from a page load. And `tailscale funnel` remains out of the question — the reach is the
+tailnet, not the internet, which is the line the system dashboard's own module docstring draws and
+the reason it draws it.
+
+**Deletion criterion (standing rule 1 applied to a carried-over mechanism rather than a new one).**
+The writes exist because the phone uses them. If 60 days after the 6b swap the index shows fewer
+than 10 mutating requests from a tailnet Host, the endpoints and their guards are deleted and the
+dashboard returns to GET-only — which is where P3 already left it, so the reversal costs one commit
+rather than a rewrite.
 
 **R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
 
