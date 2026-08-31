@@ -230,6 +230,46 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             deliberate one: step 4 archives that repository, so a residue pass there would
             polish something already on its way out. Named here rather than left as a silent
             gap in the count.
+      - [ ] the acceptance criterion the wave has *not* met. `prd.md`'s Step 3-c box reads
+            "one removal PR per consumer (9); zero trellis/router greps per repo; CI green".
+            The first and third held. The second was swept 2026-08-30, after step 3 closed,
+            and it does not: the follow-up pass removed *machinery* and left *prose*.
+
+            Machinery is clean. Enumerated from each default branch's tree rather than from
+            the merge output, the five retired paths — `.trellis/`, `.sd-ai-command-pack/`,
+            `ai-review-router.yml`, `sd-review.yml`, `sd-github-review.json` — appear in zero
+            of the nine, except `sd-github-review` itself, which carries the two router
+            workflows because they *are* its product and step 4 retires the repository whole.
+
+            Prose is not. Three repositories still ship a spec guide teaching a procedure for
+            a framework that no longer exists: `docs/spec/guides/code-reuse-thinking-guide.md`
+            carries a `## Template File Registration (Trellis-specific)` section — `trellis
+            update`, `src/templates/trellis/index.ts`, an rsync that syncs `.trellis/scripts/`
+            against a template copy — and `docs/spec/guides/cross-layer-thinking-guide.md`
+            teaches from Trellis command templates, in `hoa-manager`, `people-profiles` and
+            `rwbp-coordinator` — byte-identical copies in all three. These are `docs/spec/`,
+            the repository's own standing guidance, not archived work items — an agent reading
+            them is told to maintain a template tree that was deleted at step 1.
+
+            One file the sweep flagged is **not** residue, corrected here rather than carried:
+            `people-profiles`'s `docs/spec/frontend/hook-guidelines.md` matches on the word but
+            reads "This page previously documented … the agent platform integration that
+            Trellis and the SD AI command pack installed … None of that exists here any more."
+            It is already the record of its own removal. A grep for a name cannot tell a live
+            instruction from an obituary, which is why every hit above was opened.
+
+            Clean by the same sweep, and named so the exceptions are not mistaken for gaps:
+            `loadsmith` and `rwbp-website` carry the word only in archived work items and
+            `.gitignore`'s deliberate `.trellis/` entry; `anomaly-metric-creator` has one hit,
+            a citation of an archived item's path; `se-ai-command-pack` has 63 and is folded
+            whole at step 5. The four `~/repos/copilot-worktrees/` directories are not git
+            repositories at all, so the first pass over them returned zero for every
+            repository and meant nothing — the numbers above come from real checkouts and
+            from two shallow clones for the repositories that have none.
+
+            Left open rather than fixed in the same breath: the fix is one prose PR against
+            three repositories that this step's own scope does not cover, and the box is more
+            useful pointing at a measured gap than ticked over one.
 - [x] 3-d — `sd-review setup-github`, its own step
       - [x] the subcommand behind `SETUP_GITHUB_SEAM` in `bin/sd-review` — #615. The
             dispatch in `bin/sd-review` is three lines; the installer is
