@@ -201,9 +201,10 @@ POSTs under token).
 
 D4 stands for the *mandatory* footprint: Action, receipt protocol, consumer installer, labels,
 variables retired. The routing model survives as one config table + pure
-`route(paths, lines, draft, policy) → Plan`: categories (required-first, docs-skip as allow-list
-minus a non-removable `never_skip` deny-list), 800-line threshold, sensitive globs, draft policy,
-tier chains. Backends on the existing Provider seam:
+`route(paths, lines, draft, policy) → Plan`: categories (required-first, and matched by the
+direction they move the tier — any path to hold or raise it, every path to lower it, R11-D9),
+docs-skip as allow-list minus a non-removable `never_skip` deny-list, 800-line threshold,
+sensitive globs, draft policy, tier chains. Backends on the existing Provider seam:
 
 | Backend | Kind | Cost | Default role |
 |---|---|---|---|
@@ -677,6 +678,46 @@ merged se-* skills/agents rename to sd-* at step 5** — single namespace, colli
 - R9: D1 **decided: keep** the unused gmail token (user 2026-08-29) · D2 2-key role vocabulary · **D3 day-0 guard retarget — DONE 2026-08-29** · D4–D7 per
   Workspace section
 
+**R11-D9 (2026-08-30) — a category escalates on one path and lowers only on all of them.**
+
+Found by running step 3's own end-to-end for the first time rather than by review, which is the
+whole argument for the check that had been skipped.
+
+`_match_category` matched every category on *any* path, while `docs_skip` required *all* of them.
+For a category that lowers the tier the asymmetry is a defect: the built-in `docs` category sits at
+`cheap`, below the `standard` default, so a single markdown file in a source change matched it and
+took the change down a tier. Measured on the default policy, `['src/greet.py']` planned `standard`
+with `[codex, prism]` and `['src/greet.py', 'README.md']` planned `cheap` with `[codex]` — adding
+documentation to a change removed a reviewer from it. Because every `sd-plan` work item lives under
+`docs/work/`, that is the shape of nearly every change made through this framework: it was
+systematically under-routing the changes it exists to govern, and printing a plan that said so.
+
+The rule is now one sentence, stated by direction: a category that holds or raises the tier matches
+on any path; one that lowers it matches only when every path is in it. Escalating on one path is the
+safe direction — the worst it costs is a review nobody needed, where lowering on one path costs a
+review someone did. `required` still controls ordering only, so "touches the installer outranks is
+mostly documentation" is unchanged; the phrase "is mostly documentation" now has to mean mostly.
+
+Why no test caught it, which is the part worth carrying forward: the one mixed-path fixture pairs
+`docs/guide.md` with `installer/registry.py` and passes because the fixture policy's **required**
+`installer` category rescues the mix. It proved required-first ordering and was read as proving
+any/all semantics. The default policy has no required category, so the mixed case was uncovered
+entirely. A fixture that passes for a different reason than the one you have in mind is worse than
+no fixture, because it answers the question you meant to ask with a yes.
+
+Observed in the wild, not only in a fixture. The six routed pull requests of the 3-d wave all
+touch `.github/workflows/**`, a sensitive path that escalates a tier. Five printed `tier deep`.
+`hoa-manager#300` printed `tier standard` — its diff also carried a documentation file, which
+matched the `docs` category on one path and took the change down a tier before the sensitive-path
+escalation put it back up one. That is the defect, in the wave that was being used to prove the
+lane, visible in the check output the whole time and read by nobody until the figure was checked
+against the other five.
+
+Landed in #620, proven to bite by reintroducing the defect: `AssertionError: 'cheap' != 'standard'
+: category docs starts at tier cheap`. Blast radius named honestly: the six installed consumer
+lanes are report-only and pin an older commit, so nothing was mis-gated — the cost was a wrong
+plan printed, not a missed review.
+
 **R11-D8 (2026-08-30) — the review lane's sub-cap is 1,700, and the guard now measures the lane.**
 
 Raised in a change that does not need the room, which is the only honest time to raise a cap.
@@ -712,7 +753,7 @@ fault is one habit rather than three bugs:
   `bin/migrate-trellis` is 1,250.
 
 Parked, with a trigger rather than a date: the core line above reads ~1,800 for eight commands,
-and the five that exist already total 2,776 — `bin/sd-status` alone is 978. The itemization is
+and the ones that exist already total 2,811 (2,776 until #620) — `bin/sd-status` alone is 978. The itemization is
 stale, not the ceiling, and re-deriving it against a half-built `bin/` would replace one estimate
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
