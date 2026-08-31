@@ -9,8 +9,9 @@ notices: that the link is the one the tracker returned rather than one this
 code assembled, that a failure prints nothing on stdout (a stray
 citation pasted into a work item outlives the session that invented it), that the
 Jira half names environment variables and never their values, and that the
-three exit codes stay distinct -- 1 means "asked, and there is no such thing",
-2 means "could not ask", and pasting the difference away would make a
+three exit codes stay distinct -- 1 means the tracker was asked and the
+reference did not resolve (no such issue, or an answer this could not read), 2
+means it could not be asked at all, and pasting the difference away would make a
 mistyped reference indistinguishable from an unconfigured tracker.
 """
 

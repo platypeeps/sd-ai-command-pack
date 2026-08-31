@@ -18,8 +18,9 @@ The tracker clients live under `dashboard/` because the index was their first
 consumer. They are moved by nothing here: a second caller is a reason to import
 a module, not to relocate it.
 
-Exit codes: 0 resolved, 1 the tracker was reachable and the reference was not,
-2 the reference could not be parsed or the tracker is not configured.
+Exit codes: 0 resolved; 1 the tracker was asked and the reference did not
+resolve -- no such issue, or an answer this could not read; 2 it could not be
+asked at all -- an unparseable reference, or a tracker that is not configured.
 """
 
 from __future__ import annotations

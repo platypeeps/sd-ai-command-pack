@@ -57,7 +57,7 @@ revert, not to retro-document work already merged.
 | `--decision` | Write a `docs/decisions/` record instead of a work item |
 | `--work-dir` | Work root other than `docs/work` |
 | `--worktree` | Create the branch in its own git worktree (one writer per checkout) |
-| `--from gh:o/r#N` / `--from jira:KEY` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
+| `--from gh:owner/repo#123` / `--from jira:KEY-123` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
 | `--from-suggestion` | Seed from a pending `sd-suggest` draft |
 | `--from-proposal` | Seed from a skill proposal |
 
@@ -76,10 +76,11 @@ last moved — which goes verbatim under the PRD's `## References` heading, the
 one the template already ships. Under `--decision`, where the template has no
 such heading, add it above the bullet.
 
-Read the exit code before pasting. **1** means the tracker answered and there is
-no such reference: a typo, or a repository you cannot see. **2** means it could
-not be asked at all — `gh` missing or unauthenticated, the Jira variables unset,
-or a reference that does not parse. Neither is a licence to hand-write a
+Read the exit code before pasting. **1** means the tracker was asked and the
+reference did not resolve — no such issue, a repository you cannot see, or an
+answer this could not read. **2** means it could not be asked at all: `gh`
+missing or unauthenticated, the Jira variables unset, or a reference that does
+not parse. Neither is a licence to hand-write a
 citation: an unresolvable reference is a question for the user, and a made-up
 link in a work item outlives the session that invented it.
 

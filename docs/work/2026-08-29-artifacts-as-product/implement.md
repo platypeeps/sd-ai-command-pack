@@ -936,10 +936,13 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     lookup. The deeper reason applies to GitHub too: prose copied into a work item
     is stale the first time somebody edits the issue. The citation carries the
     link; the issue keeps its own text.
-  - **Exit 1 and exit 2 stay distinct.** 1 is "asked, no such reference" (a typo);
-    2 is "could not ask" (`gh` unauthenticated, Jira variables unset, an
-    unparseable reference). Collapsing them would make a mistyped issue number
-    indistinguishable from an unconfigured tracker, and the skill's instruction —
+  - **Exit 1 and exit 2 stay distinct.** 1 is "asked, and the reference did not
+    resolve" — no such issue, a repository you cannot see, or an answer the client
+    could not read; 2 is "could not ask" (`gh` unauthenticated, Jira variables
+    unset, or a reference that does not parse, the accepted spellings being
+    `gh:owner/repo#123` and `jira:KEY-123`). Collapsing them would make a mistyped
+    issue number indistinguishable from an unconfigured tracker, and the skill's
+    instruction —
     never hand-write a citation the command refused to produce — needs the operator
     to know which happened. The Jira half names the absent variables and never
     their values, with a test asserting the token value cannot reach the output.
