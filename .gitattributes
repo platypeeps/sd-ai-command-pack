@@ -1,7 +1,0 @@
-# Trellis-generated platform skill copies are vendored upstream content —
-# byte-identical to their `.agents/skills/trellis-*` twins — and must not be
-# hand-edited here (see CONTRIBUTING "Trellis-Owned Platform Files"). Exempt
-# them from git's whitespace checks so the vendored bytes commit unchanged.
-.claude/skills/trellis-*/** -whitespace
-.agents/skills/trellis-*/** -whitespace
-

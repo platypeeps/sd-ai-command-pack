@@ -1324,23 +1324,74 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `.github/skills/trellis-*` directories still live in this repository**, 43
     files, Copilot-facing on every pull request here, instructing on machinery
     step 2 removed. Step 2's check was `ls .trellis` fails, and `.github/skills/`
-    is not `.trellis/`. Recorded here and left for **step 7**, whose sweep
-    (`grep -rli trellis` → archive only) owns it; deleting it under 5b would be
-    scope this step did not ask for.
+    is not `.trellis/`. Recorded here and left for **step 7** — *reversed the
+    same day: Sven pulled it into 5b, and 5b-ii deletes it. The survey had
+    undercounted it too; see below.*
   - The survey also measured the thing the stage split was argued from rather
     than leaving it asserted: across this repository's 85 skill files the
     pre-screen flags exactly two, `sd-skill-adopt` (6 rules) and `sd-review`
     (1). Both are surfaces that *document* the patterns. Across
     `sd-writing-pack`'s 13, it flags none.
-- [ ] 5b-ii — the retirements. Enumerated, not yet done: `skill-proposal-accept`
-  (the vault routine, its `local-cron-jobs` job, and the ~20 files naming it),
-  `file-trellis-task.py` (**already gone** — succeeded by `file-work-item.py`;
-  only a stale `__pycache__` entry and a lineage mention remain), and the legacy
-  gito/prism skill folders (**already gone** — absent from every render root and
-  from `installed_plugins.json`, most likely in 5-iv's 599-file sweep; recorded
-  as a finding rather than claimed as a deletion this step performed). The
-  routine is safe to retire on its own evidence: its database holds 8 declined
-  and 2 filed notes and **nothing pending**, so retiring it strands no decision.
+- [x] 5b-ii — 2026-08-31. The retirements, and one deletion pulled forward.
+  Three repositories, because the thing being retired lived in three.
+  - **`skill-proposal-accept`, retired.** Order matters and was: unschedule
+    (`cron-jobs.sh uninstall`, so nothing could fire mid-edit), then delete the
+    files, then clean the rosters. It went on its own evidence rather than on
+    the plan's say-so: the database holds **8 declined, 2 filed, 0 pending**, so
+    retiring it stranded no decision. `System/Scripts/file-work-item.py` went
+    with it — the routine was that script's only caller.
+    Vault `c64ea2e`, system `e397f8a`.
+  - **The vault now writes nothing outside itself at all.** The "one authorized
+    outward write" carve-out in `VAULT-STRUCTURE.md` had exactly one consumer
+    and one implementation, and both are gone. The carve-out text is struck
+    through rather than deleted: a permission that once existed is worth being
+    able to read back, and it is the shape any future outward write should have
+    to argue against.
+  - **Two of the three enumerated targets were already gone**, and are recorded
+    as findings rather than claimed as deletions this step performed:
+    `file-trellis-task.py` (succeeded by `file-work-item.py`; only a stale
+    `__pycache__` entry and a lineage mention remained) and the legacy
+    gito/prism skill folders (absent from every render root and from
+    `installed_plugins.json` — most likely swept by 5-iv's 599 files).
+  - **The roster sweep missed three files, and the miss is the lesson.** The
+    first pass cleaned the vault and the cron job and reported clean. Re-running
+    the enumeration from the filesystem afterwards found three live claims left
+    in `~/repos/system`: the dashboard's `machine` map, which said `filed` on
+    Skill Proposals is written by `skill-proposal-accept` — so the dashboard's
+    refusal message named a routine that no longer exists — the dashboard
+    README's status table saying the same, and `local-obsidian-review`'s README
+    listing it among the nightly routines that act on the digest buttons. Fixed
+    in system `da1b27b`. The check that caught it is the one that should have
+    run first: grep every repo that *names* the thing, not the two you edited.
+  - **What survives deliberately.** `filed` stays a view on Skill Proposals —
+    two notes carry it, they are history, and history stays visible. The
+    Accept/Decline buttons stay with nothing behind them: the decision is the
+    whole record now, and adoption goes through `sd-skill-adopt`.
+  - **The Copilot-facing Trellis render, deleted — pulled into 5b by Sven,
+    reversing 5b-i's "leave it for step 7".** And it was larger than 5b-i's
+    survey reported. The survey found nine `.github/skills/trellis-*`
+    directories because it was looking for skills; enumerating the directory
+    instead found the whole platform render: **51 files, 6,395 lines** — those
+    nine skill trees, three `.github/agents/trellis-*.agent.md`, and two
+    SessionStart/userPromptSubmit hooks wired by `.github/copilot/hooks.json`
+    and `.github/hooks/trellis.json`. Every one of them reads `.trellis/`, which
+    step 2 deleted, so this has been **dead since step 2** while still being
+    injected into every Copilot session on every pull request here. A tool that
+    surveys skills finds skills; the directory listing found the rest.
+  - Two stale entries went with it, both found by checking whether the paths
+    exist rather than by reading the list: `.gitattributes` held nothing but a
+    whitespace exemption for `.claude/skills/trellis-*` and
+    `.agents/skills/trellis-*`, neither of which has existed for several steps,
+    so the file is deleted outright; and ruff's `extend-exclude` named
+    `.github/skills` and `tests/fixtures/trellis-scripts`, the second of which
+    was also already gone.
+  - Checks, run: `routine_skill_drift` **1 → 0** (the vault's own normalizer
+    caught the intermediate state — a `.job` pointing at a deleted `SKILL.md` —
+    and cleared once the system-repo half landed); `machine-setup.sh status`
+    reports every cron entry ok; `grep -rn skill-proposal-accept` across vault
+    and system returns only dated history and one deliberate lineage comment;
+    `dashboard.py` compiles. In this repository, `ls .github/` is down to
+    `scripts/`, `workflows/`, and five files, none of them Trellis.
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),

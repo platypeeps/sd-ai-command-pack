@@ -26,12 +26,10 @@ extend-exclude = [
     ".claude",
     ".codex",
     ".gemini",
-    ".github/skills",
     ".obsidian-kb",
     ".opencode",
     ".ruff_cache",
     ".sd-ai-command-pack",
-    "tests/fixtures/trellis-scripts",
     ".venv",
     "node_modules",
 ]
