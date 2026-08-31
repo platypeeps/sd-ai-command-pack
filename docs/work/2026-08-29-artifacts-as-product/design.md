@@ -843,14 +843,29 @@ anything in particular. A budget is not an interface: the system repo cannot wri
 requires:
 
 ```json
-{"title": "toolbox", "html": "<table>…</table>", "rows": [{"rank": 0, "kind": "cron-exit",
- "id": "com.sven.x", "what": "job failed", "detail": "rc=2", "href": "#toolbox"}]}
+{"tabs": [{"title": "toolbox", "html": "<table>…</table>", "rows": [{"rank": 0,
+ "kind": "cron-exit", "id": "com.sven.x", "what": "job failed", "detail": "rc=2",
+ "href": "#toolbox"}]}]}
 ```
 
-`title` names the tab and falls back to the prefix. `html` is markup rendered into that tab.
-`rows` is R11-D12's optional key, unchanged in field names from the `add()` calls it replaces.
-All three are optional; a plugin that registers for its `kinds` and declares no tile is a working
-plugin, not a broken one, and is deliberately not reported as a failure.
+**A tile returns a list of tabs, and that is not decoration.** The first draft of this record
+fixed the payload at a single tab, and building the next step against it is what found the
+mistake: a repository has one manifest and therefore one `dashboard.tile`, while `~/repos/system`
+owns **five** of the views being folded in (Toolbox, Vault/TaskNotes, Briefs, Jira personal,
+Research). One tile command must yield five tabs or 6b-3 cannot be written. A pack contributing a
+single tab writes a list of length one; two payload shapes and a rule about which applies would
+cost more than the ceremony does.
+
+`title` names the tab and is **required** — a default to the prefix is a convenience at one tab
+and a collision at five, and the title is what the operator clicks. A repeated title is refused,
+because two tabs under one name is a tab that cannot be reached and renders as a working dashboard
+quietly missing a view. `html` is markup rendered into that tab. `rows` is R11-D12's optional key,
+unchanged in field names from the `add()` calls it replaces, and each row is stamped
+`<prefix>/<title>` rather than `<prefix>` so five tabs behind one prefix are five sources.
+
+An absent `tabs` key is a refusal; an empty list is a working plugin with nothing to show. A
+plugin that registers for its `kinds` and declares no tile at all is also working, and is
+deliberately not reported as a failure.
 
 **`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
 rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
@@ -865,11 +880,11 @@ plugin crashing looks exactly like a plugin with nothing to report, and Now rend
 cron is on fire. That is the same failure R11-D12 caught in the tile-only design, one layer down.
 
 So every way a tile can fail — absent, non-zero, timed out, oversized, unparseable, or emitting a
-row the contract refuses — produces a **rank-0 row written by the loader**, naming the plugin and
-the reason. Silence is not an available outcome. A refused row is dropped individually rather than
-taking the whole list with it, and gets its own rank-0 row, so a plugin's good alerts survive one
-malformed sibling and the malformed one is still visible. The registry itself failing to read is a
-rank-0 row too.
+tab or row the contract refuses — produces a **rank-0 row written by the loader**, naming the
+plugin and the reason. Silence is not an available outcome. Refusal is per item rather than per
+tile at both levels: a bad row loses that row, a bad tab loses that tab, and each gets its own
+rank-0 row, so a plugin's good alerts and good tabs survive one malformed sibling while the
+malformed one stays visible. The registry itself failing to read is a rank-0 row too.
 
 Both bounds are enforced **while reading**, not checked afterwards. A 64KB limit applied to output
 already in memory is a limit on what gets rendered, not on what a plugin can make the dashboard
@@ -884,13 +899,13 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **1,815 of 2,500 — 685 lines left**. The loader cost 316 (308 in
+projected: `dashboard/` is **1,871 of 2,500 — 629 lines left**. The loader cost **372** (364 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
-`RUN_ALLOWLIST` together*. It overran that slice by itself.
+`RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 685
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,578,
-78 over**, and that is the optimistic figure. The shape is identical to the one that produced
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 629
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,634,
+134 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
@@ -900,9 +915,9 @@ number that comes out is another estimate. Trigger, matching R11-D15's: the land
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 308 rather than letting it pass as inevitable: about 183 lines
-are code and the rest are comments and docstrings, which is this repository's convention and not
-an accident of this file. The convention is not being revisited here; it is named so the
+One thing worth saying about the 364 rather than letting it pass as inevitable: roughly half is
+code and the rest is comments and docstrings, which is this repository's convention and not an
+accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.
 
 **R11-D15 (user, 2026-08-31) — the `bin/` cap is 14,000, derived from built code; and `sd-help`

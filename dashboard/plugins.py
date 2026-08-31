@@ -4,6 +4,13 @@ Three of the six sources the Needs-you view alerts on -- `toolbox`, `ports`,
 `areas` -- are system-owned and arrive through this module (R11-D12). Two
 properties follow from that, and both are load-bearing.
 
+**One plugin, many tabs.** A repository has one manifest and therefore one
+`dashboard.tile`, but `~/repos/system` owns five of the views being folded in.
+So a tile returns a *list* of tabs rather than a single one, and a pack
+contributing one tab writes a list of length one. The uniform shape is worth
+the small ceremony: the alternative is two payload shapes and a rule about
+which applies.
+
 **The registry is asked, never scanned.** The tile contract says registration
 happens only through `sd plugin add`; a loader that globbed a directory would
 run whatever landed in it. So this module does not read manifests at all. It
@@ -199,67 +206,115 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
     return rows, complaints
 
 
-def read_tile(entry: dict) -> dict:
-    """One registered plugin's tab, or the reason there is not one."""
+def read_plugin(entry: dict) -> dict:
+    """One registered plugin's tabs, or the reason there are none."""
     root = str(entry.get("root") or "")
     prefix = str(entry.get("prefix") or "?")
-    tab: dict = {"prefix": prefix, "root": root, "title": prefix, "html": "", "rows": []}
+    base: dict = {"prefix": prefix, "root": root, "tabs": [], "complaints": []}
+
+    def refuse(reason: str) -> dict:
+        return {**base, "ok": False, "declared": True, "reason": reason}
 
     if not entry.get("readable", False):
-        return {**tab, "ok": False, "reason": str(entry.get("why") or "manifest unreadable")}
+        return {**base, "ok": False, "declared": True,
+                "reason": str(entry.get("why") or "manifest unreadable")}
     tile = entry.get("tile")
     if not tile:
         # Not a failure. A plugin may register for its `kinds` or its issues
         # repo and never declare a tile, and reporting that as broken would
         # put a rank-0 row in Now for a machine that is working correctly.
-        return {**tab, "ok": True, "reason": "", "declared": False}
+        return {**base, "ok": True, "declared": False, "reason": ""}
     if not isinstance(tile, str):
-        return {**tab, "ok": False, "reason": "`dashboard.tile` is not a command string"}
+        return refuse("`dashboard.tile` is not a command string")
     try:
         argv = shlex.split(tile)
     except ValueError as error:
-        return {**tab, "ok": False, "reason": f"unparseable tile command: {error}"}
+        return refuse(f"unparseable tile command: {error}")
     if not argv:
-        return {**tab, "ok": False, "reason": "`dashboard.tile` is empty"}
+        return refuse("`dashboard.tile` is empty")
 
     try:
         raw = bounded_run(argv, Path(root), seconds=TILE_SECONDS, limit=TILE_BYTES)
     except Bounded as error:
-        return {**tab, "ok": False, "reason": str(error)}
+        return refuse(str(error))
     try:
         payload = json.loads(raw or b"{}")
     except json.JSONDecodeError as error:
-        return {**tab, "ok": False, "reason": f"tile output is not JSON: {error}"}
+        return refuse(f"tile output is not JSON: {error}")
     if not isinstance(payload, dict):
-        return {**tab, "ok": False, "reason": "tile output is not a JSON object"}
+        return refuse("tile output is not a JSON object")
+    declared = payload.get("tabs")
+    if declared is None:
+        return refuse("tile output declares no `tabs`")
+    if not isinstance(declared, list):
+        return refuse("`tabs` is not a list")
 
-    rows, complaints = validate_rows(payload.get("rows"), prefix)
-    title = payload.get("title")
-    html = payload.get("html")
-    return {
-        **tab,
-        "declared": True,
-        "title": title if isinstance(title, str) and title.strip() else prefix,
-        # Markup by contract: a tile renders itself into its own tab, and that
-        # was true of the tile before rows existed. Rows are data and are
-        # rendered as text; the two are not the same trust and the split is
-        # deliberate.
-        "html": html if isinstance(html, str) else "",
-        "rows": rows,
-        "complaints": complaints,
-        "ok": True,
-        "reason": "",
-    }
+    tabs, complaints = validate_tabs(declared, prefix)
+    return {**base, "tabs": tabs, "complaints": complaints,
+            "ok": True, "declared": True, "reason": ""}
+
+
+def validate_tabs(declared: list, prefix: str) -> tuple[list[dict], list[str]]:
+    """The tabs a tile emitted, and a complaint for each one refused.
+
+    A refused tab is dropped and named rather than repaired, on the same
+    reasoning as a refused row: the plugin believes it published a view, and
+    the gap between what it published and what renders is the thing that must
+    not be quiet.
+    """
+    tabs: list[dict] = []
+    complaints: list[str] = []
+    seen: set[str] = set()
+    for index, tab in enumerate(declared):
+        where = f"{prefix}: tab {index}"
+        if not isinstance(tab, dict):
+            complaints.append(f"{where} is not an object")
+            continue
+        title = tab.get("title")
+        # Required rather than defaulted to the prefix. A default is a
+        # convenience at one tab and a collision at five, and the title is
+        # what the operator clicks.
+        if not isinstance(title, str) or not title.strip():
+            complaints.append(f"{where} has no title")
+            continue
+        title = title.strip()
+        if title in seen:
+            # Two tabs under one name is a tab that cannot be reached, which
+            # renders as a working dashboard missing a view.
+            complaints.append(f"{where} repeats the title {title!r}")
+            continue
+        seen.add(title)
+        html = tab.get("html")
+        rows, row_complaints = validate_rows(tab.get("rows"), f"{prefix}/{title}")
+        complaints.extend(row_complaints)
+        tabs.append(
+            {
+                "prefix": prefix,
+                "title": title,
+                # Markup by contract: a tile renders itself into its own tab,
+                # and that was true before rows existed. Rows are data and are
+                # rendered as text; the two are not the same trust and the
+                # split is deliberate.
+                "html": html if isinstance(html, str) else "",
+                "rows": rows,
+            }
+        )
+    return tabs, complaints
 
 
 def load() -> dict:
     """Every plugin tab, plus the alert rows they contribute to Now."""
     entries, failure = catalog()
-    tabs = [read_tile(entry) for entry in entries]
-    return {"tabs": tabs, "rows": alert_rows(tabs, failure), "registryError": failure}
+    found = [read_plugin(entry) for entry in entries]
+    return {
+        "plugins": found,
+        "tabs": [tab for plugin in found for tab in plugin["tabs"]],
+        "rows": alert_rows(found, failure),
+        "registryError": failure,
+    }
 
 
-def alert_rows(tabs: list[dict], failure: str = "") -> list[dict]:
+def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
     """Plugin rows for Now, with every loss represented as a row of its own.
 
     Sorted by rank so the merge with the backbone's own rows is a concatenation
@@ -278,9 +333,9 @@ def alert_rows(tabs: list[dict], failure: str = "") -> list[dict]:
                 "detail": failure,
             }
         )
-    for tab in tabs:
-        prefix = tab["prefix"]
-        if not tab["ok"]:
+    for plugin in found:
+        prefix = plugin["prefix"]
+        if not plugin["ok"]:
             rows.append(
                 {
                     "source": prefix,
@@ -288,19 +343,20 @@ def alert_rows(tabs: list[dict], failure: str = "") -> list[dict]:
                     "kind": "plugin-dark",
                     "id": prefix,
                     "what": f"plugin tab {prefix} is not reporting",
-                    "detail": tab["reason"],
+                    "detail": plugin["reason"],
                 }
             )
             continue
-        rows.extend(tab["rows"])
-        for complaint in tab.get("complaints", []):
+        for tab in plugin["tabs"]:
+            rows.extend(tab["rows"])
+        for complaint in plugin["complaints"]:
             rows.append(
                 {
                     "source": prefix,
                     "rank": FAILURE_RANK,
-                    "kind": "plugin-row-refused",
+                    "kind": "plugin-refused",
                     "id": prefix,
-                    "what": f"plugin tab {prefix} emitted a row the contract refused",
+                    "what": f"plugin {prefix} emitted something the contract refused",
                     "detail": complaint,
                 }
             )

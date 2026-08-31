@@ -1663,10 +1663,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     registry by shelling out to `sd plugin list --json` rather than parsing a
     manifest of its own -- no second reader, and the no-disk-scanning rule
     comes free because the loader never looks at a directory. The tile payload
-    is specified for the first time: `{title, html, rows}`, all optional,
-    where `html` is markup rendered into the plugin's own tab and `rows` are
-    R11-D12's typed alert rows rendered as text with `href` confined to an
-    in-page anchor.
+    is specified for the first time: `{"tabs": [{title, html, rows}]}`, where
+    `html` is markup rendered into that tab and `rows` are R11-D12's typed
+    alert rows rendered as text with `href` confined to an in-page anchor.
+    **A list, because one repository has one manifest and `~/repos/system`
+    owns five of the views** — found by starting 6b-3 against the first draft
+    of the contract, which could hold one tab and therefore could not express
+    the step it exists to serve. `title` is required and must be unique within
+    a plugin: a repeated title is a tab the operator cannot reach.
     The addition to R11-D12: **a plugin that goes dark becomes a rank-0 row.**
     Absent, non-zero, timed out, oversized, unparseable, or emitting a refused
     row -- each produces a row naming the plugin and the reason, because a
@@ -1675,11 +1679,11 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     real subprocess: neither the 5s deadline (which kills the process group,
     so a backgrounded child cannot outlive it) nor the 64KB ceiling (enforced
     while reading, not after) survives being mocked.
-    **The measurement:** `dashboard/` is **1,815 of 2,500, 685 left**. The
-    loader cost 316 against the ~240 R11-D13 left for the loader *and*
-    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 685
-    does not fit, so `dashboard/` projects to ~2,578 with `RUN_ALLOWLIST` still
-    uncounted. Not raised here -- the test passes at 1,815, and the cap gets
+    **The measurement:** `dashboard/` is **1,871 of 2,500, 629 left**. The
+    loader cost 372 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 629
+    does not fit, so `dashboard/` projects to ~2,634 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 1,871, and the cap gets
     re-derived from counts at the landing that carries the backbone renders.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
