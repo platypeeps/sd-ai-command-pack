@@ -1434,14 +1434,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     packet removed; `handoff/` back to empty.
   - **Plugin rows: 7 → 0.** One user-scope and six project-scope rows for
     `sd@sd-ai-command-pack 0.71.62`, all pointing at the same cache install. The
-    user row went through `claude plugin uninstall`. The six project rows did
-    **not**, and the reason is a standing constraint: run from a project
-    directory, the CLI *creates* a `.claude/settings.json` holding
-    `{"enabledPlugins": {}}` in a repository that had none — the framework
-    altering a repo file for its own purpose. Verified by running it once in
-    `anomaly-metric-creator` and watching `git status` go from clean to
-    `?? .claude/settings.json`; the stub was removed and that repository is
-    clean again. The remaining five rows were removed from the global
+    user row went through `claude plugin uninstall`, leaving six. Exactly one of
+    those six went the same way — the run in `anomaly-metric-creator` that
+    showed why the other five could not. Run from a project directory the CLI
+    *creates* a `.claude/settings.json` holding `{"enabledPlugins": {}}` in a
+    repository that had none, which is the framework altering a repo file for
+    its own purpose: `git status` went from clean to `?? .claude/settings.json`.
+    The stub was removed and that repository is clean again, but the lesson
+    stood, so the **remaining five** rows were removed from the global
     `installed_plugins.json`, which is where they actually live, touching no
     repository. `claude plugin list` agrees: four plugins left, none of them sd.
   - Marketplace registration and the 0.71.62 cache install removed with it. The
