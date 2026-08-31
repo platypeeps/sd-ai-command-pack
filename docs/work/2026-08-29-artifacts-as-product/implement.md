@@ -665,7 +665,11 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - **The caveman review lane is left alone and named.** The plan row says "caveman fork
     drops review lane". There is no fork: the marketplace entry points at upstream
     `JuliusBrussee/caveman`, so `caveman:cavecrew-reviewer` cannot be dropped without
-    forking a third-party plugin. That is a decision, not a sweep item.
+    forking a third-party plugin. That is a decision, not a sweep item — **since taken as
+    R11-D11 (user, 2026-08-31): the plugin stays installed and the reviewer is demoted to
+    a scratch tool.** `sd-review` remains the only lane producing a recorded verdict; no
+    enforcement code is written, because `git grep -l cavecrew -- bin/` printing nothing
+    is the whole invariant and a check for it would be the gate standing rule 1 forbids.
   - `sd-status` reports `legacy residue: none found` and the installer reports
     `0 missing, 0 modified`, which is the step's stated check.
 - [x] LOC caps — `tests/test_loc_caps.py`, folded in here on purpose while every cap
