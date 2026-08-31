@@ -569,6 +569,149 @@ class RepoResolutionTests(StatusFixture):
             self.assertNotIn(word, text.lower())
 
 
+class IssueSectionTests(StatusFixture):
+    """The `issues:` lines, which read the index and never collect.
+
+    The fixture HOME is a temp directory, so `store.index_path()` resolves
+    under it and a test can decide whether an index exists at all -- which is
+    the distinction the section is built around: no index is a different answer
+    from no issues, and reporting the second where the first is true is the kind
+    of wrong that looks right.
+    """
+
+    def write_index(self, rows: list[dict]) -> None:
+        # `sys.path` is restored: this module also exercises `sd-status`
+        # in-process, and a leftover entry would let a later import resolve
+        # differently depending on which test ran first.
+        saved = list(sys.path)
+        sys.path.insert(0, str(BIN.parent))
+        try:
+            from dashboard import store
+        finally:
+            sys.path[:] = saved
+
+        path = self.home / ".cache" / "sd-ai-command-pack" / "index.sqlite"
+        connection = store.connect(path)
+        try:
+            store.upsert_issues(connection, rows, "2026-08-31T00:00:00Z")
+        finally:
+            connection.close()
+
+    @staticmethod
+    def jira_row(key: str, why: list[str]) -> dict:
+        """A row shaped the way `dashboard/jira.py` actually writes them.
+
+        No repo, no number, a browse URL. The point of the Jira tests is what
+        production rows look like, so the fixture has to look like one.
+        """
+        return {
+            "tracker": "jira",
+            "url": f"https://example.atlassian.net/browse/{key}",
+            "repo": "",
+            "number": None,
+            "kind": "issue",
+            "title": key,
+            "state": "open",
+            "author": "someone",
+            "updated_at": "2026-08-30T00:00:00Z",
+            "why": why,
+        }
+
+    @staticmethod
+    def row(repo: str, number: int, why: list[str], *, tracker: str = "github") -> dict:
+        return {
+            "tracker": tracker,
+            "url": f"https://github.com/{repo}/pull/{number}",
+            "repo": repo,
+            "number": number,
+            "kind": "pull",
+            "title": f"work on {number}",
+            "state": "open",
+            "author": "someone",
+            "updated_at": "2026-08-30T00:00:00Z",
+            "why": why,
+        }
+
+    def test_an_absent_index_says_so_rather_than_reporting_none(self) -> None:
+        self.with_github(pulls=[])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("no index yet", completed.stdout)
+
+    def test_rows_for_this_repo_are_split_by_whether_they_need_you(self) -> None:
+        self.with_github(pulls=[])
+        self.write_index(
+            [
+                self.row("acme/widget", 1, ["review-requested"]),
+                self.row("acme/widget", 2, ["mentioned"]),
+            ]
+        )
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("needs you: 1", completed.stdout)
+        self.assertIn("#1", completed.stdout)
+        self.assertIn("other open: 1", completed.stdout)
+
+    def test_another_repository_s_rows_are_not_shown(self) -> None:
+        """The filter is the point; presence alone would pass without it."""
+        self.with_github(pulls=[])
+        self.write_index(
+            [
+                self.row("acme/widget", 1, ["assigned"]),
+                self.row("other/thing", 99, ["assigned"]),
+            ]
+        )
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("needs you: 1", completed.stdout)
+        self.assertNotIn("#99", completed.stdout, "another repository's issue leaked in")
+
+    def test_a_jira_row_is_not_attributed_to_a_checkout(self) -> None:
+        """Named gap: no committed fact ties a Jira project to a repository.
+
+        A real Jira row, as `dashboard/jira.py` writes it: no repo slug at all.
+        """
+        self.with_github(pulls=[])
+        self.write_index([self.jira_row("RS-9", ["assigned"])])
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("none open", completed.stdout)
+        self.assertNotIn("RS-9", completed.stdout)
+
+    def test_the_filter_is_on_the_tracker_and_not_only_on_the_slug(self) -> None:
+        """Belt to the previous test's braces.
+
+        A real Jira row carries no repo, so the test above would still pass if
+        the filter were `repo == slug` alone. This one carries a matching slug
+        and must still be excluded, which is only true while `tracker` is part
+        of the filter.
+        """
+        self.with_github(pulls=[])
+        self.write_index([self.row("acme/widget", 1, ["assigned"], tracker="jira")])
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("none open", completed.stdout)
+
+    def test_a_copy_without_the_package_reports_rather_than_crashes(self) -> None:
+        """`bin/` copied alone has no `dashboard` to import.
+
+        The read-only suite runs exactly that copy, and it is how this coupling
+        was found. Every other section here degrades to a reported reason when
+        its reader is missing; this one has to as well, or one absent package
+        takes the whole report down.
+        """
+        tools = self.base / "tools"
+        shutil.copytree(BIN, tools, ignore=shutil.ignore_patterns("__pycache__"))
+        self.with_github(pulls=[])
+        completed = self.run_tool(tools / "sd-status")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("not importable from this checkout", completed.stdout)
+
+    def test_the_section_is_in_the_json_report(self) -> None:
+        self.with_github(pulls=[])
+        self.write_index([self.row("acme/widget", 1, ["assigned"])])
+        result = self.report()
+        self.assertIn("issues", result)
+        self.assertTrue(result["issues"]["available"])
+        self.assertEqual(len(result["issues"]["needs_you"]), 1)
+
+
 class ReadOnlyTests(StatusFixture):
     def test_nothing_under_the_temp_root_changes(self) -> None:
         self.with_github(pulls=[])
