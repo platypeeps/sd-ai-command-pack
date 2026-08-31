@@ -62,7 +62,9 @@ const link = (text, href) => {
     a.href = href;
     a.textContent = text;
     a.target = "_blank";
-    a.rel = "noreferrer";
+    // `noopener` spelled out: `noreferrer` implies it in current browsers,
+    // but not everywhere, and the new tab must never get a `window.opener`.
+    a.rel = "noopener noreferrer";
     td.append(a);
   } else {
     td.textContent = text;

@@ -21,13 +21,20 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard import collect, github, jira, store  # noqa: E402 - after the path insert
+from dashboard import (  # noqa: E402 - after the path insert
+    collect,
+    github,
+    jira,
+    server,
+    store,
+)
 
 NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -508,6 +515,57 @@ class DumpTests(unittest.TestCase):
             github._run, store.connect = original_run, original_connect
         self.assertEqual(code, 0)
         self.assertIn('"repos"', buffer.getvalue())
+
+
+class PayloadTests(unittest.TestCase):
+    """What `/api/issues` answers, including when the index has nothing open."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = pathlib.Path(self.tmp.name) / "index.sqlite"
+
+    def test_an_absent_index_is_reported_without_being_created(self) -> None:
+        payload = server.issue_payload(self.path)
+        self.assertFalse(payload["available"])
+        self.assertIn("no index yet", payload["reason"])
+        self.assertFalse(
+            self.path.exists(), "a GET that creates the database is a write"
+        )
+
+    def test_the_two_tables_split_on_needs_you(self) -> None:
+        connection = store.connect(self.path)
+        store.upsert_issues(
+            connection,
+            [
+                issue_row("https://x/1", ["assigned"]),
+                issue_row("https://x/2", ["mentioned"]),
+            ],
+            "2026-08-31T00:00:00Z",
+        )
+        connection.close()
+        payload = server.issue_payload(self.path)
+        self.assertEqual([row["url"] for row in payload["needsYou"]], ["https://x/1"])
+        self.assertEqual([row["url"] for row in payload["other"]], ["https://x/2"])
+
+    def test_an_index_with_nothing_open_still_reports_when_it_was_collected(self) -> None:
+        """The staleness stamp is a fact about the collect, not about the queue.
+
+        Deriving it from the open rows made an index of only closed issues say
+        it had never been collected, so the page would call a fresh index stale.
+        """
+        connection = store.connect(self.path)
+        store.upsert_issues(
+            connection,
+            [issue_row("https://x/1", ["assigned"], state="closed")],
+            "2026-08-31T00:00:00Z",
+        )
+        connection.close()
+        payload = server.issue_payload(self.path)
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["needsYou"], [])
+        self.assertEqual(payload["other"], [])
+        self.assertEqual(payload["indexedAt"], "2026-08-31T00:00:00Z")
 
 
 if __name__ == "__main__":

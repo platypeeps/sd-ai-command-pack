@@ -880,7 +880,24 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `dashboard.store` from one level up, and the read-only suite deliberately runs a copy
     of `bin/` alone, where no such package exists. That test failed, which is how it was
     found; the import is now guarded and the degraded path has its own test.
-  - Checks, run: `make check` exits 0 (52 tests in `test_sd_status`, 33 in
+  - **Five Copilot findings, all five real and all five mine.** The two that
+    changed behaviour: `indexedAt` was derived from the *open* rows, so an index
+    holding only closed issues would have reported never having been collected
+    and the page would have called a fresh index stale — it now reads
+    `MAX(last_seen)` over every row, because staleness is a fact about the
+    collect and not about the queue. And the Jira fixture was shaped like a
+    GitHub pull request, so the test asserting Jira rows are not attributed to a
+    checkout would have passed against a filter that only compared repo slugs; a
+    realistic Jira row (no repo, no number, a browse URL) now proves the real
+    case and a second test keeps the repo-bearing row to prove the `tracker`
+    half of the filter is load-bearing. Both guards were mutation-tested: revert
+    either and exactly the new test fails. The other three were correct and
+    cheap — `role="tablist"/"tab"/"tabpanel"` wiring behind the `aria-selected`
+    the markup already carried, `rel="noopener noreferrer"` spelled out rather
+    than relying on `noreferrer` implying it, and `sys.path` restored around the
+    test helper's import so no later import in the module resolves differently
+    depending on test order.
+  - Checks, run: `make check` exits 0 (53 tests in `test_sd_status`, 36 in
     `test_sd_dashboard_index`, all suites green). Live `python3 bin/sd-status` in this
     checkout prints `issues (this repo, from the index)` / `none open` — verified genuine
     rather than an empty filter, by querying the index directly: 18 open rows, 15 needing

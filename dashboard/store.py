@@ -234,6 +234,18 @@ def needs_you(row: dict) -> bool:
     return row.get("state") == "open" and bool(NEEDS_YOU & set(row.get("why") or []))
 
 
+def latest_seen(connection: sqlite3.Connection) -> str:
+    """The newest `last_seen` in the whole index, or "" when it is empty.
+
+    Every row, deliberately, not just the open ones. This answers "when did a
+    collect last see anything", which is a fact about the collect; deriving it
+    from the open rows would make an index full of closed issues report no
+    collect at all, and the page would call a working index stale.
+    """
+    row = connection.execute("SELECT MAX(last_seen) FROM issue").fetchone()
+    return (row[0] if row else "") or ""
+
+
 def issues(connection: sqlite3.Connection, state: str | None = None) -> list[dict]:
     """Every indexed issue, newest activity first; `why` decoded back to a list."""
     if state is None:

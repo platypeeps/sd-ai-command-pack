@@ -580,8 +580,15 @@ class IssueSectionTests(StatusFixture):
     """
 
     def write_index(self, rows: list[dict]) -> None:
+        # `sys.path` is restored: this module also exercises `sd-status`
+        # in-process, and a leftover entry would let a later import resolve
+        # differently depending on which test ran first.
+        saved = list(sys.path)
         sys.path.insert(0, str(BIN.parent))
-        from dashboard import store
+        try:
+            from dashboard import store
+        finally:
+            sys.path[:] = saved
 
         path = self.home / ".cache" / "sd-ai-command-pack" / "index.sqlite"
         connection = store.connect(path)
@@ -589,6 +596,26 @@ class IssueSectionTests(StatusFixture):
             store.upsert_issues(connection, rows, "2026-08-31T00:00:00Z")
         finally:
             connection.close()
+
+    @staticmethod
+    def jira_row(key: str, why: list[str]) -> dict:
+        """A row shaped the way `dashboard/jira.py` actually writes them.
+
+        No repo, no number, a browse URL. The point of the Jira tests is what
+        production rows look like, so the fixture has to look like one.
+        """
+        return {
+            "tracker": "jira",
+            "url": f"https://example.atlassian.net/browse/{key}",
+            "repo": "",
+            "number": None,
+            "kind": "issue",
+            "title": key,
+            "state": "open",
+            "author": "someone",
+            "updated_at": "2026-08-30T00:00:00Z",
+            "why": why,
+        }
 
     @staticmethod
     def row(repo: str, number: int, why: list[str], *, tracker: str = "github") -> dict:
@@ -638,7 +665,24 @@ class IssueSectionTests(StatusFixture):
         self.assertNotIn("#99", completed.stdout, "another repository's issue leaked in")
 
     def test_a_jira_row_is_not_attributed_to_a_checkout(self) -> None:
-        """Named gap: no committed fact ties a Jira project to a repository."""
+        """Named gap: no committed fact ties a Jira project to a repository.
+
+        A real Jira row, as `dashboard/jira.py` writes it: no repo slug at all.
+        """
+        self.with_github(pulls=[])
+        self.write_index([self.jira_row("RS-9", ["assigned"])])
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("none open", completed.stdout)
+        self.assertNotIn("RS-9", completed.stdout)
+
+    def test_the_filter_is_on_the_tracker_and_not_only_on_the_slug(self) -> None:
+        """Belt to the previous test's braces.
+
+        A real Jira row carries no repo, so the test above would still pass if
+        the filter were `repo == slug` alone. This one carries a matching slug
+        and must still be excluded, which is only true while `tracker` is part
+        of the filter.
+        """
         self.with_github(pulls=[])
         self.write_index([self.row("acme/widget", 1, ["assigned"], tracker="jira")])
         completed = self.run_tool(SD_STATUS)

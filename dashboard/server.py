@@ -56,17 +56,19 @@ PAGE = """<!doctype html>
 </style>
 <h1>sd dashboard</h1>
 <p class="sub" id="sub">loading\u2026</p>
-<nav>
- <button id="tab-repos" aria-selected="true">repos</button>
- <button id="tab-issues" aria-selected="false">issues</button>
+<nav role="tablist" aria-label="views">
+ <button id="tab-repos" role="tab" aria-selected="true"
+  aria-controls="panel-repos">repos</button>
+ <button id="tab-issues" role="tab" aria-selected="false"
+  aria-controls="panel-issues">issues</button>
 </nav>
-<section id="panel-repos">
+<section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos">
 <table><thead><tr>
  <th>repo</th><th>group</th><th>branch</th><th class="n">dirty</th>
  <th class="n">ahead</th><th class="n">behind</th><th>last</th><th>subject</th>
 </tr></thead><tbody id="rows"></tbody></table>
 </section>
-<section id="panel-issues" hidden>
+<section id="panel-issues" role="tabpanel" aria-labelledby="tab-issues" hidden>
 <p class="sub" id="issue-sub"></p>
 <h2>needs you</h2>
 <table><thead><tr>
@@ -160,6 +162,10 @@ def issue_payload(path: Path | None = None) -> dict:
     connection = store.connect(target)
     try:
         rows = store.issues(connection, state="open")
+        # From every row, not from `rows`: an index holding only closed issues
+        # has still been collected, and saying otherwise would report a fresh
+        # index as never filled.
+        indexed_at = store.latest_seen(connection)
     finally:
         connection.close()
     return {
@@ -169,7 +175,7 @@ def issue_payload(path: Path | None = None) -> dict:
         "other": [row for row in rows if not store.needs_you(row)],
         # The newest evidence in the index, so the page can say how stale it is
         # rather than implying it is live.
-        "indexedAt": max((row["last_seen"] for row in rows), default=""),
+        "indexedAt": indexed_at,
     }
 
 
