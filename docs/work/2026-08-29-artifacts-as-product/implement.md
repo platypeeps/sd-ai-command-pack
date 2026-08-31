@@ -1540,7 +1540,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Suggestions · Skills · Sessions | backbone, **new** — no system counterpart | no |
     | Toolbox · Briefs · Vault · Research · Jira personal | **plugin tab**, stays system-owned | no |
     | Projects | derived; folds into Now/Work rather than porting | n/a |
-    | Ports · rtk savings | no destination stated in the design | **undecided** |
+    | Ports | **plugin tab** beside Toolbox (R11-D12) | no |
+    | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
   - **The verdict: two of fifteen tabs exist, thirteen do not**, and four of
     those thirteen are new surfaces with no system counterpart to port from.
   - Three pieces of the contract are absent beyond the tabs: no
@@ -1551,18 +1552,39 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - So **6b is not a port swap gated by a checklist**: it is thirteen tabs, a
     plugin contract, an allow-list and three verbs, and the swap is its last
     step. The plan's one-line row understates it, which is the finding.
-  - Two decisions the checklist raises and does not settle: the **Ports** tab
-    and the **rtk savings ledger** have no stated destination in the design; and
+  - One thing the checklist raises and does not settle:
     `~/repos/system/local-project-dashboard/dashboard.py` is one 1,728-line
-    file serving all fifteen tabs, so it cannot
-    be deleted per-tab — the two dashboards coexist for the whole of 6b rather
-    than for a short window. The risk register names that window; this makes its
-    length concrete.
+    file serving all fifteen tabs, so it cannot be deleted per-tab — the two
+    dashboards coexist for the whole of 6b rather than for a short window. The
+    risk register names that window; this makes its length concrete.
+  - **The Ports and rtk question turned out to be a Now question, and it is
+    now R11-D12.** Chasing where those two land found that `attentionItems()`
+    draws Needs-you from six sources — `toolbox`, `repos`, `queues`, `prs`,
+    `ports`, `areas` — and **three of the six are plugin-bound**, owning nine
+    of the thirteen rows the view can emit. Worse than the count: the view
+    sorts by rank, and **every rank-0 and rank-1 row comes from a plugin-bound
+    source** — cron exited non-zero, vault collector errored, cron silent, cron
+    failure logged, task overdue. The specified `dashboard.tile` contract
+    renders into its own tab and cannot put a row in somebody else's view, so
+    the swap as designed would have left Now with no rank-0 or rank-1 row at
+    all while Now still rendered — a silent regression. R11-D12
+    adds one optional key: a plugin tab may return rows shaped like the ones
+    `add()` already takes. It also flips 6b's order — the plugin loader comes
+    before the tabs, because Now depends on it.
+  - The same look settled the two smaller ones without a decision: **rtk** is a
+    card inside `renderToolbox()`, so it rides Toolbox and never needed a
+    destination — this checklist's first draft mis-filed it by reading
+    "collector with no tab" as "fact with no home". **Ports** gets its own
+    plugin tab rather than folding into Toolbox: same owner, but its own tab
+    and its own alert identity today.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from
           `~/repos/system`, code and pinned actions still system-owned
-    - [ ] Ports and rtk have a recorded decision
+    - [x] Ports and rtk have a recorded decision — R11-D12, 2026-08-31
+    - [ ] Now emits every rank-0 and rank-1 row it emits today, from plugin
+          sources as well as backbone ones (R11-D12's optional row key wired,
+          and the count checked against `attentionItems()` rather than assumed)
     - [ ] `RUN_ALLOWLIST` exists and every UI mutation maps 1:1 to a `bin/`
           command
     - [ ] `sd-dashboard install` exists and replaces the system LaunchAgent
