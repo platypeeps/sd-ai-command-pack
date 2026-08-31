@@ -54,7 +54,7 @@ sd-ai-command-pack/
   skills/sd-*/SKILL.md  + 64 merged skills, renamed se-* → sd-* at fold (67 on disk − 3 retired:
                         se-help, se-brand-voice, se-humanizer — retired under old names)
   agents/               sd-rust-write/fill/reviewer, sd-claim-verifier, sd-source-reader —
-                        all with declared tools:. The vendoring half of this row was
+                        each carrying a declared `tools:` key. The vendoring half of this row was
                         struck at P2 (2026-08-30): every kimi and codex agent turned out
                         to be a wrapper over plugin-owned machinery, so vendoring the
                         markdown would have shipped surfaces that resolve and then refuse
