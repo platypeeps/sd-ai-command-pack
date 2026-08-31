@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""The dashboard CLI: serve the view, or dump what it would serve.
+
+Two verbs now, not the five the design lists. `install` (the LaunchAgent),
+`item set-status` (the intents lane) and `export --obsidian` land with the tabs
+they belong to, under the 3c-to-6b parity checklist -- shipping them as stubs
+would put three verbs in the inventory that answer nothing, and the inventory is
+supposed to be a promise.
+
+No verb takes a path to a repository. The fleet root comes from `SD_REPO_ROOT`
+or defaults to `~/repos`, so R10-D6 holds here the same as everywhere else: the
+dashboard reads many repos, but no invocation aims it at one.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from dashboard import collect, server  # noqa: E402 - after the path insert
+
+
+def cmd_serve(args: argparse.Namespace, out) -> int:
+    root = collect.repo_root()
+    print(f"serving {root} on http://{server.DEFAULT_HOST}:{args.port}", file=out)
+    server.serve(root, port=args.port)
+    return 0
+
+
+def cmd_index(args: argparse.Namespace, out) -> int:
+    """Collect once and report, or print the payload verbatim.
+
+    `--dump` is canonical on purpose: sorted keys, no wall clock, no cache
+    metadata. Two dumps of an unchanged fleet are byte-identical, which is what
+    makes "diff the dump" a check rather than a ritual.
+    """
+    state = collect.build_state(collect.repo_root())
+    if args.dump:
+        print(json.dumps(state, indent=2, sort_keys=True), file=out)
+        return 0
+    counts = state["counts"]
+    print(
+        f"{counts['repos']} repos, {counts['dirty']} dirty, {counts['ahead']} ahead",
+        file=out,
+    )
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sd-dashboard", description=__doc__)
+    verbs = parser.add_subparsers(dest="verb", required=True)
+    serve_verb = verbs.add_parser("serve", help="run the read-only view")
+    serve_verb.add_argument("--port", type=int, default=server.DEFAULT_PORT)
+    serve_verb.set_defaults(handler=cmd_serve)
+    index_verb = verbs.add_parser("index", help="collect the fleet once")
+    index_verb.add_argument(
+        "--dump", action="store_true", help="print the collected state as JSON"
+    )
+    index_verb.set_defaults(handler=cmd_index)
+    return parser
+
+
+def main(argv: list[str] | None = None, out=sys.stdout) -> int:
+    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    handler = args.handler
+    return int(handler(args, out))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
