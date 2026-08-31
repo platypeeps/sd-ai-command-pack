@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""The pack's service surface for plugins, stores and config.
+
+Today `sd` carries one verb group: `plugin`. The rest -- `store`, `issue`,
+`config` -- land at step 8 with the consumer that needs them (R11-D13).
+
+`sd plugin add` is the only way a plugin becomes known to this machine. There
+is no disk scanning: the backbone never goes looking for manifests, because a
+surface that discovers plugins by walking the filesystem is a surface that
+loads whatever someone drops in the right directory. Registration is an
+explicit act with a path in it.
+
+What `add` validates is deliberately narrow. It reads the whole manifest and
+checks `prefix` and `dashboard.tile` -- the two keys anything reads today --
+and carries `kinds`, `issues` and `vendor` through unexamined. Step 8 adds
+enforcement to this reader rather than writing a second one, which is the
+failure this pack has already paid for in duplicated scripts. The unenforced
+keys are not ignored: they are stored, so a manifest that declares them keeps
+them, and the step-8 parser inherits real data rather than a re-read.
+
+Exit 0 when the verb did what it says, 1 when it refused, 2 when the
+invocation was wrong.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import sd_lib  # noqa: E402
+
+MANIFEST_NAME = "sd-plugin.json"
+
+# `sd` and `se` are reserved: the backbone owns one and the other names the
+# surfaces that folded into it, whose renders may still exist on some machine.
+RESERVED_PREFIXES = frozenset({"sd", "se"})
+PREFIX_PATTERN = re.compile(r"^[a-z]{2,5}$")
+
+# Read and carried, never enforced here. Named so that step 8 extends this
+# list rather than discovering it.
+CARRIED_KEYS = ("kinds", "issues", "vendor", "interface")
+
+
+class Refusal(Exception):
+    """The invocation was understood and declined. Exit 1."""
+
+
+class UsageError(Exception):
+    """The invocation was wrong. Exit 2."""
+
+
+def read_manifest(path: pathlib.Path) -> dict[str, object]:
+    """The manifest at `path`, whole. Shape errors refuse; absence refuses."""
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise Refusal(f"no {MANIFEST_NAME} at {path}") from None
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise Refusal(f"{path} is not valid JSON: {error}") from None
+    if not isinstance(loaded, dict):
+        raise Refusal(f"{path} holds a {type(loaded).__name__}, not a JSON object")
+    return loaded
+
+
+def validate_prefix(manifest: dict[str, object], *, known: dict[str, object]) -> str:
+    """The manifest's `prefix`, or a refusal naming why it cannot be used."""
+
+    value = manifest.get("prefix")
+    if not isinstance(value, str) or not value:
+        raise Refusal(f"manifest declares no `prefix` (needs {PREFIX_PATTERN.pattern})")
+    if not PREFIX_PATTERN.fullmatch(value):
+        raise Refusal(f"prefix {value!r} is not two to five lowercase letters")
+    if value in RESERVED_PREFIXES:
+        # This is also the whole of the command-collision check. Every backbone
+        # command is spelled `sd-*`, so a `<prefix>-*` surface can shadow one
+        # only when the prefix is `sd` itself -- which this refuses. Enumerating
+        # the twelve commands here would look like a stronger guarantee while
+        # testing the same single condition.
+        raise Refusal(f"prefix {value!r} is reserved by the backbone")
+    if value in known:
+        raise Refusal(f"prefix {value!r} is already registered by {known[value]}")
+    return value
+
+
+def validate_tile(manifest: dict[str, object]) -> str | None:
+    """The `dashboard.tile` command, when the manifest declares one."""
+
+    dashboard = manifest.get("dashboard")
+    if dashboard is None:
+        return None
+    if not isinstance(dashboard, dict):
+        raise Refusal("`dashboard` is not an object")
+    tile = dashboard.get("tile")
+    if tile is None:
+        return None
+    if not isinstance(tile, str) or not tile.strip():
+        raise Refusal("`dashboard.tile` is not a non-empty command string")
+    return tile
+
+
+def registry(config: dict[str, object]) -> dict[str, object]:
+    """The `plugins` object, which a config without plugins simply lacks."""
+
+    plugins = config.get("plugins")
+    if plugins is None:
+        return {}
+    if not isinstance(plugins, dict):
+        raise Refusal("machine config `plugins` is not an object")
+    return plugins
+
+
+def write_config(config: dict[str, object], path: pathlib.Path) -> None:
+    """Replace `path` atomically, keeping every key this command did not touch.
+
+    The machine config predates this command and holds settings nothing here
+    understands. It is read, modified in place and written whole, so an
+    unrelated key survives a registration; a rename-into-place means a failed
+    write leaves the old file rather than half of a new one.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scratch = path.with_name(path.name + f".{os.getpid()}.tmp")
+    scratch.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    scratch.replace(path)
+
+
+def add(args: argparse.Namespace) -> int:
+    root = pathlib.Path(args.path).expanduser().resolve()
+    manifest_path = root / MANIFEST_NAME if root.is_dir() else root
+    manifest = read_manifest(manifest_path)
+
+    config_path = sd_lib.machine_config_path()
+    config = sd_lib.machine_config(config_path)
+    known = registry(config)
+
+    prefix = validate_prefix(manifest, known=known)
+    tile = validate_tile(manifest)
+
+    entry: dict[str, object] = {"root": str(manifest_path.parent), "prefix": prefix}
+    if tile is not None:
+        entry["tile"] = tile
+    for key in CARRIED_KEYS:
+        if key in manifest:
+            entry[key] = manifest[key]
+
+    config["plugins"] = {**known, prefix: entry}
+    write_config(config, config_path)
+    print(f"registered {prefix} from {manifest_path.parent}")
+    return 0
+
+
+def plugin_list(args: argparse.Namespace) -> int:
+    config = sd_lib.machine_config()
+    known = registry(config)
+    if args.json:
+        json.dump(known, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    if not known:
+        print("no plugins registered")
+        return 0
+    for prefix in sorted(known):
+        record = known[prefix]
+        entry: dict[str, object] = record if isinstance(record, dict) else {}
+        tile = entry.get("tile")
+        suffix = f"  tile: {tile}" if tile else ""
+        print(f"{prefix}  {entry.get('root', '?')}{suffix}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
+    groups = parser.add_subparsers(dest="group", required=True)
+
+    plugin = groups.add_parser("plugin", help="register and list plugins")
+    verbs = plugin.add_subparsers(dest="verb", required=True)
+
+    adder = verbs.add_parser("add", help=f"register the plugin whose {MANIFEST_NAME} is at PATH")
+    adder.add_argument("path", help=f"plugin checkout, or the {MANIFEST_NAME} itself")
+    adder.set_defaults(handler=add)
+
+    lister = verbs.add_parser("list", help="list registered plugins")
+    lister.add_argument("--json", action="store_true", help="machine-readable")
+    lister.set_defaults(handler=plugin_list)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exit_code:
+        return 2 if exit_code.code else 0
+    try:
+        return int(args.handler(args))
+    except Refusal as refusal:
+        print(f"sd: {refusal}", file=sys.stderr)
+        return 1
+    except sd_lib.ConfigError as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return 1
+    except UsageError as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
