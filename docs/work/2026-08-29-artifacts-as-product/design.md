@@ -1688,6 +1688,33 @@ The old number is not defended. 2,500 was set against a 457-line lift that R11-D
 763, and the estimate it rested on was wrong before any of this was built. What the cap is for is
 unchanged: the retired stack reached 95,000 lines one defensible commit at a time.
 
+**R11-D18 (2026-08-31) — a failing tile gets to say why, and the loader was throwing that away.**
+
+Found by writing the first real tile. Five tabs refused, and every row read `exited 2` and nothing
+else: not which argument was wrong, not that the interpreter was missing, not the traceback the
+tile had already printed. `bounded_run` opened the process with `stderr=subprocess.DEVNULL`.
+
+That is the module's own rule broken by the module. R11-D16 states that every way a tab can fail
+becomes a row naming the tab and the reason, *"silence is not an available outcome"* — and the
+loader was discarding the plugin's account of its own failure while dutifully reporting that
+something had gone wrong. A row that says a tab failed and cannot say why sends its reader to the
+one place the loader has already been: the tile's output.
+
+**Read, not merely piped.** The obvious fix — `stderr=subprocess.PIPE`, read it at the end — is
+wrong, and measurably so: a pipe nobody drains fills at 64KB and the writer blocks. Measured on
+this machine, a child writing 400KB to an unread stderr is still blocked after three seconds. So a
+tile with a long traceback would never reach its own exit, the five-second deadline would fire,
+and the loader would report a timeout for a tile that was ready to explain itself — a lost message
+replaced by a wrong diagnosis. Stderr is therefore read alongside stdout in the same `select` loop.
+
+**Bounded, because stderr is plugin output too.** The last 512 bytes ride back in the refusal.
+The tail rather than the head, since a traceback puts the error on its last line and the first
+stack frame is not what anyone needs. Unbounded, a plugin would decide how long a row is.
+
+Three properties, each tested: the reason carries what the tile said; a 20KB stderr still produces
+a bounded row that keeps the *end*; and a tile that floods stderr and then prints good JSON is
+served rather than killed — the test that fails against the naive fix and passes against this one.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).

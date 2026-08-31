@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -331,6 +332,81 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertFalse(self.only(loaded)["declared"])
         self.assertEqual(loaded["tabs"], [])
         self.assertEqual(loaded["rows"], [])
+
+    # -- what the tile said about its own failure --------------------------
+
+    def test_a_failing_tile_gets_to_say_why(self) -> None:
+        """`exited 1` alone is the loader going quiet on the plugin's behalf.
+
+        Found by writing a tile: five tabs refused with a bare status and no
+        way to tell a missing interpreter from a bad argument from a traceback.
+        """
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import sys
+                    print("cannot reach the vault: FDA not granted", file=sys.stderr)
+                    sys.exit(1)
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        tab = self.only_tab(loaded)
+        self.assertFalse(tab["ok"])
+        self.assertIn("exited 1", tab["reason"])
+        self.assertIn("FDA not granted", tab["reason"])
+
+    def test_the_tile_does_not_get_to_choose_how_long_the_row_is(self) -> None:
+        """Stderr is the plugin's output too, so its tail is bounded."""
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import sys
+                    sys.stderr.write("x" * 20000)
+                    sys.stderr.write("THE ACTUAL ERROR")
+                    sys.exit(1)
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        reason = self.only_tab(loaded)["reason"]
+        self.assertLess(len(reason), plugins.STDERR_TAIL + 200)
+        # The tail rather than the head: a traceback's last line is the error.
+        self.assertIn("THE ACTUAL ERROR", reason)
+
+    def test_a_tile_that_floods_stderr_is_refused_rather_than_deadlocked(self) -> None:
+        """The reason stderr is read instead of left in a pipe.
+
+        A pipe nobody drains fills at 64KB, and the tile blocks writing into
+        it. Left that way the tile never reaches its own exit, the deadline
+        fires, and the loader reports a timeout for a tile that was ready to
+        say what went wrong -- a lost message replaced by a wrong diagnosis.
+        """
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import sys
+                    sys.stderr.write("y" * 400000)
+                    sys.stderr.flush()
+                    print('{"html": "<p>survived</p>"}')
+                    """
+                ),
+            )
+        )
+        started = time.monotonic()
+        loaded = plugins.load()
+        tab = self.only_tab(loaded)
+        self.assertTrue(tab["ok"], tab["reason"])
+        self.assertEqual(tab["html"], "<p>survived</p>")
+        self.assertLess(time.monotonic() - started, plugins.TILE_SECONDS)
 
     # -- the markup filter -------------------------------------------------
 

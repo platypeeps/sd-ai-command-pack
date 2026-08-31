@@ -1747,6 +1747,19 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     ~120 for Now and ~200 for the write path, is ~3,571; 4,000 is that plus
     room for this repository's comment convention. Downward only, like
     `bin/`'s 14,000.
+  - **6b-3b: the loader keeps the tile's last words (R11-D18).** Writing the
+    first real tile refused five tabs with `exited 2` and no reason --
+    `bounded_run` opened the process with `stderr=subprocess.DEVNULL`, so the
+    loader that exists to stop a plugin going quiet was throwing away the
+    plugin's account of why it had. Stderr is now read in the same `select`
+    loop as stdout and its last 512 bytes ride back in the refusal.
+    Read rather than merely piped, and that distinction is measured: a child
+    writing 400KB into an unread pipe on this machine is still blocked after
+    three seconds, so the end-of-run fix would have turned every long traceback
+    into a timeout. Three tests: the reason carries what the tile said, a 20KB
+    stderr yields a bounded row that keeps the end rather than the start, and a
+    tile that floods stderr and then prints good JSON is served rather than
+    killed.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own
