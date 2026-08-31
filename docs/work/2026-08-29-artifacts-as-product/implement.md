@@ -1215,7 +1215,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - Checks, run: `ls ~/.claude/skills | grep -c '^se-'` = 0, same for
     `~/.codex/skills` and `~/.config/opencode/commands`; `~/.claude/agents` holds
     5 `sd-*` and 0 `se-*`; `~/.codex/agents`, `~/.config/agents` and
-    `~/.se-ai-command-pack` no longer exist. 76 surfaces render to three
+    `~/.se-ai-command-pack/` no longer exist. 76 surfaces render to three
     platforms. `grep -rn 'se-research\|se-scan' 'System/Scheduled Tasks/'` = 0,
     and `sd-research`/`sd-scan` both resolve. Every `~/.claude/skills/<name>`
     path in `sd-writing-pack`'s live surfaces now points at a directory that
