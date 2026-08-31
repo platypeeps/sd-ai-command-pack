@@ -152,14 +152,29 @@ jobs:
       - name: Check out the pull request
         uses: {CHECKOUT_ACTION} # {CHECKOUT_VERSION}
         with:
-          # The pull request's head, not the default `refs/pull/N/merge`.
-          # GitHub does not create the merge ref for a pull request with
-          # conflicts, so the default would fail this job at checkout on
-          # exactly the pull requests that are already having a bad day -- an
-          # advisory lane must never be the thing that makes one look worse.
-          # It is also what `route()` wants: it diffs `base...HEAD`, so the
-          # head commit is the subject and the merge commit is a detour.
-          ref: ${{{{ github.event.pull_request.head.sha }}}}
+          # The pull request's head ref, not the default `refs/pull/N/merge`
+          # and not the bare head SHA.
+          #
+          # Not `/merge`: GitHub does not create that ref for a pull request
+          # with conflicts, so the default fails this job at checkout on
+          # exactly the pull requests already having a bad day -- an advisory
+          # lane must never be the thing that makes one look worse.
+          #
+          # Not the bare SHA: with `fetch-depth: 0`, `actions/checkout` fetches
+          # `+refs/heads/*` and tags, and adds a pull refspec only when the ref
+          # *is* one. A fork's head commit is on no branch of this repository,
+          # so a SHA checkout resolves for same-repo pull requests and fails
+          # for forks.
+          #
+          # And not `repository: <fork>`, which would make `origin` the fork --
+          # `origin/${{{{ github.base_ref }}}}` would then name the fork's base
+          # branch, and `route()` would measure the diff against the wrong
+          # thing while looking like it worked.
+          #
+          # `refs/pull/N/head` is the head commit either way, exists whether or
+          # not the pull request merges cleanly, and leaves `origin` pointing
+          # at this repository.
+          ref: refs/pull/${{{{ github.event.pull_request.number }}}}/head
           # `route()` measures the branch against its merge base, which a
           # shallow clone does not contain.
           fetch-depth: 0

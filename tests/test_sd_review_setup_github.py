@@ -225,7 +225,27 @@ class WorkflowContentTests(SetupFixture):
         # framework making someone's pull request worse, which is the one
         # thing it must never do.
         text = setup.workflow_text("./x")
-        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", text)
+        self.assertIn(
+            "ref: refs/pull/${{ github.event.pull_request.number }}/head", text
+        )
+        # Not the bare head SHA: `fetch-depth: 0` fetches `+refs/heads/*` and
+        # tags, and `actions/checkout` adds a pull refspec only when the ref is
+        # one -- so a SHA resolves for a same-repo pull request and fails for a
+        # fork, whose head is on no branch here. Asserted because every pull
+        # request in these repositories is same-repo today, which means CI
+        # cannot show the difference.
+        self.assertNotIn("head.sha", text)
+        # And `origin` stays this repository, or `origin/<base>` would name the
+        # fork's base branch and `route()` would measure the wrong diff.
+        # Matched as a YAML key on its own line: the comment above it in the
+        # generated file explains why `repository:` is wrong, and a substring
+        # check would fire on the explanation.
+        keys = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip().startswith("repository:")
+        ]
+        self.assertEqual(keys, [])
 
     def test_the_action_referenced_exists_in_this_checkout(self) -> None:
         # A workflow naming an action path that is not shipped is a lane that
