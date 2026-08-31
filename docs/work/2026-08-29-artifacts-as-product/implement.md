@@ -159,9 +159,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - [x] 3f — the scratch-repo end-to-end this step's own check names. The table row at the
         top of this file gates step 3 on "scratch-repo sd-ship E2E; installer parity test
         green". The parity test has been green since 3e. **The end-to-end had not been run when
-        this box was opened**, and 3-c went ahead of it. Recorded as an open box rather than absorbed into a ticked
-        parent, because a step marked done on a check that never ran is the exact failure
-        critique 4 exists to end. Half of the verification section's step-3 paragraph is
+        this box was opened**, and 3-c went ahead of it. It was kept as an open box rather than
+        absorbed into a ticked parent, because a step marked done on a check that never ran is
+        the exact failure critique 4 exists to end; the tick below is the check having run. Half of the verification section's step-3 paragraph is
         already covered by fixtures — a markdown-only change plans `skip`
         (`test_documentation_only_change_plans_skip`) and an unmatched change falls back to
         the default tier (`test_an_unmatched_change_falls_back_to_the_default_tier`), both in
