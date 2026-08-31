@@ -21,7 +21,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import time
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
