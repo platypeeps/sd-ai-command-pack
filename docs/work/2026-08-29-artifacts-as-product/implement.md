@@ -504,7 +504,45 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `hyperframes` (8), `caveman` (6) and a long tail of single-skill packs. M1 touched only
     its own rows, which is the design. Recorded because the number is alarming until you
     know why it isn't.
-- [ ] P2 / P3 / P4 / P5 — rest of the platform sweep (renamed from `3a`–`3e` on 2026-08-30;
+- [x] P2 — 2026-08-30, executed as pure deletion. `codex@openai-codex` and
+      `kimi@kimi-marketplace` uninstalled; both Stop gates gone (`Stop` hooks across every
+      live plugin: 1, and it is claude-mem's, kept whole by R6-D10). The one SessionStart
+      hook this pack owns, `sd-handoff-restore` on `startup|clear`, is untouched, as are
+      the machine-level `cbm-*` hooks the plan leaves alone.
+  - **Nothing was vendored, and the step is smaller than it was written.** P2 said "vendor
+    kimi agents ×5 + codex-rescue + 3 codex skills". Neither half survives contact:
+    - All seven kimi agents are gated on the `/kimi:setup` PreToolUse hook, and that hook
+      was never registered on this machine — `~/.claude/settings.json` has no kimi entry.
+      They have been refusing with `*_HOOK_NOT_INSTALLED` the entire time they appeared in
+      the agent list. Vendoring five of them would have copied dead surfaces into the
+      backbone and called it a migration.
+    - `codex-rescue` is a forwarder, not an implementation: its skill contract is
+      `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "<args>"`, a 30.5 KB
+      plugin-owned Node script. Vendoring the four markdown files without it yields an
+      agent invoking a deleted path. Vendoring the script instead would put 30 KB of
+      Node into a pack whose `bin/` is stdlib Python under an 8,000-line cap, with a
+      `test_no_shipped_shell.py` already enforcing the opposite.
+  - Nothing is lost, because the capability was never in the plugins. Both CLIs are on
+    PATH independently (`/opt/homebrew/bin/kimi`, `/opt/homebrew/bin/codex`) and survive
+    the uninstall; `bin/sd-review:214` already carries kimi as an argv backend row with
+    the CLI's real prompt-driven invocation, and codex-rescue's stated purpose — hand a
+    substantial coding task to Codex — is what `sd-ship --backlog --agent codex` (R10-D1)
+    was built to replace, ranked above manual rescue in the model-economics section.
+  - Blast radius swept before uninstalling: references to any of these surfaces exist only
+    in this work item's own `design.md` and `implement.md`. Zero in `bin/`, zero in
+    `~/repos/system`, the vault's `System/`, shell config, `~/.claude/hooks`, or
+    `~/.codex/config.toml`.
+  - **Not verified in this session, by construction:** the agent registry is read at
+    session start, so `kimi-*` and `codex:codex-rescue` still appear in this session's
+    agent list and their absence can only be confirmed after a restart.
+  - Left for step 6 (M3), named so it is not rediscovered: the two marketplaces stay
+    registered (`kimi-marketplace`, `openai-codex` — a source list injects nothing), and
+    their `~/.claude/plugins/cache/` trees are still on disk.
+  - The installer grew no agent lane. It renders `skills/sd-*/SKILL.md` only, so an
+    `agents/` directory would not have installed anywhere — but building the lane with
+    nothing to put in it is machinery ahead of need (standing rule 1). It belongs to
+    step 5, which folds five real `se-*` agents and gives the lane its first content.
+- [ ] P3 / P4 / P5 — rest of the platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b
 - [ ] 5 / 5b

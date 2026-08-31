@@ -53,9 +53,11 @@ sd-ai-command-pack/
   skills/sd-*/SKILL.md  12 commands + templates (prd, design, implement, decision, work-README)
   skills/sd-*/SKILL.md  + 64 merged skills, renamed se-* → sd-* at fold (67 on disk − 3 retired:
                         se-help, se-brand-voice, se-humanizer — retired under old names)
-  agents/               sd-rust-write/fill/reviewer, sd-claim-verifier, sd-source-reader +
-                        vendored kimi-review/-challenge/-ask/-swarm/-swarm-write, codex-rescue,
-                        example-reviewer — all with declared tools:
+  agents/               sd-rust-write/fill/reviewer, sd-claim-verifier, sd-source-reader —
+                        all with declared tools:. The vendoring half of this row was
+                        struck at P2 (2026-08-30): every kimi and codex agent turned out
+                        to be a wrapper over plugin-owned machinery, so vendoring the
+                        markdown would have shipped surfaces that resolve and then refuse
   bin/                  sd_lib.py (detection, derive_status), sd_route.py, sd-check, sd-docs-lint,
                         sd-pr-state, sd-review(+-local), sd-status, sd-spec, sd-map, sd-handoff,
                         sd-trackers, sd-handoff-restore (hook), sd CLI (plugin|store|issue|config groups),
@@ -111,8 +113,10 @@ reviewer/verifier, patch-only writer, single-task specialist) and must declare `
 Stated exception: help/catalog surfaces (`sd-help`) are skills. Behavioral consequence, enforced
 by the render: commands set `disable-model-invocation`, skills do not, agents carry `tools:`;
 the parity test asserts each rendered file carries its kind marker, and the step-5 collision
-check is keyed on kind. Vendored agents (kimi-*, codex-rescue, example-reviewer) keep their
-upstream names — the one-prefix rule covers merged se-* surfaces, not vendored ones.
+check is keyed on kind. The vendored-agent carve-out (upstream names kept, the one-prefix rule
+covering only merged se-* surfaces) is retained for a future vendored agent, but as of P2 it has
+no members: see the P2 record in `implement.md` for why kimi-* and codex-rescue were dropped
+rather than vendored.
 
 ### Consuming-repo layout (the entire tracked footprint)
 
@@ -211,7 +215,7 @@ sensitive globs, draft policy, tier chains. Backends on the existing Provider se
 | codex | local CLI (hardened invocation verbatim from review-local.py:1983-2018) | $0 (ChatGPT sub; **rate-limited outcome distinct from unavailable**, r8). **Subscription only, never API billing (R10-D4, user 2026-08-29):** verified precedence in codex-rs `load_auth()` is `CODEX_API_KEY` env → ephemeral → `CODEX_ACCESS_TOKEN` env → `auth.json`; `OPENAI_API_KEY` is *not* read by the CLI. This machine: `auth_mode: chatgpt`, no key in auth.json, `codex login status` = "Logged in using ChatGPT". Preflight before every codex call (review, planning, `--agent codex`): scrub `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN` from the subprocess env (`build_tool_environment` inherits `os.environ` today), assert auth.json `auth_mode == chatgpt`, refuse otherwise — a run can never silently fall over to metered billing | heads every chain; default planning-review provider |
 | prism | openai-compatible | ~low | standard fallback |
 | gito | openai-compatible | per-file | deep fallback |
-| kimi | argv row (+ vendored agents for swarm/challenge) | low | `--challenge`, fan-out |
+| kimi | argv row (`kimi -p <prompt> --output-format text`); the vendored-agent half was struck at P2 — the plugin's agents were hook-gated and its setup had never been run on this machine | low | `--challenge`, fan-out |
 | antigravity (replaces gemini, r9b) | local CLI: `agy -p --output-format json --json-schema` on exact diff | $0 conditional on V1′ (paid sub on active account) + V2′ (training opt-out); gated on probe P2 (non-TTY stdout gotcha — P2 fail → pty wrapper → else delete row, per R9b-D2); local-only lane, never in setup-github CI | planning/branch diversity; personal/platypeeps repos only until employer policy check; preflight refuses on active-account mismatch |
 | local exo :52415 (R11-D1, user 2026-08-29 — replaces llama.cpp row) | openai-compatible adapter (`/v1`, verified live: MiniMax-M2.7-4bit, Qwen3-Coder-480B-A35B-4bit) | $0 | **probe-gated** (severity-floor probe; graveyard predicts failure) — cheap tiers only; model pinned by name in config, preflight refuses if not in `/v1/models` |
 | copilot | github-kind | credits | remote default (opt-in `enabled_repos`) |
