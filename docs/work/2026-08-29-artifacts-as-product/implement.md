@@ -165,8 +165,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         was built with a preexisting `docs/adr/`, a Makefile, and a small Python package, then
         driven through the sd-plan and sd-ship stages by hand — both are skills with no
         `bin/` implementation, and both say so in their own "State of the tooling" section.
-        Four checks passed: `sd-check` detected the repository's own `makefile` entrypoints and
-        deduped `test`/`lint` as covered by `check`; B5a adoption purity held with zero paths
+        Four checks passed: `sd-check` reported `entrypoints: makefile (Makefile defines check,
+        test, lint)` and ran the repository's own `make check`, deduping `test` and `lint` as
+        already covered by it; B5a adoption purity held with zero paths
         outside `docs/work/`; `sd-docs-lint` was clean with rule 4 declining to demand a
         `docs/spec/` the repository does not have; and both stated route shapes were right —
         markdown-only planned `skip` with no providers, `requirements.txt`-only planned

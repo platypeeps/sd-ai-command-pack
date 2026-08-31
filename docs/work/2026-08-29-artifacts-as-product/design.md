@@ -694,8 +694,8 @@ systematically under-routing the changes it exists to govern, and printing a pla
 
 The rule is now one sentence, stated by direction: a category that holds or raises the tier matches
 on any path; one that lowers it matches only when every path is in it. Escalating on one path is the
-safe direction — the worst it costs is a review nobody needed, where lowering on one path costs a
-review someone did. `required` still controls ordering only, so "touches the installer outranks is
+safe direction — the worst it costs is a review nobody needed, whereas lowering on one path costs
+a review someone did. `required` still controls ordering only, so "touches the installer outranks is
 mostly documentation" is unchanged; the phrase "is mostly documentation" now has to mean mostly.
 
 Why no test caught it, which is the part worth carrying forward: the one mixed-path fixture pairs
