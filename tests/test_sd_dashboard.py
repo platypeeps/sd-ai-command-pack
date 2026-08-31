@@ -209,12 +209,19 @@ class CommandLineTests(FleetHarness):
         original_root = collect.repo_root
         original_path = store.index_path
         original_run = trackers._run
+        original_available = trackers.available
         collect.repo_root = lambda environ=None: self.root  # type: ignore[assignment]
         store.index_path = lambda environ=None: (  # type: ignore[assignment]
             self.root / ".cache" / "index.sqlite"
         )
-        # Unauthenticated rather than absent: it exercises the "reported reason,
-        # never an exit code" path, and no argv reaches a real binary.
+        # Two patches, doing different jobs. `available` is pinned so the
+        # assertion does not depend on whether the machine running the suite
+        # happens to have `gh` installed -- it consults `shutil.which` before
+        # it ever reaches a runner, so patching only the runner would make this
+        # test report NO_GH on a CI image without `gh` and NO_AUTH on a laptop
+        # with it. `_run` is patched as the hard stop: whatever the code does,
+        # no argv reaches a real binary.
+        trackers.available = lambda runner=None: (False, trackers.NO_AUTH)  # type: ignore[assignment]
         trackers._run = lambda argv, runner=None: (1, "", "not logged in")  # type: ignore[assignment]
         try:
             code = sd_dashboard.main(list(argv), out=out)
@@ -222,6 +229,7 @@ class CommandLineTests(FleetHarness):
             collect.repo_root = original_root  # type: ignore[assignment]
             store.index_path = original_path  # type: ignore[assignment]
             trackers._run = original_run  # type: ignore[assignment]
+            trackers.available = original_available  # type: ignore[assignment]
         return code, out.getvalue()
 
     def test_index_reports_counts(self):

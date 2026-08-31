@@ -251,6 +251,52 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(result["reason"], trackers.NO_AUTH)
         self.assertEqual(result["issues"], [])
 
+    def test_graphql_errors_are_an_error_even_on_a_zero_exit(self) -> None:
+        """`gh` exits 1 on GraphQL errors today; this does not rely on that.
+
+        Measured on 2026-08-31: a malformed query and a partial NOT_FOUND both
+        exit 1, so the exit check already catches them. The check exists anyway
+        because that is `gh`'s behaviour rather than a contract, and the failure
+        it would otherwise cause is the expensive kind -- a short page read as a
+        complete one, and a watermark stepped past the dropped issues.
+        """
+
+        def runner(argv):
+            if argv[:3] == ["gh", "auth", "status"]:
+                return 0, "", ""
+            body = {"data": {"search": None}, "errors": [{"message": "rate limited"}]}
+            return 0, json.dumps(body), ""
+
+        result = trackers.collect(None, NOW, runner)
+        self.assertFalse(result["ok"])
+        self.assertIn("rate limited", result["reason"])
+        self.assertEqual(result["issues"], [])
+
+    def test_a_missing_search_block_is_an_error_not_an_empty_page(self) -> None:
+        """Absent and empty are different answers; collapsing them drops rows."""
+
+        def runner(argv):
+            if argv[:3] == ["gh", "auth", "status"]:
+                return 0, "", ""
+            return 0, json.dumps({"data": {}}), ""
+
+        result = trackers.collect(None, NOW, runner)
+        self.assertFalse(result["ok"])
+        self.assertIn("no search block", result["reason"])
+
+    def test_an_empty_result_set_is_a_successful_collect(self) -> None:
+        """The other side of it: no matches is an answer, not a failure."""
+
+        def runner(argv):
+            if argv[:3] == ["gh", "auth", "status"]:
+                return 0, "", ""
+            block = {"pageInfo": {"hasNextPage": False}, "nodes": []}
+            return 0, json.dumps({"data": {"search": block}}), ""
+
+        result = trackers.collect(None, NOW, runner)
+        self.assertTrue(result["ok"], "an empty search was treated as a failure")
+        self.assertEqual(result["issues"], [])
+
     def test_a_node_without_a_url_is_dropped(self) -> None:
         """An empty key would collide every url-less node onto one row."""
         self.assertIsNone(trackers.normalize({"number": 1}, "author"))

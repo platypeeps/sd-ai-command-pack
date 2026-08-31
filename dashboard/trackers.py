@@ -71,8 +71,12 @@ query($q: String!, $n: Int!, $after: String) {
 }
 """
 
-NO_GH = "gh is not installed"
-NO_AUTH = "gh has no usable credential"
+# Worded to match `bin/sd-pr-state`, deliberately: an operator who has already
+# read one of these sentences should not have to work out that the other one
+# means the same thing. Neither reports the credential -- `gh auth status` is
+# consulted for its exit code alone.
+NO_GH = "gh is not installed; install it (`brew install gh`) to collect issues"
+NO_AUTH = "gh is installed but not authenticated; run `gh auth login`"
 
 
 def iso(moment: datetime) -> str:
@@ -161,7 +165,26 @@ def _page(query: str, cursor: str | None, runner=None) -> tuple[dict, str]:
         payload = json.loads(out or "null")
     except json.JSONDecodeError as error:
         return {}, f"gh api graphql did not return JSON: {error}"
-    return ((payload or {}).get("data") or {}).get("search") or {}, ""
+    payload = payload or {}
+    # GraphQL reports per-field failures in a top-level `errors` array, and it
+    # can do so *alongside* usable `data` -- a partial answer. Measured on this
+    # machine, `gh` exits 1 in both cases (a malformed query and a partial
+    # NOT_FOUND), so the exit check above already catches them. This is checked
+    # anyway because that behaviour is `gh`'s, not a contract: the failure it
+    # would otherwise cause is the expensive kind -- a short page read as a
+    # complete one, and a watermark advanced past the issues that were dropped.
+    errors = payload.get("errors")
+    if errors:
+        first = errors[0] if isinstance(errors, list) and errors else {}
+        message = first.get("message") if isinstance(first, dict) else ""
+        return {}, f"gh api graphql returned errors: {message or errors}"
+    block = (payload.get("data") or {}).get("search")
+    # An absent `search` is malformed, an empty one is a legitimate result with
+    # no matches. Collapsing both to `{}` would turn the first into a silent
+    # empty page, which is the same silent-drop failure in a different coat.
+    if block is None:
+        return {}, "gh api graphql returned no search block"
+    return block, ""
 
 
 def search(query: str, runner=None) -> tuple[list[dict], bool, str]:
