@@ -930,6 +930,19 @@ allocate; and the deadline kills the tile's process group rather than the comman
 tile that backgrounds work outlives the timeout and goes on holding the pipe. Both are tested
 against a real subprocess, because neither survives being mocked.
 
+**The deadline covers two failures, and the row says which.** A tile that never wrote and a tile
+that wrote and then stopped both hit the same timeout. Calling the second "no output" sends whoever
+reads the row looking for a tile that never started, so the message names the bytes already in hand.
+The test keeps stdout open, which is what separates this path from the one where a tile closes the
+pipe and hangs — that is still `did not exit`. Found in review.
+
+Also raised in review and deliberately not acted on: `select` on a pipe and `os.killpg` do not work
+on Windows. Neither does the rest of this pack. It installs LaunchAgents, resolves
+`~/.local/state`, shells out to POSIX tools, and its CI is Linux with a macOS leg pending restore
+at step 7. A Windows-safe bounded reader here would be portability for one file inside a pack that
+has none, and unexercised code paths are how this repository grew the 9,390 unreachable lines the
+diagnosis counts. Named so the next reviewer does not have to find it again.
+
 **A dark plugin is named by what the loader actually has.** A manifest that will not read has no
 prefix in it, so the first version called every such plugin `?` — and two broken plugins became one
 row an operator cannot act on, identical in source, id and text, with no way to see there were two.
@@ -961,23 +974,23 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **1,927 of 2,500 — 573 lines left**. The loader cost **428** (420 in
+projected: `dashboard/` is **1,936 of 2,500 — 564 lines left**. The loader cost **437** (429 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
 `RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 573
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,690,
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 564
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,699,
 178 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
-**The cap is not raised here, and the test still passes at 1,927.** Raising it in the change that
+**The cap is not raised here, and the test still passes at 1,936.** Raising it in the change that
 revealed the problem is the move this pack has already made three times with `bin/`, and the
 number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 420 rather than letting it pass as inevitable: roughly half is
+One thing worth saying about the 429 rather than letting it pass as inevitable: roughly half is
 code and the rest is comments and docstrings, which is this repository's convention and not an
 accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.

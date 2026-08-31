@@ -347,6 +347,35 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertFalse(self.only_tab(loaded)["ok"])
         self.assertIn("did not exit", self.only_tab(loaded)["reason"])
 
+    def test_a_tile_that_stalls_mid_write_says_so_rather_than_no_output(self) -> None:
+        """Two failures share the deadline, and they are not the same failure.
+
+        Found in review. A tile that never spoke and one that wrote and then
+        stopped both hit the same timeout, and reporting the second as "no
+        output" sends whoever reads the row looking for a tile that never
+        started. Stdout stays open here -- that is what separates this path
+        from the one the hang test takes.
+        """
+        original = plugins.TILE_SECONDS
+        plugins.TILE_SECONDS = 0.4
+        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
+        self.register(
+            self.plugin(
+                "ss",
+                tile_script(
+                    """
+                    import sys, time
+                    sys.stdout.write('{"title": "t"')
+                    sys.stdout.flush()
+                    time.sleep(30)
+                    """
+                ),
+            )
+        )
+        reason = self.only_tab(plugins.load())["reason"]
+        self.assertIn("stopped writing", reason)
+        self.assertNotIn("no output", reason)
+
     def test_a_tile_that_does_not_emit_json_is_refused(self) -> None:
         self.register(self.plugin("ii", tile_script('print("not json")')))
         loaded = plugins.load()

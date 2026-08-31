@@ -137,10 +137,19 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
         fd = proc.stdout.fileno()
         while True:
             left = stop - time.monotonic()
+            # Two different failures share this deadline and are not the same
+            # thing to whoever reads the row: a tile that never spoke, and one
+            # that wrote and then stopped. Reporting the second as "no output"
+            # sends the operator looking for a tile that never started.
+            stalled = (
+                f"no output within {seconds:g}s"
+                if not size
+                else f"stopped writing within {seconds:g}s, after {size} bytes"
+            )
             if left <= 0:
-                raise Bounded(f"no output within {seconds:g}s")
+                raise Bounded(stalled)
             if not select.select([fd], [], [], left)[0]:
-                raise Bounded(f"no output within {seconds:g}s")
+                raise Bounded(stalled)
             # One byte past the ceiling is enough to know the tile crossed
             # it. Asking for a fixed 64KB and measuring afterwards would let a
             # caller with a small limit still be handed -- and made to
