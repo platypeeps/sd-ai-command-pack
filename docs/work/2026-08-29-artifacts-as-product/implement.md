@@ -1662,28 +1662,42 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     same shape `bin/` did (R11-D16).** `dashboard/plugins.py` reads the
     registry by shelling out to `sd plugin list --json` rather than parsing a
     manifest of its own -- no second reader, and the no-disk-scanning rule
-    comes free because the loader never looks at a directory. The tile payload
-    is specified for the first time: `{"tabs": [{title, html, rows}]}`, where
-    `html` is markup rendered into that tab and `rows` are R11-D12's typed
-    alert rows rendered as text with `href` confined to an in-page anchor.
-    **A list, because one repository has one manifest and `~/repos/system`
-    owns five of the views** — found by starting 6b-3 against the first draft
-    of the contract, which could hold one tab and therefore could not express
-    the step it exists to serve. `title` is required and must be unique within
-    a plugin: a repeated title is a tab the operator cannot reach.
-    The addition to R11-D12: **a plugin that goes dark becomes a rank-0 row.**
-    Absent, non-zero, timed out, oversized, unparseable, or emitting a refused
-    row -- each produces a row naming the plugin and the reason, because a
-    failed tile treated as "no rows" is indistinguishable from a quiet machine,
-    which is R11-D12's own complaint one layer down. 20 tests, all against a
-    real subprocess: neither the 5s deadline (which kills the process group,
-    so a backgrounded child cannot outlive it) nor the 64KB ceiling (enforced
-    while reading, not after) survives being mocked.
-    **The measurement:** `dashboard/` is **1,892 of 2,500, 608 left**. The
-    loader cost 393 against the ~240 R11-D13 left for the loader *and*
-    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 608
-    does not fit, so `dashboard/` projects to ~2,655 with `RUN_ALLOWLIST` still
-    uncounted. Not raised here -- the test passes at 1,892, and the cap gets
+    comes free because the loader never looks at a directory. The tile
+    protocol is specified for the first time, and it is **per tab**: the
+    manifest declares `dashboard.tabs: ["toolbox", "ports", ...]`, the loader
+    runs `<tile> <name>` once per declared name, and each call answers
+    `{title?, html?, rows?}` for that one tab -- `html` is markup rendered into
+    it, `rows` are R11-D12's typed alert rows with `href` confined to an
+    in-page anchor.
+    **Two drafts were wrong before this one, and each was corrected by
+    building against it rather than by reading it.** The first fixed a plugin
+    at one tab; starting 6b-3 found that one repository has one manifest while
+    `~/repos/system` owns five of the views, so the payload became a list of
+    tabs. That was still wrong, and timing the real collectors is what showed
+    why: `collect_toolbox` 3.78s, `collect_ports` 2.84s, `collect_areas` 0.03s,
+    `collect_briefs` 0.01s, `collect_jira` 0.00s -- **6.66s in sum against a 5s
+    per-tile budget**, so the single command would have been killed on every
+    load, permanently, while each individual collector fits the budget four
+    times over. Per tab, 5s keeps meaning one thing no matter how many tabs a
+    plugin serves, a slow tab can no longer starve its siblings, and the tabs
+    run concurrently behind a four-worker ceiling so a plugin does not get to
+    choose how many processes the dashboard starts. Tab names are validated at
+    registration (`^[a-z][a-z0-9-]{0,31}$`, no duplicates) because a name
+    reaches the tile as a command-line argument; `title` became optional, since
+    the declared name is the identity and the fallback.
+    The addition to R11-D12: **a tab that goes dark becomes a rank-0 row.**
+    Non-zero, timed out, oversized, unparseable, or emitting a refused row --
+    each produces a row naming the tab and the reason, because a failed tile
+    treated as "no rows" is indistinguishable from a quiet machine, which is
+    R11-D12's own complaint one layer down. 29 tests, all against a real
+    subprocess: neither the 5s deadline (which kills the process group, so a
+    backgrounded child cannot outlive it) nor the 64KB ceiling (enforced while
+    reading, not after) survives being mocked.
+    **The measurement:** `dashboard/` is **1,915 of 2,500, 585 left**. The
+    loader cost 416 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 585
+    does not fit, so `dashboard/` projects to ~2,678 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 1,915, and the cap gets
     re-derived from counts at the landing that carries the backbone renders.
     The loader also refuses a tile that prints good JSON and then exits
     non-zero: closing stdout is not exiting, and the status is inside the

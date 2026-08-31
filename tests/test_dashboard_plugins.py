@@ -51,12 +51,14 @@ class PluginLoaderTest(unittest.TestCase):
         self.addCleanup(lambda: (os.environ.clear(), os.environ.update(self._env)))
         os.environ["XDG_CONFIG_HOME"] = str(self.tmp / "config")
 
-    def plugin(self, prefix: str, tile: str | None = None) -> pathlib.Path:
+    def plugin(
+        self, prefix: str, tile: str | None = None, tabs: list[str] | None = None
+    ) -> pathlib.Path:
         root = self.tmp / f"plugin-{prefix}"
         root.mkdir(parents=True, exist_ok=True)
         manifest: dict = {"prefix": prefix, "interface": 1}
         if tile is not None:
-            manifest["dashboard"] = {"tile": tile}
+            manifest["dashboard"] = {"tile": tile, "tabs": tabs or ["one"]}
         (root / "sd-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
         return root
 
@@ -74,6 +76,17 @@ class PluginLoaderTest(unittest.TestCase):
     def only(self, loaded: dict) -> dict:
         self.assertEqual(len(loaded["plugins"]), 1)
         return loaded["plugins"][0]
+
+    def only_tab(self, loaded: dict) -> dict:
+        """The one tab of the one registered plugin, whether it reported or not.
+
+        Deliberately not `loaded["tabs"]`, which carries only the tabs that
+        succeeded: a refused tab has to stay inspectable, or these tests could
+        not tell one apart from a plugin that declared no tabs at all.
+        """
+        plugin = self.only(loaded)
+        self.assertEqual(len(plugin["tabs"]), 1)
+        return plugin["tabs"][0]
 
     # -- the empty machine -------------------------------------------------
 
@@ -122,12 +135,12 @@ class PluginLoaderTest(unittest.TestCase):
                 tile_script(
                     """
                     import json
-                    print(json.dumps({"tabs": [{
+                    print(json.dumps({
                         "title": "toolbox",
                         "html": "<p>ok</p>",
                         "rows": [{"rank": 0, "kind": "cron-exit", "id": "com.sven.x",
                                   "what": "job failed", "detail": "rc=2", "href": "#toolbox"}],
-                    }]}))
+                    }))
                     """
                 ),
             )
@@ -144,7 +157,7 @@ class PluginLoaderTest(unittest.TestCase):
         # Stamped by the loader, not by the plugin: a row has to be traceable
         # to the tab that emitted it even when the plugin would rather it were
         # not. Tab and not just plugin, because one prefix now carries several.
-        self.assertEqual(row["source"], "bb/toolbox")
+        self.assertEqual(row["source"], "bb/one")
 
     def test_rows_arrive_sorted_by_rank_across_plugins(self) -> None:
         for prefix, rank in (("cc", 3), ("dd", 1)):
@@ -154,8 +167,8 @@ class PluginLoaderTest(unittest.TestCase):
                     tile_script(
                         f"""
                         import json
-                        print(json.dumps({{"tabs": [{{"title": "t", "rows": [
-                          {{"rank": {rank}, "kind": "k", "id": "i", "what": "w"}}]}}]}}))
+                        print(json.dumps({{"rows": [
+                          {{"rank": {rank}, "kind": "k", "id": "i", "what": "w"}}]}}))
                         """
                     ),
                 )
@@ -178,9 +191,9 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         loaded = plugins.load()
-        plugin = self.only(loaded)
-        self.assertFalse(plugin["ok"])
-        self.assertIn("more than", plugin["reason"])
+        tab = self.only_tab(loaded)
+        self.assertFalse(tab["ok"])
+        self.assertIn("more than", tab["reason"])
         # The whole point: the oversized markup is gone and a row took its
         # place. An empty tab with no row is the failure this asserts against.
         self.assertEqual(loaded["tabs"], [])
@@ -203,8 +216,8 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
-        self.assertIn("within", self.only(loaded)["reason"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertIn("within", self.only_tab(loaded)["reason"])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
     def test_a_tile_that_backgrounds_work_does_not_outlive_the_deadline(self) -> None:
@@ -233,7 +246,7 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
         import time as _time
 
         _time.sleep(1.5)
@@ -255,8 +268,8 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
-        self.assertIn("exited 3", self.only(loaded)["reason"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertIn("exited 3", self.only_tab(loaded)["reason"])
 
     def test_a_tile_that_emits_output_and_then_fails_is_refused(self) -> None:
         """Closing stdout is not exiting, and the exit status still counts.
@@ -273,7 +286,7 @@ class PluginLoaderTest(unittest.TestCase):
                 tile_script(
                     """
                     import json, os, sys
-                    print(json.dumps({"tabs": [{"title": "t"}]}))
+                    print(json.dumps({"title": "t"}))
                     sys.stdout.flush()
                     os.close(1)
                     os._exit(3)
@@ -282,8 +295,8 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
-        self.assertIn("exited 3", self.only(loaded)["reason"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertIn("exited 3", self.only_tab(loaded)["reason"])
         self.assertEqual(loaded["tabs"], [])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
@@ -298,7 +311,7 @@ class PluginLoaderTest(unittest.TestCase):
                 tile_script(
                     """
                     import json, os, sys, time
-                    print(json.dumps({"tabs": [{"title": "t"}]}))
+                    print(json.dumps({"title": "t"}))
                     sys.stdout.flush()
                     os.close(1)
                     time.sleep(30)
@@ -307,29 +320,30 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
-        self.assertIn("did not exit", self.only(loaded)["reason"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertIn("did not exit", self.only_tab(loaded)["reason"])
 
     def test_a_tile_that_does_not_emit_json_is_refused(self) -> None:
         self.register(self.plugin("ii", tile_script('print("not json")')))
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
-        self.assertIn("not JSON", self.only(loaded)["reason"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertIn("not JSON", self.only_tab(loaded)["reason"])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
     def test_a_tile_command_that_does_not_exist_is_refused(self) -> None:
         self.register(self.plugin("jj", "/nonexistent/tile --json"))
         loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
+        self.assertFalse(self.only_tab(loaded)["ok"])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
     def test_a_manifest_deleted_after_registration_reports_rather_than_raises(self) -> None:
-        root = self.plugin("kk", tile_script("print('{\"tabs\": []}')"))
+        root = self.plugin("kk", tile_script("print('{}')"))
         self.register(root)
         (root / "sd-plugin.json").unlink()
         loaded = plugins.load()
         # `sd plugin list` reports the root as unreadable; the loader turns
         # that into a row rather than dropping a registered plugin silently.
+        # Plugin-level and not tab-level: with no manifest there are no tabs.
         self.assertFalse(self.only(loaded)["ok"])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
@@ -348,9 +362,9 @@ class PluginLoaderTest(unittest.TestCase):
                 tile_script(
                     f"""
                     import json
-                    print(json.dumps({{"tabs": [{{"title": "t",
+                    print(json.dumps({{"title": "t",
                         "html": "<p>tab still renders</p>",
-                        "rows": [json.loads({row_json!r})]}}]}}))
+                        "rows": [json.loads({row_json!r})]}}))
                     """
                 ),
             )
@@ -412,11 +426,11 @@ class PluginLoaderTest(unittest.TestCase):
                 tile_script(
                     """
                     import json
-                    print(json.dumps({"tabs": [{"title": "t", "rows": [
+                    print(json.dumps({"rows": [
                         {"rank": 2, "kind": "good", "id": "i", "what": "w"},
                         {"rank": 2, "kind": "bad", "id": "i", "what": "w",
                          "href": "https://evil.example"},
-                    ]}]}))
+                    ]}))
                     """
                 ),
             )
@@ -433,8 +447,7 @@ class PluginLoaderTest(unittest.TestCase):
                 tile_script(
                     """
                     import json
-                    print(json.dumps({"tabs": [
-                        {"title": "t", "html": "<p>ok</p>", "rows": "nope"}]}))
+                    print(json.dumps({"html": "<p>ok</p>", "rows": "nope"}))
                     """
                 ),
             )
@@ -445,92 +458,130 @@ class PluginLoaderTest(unittest.TestCase):
 
     # -- the tab contract --------------------------------------------------
 
-    def test_one_tile_may_carry_several_tabs(self) -> None:
-        """`~/repos/system` is one repository, one manifest, and five views.
+    def test_the_tile_is_invoked_once_per_declared_tab(self) -> None:
+        """The measurement that forced this shape, as a test.
 
-        A payload that could hold only one tab could not express the tabs the
-        swap exists to move, which is what makes the list the contract rather
-        than a convenience.
+        The five system collectors each fit a 5s budget and total 6.66s
+        together, so a single invocation serving every tab would be killed on
+        every load, permanently. Each declared tab is its own call, its own
+        budget and its own failure.
         """
         self.register(
             self.plugin(
                 "vv",
                 tile_script(
                     """
-                    import json
-                    print(json.dumps({"tabs": [
-                        {"title": "toolbox", "html": "<p>a</p>",
-                         "rows": [{"rank": 1, "kind": "k", "id": "i", "what": "w"}]},
-                        {"title": "vault", "html": "<p>b</p>",
-                         "rows": [{"rank": 0, "kind": "j", "id": "i", "what": "w"}]},
-                        {"title": "briefs", "html": "<p>c</p>"},
-                    ]}))
+                    import json, sys
+                    name = sys.argv[1]
+                    print(json.dumps({"title": name.upper(),
+                                      "html": "<p>" + name + "</p>",
+                                      "rows": [{"rank": 1, "kind": name,
+                                                "id": "i", "what": "w"}]}))
                     """
                 ),
+                tabs=["toolbox", "vault", "briefs"],
             )
         )
         loaded = plugins.load()
-        self.assertEqual([t["title"] for t in loaded["tabs"]], ["toolbox", "vault", "briefs"])
-        self.assertEqual([r["rank"] for r in loaded["rows"]], [0, 1])
-        # Rows carry the tab they came from, not just the plugin: five tabs
+        self.assertEqual([tab["name"] for tab in loaded["tabs"]],
+                         ["toolbox", "vault", "briefs"])
+        self.assertEqual([tab["title"] for tab in loaded["tabs"]],
+                         ["TOOLBOX", "VAULT", "BRIEFS"])
+        # Rows carry the tab they came from, not just the plugin: several tabs
         # behind one prefix would otherwise be one undifferentiated source.
-        self.assertEqual(sorted(r["source"] for r in loaded["rows"]),
-                         ["vv/toolbox", "vv/vault"])
+        self.assertEqual(sorted(row["source"] for row in loaded["rows"]),
+                         ["vv/briefs", "vv/toolbox", "vv/vault"])
 
-    def test_a_tab_without_a_title_is_refused_without_taking_its_siblings(self) -> None:
+    def test_one_failing_tab_does_not_silence_its_siblings(self) -> None:
+        """The whole reason for per-tab invocation, asserted directly."""
+        original = plugins.TILE_SECONDS
+        plugins.TILE_SECONDS = 0.6
+        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
         self.register(
             self.plugin(
                 "uu",
                 tile_script(
                     """
-                    import json
-                    print(json.dumps({"tabs": [
-                        {"html": "<p>nameless</p>"},
-                        {"title": "kept", "html": "<p>b</p>"},
-                    ]}))
+                    import json, sys, time
+                    name = sys.argv[1]
+                    if name == "slow":
+                        time.sleep(30)
+                    print(json.dumps({"rows": [{"rank": 1, "kind": name,
+                                                "id": "i", "what": "w"}]}))
                     """
                 ),
+                tabs=["slow", "fast"],
             )
         )
         loaded = plugins.load()
-        self.assertEqual([t["title"] for t in loaded["tabs"]], ["kept"])
-        self.assertEqual(len(self.rows_of("plugin-refused", loaded)), 1)
+        self.assertEqual([tab["name"] for tab in loaded["tabs"]], ["fast"])
+        # The lost tab is a rank-0 row naming exactly which tab went dark.
+        self.assertEqual([row["id"] for row in self.rows_of("plugin-dark", loaded)],
+                         ["uu/slow"])
+        # And the surviving tab's own row is still there.
+        self.assertEqual(len(self.rows_of("fast", loaded)), 1)
 
-    def test_a_repeated_title_is_refused_because_the_tab_is_unreachable(self) -> None:
+    def test_a_title_the_tile_omits_falls_back_to_the_declared_name(self) -> None:
+        self.register(self.plugin("tt", tile_script("print('{}')"), tabs=["ports"]))
+        self.assertEqual(plugins.load()["tabs"][0]["title"], "ports")
+
+    def test_a_non_string_title_is_named_and_the_declared_name_stands(self) -> None:
         self.register(
             self.plugin(
-                "tt",
+                "ss",
+                tile_script('import json; print(json.dumps({"title": 7}))'),
+                tabs=["ports"],
+            )
+        )
+        loaded = plugins.load()
+        self.assertEqual(loaded["tabs"][0]["title"], "ports")
+        self.assertEqual(len(self.rows_of("plugin-refused", loaded)), 1)
+
+    def test_a_non_string_html_is_named_rather_than_coerced(self) -> None:
+        """An empty tab that says nothing is the silence the module refuses.
+
+        The tab survives, because its rows may be perfectly good; what must not
+        happen is the markup vanishing without a word.
+        """
+        self.register(
+            self.plugin(
+                "oo",
                 tile_script(
                     """
                     import json
-                    print(json.dumps({"tabs": [
-                        {"title": "same", "html": "<p>first</p>"},
-                        {"title": "same", "html": "<p>second</p>"},
-                    ]}))
+                    print(json.dumps({"html": 42,
+                        "rows": [{"rank": 1, "kind": "kept", "id": "i", "what": "w"}]}))
                     """
                 ),
             )
         )
         loaded = plugins.load()
-        self.assertEqual(len(loaded["tabs"]), 1)
-        self.assertEqual(loaded["tabs"][0]["html"], "<p>first</p>")
+        self.assertEqual(loaded["tabs"][0]["html"], "")
+        self.assertEqual(len(self.rows_of("kept", loaded)), 1)
         self.assertEqual(len(self.rows_of("plugin-refused", loaded)), 1)
 
-    def test_a_tile_that_declares_no_tabs_key_is_refused(self) -> None:
-        """Distinct from an empty list, which is a plugin with nothing to show."""
-        self.register(self.plugin("ss", tile_script('print(\'{"html": "<p>x</p>"}\')')))
-        loaded = plugins.load()
-        self.assertFalse(self.only(loaded)["ok"])
-        self.assertIn("no `tabs`", self.only(loaded)["reason"])
-        self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
+    def test_the_byte_ceiling_is_applied_before_the_read_not_after(self) -> None:
+        """`bounded_run` must not be handed more than one byte past its limit.
 
-    def test_an_empty_tabs_list_is_a_working_plugin(self) -> None:
-        self.register(self.plugin("rr", tile_script('print(\'{"tabs": []}\')')))
-        loaded = plugins.load()
-        self.assertTrue(self.only(loaded)["ok"])
-        self.assertEqual(loaded["tabs"], [])
-        self.assertEqual(loaded["rows"], [])
-
+        Asserted on the returned length rather than on the refusal, because the
+        refusal happens either way -- what this pins is that a small limit is
+        not quietly rounded up to a full chunk before being consulted.
+        """
+        with self.assertRaises(plugins.Bounded):
+            plugins.bounded_run(
+                [sys.executable, "-c", "import sys; sys.stdout.write('x' * 100000)"],
+                None,
+                seconds=5.0,
+                limit=32,
+            )
+        # The same command inside the limit returns exactly what it wrote.
+        out = plugins.bounded_run(
+            [sys.executable, "-c", "import sys; sys.stdout.write('x' * 32)"],
+            None,
+            seconds=5.0,
+            limit=32,
+        )
+        self.assertEqual(len(out), 32)
 
 if __name__ == "__main__":
     unittest.main()

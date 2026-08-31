@@ -842,35 +842,68 @@ anything in particular. A budget is not an interface: the system repo cannot wri
 "under 64KB". So the shape is fixed here, and it is the smallest one that carries what R11-D12
 requires:
 
+The manifest names the tabs; the loader runs the tile **once per name**, passing the name as its
+argument, and each call answers for that one tab:
+
 ```json
-{"tabs": [{"title": "toolbox", "html": "<table>…</table>", "rows": [{"rank": 0,
- "kind": "cron-exit", "id": "com.sven.x", "what": "job failed", "detail": "rc=2",
- "href": "#toolbox"}]}]}
+// sd-plugin.json
+{"dashboard": {"tile": "./bin/dashboard-tile", "tabs": ["toolbox", "ports", "areas"]}}
+
+// `./bin/dashboard-tile toolbox` prints:
+{"title": "Toolbox", "html": "<table>…</table>", "rows": [{"rank": 0, "kind": "cron-exit",
+ "id": "com.sven.x", "what": "job failed", "detail": "rc=2", "href": "#toolbox"}]}
 ```
 
-**A tile returns a list of tabs, and that is not decoration.** The first draft of this record
-fixed the payload at a single tab, and building the next step against it is what found the
-mistake: a repository has one manifest and therefore one `dashboard.tile`, while `~/repos/system`
-owns **five** of the views being folded in (Toolbox, Vault/TaskNotes, Briefs, Jira personal,
-Research). One tile command must yield five tabs or 6b-3 cannot be written. A pack contributing a
-single tab writes a list of length one; two payload shapes and a rule about which applies would
-cost more than the ceremony does.
+**Per-tab invocation is forced by the budget, and it took a measurement to see it.** The first
+draft of this record fixed the payload at a single tab per plugin. Starting 6b-3 against it found
+that a repository has one manifest and therefore one `dashboard.tile`, while `~/repos/system` owns
+**five** of the views being folded in — so the payload was changed to carry a list of tabs. That
+was still wrong, and only timing the real collectors showed why:
 
-`rank` must be a non-negative integer. Rank 0 is the top of the view *and* where the loader
-writes the row saying a plugin has gone dark, so a row above it would let a plugin sort the notice
-of its own failure underneath its own rows — the outcome the failure row exists to prevent. Found
-in review.
+| collector | seconds | data |
+|---|---|---|
+| `collect_toolbox` | 3.78 | 17.0 KB |
+| `collect_ports` | 2.84 | 1.7 KB |
+| `collect_areas` | 0.03 | 2.2 KB |
+| `collect_briefs` | 0.01 | 28.8 KB |
+| `collect_jira` | 0.00 | 0.1 KB |
+| **sum** | **6.66** | **49.8 KB** |
 
-`title` names the tab and is **required** — a default to the prefix is a convenience at one tab
-and a collision at five, and the title is what the operator clicks. A repeated title is refused,
-because two tabs under one name is a tab that cannot be reached and renders as a working dashboard
-quietly missing a view. `html` is markup rendered into that tab. `rows` is R11-D12's optional key,
+Every one fits a 5s budget. Run in sequence behind a single command, Toolbox and Ports alone spend
+6.62s and the tile is killed on **every** load, permanently — a dashboard that never once showed a
+system tab, with the budget doing exactly what it was told. The 49.8 KB is collector data and not
+rendered markup, so the 64 KB half is likely breached too; that is stated as likely rather than
+measured, because only the seconds were timed.
+
+Three consequences, and the third is why this is the right shape rather than a bigger number:
+
+- **The budget keeps meaning one thing.** 5s per tab is the same promise whether a plugin serves
+  one tab or twelve. A per-tile budget scaled to tab count is a number nobody can reason about,
+  and it gets revisited the moment a sixth tab lands.
+- **Failure is per tab.** `collect_toolbox` at 3.78s can no longer starve the four tabs that cost
+  nothing between them. This is the same rule the loader already applies to rows and to tabs one
+  level out; making the *process* per tab is what completes it rather than an addition to it.
+- **Tabs run concurrently**, bounded at four workers, so wall clock is the slowest tab and not the
+  sum. A plugin declaring thirty tabs does not get to decide how many processes the dashboard
+  starts.
+
+`dashboard.tabs` is validated at registration, not at load: a name must match
+`^[a-z][a-z0-9-]{0,31}$` — it reaches the tile as a command-line argument, and a name with a
+leading dash would arrive as a flag — and a repeated name is refused there, since two tabs under
+one name is a tab nobody can reach. A `tile` with no `tabs` is refused for the same reason it
+would be useless: the loader has nothing to ask for.
+
+`title` is **optional** and renames only what the operator sees; the declared name is the identity
+and the fallback. `html` is markup rendered into that tab. `rows` is R11-D12's optional key,
 unchanged in field names from the `add()` calls it replaces, and each row is stamped
-`<prefix>/<title>` rather than `<prefix>` so five tabs behind one prefix are five sources.
+`<prefix>/<name>` so several tabs behind one prefix are several sources.
 
-An absent `tabs` key is a refusal; an empty list is a working plugin with nothing to show. A
-plugin that registers for its `kinds` and declares no tile at all is also working, and is
-deliberately not reported as a failure.
+`rank` must be a non-negative integer. Rank 0 is the top of the view *and* where the loader writes
+the row saying a tab has gone dark, so a row above it would let a plugin sort the notice of its own
+failure underneath its own rows — the outcome the failure row exists to prevent. Found in review.
+
+A plugin that registers for its `kinds` and declares no tile at all is working, and is deliberately
+not reported as a failure.
 
 **`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
 rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
@@ -884,12 +917,12 @@ emit. The consequence it did not draw: if the loader treats a failed tile as "no
 plugin crashing looks exactly like a plugin with nothing to report, and Now renders calm while
 cron is on fire. That is the same failure R11-D12 caught in the tile-only design, one layer down.
 
-So every way a tile can fail — absent, non-zero, timed out, oversized, unparseable, or emitting a
-tab or row the contract refuses — produces a **rank-0 row written by the loader**, naming the
-plugin and the reason. Silence is not an available outcome. Refusal is per item rather than per
-tile at both levels: a bad row loses that row, a bad tab loses that tab, and each gets its own
-rank-0 row, so a plugin's good alerts and good tabs survive one malformed sibling while the
-malformed one stays visible. The registry itself failing to read is a rank-0 row too.
+So every way a tab can fail — non-zero, timed out, oversized, unparseable, or emitting a title,
+markup or row the contract refuses — produces a **rank-0 row written by the loader**, naming the
+tab and the reason. Silence is not an available outcome. Refusal is per item at every level: a bad
+row loses that row, a bad tab loses that tab, a failed invocation loses that one tab and not its
+siblings, and each gets its own rank-0 row. The registry itself failing to read is a rank-0 row
+too, and it is the only one with no plugin to name.
 
 Both bounds are enforced **while reading**, not checked afterwards. A 64KB limit applied to output
 already in memory is a limit on what gets rendered, not on what a plugin can make the dashboard
@@ -912,23 +945,23 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **1,892 of 2,500 — 608 lines left**. The loader cost **393** (385 in
+projected: `dashboard/` is **1,915 of 2,500 — 585 lines left**. The loader cost **416** (408 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
 `RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 608
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,655,
-155 over**, and that is the optimistic figure. The shape is identical to the one that produced
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 585
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,678,
+178 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
-**The cap is not raised here, and the test still passes at 1,892.** Raising it in the change that
+**The cap is not raised here, and the test still passes at 1,915.** Raising it in the change that
 revealed the problem is the move this pack has already made three times with `bin/`, and the
 number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 385 rather than letting it pass as inevitable: roughly half is
+One thing worth saying about the 408 rather than letting it pass as inevitable: roughly half is
 code and the rest is comments and docstrings, which is this repository's convention and not an
 accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.

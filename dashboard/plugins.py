@@ -4,12 +4,19 @@ Three of the six sources the Needs-you view alerts on -- `toolbox`, `ports`,
 `areas` -- are system-owned and arrive through this module (R11-D12). Two
 properties follow from that, and both are load-bearing.
 
-**One plugin, many tabs.** A repository has one manifest and therefore one
-`dashboard.tile`, but `~/repos/system` owns five of the views being folded in.
-So a tile returns a *list* of tabs rather than a single one, and a pack
-contributing one tab writes a list of length one. The uniform shape is worth
-the small ceremony: the alternative is two payload shapes and a rule about
-which applies.
+**One plugin, many tabs, one invocation each.** A repository has one manifest
+and therefore one `dashboard.tile`, but `~/repos/system` owns five of the views
+being folded in. The manifest names them in `dashboard.tabs`, and the loader
+runs the tile once per name, passing the name as its argument.
+
+That is not a shape preference, it is what the budget requires. Measured on
+this machine, the five system collectors take 3.78s, 2.84s, 0.03s, 0.01s and
+0.00s. Every one fits a 5s budget; run in sequence behind a single command they
+total 6.66s and the tile is killed on every load, permanently. Per-tab
+invocation keeps the 5s meaning the same thing however many tabs a plugin
+grows, and gives each tab its own failure: the 3.78s collector can no longer
+starve the four that cost nothing. Tabs run concurrently, so the wall clock is
+the slowest tab rather than their sum.
 
 **The registry is asked, never scanned.** The tile contract says registration
 happens only through `sd plugin add`; a loader that globbed a directory would
@@ -35,6 +42,7 @@ already let an unbounded plugin decide how much memory the dashboard uses.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import re
@@ -51,6 +59,10 @@ TILE_SECONDS = 5.0
 TILE_BYTES = 64 * 1024
 CATALOG_SECONDS = 10.0
 READ_CHUNK = 65536
+# A plugin's tabs wait on each other only for the machine. Bounded because a
+# plugin declaring thirty tabs should not decide how many processes the
+# dashboard starts at once.
+TAB_WORKERS = 4
 
 # An `href` may point within the page and nowhere else. A plugin row lands in
 # the backbone's most prominent view, and the difference between rendering
@@ -67,7 +79,14 @@ FAILURE_RANK = 0
 
 
 class Bounded(Exception):
-    """A tile exceeded its budget. The message names which half."""
+    """A subprocess did not deliver a usable answer inside its bounds.
+
+    Raised for every way `bounded_run` can decline: the deadline passing, the
+    byte ceiling being crossed, the command failing to start, the process
+    outliving its own output, and a non-zero exit. The message says which. It
+    covers the registry read as well as tiles, since both go through the same
+    bounded call.
+    """
 
 
 def _terminate(proc: subprocess.Popen) -> None:
@@ -117,7 +136,12 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
                 raise Bounded(f"no output within {seconds:g}s")
             if not select.select([fd], [], [], left)[0]:
                 raise Bounded(f"no output within {seconds:g}s")
-            chunk = os.read(fd, READ_CHUNK)
+            # One byte past the ceiling is enough to know the tile crossed
+            # it. Asking for a fixed 64KB and measuring afterwards would let a
+            # caller with a small limit still be handed -- and made to
+            # allocate -- a full chunk before the limit was consulted, which
+            # is the opposite of enforcing it while reading.
+            chunk = os.read(fd, min(READ_CHUNK, limit - size + 1))
             if not chunk:
                 break
             size += len(chunk)
@@ -228,25 +252,32 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
 
 
 def read_plugin(entry: dict) -> dict:
-    """One registered plugin's tabs, or the reason there are none."""
+    """One registered plugin's tabs, each collected under its own budget."""
     root = str(entry.get("root") or "")
     prefix = str(entry.get("prefix") or "?")
-    base: dict = {"prefix": prefix, "root": root, "tabs": [], "complaints": []}
+    base: dict = {"prefix": prefix, "root": root, "tabs": []}
 
     def refuse(reason: str) -> dict:
         return {**base, "ok": False, "declared": True, "reason": reason}
 
     if not entry.get("readable", False):
-        return {**base, "ok": False, "declared": True,
-                "reason": str(entry.get("why") or "manifest unreadable")}
+        return refuse(str(entry.get("why") or "manifest unreadable"))
+    # `sd plugin list` validates the dashboard block and says when it no
+    # longer parses -- a tab that stopped appearing, rather than a plugin that
+    # never declared one.
+    broken = entry.get("dashboardError")
+    if broken:
+        return refuse(str(broken))
+
     tile = entry.get("tile")
+    names = entry.get("tabs")
     if not tile:
         # Not a failure. A plugin may register for its `kinds` or its issues
         # repo and never declare a tile, and reporting that as broken would
         # put a rank-0 row in Now for a machine that is working correctly.
         return {**base, "ok": True, "declared": False, "reason": ""}
-    if not isinstance(tile, str):
-        return refuse("`dashboard.tile` is not a command string")
+    if not isinstance(tile, str) or not isinstance(names, list) or not names:
+        return refuse("`dashboard.tile` declares no tabs to serve")
     try:
         argv = shlex.split(tile)
     except ValueError as error:
@@ -254,8 +285,24 @@ def read_plugin(entry: dict) -> dict:
     if not argv:
         return refuse("`dashboard.tile` is empty")
 
+    wanted = [str(name) for name in names]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=TAB_WORKERS) as pool:
+        tabs = list(pool.map(lambda name: read_tab(argv, root, prefix, name), wanted))
+    return {**base, "tabs": tabs, "ok": True, "declared": True, "reason": ""}
+
+
+def read_tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
+    """One tab, from one invocation of the tile under one budget."""
+    tab: dict = {"prefix": prefix, "name": name, "title": name,
+                 "html": "", "rows": [], "complaints": []}
+
+    def refuse(reason: str) -> dict:
+        return {**tab, "ok": False, "reason": reason}
+
     try:
-        raw = bounded_run(argv, Path(root), seconds=TILE_SECONDS, limit=TILE_BYTES)
+        raw = bounded_run(
+            [*argv, name], Path(root), seconds=TILE_SECONDS, limit=TILE_BYTES
+        )
     except Bounded as error:
         return refuse(str(error))
     try:
@@ -264,63 +311,37 @@ def read_plugin(entry: dict) -> dict:
         return refuse(f"tile output is not JSON: {error}")
     if not isinstance(payload, dict):
         return refuse("tile output is not a JSON object")
-    declared = payload.get("tabs")
-    if declared is None:
-        return refuse("tile output declares no `tabs`")
-    if not isinstance(declared, list):
-        return refuse("`tabs` is not a list")
 
-    tabs, complaints = validate_tabs(declared, prefix)
-    return {**base, "tabs": tabs, "complaints": complaints,
-            "ok": True, "declared": True, "reason": ""}
-
-
-def validate_tabs(declared: list, prefix: str) -> tuple[list[dict], list[str]]:
-    """The tabs a tile emitted, and a complaint for each one refused.
-
-    A refused tab is dropped and named rather than repaired, on the same
-    reasoning as a refused row: the plugin believes it published a view, and
-    the gap between what it published and what renders is the thing that must
-    not be quiet.
-    """
-    tabs: list[dict] = []
     complaints: list[str] = []
-    seen: set[str] = set()
-    for index, tab in enumerate(declared):
-        where = f"{prefix}: tab {index}"
-        if not isinstance(tab, dict):
-            complaints.append(f"{where} is not an object")
-            continue
-        title = tab.get("title")
-        # Required rather than defaulted to the prefix. A default is a
-        # convenience at one tab and a collision at five, and the title is
-        # what the operator clicks.
-        if not isinstance(title, str) or not title.strip():
-            complaints.append(f"{where} has no title")
-            continue
-        title = title.strip()
-        if title in seen:
-            # Two tabs under one name is a tab that cannot be reached, which
-            # renders as a working dashboard missing a view.
-            complaints.append(f"{where} repeats the title {title!r}")
-            continue
-        seen.add(title)
-        html = tab.get("html")
-        rows, row_complaints = validate_rows(tab.get("rows"), f"{prefix}/{title}")
-        complaints.extend(row_complaints)
-        tabs.append(
-            {
-                "prefix": prefix,
-                "title": title,
-                # Markup by contract: a tile renders itself into its own tab,
-                # and that was true before rows existed. Rows are data and are
-                # rendered as text; the two are not the same trust and the
-                # split is deliberate.
-                "html": html if isinstance(html, str) else "",
-                "rows": rows,
-            }
-        )
-    return tabs, complaints
+    where = f"{prefix}/{name}"
+    # The declared name is both the identity and the fallback; `title` only
+    # renames what the operator sees. A plugin that omits it is not in error,
+    # which is why this field differs from every other one here.
+    title = payload.get("title")
+    if title is not None and (not isinstance(title, str) or not title.strip()):
+        complaints.append(f"{where} has a title that is not a non-empty string")
+        title = None
+    html = payload.get("html")
+    if html is not None and not isinstance(html, str):
+        # Coercing it to "" would render an empty tab and say nothing, which
+        # is the silence this module exists to refuse. The tab is kept -- its
+        # rows may still be good -- and the loss is named.
+        complaints.append(f"{where} has a non-string html")
+        html = None
+    rows, row_complaints = validate_rows(payload.get("rows"), where)
+    complaints.extend(row_complaints)
+    return {
+        **tab,
+        "title": title.strip() if isinstance(title, str) else name,
+        # Markup by contract: a tile renders itself into its own tab, and that
+        # was true before rows existed. Rows are data and are rendered as
+        # text; the two are not the same trust and the split is deliberate.
+        "html": html if isinstance(html, str) else "",
+        "rows": rows,
+        "complaints": complaints,
+        "ok": True,
+        "reason": "",
+    }
 
 
 def load() -> dict:
@@ -329,7 +350,7 @@ def load() -> dict:
     found = [read_plugin(entry) for entry in entries]
     return {
         "plugins": found,
-        "tabs": [tab for plugin in found for tab in plugin["tabs"]],
+        "tabs": [tab for plugin in found for tab in plugin["tabs"] if tab["ok"]],
         "rows": alert_rows(found, failure),
         "registryError": failure,
     }
@@ -354,32 +375,34 @@ def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
                 "detail": failure,
             }
         )
+    def dark(where: str, what: str, detail: str) -> dict:
+        return {"source": where, "rank": FAILURE_RANK, "kind": "plugin-dark",
+                "id": where, "what": what, "detail": detail}
+
     for plugin in found:
         prefix = plugin["prefix"]
         if not plugin["ok"]:
-            rows.append(
-                {
-                    "source": prefix,
-                    "rank": FAILURE_RANK,
-                    "kind": "plugin-dark",
-                    "id": prefix,
-                    "what": f"plugin tab {prefix} is not reporting",
-                    "detail": plugin["reason"],
-                }
-            )
+            rows.append(dark(prefix, f"plugin {prefix} is not reporting", plugin["reason"]))
             continue
         for tab in plugin["tabs"]:
+            where = f"{prefix}/{tab['name']}"
+            if not tab["ok"]:
+                # Per tab, not per plugin: the whole reason the tile is invoked
+                # once per tab is that one of them failing must not be the
+                # others going quiet.
+                rows.append(dark(where, f"plugin tab {where} is not reporting", tab["reason"]))
+                continue
             rows.extend(tab["rows"])
-        for complaint in plugin["complaints"]:
-            rows.append(
-                {
-                    "source": prefix,
-                    "rank": FAILURE_RANK,
-                    "kind": "plugin-refused",
-                    "id": prefix,
-                    "what": f"plugin {prefix} emitted something the contract refused",
-                    "detail": complaint,
-                }
-            )
+            for complaint in tab["complaints"]:
+                rows.append(
+                    {
+                        "source": where,
+                        "rank": FAILURE_RANK,
+                        "kind": "plugin-refused",
+                        "id": where,
+                        "what": f"plugin tab {where} emitted something the contract refused",
+                        "detail": complaint,
+                    }
+                )
     rows.sort(key=lambda row: row["rank"])
     return rows
