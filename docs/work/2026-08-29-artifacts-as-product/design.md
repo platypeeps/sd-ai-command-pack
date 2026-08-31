@@ -806,10 +806,32 @@ Three D14s exist across the rounds and only one was open. `r7 D14` (no sd-* comm
 claude-mem) and `R8 D14` (OmniRoute removed, R11-D2) were already decided; this is `r2 D14`, phone
 access, and it is the one thing that blocked step 6b.
 
-**What was actually measured, because the obvious framing was wrong.** Both dashboards bind
-`127.0.0.1`. The binding is not the difference between them. The system dashboard reaches the phone
-through `tailscale serve` — tailnet-only HTTPS, never `funnel` — terminating in front of that
-loopback socket, and it guards the reach with three things rather than one: a Host-header allowlist
+**Correction (2026-08-31, found while running step 4b-i's `:8767 unchanged` check).** The
+paragraph below originally read "Both dashboards bind `127.0.0.1`. The binding is not the difference
+between them." That is wrong, and it was wrong in the direction that would have made 6b build the
+wrong thing. `lsof -i :8767` shows the system dashboard listening on `127.0.0.1` **and** on this
+node's tailnet IPv6 address: `dashboard.py:1708` binds one server per address over
+`["127.0.0.1"] + TAILNET_ADDRS`, deliberately never `0.0.0.0` ("binding 0.0.0.0 instead would
+publish the dashboard on every network this machine joins"), and the tailnet half is gated by
+`DASHBOARD_TAILNET_BIND`, which is set in `~/Library/LaunchAgents/com.sven.project-dashboard.plist`.
+So the reach is **two paths, not one**: a direct tailnet bind, and a `tailscale serve` proxy at
+`https://tg-sol.tail6dbb92.ts.net:8443` forwarding to the loopback socket. 6b has to carry both or
+knowingly drop one; a replacement that binds loopback and assumes a proxy in front would lose the
+IP-URL path, which exists precisely for a phone whose resolver ignores MagicDNS. The rest of this
+record — the decision, the three guards, and the cost to the GET-only assertion — is unaffected.
+
+A second correction in the same reading: the closing paragraph's "`tailscale funnel` remains out of
+the question" is a rule about **this** dashboard, not a description of this machine. `tailscale
+funnel status` reports Funnel **on** for `https://tg-sol.tail6dbb92.ts.net`, proxying to
+`127.0.0.1:8766` — that is `local-task-actions`, a different system-owned service whose exposure
+and authentication were not examined here and are not this plan's to change. Port 8767 is not
+funneled and must not become so. The sentence is kept because the rule is right; it is qualified
+because the next person to run that command will see "Funnel on" and needs to know which service it
+names.
+
+**What was actually measured, because the obvious framing was wrong.** The system dashboard reaches
+the phone over the tailnet — never the public internet — by the two paths named in the correction
+above, and it guards the reach with three things rather than one: a Host-header allowlist
 covering the loopback names plus this node's own MagicDNS names, a per-process token required on
 every mutating request (`X-Dashboard-Token`, checked immediately after the Host check), and the
 deliberate absence of CORS headers, so a page on another origin cannot obtain the preflight it

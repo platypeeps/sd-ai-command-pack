@@ -732,7 +732,66 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `sd_setup_github.py`, `sd-status` — keep it on purpose. They name the retired
     footprint in order to detect and remove it from consuming repositories, and
     archiving the source does not remove the footprint from anywhere it landed.
-- [ ] 4b
+- [x] 4b-i — 2026-08-31. The issue index and the GitHub tracker, split off from 4b
+      because this half alone satisfies the step's stated check ("issue table populates
+      in one refresh; :8767 unchanged") and the other half — Jira, the Issues tab,
+      `sd-plan --from` — needs none of it decided differently.
+  - **The store is a cache and says so in its own docstring.** `dashboard/store.py`:
+    two tables, `issue` and `tracker_watermark`, at
+    `~/.cache/sd-ai-command-pack/index.sqlite`. The cache root and not the state root,
+    deliberately: `~/.local/state/` holds the handoff packets, which cannot be
+    regenerated, and step 6's cleanup deletes legacy subdirectories under that root by
+    name. A rebuildable database sitting beside unrebuildable packets is an invitation
+    to exactly the sweep that must never reach them. A test asserts the path is not
+    under `.local/state`.
+  - **Rows are never deleted, and both halves of that are tested.** An issue that closes
+    is updated in place; an issue that stops matching the search is left alone with the
+    `last_seen` that says when the index last had evidence. The named gap, in the
+    docstring rather than discovered later: because collection is windowed, a close that
+    happens outside every future window is never seen, so the index can hold an `open`
+    row for something long closed. That is why `last_seen` is a column. The answer is not
+    a wider window — it is remembering this is a cache and the tracker is the truth.
+  - **Four searches, not one.** `involves:@me` would collect the same rows in one call
+    and lose *why* each arrived, which is the entire value: "three people want your
+    review" and "you opened three issues" are the same count and different mornings.
+    So `assignee`/`mentions`/`review-requested`/`author` are queried separately and
+    unioned by URL with the reasons accumulated into `why[]`. `why` is replaced rather
+    than merged on each collect, because a reason that stopped being true must stop
+    being displayed.
+  - **The watermark moves only on a successful collect**, and that is the property most
+    worth protecting here. Rows from a partial collect are still written — they are real,
+    and this is a cache — but advancing the watermark past a bucket that failed would
+    step the window over those issues permanently rather than temporarily. A test drives
+    a failing bucket and asserts both halves: the rows land, the watermark does not move.
+  - **Pagination was not in the design and the first run proved it necessary.** One page
+    of 100 per bucket looked sufficient until the first real collect reported
+    `page ceiling hit: review-requested, author` — a 90-day first window against an
+    account with 532 PRs in 60 days. Following the cursor to a ceiling of 10 pages turned
+    1,130 rows into the answer instead of 203. The ceiling itself is still reported when
+    hit, because a capped collect that renders as a complete one is worse than a failed
+    one: it looks right.
+  - **`--dump` stays offline.** It is the canonical-diff check, and putting a wall clock
+    and a remote service inside a check whose whole value is being repeatable offline
+    would end it. A test replaces both the subprocess runner and `store.connect` with
+    functions that raise, then asserts `--dump` still exits 0.
+  - **A defect found by running the check, not by reading the code.** Wiring the refresh
+    into `index` made `tests/test_sd_dashboard.py::test_index_reports_counts` run a real
+    `gh` against the network and write the operator's real `~/.cache` — a test escaping
+    its sandbox into a home directory. The fix went into the shared `run_cli` helper
+    rather than into the one test that needed it, so the next verb to grow a side effect
+    inherits the redirection instead of discovering it. Proof: the real index file's
+    checksum is identical before and after `python3 -m unittest tests.test_sd_dashboard`.
+  - Checks, run: `python3 bin/sd-dashboard index` on the real machine printed
+    `78 repos, 4 dirty, 0 ahead` then `issues: 0 new, 4 updated, 18 open` against 1,130
+    indexed rows with the watermark at `2026-08-31T08:38:18Z` — the table populates in
+    one refresh. `lsof -i :8767` still shows the system dashboard (PID 48405) and
+    `git -C ~/repos/system status --porcelain` is empty, so :8767 is unchanged.
+    `make check` exits 0; `dashboard/` is 846 lines of its 2,500 cap.
+  - Deferred to 4b-ii, named rather than stubbed: the Jira collector (~90 LOC lifted),
+    the Issues tab and "Needs you", `sd-status` `issues:` lines, and
+    `sd-plan --from gh:o/r#N|jira:KEY`. An empty Jira collector in the inventory would
+    answer nothing while reading as a feature that exists.
+- [ ] 4b-ii
 - [ ] 5 / 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0

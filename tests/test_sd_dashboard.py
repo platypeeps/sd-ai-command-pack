@@ -24,7 +24,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard import collect, server  # noqa: E402 - after the path insert
+from dashboard import (  # noqa: E402 - after the path insert
+    collect,
+    server,
+    store,
+    trackers,
+)
 
 
 def load_cli():
@@ -190,13 +195,41 @@ class CacheTests(FleetHarness):
 
 class CommandLineTests(FleetHarness):
     def run_cli(self, *argv: str) -> tuple[int, str]:
+        """The CLI, with both of its outside edges tied down.
+
+        `index` without `--dump` refreshes the issue index, which means a naive
+        harness runs a real `gh` against the network and writes the operator's
+        real `~/.cache/sd-ai-command-pack/index.sqlite`. That is exactly what
+        happened once while 4b-i was being built, and it is why the redirection
+        lives in the shared helper rather than in the one test that needs it:
+        the next verb to grow a side effect gets it for free instead of
+        discovering it in somebody's home directory.
+        """
         out = io.StringIO()
-        original = collect.repo_root
+        original_root = collect.repo_root
+        original_path = store.index_path
+        original_run = trackers._run
+        original_available = trackers.available
         collect.repo_root = lambda environ=None: self.root  # type: ignore[assignment]
+        store.index_path = lambda environ=None: (  # type: ignore[assignment]
+            self.root / ".cache" / "index.sqlite"
+        )
+        # Two patches, doing different jobs. `available` is pinned so the
+        # assertion does not depend on whether the machine running the suite
+        # happens to have `gh` installed -- it consults `shutil.which` before
+        # it ever reaches a runner, so patching only the runner would make this
+        # test report NO_GH on a CI image without `gh` and NO_AUTH on a laptop
+        # with it. `_run` is patched as the hard stop: whatever the code does,
+        # no argv reaches a real binary.
+        trackers.available = lambda runner=None: (False, trackers.NO_AUTH)  # type: ignore[assignment]
+        trackers._run = lambda argv, runner=None: (1, "", "not logged in")  # type: ignore[assignment]
         try:
             code = sd_dashboard.main(list(argv), out=out)
         finally:
-            collect.repo_root = original  # type: ignore[assignment]
+            collect.repo_root = original_root  # type: ignore[assignment]
+            store.index_path = original_path  # type: ignore[assignment]
+            trackers._run = original_run  # type: ignore[assignment]
+            trackers.available = original_available  # type: ignore[assignment]
         return code, out.getvalue()
 
     def test_index_reports_counts(self):
@@ -204,6 +237,15 @@ class CommandLineTests(FleetHarness):
         code, output = self.run_cli("index")
         self.assertEqual(code, 0)
         self.assertIn("1 repos", output)
+
+    def test_an_unreachable_tracker_is_a_reported_row_not_a_failure(self):
+        """The fleet half answered; refusing to print it would be the bug."""
+        self.make_repo("a")
+        code, output = self.run_cli("index")
+        self.assertEqual(code, 0, "an unreachable tracker failed the whole command")
+        self.assertIn("1 repos", output)
+        self.assertIn("issues: not collected", output)
+        self.assertIn(trackers.NO_AUTH, output)
 
     def test_dump_is_json_and_identical_across_runs(self):
         self.make_repo("a")

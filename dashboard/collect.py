@@ -12,7 +12,10 @@ import concurrent.futures
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
+
+from . import store, trackers
 
 GIT_WORKERS = 8
 REMOTE_PATTERN = re.compile(
@@ -136,4 +139,36 @@ def build_state(root: Path) -> dict:
             "dirty": sum(1 for row in repos if row["dirty"]),
             "ahead": sum(1 for row in repos if row["ahead"]),
         },
+    }
+
+
+def refresh_issues(connection, now: datetime | None = None, runner=None) -> dict:
+    """One tracker refresh: collect, upsert, and advance the watermark.
+
+    The order is the whole design. Rows are written whether or not the collect
+    succeeded -- a partial answer is still true, and the index is a cache -- but
+    the watermark moves **only on success**. A failed bucket therefore costs a
+    repeated window next run, never a skipped one, which is the only way a
+    windowed collector loses an issue permanently.
+    """
+    moment = datetime.now(timezone.utc) if now is None else now
+    stamp = trackers.iso(moment)
+    previous = store.watermark(connection, trackers.TRACKER)
+    result = trackers.collect(previous, moment, runner)
+    inserted, updated = store.upsert_issues(connection, result["issues"], stamp)
+    if result["ok"]:
+        store.set_watermark(
+            connection, trackers.TRACKER, stamp, result["window_start"]
+        )
+    return {
+        "ok": result["ok"],
+        "reason": result["reason"],
+        "inserted": inserted,
+        "updated": updated,
+        # Reported rather than swallowed: a bucket that hit the page ceiling
+        # collected less than it saw, and a count that silently omits the
+        # remainder reads as "that is all there is".
+        "truncated": result["truncated"],
+        "window_start": result["window_start"],
+        "watermark_moved": result["ok"],
     }
