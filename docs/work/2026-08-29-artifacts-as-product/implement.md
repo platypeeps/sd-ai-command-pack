@@ -1125,12 +1125,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - `tests/test_skill_frontmatter.py` pinned the tree to exactly twelve
     surfaces, so the fold could not land without it. A roster of every surface
     is what stops working at seventy-six; the half worth keeping is the other
-    half. The commands are exactly these twelve, and skill-ness is asserted per
-    file — no `disable-model-invocation`, no `tools:` — for every surface that
-    is not one of them. A sixty-fifth skill needs no edit here; a thirteenth
-    command still fails, which is what standing rule 2 asks for. The two
-    tool-contract suites are scoped to the twelve: a folded skill documents no
-    CLI, so it has no `bin/` absence to disclose.
+    half. The commands are exactly these eleven — twelve named surfaces less
+    `sd-help`, which the taxonomy makes a skill because a catalog authorizes
+    nothing — and skill-ness is asserted per file, no `disable-model-invocation`
+    and no `tools:`, for every surface that is not one of them. A sixty-fifth
+    skill needs no edit here; a twelfth command still fails, which is what
+    standing rule 2 asks for. The two tool-contract suites are scoped to the
+    twelve named surfaces: a folded skill documents no CLI, so it has no `bin/`
+    absence to disclose.
   - The retired-selector drift guard fired on
     `sd-coherence-audit/references/ledger-format.md`, which numbers its
     redundancy findings `R-4`. `\bR-\d` is a shape, not a claim. The exemption

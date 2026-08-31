@@ -25,10 +25,11 @@ Since 5-iii the tree also holds the sixty-four folded skills, so the inventory
 claim had to change shape. It used to be "the tree is exactly these twelve",
 which is a list -- and a list of every surface is precisely what stops being
 maintainable at seventy-six. What survives is the half that is actually load-
-bearing: the *commands* are exactly these twelve, and every other surface in the
-tree is a skill, which is a property each file carries rather than a roster this
-file recites. A sixty-fifth skill needs no edit here; a thirteenth command still
-fails, which is the invariant standing rule 2 asks for.
+bearing: the *commands* are exactly these eleven, and every other surface in the
+tree is a skill -- `sd-help` included, per the taxonomy's stated exception --
+which is a property each file carries rather than a roster this file recites. A
+sixty-fifth skill needs no edit here; a twelfth command still fails, which is
+the invariant standing rule 2 asks for.
 """
 
 from __future__ import annotations
@@ -153,7 +154,11 @@ class KindMarkerTests(unittest.TestCase):
                 )
 
     def test_skills_do_not(self) -> None:
-        """Every surface that is not one of the twelve commands.
+        """Every surface that is not one of the eleven commands.
+
+        `sd-help` is among them: the taxonomy's stated exception makes a catalog
+        surface a skill, which is why `COMMANDS` holds eleven names and the
+        twelve of `EXPECTED` are surfaces rather than commands.
 
         Scoped by exclusion rather than by a roster, which is what lets the
         sixty-four folded skills be covered without being named. A folded skill

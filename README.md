@@ -9,8 +9,8 @@
 
 One repository, one prefix, one machine-scope install. The pack renders its
 `sd-*` surfaces into the AI tools installed on a machine and gets out of the
-way — twelve commands, and the skills they draw on. It does not install
-anything into the repositories you work in.
+way — eleven commands, the `sd-help` catalog, and the skills they draw on. It
+does not install anything into the repositories you work in.
 
 That last sentence is the design, not a summary of it. The previous version of
 this pack copied roughly 56,000 lines of payload into every consuming
@@ -93,17 +93,19 @@ fact is what makes the rest safe:
 
 ## Commands
 
-Twelve commands, rendered identically to every platform. Each is documented in
-its own `skills/sd-*/SKILL.md`, which is the file that gets installed, so the
-documentation and the artifact are the same object.
+The twelve named surfaces — eleven commands plus `sd-help`, which the taxonomy
+makes a skill because a catalog authorizes nothing — rendered identically to
+every platform. Each is documented in its own `skills/sd-*/SKILL.md`, which is
+the file that gets installed, so the documentation and the artifact are the
+same object.
 
 `skills/` also holds the skills these commands draw on — knowledge and
 procedure with no standing side-effect authority, loaded when relevant rather
 than invoked. They are not listed here: `sd-help` reads the installed tree at
 runtime, which is the only inventory that cannot go stale. The one structural
-difference is in the frontmatter, and it is what the taxonomy means: a command
-sets `disable-model-invocation`, so invoking it is a deliberate act; a skill
-does not.
+difference is in the frontmatter, and it is what the taxonomy means: each of
+the eleven commands sets `disable-model-invocation`, so invoking it is a
+deliberate act; every other surface, `sd-help` included, does not.
 
 | Command | Purpose |
 |---|---|
