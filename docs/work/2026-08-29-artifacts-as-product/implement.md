@@ -28,9 +28,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **5** | Fold se-ai-command-pack (64 skills + 5 agents, all renamed se-* → sd-*; machine locations replaced). **Vault-side first:** retarget the 8 scheduled-routine callers (`se-research` ×6, `se-scan` ×2 under `System/Scheduled Tasks/`) to `sd-*`, then delete old se-* renders | `grep -rln 'se-research\|se-scan' 'System/Scheduled Tasks/'` = 0 before deletion; count = 64; collision check vs 12 commands = 0; `ls ~/.claude/skills \| grep -c '^se-'` = 0; sdw-research resolves; next nightly routine run green |
 | **5b** | `sd-skill-adopt` lands; retire skill-proposal-accept + file-trellis-task.py; delete legacy gito/prism skill folders (backend rows stay) | adopt-lint green on all installed skills |
 | **6** | Machine cleanup = M3 (receipt-driven, legacy subdirs by name) | find both spellings = 0; plugin rows = 0; `handoff/` + `intents/` untouched (a packet written before the step is restorable after) |
-| **6b** | Dashboard swap to :8767 (parity checklist complete); retire system dashboard collectors; delete system dashboard.py | `lsof -i :8767` one process; rm-test passes |
+| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13: registration slice (`sd plugin add\|list` + manifest read, pulled forward from 8) → `dashboard.d/*.py` loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the 2,500 cap's remaining headroom |
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
-| **8** | Plugin interface in backbone (manifest parser, sd store/plugin/config, vault driver, golden-corpus byte-compare) | direct-write-then-query freshness test green |
+| **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers, BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
 | **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC) | `grep -c 'System/Databases' pack.py` = 0; E2E on one piece |
 | **11** | Vault move, **last** — per the r2 D12 per-base list (Skill Proposals → files store; Tips / Blog Ideas / Topics / Market Watch / Briefs / Prompts / TaskNotes / Learning → keep; empty Followups → retire — each confirmed by the user first), enumerated coordinated list in the PR; then delete `migrate-vault` | golden-corpus byte-compare (baseline captured at step 8, **before** any move) green; `migrate-vault` refuses if any reader still points at the old path; every vault routine's next run green |
@@ -1577,6 +1577,52 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     "collector with no tab" as "fact with no home". **Ports** gets its own
     plugin tab rather than folding into Toolbox: same owner, but its own tab
     and its own alert identity today.
+  - **A second ordering problem, found before building anything, and it
+    crosses steps rather than sitting inside 6b.** The loader cannot scan for
+    plugins — design.md says registration is `sd plugin add` only — so it needs
+    a registry, and `bin/` has no `sd` at all: no verb groups, no manifest
+    parser, no registry format. All of it is scheduled at step 8, *after* 6b.
+    **R11-D13** pulls the smallest unblocking slice forward — `sd plugin
+    add|list` plus the manifest read, and nothing else from step 8 — as 6b's
+    first PR. The rejected alternative was a private registry file for the
+    loader, folded into `sd plugin` later: it defines the same disk format
+    twice, and it makes the first consumer an exception to "no disk scanning",
+    which is how that rule would stop being one.
+  - **The manifest parser reads everything and validates what it uses**
+    (user, 2026-08-31): `prefix` and `dashboard.tile` are checked; `kinds.*`,
+    `issues.repo` and `vendor.*` are read and carried. Step 8 adds enforcement
+    to an existing reader instead of writing a second one. It is also the only
+    honest option today — enforcing `kinds.*` means checking the closed 8-key
+    vocabulary, and **that vocabulary was not written down anywhere in this
+    repository**: standing rule 2 fixes it at eight and makes changes decision
+    records, while the enumeration survived only in the r5 round artifact,
+    under `/private/tmp`, backed up by nothing. **R11-D14** transcribes it into
+    design.md — `fields`, `initial-status`, `protected-fields`, `transitions`,
+    `human-only`, `unique-fields`, `floor`, `sections` — keeping the kebab-case
+    spellings exactly as ruled, since renaming them while transcribing would be
+    a vocabulary change wearing a format change's clothes.
+  - **The dashboard LOC cap is measured, not raised.** Splitting both system
+    files by where the code lands after the swap: 301 py + 317 js leave the cap
+    for `~/repos/system`; 124 py is already built here; the backbone-side lift
+    is 79 py + (829 − 145) js = **763**, against the cap's stated justification
+    of "457 lifted". With `dashboard/` at 1,499 tracked and the cap at 2,500,
+    that leaves ~240 lines for the loader and `RUN_ALLOWLIST`. The three
+    missing `sd-dashboard` verbs are not in that number: the test charges
+    `bin/sd-dashboard` to `bin/` deliberately so the caps do not overlap
+    (`tests/test_loc_caps.py:110`).
+  - **`bin/` is the tighter cap, and the rollout hits it first.** Counted:
+    `bin/` core is **7,492 of 8,000 — 508 lines left** (`migrate-*` is excluded
+    under its own 1,500 ceiling, which is why a raw 8,742 total still passes).
+    design.md's itemisation predicts ~7,170 for the **finished** pack: the
+    built-so-far total already exceeds that by 322 lines, with seven commands
+    still to write. Into the 508 go **seven unbuilt commands** — `sd-plan`, `sd-ship`,
+    `sd-spec`, `sd-deps`, `sd-help`, `sd-suggest`, `sd-map` — plus the whole
+    `sd` CLI whose first slice R11-D13 just scheduled, plus the three
+    `sd-dashboard` verbs. It does not fit. That changes no decision here, but
+    it names which ceiling breaks first and when: inside 6b, not at step 8.
+    Neither cap is raised on an estimate; both get re-derived from an itemised
+    count at the landing that measures the overrun, never in the PR that trips
+    `tests/test_loc_caps.py`.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from
