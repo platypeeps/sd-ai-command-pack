@@ -296,7 +296,14 @@ async function drawPlugins() {
   // reading it. When the data does change the state goes with it, which is
   // the honest trade: the rows under a filter are no longer the rows it was
   // applied to.
-  const signature = JSON.stringify(payload.tabs);
+  // Only the fields the panel is built from. A tab also carries `rows` and
+  // `complaints`, which go to the alert strip and change whenever a job's age
+  // or exit code does -- signing those would rebuild the panels every poll on
+  // exactly the machines that have something to report, which is the opposite
+  // of what this guard is for.
+  const signature = JSON.stringify(
+    payload.tabs.map((tab) => [tab.prefix, tab.name, tab.title, tab.html]),
+  );
   if (signature === pluginSignature) {
     showAlerts(payload.rows.filter((row) => row.rank === 0));
     return;
