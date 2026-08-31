@@ -247,10 +247,16 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             update`, `src/templates/trellis/index.ts`, an rsync that syncs `.trellis/scripts/`
             against a template copy — and `docs/spec/guides/cross-layer-thinking-guide.md`
             teaches from Trellis command templates, in `hoa-manager`, `people-profiles` and
-            `rwbp-coordinator`. `people-profiles` adds `docs/spec/frontend/hook-guidelines.md`,
-            which describes the hooks Trellis and the pack installed. These are `docs/spec/`,
+            `rwbp-coordinator` — byte-identical copies in all three. These are `docs/spec/`,
             the repository's own standing guidance, not archived work items — an agent reading
             them is told to maintain a template tree that was deleted at step 1.
+
+            One file the sweep flagged is **not** residue, corrected here rather than carried:
+            `people-profiles`'s `docs/spec/frontend/hook-guidelines.md` matches on the word but
+            reads "This page previously documented … the agent platform integration that
+            Trellis and the SD AI command pack installed … None of that exists here any more."
+            It is already the record of its own removal. A grep for a name cannot tell a live
+            instruction from an obituary, which is why every hit above was opened.
 
             Clean by the same sweep, and named so the exceptions are not mistaken for gaps:
             `loadsmith` and `rwbp-website` carry the word only in archived work items and
