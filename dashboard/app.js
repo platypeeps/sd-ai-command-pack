@@ -186,6 +186,9 @@ function addFilter(table) {
   box.type = "search";
   box.className = "filter";
   box.placeholder = table.getAttribute("data-sd-search") || "filter";
+  // A placeholder is not a name: it is not reliably announced, and it vanishes
+  // as soon as anything is typed into it.
+  box.setAttribute("aria-label", box.placeholder);
   box.addEventListener("input", () => {
     const needle = box.value.trim().toLowerCase();
     for (const row of bodyRows(table)) {
@@ -203,7 +206,11 @@ function addSort(table) {
     if (!how || how === "none") return;
     th.classList.add("sortable");
     th.tabIndex = 0;
-    let descending = false;
+    // First click sorts ascending, each one after it reverses. Started at
+    // `true` because the toggle runs before the sort does, and a header whose
+    // first click sorts descending reads as a page that ignored the click and
+    // did something else.
+    let descending = true;
     const run = () => {
       const body = table.tBodies[0];
       if (!body) return;
