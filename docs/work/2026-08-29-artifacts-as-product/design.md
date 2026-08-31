@@ -199,7 +199,8 @@ Sessions tab = `git worktree list` + running sd-* processes (replaces Trellis `.
 dashboard; per-tab parity checklist gates the swap to :8767 at step 6b. Deferred behind standing
 rule 1: FTS/Search, log streaming, session launcher. Phone access is **decided as (c)** — see
 R11-D10 below; the swap at 6b carries today's tailnet reach and its token-gated writes rather
-than regressing them.
+than regressing them. A plugin tab may also return **alert rows for Now** — see R11-D12; a
+render-only tile would strip Now of most of what it alerts on.
 
 ### Review routing + pluggable backends (r3; revises D4)
 
@@ -794,6 +795,69 @@ and the ones that exist already total 2,811 (2,776 until #620) — `bin/sd-statu
 stale, not the ceiling, and re-deriving it against a half-built `bin/` would replace one estimate
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
+
+**R11-D12 (2026-08-31) — a plugin tab contributes alert rows to Now, not only a rendered tile.**
+
+Found while writing the 6b parity checklist, and it is a regression the design as written would
+have shipped silently.
+
+`attentionItems()` in the system dashboard's `assets/dashboard.js` builds the Needs-you view from
+six sources: `toolbox`, `repos`, `queues`, `prs`, `ports`, `areas`. **Three of those six —
+`toolbox`, `ports`, `areas` — are destined to be plugin tabs**, system-owned behind
+`dashboard.d/*.py`, and they own **nine of the thirteen rows** the view can emit — five from
+`toolbox`, three from `areas`, one from `ports`; the backbone keeps two `repos` rows, one `prs`
+row and one `queues` row.
+
+What they contribute is not decoration, and the ranks say so. `attentionItems()` sorts by rank,
+0 highest. **Every rank-0 and rank-1 row in the view comes from a plugin-bound source**: cron job
+exited non-zero (`toolbox`, rank 0), vault collector errored (`areas`, rank 0), cron silent
+(`toolbox`, rank 1), cron failure logged (`toolbox`, rank 1), task overdue (`areas`, rank 1). Of
+the four rank-2 rows three are plugin-bound as well — cron job missing, machine drift, and a port
+`CLASH`/`BUSY` — leaving the backbone one rank-2 row, and that one only when a PR is older than
+fourteen days. Below rank 2 the tail is mixed rather than backbone-only: `repos` ahead/dirty,
+`prs` and `queues` at ranks 3-4, plus one more plugin row (a vault inbox note untouched for a
+week, rank 3).
+
+The contract as specified is a **tile** — `dashboard.tile`, 5s, 64KB — which renders itself into
+its own tab. A tile cannot put a row in somebody else's view. So the swap at 6b, executed against
+the design as written, would leave Now alerting on `repos`, `queues` and `prs` alone — that is,
+**with no rank-0 or rank-1 row left at all**, and a rank-2 row only while some PR is over
+fourteen days old. Port conflicts, cron failures and vault rot would go silently. Nothing would report the loss, because Now would still render.
+
+**The change is one optional key.** A plugin tab's collector may return, alongside whatever it
+renders, a list of rows shaped exactly like the ones `add()` already takes — `{rank, kind, id,
+what, detail, href}` — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
+both halves; the row list is bounded by the same cap. No new machinery, no second call, no new
+verb.
+
+Consequences recorded rather than left implicit:
+
+- **Ordering.** Now cannot be built before the plugin loader exists, because three of its six
+  sources arrive through it. 6b's sequence is therefore plugin contract first, then the tabs,
+  then Now, then the swap — not the tab-by-tab order the parity checklist's table might suggest.
+- **Trust boundary.** Plugin rows land in the backbone's most prominent view, so a plugin can
+  make Now say anything. That is already true of a tile, which renders arbitrary markup in its
+  own tab; the difference is placement, not privilege. Registration stays explicit via
+  `sd plugin add`, and `href` is confined to an in-page anchor so a row cannot navigate the user
+  off the dashboard.
+- **"Now screen = externally derived facts only" still holds**, on the reading that has always
+  been load-bearing: *derived at run time rather than stored*, not *fetched from a remote
+  service*. Every plugin row qualifies — `launchctl list`, `machine-setup.sh candidates`, and the
+  vault's own files are read fresh on each collect, and none of them is a ledger. Said explicitly
+  because the other reading would forbid the cron and vault rows the system dashboard has carried
+  in that view all along.
+- **Standing rule 1 does not apply.** This adds no gate, ledger, hook or rule; it is one field on
+  a contract that does not exist yet, and its deletion criterion is inherited from the tabs it
+  serves — if Toolbox, Ports and Vault never become plugin tabs, the field has no producer and
+  goes with them.
+
+**Two things the same investigation settled without a decision.** The **rtk savings ledger** is
+not a homeless fact: it is a card rendered inside `renderToolbox()`, so it rides Toolbox to the
+plugin side and needs no destination of its own — the parity checklist's first draft mis-filed it
+as undecided by treating "collector with no tab of its own" as "fact with no home". **Ports** does
+get its own plugin tab rather than folding into Toolbox: same owner (`machine-setup.sh` lives in
+`~/repos/system`, exactly like the launchctl scan), but it has its own tab and its own alert
+identity today, and folding would save one tab and lose that.
 
 **R11-D11 (user, 2026-08-31) — the caveman review lane is demoted, not forked away.**
 
