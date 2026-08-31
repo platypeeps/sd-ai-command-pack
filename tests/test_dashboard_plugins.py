@@ -332,7 +332,125 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(loaded["tabs"], [])
         self.assertEqual(loaded["rows"], [])
 
+    # -- what the tile said about its own failure --------------------------
+
+    def test_a_failing_tile_gets_to_say_why(self) -> None:
+        """`exited 1` alone is the loader going quiet on the plugin's behalf.
+
+        Found by writing a tile: five tabs refused with a bare status and no
+        way to tell a missing interpreter from a bad argument from a traceback.
+        """
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import sys
+                    print("cannot reach the vault: FDA not granted", file=sys.stderr)
+                    sys.exit(1)
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        tab = self.only_tab(loaded)
+        self.assertFalse(tab["ok"])
+        self.assertIn("exited 1", tab["reason"])
+        self.assertIn("FDA not granted", tab["reason"])
+
+    def test_the_tile_does_not_get_to_choose_how_long_the_row_is(self) -> None:
+        """Stderr is the plugin's output too, so its tail is bounded."""
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import sys
+                    sys.stderr.write("x" * 20000)
+                    sys.stderr.write("THE ACTUAL ERROR")
+                    sys.exit(1)
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        reason = self.only_tab(loaded)["reason"]
+        self.assertLess(len(reason), plugins.STDERR_TAIL + 200)
+        # The tail rather than the head: a traceback's last line is the error.
+        self.assertIn("THE ACTUAL ERROR", reason)
+
+    def test_a_tile_that_floods_stderr_is_refused_rather_than_deadlocked(self) -> None:
+        """The reason stderr is read instead of left in a pipe.
+
+        A pipe nobody drains fills at 64KB, and the tile blocks writing into
+        it. Left that way the tile never reaches its own exit, the deadline
+        fires, and the loader reports a timeout for a tile that was ready to
+        say what went wrong -- a lost message replaced by a wrong diagnosis.
+        """
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import sys
+                    sys.stderr.write("y" * 400000)
+                    sys.stderr.flush()
+                    print('{"html": "<p>survived</p>"}')
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        tab = self.only_tab(loaded)
+        # `ok` is the whole assertion, and it is decisive: a tile blocked on a
+        # full stderr pipe never reaches its own exit, so the deadline fires
+        # and the tab is refused. Timing `load()` against TILE_SECONDS would
+        # add nothing -- the deadlock it is meant to catch already shows up
+        # here -- while making the test fail on a contended machine for
+        # interpreter startup this budget was never meant to cover. Found in
+        # review.
+        self.assertTrue(tab["ok"], tab["reason"])
+        self.assertEqual(tab["html"], "<p>survived</p>")
+
     # -- the markup filter -------------------------------------------------
+
+    def test_a_tile_that_floods_stderr_after_closing_stdout_is_still_served(self) -> None:
+        """The same deadlock, past the point where stdout ends.
+
+        Closing stdout does not close stderr. A tile that prints its JSON,
+        closes stdout, then writes past the pipe capacity blocks in that write
+        until someone reads -- and the loop that was reading has already broken
+        on stdout's EOF. A plain `wait` here reports `did not exit` for a tile
+        that said everything it was asked for. Found in review.
+        """
+        self.register(
+            self.plugin(
+                "hh",
+                tile_script(
+                    """
+                    import os, sys, time
+                    print('{"html": "<p>late</p>"}')
+                    sys.stdout.flush()
+                    # `os.close(1)`, not `sys.stdout.close()`: CPython builds
+                    # the standard streams with `closefd=False`, so closing the
+                    # object leaves the descriptor open and the reader never
+                    # sees EOF. Measured -- the first version of this test used
+                    # the object and passed against the defect, because the loop
+                    # it was meant to escape had never broken.
+                    os.close(1)
+                    # And the pause is the rest of the test: with stderr already
+                    # ready when stdout ends, the loop drains it before noticing
+                    # the EOF and the bug hides behind the ordering.
+                    time.sleep(0.3)
+                    sys.stderr.write("y" * 400000)
+                    sys.stderr.flush()
+                    """
+                ),
+            )
+        )
+        tab = self.only_tab(plugins.load())
+        self.assertTrue(tab["ok"], tab["reason"])
+        self.assertEqual(tab["html"], "<p>late</p>")
 
     def test_a_tile_cannot_ship_an_inline_handler_through_the_loader(self) -> None:
         """The filter is asserted where the payload leaves, not only in its unit test.
@@ -596,8 +714,8 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         reason = self.only_tab(plugins.load())["reason"]
-        self.assertIn("stopped writing", reason)
-        self.assertNotIn("no output", reason)
+        self.assertIn("stopped writing stdout", reason)
+        self.assertNotIn("no stdout", reason)
 
     def test_a_tile_that_prints_nothing_is_refused_rather_than_empty(self) -> None:
         """Printing `{}` and printing nothing are different events.

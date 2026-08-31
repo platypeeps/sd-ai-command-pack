@@ -67,6 +67,25 @@ TILE_BYTES = 64 * 1024
 CATALOG_SECONDS = 10.0
 CATALOG_BYTES = 1024 * 1024
 READ_CHUNK = 65536
+# How much of a failing tile's stderr rides back in the refusal. The tail
+# rather than the head: a Python traceback puts the error on its last line, and
+# a plugin author reading a row wants the thing that went wrong rather than the
+# first frame of the stack that led there. Bounded because stderr is written by
+# the plugin too, and an unbounded one would put a plugin in charge of how long
+# a row is.
+STDERR_TAIL = 512
+
+# What one refusal will read off stderr on its way out, at most. Raised in
+# review as a hang: a tile writing stderr in a loop keeps the pipe readable, so
+# an unbounded drain would spin there and never reach the kill. Measured, that
+# does not happen -- `yes`, `cat /dev/zero`, and three concurrent writers each
+# ran the pipe empty in three reads, because a zero-timeout `select` sees the
+# gap the instant the reader wins and no writer refills within that quantum.
+# The bound stays anyway, on the narrower claim it can actually carry: one
+# refusal reads what one pipe buffer can hold, which is everything a tile can
+# have written with nobody reading, and it is a fixed amount of work rather
+# than an argument about scheduling.
+DRAIN_BYTES = 65536
 # A plugin's tabs wait on each other only for the machine. Bounded because a
 # plugin declaring thirty tabs should not decide how many processes the
 # dashboard starts at once.
@@ -136,13 +155,21 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
     Both bounds are applied to the stream as it arrives. Reading everything and
     measuring afterwards would make the limit advisory: the process has already
     handed us the bytes by the time the number is known.
+
+    Stderr is read alongside stdout and its tail is carried into the refusal.
+    It used to go to `DEVNULL`, which made every failing tile report as bare
+    `exited 1` -- this module refuses to let a plugin go quiet and was
+    discarding the plugin's own account of why it had. It is read rather than
+    left in a pipe because a pipe nobody drains fills, and a tile blocked
+    writing its traceback would hit the deadline and be reported as a timeout
+    instead: the fix for a lost message would have been a wrong one.
     """
     try:
         proc = subprocess.Popen(
             argv,
             cwd=str(cwd) if cwd else None,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             start_new_session=True,
         )
     except (OSError, ValueError) as error:
@@ -156,23 +183,77 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
     size = 0
     stop = time.monotonic() + seconds
     assert proc.stdout is not None
+    assert proc.stderr is not None
+    said = b""
+
+    def refuse(reason: str) -> Bounded:
+        """The refusal, with whatever the tile managed to say about it."""
+        drain()
+        tail = said.decode("utf-8", "replace").strip()
+        return Bounded(f"{reason}: {tail}" if tail else reason)
+
+    def drain() -> None:
+        """Whatever is already in the stderr pipe, without waiting for more.
+
+        Called on the way to every refusal because the interesting case is a
+        tile that writes its traceback and exits: both pipes close at once, and
+        the loop can break on stdout without stderr's last read.
+
+        Never blocks: a zero timeout means no read waits on the tile. Bounded
+        by DRAIN_BYTES besides, so one refusal costs a fixed amount of reading
+        no matter what the tile is doing -- see that constant for what was and
+        was not shown about the loop this bound was proposed to stop.
+        """
+        nonlocal said
+        budget = DRAIN_BYTES
+        while err in watch and budget > 0:
+            if not select.select([err], [], [], 0)[0]:
+                return
+            piece = os.read(err, min(READ_CHUNK, budget))
+            if not piece:
+                watch.remove(err)
+                return
+            budget -= len(piece)
+            said = (said + piece)[-STDERR_TAIL:]
+
+    fd = proc.stdout.fileno()
+    err = proc.stderr.fileno()
+    watch = [fd, err]
     try:
-        fd = proc.stdout.fileno()
         while True:
             left = stop - time.monotonic()
             # Two different failures share this deadline and are not the same
             # thing to whoever reads the row: a tile that never spoke, and one
-            # that wrote and then stopped. Reporting the second as "no output"
+            # that wrote and then stopped. Reporting the second as "no stdout"
             # sends the operator looking for a tile that never started.
+            #
+            # Both name stdout rather than output, because since R11-D18 the
+            # refusal carries the tile's stderr tail: "no output within 5s:
+            # Traceback ..." contradicts itself, and the tile that talked only
+            # on stderr is exactly the case this message is read in. Found in
+            # review.
             stalled = (
-                f"no output within {seconds:g}s"
+                f"no stdout within {seconds:g}s"
                 if not size
-                else f"stopped writing within {seconds:g}s, after {size} bytes"
+                else f"stopped writing stdout within {seconds:g}s, after {size} bytes"
             )
             if left <= 0:
-                raise Bounded(stalled)
-            if not select.select([fd], [], [], left)[0]:
-                raise Bounded(stalled)
+                raise refuse(stalled)
+            ready = select.select(watch, [], [], left)[0]
+            if not ready:
+                raise refuse(stalled)
+            if err in ready:
+                # Kept as a tail, so a tile that writes megabytes of warnings
+                # costs a constant amount of memory rather than its own choice
+                # of one.
+                piece = os.read(err, READ_CHUNK)
+                if piece:
+                    said = (said + piece)[-STDERR_TAIL:]
+                else:
+                    # Closed. Left in `watch` it would be ready forever and
+                    # spin this loop against the deadline.
+                    watch.remove(err)
+                continue
             # One byte past the ceiling is enough to know the tile crossed
             # it. Asking for a fixed 64KB and measuring afterwards would let a
             # caller with a small limit still be handed -- and made to
@@ -183,25 +264,52 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
                 break
             size += len(chunk)
             if size > limit:
-                raise Bounded(f"wrote more than {limit} bytes")
+                raise refuse(f"wrote more than {limit} bytes")
             chunks.append(chunk)
         # Closing stdout is not exiting, and the exit status is part of what
         # the budget covers: a tile that prints its JSON and then fails has
         # failed. Killing it on the way past would record -SIGKILL, and a
         # loader that reads its own kill as a clean exit accepts the output of
         # every tile that dies after writing.
-        try:
-            proc.wait(timeout=max(stop - time.monotonic(), 0.0))
-        except subprocess.TimeoutExpired:
-            raise Bounded(f"did not exit within {seconds:g}s") from None
+        #
+        # The wait drains, for the reason the loop above reads stderr at all.
+        # Stdout closing does not close stderr, and a tile that prints its JSON,
+        # closes stdout, then writes past the pipe capacity on stderr blocks in
+        # that write until someone reads -- so a plain `wait` here would hang on
+        # it until the deadline and report `did not exit` for a tile that had
+        # already said everything it was asked for. That is the deadlock this
+        # function was changed to remove, moved past the break. Found in review.
+        while True:
+            left = stop - time.monotonic()
+            if left <= 0:
+                raise refuse(f"did not exit within {seconds:g}s")
+            if err in watch:
+                # Capped at 50ms so a tile that exits while holding stderr open
+                # -- a grandchild inheriting it -- is noticed by the `wait`
+                # below rather than waited on until the deadline.
+                if select.select([err], [], [], min(left, 0.05))[0]:
+                    piece = os.read(err, READ_CHUNK)
+                    if piece:
+                        said = (said + piece)[-STDERR_TAIL:]
+                        continue
+                    watch.remove(err)
+            try:
+                # Once stderr is closed there is nothing left to drain and this
+                # blocks for the rest of the budget; while it is open the poll
+                # is free and the select above is what does the waiting.
+                proc.wait(timeout=left if err not in watch else 0.0)
+                break
+            except subprocess.TimeoutExpired:
+                continue
         if proc.returncode != 0:
-            raise Bounded(f"exited {proc.returncode}")
+            raise refuse(f"exited {proc.returncode}")
     finally:
         # Only on the way out of a refusal. A tile that exited on its own has
         # nothing left to kill, and `poll()` is what tells the two apart.
         if proc.poll() is None:
             _terminate(proc)
         proc.stdout.close()
+        proc.stderr.close()
     return b"".join(chunks)
 
 
