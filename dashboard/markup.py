@@ -18,9 +18,14 @@ tag gets is the whole design:
 
 * **kept** -- structural markup a table-shaped view needs;
 * **unwrapped** -- an unknown tag is dropped and its text kept, so a plugin
-  using `<article>` loses a box, not a paragraph;
+  using `<marquee>` loses a box, not a sentence;
 * **erased** -- a tag whose content is code, a request, or a control (`script`,
-  `iframe`, `img`, `form`) loses its subtree with it.
+  `iframe`, `form`, `svg`) loses its subtree with it.
+
+`<img>` sits in neither list and needs neither: it is simply not allow-listed,
+and a void element has no subtree to take with it. The distinction matters only
+to a reader of this file -- what reaches the page is the same nothing either
+way.
 
 Every drop is reported. A tile whose markup was quietly rewritten looks like a
 tile that rendered what it meant to, and the plugin author has no way to find

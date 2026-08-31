@@ -1649,7 +1649,8 @@ leave the endpoint itself serving whatever a tile printed.
 An allow-list rather than a deny-list, because a list of dangerous tags is a list somebody has to
 keep current against browsers. Three outcomes: structural markup is **kept**; an unknown tag is
 **unwrapped**, losing the box and keeping the text; and a tag whose content is code, a request or
-a control — `script`, `iframe`, `img`, `form`, `svg` — is **erased with its subtree**. Attributes
+a control — `script`, `iframe`, `form`, `svg` — is **erased with its subtree**. `<img>` needs
+neither rule: it is not allow-listed, and a void element has no subtree to erase. Attributes
 are `class`, `title`, `lang`, `dir`, a few per-tag structural ones, and `data-*`, which is what
 makes the interaction contract above possible without script. `href` must be `https:`, `http:` or
 `mailto:` — a relative one would resolve against this server's own routes. `id` is not allowed at
