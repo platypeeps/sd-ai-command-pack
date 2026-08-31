@@ -3,7 +3,7 @@ name: sd-feedback
 description: Use when the user wants supplied reviews, comments, interviews, or conversations synthesized into traceable themes, tensions, and evidence-backed response dispositions.
 ---
 
-# SE Feedback
+# sd-feedback
 
 Turn a bounded set of supplied feedback into a traceable atomic ledger, themes,
 tensions, and recommended response dispositions. Reduce repetition without

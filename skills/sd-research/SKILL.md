@@ -3,7 +3,7 @@ name: sd-research
 description: Use when the user asks for deep, multi-source research on a question or topic and wants a verified, source-graded written brief rather than a quick answer.
 ---
 
-# SE Research
+# sd-research
 
 Run this skill for deep-dive research requests. It produces a written brief
 in which every finding is cited, dated, and confidence-labeled, and the main

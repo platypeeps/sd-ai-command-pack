@@ -3,7 +3,7 @@ name: sd-typed-holes
 description: Use when starting a Rust feature, module, or rewrite skeleton-first — design the types and signatures, land a compiling skeleton whose bodies are todo!() as its own commit, then fill the holes in a separate later pass; never mix the two.
 ---
 
-# SE Typed Holes
+# sd-typed-holes
 
 Split Rust work into two passes that never mix. First lay the complete type
 surface — real signatures, real types, `todo!()` bodies — and prove it

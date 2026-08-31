@@ -3,7 +3,7 @@ name: sd-skill-retro
 description: Use when the user explicitly asks for a skill retro after a working session — which skills fired, which should have fired and did not, which fired wrongly, and which gaps have no skill at all — with each vetted finding routed to the surface that owns the fix. This is a deliberate, user-invoked post-session action; it reviews the skills, not the work.
 ---
 
-# SE Skill Retro
+# sd-skill-retro
 
 Audit how skills triggered against what the just-finished session actually
 needed. Reconstruct the trigger record from the session log and the skill

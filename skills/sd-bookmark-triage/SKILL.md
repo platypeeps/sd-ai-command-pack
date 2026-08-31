@@ -3,7 +3,7 @@ name: sd-bookmark-triage
 description: Use when the user wants to deduplicate and triage a bounded collection of saved links, videos, pages, or notes into a small evidence-labeled attention queue without mutating the source collection.
 ---
 
-# SE Bookmark Triage
+# sd-bookmark-triage
 
 Run this skill to turn a bounded saved-item collection into a feasible queue of
 worthwhile attention. It allocates attention under incomplete access; it does

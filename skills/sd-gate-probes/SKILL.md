@@ -3,7 +3,7 @@ name: sd-gate-probes
 description: Use when a change or plan is about to be offered for review — at a commit boundary, before a pull request is opened, or when asked to run pre-merge quality probes over a diff or an implementation plan. Probes report findings; the sd-review lane holds the review verdict.
 ---
 
-# SE Gate Probes
+# sd-gate-probes
 
 Run eleven universal quality probes over a diff or an implementation plan
 before it is offered for review. The probes catch scope, duplication,

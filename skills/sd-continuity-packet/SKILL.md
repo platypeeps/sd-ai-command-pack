@@ -3,7 +3,7 @@ name: sd-continuity-packet
 description: Use when the user wants a compact, evidence-backed continuity packet that lets another person, team, or AI session safely resume a defined objective.
 ---
 
-# SE Handoff
+# sd-continuity-packet
 
 Run this skill to transfer responsibility or context for a defined objective.
 It reconstructs verified current state, preserves continuation-critical detail,

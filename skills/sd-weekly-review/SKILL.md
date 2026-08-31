@@ -3,7 +3,7 @@ name: sd-weekly-review
 description: Use when the user wants an evidence-backed personal weekly review across configured work and knowledge sources, with outcomes, activity, carryover, lessons, patterns, and next-week focus kept distinct.
 ---
 
-# SE Weekly Review
+# sd-weekly-review
 
 Turn one bounded week of authorized work and knowledge evidence into a concise,
 personal cross-stream review. Keep outcomes, meaningful activity, carryover,

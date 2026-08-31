@@ -3,7 +3,7 @@ name: sd-rust-async
 description: Use when writing, designing, or debugging async or multithreaded Rust — spawned tasks, channels, select loops, Send or 'static bound errors, suspected blocking inside async code, lock-across-await questions, or cancellation-safety concerns.
 ---
 
-# SE Rust Async
+# sd-rust-async
 
 Async Rust is cooperative: tasks yield only at `.await`, every `.await` is a
 place the task can be cancelled, and every spawn is a resource that needs an

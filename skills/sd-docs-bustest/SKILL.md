@@ -3,7 +3,7 @@ name: sd-docs-bustest
 description: Use when documentation must survive a cold read — checking that a newcomer with no prior context can execute a README, runbook, setup guide, or handoff doc exactly as written, when docs are created or changed, or when asked to bus-test docs.
 ---
 
-# SE Docs Bus Test
+# sd-docs-bustest
 
 Check documentation against the bus test: if the author disappeared
 tomorrow, could a newcomer with no context pick up the document and

@@ -3,7 +3,7 @@ name: sd-status-update
 description: Use when the user wants an objective-oriented project status update from supplied or connected work sources, with outcomes, current state, blockers, risks, decisions, asks, and next actions.
 ---
 
-# SE Status
+# sd-status-update
 
 Run this skill to turn project evidence into a dated, stakeholder-ready status
 update. Status is progress against a defined objective, not a list of activity,

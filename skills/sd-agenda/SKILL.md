@@ -3,7 +3,7 @@ name: sd-agenda
 description: Use when the user wants a decision-oriented, timeboxed meeting agenda with explicit outcomes, roles, evidence, preparation, and parking-lot rules.
 ---
 
-# SE Agenda
+# sd-agenda
 
 Run this skill to design a feasible meeting around an observable outcome. An
 agenda is an operating plan for decisions and alignment, not an unbounded list

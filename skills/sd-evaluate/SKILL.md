@@ -3,7 +3,7 @@ name: sd-evaluate
 description: Use when the user wants one defined subject assessed against an explicit rubric with criterion-level evidence, uncertainty, sensitivity, deficiencies, and prioritized improvements.
 ---
 
-# SE Evaluate
+# sd-evaluate
 
 Assess one defined artifact, process, product, proposal, or outcome against an
 explicit and justified rubric. Audit the frame before applying it, map every

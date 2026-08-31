@@ -3,7 +3,7 @@ name: sd-rust-design
 description: Use when designing, writing, or restructuring Rust types and domain models — a new struct or enum, a state machine, typestate transitions, newtype wrappers, or a public API's type surface — and the goal is a design whose illegal states are unrepresentable.
 ---
 
-# SE Rust Design
+# sd-rust-design
 
 Model the domain with types before writing any logic. Enums carry states and
 variants, structs carry the data of a single state, and newtypes enforce

@@ -3,7 +3,7 @@ name: sd-retro
 description: Use when the user wants an evidence-led, non-blaming retrospective of a project, research effort, meeting, launch, or operational period with lessons and proposed follow-ups.
 ---
 
-# SE Retro
+# sd-retro
 
 Turn a completed event or bounded work period into an evidence-led reflection.
 Establish what happened before interpreting why, keep perspectives separate

@@ -3,7 +3,7 @@ name: sd-digest
 description: Use when the user provides multiple documents, threads, or links and wants them synthesized into one decision-ready brief with disagreements surfaced.
 ---
 
-# SE Digest
+# sd-digest
 
 Run this skill when the material already exists and the job is synthesis:
 several documents, threads, transcripts, or links in — one decision-ready

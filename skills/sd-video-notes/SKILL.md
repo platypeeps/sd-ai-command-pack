@@ -3,7 +3,7 @@ name: sd-video-notes
 description: Use when the user wants one or more supplied videos converted into source-faithful, timestamped notes with explicit transcript coverage, claim extraction, comparison, and read-only downstream handoffs.
 ---
 
-# SE Video Notes
+# sd-video-notes
 
 Turn supplied video material into durable, destination-neutral notes without
 pretending that unavailable content was watched. Preserve the boundary between

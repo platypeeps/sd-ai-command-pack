@@ -1,4 +1,4 @@
-# SE Monitor State Schema
+# sd-monitor State Schema
 
 `sd-monitor-state/v1` is a portable interchange artifact for a later
 `sd-monitor` or compatible bounded-delta run. It is output for the user or an

@@ -3,7 +3,7 @@ name: sd-technical-editor
 description: Use when the user wants an existing technical draft reviewed through evidence-located correctness, citation, code, structure, comprehension, confidentiality, and voice passes before approved revisions are applied.
 ---
 
-# SE Technical Editor
+# sd-technical-editor
 
 Review an existing technical draft before polishing it. Produce an editorial
 report that separates defects from choices, preserves the author's evidenced

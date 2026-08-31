@@ -3,7 +3,7 @@ name: sd-proposal
 description: Use when the user wants to develop an evidence-backed, decision-ready proposal with transparent alternatives, investment, risks, success criteria, and an explicit ask.
 ---
 
-# SE Proposal
+# sd-proposal
 
 Develop a persuasive proposal that makes a bounded intervention ready for a
 real decision without fabricating evidence, authority, economics, or

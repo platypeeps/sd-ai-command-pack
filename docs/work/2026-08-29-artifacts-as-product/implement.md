@@ -1118,10 +1118,17 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     *another* pack silently becomes a reference to this one. Audited by
     enumerating every pre-existing `sd-` token in the source: 36 of them, 30
     being "the sd-review lane" (still correct) and one being that self-route.
-  - Three `se-*` globs survived the rename because the map required a letter
-    after the prefix. Found by grepping the folded tree for the retired prefix
-    rather than by trusting the map — the byte-diff proves the map was applied
-    consistently, never that the map was complete.
+  - Two spellings survived the rename because the map's lookahead required a
+    lowercase letter after the prefix: three `se-*` globs, and — found in
+    Copilot's third round, not by me — the H1 of every one of the sixty-four
+    folded skills, still reading `# SE Typed Holes` while the directory,
+    frontmatter, and every cross-reference in the same file already read
+    `sd-typed-holes`. This is the sharpest statement of what a byte-diff does
+    and does not buy: it proves the map was applied consistently, never that
+    the map was complete, and a check derived from the map cannot find what the
+    map never matched. The guard added for it compares each title to its own
+    directory name rather than banning a spelling, so it needs no list and the
+    next stale title fails whatever it says.
   - `tests/test_skill_frontmatter.py` pinned the tree to exactly twelve
     surfaces, so the fold could not land without it. A roster of every surface
     is what stops working at seventy-six; the half worth keeping is the other
@@ -1147,7 +1154,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     missing-citation warning, so every `references/` path the folded skills cite
     resolves through 5-ii's fan-out. Three mutations on the drift guard (plant
     `R-7` in `sd-status`, plant `F/T/R` inside the exempt file, give
-    `prd.md` the four sibling class letters), each caught.
+    `prd.md` the four sibling class letters), each caught; two more on the
+    fold guards (remove four folded skills, restore a `# SE ` title), each
+    caught.
 - [ ] 5-iv — vault-side retarget of the 8 callers in 2 routines, **before** any
   deletion; then delete the old `se-*` renders from `~/.claude/skills`,
   `~/.codex/skills`, `~/.claude/agents` and `~/.codex/agents`

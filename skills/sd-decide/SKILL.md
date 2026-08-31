@@ -3,7 +3,7 @@ name: sd-decide
 description: Use when the user wants a defensible recommendation between known options using explicit criteria, constraints, evidence, tradeoffs, and uncertainty.
 ---
 
-# SE Decide
+# sd-decide
 
 Run this skill for a bounded choice: known alternatives and available evidence
 in, one defensible recommendation out. The result is a decision memo, not a

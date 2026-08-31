@@ -3,7 +3,7 @@ name: sd-distill
 description: Use when the user wants supplied material compressed to an explicit information budget while preserving decision-critical meaning, attribution, exceptions, and an auditable loss ledger.
 ---
 
-# SE Distill
+# sd-distill
 
 Compress a supplied topic corpus to a stated information budget. Treat the
 default 80/10 goal as a prioritization heuristic: target no more than 10% of

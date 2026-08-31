@@ -3,7 +3,7 @@ name: sd-ask-me
 description: Use when the user wants a profile-grounded prediction, aligned recommendation, reflection, or outward-safe draft without treating prior behavior as identity or authority.
 ---
 
-# SE Ask Me
+# sd-ask-me
 
 Answer a bounded question using an approved personal operating profile while
 keeping profile facts, prediction, advice, reflection, and drafted language

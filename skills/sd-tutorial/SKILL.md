@@ -3,7 +3,7 @@ name: sd-tutorial
 description: Use when the user wants a checkpoint-driven technical tutorial that moves a defined audience from a known starting state to an observable result with honest execution status, verification, recovery, and cleanup.
 ---
 
-# SE Tutorial
+# sd-tutorial
 
 Create a reader-verifiable technical tutorial from a declared starting state to an
 observable result. Make prerequisites, environment branches, execution state,

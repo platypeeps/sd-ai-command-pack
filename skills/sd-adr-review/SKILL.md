@@ -3,7 +3,7 @@ name: sd-adr-review
 description: Use when a PR or diff touches docs/adr/, DECISIONS.md, or *.adr.md files, when an ADR moves between proposed, accepted, rejected, or superseded status, or when the user asks to review an architecture decision record; checks MADR-style completeness, RFC-2119 driver force, honest consequences, forward links, lifecycle validity, and premise freshness, and reports P1/P2/P3 findings with one verdict line.
 ---
 
-# SE ADR Review
+# sd-adr-review
 
 Review an architecture decision record so the decision is justified, the
 record is complete and honest, and the premises it rests on are still true.

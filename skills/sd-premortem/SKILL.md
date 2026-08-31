@@ -3,7 +3,7 @@ name: sd-premortem
 description: Use when the user wants to stress-test an accepted plan before execution by assuming failure, ranking plausible failure modes, and defining indicators, prevention, contingencies, and stop conditions.
 ---
 
-# SE Premortem
+# sd-premortem
 
 Stress-test an accepted plan before execution by assuming the intended outcome
 failed, then identifying plausible failure modes, early signals, prevention,

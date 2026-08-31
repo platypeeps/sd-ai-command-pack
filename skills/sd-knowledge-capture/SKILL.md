@@ -3,7 +3,7 @@ name: sd-knowledge-capture
 description: Use when the user wants a normalized capture safely published to Obsidian or Notion through duplicate-aware preview, preservation, approval, and verified write-back.
 ---
 
-# SE Knowledge Capture
+# sd-knowledge-capture
 
 Run this skill to publish one normalized capture to a user-authorized Obsidian
 vault or Notion data source. It is the explicit write-capable bridge after

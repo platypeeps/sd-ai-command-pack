@@ -3,7 +3,7 @@ name: sd-coherence-audit
 description: Use when a knowledge corpus — a note vault, agent-instruction files, or a docs tree — must be audited against itself for contradictions, vagueness, bandaid guidance, and redundancy, returning a read-only findings ledger with both sides quoted.
 ---
 
-# SE Coherence Audit
+# sd-coherence-audit
 
 Run this skill to audit a bounded corpus against **itself**. Build an explicit
 index of the directives and assertions the corpus makes, compare them, and

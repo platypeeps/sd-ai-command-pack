@@ -3,7 +3,7 @@ name: sd-learn
 description: Use when the user wants an adaptive, mastery-oriented learning path from a stated capability goal, diagnosed baseline, constraints, and observable evidence.
 ---
 
-# SE Learn
+# sd-learn
 
 Build a bounded path from current evidence to an observable capability. Diagnose
 the baseline, map prerequisites, sequence explanation and practice, and define

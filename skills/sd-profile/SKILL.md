@@ -3,7 +3,7 @@ name: sd-profile
 description: Use when the user wants to create, inspect, correct, review, import, export, or forget a consent-driven personal operating profile with traceable assertions.
 ---
 
-# SE Profile
+# sd-profile
 
 Create and maintain one transparent, user-owned personal operating profile.
 This skill is the sole profile mutation owner. Other skills may later consume a

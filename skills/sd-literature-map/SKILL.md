@@ -3,7 +3,7 @@ name: sd-literature-map
 description: Use when the user wants a source-traceable map of a field's schools, methods, works, relationships, disputes, gaps, and reading paths without a flattened narrative review.
 ---
 
-# SE Literature Map
+# sd-literature-map
 
 Map the intellectual structure of a defined field or research question. Preserve
 schools, methods, agreements, disputes, influence, evidence strength, and search

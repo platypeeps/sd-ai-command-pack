@@ -3,7 +3,7 @@ name: sd-monitor
 description: Use when the user wants a dated, source-traceable comparison of a watched subject against an explicit baseline, with meaningful deltas and a portable next-state artifact.
 ---
 
-# SE Monitor
+# sd-monitor
 
 Run a read-only monitoring comparison for one bounded subject. Create an
 explicit first baseline or compare current evidence with a supplied prior state,

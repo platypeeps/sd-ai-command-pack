@@ -3,7 +3,7 @@ name: sd-fact-check
 description: Use when the user supplies claims or a draft and wants a claim-by-claim evidence audit with supported, partially supported, unverified, contradicted, or outdated verdicts.
 ---
 
-# SE Fact Check
+# sd-fact-check
 
 Run this skill when claims already exist and need a traceable audit. Inventory
 the claims first, verify each material assertion independently, and return a

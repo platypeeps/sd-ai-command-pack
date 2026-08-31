@@ -3,7 +3,7 @@ name: sd-topic-radar
 description: Use when the user wants ten ranked technical writing opportunities grounded in authorized personal activity, current developments, prior coverage, evidence readiness, novelty, and effort.
 ---
 
-# SE Topic Radar
+# sd-topic-radar
 
 Find worthwhile technical writing opportunities when the user does not begin
 with a theme. Rank credible original contribution above trend popularity,

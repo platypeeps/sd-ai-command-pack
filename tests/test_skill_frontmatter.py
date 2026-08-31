@@ -109,12 +109,12 @@ class InventoryTests(unittest.TestCase):
         A floor, deliberately, and not the exact count: 5-iii folded sixty-four,
         and pinning that number would put back the roster this file just stopped
         keeping -- retiring one skill would fail here rather than where the
-        retirement is decided. Sixty is close enough to the real number that
-        losing a meaningful part of the fold fails, and loose enough that
-        ordinary movement in either direction does not.
+        retirement is decided. The floor is sixty-one -- close enough to
+        the real number that losing a meaningful part of the fold fails, loose
+        enough that ordinary movement in either direction does not.
         """
 
-        self.assertGreater(len(surfaces()) - len(EXPECTED), 60)
+        self.assertGreaterEqual(len(surfaces()) - len(EXPECTED), 61)
 
     def test_no_surface_kept_a_retired_prefix(self) -> None:
         for path in surfaces():
@@ -123,6 +123,33 @@ class InventoryTests(unittest.TestCase):
                     path.parent.name.startswith("se-"),
                     "a folded surface kept its pre-fold name",
                 )
+
+    def test_the_title_is_the_surface_name(self) -> None:
+        """The first heading names the surface, and nothing else.
+
+        The directory-name check above is not enough, and the fold proved it:
+        all sixty-four folded skills arrived titled `# SE Typed Holes` while
+        their directory, frontmatter, and every cross-reference already read
+        `sd-typed-holes`. The rename map matched a lowercase prefix, so a
+        title-cased one went straight through -- a whole class the map could
+        not see, and one nothing in this suite would have reported.
+
+        Checking the title against the directory is what makes the class
+        checkable at all: it needs no list of forbidden spellings, so the next
+        stale title fails here whatever it says.
+        """
+
+        for path in surfaces():
+            heading = next(
+                (
+                    line
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("# ")
+                ),
+                None,
+            )
+            with self.subTest(surface=path.parent.name):
+                self.assertEqual(heading, f"# {path.parent.name}")
 
 
 class FrontmatterTests(unittest.TestCase):

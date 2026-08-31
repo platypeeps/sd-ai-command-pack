@@ -3,7 +3,7 @@ name: sd-prose-lint
 description: Use when prose written on the user's behalf — skill bodies, docs, README text, commit or PR text, release notes, outbound drafts — needs a prose lint, style lint, or AI-tell check before it is committed or sent; runs the deterministic Vale gate where it exists and assigns every finding a disposition, degrading gracefully where Vale is absent.
 ---
 
-# SE Prose Lint
+# sd-prose-lint
 
 Check prose deterministically before it is committed or sent. Where the Vale
 gate exists, run it and work every finding to a disposition; where it does

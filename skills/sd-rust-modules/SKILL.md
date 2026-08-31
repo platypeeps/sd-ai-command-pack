@@ -3,7 +3,7 @@ name: sd-rust-modules
 description: Use when planning, creating, splitting, or reorganizing Rust modules and crates — mod declarations, file layout, visibility, re-export facades, crate boundaries — or when a module is growing into a god module.
 ---
 
-# SE Rust Modules
+# sd-rust-modules
 
 Keep module and crate boundaries deliberate. Files are organized by domain
 concept, visibility starts closed and widens only for a named consumer, and

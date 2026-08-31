@@ -3,7 +3,7 @@ name: sd-brief
 description: Use when the user asks for a morning, daily, or on-demand brief that assembles their stated topics and sources into one short, scannable update.
 ---
 
-# SE Brief
+# sd-brief
 
 Run this skill for recurring or ad-hoc catch-up briefs: one dated, scannable
 update covering the user's topics since the last check-in. A brief is

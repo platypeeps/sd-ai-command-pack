@@ -3,7 +3,7 @@ name: sd-postmortem
 description: Use when the user wants a formal, evidence-linked, blameless analysis of an incident or failed outcome with defensible causes, safeguard findings, and verifiable corrective actions.
 ---
 
-# SE Postmortem
+# sd-postmortem
 
 Reconstruct an incident or failed outcome from evidence, explain causal and
 system conditions without blame theater, and propose corrective actions whose

@@ -3,7 +3,7 @@ name: sd-author
 description: Use when the user wants to develop an original evidence-backed technical article through a one-question interview, approved editorial brief, staged drafting, review, and publication handoff.
 ---
 
-# SE Author
+# sd-author
 
 Develop a technical article without manufacturing the user's authorship. Elicit
 the thesis, experience, examples, and judgments first; keep them separate from

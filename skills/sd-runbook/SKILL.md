@@ -3,7 +3,7 @@ name: sd-runbook
 description: Use when the user wants a source-traceable operational runbook with bounded authority, ordered steps, verification, failure handling, escalation, rollback, recovery, and maintenance metadata.
 ---
 
-# SE Runbook
+# sd-runbook
 
 Convert validated operational knowledge into a safe, versioned runbook for one
 bounded event or procedure. Keep authority, target, evidence, expected result,

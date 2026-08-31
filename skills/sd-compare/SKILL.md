@@ -3,7 +3,7 @@ name: sd-compare
 description: Use when the user wants a neutral, evidence-aware comparison of known alternatives on one fair frame without ranking them or recommending a winner.
 ---
 
-# SE Compare
+# sd-compare
 
 Compare a bounded set of known alternatives on one explicit frame. Make
 similarities, differences, eligibility, tradeoffs, evidence gaps, and

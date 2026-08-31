@@ -3,7 +3,7 @@ name: sd-sop
 description: Use when the user wants a source-traceable standard operating procedure for routine repeatable work, with controlled current practice, testable controls, exceptions, records, and maintenance metadata.
 ---
 
-# SE SOP
+# sd-sop
 
 Turn observed or approved routine practice into a controlled, maintainable
 standard operating procedure. Preserve conflicts and gaps, keep proposed

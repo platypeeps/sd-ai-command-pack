@@ -3,7 +3,7 @@ name: sd-capture
 description: Use when the user wants one URL, file, pasted passage, connected record, or bounded thread normalized into a destination-neutral knowledge artifact with provenance and no implicit external write.
 ---
 
-# SE Capture
+# sd-capture
 
 Run this skill to normalize one logical intake unit into a portable Markdown
 artifact. It preserves provenance and retrieval limits while separating source

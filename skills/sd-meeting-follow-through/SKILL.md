@@ -3,7 +3,7 @@ name: sd-meeting-follow-through
 description: Use when the user wants a source-traceable post-meeting package that reconciles intended and actual outcomes, decisions, commitments, unresolved items, and consent-gated follow-through.
 ---
 
-# SE Meeting Follow-Through
+# sd-meeting-follow-through
 
 Turn supplied meeting records into a verified follow-through package. Reconcile
 what the meeting intended to accomplish with what the record supports, while

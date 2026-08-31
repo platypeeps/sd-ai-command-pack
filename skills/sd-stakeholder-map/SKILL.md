@@ -3,7 +3,7 @@ name: sd-stakeholder-map
 description: Use when the user wants an evidence-aware map of the people and groups relevant to a defined initiative or decision, with authority, influence, interests, tensions, engagement order, and validation gaps kept distinct.
 ---
 
-# SE Stakeholder Map
+# sd-stakeholder-map
 
 Map the people and groups relevant to one bounded initiative or decision. Keep
 formal authority, informal influence, stated positions, inferred interests,

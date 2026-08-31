@@ -3,7 +3,7 @@ name: sd-rust-review
 description: Use when a diff, branch, or pull request touches Rust — .rs files, Cargo.toml, lint configuration — to run the pack's Rust-specific probe checklist as a local lens whose findings feed the review of record.
 ---
 
-# SE Rust Review
+# sd-rust-review
 
 Apply the pack's Rust bars — `sd-rust-design`, `sd-rust-quality`,
 `sd-rust-modules`, `sd-rust-async` — to a concrete diff and return

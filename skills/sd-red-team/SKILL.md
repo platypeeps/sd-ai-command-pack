@@ -3,7 +3,7 @@ name: sd-red-team
 description: Use when the user wants a constructive adversarial review of an artifact's assumptions, contrary evidence, incentives, failure modes, misuse, security, privacy, counterarguments, and reversal conditions.
 ---
 
-# SE Red Team
+# sd-red-team
 
 Challenge an artifact with the strongest relevant adversarial analysis while
 remaining evidence-based, constructive, and safe. Steelman before criticizing,

@@ -3,7 +3,7 @@ name: sd-explain
 description: Use when the user wants one complex topic explained accurately for a stated audience, purpose, prior-knowledge level, and depth, with explicit analogy and limitation boundaries.
 ---
 
-# SE Explain
+# sd-explain
 
 Explain one bounded topic at the depth and vocabulary a stated audience needs.
 Start with the smallest accurate model, then add only the intuition, example,

@@ -3,7 +3,7 @@ name: sd-presentation
 description: Use when the user wants to turn an approved source artifact into an audience-specific story arc and source-traceable slide specification before using presentation tooling.
 ---
 
-# SE Presentation
+# sd-presentation
 
 Turn an approved source artifact into a coherent, timed presentation blueprint
 that advances one observable audience outcome. Preserve source truth and make

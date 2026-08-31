@@ -3,7 +3,7 @@ name: sd-scan
 description: Use when the user wants a competitive, market, or landscape scan that inventories the players in a space and compares them on consistent criteria.
 ---
 
-# SE Scan
+# sd-scan
 
 Run this skill for breadth-first landscape work: who is in a space, compared
 apples-to-apples on the same criteria, with the gaps made visible. Depth on

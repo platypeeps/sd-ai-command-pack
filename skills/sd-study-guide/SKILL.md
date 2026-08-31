@@ -3,7 +3,7 @@ name: sd-study-guide
 description: Use when the user wants a bounded source set transformed into a durable study guide with traceable concepts, definitions, examples, retrieval prompts, practice, solutions, traps, and review order.
 ---
 
-# SE Study Guide
+# sd-study-guide
 
 Transform supplied learning material into a durable artifact optimized for
 understanding, retrieval, and application. Preserve source boundaries and

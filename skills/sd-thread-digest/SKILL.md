@@ -3,7 +3,7 @@ name: sd-thread-digest
 description: Use when the user wants a bounded Slack thread, channel window, or equivalent conversation converted into an evidence-linked digest of decisions, commitments, unresolved work, disagreement, risks, and message history.
 ---
 
-# SE Thread Digest
+# sd-thread-digest
 
 Turn a supplied or authorized conversation into a concise account of outcomes
 and unresolved work. Preserve message-level evidence, revisions, gaps, privacy,

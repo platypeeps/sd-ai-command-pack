@@ -3,7 +3,7 @@ name: sd-propose-skills
 description: Use when the user wants the current session reviewed for recurring friction, repeated steps, and hard-won gotchas, and high-bar skill proposals drafted into a configurable Obsidian Skill Proposals destination for later accept or decline.
 ---
 
-# SE Propose Skills
+# sd-propose-skills
 
 Turn what the current session actually taught into reviewable skill proposals, so
 a lesson learned the hard way is not lost when the session ends. Do the judgement

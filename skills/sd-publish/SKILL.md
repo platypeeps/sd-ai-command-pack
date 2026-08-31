@@ -3,7 +3,7 @@ name: sd-publish
 description: Use when the user wants an approved source artifact adapted into a source-faithful, destination-specific draft and preview without sending or publishing it.
 ---
 
-# SE Publish
+# sd-publish
 
 Adapt an already approved source artifact into a destination-appropriate draft
 without weakening its evidence, widening its audience, or treating preparation

@@ -3,7 +3,7 @@ name: sd-checklist
 description: Use when the user wants a short read-do or do-confirm checklist derived from bounded authoritative sources, with observable pass conditions, failure responses, and no execution or certification.
 ---
 
-# SE Checklist
+# sd-checklist
 
 Turn a bounded policy, procedure, plan, or failure history into the smallest
 checklist that materially prevents failure or proves completion. Preserve the

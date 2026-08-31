@@ -3,7 +3,7 @@ name: sd-action-inbox
 description: Use when the user wants a reviewable, cross-source inbox of explicit commitments and opt-in possible actions without creating tasks or sending replies.
 ---
 
-# SE Action Inbox
+# sd-action-inbox
 
 Run this skill to reconcile actionable statements from a bounded set of
 communication and knowledge sources into one review queue. It distinguishes

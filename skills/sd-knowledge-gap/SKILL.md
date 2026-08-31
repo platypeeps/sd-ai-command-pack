@@ -3,7 +3,7 @@ name: sd-knowledge-gap
 description: Use when the user wants a bounded, cross-source audit of missing, inaccessible, stale, conflicting, unsupported, duplicated, or unresolved knowledge.
 ---
 
-# SE Knowledge Gap
+# sd-knowledge-gap
 
 Run this skill to audit an existing knowledge system against a defined decision
 or audience. Build a provenance-preserving claim and decision map before

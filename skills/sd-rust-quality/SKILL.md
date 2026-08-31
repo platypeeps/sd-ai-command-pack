@@ -3,7 +3,7 @@ name: sd-rust-quality
 description: Use when writing, editing, or planning Rust code — .rs files, Cargo.toml, lint configuration, or clippy fixes — to hold the idiomatic bar covering error type design, clippy posture, Rust API guidelines conformance, naming, and recurring anti-patterns.
 ---
 
-# SE Rust Quality
+# sd-rust-quality
 
 Hold every Rust change to the idiomatic bar. Prefer the named idioms, reject
 the named anti-patterns, and keep error types, lints, and names conforming

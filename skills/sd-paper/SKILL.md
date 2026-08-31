@@ -3,7 +3,7 @@ name: sd-paper
 description: Use when the user wants to develop a credible research paper through question refinement, an approved research brief, explicit literature and methodology protocols, traceable evidence, reproducibility, and venue-aware review.
 ---
 
-# SE Paper
+# sd-paper
 
 Develop a research paper from a defensible question to a submission-ready draft
 without fabricating research, overstating literature coverage, or collapsing

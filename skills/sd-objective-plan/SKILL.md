@@ -3,7 +3,7 @@ name: sd-objective-plan
 description: Use when the user has accepted a goal or decision and wants a bounded, evidence-aware plan with observable milestones, dependencies, risks, decision points, and immediate next actions.
 ---
 
-# SE Plan
+# sd-objective-plan
 
 Turn one accepted outcome or decision into a practical knowledge-work plan.
 Work backward into observable milestones, make assumptions and missing

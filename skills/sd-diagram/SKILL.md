@@ -3,7 +3,7 @@ name: sd-diagram
 description: Use when the user wants a precise, evidence-traceable diagram specification or conservative Mermaid diagram for a system, process, concept, hierarchy, comparison, state model, or event sequence.
 ---
 
-# SE Diagram
+# sd-diagram
 
 Turn bounded source truth into a reviewable structural model, then choose the
 smallest visual form that answers the user's question. The evidence ledger is

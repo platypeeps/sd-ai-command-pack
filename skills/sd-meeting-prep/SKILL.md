@@ -3,7 +3,7 @@ name: sd-meeting-prep
 description: Use when the user has an upcoming meeting or call and wants a dossier on the people, company, and context, plus talking points and questions.
 ---
 
-# SE Meeting Prep
+# sd-meeting-prep
 
 Run this skill before a meeting or call: it assembles a one-page dossier on
 the participants and their organization, the likely agenda, and talking

@@ -3,7 +3,7 @@ name: sd-watchlist
 description: Use when the user wants a read-only review of configured channels, feeds, authors, searches, playlists, podcasts, or collections that reports only material new items since an explicit checkpoint.
 ---
 
-# SE Watchlist
+# sd-watchlist
 
 Review a bounded set of content sources against an explicit checkpoint and
 return the small number of genuinely new items worth attention. Preserve source

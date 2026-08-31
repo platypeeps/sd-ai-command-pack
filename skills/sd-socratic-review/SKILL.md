@@ -3,7 +3,7 @@ name: sd-socratic-review
 description: Use when the user wants a bounded, adaptive Socratic review that asks one question at a time, tests demonstrated understanding, repairs misconceptions, and reports evidence without grading.
 ---
 
-# SE Socratic Review
+# sd-socratic-review
 
 Probe and deepen understanding through a bounded dialogue. Ask one question at
 a time, adapt from demonstrated reasoning, and keep formative evidence separate

@@ -3,7 +3,7 @@ name: sd-rebase-hygiene
 description: Use when the user explicitly asks to rebase a long-lived branch or worktree — user-invoked only, never triggered automatically. Fetch before trusting local state, dry-run the merge before touching the working tree, pre-plan every conflict resolution, and verify the remote ref after a user-approved force-with-lease push.
 ---
 
-# SE Rebase Hygiene
+# sd-rebase-hygiene
 
 Run the rebase ritual for a long-lived branch: establish ground truth
 with a fetch, discover the real conflict surface with a dry run before
