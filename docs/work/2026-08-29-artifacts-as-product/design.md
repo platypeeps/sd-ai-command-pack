@@ -80,7 +80,9 @@ count in R11-D13: `bin/` core is already at 7,492 with seven commands unbuilt. T
 stands as the record of how 8,000 was derived, not as a claim about today.* The earlier 6,000 and 6,500 figures
 were both busted on paper; setting 8,000 now is the honest number, still <1/11 of today's 95k.
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
-ceiling until then. dashboard/ ≤ **2,500** (credible: 457 lifted + one JS file). Caps are CI tests; a cap is never raised in the PR
+ceiling until then. dashboard/ ≤ **2,500** (justified as "credible: 457 lifted + one JS file" — *the 457
+is superseded by R11-D13's enumeration at 763; the cap's number stands, its stated justification does
+not*). Caps are CI tests; a cap is never raised in the PR
 that busts it. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
 
 ### Commands (12 — grown from 8, each growth carried by a decision record)
@@ -192,7 +194,9 @@ projection nothing reads as input.**
 
 ### Dashboard (r2, staged replacement of system/local-project-dashboard)
 
-Stdlib ThreadingHTTPServer + one vanilla JS file; ~457 LOC lifted verbatim from dashboard.py. Tabs:
+Stdlib ThreadingHTTPServer + one vanilla JS file; ~457 LOC lifted verbatim from dashboard.py
+(*superseded: R11-D13 enumerates the backbone-side lift at 763 — 79 collector lines plus 684 of JS.
+How much of that is liftable verbatim rather than rewritten is not separately measured*). Tabs:
 Now · Work · PRs · Issues · Repos · Queues · Suggestions · Skills · Sessions · plugin tabs
 (`dashboard.d/*.py` contract incl. `mounts`). Now screen = externally derived facts only. Every UI
 mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes/runs agents.
@@ -864,11 +868,11 @@ itemised list in its own record rather than raising a number to fit the PR in fr
 estimate is worth less than one count.
 
 The cap is **not raised here**, and deliberately. Raising a cap against an estimate is how the
-6,000 and 6,500 `bin/` figures were busted twice before 8,000 was derived from an itemized list;
+6,000 and 6,500 `bin/` figures were busted twice before 8,000 was derived from an itemised list;
 the honest move is to measure first. The loader is the smallest of the three unknowns and it now
 comes first anyway, so **its PR reports its own line count against the remaining headroom**. If
 the three fit, the cap stands and this record is the measurement that says so. If they do not,
-the cap is re-derived from the itemized split in its own decision record — written before the
+the cap is re-derived from the itemised split in its own decision record — written before the
 tabs start, never in the PR that trips `tests/test_loc_caps.py`.
 
 What is recorded either way: the 457 figure is superseded by 763, so the cap's stated
