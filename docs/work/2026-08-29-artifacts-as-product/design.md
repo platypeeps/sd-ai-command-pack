@@ -774,9 +774,13 @@ access, and it is the one thing that blocked step 6b.
 through `tailscale serve` — tailnet-only HTTPS, never `funnel` — terminating in front of that
 loopback socket, and it guards the reach with three things rather than one: a Host-header allowlist
 covering the loopback names plus this node's own MagicDNS names, a per-process token required on
-every mutating request (`X-Dashboard-Token`, checked at `dashboard.py:1662` immediately after
-`host_ok()`), and the deliberate absence of CORS headers, so a page on another origin cannot obtain
-the preflight it would need to send that header at all. Three write endpoints ride on that:
+every mutating request (`X-Dashboard-Token`, checked immediately after the Host check), and the
+deliberate absence of CORS headers, so a page on another origin cannot obtain the preflight it
+would need to send that header at all. Those live in the *system* repo, not this one — the file
+under replacement is `~/repos/system/local-project-dashboard/dashboard.py`, where `do_POST` opens
+at line 1658 with `host_ok()` (defined at 1532) and the token comparison at 1661. The path is
+spelled in full because a bare `dashboard.py:1661` reads as an in-repo citation and there is no
+such file here; `dashboard/server.py` is this repo's, and it is GET-only until 6b. Three write endpoints ride on that:
 `POST /api/update`, `/api/ack`, `/api/refresh`.
 
 **The decision.** At 6b the replacement takes `:8767` *with* the tailnet reach and *with* those
