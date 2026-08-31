@@ -368,6 +368,26 @@ class SurveyTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("--list", err.getvalue())
 
+    def test_a_survey_finds_skills_wherever_the_repo_keeps_them(self) -> None:
+        """The one-level reader reported "no skills found" for a real repo.
+
+        Skills live under `.claude/skills/`, or `.agents/skills/`, or
+        `templates/skills/`. Surveying `sd-writing-pack` with the flat reader
+        found none of its twelve, and a hardcoded list of conventional locations
+        would reproduce that the next time somebody invents a thirteenth. So the
+        survey walks, and only what it refuses to descend into is spelled out.
+        """
+
+        skill(self.root / ".claude" / "skills", "nested", CLEAN)
+        skill(self.root / ".agents" / "skills", "deeper", CLEAN)
+        found = {p.parent.name for p in adopt.repo_skill_files(self.root)}
+        self.assertEqual(found, {"nested", "deeper"})
+
+    def test_a_survey_does_not_descend_into_git_or_vendored_trees(self) -> None:
+        skill(self.root / ".git" / "modules", "ghost", CLEAN)
+        skill(self.root / "node_modules" / "pkg", "vendored", CLEAN)
+        self.assertEqual(adopt.repo_skill_files(self.root), [])
+
     def test_a_survey_reports_and_writes_nothing(self) -> None:
         skill(self.root, "candidate", CLEAN)
         before = sorted(p.name for p in self.root.rglob("*"))

@@ -46,6 +46,7 @@ import argparse
 import dataclasses
 import datetime
 import hashlib
+import os
 import pathlib
 import re
 import sys
@@ -367,6 +368,36 @@ def skill_files(root: pathlib.Path) -> list[pathlib.Path]:
     )
 
 
+# Directories a walk must never descend into. `.git` would report every skill
+# once per packed revision that happens to be checked out; the rest are other
+# people's dependency trees, where a vendored SKILL.md is not this repository's
+# to survey.
+SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "venv", "__pycache__", "target"})
+
+
+def repo_skill_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every `SKILL.md` anywhere in a checkout, found by walking it.
+
+    `skill_files` above looks one level down, which is right for a flat skills
+    root and wrong for a repository: skills live under `.claude/skills/`, or
+    `.agents/skills/`, or `templates/skills/`, or somewhere this list has not
+    thought of. Surveying `sd-writing-pack` with the one-level reader reported
+    "no skills found" for a repository holding twelve, which is the failure a
+    hardcoded list of conventional locations would reproduce the next time
+    somebody invents a thirteenth. So the walk enumerates, and the only thing
+    spelled out is what it refuses to descend into.
+    """
+
+    if not root.is_dir():
+        return []
+    found: list[pathlib.Path] = []
+    for current, directories, files in os.walk(root):
+        directories[:] = [d for d in directories if d not in SKIP_DIRS]
+        if SKILL_FILE in files:
+            found.append(pathlib.Path(current) / SKILL_FILE)
+    return sorted(found)
+
+
 def installed_surfaces(scope: str, home: pathlib.Path) -> set[str]:
     """What is already claiming a name at the destination."""
 
@@ -423,7 +454,8 @@ def run_lint_only(source: str, out) -> int:
 def run_survey(source: str, out) -> int:
     """`--from-repo --list`. Reads a checkout, writes nothing, adopts nothing."""
 
-    paths = skill_files(pathlib.Path(source))
+    root = pathlib.Path(source)
+    paths = repo_skill_files(root)
     if not paths:
         out.write(f"no skills found under {source}\n")
         return 1
@@ -433,8 +465,15 @@ def run_survey(source: str, out) -> int:
         kind = "command" if fields.get(MARKER) == "true" else "skill"
         screened = len([f for f in prescreen(text) if f.severity == REFUSE])
         shape = len(lint(path.parent.name, text))
+        # Located, not just named: a repository can hold two skills of the same
+        # name under different roots, and a survey that printed the bare name
+        # would report them as one row seen twice.
+        try:
+            where = path.parent.relative_to(root)
+        except ValueError:
+            where = path.parent
         out.write(
-            f"{path.parent.name}\t{kind}\tscreen:{screened}\tshape:{shape}\t"
+            f"{path.parent.name}\t{kind}\tscreen:{screened}\tshape:{shape}\t{where}\t"
             f"{fields.get('description', '')[:70]}\n"
         )
     out.write(f"{len(paths)} skill(s) surveyed; nothing written\n")

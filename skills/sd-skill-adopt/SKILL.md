@@ -64,9 +64,12 @@ reads *untrusted* text, and the patterns it matches are the ones a document
 about prompt injection quotes — including this file.
 
 `--from-repo` with `--list` — survey a checkout's skills and report what is
-there. Report-only is the flag's only mode: without `--list` it refuses rather
-than falling through to a write. It reads a local checkout; clone a remote
-repository first.
+there: name, kind, pre-screen and shape counts, and where in the tree each one
+sits. It **walks** the checkout rather than looking in the conventional places,
+because skills live under `.claude/skills/`, `.agents/skills/`, `templates/
+skills/`, or somewhere nobody has thought of yet. Report-only is the flag's only
+mode: without `--list` it refuses rather than falling through to a write. It
+reads a local checkout; clone a remote repository first.
 
 ## Never
 

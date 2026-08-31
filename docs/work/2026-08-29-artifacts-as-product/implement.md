@@ -1299,8 +1299,26 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     76, 0, exit 0. Mutation-checked rather than trusted: a fixture with a
     mismatched `name` and an empty `description` produces exactly those two
     findings and exit 1, so the zero above is a result and not an empty loop.
-    `make check` exit 0, 42 new tests. `bin/` is 7,429 lines against the 8,000
+    `make check` exit 0, 44 new tests. `bin/` is 7,468 lines against the 8,000
     cap.
+  - **What the tool found on its first real use, which is the argument for
+    having built it.** Surveying `sd-writing-pack` reported "no skills found"
+    for a repository holding twelve: `--from-repo` looked one level down, and
+    repository skills live under `.claude/skills/`, `.agents/skills/`,
+    `templates/skills/`. Fixed by walking rather than by listing the
+    conventional places, since a list would reproduce the bug at the next
+    convention. Re-run, the survey then found something else: **nine tracked
+    `.github/skills/trellis-*` directories still live in this repository**, 43
+    files, Copilot-facing on every pull request here, instructing on machinery
+    step 2 removed. Step 2's check was `ls .trellis` fails, and `.github/skills/`
+    is not `.trellis/`. Recorded here and left for **step 7**, whose sweep
+    (`grep -rli trellis` → archive only) owns it; deleting it under 5b would be
+    scope this step did not ask for.
+  - The survey also measured the thing the stage split was argued from rather
+    than leaving it asserted: across this repository's 85 skill files the
+    pre-screen flags exactly two, `sd-skill-adopt` (6 rules) and `sd-review`
+    (1). Both are surfaces that *document* the patterns. Across
+    `sd-writing-pack`'s 13, it flags none.
 - [ ] 5b-ii — the retirements. Enumerated, not yet done: `skill-proposal-accept`
   (the vault routine, its `local-cron-jobs` job, and the ~20 files naming it),
   `file-trellis-task.py` (**already gone** — succeeded by `file-work-item.py`;
