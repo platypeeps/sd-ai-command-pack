@@ -147,6 +147,25 @@ class StateTests(FleetHarness):
             Path("/tmp/elsewhere"),
         )
 
+    def test_a_tilde_in_the_environment_is_expanded(self):
+        """A quoted SD_REPO_ROOT="~/repos" arrives with the tilde intact."""
+        self.assertEqual(
+            collect.repo_root({"SD_REPO_ROOT": "~/repos"}),
+            Path.home() / "repos",
+        )
+
+    def test_an_empty_environment_value_falls_back_to_the_default(self):
+        self.assertEqual(collect.repo_root({"SD_REPO_ROOT": ""}), Path.home() / "repos")
+
+    def test_a_missing_root_is_reported_as_missing_not_as_an_empty_fleet(self):
+        state = collect.build_state(self.root / "nope")
+        self.assertFalse(state["rootExists"])
+        self.assertEqual(state["repos"], [])
+
+    def test_a_real_but_empty_root_is_not_reported_as_missing(self):
+        state = collect.build_state(self.root)
+        self.assertTrue(state["rootExists"])
+
 
 class CacheTests(FleetHarness):
     def test_a_second_read_inside_the_window_does_not_recollect(self):

@@ -24,7 +24,9 @@ async function draw() {
     sub.textContent = `cannot reach the server (${err})`;
     return;
   }
-  sub.textContent = `${state.counts.repos} repos under ${state.root} · ${state.counts.dirty} dirty · ${state.counts.ahead} ahead`;
+  sub.textContent = state.rootExists
+    ? `${state.counts.repos} repos under ${state.root} · ${state.counts.dirty} dirty · ${state.counts.ahead} ahead`
+    : `no such directory: ${state.root} — check SD_REPO_ROOT`;
   rows.replaceChildren();
   for (const repo of state.repos) {
     const tr = document.createElement("tr");

@@ -29,7 +29,11 @@ def repo_root(environ: dict[str, str] | None = None) -> Path:
     than an exception to that rule.
     """
     env = os.environ if environ is None else environ
-    return Path(env.get("SD_REPO_ROOT", os.path.expanduser("~/repos")))
+    # Expanded whether it came from the environment or the default: a quoted
+    # SD_REPO_ROOT="~/repos" reaches us with the tilde intact, and an
+    # unexpanded one names a directory that does not exist, which discovery
+    # would report as an empty fleet rather than as a bad setting.
+    return Path(os.path.expanduser(env.get("SD_REPO_ROOT") or "~/repos"))
 
 
 def run(argv: list[str]) -> str:
@@ -122,6 +126,10 @@ def build_state(root: Path) -> dict:
     repos = collect_repos(root)
     return {
         "root": str(root),
+        # An unreadable root and a root holding no checkouts both collect
+        # nothing, and only one of them is a mistake. The page needs to tell
+        # them apart, so the state says which happened.
+        "rootExists": root.is_dir(),
         "repos": repos,
         "counts": {
             "repos": len(repos),
