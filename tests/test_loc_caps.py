@@ -80,11 +80,14 @@ class LineCountCaps(unittest.TestCase):
         """`bin/` minus the temporary migration tools, which have their own cap."""
 
         paths = [p for p in tracked("bin") if not p.name.startswith("migrate-")]
-        # The enumeration is asserted before the cap. A pathspec that stopped
-        # matching -- a rename, a move, a typo -- would count zero lines and
-        # report a clean pass, which is the one way a cap test can fail at its
-        # job while looking like it worked.
-        self.assertGreater(len(paths), 5, "bin/ enumeration found almost nothing")
+        # The enumeration is asserted non-empty before the cap. A pathspec that
+        # stopped matching -- a rename, a move, a typo -- would count zero lines
+        # and report a clean pass, which is the one way a cap test can fail at
+        # its job while looking like it worked. Non-empty is the whole check: a
+        # directory pathspec matches everything under it or nothing, so there is
+        # no partial-match case for a file-count floor to catch, and a floor
+        # would instead fail on a legitimate consolidation.
+        self.assertTrue(paths, "bin/ enumeration matched no tracked files")
         self.assert_cap("bin/", paths, BIN_CAP)
 
     def test_the_migration_tools_stay_under_their_own_ceiling(self) -> None:
@@ -111,7 +114,7 @@ class LineCountCaps(unittest.TestCase):
         """
 
         paths = tracked("dashboard")
-        self.assertGreater(len(paths), 1, "dashboard/ enumeration found almost nothing")
+        self.assertTrue(paths, "dashboard/ enumeration matched no tracked files")
         self.assert_cap("dashboard/", paths, DASHBOARD_CAP)
 
 
