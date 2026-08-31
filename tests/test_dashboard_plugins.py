@@ -414,6 +414,44 @@ class PluginLoaderTest(unittest.TestCase):
 
     # -- the markup filter -------------------------------------------------
 
+    def test_a_tile_that_floods_stderr_after_closing_stdout_is_still_served(self) -> None:
+        """The same deadlock, past the point where stdout ends.
+
+        Closing stdout does not close stderr. A tile that prints its JSON,
+        closes stdout, then writes past the pipe capacity blocks in that write
+        until someone reads -- and the loop that was reading has already broken
+        on stdout's EOF. A plain `wait` here reports `did not exit` for a tile
+        that said everything it was asked for. Found in review.
+        """
+        self.register(
+            self.plugin(
+                "hh",
+                tile_script(
+                    """
+                    import os, sys, time
+                    print('{"html": "<p>late</p>"}')
+                    sys.stdout.flush()
+                    # `os.close(1)`, not `sys.stdout.close()`: CPython builds
+                    # the standard streams with `closefd=False`, so closing the
+                    # object leaves the descriptor open and the reader never
+                    # sees EOF. Measured -- the first version of this test used
+                    # the object and passed against the defect, because the loop
+                    # it was meant to escape had never broken.
+                    os.close(1)
+                    # And the pause is the rest of the test: with stderr already
+                    # ready when stdout ends, the loop drains it before noticing
+                    # the EOF and the bug hides behind the ordering.
+                    time.sleep(0.3)
+                    sys.stderr.write("y" * 400000)
+                    sys.stderr.flush()
+                    """
+                ),
+            )
+        )
+        tab = self.only_tab(plugins.load())
+        self.assertTrue(tab["ok"], tab["reason"])
+        self.assertEqual(tab["html"], "<p>late</p>")
+
     def test_a_tile_cannot_ship_an_inline_handler_through_the_loader(self) -> None:
         """The filter is asserted where the payload leaves, not only in its unit test.
 

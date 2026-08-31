@@ -1724,6 +1724,27 @@ is read in, since a tile that dies on import talks only on stderr. Both now name
 correct in isolation and wrong once something else touches its output: the same shape as the two
 composed guards found in #652, and worth naming twice. Found in review.
 
+**The same deadlock, past the break.** Round 3 found the half the fix had
+missed. Stdout ending is not stderr ending: a tile that prints its JSON, closes
+stdout, and then writes past the pipe capacity on stderr blocks in that write
+until someone reads — and the loop that had been reading has already broken on
+stdout's EOF. The plain `proc.wait()` after it therefore hangs on exactly the
+backpressure this change removed, and reports `did not exit within 5s` for a
+tile that said everything it was asked for. The wait now drains: `select` on
+stderr with a 50ms cap while it is open, a plain wait for the rest of the budget
+once it closes, so a tile that exits while a grandchild holds stderr is still
+noticed.
+
+The test for it took three tries, and the two failures are the finding.
+`sys.stdout.close()` does **not** close descriptor 1 — CPython builds the
+standard streams with `closefd=False`, so the reader never sees EOF, the loop
+never breaks, and the first version of the test passed against the defect it was
+written for. `os.close(1)` reproduces it. And a tile that floods stderr in the
+same breath as closing stdout also passes, because `select` reports stderr ready
+and the loop drains it before it ever notices the EOF; a 0.3s pause is what
+makes the ordering deterministic. With both: 5.08s and `did not exit within 5s`
+against the plain wait, 0.41s and served against the drain.
+
 **A bound that stayed after its reason did not.** Round 2 read `drain()` as a
 hang: called on the way to a refusal, it loops on a zero-timeout `select`, and a
 tile writing stderr in a loop would keep the pipe readable forever, so the drain

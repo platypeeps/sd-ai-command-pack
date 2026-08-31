@@ -271,10 +271,36 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
         # failed. Killing it on the way past would record -SIGKILL, and a
         # loader that reads its own kill as a clean exit accepts the output of
         # every tile that dies after writing.
-        try:
-            proc.wait(timeout=max(stop - time.monotonic(), 0.0))
-        except subprocess.TimeoutExpired:
-            raise refuse(f"did not exit within {seconds:g}s") from None
+        #
+        # The wait drains, for the reason the loop above reads stderr at all.
+        # Stdout closing does not close stderr, and a tile that prints its JSON,
+        # closes stdout, then writes past the pipe capacity on stderr blocks in
+        # that write until someone reads -- so a plain `wait` here would hang on
+        # it until the deadline and report `did not exit` for a tile that had
+        # already said everything it was asked for. That is the deadlock this
+        # function was changed to remove, moved past the break. Found in review.
+        while True:
+            left = stop - time.monotonic()
+            if left <= 0:
+                raise refuse(f"did not exit within {seconds:g}s")
+            if err in watch:
+                # Capped at 50ms so a tile that exits while holding stderr open
+                # -- a grandchild inheriting it -- is noticed by the `wait`
+                # below rather than waited on until the deadline.
+                if select.select([err], [], [], min(left, 0.05))[0]:
+                    piece = os.read(err, READ_CHUNK)
+                    if piece:
+                        said = (said + piece)[-STDERR_TAIL:]
+                        continue
+                    watch.remove(err)
+            try:
+                # Once stderr is closed there is nothing left to drain and this
+                # blocks for the rest of the budget; while it is open the poll
+                # is free and the select above is what does the waiting.
+                proc.wait(timeout=left if err not in watch else 0.0)
+                break
+            except subprocess.TimeoutExpired:
+                continue
         if proc.returncode != 0:
             raise refuse(f"exited {proc.returncode}")
     finally:
