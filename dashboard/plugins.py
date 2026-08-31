@@ -197,6 +197,16 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
         if isinstance(row["rank"], bool) or not isinstance(row["rank"], int):
             complaints.append(f"{source}: row {index} has a non-integer rank")
             continue
+        # Rank 0 is the top of the view and is where this module writes the
+        # row saying a plugin has gone dark. A negative rank would sort above
+        # that, so a plugin could push the notice of its own failure below its
+        # own rows -- the exact outcome the failure row exists to prevent.
+        if row["rank"] < FAILURE_RANK:
+            complaints.append(
+                f"{source}: row {index} has a rank above {FAILURE_RANK}, "
+                f"which is the top of the view"
+            )
+            continue
         text = {key: row[key] for key in REQUIRED_ROW if key != "rank"}
         if not all(isinstance(value, str) for value in text.values()):
             complaints.append(f"{source}: row {index} has a non-string kind, id or what")

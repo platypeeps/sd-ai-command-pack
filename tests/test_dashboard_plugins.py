@@ -86,6 +86,25 @@ class PluginLoaderTest(unittest.TestCase):
         # plugins is a working machine, not a broken loader.
         self.assertEqual(loaded["registryError"], "")
 
+    def test_a_registry_that_cannot_be_read_is_a_rank_zero_row(self) -> None:
+        """The outermost refusal, and the one with no plugin to blame.
+
+        Every other failure path here has a registered plugin to name. This one
+        does not: if `sd plugin list` cannot run, the loader knows nothing about
+        any plugin, and reporting that as an empty fleet is precisely the quiet
+        the module exists to refuse.
+        """
+        original = plugins.SD
+        plugins.SD = pathlib.Path("/nonexistent/sd")
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        self.assertTrue(loaded["registryError"])
+        rows = self.rows_of("plugin-registry", loaded)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["rank"], 0)
+        # And it is distinguishable from the machine that simply has none.
+        self.assertNotEqual(loaded["rows"], [])
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()
@@ -369,6 +388,16 @@ class PluginLoaderTest(unittest.TestCase):
     def test_a_boolean_rank_is_refused(self) -> None:
         """`True` is an `int` in Python, and `rank: true` is not an ordering."""
         self.assert_refused('{"rank": true, "kind": "k", "id": "i", "what": "w"}', "rank")
+
+    def test_a_negative_rank_is_refused(self) -> None:
+        """Rank 0 is the top, and it is where a dark plugin gets reported.
+
+        A row above it would let a plugin sort the notice of its own failure
+        underneath its own rows.
+        """
+        self.assert_refused(
+            '{"rank": -1, "kind": "k", "id": "i", "what": "w"}', "top of the view"
+        )
 
     def test_a_row_missing_a_required_field_is_refused(self) -> None:
         self.assert_refused('{"rank": 1, "kind": "k", "id": "i"}', "what")

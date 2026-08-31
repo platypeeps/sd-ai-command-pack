@@ -856,6 +856,11 @@ Research). One tile command must yield five tabs or 6b-3 cannot be written. A pa
 single tab writes a list of length one; two payload shapes and a rule about which applies would
 cost more than the ceremony does.
 
+`rank` must be a non-negative integer. Rank 0 is the top of the view *and* where the loader
+writes the row saying a plugin has gone dark, so a row above it would let a plugin sort the notice
+of its own failure underneath its own rows — the outcome the failure row exists to prevent. Found
+in review.
+
 `title` names the tab and is **required** — a default to the prefix is a convenience at one tab
 and a collision at five, and the title is what the operator clicks. A repeated title is refused,
 because two tabs under one name is a tab that cannot be reached and renders as a working dashboard
@@ -907,23 +912,23 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **1,882 of 2,500 — 618 lines left**. The loader cost **383** (375 in
+projected: `dashboard/` is **1,892 of 2,500 — 608 lines left**. The loader cost **393** (385 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
 `RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 618
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,645,
-145 over**, and that is the optimistic figure. The shape is identical to the one that produced
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 608
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,655,
+155 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
-**The cap is not raised here, and the test still passes at 1,882.** Raising it in the change that
+**The cap is not raised here, and the test still passes at 1,892.** Raising it in the change that
 revealed the problem is the move this pack has already made three times with `bin/`, and the
 number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 375 rather than letting it pass as inevitable: roughly half is
+One thing worth saying about the 385 rather than letting it pass as inevitable: roughly half is
 code and the rest is comments and docstrings, which is this repository's convention and not an
 accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.

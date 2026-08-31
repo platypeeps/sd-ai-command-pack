@@ -1679,11 +1679,11 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     real subprocess: neither the 5s deadline (which kills the process group,
     so a backgrounded child cannot outlive it) nor the 64KB ceiling (enforced
     while reading, not after) survives being mocked.
-    **The measurement:** `dashboard/` is **1,882 of 2,500, 618 left**. The
-    loader cost 383 against the ~240 R11-D13 left for the loader *and*
-    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 618
-    does not fit, so `dashboard/` projects to ~2,645 with `RUN_ALLOWLIST` still
-    uncounted. Not raised here -- the test passes at 1,882, and the cap gets
+    **The measurement:** `dashboard/` is **1,892 of 2,500, 608 left**. The
+    loader cost 393 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 608
+    does not fit, so `dashboard/` projects to ~2,655 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 1,892, and the cap gets
     re-derived from counts at the landing that carries the backbone renders.
     The loader also refuses a tile that prints good JSON and then exits
     non-zero: closing stdout is not exiting, and the status is inside the
