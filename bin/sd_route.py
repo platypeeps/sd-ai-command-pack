@@ -59,7 +59,10 @@ def route(
     1. Categories match required-first, so a repository can guarantee that
        "touches the installer" outranks "is mostly documentation" no matter
        which order the two appear in the file. The matched category names the
-       starting tier; without a match the policy default starts it.
+       starting tier; without a match the policy default starts it. A category
+       that lowers the tier below that default needs *every* path to be in it;
+       one that holds or raises the tier needs only one. See
+       ``_match_category`` -- "is mostly documentation" has to mean mostly.
     2. A change whose every path is in the ``docs_skip`` allow-list plans
        ``skip`` -- unless any path is in the ``never_skip`` deny-list, which
        always wins. That deny-list is why the allow-list is safe to widen: a
@@ -76,8 +79,9 @@ def route(
     tiers = policy.get("tiers") or {}
     ordered_paths = tuple(paths)
 
-    category, category_tier = _match_category(ordered_paths, policy, order)
-    tier = category_tier or _clamp(str(policy.get("default_tier") or order[-1]), order)
+    default_tier = _clamp(str(policy.get("default_tier") or order[-1]), order)
+    category, category_tier = _match_category(ordered_paths, policy, order, default_tier)
+    tier = category_tier or default_tier
     reasons: list[str] = []
     if category:
         reasons.append(f"category {category} starts at tier {tier}")
@@ -152,19 +156,50 @@ def _cheapest_reviewing_tier(order: tuple[str, ...]) -> str:
 
 
 def _match_category(
-    paths: Sequence[str], policy: Mapping[str, Any], order: tuple[str, ...]
+    paths: Sequence[str],
+    policy: Mapping[str, Any],
+    order: tuple[str, ...],
+    baseline: str,
 ) -> tuple[str | None, str | None]:
+    """The category governing this change, matched by the direction it moves.
+
+    One rule, applied by which way the category's tier points relative to the
+    policy default:
+
+      * A category that **holds or raises** the tier matches on **any** path.
+        One touched installer file makes the whole change an installer change,
+        which is the point of `required` ordering.
+      * A category that **lowers** the tier matches only when **every** path is
+        in it -- the same unanimity `docs_skip` already requires, and for the
+        same reason.
+
+    The asymmetry is not a special case for documentation, it is the safe
+    direction in each case. Matching a lowering category on any path meant one
+    markdown file could drop a source change from `standard` to `cheap` and
+    take a reviewer off it; because every work item lives under `docs/work/`,
+    that silently under-reviewed nearly every change made through this
+    framework. Escalating on any path has no such failure mode: the worst it
+    costs is a review nobody needed.
+    """
+
     declared = policy.get("categories") or ()
     categories = [item for item in declared if isinstance(item, Mapping)]
+    baseline_index = order.index(baseline) if baseline in order else len(order) - 1
     for required in (True, False):
         for category in categories:
             if bool(category.get("required")) is not required:
                 continue
-            if _first_match(paths, category.get("paths")) is None:
+            declared_tier = category.get("tier")
+            resolved = _clamp(str(declared_tier), order) if declared_tier else None
+            lowers = resolved is not None and order.index(resolved) < baseline_index
+            if lowers:
+                matched = _all_match(paths, category.get("paths"))
+            else:
+                matched = _first_match(paths, category.get("paths")) is not None
+            if not matched:
                 continue
             name = str(category.get("name") or "")
-            tier = category.get("tier")
-            return (name or None, _clamp(str(tier), order) if tier else None)
+            return (name or None, resolved)
     return (None, None)
 
 
