@@ -94,6 +94,54 @@ class RouteTests(unittest.TestCase):
     def test_a_draft_documentation_change_stays_at_skip(self) -> None:
         self.assert_plan(["README.md"], 10, True, "skip", (), "docs")
 
+    def test_a_lowering_category_needs_every_path_to_be_in_it(self) -> None:
+        """One markdown file must not take a reviewer off a source change.
+
+        The bug this guards was found by the step-3 end-to-end, not by review:
+        `_match_category` matched on *any* path, so `docs` (tier `cheap`,
+        below the `standard` default) fired on a change that was mostly source.
+        Because every work item lives under `docs/work/`, that quietly routed
+        nearly every change made through this framework one tier cheaper than
+        the same code alone.
+        """
+
+        plan = self.assert_plan(
+            ["src/greet.py", "README.md"], 50, False, "standard", ("codex", "prism"), None
+        )
+        self.assertIn("no category matched", plan.reason)
+        # The same code alone routes identically -- adding documentation to a
+        # change is what must not move it.
+        alone = sd_route.route(["src/greet.py"], 50, False, POLICY)
+        self.assertEqual(alone.tier, plan.tier)
+        self.assertEqual(alone.providers, plan.providers)
+        # And a work item, the shape this framework produces on every change.
+        item = sd_route.route(["src/greet.py", "docs/work/x/prd.md"], 50, False, POLICY)
+        self.assertEqual(item.tier, "standard", item.reason)
+
+    def test_a_lowering_category_still_matches_when_every_path_is_in_it(self) -> None:
+        self.assert_plan(["docs/a.md", "docs/b.md"], 40, False, "skip", (), "docs")
+
+    def test_an_escalating_category_matches_on_one_path(self) -> None:
+        """The other direction keeps any-match, and that is the whole rule.
+
+        `installer` sits above the `cheap` default in this policy, so one
+        touched installer file makes the change an installer change even though
+        the rest of it is documentation. Escalating on one path can only cost a
+        review nobody needed; lowering on one path costs a review someone did.
+        """
+
+        policy = dict(POLICY, default_tier="cheap")
+        plan = self.assert_plan(
+            ["docs/guide.md", "installer/registry.py"],
+            10,
+            False,
+            "deep",
+            ("codex", "prism", "gito"),
+            "installer",
+            policy=policy,
+        )
+        self.assertIn("category installer", plan.reason)
+
     def test_required_categories_match_before_optional_ones(self) -> None:
         plan = self.assert_plan(
             ["docs/guide.md", "installer/registry.py"],
