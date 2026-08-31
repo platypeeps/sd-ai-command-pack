@@ -146,8 +146,8 @@ through `/bin/bash` on macOS.
 GitHub bills at ten times the Linux rate. macOS-specific behaviour is covered
 only by the maintainer's local `make check` — one machine, not a gate. The leg
 returns when the maintainer restores it by hand at the end of the
-artifacts-as-product rollout; there is no date, and this paragraph stands until
-there is.
+artifacts-as-product rollout. No date is set, so this paragraph stands until a
+macOS CI job actually reports — that, not a promise, is what ends it.
 
 ### Where the work happens
 
