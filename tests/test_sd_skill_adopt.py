@@ -300,11 +300,28 @@ class AdoptRunTests(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_stdin_is_named_by_its_own_frontmatter(self) -> None:
-        # There is no directory to agree with, so the declared name is the name.
-        source = skill(self.root, "candidate", CLEAN)
-        out, err = io.StringIO(), io.StringIO()
-        code = adopt.run_adopt(str(source), "user", self.home, out, err, "2026-08-31")
+        """`-` really reads stdin, and the declared name is the only name there is.
+
+        There is no directory for the frontmatter to agree with, so the lint's
+        name check has nothing to compare against and the `name:` field decides
+        where the skill lands. Written against a real `sys.stdin` rather than a
+        path, because a test that passes a directory while claiming to cover
+        stdin leaves `read_source`'s `-` branch unexecuted -- which is what it
+        did until Copilot said so on #642.
+        """
+
+        class Stdin:
+            buffer = io.BytesIO(CLEAN.encode())
+
+        original = sys.stdin
+        sys.stdin = Stdin()
+        try:
+            out, err = io.StringIO(), io.StringIO()
+            code = adopt.run_adopt("-", "user", self.home, out, err, "2026-08-31")
+        finally:
+            sys.stdin = original
         self.assertEqual(code, 0, err.getvalue())
+        self.assertIn("## Provenance", self.adopted("candidate").read_text(encoding="utf-8"))
 
     def test_a_url_is_screened_before_anything_is_written(self) -> None:
         """The fetched bytes never reach the disk on a refusal."""
