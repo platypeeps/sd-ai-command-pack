@@ -27,8 +27,17 @@ test:
 # the workflow carried its own hand-copied list until 2026-08-29 and had
 # silently omitted every bin/ file, so each tool added since sd_route.py was
 # lint-clean locally and unlinted in CI. Derive it, do not duplicate it.
-LINT_RUFF_PATHS := dashboard bin/sd-dashboard bin/migrate-trellis bin/sd_install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-review bin/sd-status tests
-LINT_MYPY_PATHS := dashboard bin/sd-dashboard bin/migrate-trellis bin/sd_install.py bin/sd_route.py bin/sd-docs-lint bin/sd_lib.py bin/sd-check bin/sd-handoff bin/sd-handoff-restore bin/sd-pr-state bin/sd-review bin/sd-status
+#
+# `bin/` is enumerated from the index rather than listed, for the same reason
+# the LOC caps are: a hand-written list cannot see the file somebody adds next
+# month, and that file is then lint-clean by never having been linted. The list
+# here was that trap in miniature until 2026-08-31 -- it had already been named
+# as one in tests/test_loc_caps.py's docstring. Everything tracked under `bin/`
+# is Python (tests/test_no_shipped_shell.py enforces it), so a non-Python file
+# arriving there fails lint loudly, which is the right direction to fail.
+LINT_BIN := $(shell git ls-files -- bin)
+LINT_RUFF_PATHS := dashboard $(LINT_BIN) tests
+LINT_MYPY_PATHS := dashboard $(LINT_BIN)
 
 .PHONY: lint-ruff-paths lint-mypy-paths
 lint-ruff-paths:

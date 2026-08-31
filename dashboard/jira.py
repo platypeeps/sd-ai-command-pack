@@ -214,6 +214,18 @@ def search(jql: str, config: dict[str, str], transport=None) -> tuple[list[dict]
     return found, True, ""
 
 
+def state_of(fields: dict) -> str:
+    """open/closed from the status *category*, shared by both readers.
+
+    Extracted rather than repeated: `normalize` (the collector) and
+    `fetch_issue` (the reference lookup) must agree about what closed means, and
+    two copies of the same rule is exactly how they would stop agreeing.
+    """
+    status = fields.get("status") or {}
+    category = ((status.get("statusCategory") or {}).get("name") or "").lower()
+    return "closed" if category == "done" else "open"
+
+
 def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
     """One Jira issue as an index row, or None when it has no key.
 
@@ -228,8 +240,6 @@ def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
     if not key:
         return None
     fields = raw.get("fields") or {}
-    status = fields.get("status") or {}
-    category = ((status.get("statusCategory") or {}).get("name") or "").lower()
 
     def person(name: str) -> dict:
         value = fields.get(name) or {}
@@ -262,7 +272,7 @@ def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
         "number": None,
         "kind": "issue",
         "title": fields.get("summary") or "",
-        "state": "closed" if category == "done" else "open",
+        "state": state_of(fields),
         "author": reporter["name"],
         "updated_at": fields.get("updated") or "",
         # `matched` rather than an empty list: the JQL selected it for some
@@ -315,3 +325,39 @@ def collect(watermark: str | None, now: datetime, seam=None, environ=None) -> di
         "truncated": ["jql"] if cut else [],
         "window_start": github.iso(start),
     }
+
+
+def fetch_issue(key: str, config: dict[str, str], transport=None) -> tuple[dict | None, str]:
+    """One named issue, for `sd-trackers ref`. (row, error).
+
+    The same reasoning as the GitHub half: the index is a worklist scoped to
+    your own involvement, and a reference is frequently to something you are
+    not on yet.
+
+    The description is deliberately not requested. API v3 returns it as
+    Atlassian Document Format -- a nested JSON tree, not text -- and rendering
+    that would be a markdown converter living inside a reference lookup. The
+    reference carries a link; the issue keeps its own prose, where it stays
+    current.
+    """
+    fields = "summary,status,updated,reporter,project"
+    url = f"{config['base']}/rest/api/3/issue/{key}?fields={fields}"
+    payload, error = _request(url, config, None, transport)
+    if error:
+        return None, error
+    raw = payload or {}
+    found = (raw.get("key") or "").strip()
+    if not found:
+        return None, "Jira answered without an issue key"
+    issue_fields = raw.get("fields") or {}
+    return {
+        "tracker": TRACKER,
+        "url": f"{config['base']}/browse/{found}",
+        "repo": (issue_fields.get("project") or {}).get("key") or "",
+        "number": None,
+        "kind": "issue",
+        "title": issue_fields.get("summary") or "",
+        "state": state_of(issue_fields),
+        "author": (issue_fields.get("reporter") or {}).get("displayName") or "",
+        "updated_at": issue_fields.get("updated") or "",
+    }, ""
