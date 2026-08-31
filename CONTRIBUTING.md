@@ -102,7 +102,8 @@ and `security` — producing five contexts. Contexts are named
 by a job's `name:`, not its YAML key, so the bash lane is required as
 `bash 3.2 syntax` and never as `bash32`; requiring the key would pin a context
 that never reports and block every pull request. Three changes moved this set inside two days. The macOS leg was dropped for the
-duration of the artifacts-as-product rollout (R11-D4, restored at step 7);
+duration of the artifacts-as-product rollout (R11-D4; restored by hand at the
+end of the rollout, no date);
 `bash32` was added because the bash 3.2 syntax gate turned out never to have run
 in CI at all (R11-D5); and `Shell coverage` was removed at step 3e, because the
 shipped shell it measured was deleted (R11-D6).
@@ -154,6 +155,15 @@ platform-specific path handling are unverified in CI until it returns. The only
 remaining macOS coverage is the maintainer's own `make check` before a push --
 one machine, not a gate.
 
+The leg was originally due back at step 7. It is not: the restore is now a
+manual step the maintainer triggers at the end of the rollout (R11-D4
+amendment, 2026-08-31), because steps 8 through 11 still land pull requests and
+restoring at step 7 would pay the ten-times runner cost on every one of them.
+The consequence is stated rather than buried: the dated deadline was what made
+this removal falsifiable, and "when the rollout is done" is not a date. This
+paragraph is the record instead, and it has no expiry -- it stands, in the
+present tense, until a macOS job actually reports.
+
 An earlier draft of this paragraph claimed the bash 3.2 syntax gate in `lint`
 covered macOS in CI. It did not -- no CI job invoked `check-bash32-syntax.sh`
 at all, and that gate had only ever run in a local `make lint`. Finding that
@@ -163,7 +173,7 @@ source and runs the gate under `STRICT=1`.
 That covers bash 3.2 *syntax*, which is a real slice of macOS compatibility and
 not the whole of it. macOS-only Python behaviour, filesystem
 case-insensitivity, and platform path handling stay unverified in CI until the
-macOS leg is restored at step 7.
+macOS leg is restored.
 
 ## Payload Rules
 

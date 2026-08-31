@@ -142,9 +142,12 @@ macOS provided, which is 3.2. Nothing is shipped now; what it still protects is
 this repo's own three scripts under `.github/scripts/`, which `make check` runs
 through `/bin/bash` on macOS.
 
-**No macOS CI leg currently runs.** It was dropped for the rollout to save
-runner cost and returns at step 7. Until then, macOS-specific behaviour is
-covered only by the maintainer's local `make check` — one machine, not a gate.
+**No macOS CI leg currently runs.** It was dropped to save runner cost, which
+GitHub bills at ten times the Linux rate. macOS-specific behaviour is covered
+only by the maintainer's local `make check` — one machine, not a gate. The leg
+returns when the maintainer restores it by hand at the end of the
+artifacts-as-product rollout; there is no date, and this paragraph stands until
+there is.
 
 ### Where the work happens
 
