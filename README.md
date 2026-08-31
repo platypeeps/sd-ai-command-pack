@@ -25,6 +25,7 @@ the framework owns.
 - `~/.claude/skills/sd-*/SKILL.md`
 - `~/.codex/skills/sd-*/SKILL.md`
 - `~/.config/opencode/commands/sd-*.md`
+- `~/.claude/agents/sd-*.md`
 - one `SessionStart` hook entry in `~/.claude/settings.json`, for
   `sd-handoff-restore`
 - one line — `CLAUDE.local.md` — in the global git excludes
@@ -34,6 +35,12 @@ the framework owns.
 lives in `CLAUDE.local.md`, which is untracked by way of that one excludes line.
 `bin/sd_install.py --repo` refuses outright if `CLAUDE.local.md` turns out to be
 tracked, rather than edit a file under version control.
+
+Agents render to Claude only. Codex keeps its agents as TOML with the
+instructions embedded in a quoted string, and producing that would be a
+translation layer — the one thing this renderer refuses to be, since a
+translated file cannot be checked by comparing bytes. The limit is a test, not
+a note: `tests/test_sd_agents.py` asserts nothing lands in `~/.codex/agents`.
 
 Antigravity is deliberately **not** rendered. Its skill format is byte-identical
 to Claude's, but which of three candidate roots `agy` actually loads is

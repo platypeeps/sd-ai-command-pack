@@ -965,7 +965,64 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     naming both spellings, and `jira:ABC-1` exits 2 naming `JIRA_BASE_URL` and
     `JIRA_EMAIL` — the two unset on this machine — while never naming the one that
     is set. Three mutations were introduced and each failed the test written for it.
-- [ ] 5 / 5b
+- [x] 5-i — 2026-08-31. The five agents, folded and governed. `agents/sd-*.md` in
+      the checkout, rendered by the installer to `~/.claude/agents/`. Split off from
+      step 5 because it is the half that can land without touching a single vault
+      caller: agents have no scheduled consumers, so nothing outside this repository
+      changes when they move.
+  - **The `tools:` declarations were the reason to do this first.** Two of the five
+    upstream templates — `se-claim-verifier` and `se-source-reader` — declare no
+    tools at all. The governed versions existed only as files somebody had edited
+    in place under `~/.claude/agents`, which the next install from the old pack
+    would have silently overwritten with the ungoverned ones. The fold takes the
+    *installed* tool sets, not the templates', and a test now asserts every agent
+    declares some; a second asserts that an agent whose description calls itself
+    read-only holds no `Edit`/`Write`. Both mutation-tested.
+  - **`Bash` is deliberately not counted as a write tool.** `sd-rust-reviewer` calls
+    itself read-only and holds `Bash`, because that is how it runs `cargo check`.
+    Putting `Bash` in the write set would either fail a correct agent or push the
+    rule back into prose; the check pins what it can actually decide.
+  - **Agents render to Claude only, and that is a stated limit rather than an
+    oversight.** Codex agents are TOML with the instructions embedded in a triple-
+    quoted string. Emitting that is a translation layer, which is precisely what
+    `render` refuses to be — its docstring's argument is that byte-identical files
+    let the parity test assert agreement rather than assert that a translation ran.
+    A converter nobody can byte-check is worse than a documented gap, so the gap is
+    documented in the README and pinned by a test asserting nothing lands in
+    `~/.codex/agents`. The five `se-*.toml` files there are old-pack renders; what
+    to do about them is 5-iii's call, and it is a real one — deleting them without a
+    replacement loses the Codex agent lane.
+  - **The `sandbox_mode` question step 5 owns, answered:** the key is *absent* from
+    all five `~/.codex/agents/se-*.toml`. Nothing enforced read-only there; the
+    property was prose inside `developer_instructions` and nothing else. So there is
+    no setting to carry across, and the honest statement is that the Codex lane
+    never had the guarantee the Claude lane now has in frontmatter.
+  - **Trellis residue removed at the fold, not after.** All five bodies told the
+    worker that "when a Trellis task is active the line reads `Active task: <task
+    path>`". Trellis is retired; the sentence now names the work item. A test fails
+    on `Trellis` or a surviving `se-` anywhere under `agents/`.
+  - **Naming.** `se-rust-*` → `sd-rust-*`, `se-claim-verifier` → `sd-claim-verifier`,
+    `se-source-reader` → `sd-source-reader`. No collisions. Their descriptions cite
+    `sd-typed-holes`, a skill that arrives in 5-ii — a one-pull-request window where
+    the citation names something not yet folded. It resolves nothing at runtime, so
+    it breaks nothing; named here rather than discovered later.
+  - **The survey that preceded this, since it corrected the plan twice.** Counted
+    from disk: 68 skills in `templates/skills/` (not 67 — `se-coherence-audit`
+    landed 2026-08-28), so 65 fold rather than 64 after the three retirements. And
+    the collision check the plan predicted at zero is **three**: `se-plan`,
+    `se-status` and `se-handoff` are knowledge-work skills that collide with three
+    engineering commands of the same name and are not the same tools. Resolved by
+    the user, 2026-08-31: name them for the artifact they produce —
+    `sd-objective-plan`, `sd-status-update`, `sd-continuity-packet`. The remaining
+    62 rename mechanically. That lands in 5-ii.
+  - Checks, run: `make check` exits 0 — 24 shards, 24 `OK`, including 11 new tests
+    in `test_sd_agents`. Three mutations introduced (drop a `tools:` block, give the
+    claim verifier `Write`, and the earlier render-kind change), each caught.
+- [ ] 5-ii — fold the 65 skills (62 mechanical, 3 artifact-named)
+- [ ] 5-iii — vault-side retarget of the 8 callers in 2 routines, **before** any
+  deletion; then delete the old `se-*` renders from `~/.claude/skills`,
+  `~/.codex/skills`, `~/.claude/agents` and `~/.codex/agents`
+- [ ] 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
