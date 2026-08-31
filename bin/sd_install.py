@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -172,13 +173,51 @@ def agent_homes(home: Path) -> list[PlatformHome]:
 # -------------------------------------------------------------------- payload
 
 
+@dataclass(frozen=True)
+class Extra:
+    """One file that ships beside a skill, and where it lands under it.
+
+    `relative` rather than just a path because the source is not always inside
+    the skill directory: a reference cited by twenty skills is stored once and
+    copied into each, so the destination has to be stated separately from where
+    it was read.
+    """
+
+    relative: str
+    source: Path
+
+
 @dataclass
 class Surface:
-    """One sd-* skill in the checkout, with any templates it carries."""
+    """One sd-* skill in the checkout, with the files it carries."""
 
     name: str
     skill: Path
-    extras: list[Path] = field(default_factory=list)
+    extras: list[Extra] = field(default_factory=list)
+
+
+# A skill cites a companion file by the path it will have once installed --
+# `references/source-standards.md` -- so this is what a citation looks like,
+# not what a file is called.
+CITATION = re.compile(r"(?<![\w/])references/([\w.-]+\.md)")
+SHARED_DIR = "_shared"
+
+
+def shared_references(checkout: Path) -> dict[str, Path]:
+    """Companion files stored once and copied into every skill that cites them.
+
+    Ninety citations of one file across the folded skills, and three files carry
+    most of them. Storing a copy per skill would put the same paragraph in the
+    repository fifty-four times, which is the exact shape ("four copies of every
+    shipped script") this rebuild exists to remove. One copy in the checkout,
+    fanned out at render time, keeps the skill's own relative citation working
+    without making the tree the place the duplication lives.
+    """
+
+    root = checkout / "skills" / SHARED_DIR / "references"
+    if not root.is_dir():
+        return {}
+    return {path.name: path for path in sorted(root.iterdir()) if path.is_file()}
 
 
 def discover_surfaces(checkout: Path) -> list[Surface]:
@@ -190,6 +229,7 @@ def discover_surfaces(checkout: Path) -> list[Surface]:
     root = checkout / "skills"
     if not root.is_dir():
         return []
+    shared = shared_references(checkout)
     surfaces: list[Surface] = []
     for entry in sorted(root.iterdir()):
         if not entry.is_dir() or not entry.name.startswith("sd-"):
@@ -197,11 +237,43 @@ def discover_surfaces(checkout: Path) -> list[Surface]:
         skill = entry / SKILL_FILE
         if not skill.is_file():
             continue
-        extras = sorted(
-            path for path in (entry / "templates").glob("*.md") if path.is_file()
-        )
-        surfaces.append(Surface(entry.name, skill, extras))
+        # Everything beside the skill, at the path it already has. Wider than
+        # the `templates/*.md` this used to look for, and derived rather than
+        # named: a skill that grows a `references/` or a `scripts/` directory
+        # ships it without the installer needing to learn the word.
+        extras = [
+            Extra(str(path.relative_to(entry)), path)
+            for path in sorted(entry.rglob("*"))
+            if path.is_file() and path != skill
+        ]
+        local = {extra.relative for extra in extras}
+        for name in sorted(set(CITATION.findall(skill.read_text(encoding="utf-8")))):
+            relative = f"references/{name}"
+            if relative in local or name not in shared:
+                continue
+            extras.append(Extra(relative, shared[name]))
+        surfaces.append(Surface(entry.name, skill, sorted(extras, key=lambda e: e.relative)))
     return surfaces
+
+
+def missing_citations(surfaces: list[Surface]) -> list[str]:
+    """Citations that resolve to no file, as `<skill>: <path>`.
+
+    A skill telling the model to read `references/x.md` that was never shipped
+    is broken in the way nobody notices: the instruction is followed, the read
+    fails, and the run continues with whatever the model remembered instead.
+    Reported by the installer rather than left to be found in a session.
+    """
+
+    problems: list[str] = []
+    for surface in surfaces:
+        shipped = {extra.relative for extra in surface.extras}
+        text = surface.skill.read_text(encoding="utf-8")
+        for name in sorted(set(CITATION.findall(text))):
+            relative = f"references/{name}"
+            if relative not in shipped:
+                problems.append(f"{surface.name}: {relative}")
+    return problems
 
 
 def discover_agents(checkout: Path) -> list[Surface]:
@@ -331,9 +403,14 @@ def render(
                 # and OpenCode's command loader would read one as a command.
                 continue
             for extra in surface.extras:
-                data = extra.read_bytes()
-                dest = target.parent / "templates" / extra.name
-                written.append(Written(dest, digest(data), f"template:{home.key}"))
+                data = extra.source.read_bytes()
+                dest = target.parent / extra.relative
+                # `companion`, not `template`: these are a skill's references
+                # and scripts as well as its templates now, and a receipt kind
+                # that names one of the three reads as a bug in the other two.
+                # Kind is metadata -- prune keys on the path -- so an existing
+                # receipt rewrites its rows without touching a single file.
+                written.append(Written(dest, digest(data), f"companion:{home.key}"))
                 if not dry_run:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(data)
@@ -803,6 +880,15 @@ def cmd_user(ctx: Context, out) -> int:
             file=out,
         )
         return 1
+
+    # Reported, not fatal, on the same reasoning `sd-dashboard` uses for a
+    # tracker it cannot reach: the other seventy skills install correctly, and
+    # refusing all of them because one cites a file nobody shipped would make
+    # the installer withhold what it can still do. CI keeps it at zero --
+    # `tests/test_sd_install.py` fails on any citation this cannot resolve --
+    # so the warning is for a checkout in the middle of an edit, not a licence.
+    for problem in missing_citations(surfaces):
+        print(f"warning: {problem} is cited but not shipped", file=out)
 
     agents = discover_agents(ctx.checkout)
     written = render(surfaces, ctx.homes, dry_run=ctx.dry_run)
