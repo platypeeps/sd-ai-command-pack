@@ -62,6 +62,20 @@ if str(_BIN) not in sys.path:
 
 import sd_lib  # noqa: E402
 
+# The index reader lives in the dashboard package, one level above `bin/`.
+# `sd_lib` above is a sibling and always travels with this file; `dashboard` is
+# not, and a copy of `bin/` alone -- which the read-only suite deliberately
+# runs -- has no package to import. So the import is guarded and its absence is
+# a reported state, exactly like an absent `gh` or an unreadable protection
+# object. Crashing the whole report because one section's reader is missing
+# would be the opposite of what every other section here does.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+try:
+    from dashboard import store  # noqa: E402 - after the path insert
+except ImportError:  # pragma: no cover - exercised by the copied-tools test
+    store = None  # type: ignore[assignment]
+
 SCHEMA_VERSION = 1
 GIT_TIMEOUT_SECONDS = 15
 
@@ -779,6 +793,57 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
     return found
 
 
+def issues_section(root: pathlib.Path) -> dict[str, Any]:
+    """Indexed issues for *this* repository, read and never collected.
+
+    Read-only twice over: it opens the index only if it already exists (opening
+    creates one, and a status command that creates files is not read-only), and
+    it never reaches GitHub or Jira. `sd-status` answering in a second is worth
+    more than it answering with rows five minutes fresher, and the collect has
+    its own command.
+
+    GitHub rows only, and the reason is a real gap rather than an oversight: a
+    GitHub row carries `owner/name`, which is exactly this repository's
+    identity, while a Jira row carries a project key that no committed fact ties
+    to a checkout. Attributing Jira issues per repository needs a configured
+    mapping that does not exist yet; inventing one here would be a config key
+    with no decision behind it.
+    """
+    if store is None:
+        return {
+            "available": False,
+            "reason": "the dashboard package is not importable from this checkout",
+            "needs_you": [],
+            "other": [],
+        }
+    slug = pr_state.remote_slug(root)
+    index = store.index_path()
+    if slug is None:
+        return {"available": False, "reason": "no GitHub remote", "needs_you": [], "other": []}
+    if not index.exists():
+        return {
+            "available": False,
+            "reason": "no index yet -- run `sd-dashboard index`",
+            "needs_you": [],
+            "other": [],
+        }
+    connection = store.connect(index)
+    try:
+        rows = [
+            row
+            for row in store.issues(connection, state="open")
+            if row["tracker"] == "github" and row["repo"] == slug
+        ]
+    finally:
+        connection.close()
+    return {
+        "available": True,
+        "reason": "",
+        "needs_you": [row for row in rows if store.needs_you(row)],
+        "other": [row for row in rows if not store.needs_you(row)],
+    }
+
+
 # --------------------------------------------------------------------------
 # Assembly and output
 # --------------------------------------------------------------------------
@@ -799,6 +864,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "handoff": handoff_section(root, environ),
         "backends": backends_section(root),
         "residue": residue_section(root),
+        "issues": issues_section(root),
     }
 
 
@@ -890,6 +956,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     for name, argv in setup["entrypoints"].items():
         write(f"    {name:<6} {' '.join(argv)}\n")
 
+    _render_issues(result["issues"], write)
     _render_protection(result["protection"], write)
     _render_handoff(result["handoff"], write)
 
@@ -903,6 +970,21 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     for entry in result["residue"]:
         write(f"  {entry['id']}: {', '.join(entry['paths'])} -- {entry['why']}\n")
         write(f"    remove: {entry['remove']}\n")
+
+
+def _render_issues(issues: dict[str, Any], write: Any) -> None:
+    write("\nissues (this repo, from the index)\n")
+    if not issues["available"]:
+        write(f"  ! {issues['reason']}\n")
+        return
+    needs, other = issues["needs_you"], issues["other"]
+    if not needs and not other:
+        write("  none open\n")
+        return
+    write(f"  needs you: {len(needs)}\n")
+    for row in needs:
+        write(f"    #{row['number']:<6} {', '.join(row['why']):<20} {row['title'][:60]}\n")
+    write(f"  other open: {len(other)}\n")
 
 
 def render_parked(work: dict[str, Any], stream: TextIO) -> None:

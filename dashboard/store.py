@@ -218,6 +218,22 @@ def set_watermark(
     connection.commit()
 
 
+# The two reasons that mean somebody is waiting on *you*. Everything else --
+# `mentioned`, `author`, `filed`, `watching`, `matched` -- is information about
+# work you are near, not work that is blocked on you.
+#
+# Defined here rather than in each surface because "needs you" is one claim: a
+# dashboard tab and an `sd-status` line that disagreed about it would be two
+# answers to the same question, and the one you happened to read would be the
+# one you believed.
+NEEDS_YOU = frozenset({"assigned", "review-requested"})
+
+
+def needs_you(row: dict) -> bool:
+    """Whether this row is waiting on the operator. Closed rows never are."""
+    return row.get("state") == "open" and bool(NEEDS_YOU & set(row.get("why") or []))
+
+
 def issues(connection: sqlite3.Connection, state: str | None = None) -> list[dict]:
     """Every indexed issue, newest activity first; `why` decoded back to a list."""
     if state is None:

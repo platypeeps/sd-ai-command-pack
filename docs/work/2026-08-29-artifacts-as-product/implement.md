@@ -844,7 +844,48 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     system dashboard has been using in production. What would settle the rest is one
     run with the two variables exported — it belongs to whoever has them, and until then
     this row says unverified rather than green.
-- [ ] 4b-iii — Issues tab + "Needs you", `sd-status issues:` lines, `sd-plan --from`
+  - **Narrowed 2026-08-31 by the Jira MCP, which reaches the same tenant over a
+    different transport.** The user pointed out the session already has it. It settles
+    the half of the gap that is about *the query* rather than *the plumbing*: the
+    collector's `DEFAULT_JQL` is valid against the real tenant and returns issues
+    (RS-9, RS-8, RS-54 for a 3-hour window), the field list is accepted rather than
+    rejected as unknown, and the paging shape matches the `nextPageToken` form the
+    collector reads. What that run cannot touch, because the MCP authenticates itself:
+    the HTTP path, basic auth from `JIRA_EMAIL` + `JIRA_API_TOKEN`, the `/myself`
+    availability check, and `isLast` semantics on a real response. Those four are what
+    "unverified" now means here — a smaller claim than yesterday's, and still not green.
+- [x] 4b-iii — 2026-08-31. The surfaces over the finished index: Issues tab,
+      "Needs you", and `sd-status issues:` lines. `sd-plan --from` moves to 4b-iv: it is
+      a *seeding* path into a work item, not a view over the index, and it needs a
+      documented resolution procedure because there is no `bin/sd-plan` to put it in.
+  - **"Needs you" is a predicate on the row, not a fourth collector.** `store.needs_you`
+    is open ∧ (`assigned` ∨ `review-requested`) — the two reasons that mean someone is
+    blocked on the operator. `mentioned` and `author` are not: being named in a thread
+    or having opened the thing is context, and a worklist that says fifteen items need
+    you when three do is a worklist nobody reads. It lives in `store.py` beside the rows
+    so the dashboard and `sd-status` cannot drift into two different definitions.
+  - **`/api/issues` checks for the index by existence, not by opening it.** `store.connect`
+    creates the database if it is absent, so the obvious implementation would make a GET
+    that quietly writes a file. The endpoint stats the path and reports "no index yet"
+    when it is missing.
+  - **`sd-status` reports GitHub rows for this repo and names the Jira gap rather than
+    guessing at it.** GitHub rows carry `repo`, so they match `pr_state.remote_slug(root)`
+    exactly. Jira rows carry no repo and there is no config key mapping a project to a
+    checkout — inventing one here would be machinery ahead of need, so the section says
+    so in one line instead of attributing a Jira issue to whatever directory you happen
+    to be standing in.
+  - **An absent index is a reported state, like every other section here.** No index, no
+    remote, and an unimportable `dashboard` package each print a reason and exit 0. The
+    last of those was a real regression this step introduced: `bin/sd-status` imports
+    `dashboard.store` from one level up, and the read-only suite deliberately runs a copy
+    of `bin/` alone, where no such package exists. That test failed, which is how it was
+    found; the import is now guarded and the degraded path has its own test.
+  - Checks, run: `make check` exits 0 (52 tests in `test_sd_status`, 33 in
+    `test_sd_dashboard_index`, all suites green). Live `python3 bin/sd-status` in this
+    checkout prints `issues (this repo, from the index)` / `none open` — verified genuine
+    rather than an empty filter, by querying the index directly: 18 open rows, 15 needing
+    me, **0** for `platypeeps/sd-ai-command-pack`. The empty is the right answer.
+- [ ] 4b-iv — `sd-plan --from gh:o/r#N|jira:KEY` seeds `## References`
 - [ ] 5 / 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0
