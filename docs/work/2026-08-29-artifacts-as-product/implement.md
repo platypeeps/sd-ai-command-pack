@@ -596,7 +596,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     step 2 and the pack itself is folded at step 5, so that path had not existed for some
     time and every 03:00 run stopped at the gate. The retarget is therefore a repair with
     a rename in it, not a rename.
-  - **Vault-side, in one commit** (`b6bd552`, six enumerated paths): `System/Scripts/
+  - **Vault-side, in one commit** (`b6bd527`, six enumerated paths): `System/Scripts/
     file-work-item.py` replaces `file-trellis-task.py`, which is deleted; the routine's
     `SKILL.md`; `blog-idea-accept`'s one cross-reference; `System/Schema.md`'s `task-path`
     row; and the `VAULT-STRUCTURE.md` authorization callout. That callout had to move in
@@ -1689,15 +1689,15 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     Non-zero, timed out, oversized, unparseable, or emitting a refused row --
     each produces a row naming the tab and the reason, because a failed tile
     treated as "no rows" is indistinguishable from a quiet machine, which is
-    R11-D12's own complaint one layer down. 34 tests, all against a real
+    R11-D12's own complaint one layer down. 35 tests, all against a real
     subprocess: neither the 5s deadline (which kills the process group, so a
     backgrounded child cannot outlive it) nor the 64KB ceiling (enforced while
     reading, not after) survives being mocked.
-    **The measurement:** `dashboard/` is **1,948 of 2,500, 552 left**. The
-    loader cost 449 against the ~240 R11-D13 left for the loader *and*
-    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 552
-    does not fit, so `dashboard/` projects to ~2,711 with `RUN_ALLOWLIST` still
-    uncounted. Not raised here -- the test passes at 1,948, and the cap gets
+    **The measurement:** `dashboard/` is **1,973 of 2,500, 527 left**. The
+    loader cost 474 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 527
+    does not fit, so `dashboard/` projects to ~2,736 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 1,973, and the cap gets
     re-derived from counts at the landing that carries the backbone renders.
     The loader also refuses a tile that prints good JSON and then exits
     non-zero: closing stdout is not exiting, and the status is inside the

@@ -402,6 +402,37 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertIn("printed nothing", loaded["registryError"])
         self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
 
+    def test_a_tile_printing_bytes_that_are_not_utf8_is_one_row_not_a_crash(self) -> None:
+        """`json.loads` decodes before it parses, so bad bytes miss every guard.
+
+        Found in review. `UnicodeDecodeError` is not a `JSONDecodeError`, so it
+        escaped the worker and surfaced when the pool's results were collected
+        -- one plugin's bad bytes, and no plugin reporting at all. Two tabs
+        here, one of them fine, because the point is that the good one lives.
+        """
+        self.register(
+            self.plugin(
+                "uu",
+                tile_script(
+                    """
+                    import json, os, sys
+                    if sys.argv[1] == "bad":
+                        os.write(1, b"\\x80\\x81 not utf-8")
+                    else:
+                        os.write(1, json.dumps({"html": "<p>fine</p>"}).encode())
+                    os._exit(0)
+                    """
+                ),
+                tabs=["bad", "good"],
+            )
+        )
+        loaded = plugins.load()
+        tabs = {tab["name"]: tab for tab in self.only(loaded)["tabs"]}
+        self.assertFalse(tabs["bad"]["ok"])
+        self.assertIn("not UTF-8", tabs["bad"]["reason"])
+        self.assertTrue(tabs["good"]["ok"])
+        self.assertEqual(tabs["good"]["html"], "<p>fine</p>")
+
     def test_a_tile_that_does_not_emit_json_is_refused(self) -> None:
         self.register(self.plugin("ii", tile_script('print("not json")')))
         loaded = plugins.load()

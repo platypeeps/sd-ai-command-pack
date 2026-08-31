@@ -930,6 +930,16 @@ allocate; and the deadline kills the tile's process group rather than the comman
 tile that backgrounds work outlives the timeout and goes on holding the pipe. Both are tested
 against a real subprocess, because neither survives being mocked.
 
+**A tab's failure stays inside that tab, including the failure nobody predicted.** `json.loads`
+decodes bytes before it parses them, so output that is not UTF-8 raises `UnicodeDecodeError` —
+which is not a `JSONDecodeError` and so missed every guard in the parse path. Raised inside a
+worker it surfaced when the pool's results were collected, and one plugin's bad bytes took the
+whole load with it: no plugin reporting at all, which is the failure this module exists to prevent
+arriving through the mechanism built to prevent it. The decode error is now named, and the worker
+is wrapped so that an exception nobody predicted becomes a row naming the tab rather than an empty
+dashboard. Catching broadly is usually how errors get hidden; here the alternative is losing every
+tab, and the error is reported where an operator sees it. Found in review.
+
 **Printing nothing is not printing `{}`.** Every key in the payload is optional, so `{}` is a
 legitimate answer from a tab with nothing to show — and the loader read *silence* as that answer,
 handing the view a successful tab that was quiet about its own failure. The same substitution sat
@@ -983,23 +993,23 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **1,948 of 2,500 — 552 lines left**. The loader cost **449** (441 in
+projected: `dashboard/` is **1,973 of 2,500 — 527 lines left**. The loader cost **474** (466 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
 `RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 552
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,711,
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 527
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,736,
 178 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
-**The cap is not raised here, and the test still passes at 1,948.** Raising it in the change that
+**The cap is not raised here, and the test still passes at 1,973.** Raising it in the change that
 revealed the problem is the move this pack has already made three times with `bin/`, and the
 number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 441 rather than letting it pass as inevitable: roughly half is
+One thing worth saying about the 466 rather than letting it pass as inevitable: roughly half is
 code and the rest is comments and docstrings, which is this repository's convention and not an
 accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.

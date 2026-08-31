@@ -209,6 +209,8 @@ def catalog() -> tuple[list[dict], str]:
         loaded = json.loads(raw)
     except json.JSONDecodeError as error:
         return [], f"plugin registry is not JSON: {error}"
+    except UnicodeDecodeError as error:
+        return [], f"plugin registry is not UTF-8: {error}"
     if not isinstance(loaded, list):
         return [], "plugin registry is not a list"
     return [entry for entry in loaded if isinstance(entry, dict)], ""
@@ -315,8 +317,25 @@ def read_plugin(entry: dict) -> dict:
 
     wanted = [str(name) for name in names]
     with concurrent.futures.ThreadPoolExecutor(max_workers=TAB_WORKERS) as pool:
-        tabs = list(pool.map(lambda name: read_tab(argv, root, prefix, name), wanted))
+        tabs = list(pool.map(lambda name: _tab(argv, root, prefix, name), wanted))
     return {**base, "tabs": tabs, "ok": True, "declared": True, "reason": ""}
+
+
+def _tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
+    """`read_tab`, with a tab's failure kept inside that tab.
+
+    Refusal is per item at every level in this module, and an exception nobody
+    predicted is the one path that was not: raised in a worker it surfaces when
+    the results are collected and takes every other plugin's tabs down with it.
+    A row naming the tab is not masking the error -- it is the error, reported
+    where an operator will see it.
+    """
+    try:
+        return read_tab(argv, root, prefix, name)
+    except Exception as error:  # noqa: BLE001 - the alternative is losing every tab
+        return {"prefix": prefix, "name": name, "title": name, "html": "",
+                "rows": [], "complaints": [], "ok": False,
+                "reason": f"the loader failed reading this tab: {error!r}"}
 
 
 def read_tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
@@ -342,6 +361,12 @@ def read_tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
         payload = json.loads(raw)
     except json.JSONDecodeError as error:
         return refuse(f"tile output is not JSON: {error}")
+    except UnicodeDecodeError as error:
+        # `json.loads` decodes bytes before it parses them, so bytes that are
+        # not UTF-8 raise past every JSON guard. Left uncaught it escapes the
+        # worker and takes the whole load with it: one plugin's bad bytes, and
+        # no plugin reports at all.
+        return refuse(f"tile output is not UTF-8: {error}")
     if not isinstance(payload, dict):
         return refuse("tile output is not a JSON object")
 
