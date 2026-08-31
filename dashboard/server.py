@@ -44,6 +44,19 @@ PAGE = """<!doctype html>
  nav button{font:inherit;padding:.2rem .8rem;cursor:pointer;background:none;
   border:1px solid rgba(128,128,128,.4);border-radius:.25rem;color:inherit}
  nav button[aria-selected=true]{border-color:currentColor;font-weight:600}
+ /* `display:contents` so plugin buttons sit in the nav's own flex row rather
+    than in a box of their own -- the container exists to be replaced wholesale
+    on every poll, not to group anything visually. */
+ #plugin-tabs{display:contents}
+ #alerts{border:1px solid #c2410c;border-radius:.25rem;padding:.5rem .8rem;margin:0 0 1rem}
+ #alerts ul{margin:0;padding-left:1.1rem}
+ #alerts .sub{margin:0 0 .3rem}
+ input.filter{font:inherit;margin:0 0 .5rem;padding:.2rem .4rem;width:14rem;
+  background:none;color:inherit;border:1px solid rgba(128,128,128,.4);border-radius:.25rem}
+ th.sortable{cursor:pointer}
+ th[aria-sort]{opacity:1}
+ th[aria-sort=ascending]::after{content:" \u2191"}
+ th[aria-sort=descending]::after{content:" \u2193"}
  table{border-collapse:collapse;width:100%}
  th,td{text-align:left;padding:.3rem .6rem;border-bottom:1px solid rgba(128,128,128,.25)}
  th{font-weight:600;opacity:.7}
@@ -56,11 +69,13 @@ PAGE = """<!doctype html>
 </style>
 <h1>sd dashboard</h1>
 <p class="sub" id="sub">loading\u2026</p>
+<div id="alerts" hidden></div>
 <nav role="tablist" aria-label="views">
  <button id="tab-repos" role="tab" aria-selected="true"
   aria-controls="panel-repos">repos</button>
  <button id="tab-issues" role="tab" aria-selected="false"
   aria-controls="panel-issues">issues</button>
+ <span id="plugin-tabs"></span>
 </nav>
 <section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos">
 <table><thead><tr>
@@ -79,6 +94,7 @@ PAGE = """<!doctype html>
  <th>where</th><th>what</th><th>why</th><th>updated</th>
 </tr></thead><tbody id="other"></tbody></table>
 </section>
+<div id="plugin-panels"></div>
 <script src="/app.js"></script>
 """
 

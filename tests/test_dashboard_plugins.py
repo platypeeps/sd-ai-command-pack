@@ -332,6 +332,41 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(loaded["tabs"], [])
         self.assertEqual(loaded["rows"], [])
 
+    # -- the markup filter -------------------------------------------------
+
+    def test_a_tile_cannot_ship_an_inline_handler_through_the_loader(self) -> None:
+        """The filter is asserted where the payload leaves, not only in its unit test.
+
+        `/api/plugins` is a surface of this server, so the guarantee has to hold
+        of what `load()` returns rather than of a function the loader could stop
+        calling. A tile is the only thing that can prove that.
+        """
+        self.register(
+            self.plugin(
+                "bb",
+                tile_script(
+                    """
+                    import json
+                    print(json.dumps({
+                        "html": '<div onclick="steal()">rows</div>'
+                                '<img src="x" onerror="steal()">',
+                    }))
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        tab = loaded["tabs"][0]
+        self.assertEqual(tab["html"], "<div>rows</div>")
+        self.assertNotIn("onclick", tab["html"])
+        # And the loss is a row, because markup rewritten in silence looks to
+        # its author exactly like markup that rendered.
+        refused = self.rows_of("plugin-refused", loaded)
+        self.assertEqual(len(refused), 2)
+        self.assertTrue(all(row["rank"] == 0 for row in refused))
+        self.assertTrue(any("img" in row["detail"] for row in refused))
+        self.assertTrue(any("onclick" in row["detail"] for row in refused))
+
     # -- the happy path ----------------------------------------------------
 
     def test_a_tile_contributes_its_markup_and_its_rows(self) -> None:

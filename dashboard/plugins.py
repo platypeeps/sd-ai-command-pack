@@ -54,6 +54,8 @@ import threading
 import time
 from pathlib import Path
 
+from . import markup
+
 SD = Path(__file__).resolve().parent.parent / "bin" / "sd"
 
 TILE_SECONDS = 5.0
@@ -460,13 +462,20 @@ def read_tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
         html = None
     rows, row_complaints = validate_rows(payload.get("rows"), where)
     complaints.extend(row_complaints)
+    # Markup by contract: a tile renders itself into its own tab, and that was
+    # true before rows existed. Rows are data and are rendered as text; the two
+    # are not the same trust and the split is deliberate. The markup half is
+    # filtered here rather than at the point of injection, so that what
+    # `/api/plugins` serves is already what the contract allows -- see
+    # `markup.py` for why `innerHTML` not running `<script>` settles nothing.
+    clean, markup_complaints = (
+        markup.sanitize(html, where) if isinstance(html, str) else ("", [])
+    )
+    complaints.extend(markup_complaints)
     return {
         **tab,
         "title": title.strip() if isinstance(title, str) else name,
-        # Markup by contract: a tile renders itself into its own tab, and that
-        # was true before rows existed. Rows are data and are rendered as
-        # text; the two are not the same trust and the split is deliberate.
-        "html": html if isinstance(html, str) else "",
+        "html": clean,
         "rows": rows,
         "complaints": complaints,
         "ok": True,
