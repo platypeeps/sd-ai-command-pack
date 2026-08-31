@@ -565,7 +565,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       lane) and `export --obsidian` land with the tabs they serve, under the parity
       checklist. Shipping them as stubs would put three verbs in an inventory that is
       supposed to be a promise.
-    - Eight of the nine tabs, the plugin tile contract, and RUN_ALLOWLIST.
+    - Eight of the nine tabs, the plugin tile contract, and `RUN_ALLOWLIST`.
       P3's checks name `/api/state` and the dump; the tabs are 4b and 6b work.
     - The SQLite index. `sd-dashboard index` collects and reports; it writes no store,
       because step 4b is where the schema and names are reconciled and inventing a

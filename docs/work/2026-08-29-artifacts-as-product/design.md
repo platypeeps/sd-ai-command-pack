@@ -206,7 +206,7 @@ How much of that is liftable verbatim rather than rewritten is not separately me
 Now · Work · PRs · Issues · Repos · Queues · Suggestions · Skills · Sessions · plugin tabs
 (a registered manifest's `dashboard.tile` + `dashboard.tabs`, per tab — R11-D16; the
 `dashboard.d/*.py` spelling this record used until 6b-2 landed never existed, because a loader
-that globs a directory is the disk scanning the interface refuses). Now screen = externally derived facts only. Every UI
+that globs a directory would be the disk scan the interface refuses). Now screen = externally derived facts only. Every UI
 mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes/runs agents.
 Sessions tab = `git worktree list` + running sd-* processes (replaces Trellis `.runtime/sessions`
 — the Trellis-hooks answer: **no hook carries over**). Lands on **:8768 beside** the system
@@ -616,7 +616,7 @@ callers, sdw meter retires per R5-D4). Repos retain full ownership of their own 
 schedules — the framework never registers, edits, or removes repo automation.
 
 Generalized (user-confirmed 2026-08-29): **system views stay system-owned and plug into the
-framework dashboard** via plugin tabs a registered manifest declares — **five of them: Toolbox,
+framework dashboard** via plugin tabs declared in a registered manifest — **five of them: Toolbox,
 Briefs, Vault, Research, and Ports** (R11-D12 gave Ports its own tab). This record said "Jira
 personal" for a year of drafts and there is no such tab: the system dashboard's fifteen tabs,
 enumerated from `dashboard.py` rather than from this list, are `attention work projects research
