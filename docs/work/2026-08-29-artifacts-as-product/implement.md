@@ -230,26 +230,31 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             deliberate one: step 4 archives that repository, so a residue pass there would
             polish something already on its way out. Named here rather than left as a silent
             gap in the count.
-      - [x] the acceptance criterion the wave had *not* met, met 2026-08-30. `prd.md`'s Step 3-c box reads
-            "one removal PR per consumer (9); zero trellis/router greps per repo; CI green".
-            The first and third held. The second was swept 2026-08-30, after step 3 closed,
-            and it does not: the follow-up pass removed *machinery* and left *prose*.
+      - [x] the acceptance criterion the wave had *not* met, met 2026-08-30. `prd.md`'s Step
+            3-c box reads "one removal PR per consumer (9); zero trellis/router greps per
+            repo; CI green". The first and third held from the start. The second was swept on
+            2026-08-30, after step 3 closed, and it did not: the follow-up pass had removed
+            *machinery* and left *prose*. Both halves are recorded below — what the sweep
+            found, and what closed it the same day — because the finding is the useful part
+            and a tick that erased it would teach nobody anything.
 
-            Machinery is clean. Enumerated from each default branch's tree rather than from
+            Machinery was clean. Enumerated from each default branch's tree rather than from
             the merge output, the five retired paths — `.trellis/`, `.sd-ai-command-pack/`,
             `ai-review-router.yml`, `sd-review.yml`, `sd-github-review.json` — appear in zero
             of the nine, except `sd-github-review` itself, which carries the two router
             workflows because they *are* its product and step 4 retires the repository whole.
 
-            Prose is not. Three repositories still ship a spec guide teaching a procedure for
-            a framework that no longer exists: `docs/spec/guides/code-reuse-thinking-guide.md`
-            carries a `## Template File Registration (Trellis-specific)` section — `trellis
-            update`, `src/templates/trellis/index.ts`, an rsync that syncs `.trellis/scripts/`
-            against a template copy — and `docs/spec/guides/cross-layer-thinking-guide.md`
-            teaches from Trellis command templates, in `hoa-manager`, `people-profiles` and
-            `rwbp-coordinator` — byte-identical copies in all three. These are `docs/spec/`,
-            the repository's own standing guidance, not archived work items — an agent reading
-            them is told to maintain a template tree that was deleted at step 1.
+            Prose was not. Three repositories were still shipping a spec guide teaching a
+            procedure for a framework that no longer exists.
+            `docs/spec/guides/code-reuse-thinking-guide.md` carried a `## Template File
+            Registration (Trellis-specific)` section — `trellis update`,
+            `src/templates/trellis/index.ts`, an rsync that synced `.trellis/scripts/` against
+            a template copy — and `docs/spec/guides/cross-layer-thinking-guide.md` taught from
+            Trellis command templates, in `hoa-manager`, `people-profiles` and
+            `rwbp-coordinator`, byte-identical copies in all three. Both live under
+            `docs/spec/`, the repository's own standing guidance rather than an archived work
+            item, so an agent reading them was told to maintain a template tree deleted at
+            step 1.
 
             One file the sweep flagged is **not** residue, corrected here rather than carried:
             `people-profiles`'s `docs/spec/frontend/hook-guidelines.md` matches on the word but
