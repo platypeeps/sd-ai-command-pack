@@ -80,8 +80,10 @@ def agent_files() -> list[Path]:
 
 class ContractTests(unittest.TestCase):
     def test_there_are_agents_to_check(self) -> None:
-        # Without this every assertion below passes over an empty list.
-        self.assertGreater(len(agent_files()), 1, "agents/ enumerated to almost nothing")
+        # Without this every assertion below passes over an empty list. The
+        # bound is zero, not the count of the day: one agent is a legitimate
+        # tree, and a test that fails on it would be asserting a roster.
+        self.assertGreater(len(agent_files()), 0, "agents/ enumerated to nothing")
 
     def test_the_name_matches_the_file(self) -> None:
         for path in agent_files():
@@ -198,13 +200,24 @@ class RenderTests(unittest.TestCase):
             for path in (codex_agents.glob("*") if codex_agents.is_dir() else [])
         )
         self.assertEqual(landed, [], f"agents rendered to {codex_agents}")
+        # A name that is legitimately both an agent and a skill would render to
+        # the skill homes on the skill's own account. None collide today; the
+        # exemption is here so a future collision fails the *render*, not this.
+        skills = {surface.name for surface in sd_install.discover_surfaces(REPO_ROOT)}
+        roots = (
+            self.home / ".codex" / "skills",
+            self.home / ".config" / "opencode" / "commands",
+        )
         for source in agent_files():
-            with self.subTest(agent=source.name):
-                self.assertEqual(sorted((self.home / ".codex" / "skills").glob(
-                    f"{source.stem}.*")), [])
-                self.assertEqual(sorted(
-                    (self.home / ".config" / "opencode" / "commands").glob(
-                        f"{source.stem}.*")), [])
+            if source.stem in skills:
+                continue
+            for root in roots:
+                with self.subTest(agent=source.name, root=root.name):
+                    # Both spellings: the skill homes are directory-layout, so
+                    # an agent rendered through that path would land as
+                    # `<name>/SKILL.md` and a file-only glob would miss it.
+                    self.assertFalse((root / source.stem).exists())
+                    self.assertEqual(sorted(root.glob(f"{source.stem}.*")), [])
 
     def test_uninstall_takes_them_with_it(self) -> None:
         self.install("--user")
