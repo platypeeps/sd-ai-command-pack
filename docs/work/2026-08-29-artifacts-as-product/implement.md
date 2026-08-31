@@ -230,7 +230,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             deliberate one: step 4 archives that repository, so a residue pass there would
             polish something already on its way out. Named here rather than left as a silent
             gap in the count.
-      - [ ] the acceptance criterion the wave has *not* met. `prd.md`'s Step 3-c box reads
+      - [x] the acceptance criterion the wave had *not* met, met 2026-08-30. `prd.md`'s Step 3-c box reads
             "one removal PR per consumer (9); zero trellis/router greps per repo; CI green".
             The first and third held. The second was swept 2026-08-30, after step 3 closed,
             and it does not: the follow-up pass removed *machinery* and left *prose*.
@@ -267,9 +267,42 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             repository and meant nothing — the numbers above come from real checkouts and
             from two shallow clones for the repositories that have none.
 
-            Left open rather than fixed in the same breath: the fix is one prose PR against
-            three repositories that this step's own scope does not cover, and the box is more
-            useful pointing at a measured gap than ticked over one.
+            **Closed the same day, on the user's word.** One pull request per repository,
+            the same edit applied by one script to files that were byte-identical in all
+            three: `hoa-manager#301` (`0ebf1dac`), `people-profiles#24` (`db061865`),
+            `rwbp-coordinator#272` (`759ce65c`). Each removes the retired framework's
+            procedures and leaves a dated record where the section was, in the same shape
+            `people-profiles`'s own `hook-guidelines.md` already used — so a reader who
+            remembers a section learns it was removed rather than finding a silent gap. One
+            example is kept and re-marked as history, because the manual file list that
+            drifted from `getAllScripts()` illustrates asymmetric mechanisms well and the
+            lesson does not depend on the framework being reachable.
+
+            Copilot found two real defects in the first draft, and both were fixed in all
+            three copies rather than in the repository that raised them, so the files stay
+            byte-identical: the kept example spelled the JavaScript iteration form `for..of`,
+            which is not valid syntax, and the sentence describing the duplicated sections
+            scanned as a missing verb. Two of the three pull requests read `BLOCKED` until
+            those threads were resolved — those repositories require conversation resolution,
+            `rwbp-coordinator` has no such rule and read `CLEAN` throughout, which is the
+            per-repository enforcement variance R11-D3 exists to report rather than assume.
+
+            One gap found while doing it and fixed in the same pull request, because it is the
+            same residue: `people-profiles`'s `.gitignore` had no `.trellis/` entry, unlike
+            every sibling in the wave, so the leftover working-tree directory showed as
+            untracked and was one `git add -A` from being committed back. Deleting it from the
+            machine stays step 6's job.
+
+            **Re-swept after the merges**, and the honest form of the result is not a count of
+            zero: `docs/spec/` in `hoa-manager`, `people-profiles` and `rwbp-coordinator` still
+            matches the word, in the removal records themselves, and
+            `anomaly-metric-creator` still matches in citations of an archived item's path.
+            Every remaining hit was opened and read. No live instruction survives — which is
+            the criterion, and is why the check is a reading rather than a grep count.
+
+            Carried, not closed: `se-ai-command-pack` holds byte-identical copies of both
+            guides and is folded whole at step 5. It was left alone deliberately, and is named
+            here so the fold does not carry the defect into the backbone.
 - [x] 3-d — `sd-review setup-github`, its own step
       - [x] the subcommand behind `SETUP_GITHUB_SEAM` in `bin/sd-review` — #615. The
             dispatch in `bin/sd-review` is three lines; the installer is
