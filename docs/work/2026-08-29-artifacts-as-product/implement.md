@@ -1217,6 +1217,21 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     is still right — a research pass reads a great deal and none of it belongs in
     the pipeline's context — so the mechanism stayed and the reason was corrected.
     Same for `model: opus`, which the frontmatter never pinned.
+  - **Correction to the bullet above, from evidence found while starting 5b.**
+    `local-cron-jobs/logs/market-watch.log` records the 2026-08-27 unattended run
+    stopping on a blocker it quotes verbatim: *"Skill se-research cannot be used
+    with Skill tool due to disable-model-invocation."* So the marker was really
+    there — on the **installed render**, which is what an unattended routine
+    reaches. The template it was rendered from did not carry it, which is what
+    `test_generate.py:320` asserts and what I checked. Both facts are true and I
+    reported only one of them: installed had drifted from template, the same
+    class of drift 5-i found in the two agents' `tools:` and the same reason.
+    `sd-writing-pack`'s claim was therefore right about the machine and wrong
+    about the source, and what I wrote flattened that into "false". The
+    mechanical cause is gone — `disable-model-invocation` appears zero times in
+    `~/.claude/skills/sd-research/SKILL.md` — so a routine naming `sd-research`
+    can now reach it. **Not verified:** that it does, which is still the
+    2026-09-01 03:00 run's evidence and not something a grep can stand in for.
   - Checks, run: `ls ~/.claude/skills | grep -c '^se-'` = 0, same for
     `~/.codex/skills` and `~/.config/opencode/commands`; `~/.claude/agents` holds
     5 `sd-*` and 0 `se-*`; `~/.codex/agents`, `~/.config/agents` and
@@ -1226,7 +1241,75 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     path in `sd-writing-pack`'s live surfaces now points at a directory that
     exists. **Not verified:** the next unattended `market-watch` run at 03:00 —
     that is tomorrow's evidence, and nothing here can stand in for it.
-- [ ] 5b
+- [x] 5b-i — 2026-08-31. `bin/sd-skill-adopt`: the five stages in one place,
+  and the one design decision that made the step's own check possible.
+
+  - **The stage split is the whole design.** `--lint-only` runs stage 2 and
+    stops. That is not an economy, it is what makes "adopt-lint green on all
+    installed skills" a check that can pass at all: stage 1 screens *untrusted*
+    text for the shapes that make an arbitrary file dangerous, and the patterns
+    it matches — `ignore all previous`, `mcp__gmail__*`, `curl | sh` — are
+    exactly the ones a document *about* prompt injection quotes. Pointing it at
+    a tree of skills you already trust reports the documentation as the threat,
+    starting with this pack's own `sd-skill-adopt`. Stage 2 asks only "is this
+    the shape of a skill", which is worth asking of every skill on the machine.
+    `LintTests.test_the_lint_does_not_run_the_pre_screen` pins the split so it
+    cannot erode into one stage later.
+  - **Every scanner rule is pinned from both sides.** A pre-screen that refuses
+    everything passes every test written from hostile fixtures alone, and a wall
+    is the failure this command exists to replace — ten proposals, six stages,
+    four repositories, zero adopted. So `PrescreenAcceptanceTests` carries a
+    skill that fetches a page, one that names the environment variable its tool
+    needs, and one that mentions an address, and each must pass clean.
+  - **Exfiltration is the pair, not either half.** A network verb is ordinary
+    and a credential-shaped env-var name is documentation; together they are the
+    shape that sends one to the other, and nothing in a static read can say
+    which line feeds which. So `curl` alone warns, `GITHUB_TOKEN` alone warns,
+    and the combination refuses. Reading a credential *store* (`~/.ssh`,
+    `auth.json`, `.netrc`, `.env`, an environment dump) refuses on its own,
+    because no skill's job is that wide.
+  - **A finding names its rule and its line and never quotes the match.**
+    Scanning for a credential means one may well be there, and a report that
+    echoes the hit to be helpful publishes the thing the scan was for.
+    `FindingHygieneTests` asserts a planted secret appears in no rendered
+    finding.
+  - **The command marker is a stage-3 refusal, not a stage-2 shape error.** The
+    marker is legitimate — eleven surfaces here carry it — so the lint only
+    requires it to be a boolean. What may not happen is an incoming file
+    arriving with standing authority to act: granting that is a decision record,
+    not a flag. Keeping it out of the lint is also what stops `--lint-only` from
+    refusing this pack's own commands.
+  - **Every refusal test asserts the destination is still empty**, not merely
+    that the exit code was 1. A tool that writes and then reports a refusal has
+    refused nothing. A URL is fetched into memory and screened there, so a
+    hostile candidate leaves nothing on disk at all.
+  - `--from-repo` without `--list` exits 2 rather than falling through to a
+    write. Report-only is the flag's only mode, not a convention to be
+    remembered — the same reasoning that made `--lint-only` on an empty tree
+    exit 2 instead of 0, since "I linted nothing" reported as a pass is how a
+    mistyped path becomes a green check over a directory nobody read.
+  - Landing the tool moves the surface from `UnbuiltSurfaceTests` to
+    `DocumentedFlagTests`, so the skill lost its "there is no `bin/`" section and
+    every flag it documents now has to exist. It also corrected a count the
+    skill had carried since it was written: the collision check is against
+    **eleven** commands, not twelve — `sd-help` is the taxonomy's stated
+    exception and was never one.
+  - Checks, run: `--lint-only ~/.claude/skills` → **138 skills, 0 findings,
+    exit 0**; `~/.codex/skills` → 79, 0, exit 0; this repository's `skills/` →
+    76, 0, exit 0. Mutation-checked rather than trusted: a fixture with a
+    mismatched `name` and an empty `description` produces exactly those two
+    findings and exit 1, so the zero above is a result and not an empty loop.
+    `make check` exit 0, 42 new tests. `bin/` is 7,429 lines against the 8,000
+    cap.
+- [ ] 5b-ii — the retirements. Enumerated, not yet done: `skill-proposal-accept`
+  (the vault routine, its `local-cron-jobs` job, and the ~20 files naming it),
+  `file-trellis-task.py` (**already gone** — succeeded by `file-work-item.py`;
+  only a stale `__pycache__` entry and a lineage mention remain), and the legacy
+  gito/prism skill folders (**already gone** — absent from every render root and
+  from `installed_plugins.json`, most likely in 5-iv's 599-file sweep; recorded
+  as a finding rather than claimed as a deletion this step performed). The
+  routine is safe to retire on its own evidence: its database holds 8 declined
+  and 2 filed notes and **nothing pending**, so retiring it strands no decision.
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
