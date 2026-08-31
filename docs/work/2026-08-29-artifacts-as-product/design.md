@@ -204,7 +204,10 @@ Stdlib ThreadingHTTPServer + one vanilla JS file; ~457 LOC lifted verbatim from 
 (*superseded: R11-D13 enumerates the backbone-side lift at 763 — 79 collector lines plus 684 of JS.
 How much of that is liftable verbatim rather than rewritten is not separately measured*). Tabs:
 Now · Work · PRs · Issues · Repos · Queues · Suggestions · Skills · Sessions · plugin tabs
-(`dashboard.d/*.py` contract incl. `mounts`). Now screen = externally derived facts only. Every UI
+(a registered manifest declares `dashboard.tile` and `dashboard.tabs`, and the loader
+invokes that one tile once per declared tab name — R11-D16; the
+`dashboard.d/*.py` spelling this record used until 6b-2 landed never existed, because a loader
+that globs a directory would be the disk scan the interface refuses). Now screen = externally derived facts only. Every UI
 mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes/runs agents.
 Sessions tab = `git worktree list` + running sd-* processes (replaces Trellis `.runtime/sessions`
 — the Trellis-hooks answer: **no hook carries over**). Lands on **:8768 beside** the system
@@ -614,8 +617,14 @@ callers, sdw meter retires per R5-D4). Repos retain full ownership of their own 
 schedules — the framework never registers, edits, or removes repo automation.
 
 Generalized (user-confirmed 2026-08-29): **system views stay system-owned and plug into the
-framework dashboard** via `dashboard.d/*.py` plugin tabs (TaskNotes/Vault, Toolbox, Briefs, Jira
-personal, Research via mounts) — code + pinned actions live in `~/repos/system`. Only the
+framework dashboard** via plugin tabs declared in a registered manifest — **five of them: Toolbox,
+Briefs, Vault, Research, and Ports** (R11-D12 gave Ports its own tab). This record said "Jira
+personal" for a year of drafts and there is no such tab: the system dashboard's fifteen tabs,
+enumerated from `dashboard.py` rather than from this list, are `attention work projects research
+repos issues areas toolbox briefs ports` plus five `db-*`, and Jira appears only *inside* `issues`,
+which R3-D13 already migrates to the backbone and which `dashboard/jira.py` already serves. A
+plugin tab that does not exist cannot be ported, and a phantom in the count is one more tab 6b-3
+would have gone looking for — code + pinned actions live in `~/repos/system`. Only the
 dashboard shell + framework-native facts fold into the backbone; Issues is the one migrating view
 (r3 tracker mapping, R3-D13). Repo packs contribute via the r5 manifest tile contract.
 
@@ -1236,7 +1245,7 @@ What is recorded either way: the 457 figure is superseded by 763, so the cap's s
 justification no longer matches its number even though the number may still be right.
 
 **Consequence for the sequence.** 6b's order, already flipped once by R11-D12, is now:
-registration slice → `dashboard.d` loader → the five plugin tabs → backbone tabs → Now →
+registration slice → the tile loader → the five plugin tabs → backbone tabs → Now →
 `RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`. Step 8 keeps
 everything else and loses only what moved.
 
@@ -1250,8 +1259,8 @@ have shipped silently.
 
 `attentionItems()` in the system dashboard's `assets/dashboard.js` builds the Needs-you view from
 six sources: `toolbox`, `repos`, `queues`, `prs`, `ports`, `areas`. **Three of those six —
-`toolbox`, `ports`, `areas` — are destined to be plugin tabs**, system-owned behind
-`dashboard.d/*.py`, and they own **nine of the thirteen rows** the view can emit — five from
+`toolbox`, `ports`, `areas` — are destined to be plugin tabs**, system-owned behind their own
+manifest, and they own **nine of the thirteen rows** the view can emit — five from
 `toolbox`, three from `areas`, one from `ports`; the backbone keeps two `repos` rows, one `prs`
 row and one `queues` row.
 
