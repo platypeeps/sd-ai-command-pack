@@ -26,7 +26,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import collect, store
+from . import collect, plugins, store
 
 DEFAULT_PORT = 8768
 DEFAULT_HOST = "127.0.0.1"
@@ -135,6 +135,14 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 return self.send_body(body, "application/json")
             if path == "/api/issues":
                 body = json.dumps(issue_payload()).encode()
+                return self.send_body(body, "application/json")
+            if path == "/api/plugins":
+                # Not folded into /api/state: that payload is cached for
+                # twenty seconds against a git fan-out, and a tile budgeted at
+                # five seconds does not belong behind the same timer. Keeping
+                # them apart also means one slow plugin cannot delay the repo
+                # table, which is the view that works when nothing else does.
+                body = json.dumps(plugins.load()).encode()
                 return self.send_body(body, "application/json")
             self.send_error(404)
 

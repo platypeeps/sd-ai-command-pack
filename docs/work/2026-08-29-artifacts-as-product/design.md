@@ -831,6 +831,80 @@ stale, not the ceiling, and re-deriving it against a half-built `bin/` would rep
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
 
+**R11-D16 (2026-08-31) — the tile's output shape is written down, a plugin that goes dark
+becomes a row, and the dashboard cap is on the same trajectory `bin/` was.**
+
+6b-2 is the plugin loader. Three things came out of building it, and only the first was expected.
+
+**One. The tile contract named a budget but never a payload.** `dashboard.tile` is specified
+throughout this document as a command under 5s and 64KB, and nowhere as a command that returns
+anything in particular. A budget is not an interface: the system repo cannot write a tab against
+"under 64KB". So the shape is fixed here, and it is the smallest one that carries what R11-D12
+requires:
+
+```json
+{"title": "toolbox", "html": "<table>…</table>", "rows": [{"rank": 0, "kind": "cron-exit",
+ "id": "com.sven.x", "what": "job failed", "detail": "rc=2", "href": "#toolbox"}]}
+```
+
+`title` names the tab and falls back to the prefix. `html` is markup rendered into that tab.
+`rows` is R11-D12's optional key, unchanged in field names from the `add()` calls it replaces.
+All three are optional; a plugin that registers for its `kinds` and declares no tile is a working
+plugin, not a broken one, and is deliberately not reported as a failure.
+
+**`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
+rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
+privilege, is what changes when a plugin reaches Now. Rows go into the backbone's most prominent
+view, so they are typed fields rendered as text, never markup, and `href` must match an in-page
+anchor. A row cannot navigate the operator anywhere.
+
+**Two. The loader must make its own failure loud, and this is an addition to R11-D12.** That
+record established that three plugin-bound sources own every rank-0 and rank-1 alert the view can
+emit. The consequence it did not draw: if the loader treats a failed tile as "no rows", then a
+plugin crashing looks exactly like a plugin with nothing to report, and Now renders calm while
+cron is on fire. That is the same failure R11-D12 caught in the tile-only design, one layer down.
+
+So every way a tile can fail — absent, non-zero, timed out, oversized, unparseable, or emitting a
+row the contract refuses — produces a **rank-0 row written by the loader**, naming the plugin and
+the reason. Silence is not an available outcome. A refused row is dropped individually rather than
+taking the whole list with it, and gets its own rank-0 row, so a plugin's good alerts survive one
+malformed sibling and the malformed one is still visible. The registry itself failing to read is a
+rank-0 row too.
+
+Both bounds are enforced **while reading**, not checked afterwards. A 64KB limit applied to output
+already in memory is a limit on what gets rendered, not on what a plugin can make the dashboard
+allocate; and the deadline kills the tile's process group rather than the command it named, or a
+tile that backgrounds work outlives the timeout and goes on holding the pipe. Both are tested
+against a real subprocess, because neither survives being mocked.
+
+**No second manifest parser.** The loader reads no manifests. It shells out to `sd plugin list
+--json` — the CLI is the plugin service surface by design, R11-D13 pulled it forward precisely so
+this would exist, and calling it is what stops a fourth copy of a reader from being the thing that
+ships. It also gets the no-disk-scanning rule for free: the loader cannot glob because it never
+looks at a directory.
+
+**Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
+projected: `dashboard/` is **1,815 of 2,500 — 685 lines left**. The loader cost 316 (308 in
+`plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
+`RUN_ALLOWLIST` together*. It overran that slice by itself.
+
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 685
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,578,
+78 over**, and that is the optimistic figure. The shape is identical to the one that produced
+R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
+share.
+
+**The cap is not raised here, and the test still passes at 1,815.** Raising it in the change that
+revealed the problem is the move this pack has already made three times with `bin/`, and the
+number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
+the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
+in its own record. Owner: whoever lands it.
+
+One thing worth saying about the 308 rather than letting it pass as inevitable: about 183 lines
+are code and the rest are comments and docstrings, which is this repository's convention and not
+an accident of this file. The convention is not being revisited here; it is named so the
+re-derivation does not mistake a house style for a measurement.
+
 **R11-D15 (user, 2026-08-31) — the `bin/` cap is 14,000, derived from built code; and `sd-help`
 leaves `bin/` because the taxonomy already said it is not a command.**
 
