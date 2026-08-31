@@ -376,6 +376,32 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertIn("stopped writing", reason)
         self.assertNotIn("no output", reason)
 
+    def test_a_tile_that_prints_nothing_is_refused_rather_than_empty(self) -> None:
+        """Printing `{}` and printing nothing are different events.
+
+        Found in review. An empty payload is `{}`, and a tile with nothing to
+        show prints it. Silence was being read as that payload, which handed
+        the view a successful tab that was silent about its own failure -- the
+        exact shape R11-D12 exists to refuse, one level down.
+        """
+        self.register(self.plugin("tt", tile_script("pass")))
+        loaded = plugins.load()
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertIn("printed nothing", self.only_tab(loaded)["reason"])
+        self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
+
+    def test_a_registry_that_prints_nothing_is_refused_rather_than_empty(self) -> None:
+        """The same rule at the level that has no plugin to blame."""
+        quiet = self.tmp / "quiet-sd"
+        quiet.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        quiet.chmod(0o755)
+        original = plugins.SD
+        plugins.SD = quiet
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        self.assertIn("printed nothing", loaded["registryError"])
+        self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
+
     def test_a_tile_that_does_not_emit_json_is_refused(self) -> None:
         self.register(self.plugin("ii", tile_script('print("not json")')))
         loaded = plugins.load()

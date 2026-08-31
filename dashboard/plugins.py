@@ -198,8 +198,15 @@ def catalog() -> tuple[list[dict], str]:
         )
     except Bounded as error:
         return [], f"cannot read the plugin registry: {error}"
+    # `sd plugin list --json` prints a JSON array on every path, an empty
+    # registry included. Nothing at all is the CLI misbehaving, and treating it
+    # as an empty registry makes a broken loader look like a machine with no
+    # plugins -- this module's own complaint, at the one level that has no
+    # plugin to blame.
+    if not raw.strip():
+        return [], "plugin registry printed nothing"
     try:
-        loaded = json.loads(raw or b"[]")
+        loaded = json.loads(raw)
     except json.JSONDecodeError as error:
         return [], f"plugin registry is not JSON: {error}"
     if not isinstance(loaded, list):
@@ -326,8 +333,13 @@ def read_tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
         )
     except Bounded as error:
         return refuse(str(error))
+    # An empty payload is `{}` and a tile that has nothing to show prints it.
+    # Printing nothing is a different event, and accepting it hands the view a
+    # successful tab that is silent about its own failure.
+    if not raw.strip():
+        return refuse("tile printed nothing")
     try:
-        payload = json.loads(raw or b"{}")
+        payload = json.loads(raw)
     except json.JSONDecodeError as error:
         return refuse(f"tile output is not JSON: {error}")
     if not isinstance(payload, dict):
