@@ -94,9 +94,11 @@ class AddTests(PluginFixture):
         self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
         self.assertIsNone(self.listed()[0].get("tile"))
         (root / "sd-plugin.json").write_text(
-            json.dumps({"prefix": "pp", "dashboard": {"tile": "./bin/tile"}}), encoding="utf-8"
+            json.dumps({"prefix": "pp", "dashboard": {"tile": "./bin/tile",
+                        "tabs": ["one"]}}), encoding="utf-8"
         )
         self.assertEqual(self.listed()[0]["tile"], "./bin/tile")
+        self.assertEqual(self.listed()[0]["tabs"], ["one"])
 
     def test_an_unreadable_root_is_reported_rather_than_hidden(self) -> None:
         root = self.plugin()
@@ -128,9 +130,10 @@ class AddTests(PluginFixture):
         self.assertEqual(self.run_sd("plugin", "add", str(manifest)).returncode, 0)
 
     def test_the_tile_command_is_reported_when_declared(self) -> None:
-        root = self.plugin(dashboard={"tile": "./bin/tile"})
+        root = self.plugin(dashboard={"tile": "./bin/tile", "tabs": ["one", "two"]})
         self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
         self.assertEqual(self.listed()[0]["tile"], "./bin/tile")
+        self.assertEqual(self.listed()[0]["tabs"], ["one", "two"])
 
     def test_keys_this_slice_does_not_enforce_are_left_alone(self) -> None:
         """`kinds` is neither validated nor copied; step 8 reads it in place."""
@@ -189,6 +192,38 @@ class RefusalTests(PluginFixture):
         self.assert_refused(
             "plugin", "add", str(self.plugin("two")), because="already registered"
         )
+
+    def test_a_tile_without_tabs_refuses(self) -> None:
+        """The loader invokes the tile once per tab, so it must be told which.
+
+        A tile with nothing to serve is a registration that would silently
+        contribute no view, which is worth catching at the registry rather
+        than discovering as an empty dashboard.
+        """
+        done = self.run_sd(
+            "plugin", "add", str(self.plugin(dashboard={"tile": "./bin/tile"}))
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("no `dashboard.tabs`", done.stderr)
+
+    def test_a_tab_name_shaped_like_a_flag_refuses(self) -> None:
+        """A name reaches the tile as an argument and must not read as one."""
+        done = self.run_sd(
+            "plugin",
+            "add",
+            str(self.plugin(dashboard={"tile": "./bin/tile", "tabs": ["--help"]})),
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("tab name", done.stderr)
+
+    def test_a_repeated_tab_name_refuses(self) -> None:
+        done = self.run_sd(
+            "plugin",
+            "add",
+            str(self.plugin(dashboard={"tile": "./bin/tile", "tabs": ["a", "a"]})),
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("declared twice", done.stderr)
 
     def test_a_tile_that_is_not_a_command_refuses(self) -> None:
         self.assert_refused(

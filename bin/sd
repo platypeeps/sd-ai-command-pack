@@ -53,6 +53,9 @@ MANIFEST_NAME = "sd-plugin.json"
 # surfaces that folded into it, whose renders may still exist on some machine.
 RESERVED_PREFIXES = frozenset({"sd", "se"})
 PREFIX_PATTERN = re.compile(r"^[a-z]{2,5}$")
+# A tab name reaches the tile as a command-line argument. Leading dashes and
+# anything shell-shaped are excluded so a name can never read as a flag.
+TAB_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 class Refusal(Exception):
     """The invocation was understood and declined. Exit 1."""
@@ -100,8 +103,15 @@ def validate_prefix(manifest: dict[str, object], *, known: dict[str, pathlib.Pat
     return value
 
 
-def validate_tile(manifest: dict[str, object]) -> str | None:
-    """The `dashboard.tile` command, when the manifest declares one."""
+def validate_dashboard(manifest: dict[str, object]) -> tuple[str, list[str]] | None:
+    """The `dashboard.tile` command and the tabs it serves, when declared.
+
+    The tab names are part of the manifest rather than something the tile
+    announces at run time, because the loader invokes the tile **once per tab**
+    -- each tab under its own time and byte budget -- and it has to know what
+    to ask for before it can ask. A name is passed to the tile as an argument,
+    so it is constrained to a shape that cannot be mistaken for a flag.
+    """
 
     dashboard = manifest.get("dashboard")
     if dashboard is None:
@@ -113,7 +123,19 @@ def validate_tile(manifest: dict[str, object]) -> str | None:
         return None
     if not isinstance(tile, str) or not tile.strip():
         raise Refusal("`dashboard.tile` is not a non-empty command string")
-    return tile
+    tabs = dashboard.get("tabs")
+    if not isinstance(tabs, list) or not tabs:
+        raise Refusal("`dashboard.tile` declares no `dashboard.tabs` to serve")
+    seen: list[str] = []
+    for name in tabs:
+        if not isinstance(name, str) or not TAB_PATTERN.fullmatch(name):
+            raise Refusal(f"tab name {name!r} is not {TAB_PATTERN.pattern}")
+        if name in seen:
+            # Two tabs under one name is a tab nobody can reach, and the
+            # registry is where that is cheapest to catch.
+            raise Refusal(f"tab name {name!r} is declared twice")
+        seen.append(name)
+    return tile, seen
 
 
 def registry(config: dict[str, object]) -> list[str]:
@@ -175,7 +197,7 @@ def add(args: argparse.Namespace) -> int:
     if plugin_root in roots:
         raise Refusal(f"{plugin_root} is already registered")
     prefix = validate_prefix(manifest, known=registered(roots))
-    validate_tile(manifest)
+    validate_dashboard(manifest)
 
     config["plugins"] = sorted({*roots, plugin_root})
     write_config(config, config_path)
@@ -195,11 +217,15 @@ def describe(root: str) -> dict[str, object]:
     if isinstance(prefix, str):
         entry["prefix"] = prefix
     try:
-        tile = validate_tile(manifest)
-    except Refusal:
-        tile = None
-    if tile is not None:
-        entry["tile"] = tile
+        declared = validate_dashboard(manifest)
+    except Refusal as refusal:
+        # Reported rather than dropped: a manifest whose dashboard block has
+        # gone bad since registration is a tab that stopped appearing, and the
+        # loader turns this into a visible row.
+        entry["dashboardError"] = str(refusal)
+        return entry
+    if declared is not None:
+        entry["tile"], entry["tabs"] = declared
     return entry
 
 
@@ -218,7 +244,14 @@ def plugin_list(args: argparse.Namespace) -> int:
             print(f"?  {entry['root']}  UNREADABLE: {entry['why']}")
             continue
         tile = entry.get("tile")
-        suffix = f"  tile: {tile}" if tile else ""
+        tabs = entry.get("tabs")
+        names = ", ".join(str(name) for name in tabs) if isinstance(tabs, list) else ""
+        if entry.get("dashboardError"):
+            suffix = f"  dashboard: {entry['dashboardError']}"
+        elif tile:
+            suffix = f"  tile: {tile}  tabs: {names}"
+        else:
+            suffix = ""
         print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
     return 0
 

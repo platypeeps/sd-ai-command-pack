@@ -831,6 +831,258 @@ stale, not the ceiling, and re-deriving it against a half-built `bin/` would rep
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
 
+**R11-D16 (2026-08-31) — the tile's output shape is written down, a plugin that goes dark
+becomes a row, and the dashboard cap is on the same trajectory `bin/` was.**
+
+6b-2 is the plugin loader. Three things came out of building it, and only the first was expected.
+
+**One. The tile contract named a budget but never a payload.** `dashboard.tile` is specified
+throughout this document as a command under 5s and 64KB, and nowhere as a command that returns
+anything in particular. A budget is not an interface: the system repo cannot write a tab against
+"under 64KB". So the shape is fixed here, and it is the smallest one that carries what R11-D12
+requires:
+
+The manifest names the tabs; the loader runs the tile **once per name**, passing the name as its
+argument, and each call answers for that one tab:
+
+```json
+// sd-plugin.json
+{"dashboard": {"tile": "./bin/dashboard-tile", "tabs": ["toolbox", "ports", "areas"]}}
+
+// `./bin/dashboard-tile toolbox` prints:
+{"title": "Toolbox", "html": "<table>…</table>", "rows": [{"rank": 0, "kind": "cron-exit",
+ "id": "com.sven.x", "what": "job failed", "detail": "rc=2", "href": "#toolbox"}]}
+```
+
+**Per-tab invocation is forced by the budget, and it took a measurement to see it.** The first
+draft of this record fixed the payload at a single tab per plugin. Starting 6b-3 against it found
+that a repository has one manifest and therefore one `dashboard.tile`, while `~/repos/system` owns
+**five** of the views being folded in — so the payload was changed to carry a list of tabs. That
+was still wrong, and only timing the real collectors showed why:
+
+| collector | seconds | data |
+|---|---|---|
+| `collect_toolbox` | 3.78 | 17.0 KB |
+| `collect_ports` | 2.84 | 1.7 KB |
+| `collect_areas` | 0.03 | 2.2 KB |
+| `collect_briefs` | 0.01 | 28.8 KB |
+| `collect_jira` | 0.00 | 0.1 KB |
+| **sum** | **6.66** | **49.8 KB** |
+
+Every one fits a 5s budget. Run in sequence behind a single command, Toolbox and Ports alone spend
+6.62s and the tile is killed on **every** load, permanently — a dashboard that never once showed a
+system tab, with the budget doing exactly what it was told. The 49.8 KB is collector data and not
+rendered markup, so the 64 KB half is likely breached too; that is stated as likely rather than
+measured, because only the seconds were timed.
+
+Three consequences, and the third is why this is the right shape rather than a bigger number:
+
+- **The budget keeps meaning one thing.** 5s per tab is the same promise whether a plugin serves
+  one tab or twelve. A per-tile budget scaled to tab count is a number nobody can reason about,
+  and it gets revisited the moment a sixth tab lands.
+- **Failure is per tab.** `collect_toolbox` at 3.78s can no longer starve the four tabs that cost
+  nothing between them. This is the same rule the loader already applies to rows and to tabs one
+  level out; making the *process* per tab is what completes it rather than an addition to it.
+- **Tabs run concurrently**, bounded at four workers, so wall clock is the slowest tab and not the
+  sum. A plugin declaring thirty tabs does not get to decide how many processes the dashboard
+  starts.
+
+`dashboard.tabs` is validated at registration, not at load: a name must match
+`^[a-z][a-z0-9-]{0,31}$` — it reaches the tile as a command-line argument, and a name with a
+leading dash would arrive as a flag — and a repeated name is refused there, since two tabs under
+one name is a tab nobody can reach. A `tile` with no `tabs` is refused for the same reason it
+would be useless: the loader has nothing to ask for.
+
+`title` is **optional** and renames only what the operator sees; the declared name is the identity
+and the fallback. `html` is markup rendered into that tab. `rows` is R11-D12's optional key,
+unchanged in field names from the `add()` calls it replaces, and each row is stamped
+`<prefix>/<name>` so several tabs behind one prefix are several sources.
+
+`rank` must be a non-negative integer. Rank 0 is the top of the view *and* where the loader writes
+the row saying a tab has gone dark, so a row above it would let a plugin sort the notice of its own
+failure underneath its own rows — the outcome the failure row exists to prevent. Found in review.
+
+A plugin that registers for its `kinds` and declares no tile at all is working, and is deliberately
+not reported as a failure.
+
+**`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
+rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
+privilege, is what changes when a plugin reaches Now. Rows go into the backbone's most prominent
+view, so they are typed fields rendered as text, never markup, and `href` must match an in-page
+anchor. A row cannot navigate the operator anywhere.
+
+**Two. The loader must make its own failure loud, and this is an addition to R11-D12.** That
+record established that three plugin-bound sources own every rank-0 and rank-1 alert the view can
+emit. The consequence it did not draw: if the loader treats a failed tile as "no rows", then a
+plugin crashing looks exactly like a plugin with nothing to report, and Now renders calm while
+cron is on fire. That is the same failure R11-D12 caught in the tile-only design, one layer down.
+
+So every way a tab can fail — non-zero, timed out, oversized, unparseable, or emitting a title,
+markup or row the contract refuses — produces a **rank-0 row written by the loader**, naming the
+tab and the reason. Silence is not an available outcome. Refusal is per item at every level: a bad
+row loses that row, a bad tab loses that tab, a failed invocation loses that one tab and not its
+siblings, and each gets its own rank-0 row. The registry itself failing to read is a rank-0 row
+too, and it is the only one with no plugin to name.
+
+Both bounds are enforced **while reading**, not checked afterwards. A 64KB limit applied to output
+already in memory is a limit on what gets rendered, not on what a plugin can make the dashboard
+allocate; and the deadline kills the tile's process group rather than the command it named, or a
+tile that backgrounds work outlives the timeout and goes on holding the pipe. Both are tested
+against a real subprocess, because neither survives being mocked.
+
+**Read, not coerced.** `root` and `prefix` were passed through `str()` before being checked for
+emptiness, so a corrupt registry entry with `"root": 7` became the non-empty string `"7"` — passing
+the check and leaving `Path("7")` as a relative working directory the plugin never named. Coercion
+that turns an invalid value into a plausible one is the quiet failure wearing a different hat: the
+check is now for the type the contract states, not for something that can be spelled as text. Found
+in review.
+
+**The four-worker ceiling is machine-wide, and it is worth knowing why.** Raised in review as
+`TAB_WORKERS * plugins`, since the pool is created per plugin. It is not, because `load` reads
+plugins serially and `cached_load` allows one load at a time — so four is the real ceiling on
+concurrent tiles. It is also incidental rather than enforced: the day plugin reading is
+parallelised the ceiling multiplies, which is recorded beside the constant rather than pre-empted
+with a semaphore for a code path that does not exist.
+
+**One fan-out at a time, and not repeated for callers arriving together.** The server is threaded,
+so `/api/plugins` started a fresh fan-out of tile subprocesses on every request: a page refreshing
+quickly, or two of them, multiplied the tiles by the number of readers, and the module that exists
+to bound one plugin's cost had no bound on its own. A lock makes concurrent callers wait on one
+load, and a five-second window keeps a refresh loop from re-running tiles that answered a moment
+ago. Deliberately not the state cache's twenty seconds — a plugin row is what an operator is
+watching change. Found in review.
+
+**The loader validates the tab names it is handed, even though registration already did.** A name
+arrives at the tile as a command-line argument, so `--anything` would arrive as a flag, and a name
+declared twice would invoke the same tab twice and produce two identical dark rows. Both are
+refused at load, each as a tab that says why it was never invoked rather than one that quietly
+vanishes. This is a second copy of the registration rule, and it is deliberate: the loader trusts
+no payload it did not write, including one from the pack's own CLI. Found in review, along with the
+`cannot run` message, which now names the working directory — "no such file or directory" for a
+tile that exists says nothing until you know which directory it was looked for in.
+
+**The registry read has no plugin above it, so it carries the net itself.** `select` and `os.read`
+raise `OSError` and `InterruptedError` on their own account, outside the module's own `Bounded`
+vocabulary. Uncaught in a tab that costs one tab; uncaught in the registry read it costs the whole
+view. The same wrapper the per-tab worker got now sits there too. And `readable` is checked against
+`True` rather than for truthiness — a registry spelling it `"false"` hands over a string, a string
+is truthy, and the loader would have run a tile for a manifest that never parsed. Both found in
+review.
+
+**`null` is absent, and it is absent for every optional key alike.** Raised in review as a possible
+quiet loss on `{"rows": null}`. It is not one: a tile spelling "nothing to show" as `null` rather
+than by omission has lost nothing, and complaining about one spelling while accepting the other for
+`title` and `html` would be a rule about JSON style rather than about what reached the operator.
+Kept, pinned by a test, and stated here so it is a decision rather than a coincidence of `.get`.
+
+The registry's own row stopped saying "unreadable" in the same pass: the registry now also reports
+entries it had to drop, so a perfectly readable registry can fail there, and a row naming the wrong
+failure misdirects whoever reads it.
+
+**An entry the loader cannot identify is not one it may run.** A registry entry with an empty root
+would have resolved to `Path("")` — the dashboard's own working directory — so a plugin's tile would
+have run somewhere its plugin never asked for, and an empty prefix stamps every row of every tab as
+`/<name>`. Refused, which is the answer the rest of this module gives to a payload it cannot trust.
+Found in review.
+
+**The registry says what it dropped.** Non-object elements in the listing were skipped and success
+was reported, so a corrupt registry would lose plugins with nothing said — the same quiet, in the
+loader's own reading of its own CLI. The readable entries still come back, because losing the rest
+of the fleet to one bad element is the same mistake pointed the other way; what changes is that the
+count of what was dropped is now a rank-0 row. Found in review.
+
+**One of the tests could not fail, and that is worth recording.** The process-group kill was checked
+by a tile that backgrounds a child which writes a marker after six seconds, with the assertion
+reading the marker one and a half seconds later. The marker could not exist either way, so the test
+passed whether or not the kill worked — a green check over an unexercised guarantee, which is worse
+than no test because it is believed. The child's sleep now sits between the deadline that kills it
+and a wait long enough that a survivor would certainly have written. Verified by replacing
+`os.killpg` with `proc.kill` and watching it fail. Found in review.
+
+**A tab's failure stays inside that tab, including the failure nobody predicted.** `json.loads`
+decodes bytes before it parses them, so output that is not UTF-8 raises `UnicodeDecodeError` —
+which is not a `JSONDecodeError` and so missed every guard in the parse path. Raised inside a
+worker it surfaced when the pool's results were collected, and one plugin's bad bytes took the
+whole load with it: no plugin reporting at all, which is the failure this module exists to prevent
+arriving through the mechanism built to prevent it. The decode error is now named, and the worker
+is wrapped so that an exception nobody predicted becomes a row naming the tab rather than an empty
+dashboard. Catching broadly is usually how errors get hidden; here the alternative is losing every
+tab, and the error is reported where an operator sees it. Found in review.
+
+**Printing nothing is not printing `{}`.** Every key in the payload is optional, so `{}` is a
+legitimate answer from a tab with nothing to show — and the loader read *silence* as that answer,
+handing the view a successful tab that was quiet about its own failure. The same substitution sat
+one level up, where an empty read from `sd plugin list --json` became an empty registry, so a
+misbehaving CLI looked exactly like a machine with no plugins. Both refuse now. This is the
+module's own rule applied to itself: R11-D12's complaint is that a failure indistinguishable from
+calm is the failure, and a default supplied for missing output is how that gets reintroduced by
+accident. Found in review.
+
+**The deadline covers two failures, and the row says which.** A tile that never wrote and a tile
+that wrote and then stopped both hit the same timeout. Calling the second "no output" sends whoever
+reads the row looking for a tile that never started, so the message names the bytes already in hand.
+The test keeps stdout open, which is what separates this path from the one where a tile closes the
+pipe and hangs — that is still `did not exit`. Found in review.
+
+Also raised in review and deliberately not acted on: `select` on a pipe and `os.killpg` do not work
+on Windows. Neither does the rest of this pack. It installs LaunchAgents, resolves
+`~/.local/state`, shells out to POSIX tools, and its CI is Linux with a macOS leg pending restore
+at step 7. A Windows-safe bounded reader here would be portability for one file inside a pack that
+has none, and unexercised code paths are how this repository grew the 9,390 unreachable lines the
+diagnosis counts. Named so the next reviewer does not have to find it again.
+
+**A dark plugin is named by what the loader actually has.** A manifest that will not read has no
+prefix in it, so the first version called every such plugin `?` — and two broken plugins became one
+row an operator cannot act on, identical in source, id and text, with no way to see there were two.
+The root is available in every case, so the row falls back to it. The same review found the sibling
+conflation: `if not tile` treated an empty tile string as no tile declared, which is the one
+condition that is deliberately *not* a failure. Absent is now the only spelling of absent, and a
+declared-but-empty tile refuses like any other malformed declaration. Both found in review.
+
+**The registry answers to its own budget, not a plugin's.** The loader reads `sd plugin list
+--json` through the same bounded reader, and the first implementation borrowed the tile's 64KB for
+it — which made the size a registry is allowed to be a function of how much output *one plugin* may
+print. A machine registering enough plugins to pass 64KB of listing would have reported a broken
+registry on every load, permanently, with nothing wrong with it: the one failure the loader cannot
+attribute to a plugin, caused by a constant that has nothing to do with the registry. Separate
+ceiling, 1MB, and the test registers enough roots to exceed a tile's. Found in review.
+
+**The exit status is inside the budget, and closing stdout is not exiting.** A tile that prints
+good JSON and then fails has failed, so the loader waits for the process within the same deadline
+and refuses a non-zero status even when the output parsed. This is worth stating because the
+obvious implementation gets it backwards: killing the process on the way out of the *success* path
+records `-SIGKILL` as the status, and a loader that reads its own kill as a clean exit accepts the
+output of every tile that dies after writing. The kill therefore runs only on refusal paths. Found
+in review of this record's own implementation.
+
+**No second manifest parser.** The loader reads no manifests. It shells out to `sd plugin list
+--json` — the CLI is the plugin service surface by design, R11-D13 pulled it forward precisely so
+this would exist, and calling it is what stops a fourth copy of a reader from being the thing that
+ships. It also gets the no-disk-scanning rule for free: the loader cannot glob because it never
+looks at a directory.
+
+**Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
+projected: `dashboard/` is **2,067 of 2,500 — 433 lines left**. The loader cost **568** (560 in
+`plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
+`RUN_ALLOWLIST` together*. It is more than twice that slice, by itself.
+
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 433
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,830,
+330 over**, and that is the optimistic figure. The shape is identical to the one that produced
+R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
+share.
+
+**The cap is not raised here, and the test still passes at 2,067.** Raising it in the change that
+revealed the problem is the move this pack has already made three times with `bin/`, and the
+number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
+the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
+in its own record. Owner: whoever lands it.
+
+One thing worth saying about the 560 rather than letting it pass as inevitable: roughly half is
+code and the rest is comments and docstrings, which is this repository's convention and not an
+accident of this file. The convention is not being revisited here; it is named so the
+re-derivation does not mistake a house style for a measurement.
+
 **R11-D15 (user, 2026-08-31) — the `bin/` cap is 14,000, derived from built code; and `sd-help`
 leaves `bin/` because the taxonomy already said it is not a command.**
 

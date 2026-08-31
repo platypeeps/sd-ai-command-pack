@@ -96,7 +96,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - [x] 3e — machine-scope installer + `installed.json` + parity tests; deletes the legacy render
         payload. Landed as two commits in one pull request: `feat` adds `bin/sd_install.py` and
         `tests/test_sd_install.py`, `refactor!` deletes what it replaces. Reviewable apart,
-        atomic on merge. **365 files, 183,494 deletions against 1,343 insertions.**
+        atomic on merge. **365 files, 183,433 deletions against 1,343 insertions.**
 
         Six things worth recording, because each was a call rather than a mechanical step.
 
@@ -596,7 +596,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     step 2 and the pack itself is folded at step 5, so that path had not existed for some
     time and every 03:00 run stopped at the gate. The retarget is therefore a repair with
     a rename in it, not a rename.
-  - **Vault-side, in one commit** (`b6bd564`, six enumerated paths): `System/Scripts/
+  - **Vault-side, in one commit** (`b6bd433`, six enumerated paths): `System/Scripts/
     file-work-item.py` replaces `file-trellis-task.py`, which is deleted; the routine's
     `SKILL.md`; `blog-idea-accept`'s one cross-reference; `System/Schema.md`'s `task-path`
     row; and the `VAULT-STRUCTURE.md` authorization callout. That callout had to move in
@@ -1658,6 +1658,51 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     sections above its own taxonomy paragraph calling `sd-help` a skill, plus
     three other recitations. Fixed. It moves no budget — the derivation counts
     six remaining commands, never seven.
+  - **6b-2 landed: the plugin loader, and the dashboard cap now shows the
+    same shape `bin/` did (R11-D16).** `dashboard/plugins.py` reads the
+    registry by shelling out to `sd plugin list --json` rather than parsing a
+    manifest of its own -- no second reader, and the no-disk-scanning rule
+    comes free because the loader never looks at a directory. The tile
+    protocol is specified for the first time, and it is **per tab**: the
+    manifest declares `dashboard.tabs: ["toolbox", "ports", ...]`, the loader
+    runs `<tile> <name>` once per declared name, and each call answers
+    `{title?, html?, rows?}` for that one tab -- `html` is markup rendered into
+    it, `rows` are R11-D12's typed alert rows with `href` confined to an
+    in-page anchor.
+    **Two drafts were wrong before this one, and each was corrected by
+    building against it rather than by reading it.** The first fixed a plugin
+    at one tab; starting 6b-3 found that one repository has one manifest while
+    `~/repos/system` owns five of the views, so the payload became a list of
+    tabs. That was still wrong, and timing the real collectors is what showed
+    why: `collect_toolbox` 3.78s, `collect_ports` 2.84s, `collect_areas` 0.03s,
+    `collect_briefs` 0.01s, `collect_jira` 0.00s -- **6.66s in sum against a 5s
+    per-tile budget**, so the single command would have been killed on every
+    load, permanently, while each individual collector fits the budget four
+    times over. Per tab, 5s keeps meaning one thing no matter how many tabs a
+    plugin serves, a slow tab can no longer starve its siblings, and the tabs
+    run concurrently behind a four-worker ceiling so a plugin does not get to
+    choose how many processes the dashboard starts. Tab names are validated at
+    registration (`^[a-z][a-z0-9-]{0,31}$`, no duplicates) because a name
+    reaches the tile as a command-line argument; `title` became optional, since
+    the declared name is the identity and the fallback.
+    The addition to R11-D12: **a tab that goes dark becomes a rank-0 row.**
+    Non-zero, timed out, oversized, unparseable, or emitting a refused row --
+    each produces a row naming the tab and the reason, because a failed tile
+    treated as "no rows" is indistinguishable from a quiet machine, which is
+    R11-D12's own complaint one layer down. 43 tests, all against a real
+    subprocess: neither the 5s deadline (which kills the process group, so a
+    backgrounded child cannot outlive it) nor the 64KB ceiling (enforced while
+    reading, not after) survives being mocked.
+    **The measurement:** `dashboard/` is **2,067 of 2,500, 433 left**. The
+    loader cost 568 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 433
+    does not fit, so `dashboard/` projects to ~2,830 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 2,067, and the cap gets
+    re-derived from counts at the landing that carries the backbone renders.
+    The loader also refuses a tile that prints good JSON and then exits
+    non-zero: closing stdout is not exiting, and the status is inside the
+    budget (found in review -- the first version killed the process on the
+    success path too, recording -SIGKILL and reading its own kill as clean).
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from
