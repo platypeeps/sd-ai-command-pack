@@ -930,6 +930,14 @@ allocate; and the deadline kills the tile's process group rather than the comman
 tile that backgrounds work outlives the timeout and goes on holding the pipe. Both are tested
 against a real subprocess, because neither survives being mocked.
 
+**The registry read has no plugin above it, so it carries the net itself.** `select` and `os.read`
+raise `OSError` and `InterruptedError` on their own account, outside the module's own `Bounded`
+vocabulary. Uncaught in a tab that costs one tab; uncaught in the registry read it costs the whole
+view. The same wrapper the per-tab worker got now sits there too. And `readable` is checked against
+`True` rather than for truthiness — a registry spelling it `"false"` hands over a string, a string
+is truthy, and the loader would have run a tile for a manifest that never parsed. Both found in
+review.
+
 **`null` is absent, and it is absent for every optional key alike.** Raised in review as a possible
 quiet loss on `{"rows": null}`. It is not one: a tile spelling "nothing to show" as `null` rather
 than by omission has lost nothing, and complaining about one spelling while accepting the other for
@@ -1023,23 +1031,23 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **1,997 of 2,500 — 503 lines left**. The loader cost **498** (490 in
+projected: `dashboard/` is **2,006 of 2,500 — 494 lines left**. The loader cost **507** (499 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
 `RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 503
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,760,
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 494
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,769,
 178 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
-**The cap is not raised here, and the test still passes at 1,997.** Raising it in the change that
+**The cap is not raised here, and the test still passes at 2,006.** Raising it in the change that
 revealed the problem is the move this pack has already made three times with `bin/`, and the
 number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 490 rather than letting it pass as inevitable: roughly half is
+One thing worth saying about the 499 rather than letting it pass as inevitable: roughly half is
 code and the rest is comments and docstrings, which is this repository's convention and not an
 accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.

@@ -198,6 +198,12 @@ def catalog() -> tuple[list[dict], str]:
         )
     except Bounded as error:
         return [], f"cannot read the plugin registry: {error}"
+    except Exception as error:  # noqa: BLE001 - the alternative is no dashboard
+        # `select` and `os.read` raise `OSError` and `InterruptedError` on
+        # their own account, and this is the one read with no plugin above it
+        # to catch the failure: uncaught, the whole view is gone rather than
+        # one tab. Same rule as the per-tab net, at the level that has no tab.
+        return [], f"the loader failed reading the plugin registry: {error!r}"
     # `sd plugin list --json` prints a JSON array on every path, an empty
     # registry included. Nothing at all is the CLI misbehaving, and treating it
     # as an empty registry makes a broken loader look like a machine with no
@@ -299,7 +305,10 @@ def read_plugin(entry: dict) -> dict:
     def refuse(reason: str) -> dict:
         return {**base, "ok": False, "declared": True, "reason": reason}
 
-    if not entry.get("readable", False):
+    # `is not True` rather than falsiness: a registry spelling it `"false"` is
+    # a string, which is truthy, and the loader would have run a tile for a
+    # manifest that never read. Found in review.
+    if entry.get("readable") is not True:
         return refuse(str(entry.get("why") or "manifest unreadable"))
     # An entry the loader cannot identify is not an entry it may run. An empty
     # root would resolve to `Path("")`, which is the dashboard's own working

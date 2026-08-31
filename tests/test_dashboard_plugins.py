@@ -217,6 +217,44 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(tab["complaints"], [])
         self.assertEqual(self.rows_of("plugin-dark", loaded), [])
 
+    def test_a_readable_flag_that_is_not_a_boolean_is_not_readable(self) -> None:
+        """`"false"` is a string, and a string is truthy.
+
+        Found in review. Falsiness would have read a registry saying the
+        manifest did not parse as saying it did, and run the tile anyway.
+        """
+        listing = self.tmp / "stringy-sd"
+        listing.write_text(
+            '#!/bin/sh\necho \'[{"root": "/x", "prefix": "aa", "readable": "false",'
+            ' "tile": "/bin/echo", "tabs": ["one"]}]\'\n',
+            encoding="utf-8",
+        )
+        listing.chmod(0o755)
+        original = plugins.SD
+        plugins.SD = listing
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        self.assertFalse(self.only(loaded)["ok"])
+        self.assertEqual(loaded["tabs"], [])
+
+    def test_an_unexpected_error_reading_the_registry_is_a_row(self) -> None:
+        """The one read with no plugin above it to catch the failure.
+
+        Found in review. `select` and `os.read` raise on their own account,
+        and `catalog` caught only `Bounded` -- so an `OSError` there lost the
+        whole view rather than one tab.
+        """
+        original = plugins.bounded_run
+
+        def explode(*args: object, **kwargs: object) -> bytes:
+            raise OSError(9, "bad file descriptor")
+
+        plugins.bounded_run = explode
+        self.addCleanup(lambda: setattr(plugins, "bounded_run", original))
+        loaded = plugins.load()
+        self.assertIn("the loader failed", loaded["registryError"])
+        self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()
