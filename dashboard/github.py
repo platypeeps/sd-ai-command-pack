@@ -290,3 +290,51 @@ def collect(watermark: str | None, now: datetime, runner=None) -> dict:
         "truncated": truncated,
         "window_start": iso(start),
     }
+
+
+def fetch_issue(owner: str, repo: str, number: int, runner=None) -> tuple[dict | None, str]:
+    """One named issue or pull request, for `sd-trackers ref`. (row, error).
+
+    Not part of the collect path and deliberately not routed through it: the
+    index holds `involves:@me` and nothing else, so an issue nobody has
+    assigned to you -- the ordinary case when you plan against someone else's
+    report -- is not in it and never will be. Reading the index here would make
+    the answer depend on whether the operator happens to be involved.
+
+    REST rather than the GraphQL query above, because `repos/{o}/{r}/issues/{n}`
+    answers for a pull request too (GitHub numbers them in one sequence and
+    serves both from this endpoint), so one call covers both spellings of a
+    reference without asking the caller which they meant. `pull_request` in the
+    payload is what tells them apart.
+    """
+    code, out, err = _run(["gh", "api", f"repos/{owner}/{repo}/issues/{number}"], runner)
+    if code != 0:
+        detail = (err or out).strip().splitlines()
+        return None, detail[0] if detail else f"gh api exited {code}"
+    try:
+        payload = json.loads(out or "null") or {}
+    except json.JSONDecodeError as error:
+        return None, f"gh api did not return JSON: {error}"
+    url = (payload.get("html_url") or "").strip()
+    # The URL is taken from the answer, never assembled from the reference: an
+    # issue and a pull request differ in that path segment, and constructing it
+    # here would produce a link that redirects at best and 404s at worst.
+    if not url:
+        return None, "gh api returned no html_url"
+    pull = payload.get("pull_request") or {}
+    # `merged` is a third state here and only here. The index stores open or
+    # closed and nothing else, and this row never reaches it: a citation saying
+    # a pull request is closed when it landed reads as work abandoned, which is
+    # the opposite of what happened.
+    state = "merged" if pull.get("merged_at") else (payload.get("state") or "").lower()
+    return {
+        "tracker": TRACKER,
+        "url": url,
+        "repo": f"{owner}/{repo}",
+        "number": payload.get("number"),
+        "kind": "pull" if pull else "issue",
+        "title": payload.get("title") or "",
+        "state": state,
+        "author": (payload.get("user") or {}).get("login") or "",
+        "updated_at": payload.get("updated_at") or "",
+    }, ""

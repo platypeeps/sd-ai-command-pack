@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Resolve one tracker reference into the block a work item cites it with.
+
+`sd-plan --from gh:o/r#N|jira:KEY` is a *seeding* path: it turns a reference
+someone typed into the `## References` section of a new work item. `sd-plan`
+has no `bin/` half -- the procedure is carried out by the agent -- so the
+resolution has to be callable from somewhere, and a resolution described only
+in prose is a resolution that drifts into "look it up and write something
+sensible". This is that somewhere.
+
+One verb, `ref`, and it prints one markdown bullet to stdout. It writes no file, touches
+no repository, and does not consult the issue index: the index holds what
+involves you, and a reference is regularly to an issue you are not on yet.
+Reading it here would make the answer depend on your involvement rather than on
+the reference.
+
+The tracker clients live under `dashboard/` because the index was their first
+consumer. They are moved by nothing here: a second caller is a reason to import
+a module, not to relocate it.
+
+Exit codes: 0 resolved, 1 the tracker was reachable and the reference was not,
+2 the reference could not be parsed or the tracker is not configured.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from dashboard import github, jira  # noqa: E402 - after the path insert
+
+# `owner/repo#N` with the shapes GitHub itself allows: names are alphanumeric
+# with dots, dashes and underscores. Anchored, so a half-match is a parse
+# failure rather than a silent read of the part that happened to match.
+GH_REF = re.compile(r"^gh:([\w.-]+)/([\w.-]+)#(\d+)$")
+# Jira keys are an uppercase project key, a hyphen, and a number. Lowercase is
+# accepted and upper-cased: the tracker is case-insensitive about keys and
+# refusing `abc-1` would be pedantry with no safety behind it.
+JIRA_REF = re.compile(r"^jira:([A-Za-z][A-Za-z0-9_]*)-(\d+)$")
+
+SPELLINGS = "gh:owner/repo#123 or jira:KEY-123"
+
+
+def render(row: dict) -> str:
+    """One `## References` bullet, exactly as it should appear in the item.
+
+    The bullet and not the heading: the PRD template already carries a
+    `## References` section, so printing the heading too would have every
+    seeded item grow a second one. A citation is a link, a title, and the two
+    facts that decide whether it is still worth reading -- its state and when
+    it last moved. Not the body: an issue's prose copied into a work item is
+    stale the first time somebody edits the issue, and the link is already
+    there to carry it.
+    """
+    if row["tracker"] == github.TRACKER:
+        label = f"{row['repo']}#{row['number']}"
+    else:
+        # A Jira row has no number of its own; its key is the tail of the URL.
+        label = row["url"].rstrip("/").rsplit("/", 1)[-1]
+    kind = "pull request" if row["kind"] == "pull" else "issue"
+    state = row["state"] or "state unknown"
+    moved = (row["updated_at"] or "")[:10]
+    tail = f"{state} {kind}" + (f", updated {moved}" if moved else "")
+    title = row["title"] or "(no title)"
+    return f"- [{label}]({row['url']}) — {title} ({tail})"
+
+
+def resolve_github(owner: str, repo: str, number: int, runner=None) -> tuple[dict | None, str, int]:
+    ok, reason = github.available(runner)
+    if not ok:
+        return None, reason, 2
+    row, error = github.fetch_issue(owner, repo, number, runner)
+    if error:
+        return None, error, 1
+    return row, "", 0
+
+
+def resolve_jira(key: str, transport=None, environ=None) -> tuple[dict | None, str, int]:
+    config = jira.settings(environ)
+    absent = jira.missing(config)
+    if absent:
+        # Names, never values: this line exists to tell an operator what to
+        # set, and it must not become somewhere a credential can be read.
+        return None, "Jira is not configured; set " + ", ".join(absent), 2
+    row, error = jira.fetch_issue(key, config, transport)
+    if error:
+        return None, error, 1
+    return row, "", 0
+
+
+def cmd_ref(args: argparse.Namespace, out, err) -> int:
+    reference = args.reference.strip()
+    github_match = GH_REF.match(reference)
+    jira_match = JIRA_REF.match(reference)
+    if github_match:
+        owner, repo, number = github_match.groups()
+        row, problem, code = resolve_github(owner, repo, int(number), args.runner)
+    elif jira_match:
+        project, number = jira_match.groups()
+        row, problem, code = resolve_jira(
+            f"{project.upper()}-{number}", args.transport, args.environ
+        )
+    else:
+        print(f"cannot read {reference!r} as a reference; expected {SPELLINGS}", file=err)
+        return 2
+    if row is None:
+        print(f"{reference}: {problem}", file=err)
+        return code
+    print(render(row), file=out)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sd-trackers", description=__doc__)
+    verbs = parser.add_subparsers(dest="verb", required=True)
+    ref_verb = verbs.add_parser("ref", help="resolve one reference into a citation block")
+    ref_verb.add_argument("reference", help=SPELLINGS)
+    ref_verb.set_defaults(handler=cmd_ref)
+    return parser
+
+
+def main(
+    argv: list[str] | None = None,
+    out=sys.stdout,
+    err=sys.stderr,
+    runner=None,
+    transport=None,
+    environ=None,
+) -> int:
+    """`runner`, `transport` and `environ` are the test seams the clients take.
+
+    Kept off the parser deliberately: they are injected by the suite, never
+    typed, and an argument that exists only for tests is an argument an
+    operator can reach.
+    """
+    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    args.runner, args.transport, args.environ = runner, transport, environ
+    return int(args.handler(args, out, err))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

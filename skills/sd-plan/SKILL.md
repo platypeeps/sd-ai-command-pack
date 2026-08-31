@@ -57,9 +57,34 @@ revert, not to retro-document work already merged.
 | `--decision` | Write a `docs/decisions/` record instead of a work item |
 | `--work-dir` | Work root other than `docs/work` |
 | `--worktree` | Create the branch in its own git worktree (one writer per checkout) |
-| `--from gh:o/r#N` / `--from jira:KEY` | Seed `## References` from a tracker item |
+| `--from gh:o/r#N` / `--from jira:KEY` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
 | `--from-suggestion` | Seed from a pending `sd-suggest` draft |
 | `--from-proposal` | Seed from a skill proposal |
+
+## Seeding from a tracker
+
+`--from` resolves through one command, so the citation is what the tracker
+says rather than what anyone remembered:
+
+```bash
+sd-trackers ref gh:openai/whisper#42
+sd-trackers ref jira:ABC-45
+```
+
+It prints one bullet — the link, the title, the state, and the date the item
+last moved — which goes verbatim under the PRD's `## References` heading, the
+one the template already ships. Under `--decision`, where the template has no
+such heading, add it above the bullet.
+
+Read the exit code before pasting. **1** means the tracker answered and there is
+no such reference: a typo, or a repository you cannot see. **2** means it could
+not be asked at all — `gh` missing or unauthenticated, the Jira variables unset,
+or a reference that does not parse. Neither is a licence to hand-write a
+citation: an unresolvable reference is a question for the user, and a made-up
+link in a work item outlives the session that invented it.
+
+The issue's own text stays in the issue. Cite the link, read the issue for the
+interview, and leave its prose where it will still be current next month.
 
 ## Never
 
@@ -86,5 +111,10 @@ the field that saves the most rework — `dont[]`.
 ## State of the tooling
 
 There is no `bin/sd-plan` yet; the templates ship and this procedure is carried
-out by the agent. `sd-review`, `sd-check`, `sd-status`, `sd-handoff` and
-`sd-docs-lint` are real and callable today.
+out by the agent. `sd-review`, `sd-check`, `sd-status`, `sd-handoff`,
+`sd-trackers` and `sd-docs-lint` are real and callable today.
+
+`--from-suggestion` and `--from-proposal` have no resolution path yet. They land
+with `sd-suggest` and `sd-skill-adopt`; until then they are rows in the table
+above and nothing more, and improvising one is how a flag comes to mean whatever
+the last session decided it meant.

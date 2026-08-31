@@ -902,7 +902,66 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     checkout prints `issues (this repo, from the index)` / `none open` — verified genuine
     rather than an empty filter, by querying the index directly: 18 open rows, 15 needing
     me, **0** for `platypeeps/sd-ai-command-pack`. The empty is the right answer.
-- [ ] 4b-iv — `sd-plan --from gh:o/r#N|jira:KEY` seeds `## References`
+- [x] 4b-iv — 2026-08-31. `sd-plan --from gh:o/r#N|jira:KEY` gets a resolution path:
+      `bin/sd-trackers ref`, one verb, printing the citation bullet the flag was
+      always described as producing. The flag row had been in the skill since step 3
+      with nothing behind it, which is the failure this step exists to close: a
+      documented flag with no procedure resolves to whatever the session improvises.
+  - **It does not read the index, and that is the whole design question.** The
+    obvious implementation queries the SQLite index 4b-i and 4b-ii filled — it is
+    right there, and it is free. It is also wrong: the index holds `involves:@me`
+    and nothing else, so an issue nobody has assigned to you is absent from it and
+    always will be. Planning against someone else's report is the ordinary case for
+    `--from`, so reading the index would make the answer depend on the operator's
+    involvement rather than on the reference. Both halves fetch live.
+  - **One REST call covers both spellings.** `repos/{o}/{r}/issues/{n}` answers for
+    a pull request too — GitHub numbers them in one sequence — so `gh:o/r#N` does
+    not have to say which it meant, and the collector's GraphQL search stays a
+    search. `pull_request` in the payload tells them apart.
+  - **The link is the tracker's, never assembled.** An issue and a pull request
+    differ in that path segment, so constructing `/issues/N` from the reference
+    yields a link that redirects today and breaks whenever GitHub stops. Pinned by
+    a test whose payload deliberately answers `/pull/8` to a `#8` reference;
+    mutation-tested (build the URL instead and exactly that test fails).
+  - **`merged` is a third state, and only here.** The index stores open or closed;
+    this row never reaches it. A citation calling a landed pull request "closed"
+    reads as work abandoned, which is the opposite of what happened.
+  - **The bullet, not the section.** First draft printed `## References` and a
+    blank line with it — and the PRD template already ships that heading, so every
+    seeded item would have grown a second one. Caught by writing the paste down
+    rather than by reading the code; the test now asserts both halves, that the
+    output starts with `- [` and that the template still carries the heading.
+  - **No issue body.** Jira v3 returns descriptions as Atlassian Document Format,
+    a JSON tree, and rendering it would put a markdown converter inside a reference
+    lookup. The deeper reason applies to GitHub too: prose copied into a work item
+    is stale the first time somebody edits the issue. The citation carries the
+    link; the issue keeps its own text.
+  - **Exit 1 and exit 2 stay distinct.** 1 is "asked, no such reference" (a typo);
+    2 is "could not ask" (`gh` unauthenticated, Jira variables unset, an
+    unparseable reference). Collapsing them would make a mistyped issue number
+    indistinguishable from an unconfigured tracker, and the skill's instruction —
+    never hand-write a citation the command refused to produce — needs the operator
+    to know which happened. The Jira half names the absent variables and never
+    their values, with a test asserting the token value cannot reach the output.
+  - **`jira.state_of` extracted rather than copied.** The collector and the
+    reference lookup have to agree about what closed means; two copies of that rule
+    is how they would stop agreeing.
+  - **The Makefile's lint list now enumerates from the index**, which
+    `tests/test_loc_caps.py` had already named as a trap in its own docstring. It
+    was one: the list was missing `bin/sd_setup_github.py`, which had therefore
+    been lint-clean by never having been linted since it landed. It passes ruff and
+    mypy now that it is actually checked, but that was luck, not a gate.
+  - **Named rather than quietly left:** `--from-suggestion` and `--from-proposal`
+    are still rows with no procedure behind them. They land with `sd-suggest` and
+    `sd-skill-adopt`; the skill now says so out loud instead of reading as though
+    all three flags work.
+  - Checks, run: `make check` exits 0 — 23 shards, 23 `OK`, 0 failures, including
+    the 18 new tests in `test_sd_trackers`. Live against this repository:
+    `sd-trackers ref gh:platypeeps/sd-ai-command-pack#636` prints the merged-pull
+    citation, `#999999` exits 1 with `gh: Not Found (HTTP 404)`, `nonsense` exits 2
+    naming both spellings, and `jira:ABC-1` exits 2 naming `JIRA_BASE_URL` and
+    `JIRA_EMAIL` — the two unset on this machine — while never naming the one that
+    is set. Three mutations were introduced and each failed the test written for it.
 - [ ] 5 / 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
