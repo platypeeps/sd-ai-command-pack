@@ -155,6 +155,20 @@ def platform_homes(home: Path, environ: dict[str, str]) -> list[PlatformHome]:
     ]
 
 
+def agent_homes(home: Path) -> list[PlatformHome]:
+    """Where agents are rendered. Claude only, and that is a stated limit.
+
+    Codex keeps its agents as TOML with the instructions embedded in a triple-
+    quoted string. Producing that is a translation layer -- the exact thing
+    `render` refuses to be -- and a translated agent could not be checked by the
+    parity test's byte-compare, only by asserting the translation ran. So v1
+    renders agents to Claude, where the format is the same file the checkout
+    holds, and says plainly that Codex agents are not rendered rather than
+    shipping a converter nothing verifies.
+    """
+    return [PlatformHome("claude", home / ".claude" / "agents", "flat")]
+
+
 # -------------------------------------------------------------------- payload
 
 
@@ -188,6 +202,23 @@ def discover_surfaces(checkout: Path) -> list[Surface]:
         )
         surfaces.append(Surface(entry.name, skill, extras))
     return surfaces
+
+
+def discover_agents(checkout: Path) -> list[Surface]:
+    """Enumerate `agents/sd-*.md` from disk, for the same reason skills are.
+
+    Agents reuse `Surface` because they are the narrower case of one: a name and
+    a file, with no templates beside them. A second dataclass differing by an
+    always-empty field would buy nothing.
+    """
+    root = checkout / "agents"
+    if not root.is_dir():
+        return []
+    return [
+        Surface(path.stem, path)
+        for path in sorted(root.glob("sd-*.md"))
+        if path.is_file()
+    ]
 
 
 def digest(data: bytes) -> str:
@@ -272,7 +303,11 @@ class Written:
 
 
 def render(
-    surfaces: list[Surface], homes: list[PlatformHome], *, dry_run: bool = False
+    surfaces: list[Surface],
+    homes: list[PlatformHome],
+    *,
+    kind: str = "skill",
+    dry_run: bool = False,
 ) -> list[Written]:
     """Copy every surface into every platform home, verbatim.
 
@@ -287,7 +322,7 @@ def render(
         for surface in surfaces:
             body = surface.skill.read_bytes()
             target = home.target_for(surface.name)
-            written.append(Written(target, digest(body), f"skill:{home.key}"))
+            written.append(Written(target, digest(body), f"{kind}:{home.key}"))
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body)
@@ -746,6 +781,10 @@ class Context:
         return platform_homes(self.home, self.environ)
 
     @property
+    def agents(self) -> list[PlatformHome]:
+        return agent_homes(self.home)
+
+    @property
     def receipt(self) -> Path:
         return receipt_path(self.home, self.environ)
 
@@ -765,7 +804,12 @@ def cmd_user(ctx: Context, out) -> int:
         )
         return 1
 
+    agents = discover_agents(ctx.checkout)
     written = render(surfaces, ctx.homes, dry_run=ctx.dry_run)
+    # Rendered after the skills and into their own homes, so a machine with no
+    # `agents/` in its checkout converges exactly as before rather than failing
+    # on an absent directory.
+    written += render(agents, ctx.agents, kind="agent", dry_run=ctx.dry_run)
     current = {str(item.path) for item in written}
 
     previous = owned_entries(read_receipt(ctx.receipt))
@@ -807,6 +851,10 @@ def cmd_user(ctx: Context, out) -> int:
     )
     for home in ctx.homes:
         print(f"  {home.key}: {home.root}", file=out)
+    if agents:
+        print(f"{prefix} {len(agents)} agents", file=out)
+        for home in ctx.agents:
+            print(f"  {home.key}: {home.root}", file=out)
     if hook_changed:
         print(f"  SessionStart hook registered: {hook}", file=out)
     if excludes_changed:
