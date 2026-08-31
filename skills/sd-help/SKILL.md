@@ -47,7 +47,8 @@ editing** — which is the property that makes the enumeration worth having.
   and teaches the user a name that will fail again.
 - **Never present a legacy `se-*` name as current.** Merged surfaces renamed to
   `sd-*` at the fold; retired ones (`se-help`, `se-brand-voice`,
-  `se-humanizer`) keep their old names in historical records only.
+  `se-humanizer`, `se-review-skills`) keep their old names in historical
+  records only.
 - **Never run anything on the user's behalf from the catalog.** Listing a
   command is not invoking it — the commands are the surfaces that
   pre-authorize side effects, and each is invoked deliberately.

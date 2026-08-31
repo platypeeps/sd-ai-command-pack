@@ -7,9 +7,10 @@
 
 ## Overview
 
-One repository, one prefix, one machine-scope install. The pack renders twelve
-`sd-*` command surfaces into the AI tools installed on a machine and gets out of
-the way. It does not install anything into the repositories you work in.
+One repository, one prefix, one machine-scope install. The pack renders its
+`sd-*` surfaces into the AI tools installed on a machine and gets out of the
+way — eleven commands, the `sd-help` catalog, and the skills they draw on. It
+does not install anything into the repositories you work in.
 
 That last sentence is the design, not a summary of it. The previous version of
 this pack copied roughly 56,000 lines of payload into every consuming
@@ -46,8 +47,9 @@ Antigravity is deliberately **not** rendered. Its skill format is byte-identical
 to Claude's, but which of three candidate roots `agy` actually loads is
 unresolved, and rendering into the wrong one would produce surfaces that appear
 installed and never load — worse than absent, because nothing would report them
-missing. The parity test asserts the Antigravity count is zero or twelve, never
-partial.
+missing. Zero or all, never partial, is the rule; what the test asserts today
+is the zero half of it — no `sd-*` under any of the three candidate roots —
+because P1 has not passed and there is no all half to check yet.
 
 ## Install
 
@@ -92,9 +94,19 @@ fact is what makes the rest safe:
 
 ## Commands
 
-Twelve surfaces, rendered identically to every platform. Each is documented in
-its own `skills/sd-*/SKILL.md`, which is the file that gets installed, so the
-documentation and the artifact are the same object.
+The twelve named surfaces — eleven commands plus `sd-help`, which the taxonomy
+makes a skill because a catalog authorizes nothing — rendered identically to
+every platform. Each is documented in its own `skills/sd-*/SKILL.md`, which is
+the file that gets installed, so the documentation and the artifact are the
+same object.
+
+`skills/` also holds the skills these commands draw on — knowledge and
+procedure with no standing side-effect authority, loaded when relevant rather
+than invoked. They are not listed here: `sd-help` reads the installed tree at
+runtime, which is the only inventory that cannot go stale. The one structural
+difference is in the frontmatter, and it is what the taxonomy means: each of
+the eleven commands sets `disable-model-invocation`, so invoking it is a
+deliberate act; every other surface, `sd-help` included, does not.
 
 | Command | Purpose |
 |---|---|

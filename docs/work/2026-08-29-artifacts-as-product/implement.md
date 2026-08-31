@@ -1068,7 +1068,95 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - Checks, run: `make check` exits 0 — 25 shards, 25 `OK`, including 11 new tests
     in `test_skill_companions`. Three mutations introduced (copy every shared file,
     let shared win over local, drop the citation boundary), each caught.
-- [ ] 5-iii — fold the 65 skills (62 mechanical, 3 artifact-named)
+- [x] 5-iii — 2026-08-31. Sixty-four skills folded, in two commits so the first
+  one is provable. The plan said 64 and the source tree holds 68, which is the
+  same number once the retirements are counted: `se-help`, `se-brand-voice`,
+  `se-humanizer`, and a fourth decided in this step.
+
+  - The fourth retirement is `se-review-skills`, raised as a decision because it
+    is not a prose skill: 3,258 lines of which 2,115 are
+    `scripts/skill_review.py`, whose `_discover` is hard-coded to two layouts
+    that no longer exist — `templates/skills` and `templates/.agents/skills` —
+    and which reads a `.se-ai-command-pack/provenance.json` this pack does not
+    write and a `generated/skills/` it does not produce. It has no scheduled
+    caller and `skills/` is under no LOC cap, so folding it would have landed a
+    broken script uncapped, and retargeting it meant owning a 2,115-line
+    discovery path of unmeasured coupling depth. Retired. What is lost, named
+    rather than waved away: there is now no deterministic multi-skill audit, and
+    no usage evidence was available either way — if it turns out to be run, this
+    was the wrong call and folding it back is a decision record, not a chore.
+    `sd-skill-retro` says so in its own scope section rather than pointing at a
+    surface that is gone.
+  - Three names collide with a command, so those three are named by the artifact
+    they produce rather than mechanically (user, 2026-08-31): `se-plan` →
+    `sd-objective-plan`, `se-status` → `sd-status-update`, `se-handoff` →
+    `sd-continuity-packet`. The other sixty-one rename mechanically. Collision
+    check against the twelve: zero.
+  - The rename map is anchored, not substring. `(?<![\w-])se-` is the whole
+    difference between a correct fold and a broken one: the unanchored spelling
+    matches inside `prose-lint`, `use-case`, `case-study`, `database-update` and
+    nine more, and would have rewritten ordinary English into `sd-` tokens. Same
+    defect class as three earlier this week, caught here before it was written
+    rather than after.
+  - The first commit is mechanical by construction and was checked that way:
+    re-running the map over the source reproduces all 71 files byte for byte,
+    no file is missing, and none is shipped that the source did not have. The
+    check is what makes the second commit readable — everything a reviewer has
+    to think about is in it.
+  - The second commit carries what the byte-diff cannot see, because in the
+    source it all resolved. Retired skills still cited: `sd-prose-lint` handed
+    rewrite-shaped findings to `sd-humanizer` at six places including step 7 of
+    its own procedure; `sd-technical-editor` gave house-voice conformance to
+    `sd-brand-voice`; three more routed to the humanizer. Trellis surfaces still
+    named: seven skills shared one dispatch boilerplate opening a worker prompt
+    with `Active task: <task path from task.py current>`, retargeted to the item
+    directory as the agents were in 5-i; `trellis-check` and `task.py` went to
+    `sd-check` and `sd-status`; `sd-skill-retro` still sent fixes to
+    `templates/skills/<name>/SKILL.md`. And `sd-retro` was telling itself to
+    route to `sd-retro` — the name it meant belonged to the Trellis-era pack,
+    which is the one hazard of a one-prefix fold: a reference that was to
+    *another* pack silently becomes a reference to this one. Audited by
+    enumerating every pre-existing `sd-` token in the source: 36 of them, 30
+    being "the sd-review lane" (still correct) and one being that self-route.
+  - Two spellings survived the rename because the map's lookahead required a
+    lowercase letter after the prefix: three `se-*` globs, and — found in
+    Copilot's third round, not by me — the H1 of every one of the sixty-four
+    folded skills, still reading `# SE Typed Holes` while the directory,
+    frontmatter, and every cross-reference in the same file already read
+    `sd-typed-holes`. This is the sharpest statement of what a byte-diff does
+    and does not buy: it proves the map was applied consistently, never that
+    the map was complete, and a check derived from the map cannot find what the
+    map never matched. The guard added for it compares each title to its own
+    directory name rather than banning a spelling, so it needs no list and the
+    next stale title fails whatever it says.
+  - `tests/test_skill_frontmatter.py` pinned the tree to exactly twelve
+    surfaces, so the fold could not land without it. A roster of every surface
+    is what stops working at seventy-six; the half worth keeping is the other
+    half. The commands are exactly these eleven — twelve named surfaces less
+    `sd-help`, which the taxonomy makes a skill because a catalog authorizes
+    nothing — and skill-ness is asserted per file, no `disable-model-invocation`
+    and no `tools:`, for every surface that is not one of them. A sixty-fifth
+    skill needs no edit here; a twelfth command still fails, which is what
+    standing rule 2 asks for. The two tool-contract suites are scoped to the
+    twelve named surfaces: a folded skill documents no CLI, so it has no `bin/`
+    absence to disclose.
+  - The retired-selector drift guard fired on
+    `sd-coherence-audit/references/ledger-format.md`, which numbers its
+    redundancy findings `R-4`. `\bR-\d` is a shape, not a claim. The exemption
+    is written as "this file declares its own class-letter id scheme" rather
+    than "this file does not mention `sd-status`", because the second spelling
+    would have disarmed the guard over `skills/sd-plan/templates/prd.md` — an
+    empty template naming no command, and exactly where a retired selector could
+    reappear unread. Two tests hold it: neither status surface can claim the
+    exemption, and the set of files that do is asserted to be the one.
+  - Checks, run: `make check` exits 0 — 25 shards, 25 `OK`. The installer
+    dry-run renders 76 surfaces (485 files) to three platforms with no
+    missing-citation warning, so every `references/` path the folded skills cite
+    resolves through 5-ii's fan-out. Three mutations on the drift guard (plant
+    `R-7` in `sd-status`, plant `F/T/R` inside the exempt file, give
+    `prd.md` the four sibling class letters), each caught; two more on the
+    fold guards (remove four folded skills, restore a `# SE ` title), each
+    caught.
 - [ ] 5-iv — vault-side retarget of the 8 callers in 2 routines, **before** any
   deletion; then delete the old `se-*` renders from `~/.claude/skills`,
   `~/.codex/skills`, `~/.claude/agents` and `~/.codex/agents`

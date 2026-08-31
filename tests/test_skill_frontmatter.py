@@ -20,6 +20,16 @@ These run without an installer. That is the point: step 3e builds the renderer
 that consumes this tree, so without these assertions the twelve surfaces would
 sit unverified until then, and a missing marker would surface as a command that
 silently invokes itself.
+
+Since 5-iii the tree also holds the sixty-four folded skills, so the inventory
+claim had to change shape. It used to be "the tree is exactly these twelve",
+which is a list -- and a list of every surface is precisely what stops being
+maintainable at seventy-six. What survives is the half that is actually load-
+bearing: the *commands* are exactly these eleven, and every other surface in the
+tree is a skill -- `sd-help` included, per the taxonomy's stated exception --
+which is a property each file carries rather than a roster this file recites. A
+sixty-fifth skill needs no edit here; a twelfth command still fails, which is
+the invariant standing rule 2 asks for.
 """
 
 from __future__ import annotations
@@ -45,6 +55,8 @@ SKILL_KIND = frozenset({"sd-help"})
 EXPECTED = COMMANDS | SKILL_KIND
 
 MARKER = "disable-model-invocation"
+# Matches `sd_install.SHARED_DIR`; spelled here so the test needs no import.
+SHARED_DIR = "_shared"
 
 
 def frontmatter(text: str) -> dict[str, str] | None:
@@ -77,17 +89,67 @@ def surfaces() -> list[pathlib.Path]:
 
 
 class InventoryTests(unittest.TestCase):
-    def test_the_tree_holds_exactly_the_surfaces_the_design_names(self) -> None:
+    def test_the_twelve_named_surfaces_are_all_present(self) -> None:
         found = {p.parent.name for p in surfaces()}
-        self.assertEqual(found, set(EXPECTED), "skills/ drifted from the design's 12")
+        self.assertEqual(set(EXPECTED) - found, set(), "a named surface left the tree")
 
     def test_every_directory_holds_a_skill_file(self) -> None:
         if not SKILLS.is_dir():
             self.skipTest("skills/ does not exist yet")
         for entry in sorted(SKILLS.iterdir()):
-            if entry.is_dir():
+            # `_shared` holds reference files the installer fans out by
+            # citation; it is deliberately not a surface and has no SKILL.md.
+            if entry.is_dir() and entry.name != SHARED_DIR:
                 with self.subTest(surface=entry.name):
                     self.assertTrue((entry / "SKILL.md").is_file(), "no SKILL.md")
+
+    def test_the_folded_skills_are_here(self) -> None:
+        """Guards every "for each non-command surface" loop from running empty.
+
+        A floor, deliberately, and not the exact count: 5-iii folded sixty-four,
+        and pinning that number would put back the roster this file just stopped
+        keeping -- retiring one skill would fail here rather than where the
+        retirement is decided. The floor is sixty-one -- close enough to
+        the real number that losing a meaningful part of the fold fails, loose
+        enough that ordinary movement in either direction does not.
+        """
+
+        self.assertGreaterEqual(len(surfaces()) - len(EXPECTED), 61)
+
+    def test_no_surface_kept_a_retired_prefix(self) -> None:
+        for path in surfaces():
+            with self.subTest(surface=path.parent.name):
+                self.assertFalse(
+                    path.parent.name.startswith("se-"),
+                    "a folded surface kept its pre-fold name",
+                )
+
+    def test_the_title_is_the_surface_name(self) -> None:
+        """The first heading names the surface, and nothing else.
+
+        The directory-name check above is not enough, and the fold proved it:
+        all sixty-four folded skills arrived titled `# SE Typed Holes` while
+        their directory, frontmatter, and every cross-reference already read
+        `sd-typed-holes`. The rename map matched a lowercase prefix, so a
+        title-cased one went straight through -- a whole class the map could
+        not see, and one nothing in this suite would have reported.
+
+        Checking the title against the directory is what makes the class
+        checkable at all: it needs no list of forbidden spellings, so the next
+        stale title fails here whatever it says.
+        """
+
+        for path in surfaces():
+            heading = next(
+                (
+                    line
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("# ")
+                ),
+                None,
+            )
+            with self.subTest(surface=path.parent.name):
+                self.assertEqual(heading, f"# {path.parent.name}")
 
 
 class FrontmatterTests(unittest.TestCase):
@@ -127,8 +189,20 @@ class KindMarkerTests(unittest.TestCase):
                 )
 
     def test_skills_do_not(self) -> None:
+        """Every surface that is not one of the eleven commands.
+
+        `sd-help` is among them: the taxonomy's stated exception makes a catalog
+        surface a skill, which is why `COMMANDS` holds eleven names and the
+        twelve of `EXPECTED` are surfaces rather than commands.
+
+        Scoped by exclusion rather than by a roster, which is what lets the
+        sixty-four folded skills be covered without being named. A folded skill
+        that arrived carrying the marker would be a surface the model refuses to
+        load on relevance -- silently, since nothing else reads the key.
+        """
+
         for path in surfaces():
-            if path.parent.name not in SKILL_KIND:
+            if path.parent.name in COMMANDS:
                 continue
             fields = frontmatter(path.read_text(encoding="utf-8")) or {}
             with self.subTest(skill=path.parent.name):
@@ -160,6 +234,11 @@ class DocumentedFlagTests(unittest.TestCase):
     def implemented(self) -> list[tuple[str, pathlib.Path, pathlib.Path]]:
         found = []
         for path in surfaces():
+            # The twelve only. A folded skill is a procedure, not a CLI, and a
+            # folded name that happened to match a `bin/` file would otherwise
+            # be dragged into a flag contract it was never written against.
+            if path.parent.name not in EXPECTED:
+                continue
             tool = REPO_ROOT / "bin" / path.parent.name
             if tool.is_file():
                 found.append((path.parent.name, path, tool))
@@ -256,6 +335,10 @@ class UnbuiltSurfaceTests(unittest.TestCase):
     are written from the design, and a reader -- human or model -- who takes one
     at face value will try to run a command that is not there. Saying "not built
     yet" once is the whole requirement; this test only checks it is said.
+
+    Scoped to those twelve. The folded skills name no `bin/` tool at all -- they
+    are procedures the model follows, so there is nothing for them to disclose,
+    and requiring the sentence would be requiring a denial of a claim never made.
     """
 
     DISCLOSURES = (
@@ -272,7 +355,8 @@ class UnbuiltSurfaceTests(unittest.TestCase):
         return [
             path
             for path in surfaces()
-            if not (REPO_ROOT / "bin" / path.parent.name).is_file()
+            if path.parent.name in EXPECTED
+            and not (REPO_ROOT / "bin" / path.parent.name).is_file()
         ]
 
     def test_there_are_unbuilt_surfaces_to_check(self) -> None:
