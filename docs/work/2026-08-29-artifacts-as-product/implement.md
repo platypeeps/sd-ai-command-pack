@@ -478,7 +478,33 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       survivors are repo-own skills the carve-out protects (`playwright`,
       `security-threat-model`, `amc-server-compatibility`, `loadsmith-swift-app`,
       `hoa-manager-payload-tenant-safety`, `rwbp-next-payload`) or files edited since install.
-- [ ] P1 / P2 / P3 / P4 / P5 — platform sweep (renamed from `3a`–`3e` on 2026-08-30;
+- [x] P1 — cross-platform sweep, 2026-08-30. All three checks pass:
+      `~/.gemini/commands/sd` is gone (the whole `commands` tree with it, since the TOML
+      renderer was deleted at R9b-D1 and renders nothing to replace it); the OpenCode
+      commands directory holds exactly 12 `sd-*` entries, which are the 12 surfaces and
+      not a survivor among them; all three candidate Antigravity skill roots hold zero
+      `sd-*` files (`~/.gemini/antigravity-cli/skills` does not exist, the other two do
+      and are clean). `--user` then rendered 46 files to 3 platforms and moved the
+      serving checkout off the stale `wt-3e` scratchpad worktree onto
+      `~/repos/platypeeps/sd-ai-command-pack`, which is what D-R4-8 asks for.
+  - The step also found three defects in the legacy lane, all fixed here, because the
+    step could not be honestly reported without them. `--adopt-legacy` deleted 112 files
+    and said `removed 5`: it counted the survivors *after* pruning and reported them as
+    the whole population. The count is the only output the step has, so a count read
+    after the fact is not a smaller bug than a wrong deletion — it is the same bug seen
+    from the operator's chair. Second, adoption never retired the receipt, so `--status`
+    went on advising `--adopt-legacy` after the migration was complete. Third, the
+    `--status` banner counted a recorded path as legacy without asking whether the
+    current render owns it, so after `--user` overwrote the five colliding OpenCode names
+    it pointed at the installer's own fresh output and called it someone else's leftovers.
+    Five regression tests, four of which fail without the fix.
+  - The `~/.agents` tree holds 1,391 files against a 117-row receipt, which looked like a
+    receipt-driven removal about to leave 1,274 files behind. It is not: `~/.agents/skills`
+    is a shared root, and the other 1,299 files belong to `cmux` (26), `pp` (8),
+    `hyperframes` (8), `caveman` (6) and a long tail of single-skill packs. M1 touched only
+    its own rows, which is the design. Recorded because the number is alarming until you
+    know why it isn't.
+- [ ] P2 / P3 / P4 / P5 — rest of the platform sweep (renamed from `3a`–`3e` on 2026-08-30;
       the step-3 sub-PRs keep those letters, which five merged PRs already cite)
 - [ ] 4 / 4b
 - [ ] 5 / 5b

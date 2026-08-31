@@ -490,6 +490,102 @@ class LegacyReceiptTests(InstallerHarness):
         self.assertTrue(edited.exists(), "an edited legacy file was deleted")
         self.assertIn("modified since it was installed", output)
 
+    def legacy_receipt_file(self) -> Path:
+        return (
+            self.home
+            / ".local"
+            / "state"
+            / "sd-ai-command-pack"
+            / "machine"
+            / "machine-receipt.json"
+        )
+
+    def seed(self, family: str, rel: str, body: bytes) -> dict:
+        roots = {
+            "agents-skills": self.home / ".agents" / "skills",
+            "opencode-commands": self.home / ".config" / "opencode" / "commands",
+        }
+        path = roots[family] / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        return {"family": family, "path": rel, "digest": sd_install.digest(body)}
+
+    def test_the_removal_count_is_measured_before_the_removal(self):
+        """The count is the only output, so a count read after the fact lies.
+
+        `present` used to be computed from the disk *after* pruning, which made
+        a run that deleted every recorded file report the survivors instead --
+        on this machine, "removed 5" for a 112-file removal. The number a
+        migration step prints is the number its operator checks.
+        """
+        rows = [
+            self.seed("agents-skills", f"sd-gone-{n}/SKILL.md", b"legacy %d\n" % n)
+            for n in range(4)
+        ]
+        self.write_legacy_receipt(rows)
+        rc, output = self.run_cli("--adopt-legacy")
+        self.assertEqual(rc, 0)
+        self.assertIn("4 recorded, 4 still present, removed 4", output)
+
+    def test_a_colliding_name_is_kept_and_not_counted_as_removed(self):
+        """`--user` overwrites collisions; adoption must not claim them."""
+        kept = self.seed("opencode-commands", "sd-check.md", b"old sd-check\n")
+        gone = self.seed("agents-skills", "sd-retired/SKILL.md", b"no successor\n")
+        self.write_legacy_receipt([kept, gone])
+        rc, output = self.run_cli("--adopt-legacy")
+        self.assertEqual(rc, 0)
+        self.assertIn("2 recorded, 2 still present, removed 1", output)
+        self.assertIn("1 kept for --user to overwrite", output)
+        self.assertTrue(
+            (self.home / ".config" / "opencode" / "commands" / "sd-check.md").exists()
+        )
+
+    def test_adoption_retires_the_receipt_and_stops_the_status_advice(self):
+        """The ratchet has to latch, or --status advises a done migration forever."""
+        self.write_legacy_receipt(
+            [self.seed("opencode-commands", "sd-check.md", b"old sd-check\n")]
+        )
+        rc, _ = self.run_cli("--adopt-legacy")
+        self.assertEqual(rc, 0)
+        self.assertFalse(self.legacy_receipt_file().exists())
+        self.install()
+        rc, output = self.run_cli("--status")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("legacy:", output)
+
+    def test_an_unremovable_receipt_is_reported_not_swallowed(self):
+        """--status keeps advising the migration, so silence would strand it."""
+        self.write_legacy_receipt(
+            [self.seed("opencode-commands", "sd-check.md", b"old sd-check\n")]
+        )
+        with unittest.mock.patch.object(
+            Path, "unlink", side_effect=OSError(13, "Permission denied")
+        ):
+            rc, output = self.run_cli("--adopt-legacy")
+        self.assertEqual(rc, 0)
+        self.assertIn("could not retire the legacy receipt", output)
+        self.assertIn("Permission denied", output)
+
+    def test_a_skipped_file_keeps_the_receipt_for_a_second_attempt(self):
+        edited = self.seed("agents-skills", "sd-edited/SKILL.md", b"changed\n")
+        edited["digest"] = sd_install.digest(b"what was installed\n")
+        self.write_legacy_receipt([edited])
+        rc, output = self.run_cli("--adopt-legacy")
+        self.assertEqual(rc, 0)
+        self.assertIn("modified since it was installed", output)
+        self.assertTrue(self.legacy_receipt_file().exists())
+
+    def test_status_does_not_call_its_own_renders_legacy(self):
+        """A recorded name the current render owns is ours, not a leftover."""
+        self.install()
+        self.write_legacy_receipt(
+            [{"family": "opencode-commands", "path": "sd-check.md", "digest": "stale"}]
+        )
+        rc, output = self.run_cli("--status")
+        self.assertEqual(rc, 0)
+        self.assertIn("0 missing, 0 modified", output)
+        self.assertNotIn("legacy:", output)
+
     def test_adopt_legacy_is_a_clean_no_op_without_a_receipt(self):
         rc, output = self.run_cli("--adopt-legacy")
         self.assertEqual(rc, 0)

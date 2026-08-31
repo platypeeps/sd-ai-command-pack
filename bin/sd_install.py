@@ -602,6 +602,11 @@ LEGACY_FAMILY_ROOTS = {
 }
 
 
+def legacy_receipt_path(home: Path, environ: dict[str, str]) -> Path:
+    """Where the old fleet installer left its receipt."""
+    return state_home(home, environ) / STATE_DIR / Path(*LEGACY_RECEIPT)
+
+
 def legacy_targets(home: Path, environ: dict[str, str]) -> list[tuple[Path, str]]:
     """Enumerate what the old fleet installer wrote, from its own receipt.
 
@@ -613,8 +618,7 @@ def legacy_targets(home: Path, environ: dict[str, str]) -> list[tuple[Path, str]
     Returns `(path, sha256)` pairs; the digest is what lets `--adopt-legacy`
     refuse to delete a file somebody has since edited.
     """
-    receipt = state_home(home, environ) / STATE_DIR / Path(*LEGACY_RECEIPT)
-    data = read_receipt(receipt)
+    data = read_receipt(legacy_receipt_path(home, environ))
     rows = data.get("files")
     if not isinstance(rows, list):
         return []
@@ -842,7 +846,11 @@ def cmd_status(ctx: Context, out) -> int:
         file=out,
     )
 
-    legacy = [path for path, _ in legacy_targets(ctx.home, ctx.environ) if path.exists()]
+    legacy = [
+        path
+        for path, _ in legacy_targets(ctx.home, ctx.environ)
+        if path.exists() and str(path) not in expected
+    ]
     if legacy:
         print(
             f"legacy: {len(legacy)} file(s) from the old fleet installer remain "
@@ -937,16 +945,40 @@ def cmd_adopt_legacy(ctx: Context, out) -> int:
         {"path": str(path), "sha256": sha, "kind": "legacy"}
         for path, sha in entries
     ]
+    # Counted before pruning, because pruning is what changes it: reading the
+    # disk afterwards would report the survivors as though they were the whole
+    # population and turn a 112-file removal into "removed 5".
+    present = [path for path, _ in entries if path.exists()]
+    collisions = [path for path in present if str(path) in current]
     skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
-    present = sum(1 for path, _ in entries if path.exists())
     prefix = "would remove" if ctx.dry_run else "removed"
     print(
-        f"legacy: {len(entries)} recorded, {present} still present, "
-        f"{prefix} {present - len(skipped)}",
+        f"legacy: {len(entries)} recorded, {len(present)} still present, "
+        f"{prefix} {len(present) - len(collisions) - len(skipped)}",
         file=out,
     )
+    if collisions:
+        print(
+            f"  {len(collisions)} kept for --user to overwrite (same name, "
+            "new content)",
+            file=out,
+        )
     for path, reason in skipped:
         print(f"  left in place ({reason}): {path}", file=out)
+    if not ctx.dry_run and not skipped:
+        # Adoption has latched: everything the receipt records is either gone
+        # or a name this checkout now owns. Leaving the receipt behind would
+        # make --status advise a migration that has already happened, forever.
+        try:
+            legacy_receipt_path(ctx.home, ctx.environ).unlink()
+        except OSError as exc:
+            print(
+                f"  could not retire the legacy receipt ({exc.strerror or exc}); "
+                "--status will keep advising --adopt-legacy",
+                file=out,
+            )
+        else:
+            print("legacy receipt retired; nothing left to reconcile", file=out)
     return 0
 
 
