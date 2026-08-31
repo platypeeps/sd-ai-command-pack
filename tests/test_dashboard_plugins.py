@@ -371,6 +371,25 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertFalse(self.only(loaded)["ok"])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
+    def test_two_unreadable_plugins_are_two_distinguishable_rows(self) -> None:
+        """A plugin with no readable manifest has no prefix to be named by.
+
+        Found in review. Naming it "?" made every dark plugin the same row --
+        same source, same id, same text -- so an operator with two broken
+        plugins could not tell which, or that there were two. The loader has
+        the root, so it says the root.
+        """
+        for prefix in ("kk", "ll"):
+            root = self.plugin(prefix, tile_script("print('{}')"))
+            self.register(root)
+            (root / "sd-plugin.json").unlink()
+        rows = self.rows_of("plugin-dark", plugins.load())
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            sorted(row["source"] for row in rows),
+            sorted(str(self.tmp / f"plugin-{prefix}") for prefix in ("kk", "ll")),
+        )
+
     # -- the row contract --------------------------------------------------
 
     def refused_row(self, row_json: str) -> dict:

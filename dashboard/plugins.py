@@ -259,8 +259,11 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
 def read_plugin(entry: dict) -> dict:
     """One registered plugin's tabs, each collected under its own budget."""
     root = str(entry.get("root") or "")
-    prefix = str(entry.get("prefix") or "?")
-    base: dict = {"prefix": prefix, "root": root, "tabs": []}
+    prefix = str(entry.get("prefix") or "")
+    # A plugin whose manifest will not read has no prefix to be named by, and
+    # "?" for every one of them makes two dark plugins one indistinguishable
+    # row. The root is what the loader has, so the root is what it says.
+    base: dict = {"prefix": prefix, "root": root, "label": prefix or root or "?", "tabs": []}
 
     def refuse(reason: str) -> dict:
         return {**base, "ok": False, "declared": True, "reason": reason}
@@ -276,13 +279,17 @@ def read_plugin(entry: dict) -> dict:
 
     tile = entry.get("tile")
     names = entry.get("tabs")
-    if not tile:
+    if tile is None:
         # Not a failure. A plugin may register for its `kinds` or its issues
         # repo and never declare a tile, and reporting that as broken would
         # put a rank-0 row in Now for a machine that is working correctly.
+        # Absent is the only spelling of that -- an empty or non-string tile is
+        # a declared tile that is wrong, and falls through to a refusal.
         return {**base, "ok": True, "declared": False, "reason": ""}
-    if not isinstance(tile, str) or not isinstance(names, list) or not names:
-        return refuse("`dashboard.tile` declares no tabs to serve")
+    if not isinstance(tile, str) or not tile:
+        return refuse("`dashboard.tile` is not a command")
+    if not isinstance(names, list) or not names:
+        return refuse("`dashboard.tabs` names no tabs to serve")
     try:
         argv = shlex.split(tile)
     except ValueError as error:
@@ -385,12 +392,12 @@ def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
                 "id": where, "what": what, "detail": detail}
 
     for plugin in found:
-        prefix = plugin["prefix"]
+        label = plugin["label"]
         if not plugin["ok"]:
-            rows.append(dark(prefix, f"plugin {prefix} is not reporting", plugin["reason"]))
+            rows.append(dark(label, f"plugin {label} is not reporting", plugin["reason"]))
             continue
         for tab in plugin["tabs"]:
-            where = f"{prefix}/{tab['name']}"
+            where = f"{plugin['prefix']}/{tab['name']}"
             if not tab["ok"]:
                 # Per tab, not per plugin: the whole reason the tile is invoked
                 # once per tab is that one of them failing must not be the
