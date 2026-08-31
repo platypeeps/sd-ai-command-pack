@@ -232,6 +232,11 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
     their own: a plugin whose alert was malformed has still lost an alert, and
     that loss is exactly what must not be quiet.
     """
+    # `null` is absent, here and for `title` and `html` alike. The contract
+    # marks these keys optional, and a tile that spells "nothing to show" as
+    # `null` rather than by omission has lost nothing -- complaining about one
+    # spelling while accepting the other is a rule about JSON style rather than
+    # about what reached the operator. Raised in review; kept, and now stated.
     if payload is None:
         return [], []
     if not isinstance(payload, list):
@@ -445,7 +450,10 @@ def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
                 "rank": FAILURE_RANK,
                 "kind": "plugin-registry",
                 "id": "registry",
-                "what": "plugin registry unreadable",
+                # Not "unreadable": since the registry also reports entries it
+                # had to drop, a readable registry can fail here too, and a row
+                # that names the wrong failure is a row that misdirects.
+                "what": "plugin registry did not load cleanly",
                 "detail": failure,
             }
         )

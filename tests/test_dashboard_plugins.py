@@ -188,6 +188,35 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(loaded["tabs"], [])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
 
+    def test_an_explicit_null_is_the_same_as_an_absent_key(self) -> None:
+        """`null` is absent, and it is absent for every optional key alike.
+
+        Raised in review as a possible quiet loss. It is not one: a tile that
+        spells "nothing to show" as `null` rather than by omission has lost
+        nothing, and complaining about one spelling while accepting the other
+        would be a rule about JSON style. Pinned so the policy is a decision
+        rather than a coincidence of `.get`.
+        """
+        self.register(
+            self.plugin(
+                "vv",
+                tile_script(
+                    """
+                    import json, sys
+                    sys.stdout.write(json.dumps(
+                        {"title": None, "html": None, "rows": None}))
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        tab = self.only_tab(loaded)
+        self.assertTrue(tab["ok"])
+        self.assertEqual(tab["title"], "one")
+        self.assertEqual(tab["rows"], [])
+        self.assertEqual(tab["complaints"], [])
+        self.assertEqual(self.rows_of("plugin-dark", loaded), [])
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()
