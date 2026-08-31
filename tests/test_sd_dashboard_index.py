@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard import collect, store, trackers  # noqa: E402 - after the path insert
+from dashboard import collect, github, jira, store  # noqa: E402 - after the path insert
 
 NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -177,15 +177,15 @@ class StoreTests(unittest.TestCase):
 
 class WindowTests(unittest.TestCase):
     def test_no_watermark_opens_the_first_run_window(self) -> None:
-        self.assertEqual(trackers.window_start(None, NOW), NOW - trackers.FIRST_RUN_WINDOW)
+        self.assertEqual(github.window_start(None, NOW), NOW - github.FIRST_RUN_WINDOW)
 
     def test_a_watermark_is_rewound_by_the_overlap(self) -> None:
-        mark = trackers.iso(NOW - timedelta(hours=6))
-        self.assertEqual(trackers.window_start(mark, NOW), NOW - timedelta(hours=7))
+        mark = github.iso(NOW - timedelta(hours=6))
+        self.assertEqual(github.window_start(mark, NOW), NOW - timedelta(hours=7))
 
     def test_an_unparseable_watermark_widens_rather_than_narrows(self) -> None:
         """Garbage must never shrink the window; that stops collection silently."""
-        self.assertEqual(trackers.window_start("not-a-date", NOW), NOW - trackers.FIRST_RUN_WINDOW)
+        self.assertEqual(github.window_start("not-a-date", NOW), NOW - github.FIRST_RUN_WINDOW)
 
 
 class CollectTests(unittest.TestCase):
@@ -199,7 +199,7 @@ class CollectTests(unittest.TestCase):
                 "author": [page([node(9, shared, kind="PullRequest")])],
             }
         )
-        result = trackers.collect(None, NOW, gh)
+        result = github.collect(None, NOW, gh)
         self.assertTrue(result["ok"])
         self.assertEqual(len(result["issues"]), 1)
         self.assertEqual(
@@ -216,13 +216,13 @@ class CollectTests(unittest.TestCase):
                 "author": [page([])],
             }
         )
-        result = trackers.collect(None, NOW, gh)
+        result = github.collect(None, NOW, gh)
         self.assertEqual(len(result["issues"]), 2)
         self.assertEqual(result["truncated"], [])
 
     def test_the_page_ceiling_is_reported(self) -> None:
         """Property 3: a capped walk says so."""
-        endless = [page([node(n)], next_cursor=str(n + 1)) for n in range(trackers.MAX_PAGES + 2)]
+        endless = [page([node(n)], next_cursor=str(n + 1)) for n in range(github.MAX_PAGES + 2)]
         gh = FakeGh(
             {
                 "assignee": endless,
@@ -231,24 +231,24 @@ class CollectTests(unittest.TestCase):
                 "author": [page([])],
             }
         )
-        result = trackers.collect(None, NOW, gh)
+        result = github.collect(None, NOW, gh)
         self.assertEqual(result["truncated"], ["assigned"])
-        self.assertEqual(len(result["issues"]), trackers.MAX_PAGES)
+        self.assertEqual(len(result["issues"]), github.MAX_PAGES)
 
     def test_a_failing_bucket_keeps_the_rows_and_fails_the_collect(self) -> None:
         gh = FakeGh(
             {"assignee": [page([node(1)])], "mentions": [page([])], "review-requested": [page([])], "author": [page([])]},
             fail={"author"},
         )
-        result = trackers.collect(None, NOW, gh)
+        result = github.collect(None, NOW, gh)
         self.assertFalse(result["ok"])
         self.assertIn("author", result["reason"])
         self.assertEqual(len(result["issues"]), 1, "real rows were thrown away with the error")
 
     def test_unauthenticated_is_a_reason_not_a_crash(self) -> None:
-        result = trackers.collect(None, NOW, FakeGh({}, authed=False))
+        result = github.collect(None, NOW, FakeGh({}, authed=False))
         self.assertFalse(result["ok"])
-        self.assertEqual(result["reason"], trackers.NO_AUTH)
+        self.assertEqual(result["reason"], github.NO_AUTH)
         self.assertEqual(result["issues"], [])
 
     def test_graphql_errors_are_an_error_even_on_a_zero_exit(self) -> None:
@@ -267,7 +267,7 @@ class CollectTests(unittest.TestCase):
             body = {"data": {"search": None}, "errors": [{"message": "rate limited"}]}
             return 0, json.dumps(body), ""
 
-        result = trackers.collect(None, NOW, runner)
+        result = github.collect(None, NOW, runner)
         self.assertFalse(result["ok"])
         self.assertIn("rate limited", result["reason"])
         self.assertEqual(result["issues"], [])
@@ -280,7 +280,7 @@ class CollectTests(unittest.TestCase):
                 return 0, "", ""
             return 0, json.dumps({"data": {}}), ""
 
-        result = trackers.collect(None, NOW, runner)
+        result = github.collect(None, NOW, runner)
         self.assertFalse(result["ok"])
         self.assertIn("no search block", result["reason"])
 
@@ -293,13 +293,126 @@ class CollectTests(unittest.TestCase):
             block = {"pageInfo": {"hasNextPage": False}, "nodes": []}
             return 0, json.dumps({"data": {"search": block}}), ""
 
-        result = trackers.collect(None, NOW, runner)
+        result = github.collect(None, NOW, runner)
         self.assertTrue(result["ok"], "an empty search was treated as a failure")
         self.assertEqual(result["issues"], [])
 
     def test_a_node_without_a_url_is_dropped(self) -> None:
         """An empty key would collide every url-less node onto one row."""
-        self.assertIsNone(trackers.normalize({"number": 1}, "author"))
+        self.assertIsNone(github.normalize({"number": 1}, "author"))
+
+
+JIRA_ENV = {
+    "JIRA_BASE_URL": "https://example.invalid",
+    "JIRA_EMAIL": "someone@example.invalid",
+    "JIRA_API_TOKEN": "not-a-real-token",
+}
+
+
+def jira_issue(key: str, *, category: str = "To Do", me: str = "acct-1", **over):
+    fields = {
+        "summary": f"issue {key}",
+        "status": {"name": "Open", "statusCategory": {"name": category}},
+        "updated": "2026-08-30T00:00:00.000+0000",
+        "assignee": {"accountId": me, "displayName": "Sven"},
+        "reporter": {"accountId": "acct-other", "displayName": "Someone"},
+        "project": {"key": key.split("-")[0]},
+        "watches": {"isWatching": False},
+    }
+    fields.update(over)
+    return {"key": key, "fields": fields}
+
+
+def jira_transport(pages: list[dict], *, me: str = "acct-1", myself_error=None):
+    """A Jira that answers from a script. Records the JQL it was asked."""
+    seen: dict = {"jql": [], "calls": 0}
+
+    def transport(url, headers, body):
+        seen["calls"] += 1
+        if url.endswith("/myself"):
+            if myself_error is not None:
+                return None, myself_error
+            return {"accountId": me}, ""
+        seen["jql"].append(body["jql"])
+        index = len([j for j in seen["jql"]]) - 1
+        return (pages[index] if index < len(pages) else {"issues": [], "isLast": True}), ""
+
+    transport.seen = seen
+    return transport
+
+
+class JiraTests(unittest.TestCase):
+    def test_absent_variables_are_named_never_valued(self) -> None:
+        """Names and presence only -- the report must not become a leak."""
+        result = jira.collect(None, NOW, None, {"JIRA_API_TOKEN": "secret-value"})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "JIRA_BASE_URL and JIRA_EMAIL not set")
+        self.assertNotIn("secret-value", result["reason"])
+        self.assertNotIn("JIRA_API_TOKEN", result["reason"], "a set variable was reported missing")
+
+    def test_no_base_url_is_never_guessed(self) -> None:
+        """The backbone carries no employer host, not even as a fallback."""
+        env = dict(JIRA_ENV)
+        del env["JIRA_BASE_URL"]
+        result = jira.collect(None, NOW, jira_transport([]), env)
+        self.assertFalse(result["ok"])
+        self.assertIn("JIRA_BASE_URL", result["reason"])
+
+    def test_bad_credentials_fail_before_the_search_is_believed(self) -> None:
+        """A 200-with-no-issues must not read as "you have nothing to do"."""
+        transport = jira_transport([], myself_error="Jira rejected the credentials (401 Unauthorized)")
+        result = jira.collect(None, NOW, transport, JIRA_ENV)
+        self.assertFalse(result["ok"])
+        self.assertIn("401", result["reason"])
+        self.assertEqual(transport.seen["calls"], 1, "the search ran despite bad credentials")
+
+    def test_the_window_is_relative_minutes_not_a_timestamp(self) -> None:
+        """JQL date literals resolve in the Jira account's timezone, not ours."""
+        transport = jira_transport([{"issues": [], "isLast": True}])
+        jira.collect(github.iso(NOW - timedelta(hours=2)), NOW, transport, JIRA_ENV)
+        jql = transport.seen["jql"][0]
+        self.assertIn("updated >= -180m", jql, "the window was not the mark plus the overlap")
+        self.assertNotIn("2026-", jql, "a timezone-dependent timestamp reached the JQL")
+
+    def test_reasons_come_from_identity_and_from_jira_itself(self) -> None:
+        raw = jira_issue("ABC-1")
+        raw["fields"]["watches"] = {"isWatching": True}
+        raw["fields"]["reporter"] = {"accountId": "acct-1", "displayName": "Sven"}
+        transport = jira_transport([{"issues": [raw], "isLast": True}])
+        result = jira.collect(None, NOW, transport, JIRA_ENV)
+        self.assertTrue(result["ok"])
+        self.assertEqual(sorted(result["issues"][0]["why"]), ["assigned", "filed", "watching"])
+
+    def test_an_empty_identity_does_not_match_everyone(self) -> None:
+        """Empty-equals-empty is how every issue becomes both yours and theirs."""
+        raw = jira_issue("ABC-1")
+        raw["fields"]["assignee"] = {"displayName": "Nobody"}
+        raw["fields"]["reporter"] = {"displayName": "Nobody"}
+        transport = jira_transport([{"issues": [raw], "isLast": True}])
+        result = jira.collect(None, NOW, transport, JIRA_ENV)
+        self.assertEqual(result["issues"][0]["why"], ["matched"])
+
+    def test_the_status_category_decides_closed(self) -> None:
+        transport = jira_transport(
+            [{"issues": [jira_issue("ABC-1", category="Done")], "isLast": True}]
+        )
+        result = jira.collect(None, NOW, transport, JIRA_ENV)
+        self.assertEqual(result["issues"][0]["state"], "closed")
+
+    def test_paging_stops_at_the_ceiling_and_says_so(self) -> None:
+        pages = [
+            {"issues": [jira_issue(f"ABC-{n}")], "isLast": False, "nextPageToken": str(n)}
+            for n in range(jira.MAX_PAGES + 2)
+        ]
+        transport = jira_transport(pages)
+        result = jira.collect(None, NOW, transport, JIRA_ENV)
+        self.assertEqual(result["truncated"], ["jql"])
+        self.assertEqual(len(result["issues"]), jira.MAX_PAGES)
+
+    def test_window_minutes_rounds_up(self) -> None:
+        """Truncating would shave the oldest edge off the overlap."""
+        self.assertEqual(jira.window_minutes(NOW - timedelta(seconds=61), NOW), 2)
+        self.assertEqual(jira.window_minutes(NOW, NOW), 1)
 
 
 class RefreshTests(unittest.TestCase):
@@ -318,24 +431,48 @@ class RefreshTests(unittest.TestCase):
             fail=fail,
         )
 
+    def refresh(self, gh: FakeGh, jira_seam=None):
+        return collect.refresh_issues(
+            self.connection, NOW, {"github": gh, "jira": jira_seam}
+        )
+
     def test_a_successful_refresh_moves_the_watermark(self) -> None:
-        result = collect.refresh_issues(self.connection, NOW, self.all_pages([node(1)]))
+        result = self.refresh(self.all_pages([node(1)]))["github"]
         self.assertTrue(result["watermark_moved"])
         self.assertEqual(result["inserted"], 1)
-        self.assertEqual(store.watermark(self.connection, "github"), trackers.iso(NOW))
+        self.assertEqual(store.watermark(self.connection, "github"), github.iso(NOW))
 
     def test_a_failed_refresh_leaves_the_watermark_where_it_was(self) -> None:
         """Property 2, the one that decides whether a gap is temporary."""
         store.set_watermark(self.connection, "github", "2026-08-01T00:00:00Z", "x")
-        result = collect.refresh_issues(
-            self.connection, NOW, self.all_pages([node(1)], fail={"author"})
-        )
+        result = self.refresh(self.all_pages([node(1)], fail={"author"}))["github"]
         self.assertFalse(result["watermark_moved"])
         self.assertEqual(result["inserted"], 1, "the rows that did arrive were dropped")
         self.assertEqual(
             store.watermark(self.connection, "github"),
             "2026-08-01T00:00:00Z",
             "a partial collect stepped the window past the bucket that failed",
+        )
+
+    def test_an_unconfigured_tracker_does_not_stop_the_other(self) -> None:
+        """Per-tracker watermarks: one failing must not gate or skew the other.
+
+        `jira.settings` is pinned rather than left to read the ambient
+        environment. A machine with all three Jira variables exported would
+        otherwise make this test open a socket -- the same environment
+        dependency that made the NO_AUTH assertion pass by accident of the CI
+        image.
+        """
+        original = jira.settings
+        jira.settings = lambda environ=None: {"base": "", "email": "", "token": "", "jql": ""}
+        self.addCleanup(lambda: setattr(jira, "settings", original))
+        results = self.refresh(self.all_pages([node(1)]))
+        self.assertTrue(results["github"]["ok"])
+        self.assertFalse(results["jira"]["ok"], "Jira collected without credentials")
+        self.assertEqual(store.watermark(self.connection, "github"), github.iso(NOW))
+        self.assertIsNone(
+            store.watermark(self.connection, "jira"),
+            "an unconfigured tracker's window was stepped forward over a gap it never read",
         )
 
 
@@ -351,13 +488,13 @@ class DumpTests(unittest.TestCase):
         def explode(*_args, **_kwargs):
             raise AssertionError("--dump reached the network or the index")
 
-        original_run, original_connect = trackers._run, store.connect
-        trackers._run, store.connect = explode, explode
+        original_run, original_connect = github._run, store.connect
+        github._run, store.connect = explode, explode
         try:
             buffer = io.StringIO()
             code = module["main"](["index", "--dump"], out=buffer)
         finally:
-            trackers._run, store.connect = original_run, original_connect
+            github._run, store.connect = original_run, original_connect
         self.assertEqual(code, 0)
         self.assertIn('"repos"', buffer.getvalue())
 

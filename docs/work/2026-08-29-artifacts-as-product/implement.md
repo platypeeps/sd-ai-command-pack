@@ -791,7 +791,60 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     the Issues tab and "Needs you", `sd-status` `issues:` lines, and
     `sd-plan --from gh:o/r#N|jira:KEY`. An empty Jira collector in the inventory would
     answer nothing while reading as a feature that exists.
-- [ ] 4b-ii
+- [x] 4b-ii — 2026-08-31. The Jira collector, into the same index. Surfaces (Issues
+      tab, "Needs you", `sd-status issues:` lines, `sd-plan --from`) are 4b-iii: this
+      step finishes the collectors, and a tab over one and a half trackers would have to
+      be revisited the moment the second landed.
+  - **`trackers.py` is renamed to `github.py`, because it only ever held GitHub.** The
+    two collectors share exactly one thing — the five-key contract
+    `collect.refresh_issues` calls — and nothing else, because the services differ:
+    GitHub is reached through the `gh` CLI and answers GraphQL, Jira over HTTP with
+    basic auth and answers JQL. A shared base class would abstract over that split and
+    buy nothing at two implementations.
+  - **Three things carried over verbatim from the system dashboard, each learned the
+    hard way.** `myself` is the availability check rather than the search, because bad
+    credentials do not make a JQL search fail — Jira answers 200 with
+    `{"issues": [], "isLast": true}` since `currentUser()` resolves to anonymous, who is
+    assigned nothing, so the search cannot tell "your credentials are wrong" from "you
+    have nothing to do". The account id and not the email is what issues are matched
+    against, because Jira hides `emailAddress` on any site with the privacy setting on
+    and empty-equals-empty marks every issue as both yours and theirs. And
+    `watches.isWatching` is read rather than derived, because Jira has already computed
+    it for the authenticated user.
+  - **Three things deliberately changed, and the middle one would have been a defect.**
+    *No default base URL:* the system dashboard falls back to a specific Atlassian host
+    and this backbone carries no employer footprint, not even as a fallback, so an unset
+    `JIRA_BASE_URL` is "not configured" and never a guess. *The window replaces the
+    open-only filter:* a worklist wants open issues, but an index that never sees a
+    close leaves the row saying `open` forever. *The window is relative minutes, never a
+    timestamp:* JQL date literals resolve in the **Jira account's** configured timezone,
+    which this machine has no way to know, and `-180m` has no timezone to get wrong.
+    A straight port would have shipped a window silently offset by the account's UTC
+    offset.
+  - **Watermarks are per tracker, and a test proves one cannot step the other's.** Jira
+    being unconfigured neither blocks GitHub from collecting nor lets GitHub's success
+    advance Jira's window over a gap it never read.
+  - **Two environment-dependent tests, caught before review this time.** The refresh test
+    and the CLI harness both let Jira read the ambient environment, so a machine with all
+    three `JIRA_*` variables exported would have had the suite open a socket against a
+    real tenant. Both now pin `jira.settings`. This is the same defect class Copilot
+    found in 4b-i's harness one PR earlier, which is why it was looked for.
+  - Checks, run: `python3 bin/sd-dashboard index` on the real machine printed
+    `issues[github]: 0 new, 5 updated, 18 open` and
+    `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` — one line per
+    tracker, and the unconfigured one names the variables and reports no value.
+    `make check` exits 0 over 59 dashboard tests; `dashboard/` is 1,195 lines of its
+    2,500 cap.
+  - **Named gap, not a fabricated check: the live Jira path is unverified on this
+    machine.** `JIRA_API_TOKEN` is present in the environment; `JIRA_BASE_URL` and
+    `JIRA_EMAIL` are not — they exist only in the system repo's `.env`, which this pack
+    must not read, so no run here can reach a real tenant. What *is* verified: the
+    not-configured path, live, against the real environment; and every parse, window,
+    identity, paging and upsert path against fixtures shaped from the field list the
+    system dashboard has been using in production. What would settle the rest is one
+    run with the two variables exported — it belongs to whoever has them, and until then
+    this row says unverified rather than green.
+- [ ] 4b-iii — Issues tab + "Needs you", `sd-status issues:` lines, `sd-plan --from`
 - [ ] 5 / 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0

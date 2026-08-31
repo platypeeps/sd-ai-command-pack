@@ -26,9 +26,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from dashboard import (  # noqa: E402 - after the path insert
     collect,
+    github,
+    jira,
     server,
     store,
-    trackers,
 )
 
 
@@ -208,8 +209,9 @@ class CommandLineTests(FleetHarness):
         out = io.StringIO()
         original_root = collect.repo_root
         original_path = store.index_path
-        original_run = trackers._run
-        original_available = trackers.available
+        original_run = github._run
+        original_available = github.available
+        original_settings = jira.settings
         collect.repo_root = lambda environ=None: self.root  # type: ignore[assignment]
         store.index_path = lambda environ=None: (  # type: ignore[assignment]
             self.root / ".cache" / "index.sqlite"
@@ -221,15 +223,25 @@ class CommandLineTests(FleetHarness):
         # test report NO_GH on a CI image without `gh` and NO_AUTH on a laptop
         # with it. `_run` is patched as the hard stop: whatever the code does,
         # no argv reaches a real binary.
-        trackers.available = lambda runner=None: (False, trackers.NO_AUTH)  # type: ignore[assignment]
-        trackers._run = lambda argv, runner=None: (1, "", "not logged in")  # type: ignore[assignment]
+        github.available = lambda runner=None: (False, github.NO_AUTH)  # type: ignore[assignment]
+        github._run = lambda argv, runner=None: (1, "", "not logged in")  # type: ignore[assignment]
+        # Jira gets the same treatment for the same reason: a machine with the
+        # three JIRA_* variables exported would otherwise have this harness
+        # open a socket against a real tenant.
+        jira.settings = lambda environ=None: {  # type: ignore[assignment]
+            "base": "",
+            "email": "",
+            "token": "",
+            "jql": "",
+        }
         try:
             code = sd_dashboard.main(list(argv), out=out)
         finally:
             collect.repo_root = original_root  # type: ignore[assignment]
             store.index_path = original_path  # type: ignore[assignment]
-            trackers._run = original_run  # type: ignore[assignment]
-            trackers.available = original_available  # type: ignore[assignment]
+            github._run = original_run  # type: ignore[assignment]
+            github.available = original_available  # type: ignore[assignment]
+            jira.settings = original_settings  # type: ignore[assignment]
         return code, out.getvalue()
 
     def test_index_reports_counts(self):
@@ -244,8 +256,11 @@ class CommandLineTests(FleetHarness):
         code, output = self.run_cli("index")
         self.assertEqual(code, 0, "an unreachable tracker failed the whole command")
         self.assertIn("1 repos", output)
-        self.assertIn("issues: not collected", output)
-        self.assertIn(trackers.NO_AUTH, output)
+        self.assertIn("issues[github]: not collected", output)
+        self.assertIn(github.NO_AUTH, output)
+        # One line per tracker, because a merged total hides that half of them
+        # never answered.
+        self.assertIn("issues[jira]: not collected", output)
 
     def test_dump_is_json_and_identical_across_runs(self):
         self.make_repo("a")
