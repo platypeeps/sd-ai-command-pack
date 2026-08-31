@@ -406,9 +406,21 @@ that asserted it. Result across the 24 non-archived platypeeps repos and the 5 a
   15 vault routines that D-doctrine says stay system-owned); `www_platypeeps_com`,
   `copper-hugo-platypeeps`, `godocs-hugo-platypeeps`, `doc_platypeeps_com`, `company`, and
   `company-public` are dormant (last commit 2022–2025); `sd-github-review-pilot` and
-  `sd-review-test` are retired at step 4; `testme` has no default branch. `platypeeps/
-  google_workspace_mcp` was left as the one open call — see the amendment below, which
-  resolves it and corrects the reason it was open.
+  `sd-review-test` are retired at step 4; `testme` has no default branch.
+  `platypeeps/google_workspace_mcp` was left as the one open call — the amendment at the end
+  of this record resolves it and corrects the reason it was open.
+- **All 5 active personal `sdelmas/*` repos are forks** (Trellis, prism, marketplace,
+  google_workspace_mcp, SREGym). Fork-first doctrine governs: a fork's `main` tracks upstream and
+  the patch stack lives on integration branches, so protecting it would fight the flow it exists
+  to serve. No protection added.
+- **No employer/mezmo repo was read or touched** (D7 freeze; collaborators never affected).
+
+Consequence for the prose, and the reason this is a decision and not a chore: the doctrine is now
+stated conditionally everywhere it appears (critique 4, the gates section, the autonomous lane, prd
+requirement 2, this repo's CONTRIBUTING). "Merge authority is branch protection" is true only while
+protection enforces; where it does not, `sd-status` reports the gap (folded into the step-3b brief)
+and no document claims a guarantee the config does not provide.
+
 **R11-D3 amendment (user, 2026-08-31) — `platypeeps/google_workspace_mcp` stays unprotected,
 deliberately; and the activity number that made it an open call was wrong.**
 
@@ -441,18 +453,6 @@ How the wrong number got in: 60 days of merge commits were counted on `main` and
 requests, without checking who authored them or asking GitHub how many pull requests the repo has
 ever had. Both checks are one API call. The lesson generalizes past this row — a merge count is
 not a review count in any repo that syncs an upstream.
-
-- **All 5 active personal `sdelmas/*` repos are forks** (Trellis, prism, marketplace,
-  google_workspace_mcp, SREGym). Fork-first doctrine governs: a fork's `main` tracks upstream and
-  the patch stack lives on integration branches, so protecting it would fight the flow it exists
-  to serve. No protection added.
-- **No employer/mezmo repo was read or touched** (D7 freeze; collaborators never affected).
-
-Consequence for the prose, and the reason this is a decision and not a chore: the doctrine is now
-stated conditionally everywhere it appears (critique 4, the gates section, the autonomous lane, prd
-requirement 2, this repo's CONTRIBUTING). "Merge authority is branch protection" is true only while
-protection enforces; where it does not, `sd-status` reports the gap (folded into the step-3b brief)
-and no document claims a guarantee the config does not provide.
 
 ### Autonomous backlog lane — `sd-ship --backlog --agent codex` (R10-D1)
 
