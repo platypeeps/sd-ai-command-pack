@@ -197,9 +197,9 @@ mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes
 Sessions tab = `git worktree list` + running sd-* processes (replaces Trellis `.runtime/sessions`
 — the Trellis-hooks answer: **no hook carries over**). Lands on **:8768 beside** the system
 dashboard; per-tab parity checklist gates the swap to :8767 at step 6b. Deferred behind standing
-rule 1: FTS/Search, log streaming, session launcher. D14 decides phone access (today's tailnet
-iOS PWA writes are live — loopback-only is a knowing regression; option (c) keeps ack/queue-set
-POSTs under token).
+rule 1: FTS/Search, log streaming, session launcher. Phone access is **decided as (c)** — see
+R11-D10 below; the swap at 6b carries today's tailnet reach and its token-gated writes rather
+than regressing them.
 
 ### Review routing + pluggable backends (r3; revises D4)
 
@@ -761,6 +761,93 @@ and the ones that exist already total 2,811 (2,776 until #620) — `bin/sd-statu
 stale, not the ceiling, and re-deriving it against a half-built `bin/` would replace one estimate
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
+
+**R11-D11 (user, 2026-08-31) — the caveman review lane is demoted, not forked away.**
+
+The plan's step-3e row said "caveman fork drops review lane". P5 could not execute it and said so
+rather than reporting the row done: there is no fork, the marketplace entry points straight at
+upstream `JuliusBrussee/caveman`, and dropping `caveman:cavecrew-reviewer` would mean forking a
+third-party plugin and maintaining that fork forever to delete one 1.5 KB file. The other two
+agents in the same plugin — `cavecrew-builder` (bounded 1–2 file edits) and `cavecrew-investigator`
+(read-only locator) — are useful and conflict with nothing.
+
+**The decision: keep the plugin installed, and demote the reviewer to a scratch tool.**
+`sd-review` is the only lane that produces a *recorded* verdict. `cavecrew-reviewer` may be run for
+a quick second look, and its output goes nowhere: it never writes `## Review`, never dispositions a
+finding, never gates a merge, and is never named by a pack lane.
+
+**Why this is doctrine and deliberately not machinery.** Standing rule 1 forbids a new gate without
+a linked incident, and there is no incident here — no caveman finding has ever entered a `## Review`
+section, because nothing automated could put it there. Writing an enforcement check would be
+building the gate the rule exists to prevent, to guard against a human choosing to paste. The rule
+is one sentence, and the thing that makes it hold is that no code path exists to violate it.
+
+**The falsifiable form, since a sentence with no check is how prose gates start.** No `bin/` code
+invokes it: `git grep -l cavecrew -- bin/` prints nothing and exits 1 today, and that is the
+invariant. The one tracked file naming `cavecrew` at all is this rollout's own `implement.md`,
+describing the situation. If a `bin/` hit ever appears, the demotion has been reversed by accident
+and the lane needs a real decision rather than this one.
+
+**Why the kimi/codex treatment does not transfer.** Step 3b vendored those agents *into* the pack
+and then uninstalled their plugins, because pack lanes call them — `sd-review --challenge` names
+kimi-challenge, and the vendored copy is what makes the lane survive the uninstall. No pack lane
+calls a caveman agent, so vendoring buys nothing and forking costs a fork. The asymmetry is not
+inconsistency: it tracks whether the backbone depends on the surface.
+
+**Deletion criterion.** Not applicable in the usual direction — nothing is being added. The
+reverse trigger: if a caveman finding is ever wanted in a recorded verdict, that is `sd-review`
+growing a provider row, which is a backend-table change with its own record, not a quiet promotion
+of the plugin agent.
+
+**R11-D10 (user, 2026-08-31) — D14 resolves to (c): the phone keeps its writes, and the
+GET-only assertion is temporary by design.**
+
+Three D14s exist across the rounds and only one was open. `r7 D14` (no sd-* command may depend on
+claude-mem) and `R8 D14` (OmniRoute removed, R11-D2) were already decided; this is `r2 D14`, phone
+access, and it is the one thing that blocked step 6b.
+
+**What was actually measured, because the obvious framing was wrong.** Both dashboards bind
+`127.0.0.1`. The binding is not the difference between them. The system dashboard reaches the phone
+through `tailscale serve` — tailnet-only HTTPS, never `funnel` — terminating in front of that
+loopback socket, and it guards the reach with three things rather than one: a Host-header allowlist
+covering the loopback names plus this node's own MagicDNS names, a per-process token required on
+every mutating request (`X-Dashboard-Token`, checked immediately after the Host check), and the
+deliberate absence of CORS headers, so a page on another origin cannot obtain the preflight it
+would need to send that header at all. Those live in the *system* repo, not this one — the file
+under replacement is `~/repos/system/local-project-dashboard/dashboard.py`, where `do_POST` opens
+at line 1658 with `host_ok()` (defined at 1532) and the token comparison at 1661. The path is
+spelled in full because a bare `dashboard.py:1661` reads as an in-repo citation and there is no
+such file here; `dashboard/server.py` is this repo's, and it is GET-only until 6b. Three write endpoints ride on that:
+`POST /api/update`, `/api/ack`, `/api/refresh`.
+
+**The decision.** At 6b the replacement takes `:8767` *with* the tailnet reach and *with* those
+writes, under the same three guards. Options (a) loopback-only and (b) tailnet read-only were both
+available and both were regressions of a working daily surface — the iOS PWA is in live use, and
+removing ack and queue-set from it would mean picking up a laptop to do what a thumb does now.
+A framework that makes an existing workflow worse in order to keep its own invariant tidy has the
+priority backwards.
+
+**The cost, stated rather than discovered later.** P3 shipped `dashboard/server.py` with `do_GET`
+and nothing else, and `tests/test_sd_dashboard.py` asserts the *absence* of `do_POST`, `do_PUT` and
+`do_DELETE`. That assertion is now known to be temporary, and it stays exactly as it is until 6b —
+it is correct today and it is what stops a tab quietly growing a write endpoint in the meantime.
+At 6b it is not deleted but **replaced by a stronger one**: that every mutating handler refuses a
+request failing the Host allowlist, refuses one without the token, and that no CORS header is ever
+emitted. "No writes" is easy to assert and easy to lose; "writes exist and are guarded three ways"
+is the assertion that has to survive.
+
+Two things this does **not** license. The server still never commits, pushes, or runs an agent: the
+r2 rule that every UI mutation maps 1:1 to a `bin/` command through RUN_ALLOWLIST is untouched, and
+status flips remain intents applied by the next `sd-plan`/`sd-ship` sweep rather than a working-tree
+write from a page load. And `tailscale funnel` remains out of the question — the reach is the
+tailnet, not the internet, which is the line the system dashboard's own module docstring draws and
+the reason it draws it.
+
+**Deletion criterion (standing rule 1 applied to a carried-over mechanism rather than a new one).**
+The writes exist because the phone uses them. If 60 days after the 6b swap the index shows fewer
+than 10 mutating requests from a tailnet Host, the endpoints and their guards are deleted and the
+dashboard returns to GET-only — which is where P3 already left it, so the reversal costs one commit
+rather than a rewrite.
 
 **R11-D4 (user, 2026-08-29) — the macOS CI leg is dropped for the rollout, and restored at step 7.**
 
