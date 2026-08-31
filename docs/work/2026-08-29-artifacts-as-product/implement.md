@@ -1592,7 +1592,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
           every shared fact
     - [ ] tailnet reach and token-gated writes carried, not regressed (R11-D10
           decided phone access as (c))
-    - [ ] `lsof -i :8767` shows one process, and it is the pack's
+    - [ ] `lsof -i :8767` shows exactly one listening process, and it is the
+          pack's dashboard rather than the system one
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
