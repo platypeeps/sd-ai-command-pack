@@ -1299,8 +1299,21 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     76, 0, exit 0. Mutation-checked rather than trusted: a fixture with a
     mismatched `name` and an empty `description` produces exactly those two
     findings and exit 1, so the zero above is a result and not an empty loop.
-    `make check` exit 0, 44 new tests. `bin/` is 7,468 lines against the 8,000
+    `make check` exit 0, 47 new tests. `bin/` is 7,487 lines against the 8,000
     cap.
+  - **A path traversal, found in review and fixed in the code rather than in a
+    test.** Copilot asked for a test pinning that a hostile `name:` from stdin
+    or a URL is refused. There was no such test because there was no such
+    refusal: on those two paths there is no directory for the frontmatter to
+    disagree with, so `name:` alone decided the destination, and
+    `name: ../../evil` resolved outside the skills root — in the one tool whose
+    entire job is handling files nobody has vetted. The fix is a lint rule that
+    a name is a single path segment, chosen after measuring rather than before:
+    all 138 names under `~/.claude/skills` and all 79 under `~/.codex/skills`
+    already sit inside `[A-Za-z0-9._-]`, so the rule costs nothing real. It went
+    in the *lint* rather than at the write so every path that writes a skill is
+    covered once, with a resolved-inside-root assertion at the write as the
+    check that survives a later refactor adding a path that skips the lint.
   - **What the tool found on its first real use, which is the argument for
     having built it.** Surveying `sd-writing-pack` reported "no skills found"
     for a repository holding twelve: `--from-repo` looked one level down, and

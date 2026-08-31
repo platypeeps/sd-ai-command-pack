@@ -25,9 +25,9 @@ adopted**. A pipeline with a zero completion rate is a wall.
      something from the user;
    - exfiltration: a network verb standing beside something worth sending — a
      credential-shaped environment variable name, the address that identifies
-     the user, this machine's own state files. Either half alone is ordinary
-     and passes; the pair is the refusal, because nothing in a static read can
-     say which line feeds which;
+     the user, this machine's own state files. Either half alone **warns** —
+     it is ordinary, and a skill is not refused for it. The **pair** is the
+     refusal, because nothing in a static read can say which line feeds which;
    - credential handling: reading `~/.ssh`, `auth.json`, `.netrc`, `.env`, or
      dumping the environment;
    - `curl | sh`. An unpinned install warns rather than refuses — "latest" is
@@ -35,9 +35,12 @@ adopted**. A pipeline with a zero completion rate is a wall.
    - **named Google connector tools** — `mcp__claude_ai_Gmail|Google_*` and
      `mcp__gmail__*` ghosts. workspace-mcp is the only Google write path; a
      skill naming a connector send names one the send guard does not cover.
-2. **Lint.** Frontmatter that parses, a `name` matching the directory, a
-   one-line non-empty `description`, a kind marker that is actually a boolean,
-   and no `tools:` — `tools:` marks an agent, and agents live in `agents/`.
+2. **Lint.** Frontmatter that parses, a `name` matching the directory and
+   spelled as a single path segment — on the `-` and URL paths there is no
+   directory to disagree with, so `name:` alone decides where the file lands,
+   and `name: ../../evil` would land there — a one-line non-empty
+   `description`, a kind marker that is actually a boolean, and no `tools:`,
+   which marks an agent, and agents live in `agents/`.
 3. **Canonical transform.** Apply the `sd-` prefix when the skill is joining
    the pack's namespace, and check the name against the eleven commands and
    against every surface already installed at the destination — a collision is

@@ -160,6 +160,30 @@ class LintTests(unittest.TestCase):
         text = "---\nname: candidate\ndescription:\n---\n\n# candidate\n"
         self.assertIn("missing-description", {f.rule for f in adopt.lint("candidate", text)})
 
+    def test_a_name_that_is_not_one_path_segment(self) -> None:
+        """The traversal the stdin and URL paths would otherwise have.
+
+        There is no directory for the frontmatter to disagree with on those two
+        paths, so `name:` alone decides where the file is written -- and
+        `../../evil` would be written there. Pinned in the lint rather than at
+        the write so every path that ever writes a skill is covered by one rule
+        instead of each write site remembering to sanitize. Found by Copilot on
+        #642.
+        """
+
+        for hostile in ("../../evil", "a/b", ".hidden", "..", "sd-x/../../y"):
+            text = CLEAN.replace("name: candidate", f"name: {hostile}")
+            with self.subTest(name=hostile):
+                self.assertIn("unsafe-name", {f.rule for f in adopt.lint(hostile, text)})
+
+    def test_the_names_real_skills_have_are_not_refused(self) -> None:
+        # The rule is worth nothing if it also rejects ordinary names. These are
+        # the shapes actually on disk: prefixed, dotted, digits.
+        for benign in ("sd-typed-holes", "cmux", "hyperframes-cli", "v2.plan", "a_b"):
+            text = CLEAN.replace("name: candidate", f"name: {benign}")
+            with self.subTest(name=benign):
+                self.assertEqual([f.rule for f in adopt.lint(benign, text)], [])
+
     def test_an_agent_in_the_skills_tree(self) -> None:
         text = CLEAN.replace("---\n\n#", "tools: Read, Grep\n---\n\n#")
         self.assertIn("agent-in-skills-tree", {f.rule for f in adopt.lint("candidate", text)})
@@ -291,6 +315,30 @@ class AdoptRunTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("command marker", err)
         self.assertFalse(self.adopted("candidate").exists())
+
+    def test_a_hostile_name_from_stdin_writes_nothing_anywhere(self) -> None:
+        """End to end, on the path that has no directory to cross-check.
+
+        The lint assertion above proves the rule fires; this proves the run
+        stops on it and that nothing appeared outside the destination root --
+        which is the claim that matters, and the one an exit code alone does
+        not make.
+        """
+
+        class Stdin:
+            buffer = io.BytesIO(CLEAN.replace("name: candidate", "name: ../../evil").encode())
+
+        original = sys.stdin
+        sys.stdin = Stdin()
+        try:
+            out, err = io.StringIO(), io.StringIO()
+            code = adopt.run_adopt("-", "user", self.home, out, err, "2026-08-31")
+        finally:
+            sys.stdin = original
+        self.assertEqual(code, 1)
+        self.assertIn("unsafe-name", out.getvalue())
+        self.assertEqual(list((self.home / ".claude" / "skills").iterdir()), [])
+        self.assertEqual([p.name for p in self.root.iterdir()], ["home"])
 
     def test_a_missing_source_is_an_argument_error(self) -> None:
         # 2, not 1: "you typed a path that is not there" and "the candidate was

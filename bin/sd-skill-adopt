@@ -75,6 +75,15 @@ COMMANDS = frozenset({
 
 MARKER = "disable-model-invocation"
 
+# A name is one path segment and nothing else. On the `-` and URL paths there is
+# no directory for the frontmatter to disagree with, so `name:` alone decides
+# where the file is written -- and `name: ../../evil` would be written there.
+# Measured before choosing the character set rather than after: across the 138
+# skills installed on this machine and the 79 under ~/.codex, every name is
+# already inside this set, so the rule costs nothing real and closes a traversal
+# in the one tool whose whole job is handling files nobody has vetted.
+SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 REFUSE = "refuse"
 WARN = "warn"
 
@@ -239,6 +248,13 @@ def lint(directory_name: str, text: str) -> list[Finding]:
     description = fields.get("description", "")
     if not description.strip():
         findings.append(Finding(REFUSE, "missing-description", 1))
+
+    if name and not SAFE_NAME_RE.match(name):
+        # Deliberately in the lint and not at the write. A separator or a `..`
+        # in a name is a malformed name, and saying so here means every path
+        # that ever writes a skill is covered by one rule rather than each
+        # write site remembering to sanitize.
+        findings.append(Finding(REFUSE, "unsafe-name", 1, "not a single path segment"))
 
     if "tools" in fields:
         # `tools:` is what makes something an agent, and agents live in
@@ -548,6 +564,14 @@ def run_adopt(
     out.write("provenance: recorded\n")
 
     destination = root / target / SKILL_FILE
+    # Belt and braces. The lint above rejects a name that is not one segment, so
+    # this cannot fire today; it is here because it is the check that stays true
+    # if someone later adds a write path that skips the lint, and a traversal
+    # caught only by a rule two stages earlier is a traversal waiting for a
+    # refactor.
+    if root.resolve() not in destination.resolve().parents:
+        err.write(f"refused: {target} resolves outside {root}; nothing written\n")
+        return 1
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(adopted, encoding="utf-8")
     out.write(f"adopted: {destination}\n")
