@@ -1499,6 +1499,75 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     directory on `PATH` costs nothing. Named so the next reader does not take
     the plugin sweep for a full audit.
 - [ ] 6b — dashboard swap to :8767 behind the parity checklist.
+  - **The checklist is written, and it lives here.** It was drafted as a
+    separate `dashboard-parity.md` and `sd-docs-lint` refused it — *"a work item
+    holds prd.md, design.md and implement.md only"*, rule 1, on the pack's own
+    work item. The gate was right and the file was folded in rather than the
+    rule relaxed; the tables below are that checklist. Written 2026-08-31,
+    before any swap.
+  - Both columns are enumerated **from the running code**, not from design.md,
+    and that matters: design.md names the target tabs as "Now · Work · PRs ·
+    Issues · Repos · Queues · Suggestions · Skills · Sessions", and only three
+    of those nine are tabs the system dashboard actually has. That list is the
+    destination, not an inventory.
+  - **What each side serves today.** The system dashboard
+    (`dashboard.py:1455`) has fifteen tabs from thirteen collectors: Needs you
+    and Projects (both derived client-side, no collector), Work
+    (`collect_work` rollup plus `/api/work` for the timeline), Research
+    (`collect_research`, checkouts carrying `research.conf.py`), Repos
+    (`collect_repos`, the `repo-sync` profile plus on-disk checkouts), Issues (`collect_issues` +
+    `collect_github_issues` + `collect_jira`), Vault (`collect_areas`) and Briefs
+    (`collect_briefs`, both read the vault), Toolbox (`collect_toolbox`,
+    `launchctl list` for `com.sven.*` and the job logs), Ports
+    (`collect_ports`, `machine-setup.sh candidates service`), and five `db-*` queue tabs — blog,
+    tip, skill, topic, watch — from `collect_queues`. Two collectors feed no
+    tab of their own: `collect_prs` and `collect_rtk`.
+    The pack dashboard (`dashboard/app.js:129`) has **two** tabs, Repos and
+    Issues, from two collectors and four HTTP routes (`/`, `/app.js`,
+    `/api/state`, `/api/issues`). `sd-dashboard index --dump` returns 79
+    checkouts, so the Repos half is real and not a stub.
+  - **Where each tab lands**, per design.md's rule that system views stay
+    system-owned behind `dashboard.d/*.py` plugin tabs while the shell and the
+    framework-native facts fold into the backbone:
+
+    | Tab | Destination | Built? |
+    |---|---|---|
+    | Repos | backbone | **yes** |
+    | Issues | backbone — the one migrating view (R3-D13) | **yes** |
+    | Work · Now · PRs · Queues | backbone | no |
+    | Suggestions · Skills · Sessions | backbone, **new** — no system counterpart | no |
+    | Toolbox · Briefs · Vault · Research · Jira personal | **plugin tab**, stays system-owned | no |
+    | Projects | derived; folds into Now/Work rather than porting | n/a |
+    | Ports · rtk savings | no destination stated in the design | **undecided** |
+  - **The verdict: two of fifteen tabs exist, thirteen do not**, and four of
+    those thirteen are new surfaces with no system counterpart to port from.
+  - Three pieces of the contract are absent beyond the tabs: no
+    `dashboard.d/*.py` plugin-tab loader (five tabs are supposed to arrive
+    through it), no `RUN_ALLOWLIST`, and `sd-dashboard` ships two of its five
+    verbs — `install`, the one that performs the swap, is among the three that
+    do not exist.
+  - So **6b is not a port swap gated by a checklist**: it is thirteen tabs, a
+    plugin contract, an allow-list and three verbs, and the swap is its last
+    step. The plan's one-line row understates it, which is the finding.
+  - Two decisions the checklist raises and does not settle: the **Ports** tab
+    and the **rtk savings ledger** have no stated destination in the design; and
+    `dashboard.py` is one 1,728-line file serving all fifteen tabs, so it cannot
+    be deleted per-tab — the two dashboards coexist for the whole of 6b rather
+    than for a short window. The risk register names that window; this makes its
+    length concrete.
+  - **What must be true before the swap**, the gate itself:
+    - [ ] every tab marked "backbone" above serves from the pack dashboard
+    - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from
+          `~/repos/system`, code and pinned actions still system-owned
+    - [ ] Ports and rtk have a recorded decision
+    - [ ] `RUN_ALLOWLIST` exists and every UI mutation maps 1:1 to a `bin/`
+          command
+    - [ ] `sd-dashboard install` exists and replaces the system LaunchAgent
+    - [ ] `index --dump` diffed against the system `/api/state` is empty for
+          every shared fact
+    - [ ] tailnet reach and token-gated writes carried, not regressed (R11-D10
+          decided phone access as (c))
+    - [ ] `lsof -i :8767` shows one process, and it is the pack's
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
