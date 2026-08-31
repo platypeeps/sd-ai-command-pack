@@ -82,9 +82,9 @@ draft-PR lane +450 · R10-D2 draft-convert +40 · 45-day sweep +40 · google.acc
 +50 · env reads +20 = **~7,170**, leaving ~830 headroom — *superseded as a prediction by the
 count in R11-D13: `bin/` core is already at 7,492 with seven commands unbuilt. The itemisation
 stands as the record of how 8,000 was derived, not as a claim about today.* The earlier 6,000 and 6,500 figures
-were both busted on paper; setting 8,000 now is the honest number, still <1/11 of today's 95k.
-*Superseded by R11-D15: 8,000 was busted too, and the current ceiling is 14,000 — roughly a
-seventh of the 95k rather than an eleventh.*
+were both busted on paper, and on 2026-08-29 the record called 8,000 the honest number at
+"still <1/11 of today's 95k". *8,000 was busted too. R11-D15 re-derived the ceiling at 14,000
+from built code — roughly a seventh of the 95k rather than an eleventh.*
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
 ceiling until then. dashboard/ ≤ **2,500** (justified as "credible: 457 lifted + one JS file" — *the 457
 is superseded by R11-D13's enumeration at 763; the cap's number stands, its stated justification does
