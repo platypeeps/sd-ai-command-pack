@@ -674,11 +674,15 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       the ceiling is lowered under the real count.
 - [x] 4 — 2026-08-31. Four router repositories archived, each carrying a pointer
       rather than a redirect nobody can read.
-  - **The stated check was already met before the step began.** `git grep -c
-    remoteIntegration bin/` is 0, and has been since the remote half went at steps 1
-    and 2. So step 4 was never about deleting code from here; it was about the
-    repositories that code used to talk to, and the check confirms there is nothing
-    left pointing at them from `bin/`.
+  - **The stated check was already met before the step began**, though not in the
+    spelling the table gives it. `git grep -c` prints one `path:count` line per file
+    that matches and *nothing at all* when none do, exiting 1 — so "`git grep -c
+    remoteIntegration bin/` = 0" describes an output the command cannot produce. What
+    was actually run, and what a reader should run: `git grep -q remoteIntegration --
+    bin/` exits **1**, and `git grep -l` prints nothing. Zero matches, and zero since
+    the remote half went at steps 1 and 2. So step 4 was never about deleting code
+    from here; it was about the repositories that code used to talk to, and the check
+    confirms there is nothing left pointing at them from `bin/`.
   - Archived: `sd-github-review` (public, 5.1 MB), `sd-review-test`,
     `sd-github-review-pilot`, and `sd-review-control-plane` (archived 2026-08-30, the
     day before the rest). Each was verified first: 0 stars, 0 forks, 0 open issues,
