@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""The pack's service surface for plugins, stores and config.
+
+Today `sd` carries one verb group: `plugin`. The rest -- `store`, `issue`,
+`config` -- land at step 8 with the consumer that needs them (R11-D13).
+
+`sd plugin add` is the only way a plugin becomes known to this machine. There
+is no disk scanning: the backbone never goes looking for manifests, because a
+surface that discovers plugins by walking the filesystem is a surface that
+loads whatever someone drops in the right directory. Registration is an
+explicit act with a path in it.
+
+What `add` validates is deliberately narrow. It reads the whole manifest and
+checks `prefix` and `dashboard.tile` -- the two keys anything reads today --
+leaving `kinds`, `issues` and `vendor` unexamined. Step 8 adds enforcement to
+this reader rather than writing a second one, which is the failure this pack
+has already paid for in duplicated scripts.
+
+**The registry stores a path, not a copy of the manifest.** Registration
+decides exactly one fact -- that this checkout is a plugin of this machine --
+and that fact is the path. Everything else lives in the manifest and is read
+from it at use time, because a manifest copied into the machine config is
+committed derived state, and the plugin repository would go on editing the
+original while every reader saw the snapshot. That is the staleness this pack
+exists to stop doing (critique 3), and it does not become acceptable for being
+small.
+
+The cost is real and accepted: `list` opens every registered manifest, and a
+plugin whose checkout has been moved or deleted reports as unreadable instead
+of quietly listing stale values. Reporting it is the point -- a registry
+pointing at nothing is a fact worth seeing.
+
+Exit 0 when the verb did what it says, 1 when it refused, 2 when the
+invocation was wrong.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import sd_lib  # noqa: E402
+
+MANIFEST_NAME = "sd-plugin.json"
+
+# `sd` and `se` are reserved: the backbone owns one and the other names the
+# surfaces that folded into it, whose renders may still exist on some machine.
+RESERVED_PREFIXES = frozenset({"sd", "se"})
+PREFIX_PATTERN = re.compile(r"^[a-z]{2,5}$")
+
+class Refusal(Exception):
+    """The invocation was understood and declined. Exit 1."""
+
+
+class UsageError(Exception):
+    """The invocation was wrong. Exit 2."""
+
+
+def read_manifest(path: pathlib.Path) -> dict[str, object]:
+    """The manifest at `path`, whole. Shape errors refuse; absence refuses."""
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise Refusal(f"no {MANIFEST_NAME} at {path}") from None
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise Refusal(f"{path} is not valid JSON: {error}") from None
+    if not isinstance(loaded, dict):
+        raise Refusal(f"{path} holds a {type(loaded).__name__}, not a JSON object")
+    return loaded
+
+
+def validate_prefix(manifest: dict[str, object], *, known: dict[str, pathlib.Path]) -> str:
+    """The manifest's `prefix`, or a refusal naming why it cannot be used."""
+
+    value = manifest.get("prefix")
+    if not isinstance(value, str) or not value:
+        raise Refusal(f"manifest declares no `prefix` (needs {PREFIX_PATTERN.pattern})")
+    if not PREFIX_PATTERN.fullmatch(value):
+        raise Refusal(f"prefix {value!r} is not two to five lowercase letters")
+    if value in RESERVED_PREFIXES:
+        # This is also the whole of the command-collision check. Every backbone
+        # command is spelled `sd-*`, so a `<prefix>-*` surface can shadow one
+        # only when the prefix is `sd` itself -- which this refuses. Enumerating
+        # the twelve commands here would look like a stronger guarantee while
+        # testing the same single condition.
+        raise Refusal(f"prefix {value!r} is reserved by the backbone")
+    if value in known:
+        raise Refusal(f"prefix {value!r} is already registered by {known[value].parent}")
+    return value
+
+
+def validate_tile(manifest: dict[str, object]) -> str | None:
+    """The `dashboard.tile` command, when the manifest declares one."""
+
+    dashboard = manifest.get("dashboard")
+    if dashboard is None:
+        return None
+    if not isinstance(dashboard, dict):
+        raise Refusal("`dashboard` is not an object")
+    tile = dashboard.get("tile")
+    if tile is None:
+        return None
+    if not isinstance(tile, str) or not tile.strip():
+        raise Refusal("`dashboard.tile` is not a non-empty command string")
+    return tile
+
+
+def registry(config: dict[str, object]) -> list[str]:
+    """The registered plugin roots. A config without plugins simply lacks it."""
+
+    plugins = config.get("plugins")
+    if plugins is None:
+        return []
+    if not isinstance(plugins, list) or not all(isinstance(p, str) for p in plugins):
+        raise Refusal("machine config `plugins` is not a list of paths")
+    return [str(p) for p in plugins]
+
+
+def registered(roots: list[str]) -> dict[str, pathlib.Path]:
+    """Prefix -> manifest path, for every root whose manifest still reads.
+
+    A root that no longer holds a readable manifest is skipped rather than
+    fatal: it must not stop an unrelated registration, and `list` reports it.
+    """
+
+    found: dict[str, pathlib.Path] = {}
+    for root in roots:
+        path = pathlib.Path(root) / MANIFEST_NAME
+        try:
+            manifest = read_manifest(path)
+        except Refusal:
+            continue
+        prefix = manifest.get("prefix")
+        if isinstance(prefix, str) and prefix:
+            found[prefix] = path
+    return found
+
+
+def write_config(config: dict[str, object], path: pathlib.Path) -> None:
+    """Replace `path` atomically, keeping every key this command did not touch.
+
+    The machine config predates this command and holds settings nothing here
+    understands. It is read, modified in place and written whole, so an
+    unrelated key survives a registration; a rename-into-place means a failed
+    write leaves the old file rather than half of a new one.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scratch = path.with_name(path.name + f".{os.getpid()}.tmp")
+    scratch.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    scratch.replace(path)
+
+
+def add(args: argparse.Namespace) -> int:
+    root = pathlib.Path(args.path).expanduser().resolve()
+    manifest_path = root / MANIFEST_NAME if root.is_dir() else root
+    manifest = read_manifest(manifest_path)
+
+    config_path = sd_lib.machine_config_path()
+    config = sd_lib.machine_config(config_path)
+    roots = registry(config)
+
+    plugin_root = str(manifest_path.parent)
+    if plugin_root in roots:
+        raise Refusal(f"{plugin_root} is already registered")
+    prefix = validate_prefix(manifest, known=registered(roots))
+    validate_tile(manifest)
+
+    config["plugins"] = sorted({*roots, plugin_root})
+    write_config(config, config_path)
+    print(f"registered {prefix} from {plugin_root}")
+    return 0
+
+
+def describe(root: str) -> dict[str, object]:
+    """One registered root, read from its manifest now rather than recalled."""
+
+    try:
+        manifest = read_manifest(pathlib.Path(root) / MANIFEST_NAME)
+    except Refusal as refusal:
+        return {"root": root, "readable": False, "why": str(refusal)}
+    entry: dict[str, object] = {"root": root, "readable": True}
+    prefix = manifest.get("prefix")
+    if isinstance(prefix, str):
+        entry["prefix"] = prefix
+    try:
+        tile = validate_tile(manifest)
+    except Refusal:
+        tile = None
+    if tile is not None:
+        entry["tile"] = tile
+    return entry
+
+
+def plugin_list(args: argparse.Namespace) -> int:
+    roots = registry(sd_lib.machine_config())
+    entries = [describe(root) for root in roots]
+    if args.json:
+        json.dump(entries, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    if not entries:
+        print("no plugins registered")
+        return 0
+    for entry in entries:
+        if not entry["readable"]:
+            print(f"?  {entry['root']}  UNREADABLE: {entry['why']}")
+            continue
+        tile = entry.get("tile")
+        suffix = f"  tile: {tile}" if tile else ""
+        print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
+    groups = parser.add_subparsers(dest="group", required=True)
+
+    plugin = groups.add_parser("plugin", help="register and list plugins")
+    verbs = plugin.add_subparsers(dest="verb", required=True)
+
+    adder = verbs.add_parser("add", help=f"register the plugin whose {MANIFEST_NAME} is at PATH")
+    adder.add_argument("path", help=f"plugin checkout, or the {MANIFEST_NAME} itself")
+    adder.set_defaults(handler=add)
+
+    lister = verbs.add_parser("list", help="list registered plugins")
+    lister.add_argument("--json", action="store_true", help="machine-readable")
+    lister.set_defaults(handler=plugin_list)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exit_code:
+        return 2 if exit_code.code else 0
+    try:
+        return int(args.handler(args))
+    except Refusal as refusal:
+        print(f"sd: {refusal}", file=sys.stderr)
+        return 1
+    except sd_lib.ConfigError as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return 1
+    except UsageError as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

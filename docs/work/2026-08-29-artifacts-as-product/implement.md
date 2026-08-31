@@ -1623,6 +1623,18 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     Neither cap is raised on an estimate; both get re-derived from an itemised
     count at the landing that measures the overrun, never in the PR that trips
     `tests/test_loc_caps.py`.
+  - **6b-1 landed, and its measurement answers the cap question: `bin/`
+    busts.** `bin/sd` with `plugin add|list` and the whole-manifest reader is
+    **264 lines**, taking `bin/` core from 7,492 to 7,756 and the headroom from
+    508 to **244**. Still to fit in those 244: **seven commands** — `sd-plan`,
+    `sd-ship`, `sd-spec`, `sd-deps`, `sd-help`, `sd-suggest`, `sd-map` — plus
+    `sd store|issue|config` and the three `sd-dashboard` verbs. The five
+    commands already built run 279 to 1,368 lines, median 631; at the size of
+    the *smallest* one the remaining headroom holds **none of the seven**. This
+    is no longer a projection, and R11-D13's stated trigger has fired: the
+    `bin/` cap is re-derived from an itemised list in its own decision record,
+    **before the dashboard tabs start**, not in the PR that trips
+    `tests/test_loc_caps.py`.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from
