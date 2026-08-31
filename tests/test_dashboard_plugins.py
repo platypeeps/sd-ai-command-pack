@@ -164,6 +164,28 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertIn("not objects", loaded["registryError"])
         self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
 
+    def test_a_root_that_is_not_a_string_is_refused_rather_than_coerced(self) -> None:
+        """`str(7)` is a non-empty string, and `Path("7")` is a directory.
+
+        Found in review. Coercing first and checking emptiness afterwards
+        turned an invalid entry into a plausible one, and would have run the
+        tile in a relative directory the plugin never named.
+        """
+        listing = self.tmp / "numeric-sd"
+        listing.write_text(
+            '#!/bin/sh\necho \'[{"root": 7, "prefix": "aa", "readable": true,'
+            ' "tile": "/bin/echo", "tabs": ["one"]}]\'\n',
+            encoding="utf-8",
+        )
+        listing.chmod(0o755)
+        original = plugins.SD
+        plugins.SD = listing
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        self.assertFalse(self.only(loaded)["ok"])
+        self.assertIn("no root or no prefix", self.only(loaded)["reason"])
+        self.assertEqual(loaded["tabs"], [])
+
     def test_a_registry_entry_with_no_root_is_refused_rather_than_run(self) -> None:
         """An entry the loader cannot identify is not one it may run.
 

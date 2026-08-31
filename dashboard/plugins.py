@@ -316,8 +316,14 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
 
 def read_plugin(entry: dict) -> dict:
     """One registered plugin's tabs, each collected under its own budget."""
-    root = str(entry.get("root") or "")
-    prefix = str(entry.get("prefix") or "")
+    # Read, not coerced: `str(7)` is a non-empty string that passes the check
+    # below and leaves `Path("7")` as a relative working directory the plugin
+    # never named. The check is for the type the contract says, not for
+    # something that can be spelled as text. Found in review.
+    raw_root = entry.get("root")
+    raw_prefix = entry.get("prefix")
+    root = raw_root if isinstance(raw_root, str) else ""
+    prefix = raw_prefix if isinstance(raw_prefix, str) else ""
     # A plugin whose manifest will not read has no prefix to be named by, and
     # "?" for every one of them makes two dark plugins one indistinguishable
     # row. The root is what the loader has, so the root is what it says.

@@ -96,7 +96,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - [x] 3e — machine-scope installer + `installed.json` + parity tests; deletes the legacy render
         payload. Landed as two commits in one pull request: `feat` adds `bin/sd_install.py` and
         `tests/test_sd_install.py`, `refactor!` deletes what it replaces. Reviewable apart,
-        atomic on merge. **365 files, 183,439 deletions against 1,343 insertions.**
+        atomic on merge. **365 files, 183,433 deletions against 1,343 insertions.**
 
         Six things worth recording, because each was a call rather than a mechanical step.
 
@@ -596,7 +596,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     step 2 and the pack itself is folded at step 5, so that path had not existed for some
     time and every 03:00 run stopped at the gate. The retarget is therefore a repair with
     a rename in it, not a rename.
-  - **Vault-side, in one commit** (`b6bd439`, six enumerated paths): `System/Scripts/
+  - **Vault-side, in one commit** (`b6bd433`, six enumerated paths): `System/Scripts/
     file-work-item.py` replaces `file-trellis-task.py`, which is deleted; the routine's
     `SKILL.md`; `blog-idea-accept`'s one cross-reference; `System/Schema.md`'s `task-path`
     row; and the `VAULT-STRUCTURE.md` authorization callout. That callout had to move in
@@ -1689,15 +1689,15 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     Non-zero, timed out, oversized, unparseable, or emitting a refused row --
     each produces a row naming the tab and the reason, because a failed tile
     treated as "no rows" is indistinguishable from a quiet machine, which is
-    R11-D12's own complaint one layer down. 42 tests, all against a real
+    R11-D12's own complaint one layer down. 43 tests, all against a real
     subprocess: neither the 5s deadline (which kills the process group, so a
     backgrounded child cannot outlive it) nor the 64KB ceiling (enforced while
     reading, not after) survives being mocked.
-    **The measurement:** `dashboard/` is **2,061 of 2,500, 439 left**. The
-    loader cost 562 against the ~240 R11-D13 left for the loader *and*
-    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 439
-    does not fit, so `dashboard/` projects to ~2,824 with `RUN_ALLOWLIST` still
-    uncounted. Not raised here -- the test passes at 2,061, and the cap gets
+    **The measurement:** `dashboard/` is **2,067 of 2,500, 433 left**. The
+    loader cost 568 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 433
+    does not fit, so `dashboard/` projects to ~2,830 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 2,067, and the cap gets
     re-derived from counts at the landing that carries the backbone renders.
     The loader also refuses a tile that prints good JSON and then exits
     non-zero: closing stdout is not exiting, and the status is inside the
