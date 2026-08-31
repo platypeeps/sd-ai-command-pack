@@ -57,7 +57,12 @@ SD = Path(__file__).resolve().parent.parent / "bin" / "sd"
 
 TILE_SECONDS = 5.0
 TILE_BYTES = 64 * 1024
+# The registry is the pack's own CLI rather than a plugin, so it answers to its
+# own budget. Borrowing the per-tile ceiling made the registry's size a function
+# of what one plugin is allowed to print, and a machine registering enough
+# plugins to pass 64KB of listing would have read as a broken registry forever.
 CATALOG_SECONDS = 10.0
+CATALOG_BYTES = 1024 * 1024
 READ_CHUNK = 65536
 # A plugin's tabs wait on each other only for the machine. Bounded because a
 # plugin declaring thirty tabs should not decide how many processes the
@@ -180,7 +185,7 @@ def catalog() -> tuple[list[dict], str]:
             [str(SD), "plugin", "list", "--json"],
             cwd=None,
             seconds=CATALOG_SECONDS,
-            limit=TILE_BYTES,
+            limit=CATALOG_BYTES,
         )
     except Bounded as error:
         return [], f"cannot read the plugin registry: {error}"

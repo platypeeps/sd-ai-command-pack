@@ -118,6 +118,30 @@ class PluginLoaderTest(unittest.TestCase):
         # And it is distinguishable from the machine that simply has none.
         self.assertNotEqual(loaded["rows"], [])
 
+    def test_a_registry_larger_than_a_tile_is_allowed_still_reads(self) -> None:
+        """The registry answers to its own budget, not to a plugin's.
+
+        Found in review. `catalog` read `sd plugin list --json` under
+        `TILE_BYTES`, so the size a registry was allowed to be was a function
+        of how much output one plugin may print. A machine with enough plugins
+        to pass 64KB of listing would have reported a broken registry on every
+        load, permanently, with nothing wrong with it.
+        """
+        config = pathlib.Path(os.environ["XDG_CONFIG_HOME"]) / "sd-ai-command-pack"
+        config.mkdir(parents=True, exist_ok=True)
+        # Unregistered roots still list, each with its path and its reason, so
+        # a listing far past the tile ceiling needs no plugins on disk.
+        roots = [str(self.tmp / ("absent-" + "x" * 200 + f"-{index}")) for index in range(500)]
+        (config / "config.json").write_text(
+            json.dumps({"plugins": roots}), encoding="utf-8"
+        )
+        raw, error = plugins.catalog()
+        self.assertEqual(error, "")
+        self.assertEqual(len(raw), len(roots))
+        self.assertGreater(
+            len(json.dumps(raw)), plugins.TILE_BYTES, "fixture no longer exceeds a tile"
+        )
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()
