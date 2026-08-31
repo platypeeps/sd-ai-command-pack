@@ -74,6 +74,18 @@ READ_CHUNK = 65536
 # the plugin too, and an unbounded one would put a plugin in charge of how long
 # a row is.
 STDERR_TAIL = 512
+
+# What one refusal will read off stderr on its way out, at most. Raised in
+# review as a hang: a tile writing stderr in a loop keeps the pipe readable, so
+# an unbounded drain would spin there and never reach the kill. Measured, that
+# does not happen -- `yes`, `cat /dev/zero`, and three concurrent writers each
+# ran the pipe empty in three reads, because a zero-timeout `select` sees the
+# gap the instant the reader wins and no writer refills within that quantum.
+# The bound stays anyway, on the narrower claim it can actually carry: one
+# refusal reads what one pipe buffer can hold, which is everything a tile can
+# have written with nobody reading, and it is a fixed amount of work rather
+# than an argument about scheduling.
+DRAIN_BYTES = 65536
 # A plugin's tabs wait on each other only for the machine. Bounded because a
 # plugin declaring thirty tabs should not decide how many processes the
 # dashboard starts at once.
@@ -185,17 +197,23 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
 
         Called on the way to every refusal because the interesting case is a
         tile that writes its traceback and exits: both pipes close at once, and
-        the loop can break on stdout without stderr's last read. Never blocks,
-        so a tile that holds stderr open cannot extend the deadline by it.
+        the loop can break on stdout without stderr's last read.
+
+        Never blocks: a zero timeout means no read waits on the tile. Bounded
+        by DRAIN_BYTES besides, so one refusal costs a fixed amount of reading
+        no matter what the tile is doing -- see that constant for what was and
+        was not shown about the loop this bound was proposed to stop.
         """
         nonlocal said
-        while err in watch:
+        budget = DRAIN_BYTES
+        while err in watch and budget > 0:
             if not select.select([err], [], [], 0)[0]:
                 return
-            piece = os.read(err, READ_CHUNK)
+            piece = os.read(err, min(READ_CHUNK, budget))
             if not piece:
                 watch.remove(err)
                 return
+            budget -= len(piece)
             said = (said + piece)[-STDERR_TAIL:]
 
     fd = proc.stdout.fileno()

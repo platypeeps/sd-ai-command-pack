@@ -1724,6 +1724,23 @@ is read in, since a tile that dies on import talks only on stderr. Both now name
 correct in isolation and wrong once something else touches its output: the same shape as the two
 composed guards found in #652, and worth naming twice. Found in review.
 
+**A bound that stayed after its reason did not.** Round 2 read `drain()` as a
+hang: called on the way to a refusal, it loops on a zero-timeout `select`, and a
+tile writing stderr in a loop would keep the pipe readable forever, so the drain
+would spin and never reach the kill. Shaped right, and it does not happen.
+Measured with three writers — `yes`, `cat /dev/zero`, and three concurrent
+`yes` — the pipe ran empty in **three reads every time**, because a zero-timeout
+`select` sees the gap the instant the reader wins and no writer refills within
+that scheduling quantum. A test written for the spin passed against the
+unbounded code, which is the only useful thing it proved.
+
+`DRAIN_BYTES = 65536` stays, on the narrower claim it can carry: one refusal
+reads at most what one pipe buffer holds — everything a tile can have written
+with nobody reading — so its cost is fixed rather than resting on an argument
+about scheduling. The test was deleted rather than kept green, because a test
+that passes with and against the fix is worse than none: it reports that
+something was verified.
+
 The flood test lost its clock in the same round. It asserted `load()` finished inside
 `TILE_SECONDS`, which measures interpreter startup and registry reads against a budget meant for
 one subprocess. It was also redundant: a tile blocked on a full stderr pipe never reaches its own
