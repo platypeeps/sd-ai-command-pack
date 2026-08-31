@@ -2,7 +2,8 @@
 
 The design fixes a ceiling for each part of the replacement world -- `bin/` at
 14,000 lines (R11-D15, re-derived from built code after 8,000 was busted with
-seven commands still unwritten), the temporary `migrate-*` tools at 1,500
+six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`, `sd-spec`,
+`sd-deps`, `sd-suggest`, `sd-map`), the temporary `migrate-*` tools at 1,500
 outside it, `dashboard/` at 2,500 -- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
 the re-derivation: 14,000 was set in its own decision record, not in a PR that

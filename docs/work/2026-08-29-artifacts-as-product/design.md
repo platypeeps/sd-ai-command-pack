@@ -836,8 +836,10 @@ leaves `bin/` because the taxonomy already said it is not a command.**
 
 R11-D13 said the cap would be re-derived from an itemised count at the landing that measured the
 overrun rather than raised on an estimate. 6b-1 is that landing: `bin/sd` came in at 264 lines,
-taking core to 7,756 of 8,000 with **244 left and seven commands unbuilt**, when the smallest
-command already built is 279. The trigger has fired.
+taking core to 7,756 of 8,000 with **244 left and seven commands then counted as unbuilt**, when
+the smallest command already built is 279. The trigger has fired. (Seven is what that count found;
+the reclassification below takes `sd-help` out of `bin/`, so every projection in this record works
+from **six**.)
 
 **Why this number is different from the last three.** 6,000, 6,500 and 8,000 were each derived by
 itemising work that did not exist yet — adding up guesses about unwritten commands. All three were
