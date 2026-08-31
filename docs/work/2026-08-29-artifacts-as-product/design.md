@@ -930,6 +930,23 @@ allocate; and the deadline kills the tile's process group rather than the comman
 tile that backgrounds work outlives the timeout and goes on holding the pipe. Both are tested
 against a real subprocess, because neither survives being mocked.
 
+**One fan-out at a time, and not repeated for callers arriving together.** The server is threaded,
+so `/api/plugins` started a fresh fan-out of tile subprocesses on every request: a page refreshing
+quickly, or two of them, multiplied the tiles by the number of readers, and the module that exists
+to bound one plugin's cost had no bound on its own. A lock makes concurrent callers wait on one
+load, and a five-second window keeps a refresh loop from re-running tiles that answered a moment
+ago. Deliberately not the state cache's twenty seconds — a plugin row is what an operator is
+watching change. Found in review.
+
+**The loader validates the tab names it is handed, even though registration already did.** A name
+arrives at the tile as a command-line argument, so `--anything` would arrive as a flag, and a name
+declared twice would invoke the same tab twice and produce two identical dark rows. Both are
+refused at load, each as a tab that says why it was never invoked rather than one that quietly
+vanishes. This is a second copy of the registration rule, and it is deliberate: the loader trusts
+no payload it did not write, including one from the pack's own CLI. Found in review, along with the
+`cannot run` message, which now names the working directory — "no such file or directory" for a
+tile that exists says nothing until you know which directory it was looked for in.
+
 **The registry read has no plugin above it, so it carries the net itself.** `select` and `os.read`
 raise `OSError` and `InterruptedError` on their own account, outside the module's own `Bounded`
 vocabulary. Uncaught in a tab that costs one tab; uncaught in the registry read it costs the whole
@@ -1031,23 +1048,23 @@ ships. It also gets the no-disk-scanning rule for free: the loader cannot glob b
 looks at a directory.
 
 **Three. The dashboard cap is heading where `bin/` went, and this is the count.** Measured, not
-projected: `dashboard/` is **2,006 of 2,500 — 494 lines left**. The loader cost **507** (499 in
+projected: `dashboard/` is **2,054 of 2,500 — 446 lines left**. The loader cost **555** (547 in
 `plugins.py`, 8 wiring the endpoint), against the **~240** R11-D13 left for *the loader and
-`RUN_ALLOWLIST` together*. It overran that slice by half again, by itself.
+`RUN_ALLOWLIST` together*. It is more than twice that slice, by itself.
 
-R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 494
-does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,769,
-178 over**, and that is the optimistic figure. The shape is identical to the one that produced
+R11-D13 enumerated the backbone-side lift from the system dashboard at **763**. 763 against 446
+does not fit, before `RUN_ALLOWLIST` is counted at all — so `dashboard/` lands at roughly **2,817,
+317 over**, and that is the optimistic figure. The shape is identical to the one that produced
 R11-D15: a cap itemised from unwritten scope, and the first piece actually built comes in over its
 share.
 
-**The cap is not raised here, and the test still passes at 2,006.** Raising it in the change that
+**The cap is not raised here, and the test still passes at 2,054.** Raising it in the change that
 revealed the problem is the move this pack has already made three times with `bin/`, and the
 number that comes out is another estimate. Trigger, matching R11-D15's: the landing that carries
 the backbone renders re-derives `dashboard/` from files that exist, once, and may set the ceiling
 in its own record. Owner: whoever lands it.
 
-One thing worth saying about the 499 rather than letting it pass as inevitable: roughly half is
+One thing worth saying about the 547 rather than letting it pass as inevitable: roughly half is
 code and the rest is comments and docstrings, which is this repository's convention and not an
 accident of this file. The convention is not being revisited here; it is named so the
 re-derivation does not mistake a house style for a measurement.

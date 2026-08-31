@@ -255,6 +255,53 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertIn("the loader failed", loaded["registryError"])
         self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
 
+    def test_a_tab_name_the_loader_will_not_pass_is_refused_not_run(self) -> None:
+        """A name reaches the tile as an argument, so `--x` would be a flag.
+
+        The registry validates names at registration; this is the loader
+        declining to trust what reaches it anyway, and saying so rather than
+        dropping the tab. Found in review.
+        """
+        listing = self.tmp / "flagged-sd"
+        listing.write_text(
+            '#!/bin/sh\necho \'[{"root": "/tmp", "prefix": "aa", "readable": true,'
+            ' "tile": "/bin/echo", "tabs": ["--force", "one", "one"]}]\'\n',
+            encoding="utf-8",
+        )
+        listing.chmod(0o755)
+        original = plugins.SD
+        plugins.SD = listing
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        tabs = {tab["name"]: tab for tab in self.only(loaded)["tabs"]}
+        self.assertFalse(tabs["--force"]["ok"])
+        self.assertIn("is not a tab name", tabs["--force"]["reason"])
+        # Declared twice: invoked once, and the duplicate is a row of its own.
+        # Three rows in all -- the flag, the duplicate, and `one` itself, whose
+        # `/bin/echo` prints its argument rather than JSON.
+        self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 3)
+        self.assertEqual(len([t for t in tabs.values() if t["ok"]]), 0)
+
+    def test_overlapping_requests_share_one_load(self) -> None:
+        """A threaded server had every request start its own fan-out.
+
+        Found in review: a page refreshing quickly, or two of them, multiplied
+        the tile subprocesses by the number of readers.
+        """
+        calls = []
+        original = plugins.load
+        plugins.load = lambda: (calls.append(1), {"plugins": [], "tabs": [],
+                                                  "rows": [], "registryError": ""})[1]
+        self.addCleanup(lambda: setattr(plugins, "load", original))
+        self.addCleanup(lambda: setattr(plugins, "_LOADED", None))
+        plugins._LOADED = None
+        for _ in range(5):
+            plugins.cached_load(now=100.0)
+        self.assertEqual(len(calls), 1)
+        # And the window is short enough that a watched row still moves.
+        plugins.cached_load(now=100.0 + plugins.LOAD_SECONDS)
+        self.assertEqual(len(calls), 2)
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()

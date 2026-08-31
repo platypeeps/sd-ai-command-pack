@@ -142,7 +142,7 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 # five seconds does not belong behind the same timer. Keeping
                 # them apart also means one slow plugin cannot delay the repo
                 # table, which is the view that works when nothing else does.
-                body = json.dumps(plugins.load()).encode()
+                body = json.dumps(plugins.cached_load()).encode()
                 return self.send_body(body, "application/json")
             self.send_error(404)
 

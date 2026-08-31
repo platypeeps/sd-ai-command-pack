@@ -50,6 +50,7 @@ import select
 import shlex
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -68,6 +69,15 @@ READ_CHUNK = 65536
 # plugin declaring thirty tabs should not decide how many processes the
 # dashboard starts at once.
 TAB_WORKERS = 4
+# One fan-out at a time, and not repeated for callers arriving together.
+LOAD_SECONDS = 5.0
+_LOAD_LOCK = threading.Lock()
+_LOADED: dict | None = None
+_LOADED_AT = 0.0
+# The registry validates tab names when a plugin registers; this is the loader
+# declining to trust what reaches it anyway, because a name arrives as a
+# command-line argument and `--anything` would arrive as a flag.
+TAB_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 # An `href` may point within the page and nowhere else. A plugin row lands in
 # the backbone's most prominent view, and the difference between rendering
@@ -127,7 +137,11 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
             start_new_session=True,
         )
     except (OSError, ValueError) as error:
-        raise Bounded(f"cannot run {argv[0]}: {error}") from None
+        # The cwd belongs in the message: "no such file or directory" for a
+        # tile that exists says nothing until you know which directory it was
+        # looked for in. Found in review.
+        where = f" in {cwd}" if cwd is not None else ""
+        raise Bounded(f"cannot run {argv[0]}{where}: {error}") from None
 
     chunks: list[bytes] = []
     size = 0
@@ -345,10 +359,25 @@ def read_plugin(entry: dict) -> dict:
     if not argv:
         return refuse("`dashboard.tile` is empty")
 
-    wanted = [str(name) for name in names]
+    wanted: list[str] = []
+    refused: list[dict] = []
+    for name in names:
+        text = str(name)
+        if not TAB_NAME.fullmatch(text):
+            refused.append(_refused_tab(prefix, text, "is not a tab name"))
+        elif text in wanted:
+            refused.append(_refused_tab(prefix, text, "is declared twice"))
+        else:
+            wanted.append(text)
     with concurrent.futures.ThreadPoolExecutor(max_workers=TAB_WORKERS) as pool:
         tabs = list(pool.map(lambda name: _tab(argv, root, prefix, name), wanted))
-    return {**base, "tabs": tabs, "ok": True, "declared": True, "reason": ""}
+    return {**base, "tabs": tabs + refused, "ok": True, "declared": True, "reason": ""}
+
+
+def _refused_tab(prefix: str, name: str, why: str) -> dict:
+    """A declared tab that is never invoked, and says so rather than vanishing."""
+    return {"prefix": prefix, "name": name, "title": name, "html": "", "rows": [],
+            "complaints": [], "ok": False, "reason": f"`{name}` {why}"}
 
 
 def _tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
@@ -430,6 +459,25 @@ def read_tab(argv: list[str], root: str, prefix: str, name: str) -> dict:
         "ok": True,
         "reason": "",
     }
+
+
+def cached_load(now: float | None = None) -> dict:
+    """`load`, shared between overlapping requests rather than repeated.
+
+    The server is threaded, so a page refreshing quickly -- or two of them --
+    had every request starting its own fan-out of tile subprocesses. The lock
+    makes concurrent callers wait for one load instead of each spawning their
+    own, and the short window keeps a refresh loop from re-running tiles that
+    answered a moment ago. Deliberately not the state cache's twenty seconds: a
+    plugin row is what an operator is watching change. Found in review.
+    """
+    stamp = time.monotonic() if now is None else now
+    with _LOAD_LOCK:
+        global _LOADED, _LOADED_AT
+        if _LOADED is None or stamp - _LOADED_AT >= LOAD_SECONDS:
+            _LOADED = load()
+            _LOADED_AT = stamp
+        return _LOADED
 
 
 def load() -> dict:
