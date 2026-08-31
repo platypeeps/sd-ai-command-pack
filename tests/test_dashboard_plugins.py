@@ -164,6 +164,30 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertIn("not objects", loaded["registryError"])
         self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
 
+    def test_a_registry_entry_with_no_root_is_refused_rather_than_run(self) -> None:
+        """An entry the loader cannot identify is not one it may run.
+
+        Found in review. An empty root resolves to `Path("")` -- the
+        dashboard's own working directory -- so the tile would have run
+        somewhere its plugin never asked for, and an empty prefix stamps every
+        row as `/<name>`.
+        """
+        listing = self.tmp / "rootless-sd"
+        listing.write_text(
+            '#!/bin/sh\necho \'[{"root": "", "prefix": "aa", "readable": true,'
+            ' "tile": "/bin/echo", "tabs": ["one"]}]\'\n',
+            encoding="utf-8",
+        )
+        listing.chmod(0o755)
+        original = plugins.SD
+        plugins.SD = listing
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        self.assertFalse(self.only(loaded)["ok"])
+        self.assertIn("no root or no prefix", self.only(loaded)["reason"])
+        self.assertEqual(loaded["tabs"], [])
+        self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()

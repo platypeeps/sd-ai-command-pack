@@ -296,6 +296,14 @@ def read_plugin(entry: dict) -> dict:
 
     if not entry.get("readable", False):
         return refuse(str(entry.get("why") or "manifest unreadable"))
+    # An entry the loader cannot identify is not an entry it may run. An empty
+    # root would resolve to `Path("")`, which is the dashboard's own working
+    # directory, so a tile would run somewhere its plugin never asked for; and
+    # an empty prefix stamps every row of every tab as `/<name>`. Refusing is
+    # the same answer the rest of this module gives to a payload it cannot
+    # trust. Found in review.
+    if not root or not prefix:
+        return refuse("registry entry has no root or no prefix")
     # `sd plugin list` validates the dashboard block and says when it no
     # longer parses -- a tab that stopped appearing, rather than a plugin that
     # never declared one.
