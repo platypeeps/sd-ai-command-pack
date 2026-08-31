@@ -101,12 +101,12 @@ same four unconditional jobs — the `unittest` matrix, `lint`, `bash 3.2 syntax
 and `security` — producing five contexts. Contexts are named
 by a job's `name:`, not its YAML key, so the bash lane is required as
 `bash 3.2 syntax` and never as `bash32`; requiring the key would pin a context
-that never reports and block every pull request. Three changes moved this set inside two days. The macOS leg was dropped for the
-duration of the artifacts-as-product rollout (R11-D4; restored by hand at the
-end of the rollout, no date);
-`bash32` was added because the bash 3.2 syntax gate turned out never to have run
-in CI at all (R11-D5); and `Shell coverage` was removed at step 3e, because the
-shipped shell it measured was deleted (R11-D6).
+that never reports and block every pull request. Three changes moved this set
+inside two days. The macOS leg was dropped for the duration of the
+artifacts-as-product rollout (R11-D4; restored by hand at the end of the
+rollout, no date); `bash32` was added because the bash 3.2 syntax gate turned
+out never to have run in CI at all (R11-D5); and `Shell coverage` was removed at
+step 3e, because the shipped shell it measured was deleted (R11-D6).
 
 That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection here is enforcing as of
