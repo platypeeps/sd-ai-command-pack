@@ -160,6 +160,39 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
         `sd-ship` in a scratch repository that already has `docs/adr/` and a Makefile, ending
         in a merged pull request and an adoption-purity assertion (B5a): `git status
         --porcelain` shows only `<work>/**`.
+
+        **Run 2026-08-30, and it earned its keep on the first attempt.** A scratch repository
+        was built with a preexisting `docs/adr/`, a Makefile, and a small Python package, then
+        driven through the sd-plan and sd-ship stages by hand — both are skills with no
+        `bin/` implementation, and both say so in their own "State of the tooling" section.
+        Four checks passed: `sd-check` reported `entrypoints: makefile (Makefile defines check,
+        test, lint)` and ran the repository's own `make check`, deduping `test` and `lint` as
+        already covered by it; B5a adoption purity held with zero paths
+        outside `docs/work/`; `sd-docs-lint` was clean with rule 4 declining to demand a
+        `docs/spec/` the repository does not have; and both stated route shapes were right —
+        markdown-only planned `skip` with no providers, `requirements.txt`-only planned
+        `standard`. Acceptance criteria were verified from real output rather than exit codes
+        (`Ran 2 tests ... OK`, `greet("world") -> 'Hello, world!'`).
+
+        The fifth check found a routing defect that no fixture covered: a category that lowers
+        the tier matched on any path, so one markdown file took a reviewer off a source change
+        (R11-D9, #620). That is the return on running the check — the two shapes the
+        verification section names are both single-category, and neither could ever have found
+        it. The wave itself had been printing the defect: of the six routed pull
+        requests, five planned `tier deep` and `hoa-manager#300` planned `tier standard`,
+        because its diff also carried a documentation file. Visible in the check output the
+        whole time, and read by nobody until it was compared against the other five. Two smaller observations kept rather than fixed: rule 4 *no-ops* when `docs/spec/`
+        is absent rather than indexing the preexisting `docs/adr/`, so the pack does not block
+        the repository but does not detect its ADR location either (that detection lives in
+        `sd-plan --decision`, unimplemented); and the fixture initially failed adoption purity
+        on a `src/__pycache__/` its own `make check` produced, which is the scratch repository
+        lacking a `.gitignore` any real Python repository has, not a pack defect — the fixture
+        was corrected and the correction is recorded here rather than quietly re-measured.
+
+        **Still open, and this is why the box is not ticked:** the half that ends *in a merged
+        pull request* has not run. It needs a live GitHub repository, so it is a deliberate
+        stop rather than an oversight. Everything the local stages can prove is proven; the
+        `sd-ship` push/PR/settle/merge sequence is not.
 - [x] 3-c — consumer removal PRs (9); removal only
       - [x] the tool the wave runs on: `migrate-trellis --consumer`, with tests
       - [x] the nine removal pull requests, opened 2026-08-30 and merged the same day on the
@@ -169,7 +202,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             deliberate one: step 4 archives that repository, so a residue pass there would
             polish something already on its way out. Named here rather than left as a silent
             gap in the count.
-- [ ] 3-d — `sd-review setup-github`, its own step
+- [x] 3-d — `sd-review setup-github`, its own step
       - [x] the subcommand behind `SETUP_GITHUB_SEAM` in `bin/sd-review` — #615. The
             dispatch in `bin/sd-review` is three lines; the installer is
             `bin/sd_setup_github.py`, a module of its own because two guards said so and
@@ -187,7 +220,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             purely local write needing no credentials — and the line is asserted by a test.
             No local test could have found this, which is the argument for proving the lane
             on the pack before offering it to any other repository.
-      - [ ] one opt-in PR per remaining `mode: full` repository — six of them:
+      - [x] one opt-in PR per remaining `mode: full` repository — six of them, all opened
+            and merged 2026-08-30 on the user's word:
             `anomaly-metric-creator`, `hoa-manager`, `loadsmith`, `people-profiles`,
             `rwbp-coordinator`, `rwbp-website`. `mezmo-world-simulator` is an employer
             repository and gets none. `sd-github-review` is retired at step 4 and
@@ -197,6 +231,19 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
             repository declares a mode at all. `setup-github`'s own `minimal`/`guest` refusal
             is what will enforce the distinction once they do; today it is a list in this file,
             which is why it is written out repository by repository rather than as a count.
+            Merged as amc#424, hoa-manager#300, loadsmith#264, people-profiles#23,
+            rwbp-coordinator#271, rwbp-website#284. Verified on the six default branches
+            rather than from the merge output: the workflow is present in all six with
+            identical content, pinned to `50b2c0e7`, `ref: refs/pull/N/head` on line 61.
+
+            The wave cost four defects in the generated file, each found by a consumer's own
+            reviewer and each fixed in the generator rather than in the copy — a header naming
+            a policy file no consumer has, a concurrency group eaten by the f-string so every
+            pull request in a repository shared one, a checkout that failed on conflicted pull
+            requests, and the fix for *that* which broke fork pull requests (#617, #618, #619).
+            The sequencing is what made them cheap: proving the lane on one repository before
+            fanning out meant each defect was fixed in one place and regenerated six times,
+            never hand-edited in six.
 
       **The lane is report-only** (user, 2026-08-30). It prints the `route()` plan to the job
       log and the step summary; it requests no reviewer and posts no comment. That is what
@@ -222,7 +269,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       because 1,700 against a one-file guard would have been a number with nothing behind it.
 
       Parked with a trigger, not a date: the design's core line reads ~1,800 for eight
-      commands and the five that exist already total 2,776. That is a stale estimate rather
+      commands and the ones that exist already total 2,811 (2,776 until #620 added 35 lines to
+      `bin/sd_route.py`; the figure is restated here because a parked number that silently
+      drifts is how a parked concern becomes a forgotten one). That is a stale estimate rather
       than a busted ceiling — `bin/` is 6,276 once `migrate-*` is excluded — and re-deriving it
       against a half-built `bin/` would swap one guess for another. The next command to land
       under `bin/` re-derives it.
