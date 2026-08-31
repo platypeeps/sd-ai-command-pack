@@ -123,7 +123,7 @@ invisible and the real failure. Name the silent-failure case.>
 
 ---
 
-*This is a native note in this vault — the note itself is the record; there is no external ledger. Use the dropdown above rather than the frontmatter field — an off-vocabulary value is reported, not guessed at, so a typo reads as silence. Pick `accepted` to have `skill-proposal-accept` file it as a Trellis task in `sd-ai-command-pack`, or `declined` to close it. `filed` is set by the routine, not by you.*
+*This is a native note in this vault — the note itself is the record; there is no external ledger. Use the dropdown above rather than the frontmatter field — an off-vocabulary value is reported, not guessed at, so a typo reads as silence. Pick `accepted` to have `skill-proposal-accept` file it as a work item in `sd-ai-command-pack`, or `declined` to close it. `filed` is set by the routine, not by you.*
 ````
 
 The note's `# <skill-name>` and `skill-name:` are the proposed skill's name, not

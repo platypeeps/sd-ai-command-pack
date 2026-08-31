@@ -124,7 +124,7 @@ Unknown argument names are an error — stop and report them before starting.
    ```
 
 10. When the user then asks for edits, hand the changed prose through
-    `sd-prose-lint` and `sd-humanizer` before it is committed, keeping the
+    `sd-prose-lint` before it is committed, keeping the
     RFC-2119 keywords exempt from both passes, and re-read the edited
     record end to end so it still argues as one document.
 
@@ -150,6 +150,6 @@ Unknown argument names are an error — stop and report them before starting.
 - **Premise evidence** — what was checked for each premise grade: the
   search run, the reference resolved, the status read;
 - **Handoffs** — edits awaiting explicit approval, the
-  `sd-prose-lint`/`sd-humanizer` chain for changed prose, and anything
+  `sd-prose-lint` pass over changed prose, and anything
   escalated to the sd-review lane; and
 - **Limits** — records or premises that could not be verified and why.

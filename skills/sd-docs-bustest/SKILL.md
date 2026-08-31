@@ -23,8 +23,7 @@ is about to become someone's only guide (onboarding, runbook, handoff,
 release procedure), or when the user asks whether docs are good enough
 for a newcomer.
 
-Do not use for prose style or tone — that is `sd-prose-lint` and
-`sd-humanizer`. Do not use for pre-merge scope and coherence probes over
+Do not use for prose style or tone — that is `sd-prose-lint`. Do not use for pre-merge scope and coherence probes over
 the surrounding change — that is `sd-gate-probes`, which routes
 checked-in docs changes here. The review verdict on a docs-touching pull
 request stays with the sd-review lane.
@@ -84,7 +83,7 @@ Unknown argument names are an error — stop and report them before starting.
    can leave a patchwork: repeated context, contradictory statements,
    broken flow. The document must read as one coherent narrative.
 5. Deliver the report. When the changed docs contain user-facing prose,
-   suggest `sd-prose-lint` and `sd-humanizer` as follow-ups, marked
+   suggest `sd-prose-lint` as a follow-up, marked
    `not run`.
 
 ## Safety rules
@@ -102,9 +101,8 @@ Unknown argument names are an error — stop and report them before starting.
   was not.
 - Findings inform the change; they are not a review verdict. Approval of
   a docs-touching pull request stays with the sd-review lane.
-- Route only to surfaces this pack ships: sibling `se-*` skills by their
-  final names, `trellis-check`, the sd-review lane, and `task.py`
-  surfaces.
+- Route only to surfaces this pack ships: sibling `sd-*` skills by their
+  final names and the sd-review lane.
 
 ## Final report
 
@@ -119,5 +117,5 @@ Unknown argument names are an error — stop and report them before starting.
   friction, or fails cold execution, in one sentence;
 - **Coherence check** — for edited documents, confirmation of the
   end-to-end re-read or the gaps it found;
-- **Suggested next steps** — follow-up routes such as `sd-prose-lint`
-  and `sd-humanizer`, each marked `not run`.
+- **Suggested next steps** — follow-up routes such as `sd-prose-lint`,
+  each marked `not run`.

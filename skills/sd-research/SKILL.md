@@ -109,11 +109,11 @@ scope, the verification bar, or the `## Final report` contract.
   a dispatched sub-agent. When it is already running as a dispatched sub-agent,
   run the units inline in its own context rather than dispatching further — do
   not spawn another layer.
-- **Active task prefix.** When a Trellis task is active, open each dispatch
-  prompt with `Active task: <task path from task.py current>` before the
-  role-specific instructions, so platforms that do not hook-inject context still
-  receive it. When no Trellis task is active, omit the prefix and hand the worker
-  its unit input directly.
+- **Active item prefix.** When a work item is active, open each dispatch
+  prompt with `Active item: <item directory>` before the role-specific
+  instructions, so platforms that do not hook-inject context still receive it.
+  When no item is active, omit the prefix and hand the worker its unit input
+  directly.
 
 ## Safety rules
 

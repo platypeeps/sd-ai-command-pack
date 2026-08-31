@@ -87,9 +87,9 @@ Unknown argument names are an error — stop and report them before starting.
 8. Optionally delegate the passes to the pack's agent trio: the
    `sd-rust-write` agent lays the skeleton, the `sd-rust-fill` agent
    fills named holes against a fixed surface, and the `sd-rust-reviewer`
-   agent examines each pass. When the work spans multiple Trellis units,
-   split it as one skeleton unit plus one unit per fill batch via the
-   `task.py` surfaces, and gate each unit with `trellis-check`.
+   agent examines each pass. When the work spans multiple units, split it
+   as one skeleton unit plus one unit per fill batch, and gate each unit
+   with `sd-check`.
 9. Close out: remove the remaining dead-code allowance, flip the hole
    lint to deny or show the grep returning nothing, and confirm the
    surface carries no marker whose reason is stale.

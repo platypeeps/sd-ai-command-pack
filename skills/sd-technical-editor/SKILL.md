@@ -29,8 +29,8 @@ Do not use for topic discovery (`sd-topic-radar`), original article development
 
 The `voice-consistency` pass here measures the draft against its own
 representative language. Conformance to an external, stated brand or house voice
-belongs to `sd-brand-voice`, which validates any content against a guidelines
-artifact and reports only voice findings.
+is out of scope: no skill in this pack validates content against a guidelines
+artifact, so say so rather than judging against a house voice from memory.
 
 ## Arguments
 

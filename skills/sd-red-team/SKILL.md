@@ -155,11 +155,11 @@ scope, the classification discipline, or the `## Final report` contract.
   not spawn another layer. Under a fresh-session independent-red-team profile the
   worker likewise completes its lane inline in its own session and does not
   re-dispatch.
-- **Active task prefix.** When a Trellis task is active, open each dispatch
-  prompt with `Active task: <task path from task.py current>` before the
-  role-specific instructions, so platforms that do not hook-inject context still
-  receive it. When no Trellis task is active, omit the prefix and hand the worker
-  its lane input directly.
+- **Active item prefix.** When a work item is active, open each dispatch
+  prompt with `Active item: <item directory>` before the role-specific
+  instructions, so platforms that do not hook-inject context still receive it.
+  When no item is active, omit the prefix and hand the worker its lane input
+  directly.
 
 ## Safety rules
 

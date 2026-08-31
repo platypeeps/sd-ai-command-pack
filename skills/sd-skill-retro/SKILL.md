@@ -23,9 +23,9 @@ Do not use for:
 
 - retrospectives of the work itself — that is `sd-retro`;
 - formal incident analysis — that is `sd-postmortem`;
-- a deep, inventory-backed review of a bounded skill collection — that is
-  `sd-review-skills`. This skill is the light single-session triggering
-  audit; its findings can seed a later `sd-review-skills` run.
+- a deep, inventory-backed review of a bounded skill collection. This
+  skill is the light single-session triggering audit; no skill in this
+  pack owns the deep audit, so say so rather than improvising one.
 
 ## Arguments
 
@@ -73,11 +73,10 @@ Unknown argument names are an error — stop and report them before starting.
 4. Vet the findings with the user before writing or filing anything —
    including any destination and naming. Do not write first and ask after.
 5. Route each vetted finding to its owner:
-   - a defect in an `se-*` skill is fixed in
-     `templates/skills/<name>/SKILL.md` in this repository and ships
-     fleet-wide through the normal registry and generation pipeline;
-   - a defect in an `sd-*` or Trellis surface is filed as a task against
-     the owning repository — never patched in a consumer checkout;
+   - a defect in an `sd-*` skill is fixed in `skills/<name>/SKILL.md` in
+     this repository and reaches the machine on the next install;
+   - a defect in a surface another repository owns is filed as a work item
+     against that repository — never patched in a consumer checkout;
    - an uncovered gap becomes input for `sd-propose-skills`, which owns
      proposing new skills.
 6. Run every proposed skill edit through the portability checklist before
@@ -95,8 +94,8 @@ Unknown argument names are an error — stop and report them before starting.
   skill's trigger text, or its firing, from memory.
 - The audit is read-only until the user approves a routed finding. No skill
   edits, no filed tasks, no new files without that approval.
-- Never patch `sd-*` or vendored Trellis surfaces from here, whatever the
-  finding — the owning repository takes a task instead.
+- Never patch a surface another repository owns from here, whatever the
+  finding — that repository takes a work item instead.
 
 ## Final report
 
@@ -106,7 +105,7 @@ Unknown argument names are an error — stop and report them before starting.
   log. A fired-and-ignored row has no failed channel, since the trigger
   worked; name the step that was skipped instead;
 - **Routed findings** — each vetted finding with its owner and destination
-  (`templates/skills/` fix, owning-repository task, or
+  (`skills/` fix, owning-repository work item, or
   `sd-propose-skills` input);
 - **Proposed correctives** — the concrete edits or task summaries, marked
   vetted or awaiting the user's decision; and

@@ -21,10 +21,9 @@ period when the user wants expected-versus-actual comparison, lessons, and
 proposed follow-ups without formal incident causal analysis.
 
 When the subject is a software-delivery debugging stream, incident, CI or
-review gate miss, or pull-request workflow, route to `sd-retro` if that
-specialized workflow is available. If it is unavailable, continue here while
-stating that journal recording, delivery-gate analysis, and Trellis prevention
-tasks are outside this skill. Use `sd-postmortem` for formal incident analysis
+review gate miss, or pull-request workflow, continue here while stating that
+delivery-gate analysis and the filing of prevention work items are outside
+this skill. Use `sd-postmortem` for formal incident analysis
 that requires defensible root causes, safeguard findings, and verifiable
 corrective actions.
 

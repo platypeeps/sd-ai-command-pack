@@ -27,8 +27,8 @@ to plans and implementation specs. Run whichever set matches the artifact;
 run both when a change ships with its plan.
 
 Do not use as a substitute for review. The sd-review lane owns the review
-verdict on a diff or pull request; `trellis-check` owns spec-conformance
-checking with self-fixes. This skill feeds both, replaces neither.
+verdict on a diff or pull request; `sd-check` owns the deterministic
+repository gate. This skill feeds both, replaces neither.
 
 ## Arguments
 
@@ -114,10 +114,10 @@ Unknown argument names are an error — stop and report them before starting.
    | Rust module or crate layout change | `sd-rust-modules` |
    | ADR or decision-record change | `sd-adr-review` |
    | Checked-in documentation change | `sd-docs-bustest` |
-   | User-facing prose to check in or send | `sd-prose-lint`, `sd-humanizer` |
-   | Spec and convention conformance with self-fix | `trellis-check` |
+   | User-facing prose to check in or send | `sd-prose-lint` |
+   | Deterministic repository gate | `sd-check` |
    | Review verdict on the diff or pull request | the sd-review lane |
-   | Trellis task state and boundaries | `task.py` (`task.py current`) |
+   | Work-item state and boundaries | `sd-status` |
 
    If a routed sibling is unavailable on this platform, say so instead
    of silently skipping it.
@@ -135,9 +135,9 @@ Unknown argument names are an error — stop and report them before starting.
   line, step number, or command output — is UNSCORED, and an UNSCORED
   probe whose FAIL would have blocked the gate blocks it too. Missing
   evidence fails loud; it never resolves to a quiet PASS.
-- Route only to surfaces this pack ships: `trellis-check`, the sd-review
-  lane, `task.py` surfaces, and sibling `se-*` skills by their final
-  names. Do not route to anything else.
+- Route only to surfaces this pack ships: `sd-check`, the sd-review lane,
+  `sd-status`, and sibling `sd-*` skills by their final names. Do not
+  route to anything else.
 - A user override of a blocking FAIL is recorded in the report as an
   override, never rescored as a PASS.
 

@@ -8,8 +8,8 @@ description: Use when prose written on the user's behalf — skill bodies, docs,
 Check prose deterministically before it is committed or sent. Where the Vale
 gate exists, run it and work every finding to a disposition; where it does
 not, say so in one plain sentence and continue with the judgment pass. This
-skill reports and dispositions — it never rewrites. Rewriting is
-`sd-humanizer`.
+skill reports and dispositions — it never rewrites. Rewriting belongs to
+whoever owns the prose.
 
 ## When to use
 
@@ -21,7 +21,8 @@ name.
 
 Do not use for:
 
-- rewriting flagged prose into something human — that is `sd-humanizer`;
+- rewriting flagged prose into something human — this skill hands those
+  findings back rather than composing sentences;
 - a full editorial review of a technical draft — that is
   `sd-technical-editor`;
 - linting code, schemas, or configuration — the gate scopes to prose.
@@ -68,8 +69,8 @@ Unknown argument names are an error — stop and report them before starting.
    no disposition is unfinished work:
    - **fix** — the rule is right and the correction is mechanical, fully
      determined by the rule itself: delete the hedge, cut the AI-tell.
-     Anything needing the sentence re-composed is rewrite-shaped and goes
-     to `sd-humanizer` under step 7, which is what "never rewrites" above
+     Anything needing the sentence re-composed is rewrite-shaped and is
+     handed off under step 7, which is what "never rewrites" above
      means;
    - **suppress** — the rule is right in general and wrong for this span;
      suppress inline with a written justification recorded at the
@@ -87,17 +88,17 @@ Unknown argument names are an error — stop and report them before starting.
    for tells no rule covers — hedging stacks, filler, formulaic
    transitions, promotional puffery — and judge by clusters of tells, not
    isolated hits.
-7. Hand rewrite-shaped findings to `sd-humanizer` with the finding list
-   attached, so the rewrite pass does not re-derive the deterministic
-   results.
+7. Hand rewrite-shaped findings back to whoever owns the prose, with the
+   finding list attached, so the rewrite pass does not re-derive the
+   deterministic results.
 
 ## Safety rules
 
 - Never fail a session because a repository lacks Vale. Absence is a
   reported gap plus the judgment pass, nothing more.
-- Report and disposition; never rewrite. The rewrite belongs to
-  `sd-humanizer`, and posting or sending on the user's behalf is never
-  authorized from here.
+- Report and disposition; never rewrite. The rewrite belongs to the prose
+  owner, and posting or sending on the user's behalf is never authorized
+  from here.
 - Never suppress a finding without a justification recorded at the
   suppression site.
 - Do not install Vale, change gate configuration, or edit shared style
@@ -116,6 +117,6 @@ Unknown argument names are an error — stop and report them before starting.
 - **Suppressions** — every suppression with its recorded justification;
 - **Judgment-pass findings** — tells found beyond the rules, with
   locations;
-- **Handoffs** — findings passed to `sd-humanizer` and proposed config
+- **Handoffs** — rewrite-shaped findings handed back and proposed config
   promotions awaiting the gate owner; and
 - **Residue** — anything left unlinted and why.

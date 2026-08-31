@@ -35,7 +35,7 @@ stop and identify them before reading personal or external sources.
 - `domains=` — optional technical domains, products, or problem areas;
 - `audience=` — intended readers and their current knowledge or decision need;
 - `horizon=` — recency window or explicit dates for activity and developments;
-- `sources=` — supplied or connected repositories, Trellis work, notes,
+- `sources=` — supplied or connected repositories, work items, notes,
   captures, messages, reading history, or other authorized source locators;
 - `prior_content=` — known published or drafted content used for duplicate and
   new-angle checks;
