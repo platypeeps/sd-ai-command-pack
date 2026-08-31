@@ -1462,16 +1462,40 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     and `~/repos/platypeeps/omniroute-test` are all absent, `~/.claude.json`
     holds no matching project entry, and no `OMNIROUTE_*` name is exported.
     Recorded as a finding, not claimed as a deletion this step performed.
-  - **Left alone, and named rather than swept.** Three orphaned plugin cache
-    trees survive their uninstalled plugins — `kimi-marketplace` (45M),
-    `google-gemini` (8.6M), `openai-codex` (320K) — plus two `temp_git_*`
-    directories and a `google-gemini` marketplace stanza in
-    `~/.claude/settings.json`. They belong to steps 3a/3b, whose checks asked
-    whether the vendored agents still resolve, not whether the cache was swept.
-    Separately, three of the four plugin `bin` directories on that file's `PATH`
-    point at versions that no longer exist — including the claude-mem one, which
-    names 13.13.1 while 13.18.0 is installed. All of it is user-owned; listed
-    here for a decision rather than deleted under a step that did not ask for it.
+  - **The plugin residue, listed first and then swept on Sven's word.** Three
+    orphaned cache trees survived their uninstalled plugins —
+    `kimi-marketplace` (45M), `google-gemini` (8.6M), `openai-codex` (320K) —
+    plus two `temp_git_*` directories and a `google-gemini` entry in
+    `extraKnownMarketplaces`. The first version of this record filed them under
+    steps 3a/3b; that was wrong, and P2's own record says so: *"Left for step 6
+    (M3), named so it is not rediscovered: the two marketplaces stay registered
+    … and their `~/.claude/plugins/cache/` trees are still on disk."* They were
+    always this step's.
+  - **Checked before deleting, because the check nearly reversed the decision.**
+    `openai-codex/codex/1.0.6/agents/codex-rescue.md` and the kimi 1.9.5 tree
+    are the *only* copies of those agent definitions on this machine — the pack
+    vendored none of them, and `agents/` holds five `sd-*` files and nothing
+    else. That looked like deleting the last copy of something P2 was supposed
+    to preserve. P2's record settles it: nothing was vendored **on purpose** —
+    the kimi agents are gated on a `/kimi:setup` hook never registered here, and
+    `codex-rescue` is a forwarder to a plugin-owned Node script, so vendoring
+    either would have copied dead surfaces. The caches are dead weight, not the
+    last copy of anything wanted. Swept: **54 MB**, cache down to the four live
+    plugins, `claude plugin list` unchanged at four enabled.
+  - **`PATH` in `~/.claude/settings.json`, three dead entries removed.** Only
+    one of the four plugin `bin` directories it named exists (caveman); the
+    other three — claude-mem's, naming 13.13.1 while 13.18.0 is installed, plus
+    codex's and claude-hud's — point at versions that are gone, and **no version
+    of those plugins ships a `bin` directory at all**, so there was nothing to
+    repoint them at. Removed rather than updated. Verified after: 22 segments,
+    zero empty ones, the surviving plugin entry resolves, and both
+    `sd-handoff-restore` hook rows are intact.
+  - Six non-plugin `PATH` entries also name directories that do not exist —
+    `~/bin/x86_64_Darwin`, `~/.composer/vendor/bin`, `/pkg/env/global/bin`, and
+    three macOS `cryptexd` bootstrap paths. Left alone: they are user tooling
+    and OS-managed paths that come and go, not framework residue, and a missing
+    directory on `PATH` costs nothing. Named so the next reader does not take
+    the plugin sweep for a full audit.
 - [ ] 6b — dashboard swap to :8767 behind the parity checklist.
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
