@@ -47,8 +47,9 @@ Antigravity is deliberately **not** rendered. Its skill format is byte-identical
 to Claude's, but which of three candidate roots `agy` actually loads is
 unresolved, and rendering into the wrong one would produce surfaces that appear
 installed and never load — worse than absent, because nothing would report them
-missing. The parity test asserts the Antigravity count is zero or every
-surface, never partial.
+missing. Zero or all, never partial, is the rule; what the test asserts today
+is the zero half of it — no `sd-*` under any of the three candidate roots —
+because P1 has not passed and there is no all half to check yet.
 
 ## Install
 
