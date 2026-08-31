@@ -406,9 +406,9 @@ that asserted it. Result across the 24 non-archived platypeeps repos and the 5 a
   15 vault routines that D-doctrine says stay system-owned); `www_platypeeps_com`,
   `copper-hugo-platypeeps`, `godocs-hugo-platypeeps`, `doc_platypeeps_com`, `company`, and
   `company-public` are dormant (last commit 2022–2025); `sd-github-review-pilot` and
-  `sd-review-test` are retired at step 4; `testme` has no default branch. `platypeeps/
-  google_workspace_mcp` is the one open call — active PR flow (41 merges/60d), no protection —
-  left to the user rather than changed unilaterally.
+  `sd-review-test` are retired at step 4; `testme` has no default branch.
+  `platypeeps/google_workspace_mcp` was left as the one open call — the amendment at the end
+  of this record resolves it and corrects the reason it was open.
 - **All 5 active personal `sdelmas/*` repos are forks** (Trellis, prism, marketplace,
   google_workspace_mcp, SREGym). Fork-first doctrine governs: a fork's `main` tracks upstream and
   the patch stack lives on integration branches, so protecting it would fight the flow it exists
@@ -420,6 +420,39 @@ stated conditionally everywhere it appears (critique 4, the gates section, the a
 requirement 2, this repo's CONTRIBUTING). "Merge authority is branch protection" is true only while
 protection enforces; where it does not, `sd-status` reports the gap (folded into the step-3b brief)
 and no document claims a guarantee the config does not provide.
+
+**R11-D3 amendment (user, 2026-08-31) — `platypeeps/google_workspace_mcp` stays unprotected,
+deliberately; and the activity number that made it an open call was wrong.**
+
+The user's answer is *deliberate*: no protection. Recorded here rather than left as an open call,
+so nothing later reads the absence as an oversight and adds it.
+
+The original record justified leaving it open with "active PR flow (41 merges/60d)". That figure
+does not reproduce and the shape it implied is not the shape of this repo. Measured 2026-08-31:
+
+| Claimed | Measured |
+|---|---|
+| 41 merges / 60d, read as this repo's PR flow | 62 merge commits / 60d on `main`, but **4 pull requests in the repo's entire history**, 2 of them merged in that window |
+| — | 154 commits / 60d, **117 of them authored by the upstream maintainer** |
+| — | `fork: false`, no parent — a detached copy, 200 behind and 5 ahead of `taylorwilsdon/google_workspace_mcp` |
+
+So the merge commits are upstream history arriving, not review happening. The repo is a vendored
+copy of somebody else's project that tracks upstream by pushing merges to `main` directly, with
+five local commits of our own on top. That is fork-first doctrine in substance even though GitHub
+does not label it a fork, and it lands in the same bucket as the five `sdelmas/*` forks in the
+bullet below: a required-PR gate on `main` would block the upstream sync, which is the one thing
+`main` is for here.
+
+Two things this amendment is careful not to claim. It does **not** say protection would be
+harmful in general — it says it would break *this* flow, which is the only argument standing
+rule 1 accepts for a gap. And the honest consequence under R11-D3's own doctrine still applies:
+**nothing enforces merge authority in this repo**, and `sd-status` reports that gap rather than
+implying safety. The decision is to accept the gap knowingly, not to deny it exists.
+
+How the wrong number got in: 60 days of merge commits were counted on `main` and read as pull
+requests, without checking who authored them or asking GitHub how many pull requests the repo has
+ever had. Both checks are one API call. The lesson generalizes past this row — a merge count is
+not a review count in any repo that syncs an upstream.
 
 ### Autonomous backlog lane — `sd-ship --backlog --agent codex` (R10-D1)
 
