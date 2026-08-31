@@ -582,8 +582,96 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     is how every `bin/` file went unlinted in CI until 2026-08-29. `dashboard/` and
     `bin/sd-dashboard` are added to both, but the next file added will face the same
     trap. Deriving the list is its own change.
-- [ ] P4 / P5 — rest of the platform sweep (renamed from `3a`–`3e` on 2026-08-30;
-      the step-3 sub-PRs keep those letters, which five merged PRs already cite)
+- [x] P4 — 2026-08-30. The nightly `skill-proposal-accept` routine files its one
+      authorized outward write into `sd-ai-command-pack` again, as a work item.
+  - **It had been failing, not idling.** Gate 4 of its preflight required
+    `se-ai-command-pack/.trellis/scripts/task.py`. Trellis was removed from the pack at
+    step 2 and the pack itself is folded at step 5, so that path had not existed for some
+    time and every 03:00 run stopped at the gate. The retarget is therefore a repair with
+    a rename in it, not a rename.
+  - **Vault-side, in one commit** (`b6bd564`, six enumerated paths): `System/Scripts/
+    file-work-item.py` replaces `file-trellis-task.py`, which is deleted; the routine's
+    `SKILL.md`; `blog-idea-accept`'s one cross-reference; `System/Schema.md`'s `task-path`
+    row; and the `VAULT-STRUCTURE.md` authorization callout. That callout had to move in
+    the same change as the script — gate 2 greps it for the repository name, so a
+    preflight looking for a name the block no longer carried would stop the routine before
+    it filed anything. The vault said so itself at line 388, which is why the instruction
+    was there.
+  - **One authority moved rather than being renamed.** The old wrapper refused to
+    hand-author `task.json` because that schema belonged to another repository, so the
+    only honest way to produce one was to run that repository's own creator. A work item
+    has no creator — it is a directory and a markdown file — but it does have a schema,
+    and `bin/sd-docs-lint` enforces it. So `file-work-item.py` writes the item and then
+    runs *this repository's* linter over the result: failures naming the new item roll it
+    back and leave nothing behind, and failures elsewhere in `docs/work` are reported but
+    change nothing, because they are not that run's doing.
+  - `task-path` keeps its name in the note frontmatter. It names *where the filed artifact
+    landed*, `Writing/Skill Proposals.base` displays it under that name, and renaming it
+    would orphan the one note already carrying a value for a field whose meaning did not
+    change.
+  - **A gate was removed rather than repaired.** The preflight's first check compared this
+    routine's "live copy" against its "mirror" — both of which resolve to the same file,
+    since `VAULT-STRUCTURE.md` recorded the move to one copy per routine and this gate was
+    left behind. It could only compare a file to itself, so it passed unconditionally
+    while reporting like a check that had run. Three gates now, all of which can fail.
+  - **Verified in two halves, because a no-op cannot exercise a write.** The routine's own
+    check is "files an item or cleanly no-ops": all ten Skill Proposals notes are terminal
+    (8 `declined`, 2 `filed`), zero `accepted` and zero off-vocabulary, so the next run
+    passes its three gates and reports "nothing waiting" — the clean no-op. The write path
+    was exercised directly instead: five refusals each fire with their own message (empty
+    body, dated slug, malformed slug, empty title, an `anthropic-key` shape in the PRD);
+    the happy path wrote a lint-clean item and `sd-docs-lint` reported `clean`; a re-run
+    with the same slug refused the collision; a stubbed linter naming the new item rolled
+    it back with nothing left on disk; and a stubbed linter naming some *other* item left
+    the new one in place. The scratch items were removed and the checkout is clean.
+  - Not pushed. `vault-cleanup` pushes that repository every morning at 07:01, and a
+    routine's commit riding its own scheduled push is the existing arrangement.
+- [x] P5 — 2026-08-30, and smaller than planned once measured. Two of the five installed
+      agents claimed to be read-only in their own prose while declaring no `tools:` at
+      all, so the registry handed them every tool including `Write`, `Edit` and `Bash`.
+      `se-claim-verifier` now declares `Read, Grep, Glob`; `se-source-reader` declares
+      those plus `WebFetch`, because its brief names "a document, page, transcript" and
+      refusing the fetch would make the page case impossible. All five now declare
+      `tools:`, which is what the taxonomy requires of an agent. Takes effect next
+      session — the agent registry is read at session start.
+  - **The source fix was attempted first and reverted, deliberately.** These five render
+    from `se-ai-command-pack/templates/agents/`, so fixing only the machine copy is the
+    "fixed the render, not the source" trap. The templates were edited, regenerated
+    cleanly, and then `make check` there failed on that repository's release payload gate:
+    `payload changed without a version bump (version is still 0.72.0)`. 0.72.0 is the M0
+    tombstone — the terminal release, and the only reach-back signal a second machine can
+    ever get. Shipping two frontmatter lines by cutting a release past the tombstone
+    trades a real invariant for a small convenience, so the branch was deleted and that
+    repository is untouched. **Step 5 must carry the same two declarations into the fold**
+    — `templates/agents/se-claim-verifier.md` gets `tools: [Read, Grep, Glob]` and
+    `templates/agents/se-source-reader.md` gets `tools: [Read, Grep, Glob, WebFetch]` —
+    or the fold re-imports the ungoverned version and undoes this.
+  - **The codex half is a named gap, not a silent one.** The agents install to
+    `~/.codex/agents/*.toml`, not to `~/.codex/config.toml` as the plan row says. That
+    render carries `model` and `sandbox_mode` and never `tools`, and no template sets
+    `sandbox_mode`, so on the codex side all five run under the default sandbox. The fix
+    would be `sandbox_mode: read-only` on the same two agents; it is not applied here
+    because nothing on this machine can confirm codex accepts the key — the generator
+    supports it but no template has ever used it, and an unverified key in an external
+    format could reject two working agent files, which is worse than the gap. It belongs
+    to step 5, where the codex render is rebuilt anyway.
+  - **The caveman review lane is left alone and named.** The plan row says "caveman fork
+    drops review lane". There is no fork: the marketplace entry points at upstream
+    `JuliusBrussee/caveman`, so `caveman:cavecrew-reviewer` cannot be dropped without
+    forking a third-party plugin. That is a decision, not a sweep item.
+  - `sd-status` reports `legacy residue: none found` and the installer reports
+    `0 missing, 0 modified`, which is the step's stated check.
+- [x] LOC caps — `tests/test_loc_caps.py`, folded in here on purpose while every cap
+      still passes, so it lands as a guard rather than as a negotiation. `bin/` 6,458 of
+      8,000 · `bin/migrate-*` 1,250 of 1,500 · `dashboard/` 308 of 2,500. Enumerated from
+      `git ls-files`, never from a list: a hand-written list cannot see the thirteenth
+      file, and walking the directory is how `find bin -type f` once reported this
+      repository at 8,862 lines — over its own cap — by counting `__pycache__/*.pyc`.
+      Each test asserts its enumeration is non-empty *before* the cap, because a pathspec
+      that stopped matching would count zero and report a clean pass, which is the one way
+      a cap test fails at its job while looking like it worked. Verified in both
+      directions: green as written, and red with `6458 not less than or equal to 100` when
+      the ceiling is lowered under the real count.
 - [ ] 4 / 4b
 - [ ] 5 / 5b
 - [ ] 6 / 6b
