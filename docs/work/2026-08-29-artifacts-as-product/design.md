@@ -50,7 +50,9 @@ sd-ai-command-pack/
                         user-settings edit the installer ever makes, recorded in owned[],
                         removed on --uninstall; ensures ONE global-excludes line `CLAUDE.local.md`;
                         never edits AGENTS.md or any tracked repo file
-  skills/sd-*/SKILL.md  11 commands + sd-help + templates (prd, design, implement, decision, work-README)
+  skills/sd-*/SKILL.md  11 commands + the sd-help skill (a catalog, not a command
+                        — R11-D15) + templates (prd, design, implement, decision,
+                        work-README)
   skills/sd-*/SKILL.md  + 64 merged skills, renamed se-* → sd-* at fold (67 on disk − 3 retired:
                         se-help, se-brand-voice, se-humanizer — retired under old names)
   agents/               sd-rust-write/fill/reviewer, sd-claim-verifier, sd-source-reader —
@@ -854,8 +856,9 @@ commands that exist:
 | **Derived** | **13,980 → cap 14,000** |
 
 Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
-weak instrument and saying so is part of the derivation: at the *smallest* built command the six
-land at ~2,600 and the total at ~12,100; at the *largest*, ~8,200 and ~17,700. **Every version of
+weak instrument and saying so is part of the derivation: at the *smallest* built command, `sd-check`
+at 279, the six land at 1,674 and the total at **11,130**; at the *largest*, `sd-review` at 1,368,
+they land at 8,208 and the total at **17,664**. **Every version of
 this clears 8,000 by thousands**, which is the robust part of the finding. 14,000 is the middle of
 a range the evidence supports, not a number chosen to be comfortable, and it is roughly a seventh
 of today's 95k — 95,000 over 14,000 is 6.8, so the original "<1/11" framing goes with the old

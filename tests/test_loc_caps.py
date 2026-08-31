@@ -6,9 +6,11 @@ seven commands still unwritten), the temporary `migrate-*` tools at 1,500
 outside it, `dashboard/` at 2,500 -- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
 the re-derivation: 14,000 was set in its own decision record, not in a PR that
-did not fit, and it may only move downward from here. Until now they were prose. The retired stack
-this repository is replacing reached 95,000 lines one defensible commit at a
-time, and no single one of those commits looked like the problem, which is
+did not fit, and it may only move downward from here.
+
+Until now they were prose. The retired stack this repository is replacing
+reached 95,000 lines one defensible commit at a time, and no single one of
+those commits looked like the problem, which is
 exactly why the bound has to be mechanical: a number in a design document is
 checked by whoever remembers to check it.
 
