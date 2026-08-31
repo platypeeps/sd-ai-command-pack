@@ -1405,7 +1405,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     and cleared once the system-repo half landed); `machine-setup.sh status`
     reports every cron entry ok; `grep -rn skill-proposal-accept` across vault
     and system returns only dated history and one deliberate lineage comment;
-    `dashboard.py` compiles. In this repository, `ls .github/` is down to
+    `~/repos/system/local-project-dashboard/dashboard.py` compiles. In this
+    repository, `ls .github/` is down to
     `scripts/`, `workflows/`, and five files, none of them Trellis.
 - [x] 6 — 2026-08-31. M3, the machine cleanup. Deletion by name, because the
   receipt grants no authority over any of it: these directories were written by
@@ -1511,7 +1512,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     of those nine are tabs the system dashboard actually has. That list is the
     destination, not an inventory.
   - **What each side serves today.** The system dashboard
-    (`dashboard.py:1455`) has fifteen tabs from thirteen collectors: Needs you
+    (`~/repos/system/local-project-dashboard/dashboard.py:1455`) has fifteen
+    tabs from thirteen collectors: Needs you
     and Projects (both derived client-side, no collector), Work
     (`collect_work` rollup plus `/api/work` for the timeline), Research
     (`collect_research`, checkouts carrying `research.conf.py`), Repos
@@ -1551,7 +1553,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     step. The plan's one-line row understates it, which is the finding.
   - Two decisions the checklist raises and does not settle: the **Ports** tab
     and the **rtk savings ledger** have no stated destination in the design; and
-    `dashboard.py` is one 1,728-line file serving all fifteen tabs, so it cannot
+    `~/repos/system/local-project-dashboard/dashboard.py` is one 1,728-line
+    file serving all fifteen tabs, so it cannot
     be deleted per-tab — the two dashboards coexist for the whole of 6b rather
     than for a short window. The risk register names that window; this makes its
     length concrete.
