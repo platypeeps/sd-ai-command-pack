@@ -68,6 +68,13 @@ READ_CHUNK = 65536
 # A plugin's tabs wait on each other only for the machine. Bounded because a
 # plugin declaring thirty tabs should not decide how many processes the
 # dashboard starts at once.
+#
+# This is a per-plugin pool, and the machine-wide ceiling is the same number
+# only because plugins are read one at a time -- `load` iterates them serially,
+# and `cached_load`'s lock means one load runs at a time. Raised in review as
+# `TAB_WORKERS * plugins`, which is what it would become the day plugin reading
+# is parallelised. Whoever does that owes this constant a semaphore; until
+# then, adding one would be machinery for a code path that does not exist.
 TAB_WORKERS = 4
 # One fan-out at a time, and not repeated for callers arriving together.
 LOAD_SECONDS = 5.0
