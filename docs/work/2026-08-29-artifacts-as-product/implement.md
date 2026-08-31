@@ -28,7 +28,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **5** | Fold se-ai-command-pack (64 skills + 5 agents, all renamed se-* → sd-*; machine locations replaced). **Vault-side first:** retarget the 8 scheduled-routine callers (`se-research` ×6, `se-scan` ×2 under `System/Scheduled Tasks/`) to `sd-*`, then delete old se-* renders | `grep -rln 'se-research\|se-scan' 'System/Scheduled Tasks/'` = 0 before deletion; count = 64; collision check vs 11 commands = 0; `ls ~/.claude/skills \| grep -c '^se-'` = 0; sdw-research resolves; next nightly routine run green |
 | **5b** | `sd-skill-adopt` lands; retire skill-proposal-accept + file-trellis-task.py; delete legacy gito/prism skill folders (backend rows stay) | adopt-lint green on all installed skills |
 | **6** | Machine cleanup = M3 (receipt-driven, legacy subdirs by name) | find both spellings = 0; plugin rows = 0; `handoff/` + `intents/` untouched (a packet written before the step is restorable after) |
-| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the 2,500 cap's remaining headroom |
+| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the dashboard cap's remaining headroom, and the backbone-render PR re-derives that cap from files that exist (R11-D17: 4,000) |
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers, BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
@@ -1708,6 +1708,45 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     non-zero: closing stdout is not exiting, and the status is inside the
     budget (found in review -- the first version killed the process on the
     success path too, recording -SIGKILL and reading its own kill as clean).
+  - **6b-3 landed: the backbone renders plugin tabs, and the two questions
+    R11-D16 could not answer are answered by R11-D17.** The loader had nobody
+    to render it: `dashboard/app.js` drew a repo table and an issue table and
+    nothing else, so a plugin tab loaded, validated and budgeted was reaching
+    no screen at all. It now builds a nav button and a panel per tab from
+    `/api/plugins`, rebuilding only when the payload changes -- the poll is
+    every ten seconds and a rebuild destroys the panel, which is where a typed
+    filter and a chosen sort order live.
+    **Interaction is declared, not shipped.** The tabs being folded in are
+    searchable and sortable today, so a port without that is a regression the
+    parity checklist would catch. The user chose the third of three options
+    over letting a plugin ship script: a table carries `data-sd-search` and
+    `data-sd-sort`, a `<th data-sort="num">` says how a column compares, and
+    the backbone provides the behaviour for every plugin at once.
+    **The boundary needed a filter, not a reassurance.** `innerHTML` does not
+    run `<script>`, which is the fact that makes people stop looking; `onclick`
+    runs as written and `<img src=x onerror=…>` needs no click. So
+    `dashboard/markup.py` filters the markup on the way out of the loader --
+    server-side, because `/api/plugins` is a surface of this server and a
+    sanitiser in `app.js` would leave the endpoint serving whatever a tile
+    printed. Allow-list, three outcomes: kept, unwrapped (box lost, text kept),
+    or erased with its subtree. Every drop is a rank-0 row, because markup
+    rewritten in silence looks to its author exactly like markup that rendered.
+    **Verified in a browser engine, not only by `node --check`:** headless
+    Chrome against a two-tab plugin renders both buttons and both panels, two
+    filter inputs, four sortable headers, an alert strip carrying all four
+    rows, and `<div onclick="steal()">` arriving as `<div>`. The comparator's
+    NaN handling was checked separately, since a cell holding no number must
+    sink rather than sort as zero. What is **not** verified: a real click on a
+    header. There is no JS test harness in this repository and adding one was
+    out of scope for this change.
+    **The measurement, and the cap:** `dashboard/` is **2,488** with 6b-3 in
+    it, which fits the 2,500 cap with twelve lines to spare -- so R11-D16's
+    trigger fires exactly as written, and **R11-D17 re-derives the ceiling at
+    4,000** in its own record rather than in a change that busted the old one:
+    2,488 measured, plus R11-D13's 763-line backbone lift, plus estimates of
+    ~120 for Now and ~200 for the write path, is ~3,571; 4,000 is that plus
+    room for this repository's comment convention. Downward only, like
+    `bin/`'s 14,000.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own

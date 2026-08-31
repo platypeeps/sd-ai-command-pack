@@ -64,7 +64,7 @@ sd-ai-command-pack/
                         sd-pr-state, sd-review(+-local), sd-status, sd-spec, sd-map, sd-handoff,
                         sd-trackers, sd-handoff-restore (hook), sd CLI (plugin|store|issue|config groups),
                         migrate-* (temp)
-  dashboard/            stdlib HTTP server + one JS file + sd-dashboard CLI (≤2,500 LOC cap)
+  dashboard/            stdlib HTTP server + one JS file + sd-dashboard CLI (≤4,000 LOC cap)
   actions/              docs-lint + review-route composite actions (SHA/tag-pinned, opt-in only)
   docs/work|spec|decisions   dogfood
   tests/                ~3k lines: install, docs-lint, route fixtures, store invariants,
@@ -86,10 +86,11 @@ were both busted on paper, and on 2026-08-29 the record called 8,000 the honest 
 "still <1/11 of today's 95k". *8,000 was busted too. R11-D15 re-derived the ceiling at 14,000
 from built code — roughly a seventh of the 95k rather than an eleventh.*
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
-ceiling until then. dashboard/ ≤ **2,500** (justified as "credible: 457 lifted + one JS file" — *the 457
-is superseded by R11-D13's enumeration at 763; the cap's number stands, its stated justification does
-not*). Caps are CI tests; a cap is never raised in the PR
-that busts it. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
+ceiling until then. dashboard/ ≤ **4,000** (*R11-D17 re-derived it at 6b-3 from files that exist:
+2,488 measured plus R11-D13's 763-line lift and two estimates. The old 2,500 rested on "credible:
+457 lifted + one JS file", and R11-D13 measured that lift at 763*). Caps are CI tests; a cap is
+never raised in the PR that busts it — 4,000 was set in its own record by a change that fit under
+2,500, and like `bin/`'s 14,000 it may only move downward. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
 
 ### Commands (11 — grown from 8, each growth carried by a decision record; `sd-help` left at
 R11-D15, being a catalog rather than a command)
@@ -1606,6 +1607,86 @@ shebang names a shell -- because an extensionless script is exactly what a suffi
 miss. Re-introducing shipped shell then fails CI until this decision is revisited and the lane
 restored. If that test is ever deleted rather than satisfied, this record is the falsifiable
 evidence that the removal was quietly widened.
+
+**R11-D17 (user, 2026-08-31) — a plugin declares what its table can do and the backbone does
+it; the markup it sends is filtered on the way out of the loader; and `dashboard/` is re-derived
+at 4,000.**
+
+6b-3 is the backbone rendering plugin tabs. R11-D16 fixed what a tile returns and left two
+questions it could not answer without a consumer, and building the consumer answered both.
+
+**One. Interaction. The tile's tables are searchable and sortable in the view they replace, and
+the tile cannot ship the script that does it.** The system dashboard's own JS gives every one of
+these tabs a filter box and click-to-sort headers, so a port that dropped them would be a
+regression the parity checklist would catch at the swap. Three ways to keep them, and the user
+chose the third: let the plugin ship script (the boundary this pack spent 6b-2 establishing, gone
+in one line); accept the regression; or **have the plugin declare the behaviour and the backbone
+provide it**.
+
+The declaration is attributes, because attributes are data:
+
+```html
+<table data-sd-sort data-sd-search="filter jobs">
+  <thead><tr><th data-sort="text">job</th><th data-sort="num">age</th></tr></thead>
+```
+
+`data-sd-search` asks for a filter box above the table, its value becoming the placeholder;
+`data-sd-sort` asks for click-to-sort headers; a `<th data-sort="num">` says that column compares
+as a number and `data-sort="none"`, or its absence, leaves a column unsortable. The backbone owns
+the implementation, so every plugin's table sorts the same way and a fix reaches all of them at
+once. The cost is honest and small: a behaviour no attribute names cannot be had at all, and the
+answer to "our table needs to do something else" is a new attribute in this record, not a script
+tag.
+
+**Two. `innerHTML` not running `<script>` settles nothing, and that is why there is a filter.**
+The markup a tile returns is injected into its panel. Injection does not execute a `<script>`
+element, which is the fact that makes people stop looking — and it is not the attack. `onclick`
+runs as written, `<img src=x onerror=…>` needs no click, and an `<iframe>` needs neither. So the
+payload passes an **allow-list** on the way out of the loader, server-side rather than in the
+browser: `/api/plugins` is a surface of this server, and a sanitiser living in `app.js` would
+leave the endpoint itself serving whatever a tile printed.
+
+An allow-list rather than a deny-list, because a list of dangerous tags is a list somebody has to
+keep current against browsers. Three outcomes: structural markup is **kept**; an unknown tag is
+**unwrapped**, losing the box and keeping the text; and a tag whose content is code, a request or
+a control — `script`, `iframe`, `form`, `svg` — is **erased with its subtree**. `<img>` needs
+neither rule: it is not allow-listed, and a void element has no subtree to erase. Attributes
+are `class`, `title`, `lang`, `dir`, a few per-tag structural ones, and `data-*`, which is what
+makes the interaction contract above possible without script. `href` must be `https:`, `http:` or
+`mailto:` — a relative one would resolve against this server's own routes. `id` is not allowed at
+all: a tile emitting `id="rows"` would claim an element the backbone addresses by name.
+
+Every drop is reported, and the report is a rank-0 row. Markup rewritten in silence looks to its
+author exactly like markup that rendered, and this is the same rule as the rest of the loader: the
+tab is kept, the loss is named.
+
+**Rows are still not markup.** R11-D16's split is unchanged and this does not soften it: `rows`
+are typed fields rendered as text into the backbone's own view, and no filter makes markup
+welcome there.
+
+**Three. The dashboard cap is re-derived at 4,000, from files that exist.** R11-D16's trigger
+named this landing — *"the landing that carries the backbone renders re-derives `dashboard/` from
+files that exist, once, and may set the ceiling in its own record"* — and this is that record. The
+re-derivation, all of it from measurement or from an enumeration already made:
+
+| part | lines | source |
+|---|---|---|
+| `dashboard/` as it stands with 6b-3 | 2,488 | measured, `git ls-files -- dashboard` |
+| backbone tabs still to port | 763 | R11-D13's enumeration: 79 collector lines plus 684 of JS |
+| Now: merging plugin rows with the backbone's, ranked | ~120 | estimate |
+| the token-gated write path R11-D10 commits to | ~200 | estimate |
+| **derived total** | **~3,571** | |
+
+Set at **4,000**, which is the derived total plus room for this repository's comment convention
+rather than for more scope — roughly half of every file here is prose, which is house style and
+not an accident, and a cap derived from code alone would be busted by the next docstring. Like
+`bin/`'s 14,000 it may move **downward** and not up, and the two estimates in the table are the
+part to check: if Now and the write path land materially over them, that is a finding for their
+own records, not a second re-derivation.
+
+The old number is not defended. 2,500 was set against a 457-line lift that R11-D13 measured at
+763, and the estimate it rested on was wrong before any of this was built. What the cap is for is
+unchanged: the retired stack reached 95,000 lines one defensible commit at a time.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
