@@ -7,9 +7,10 @@
 
 ## Overview
 
-One repository, one prefix, one machine-scope install. The pack renders twelve
-`sd-*` command surfaces into the AI tools installed on a machine and gets out of
-the way. It does not install anything into the repositories you work in.
+One repository, one prefix, one machine-scope install. The pack renders its
+`sd-*` surfaces into the AI tools installed on a machine and gets out of the
+way — twelve commands, and the skills they draw on. It does not install
+anything into the repositories you work in.
 
 That last sentence is the design, not a summary of it. The previous version of
 this pack copied roughly 56,000 lines of payload into every consuming
@@ -46,8 +47,8 @@ Antigravity is deliberately **not** rendered. Its skill format is byte-identical
 to Claude's, but which of three candidate roots `agy` actually loads is
 unresolved, and rendering into the wrong one would produce surfaces that appear
 installed and never load — worse than absent, because nothing would report them
-missing. The parity test asserts the Antigravity count is zero or twelve, never
-partial.
+missing. The parity test asserts the Antigravity count is zero or every
+surface, never partial.
 
 ## Install
 
@@ -92,9 +93,17 @@ fact is what makes the rest safe:
 
 ## Commands
 
-Twelve surfaces, rendered identically to every platform. Each is documented in
+Twelve commands, rendered identically to every platform. Each is documented in
 its own `skills/sd-*/SKILL.md`, which is the file that gets installed, so the
 documentation and the artifact are the same object.
+
+`skills/` also holds the skills these commands draw on — knowledge and
+procedure with no standing side-effect authority, loaded when relevant rather
+than invoked. They are not listed here: `sd-help` reads the installed tree at
+runtime, which is the only inventory that cannot go stale. The one structural
+difference is in the frontmatter, and it is what the taxonomy means: a command
+sets `disable-model-invocation`, so invoking it is a deliberate act; a skill
+does not.
 
 | Command | Purpose |
 |---|---|
