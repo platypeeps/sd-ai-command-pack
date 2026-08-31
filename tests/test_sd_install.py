@@ -592,6 +592,38 @@ class LegacyReceiptTests(InstallerHarness):
         self.assertIn("no legacy receipt", output)
 
 
+class ReceiptCanonicalTests(InstallerHarness):
+    """The receipt is an artifact others diff, so its bytes have to mean something."""
+
+    def test_owned_is_sorted_by_path(self):
+        self.install()
+        paths = [row["path"] for row in self.receipt["owned"]]
+        self.assertEqual(paths, sorted(paths))
+
+    def test_two_runs_of_the_same_checkout_write_identical_bytes(self):
+        path = (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
+        )
+        self.install()
+        first = path.read_bytes()
+        self.install()
+        self.assertEqual(first, path.read_bytes())
+
+    def test_the_hook_row_takes_its_sorted_position(self):
+        """It is appended after the renders, so sorting has to come after that.
+
+        Asserted by position rather than by "it is not last", which would only
+        hold for a home whose settings path happens not to sort last.
+        """
+        self.install()
+        owned = self.receipt["owned"]
+        hook = next(row for row in owned if row.get("kind") == "hook")
+        self.assertEqual(
+            owned.index(hook),
+            sorted(row["path"] for row in owned).index(hook["path"]),
+        )
+
+
 class CommandLineTests(InstallerHarness):
     def test_no_mode_prints_usage_and_fails(self):
         out = io.StringIO()

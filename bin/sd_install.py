@@ -783,6 +783,12 @@ def cmd_user(ctx: Context, out) -> int:
         for item in written
     ]
     owned.append({"path": str(ctx.settings), "kind": "hook", "command": hook})
+    # Sorted, so the receipt is canonical rather than merely repeatable. Render
+    # order is platform-major and stable today, which makes two runs agree by
+    # accident; reordering `platform_homes` or nesting the render loop the other
+    # way would churn every row without changing a single installed file, and a
+    # diff that noisy is a diff nobody reads.
+    owned.sort(key=lambda row: (row["path"], row.get("kind", "")))
     payload = {
         "schema": RECEIPT_SCHEMA,
         "checkout": str(ctx.checkout),
