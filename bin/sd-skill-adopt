@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+"""The one door an outside skill comes through.
+
+The measured failure this replaces: ten skill proposals went through a six-stage
+pipeline spread across four repositories, and *none* of them was ever adopted.
+Eight were declined, two were filed as work items and then sat. A pipeline whose
+completion rate is zero is not a careful pipeline, it is a wall, and the answer
+in the design is one command that runs every stage in one place.
+
+Five stages, in this order, and the order is the whole safety argument:
+
+1. **Pre-screen** the candidate's text for the shapes that make adopting an
+   arbitrary file dangerous -- injection, exfiltration, credential reads,
+   pipe-to-shell installs, and named Google connector tools.
+2. **Lint** its shape: frontmatter that parses, a `name` agreeing with its
+   directory, a one-line description, and a kind marker that means what it says.
+3. **Transform** the name into this namespace and check it against what is
+   already there, so a collision is a refusal rather than a silent overwrite.
+4. **Record provenance** in the adopted file, because a skill nobody can trace
+   is a skill nobody can re-audit.
+5. **Write**, and only now.
+
+Nothing is written before stage 1 passes. A URL is fetched into memory and
+screened there; a refusal leaves no file on disk at all.
+
+**`--lint-only` runs stage 2 and stops.** That split is deliberate rather than
+economical. Stage 1 screens *untrusted* text: it is looking for a file that
+wants to talk to the agent, and the patterns it matches are exactly the ones a
+document *about* prompt injection quotes. Pointing it at a tree of skills you
+already installed and trust -- including this pack's own, which documents those
+patterns by name -- would report the documentation as the threat. Stage 2 asks
+only "is this the shape of a skill", which is a question worth asking of every
+skill on the machine and the one the design's check for this step names.
+
+Findings never quote the line they matched. They give the line number and the
+name of the rule that fired: a credential is exactly the thing a scanner is most
+likely to have found, and echoing the hit to report it would be the leak.
+
+Exits 0 when nothing refused, 1 on any refusal (or, under `--lint-only`, any
+finding), and 2 when the arguments themselves were wrong.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import datetime
+import hashlib
+import os
+import pathlib
+import re
+import sys
+import urllib.request
+
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+from sd_lib import git_output, parse_frontmatter, repo_root  # noqa: E402
+
+SKILL_FILE = "SKILL.md"
+PREFIX = "sd-"
+# `_shared` holds reference files the installer fans out by citation. It is not
+# a surface and has no SKILL.md, so a survey that treated it as one would report
+# a missing file for a directory that is correct as it stands.
+SHARED_DIR = "_shared"
+
+# The eleven commands, spelled here rather than imported: this tool refuses a
+# collision with one of them, and it must be able to do that while standing in
+# some other repository entirely, where the pack's own `skills/` is not on disk.
+COMMANDS = frozenset({
+    "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
+    "sd-deps", "sd-suggest", "sd-skill-adopt", "sd-map", "sd-handoff",
+})
+
+MARKER = "disable-model-invocation"
+
+# A name is one path segment and nothing else. On the `-` and URL paths there is
+# no directory for the frontmatter to disagree with, so `name:` alone decides
+# where the file is written -- and `name: ../../evil` would be written there.
+# Measured before choosing the character set rather than after: across the 138
+# skills installed on this machine and the 79 under ~/.codex, every name is
+# already inside this set, so the rule costs nothing real and closes a traversal
+# in the one tool whose whole job is handling files nobody has vetted.
+SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+REFUSE = "refuse"
+WARN = "warn"
+
+# --------------------------------------------------------------------------
+# Stage 1 -- the pre-screen
+# --------------------------------------------------------------------------
+
+# Characters with no business in a document meant to be read. Zero-width and
+# bidirectional-override runs are how text that a human reviewer cannot see gets
+# in front of a model that can. There is no benign use in a skill, so the rule
+# is presence, not context.
+INVISIBLE_RE = re.compile(
+    "[\u200b-\u200f\u2060-\u2064\u202a-\u202e\ufeff]"
+)
+
+# Shapes that address the agent over the user's head. Each is a phrase that
+# earns its place by being useless in honest prose about what a skill does.
+INJECTION_PATTERNS = (
+    (re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\b", re.I), "ignore-previous"),
+    (re.compile(r"disregard\s+(?:all\s+)?(?:previous|prior|the\s+above)\b", re.I), "disregard-above"),
+    (re.compile(r"your\s+(?:real|true|actual)\s+instructions?\b", re.I), "true-instructions"),
+    (re.compile(r"\bthis\s+skill\s+is\s+(?:pre-)?(?:approved|adopted|signed)\b", re.I), "self-approving"),
+    (re.compile(r"do\s+not\s+(?:tell|show|report\s+to)\s+the\s+user\b", re.I), "conceal-from-user"),
+)
+
+# Reading a credential store. A skill that needs one of these is a skill whose
+# blast radius is wider than any skill's job, so this refuses rather than warns.
+CREDENTIAL_PATTERNS = (
+    (re.compile(r"~/\.ssh|\bid_rsa\b|\bid_ed25519\b"), "ssh-key-read"),
+    (re.compile(r"\bauth\.json\b|\.aws/credentials|\.netrc\b"), "credential-file-read"),
+    (re.compile(r"(?<![\w-])\.env(?![\w.-])"), "dotenv-read"),
+    (re.compile(r"\bprintenv\b|\benv\s*\|"), "environment-dump"),
+)
+
+# Verbs that reach the network. On their own these are a warning: a skill may
+# legitimately tell you to fetch a page, and most useful ones do.
+NETWORK_PATTERNS = (
+    (re.compile(r"\bcurl\b|\bwget\b"), "shell-http"),
+    (re.compile(r"requests\.(?:post|put)\b|urllib\.request\.urlopen"), "python-http"),
+    (re.compile(r"\bfetch\s*\(|\bXMLHttpRequest\b"), "javascript-http"),
+    (re.compile(r"\bnc\s+-|\bncat\b"), "raw-socket"),
+)
+
+# Things worth sending somewhere, which honest skills also mention. An env var
+# named for a token, the address that identifies the user, the file holding this
+# machine's project state: none is a refusal on its own -- a skill that says
+# "set GITHUB_TOKEN first" is doing its job. Paired with a network verb they
+# become the shape that sends one to the other, and the pre-screen cannot tell
+# which line feeds which, so the *combination* is what refuses.
+EXFIL_SUBJECT_PATTERNS = (
+    (re.compile(r"\b[A-Z][A-Z0-9_]*_(?:TOKEN|KEY|SECRET|PASSWORD)\b"), "credential-env-name"),
+    (re.compile(r"git\s+config\s+(?:--\w+\s+)*user\.email|[\w.+-]+@[\w-]+\.[\w.]+"), "user-identity"),
+    (re.compile(r"~/\.claude\.json|~/\.config/|\bos\.environ\b|\$ENV\b"), "machine-state"),
+)
+
+# Piping a download into a shell, and installing something unpinned. The first
+# is a refusal because the fetched bytes are never reviewed; the second is a
+# warning because "latest" is careless rather than hostile.
+PIPE_TO_SHELL_RE = re.compile(r"(?:curl|wget)[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|d)?sh\b")
+UNPINNED_INSTALL_RE = re.compile(
+    r"(?:pip3?\s+install|npm\s+(?:i|install)\s+-g|uv\s+pip\s+install)\s+(?![-\s])(?!.*[=@]{1,2}\d)",
+)
+
+# The single-write-path doctrine, enforced at the door. workspace-mcp is the
+# only Google write path on this machine; a skill naming a connector send is
+# naming a path the send guard does not cover, and `mcp__gmail__*` is a tool
+# roster that no longer exists at all.
+CONNECTOR_RE = re.compile(r"mcp__claude_ai_(?:Gmail|Google_)\w*|mcp__gmail__\w+")
+
+
+@dataclasses.dataclass(frozen=True)
+class Finding:
+    """One thing wrong, located and named but never quoted."""
+
+    severity: str
+    rule: str
+    line: int
+    detail: str = ""
+
+    def render(self) -> str:
+        where = f"line {self.line}" if self.line else "file"
+        tail = f" ({self.detail})" if self.detail else ""
+        return f"  {self.severity}: {self.rule} at {where}{tail}"
+
+
+def _line_of(text: str, index: int) -> int:
+    return text.count("\n", 0, index) + 1
+
+
+def _scan(text: str, patterns, severity: str) -> list[Finding]:
+    """First hit per pattern. A second hit of the same rule adds no decision."""
+
+    found: list[Finding] = []
+    for pattern, rule in patterns:
+        match = pattern.search(text)
+        if match:
+            found.append(Finding(severity, rule, _line_of(text, match.start())))
+    return found
+
+
+def prescreen(text: str) -> list[Finding]:
+    """Stage 1. Everything here is about the candidate's *content*."""
+
+    findings: list[Finding] = []
+    match = INVISIBLE_RE.search(text)
+    if match:
+        findings.append(Finding(REFUSE, "invisible-characters", _line_of(text, match.start())))
+    findings += _scan(text, INJECTION_PATTERNS, REFUSE)
+    findings += _scan(text, CREDENTIAL_PATTERNS, REFUSE)
+
+    match = PIPE_TO_SHELL_RE.search(text)
+    if match:
+        findings.append(Finding(REFUSE, "pipe-to-shell", _line_of(text, match.start())))
+    match = CONNECTOR_RE.search(text)
+    if match:
+        findings.append(Finding(REFUSE, "google-connector-tool", _line_of(text, match.start())))
+
+    network = _scan(text, NETWORK_PATTERNS, WARN)
+    subjects = _scan(text, EXFIL_SUBJECT_PATTERNS, WARN)
+    if network and subjects:
+        findings.append(
+            Finding(REFUSE, "exfiltration-shape", network[0].line, subjects[0].rule)
+        )
+    findings += network + subjects
+
+    match = UNPINNED_INSTALL_RE.search(text)
+    if match:
+        findings.append(Finding(WARN, "unpinned-install", _line_of(text, match.start())))
+    return findings
+
+
+# --------------------------------------------------------------------------
+# Stage 2 -- the lint
+# --------------------------------------------------------------------------
+
+
+def lint(directory_name: str, text: str) -> list[Finding]:
+    """Stage 2. Is this the shape of a skill?
+
+    The same contract `tests/test_skill_frontmatter.py` asserts over this
+    repository's own tree, applied to a candidate that is not in it yet. Kept
+    deliberately narrow: it checks the keys that carry *meaning* -- the name
+    that must agree with the directory, a description that is actually one line,
+    and the two markers that decide what kind of surface this is -- and says
+    nothing about the body. A lint with an opinion about prose is a lint that
+    fails on other people's skills for being written differently.
+    """
+
+    findings: list[Finding] = []
+    fields = parse_frontmatter(text)
+    if fields is None:
+        return [Finding(REFUSE, "no-frontmatter", 1)]
+
+    name = fields.get("name")
+    if not name:
+        findings.append(Finding(REFUSE, "missing-name", 1))
+    elif name != directory_name:
+        findings.append(
+            Finding(REFUSE, "name-directory-mismatch", 1, f"name={name} dir={directory_name}")
+        )
+
+    description = fields.get("description", "")
+    if not description.strip():
+        findings.append(Finding(REFUSE, "missing-description", 1))
+
+    if name and not SAFE_NAME_RE.match(name):
+        # Deliberately in the lint and not at the write. A separator or a `..`
+        # in a name is a malformed name, and saying so here means every path
+        # that ever writes a skill is covered by one rule rather than each
+        # write site remembering to sanitize.
+        findings.append(Finding(REFUSE, "unsafe-name", 1, "not a single path segment"))
+
+    if "tools" in fields:
+        # `tools:` is what makes something an agent, and agents live in
+        # `agents/`. Adopting one into a skills tree would put a bounded worker
+        # where the loader expects knowledge.
+        findings.append(Finding(REFUSE, "agent-in-skills-tree", 1))
+
+    marker = fields.get(MARKER)
+    if marker is not None and marker not in ("true", "false"):
+        findings.append(Finding(REFUSE, "marker-not-boolean", 1, f"{MARKER}={marker}"))
+    return findings
+
+
+# --------------------------------------------------------------------------
+# Stage 3 -- the canonical transform
+# --------------------------------------------------------------------------
+
+
+def canonical_name(name: str, scope: str, existing: set[str]) -> tuple[str, list[Finding]]:
+    """Stage 3. What this skill will be called here, or why it cannot be.
+
+    `pack` scope moves the surface into the pack's one namespace, so the prefix
+    is applied. `user` scope leaves the name alone: an adopted third-party skill
+    in the user's own home is not the pack's, and renaming it there would claim
+    an ownership the installer does not have.
+    """
+
+    target = name if scope == "user" or name.startswith(PREFIX) else PREFIX + name
+    findings: list[Finding] = []
+    if target in COMMANDS:
+        findings.append(Finding(REFUSE, "collides-with-command", 0, target))
+    elif target in existing:
+        findings.append(Finding(REFUSE, "collides-with-installed-surface", 0, target))
+    return target, findings
+
+
+# --------------------------------------------------------------------------
+# Stage 4 -- provenance
+# --------------------------------------------------------------------------
+
+PROVENANCE_HEADING = "## Provenance"
+
+
+def source_revision(source: str, raw: bytes) -> str:
+    """What this file was when it was adopted.
+
+    A git revision when the source is inside a checkout, because that is the
+    identifier the origin repository itself uses. A content digest always,
+    because a URL has no revision and a loose file has no history, and a hash of
+    the exact bytes is the one identifier that exists in every case.
+    """
+
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    path = pathlib.Path(source)
+    if path.exists():
+        root = repo_root(path)
+        if root is not None:
+            commit = git_output(["rev-parse", "--short", "HEAD"], root)
+            if commit:
+                return f"{commit} (sha256:{digest})"
+    return f"sha256:{digest}"
+
+
+def with_provenance(text: str, source: str, revision: str, today: str) -> str:
+    """Stage 4. Append the record, or refresh it if one is already there.
+
+    Re-adopting an updated skill should restate where it came from, not stack a
+    second Provenance section under the first. The heading is the anchor:
+    everything from it to the end of the file is this tool's, because the
+    section is always written last.
+    """
+
+    body = text.rstrip("\n")
+    index = body.find("\n" + PROVENANCE_HEADING)
+    if index != -1:
+        body = body[:index].rstrip("\n")
+    block = (
+        f"{PROVENANCE_HEADING}\n\n"
+        f"Adopted by `sd-skill-adopt` on {today} from `{source}` at revision "
+        f"`{revision}`.\n"
+    )
+    return f"{body}\n\n{block}"
+
+
+# --------------------------------------------------------------------------
+# Reading the candidate, and reading a tree of them
+# --------------------------------------------------------------------------
+
+
+def read_source(source: str, opener=urllib.request.urlopen) -> tuple[str, bytes]:
+    """The candidate's bytes, and the directory name it is claiming.
+
+    `-` reads stdin. A URL is fetched into memory and never written anywhere:
+    the pre-screen has to run before anything touches the disk, and a file
+    downloaded "just to scan it" is a file that exists.
+    """
+
+    if source == "-":
+        return "", sys.stdin.buffer.read()
+    if source.startswith(("http://", "https://")):
+        with opener(source, timeout=30) as response:
+            return "", response.read()
+    path = pathlib.Path(source)
+    if path.is_dir():
+        path = path / SKILL_FILE
+    if not path.is_file():
+        raise FileNotFoundError(source)
+    return path.parent.name, path.read_bytes()
+
+
+def skill_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every `*/SKILL.md` under a root, enumerated from disk.
+
+    One level down only. A skill is a directory holding a `SKILL.md`, and
+    recursing would sweep up the reference files a skill keeps beside itself and
+    report each as a malformed surface of its own.
+    """
+
+    if root.is_file():
+        return [root]
+    if not root.is_dir():
+        return []
+    return sorted(
+        entry / SKILL_FILE
+        for entry in root.iterdir()
+        if entry.is_dir() and entry.name != SHARED_DIR and (entry / SKILL_FILE).is_file()
+    )
+
+
+# Directories a walk must never descend into. `.git` would report every skill
+# once per packed revision that happens to be checked out; the rest are other
+# people's dependency trees, where a vendored SKILL.md is not this repository's
+# to survey.
+SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "venv", "__pycache__", "target"})
+
+
+def repo_skill_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every `SKILL.md` anywhere in a checkout, found by walking it.
+
+    `skill_files` above looks one level down, which is right for a flat skills
+    root and wrong for a repository: skills live under `.claude/skills/`, or
+    `.agents/skills/`, or `templates/skills/`, or somewhere this list has not
+    thought of. Surveying `sd-writing-pack` with the one-level reader reported
+    "no skills found" for a repository holding twelve, which is the failure a
+    hardcoded list of conventional locations would reproduce the next time
+    somebody invents a thirteenth. So the walk enumerates, and the only thing
+    spelled out is what it refuses to descend into.
+    """
+
+    if not root.is_dir():
+        return []
+    found: list[pathlib.Path] = []
+    for current, directories, files in os.walk(root):
+        directories[:] = [d for d in directories if d not in SKIP_DIRS]
+        if SKILL_FILE in files:
+            found.append(pathlib.Path(current) / SKILL_FILE)
+    return sorted(found)
+
+
+def installed_surfaces(scope: str, home: pathlib.Path) -> set[str]:
+    """What is already claiming a name at the destination."""
+
+    return {path.parent.name for path in skill_files(destination_root(scope, home))}
+
+
+def destination_root(scope: str, home: pathlib.Path) -> pathlib.Path:
+    """Where `--scope` writes.
+
+    `pack` resolves from the current working directory like every other sd-*
+    command (R10-D6): the pack you are adopting into is the repository you are
+    standing in, and there is no flag to point it elsewhere.
+    """
+
+    if scope == "user":
+        return home / ".claude" / "skills"
+    root = repo_root()
+    if root is None:
+        raise ValueError("--scope pack needs a repository; cd into one, or use --scope user")
+    return root / "skills"
+
+
+# --------------------------------------------------------------------------
+# The runs
+# --------------------------------------------------------------------------
+
+
+def report(out, label: str, findings: list[Finding]) -> None:
+    if not findings:
+        out.write(f"{label}: ok\n")
+        return
+    out.write(f"{label}: {len(findings)} finding(s)\n")
+    for finding in findings:
+        out.write(finding.render() + "\n")
+
+
+def run_lint_only(source: str, out) -> int:
+    """Stage 2 over one skill or a directory of them."""
+
+    paths = skill_files(pathlib.Path(source))
+    if not paths:
+        out.write(f"nothing to lint at {source}\n")
+        return 2
+    total = 0
+    for path in paths:
+        findings = lint(path.parent.name, path.read_text(encoding="utf-8", errors="replace"))
+        total += len(findings)
+        if findings:
+            report(out, str(path), findings)
+    out.write(f"{len(paths)} skill(s) linted, {total} finding(s)\n")
+    return 1 if total else 0
+
+
+def run_survey(source: str, out) -> int:
+    """`--from-repo --list`. Reads a checkout, writes nothing, adopts nothing."""
+
+    root = pathlib.Path(source)
+    paths = repo_skill_files(root)
+    if not paths:
+        out.write(f"no skills found under {source}\n")
+        return 1
+    for path in paths:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        fields = parse_frontmatter(text) or {}
+        kind = "command" if fields.get(MARKER) == "true" else "skill"
+        screened = len([f for f in prescreen(text) if f.severity == REFUSE])
+        shape = len(lint(path.parent.name, text))
+        # Located, not just named: a repository can hold two skills of the same
+        # name under different roots, and a survey that printed the bare name
+        # would report them as one row seen twice.
+        try:
+            where = path.parent.relative_to(root)
+        except ValueError:
+            where = path.parent
+        out.write(
+            f"{path.parent.name}\t{kind}\tscreen:{screened}\tshape:{shape}\t{where}\t"
+            f"{fields.get('description', '')[:70]}\n"
+        )
+    out.write(f"{len(paths)} skill(s) surveyed; nothing written\n")
+    return 0
+
+
+def run_adopt(
+    source: str,
+    scope: str,
+    home: pathlib.Path,
+    out,
+    err,
+    today: str,
+    opener=urllib.request.urlopen,
+) -> int:
+    """All five stages, in order, stopping at the first refusal."""
+
+    try:
+        directory_name, raw = read_source(source, opener=opener)
+    except FileNotFoundError:
+        err.write(f"no skill at {source}\n")
+        return 2
+    except OSError as problem:  # network, permissions, unreadable
+        err.write(f"cannot read {source}: {problem}\n")
+        return 2
+
+    text = raw.decode("utf-8", errors="replace")
+
+    findings = prescreen(text)
+    report(out, "pre-screen", findings)
+    if any(f.severity == REFUSE for f in findings):
+        err.write("refused: the candidate did not pass the pre-screen; nothing written\n")
+        return 1
+
+    fields = parse_frontmatter(text) or {}
+    # For stdin and URLs there is no directory to agree with, so the declared
+    # name is the only name there is. The lint below still requires it to exist.
+    claimed = directory_name or fields.get("name", "")
+    shape = lint(claimed, text) if claimed else [Finding(REFUSE, "missing-name", 1)]
+    report(out, "lint", shape)
+    if any(f.severity == REFUSE for f in shape):
+        err.write("refused: the candidate is not the shape of a skill; nothing written\n")
+        return 1
+
+    if fields.get(MARKER) == "true":
+        # Stage 3 policy rather than stage 2 shape: the marker is legitimate on
+        # a command, and this pack has eleven of them. What may not happen is an
+        # *incoming* file arriving with standing authority to act -- adoption
+        # would be granting it, and granting it is a decision record, not a flag.
+        report(out, "transform", [Finding(REFUSE, "adopted-surface-claims-command-authority", 1)])
+        err.write("refused: an adopted surface may not carry the command marker\n")
+        return 1
+
+    try:
+        root = destination_root(scope, home)
+    except ValueError as problem:
+        err.write(f"{problem}\n")
+        return 2
+
+    target, collisions = canonical_name(claimed, scope, installed_surfaces(scope, home))
+    report(out, "transform", collisions)
+    if collisions:
+        err.write(f"refused: {target} is taken; nothing written\n")
+        return 1
+
+    adopted = with_provenance(text, source, source_revision(source, raw), today)
+    if target != claimed:
+        # The name lives in two places and both have to move together, or the
+        # lint this tool just ran would fail on its own output.
+        adopted = adopted.replace(f"name: {claimed}", f"name: {target}", 1)
+        adopted = adopted.replace(f"# {claimed}", f"# {target}", 1)
+    out.write("provenance: recorded\n")
+
+    destination = root / target / SKILL_FILE
+    # Belt and braces. The lint above rejects a name that is not one segment, so
+    # this cannot fire today; it is here because it is the check that stays true
+    # if someone later adds a write path that skips the lint, and a traversal
+    # caught only by a rule two stages earlier is a traversal waiting for a
+    # refactor.
+    if root.resolve() not in destination.resolve().parents:
+        err.write(f"refused: {target} resolves outside {root}; nothing written\n")
+        return 1
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(adopted, encoding="utf-8")
+    out.write(f"adopted: {destination}\n")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Adopt an outside skill through pre-screen, lint, transform and provenance.",
+    )
+    parser.add_argument("source", help="path to a skill, a URL, or - for stdin")
+    parser.add_argument(
+        "--scope",
+        choices=("pack", "user"),
+        default="pack",
+        help="where the adopted skill lands (default: pack, resolved from cwd)",
+    )
+    parser.add_argument(
+        "--lint-only",
+        action="store_true",
+        help="run the shape lint over a skill or a directory of them, and stop",
+    )
+    parser.add_argument(
+        "--from-repo",
+        action="store_true",
+        help="read source as a checkout to survey; requires --list",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="with --from-repo: report what is there and write nothing",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None, out=None, err=None, home=None, today=None) -> int:
+    args = build_parser().parse_args(argv)
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    home = pathlib.Path.home() if home is None else home
+    today = datetime.date.today().isoformat() if today is None else today
+
+    if args.from_repo and not args.list:
+        # Report-only is not a convention to be remembered; it is the only mode
+        # this flag has. Surveying someone else's repository must not be one
+        # forgotten argument away from writing into it.
+        err.write("--from-repo surveys only; pass --list\n")
+        return 2
+    if args.from_repo:
+        return run_survey(args.source, out)
+    if args.lint_only:
+        return run_lint_only(args.source, out)
+    return run_adopt(args.source, args.scope, home, out, err, today)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
