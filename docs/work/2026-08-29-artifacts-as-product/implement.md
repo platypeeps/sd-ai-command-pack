@@ -1206,9 +1206,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     rather than for the skill names in the repositories I had in mind.
   - The break exposed a claim that was false before the fold. Four places in
     `sd-writing-pack` said these skills carry `disable-model-invocation: true`
-    and are therefore slash commands the pipeline cannot fire; the old pack's own
-    `tests/test_generate.py:320` asserts the marker is **absent** from
-    `se-research`, and the folded skills carry none either. The sub-agent handoff
+    and are therefore slash commands the pipeline cannot fire. The evidence
+    against that is in the pack the claim was written about:
+    `~/repos/platypeeps/se-ai-command-pack/tests/test_generate.py:320` asserts
+    the marker is **absent** from `se-research`. That checkout is archived at
+    step 7, so the claim carries forward here instead —
+    `KindMarkerTests.test_skills_do_not` asserts every surface that is not one of
+    the eleven commands, `sd-research` and `sd-fact-check` among them, carries no
+    `disable-model-invocation`. The sub-agent handoff
     is still right — a research pass reads a great deal and none of it belongs in
     the pipeline's context — so the mechanism stayed and the reason was corrected.
     Same for `model: opus`, which the frontmatter never pinned.
