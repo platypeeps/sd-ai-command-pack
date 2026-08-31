@@ -1588,6 +1588,19 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     loader, folded into `sd plugin` later: it defines the same disk format
     twice, and it makes the first consumer an exception to "no disk scanning",
     which is how that rule would stop being one.
+  - **The manifest parser reads everything and validates what it uses**
+    (user, 2026-08-31): `prefix` and `dashboard.tile` are checked; `kinds.*`,
+    `issues.repo` and `vendor.*` are read and carried. Step 8 adds enforcement
+    to an existing reader instead of writing a second one. It is also the only
+    honest option today — enforcing `kinds.*` means checking the closed 8-key
+    vocabulary, and **that vocabulary was not written down anywhere in this
+    repository**: standing rule 2 fixes it at eight and makes changes decision
+    records, while the enumeration survived only in the r5 round artifact,
+    under `/private/tmp`, backed up by nothing. **R11-D14** transcribes it into
+    design.md — `fields`, `initial-status`, `protected-fields`, `transitions`,
+    `human-only`, `unique-fields`, `floor`, `sections` — keeping the kebab-case
+    spellings exactly as ruled, since renaming them while transcribing would be
+    a vocabulary change wearing a format change's clothes.
   - **The dashboard LOC cap is measured, not raised.** Splitting both system
     files by where the code lands after the swap: 301 py + 317 js leave the cap
     for `~/repos/system`; 124 py is already built here; the backbone-side lift

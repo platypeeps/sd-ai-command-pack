@@ -242,7 +242,30 @@ Committed `sd-plugin.json` manifest (JSON per D-C1) + the `sd` CLI as sole servi
 `sd store get --json` returns fields + full body), `kinds.*` objects (closed 8-key invariant
 vocabulary — plugin-declared, backbone-enforced generically), `issues.repo`, `vendor.*` +
 `sd plugin lock`, optional `dashboard.tile` (5s/64KB contract). Registration only via
-`sd plugin add` — no disk scanning, no repo writes. Repo-scoped skills ARE the contract (no
+`sd plugin add` — no disk scanning, no repo writes.
+
+**The eight keys, written down (R11-D14, 2026-08-31).** Standing rule 2 fixes the kind vocabulary
+at eight and makes any change a decision record, and until now this repository never said which
+eight — the enumeration existed only in the r5 round artifact, in a scratchpad under `/private/tmp`
+that no backup covers. A closed vocabulary nobody can recite is not enforceable, and a rule
+against growing it has nothing to measure growth from. They are:
+
+| Key | What it carries |
+|---|---|
+| `fields` | the kind's frontmatter fields |
+| `initial-status` | status a newly added item starts in |
+| `protected-fields` | fields the store refuses to overwrite |
+| `transitions` | status moves a machine caller may make |
+| `human-only` | per-kind action → status map; seeded verbatim from `task-actions.sh`, not a hardcoded accept/decline pair |
+| `unique-fields` | fields that must not collide within the kind |
+| `floor` | numeric minimum |
+| `sections` | ordered H2 list plus the template path in the plugin repo |
+
+Recorded verbatim from the r5 ruling, with one carry-over noted rather than silently converted:
+r5 wrote these as TOML `[kinds.<name>]` tables and **D-C1 later made every pack-owned manifest
+JSON**, so they become object keys. The kebab-case spellings are kept exactly as ruled — renaming
+them to snake_case while transcribing would be a vocabulary change wearing the clothes of a
+format change, and standing rule 2 says that is a decision record. Repo-scoped skills ARE the contract (no
 `sd plugin sync` copy machinery). **sd-writing-pack is the first plugin**: pack.py 2,532 → ~1,250
 LOC (store verbs/gh/config/help/adversarial deleted → backbone; pieces/build-html/companion ledger
 stay). Vault-side routines (intel-brief, intel-weekly, tips-weekly, tips-accept,
@@ -818,6 +841,18 @@ The fix is the smallest slice that unblocks the loader: **`sd plugin add|list` p
 read, pulled forward as 6b's first PR.** Not `sd store`, not `sd config`, not the vault driver,
 not `sd plugin lock` — those stay at step 8 with the consumer that needs them. What moves is
 exactly what the `dashboard.tile` key requires in order to be found.
+
+**What the slice's parser does, and does not do (user, 2026-08-31).** It reads the **whole**
+manifest into an object and validates **only the keys it uses** — `prefix` and `dashboard.tile`.
+`kinds.*`, `issues.repo` and `vendor.*` are read and carried, not enforced. Step 8 then adds
+enforcement to a reader that already exists rather than writing a second one, which is the failure
+this pack has already paid for four times over in duplicated scripts.
+
+It is also the only option that is honest right now: `kinds.*` validation means checking against
+the closed 8-key vocabulary, and until R11-D14 (recorded in the Plugin
+interface section above, where the schema it belongs to lives) that vocabulary was not written
+down anywhere in this repository. A parser cannot enforce a list it cannot read, and enforcing it a
+step early would have meant inventing the list at the keyboard.
 
 The alternative considered and rejected: let the loader read a registry file of its own at 6b and
 fold it into `sd plugin` at step 8. That defines the same disk format twice and hands step 8 a
