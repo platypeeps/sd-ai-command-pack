@@ -213,7 +213,15 @@ def catalog() -> tuple[list[dict], str]:
         return [], f"plugin registry is not UTF-8: {error}"
     if not isinstance(loaded, list):
         return [], "plugin registry is not a list"
-    return [entry for entry in loaded if isinstance(entry, dict)], ""
+    entries = [entry for entry in loaded if isinstance(entry, dict)]
+    # Dropping what it cannot read and reporting success is the quiet this
+    # module refuses everywhere else: a corrupt registry would lose plugins
+    # with nothing said. The readable entries are still returned, because
+    # losing the rest of the fleet to one bad element is the same mistake.
+    dropped = len(loaded) - len(entries)
+    if dropped:
+        return entries, f"plugin registry has {dropped} entr{'y' if dropped == 1 else 'ies'} that are not objects"
+    return entries, ""
 
 
 def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:

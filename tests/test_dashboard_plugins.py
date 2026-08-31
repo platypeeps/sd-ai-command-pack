@@ -142,6 +142,28 @@ class PluginLoaderTest(unittest.TestCase):
             len(json.dumps(raw)), plugins.TILE_BYTES, "fixture no longer exceeds a tile"
         )
 
+    def test_a_registry_entry_that_is_not_an_object_is_reported(self) -> None:
+        """Dropping what cannot be read and reporting success is the quiet.
+
+        Found in review. The loader skipped non-object entries and returned no
+        error, so a corrupt registry lost plugins with nothing said. The
+        readable entries still come back -- losing the rest of the fleet to one
+        bad element is the same mistake in the other direction.
+        """
+        listing = self.tmp / "listing-sd"
+        listing.write_text(
+            '#!/bin/sh\necho \'[{"root": "/x", "prefix": "aa", "readable": true}, 7]\'\n',
+            encoding="utf-8",
+        )
+        listing.chmod(0o755)
+        original = plugins.SD
+        plugins.SD = listing
+        self.addCleanup(lambda: setattr(plugins, "SD", original))
+        loaded = plugins.load()
+        self.assertEqual(len(loaded["plugins"]), 1)
+        self.assertIn("not objects", loaded["registryError"])
+        self.assertEqual(len(self.rows_of("plugin-registry", loaded)), 1)
+
     def test_a_plugin_without_a_tile_is_not_a_failure(self) -> None:
         self.register(self.plugin("aa"))
         loaded = plugins.load()
@@ -262,7 +284,7 @@ class PluginLoaderTest(unittest.TestCase):
                     f"""
                     import subprocess, sys, time
                     subprocess.Popen([sys.executable, "-c",
-                      "import time,pathlib; time.sleep(6);"
+                      "import time,pathlib; time.sleep(0.8);"
                       "pathlib.Path({str(marker)!r}).write_text('x')"])
                     time.sleep(30)
                     """
@@ -273,7 +295,13 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertFalse(self.only_tab(loaded)["ok"])
         import time as _time
 
-        _time.sleep(1.5)
+        # The child's own sleep sits between the deadline that kills it (0.4s,
+        # so it is still running when the group is killed) and this wait, which
+        # is long enough that a survivor would certainly have written by now.
+        # Found in review: with a 6s child and a 1.5s wait the marker could not
+        # exist either way, and the assertion held whether or not the kill
+        # worked.
+        _time.sleep(2.0)
         self.assertFalse(
             marker.exists(),
             "the tile's child survived the group kill and kept running",
