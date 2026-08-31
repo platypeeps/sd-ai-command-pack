@@ -168,17 +168,25 @@ const bodyRows = (table) =>
 const cellText = (row, column) =>
   row.cells[column] ? row.cells[column].textContent.trim() : "";
 
-function compare(a, b, how) {
-  if (how !== "num") return a.localeCompare(b, undefined, { sensitivity: "base" });
+// Direction is an argument rather than a multiplier on the result, and that is
+// the whole reason this signature has four parameters. A cell holding no
+// number must sink in both directions -- sorting it as zero would put an
+// em-dash among the small values and read as data -- and a `* -1` applied to
+// the answer flips the sinking along with everything else, floating the empty
+// cells to the top of a descending sort. Found in review, where the comment
+// promising "either way" was true of the comparator and false of its caller.
+function compare(a, b, how, descending) {
+  if (how !== "num") {
+    const order = a.localeCompare(b, undefined, { sensitivity: "base" });
+    return descending ? -order : order;
+  }
   // Strip everything a number is not, so "12 min" and "$4.10" still order.
   const x = Number.parseFloat(a.replace(/[^0-9.eE+-]/g, ""));
   const y = Number.parseFloat(b.replace(/[^0-9.eE+-]/g, ""));
-  // A cell that holds no number sinks either way rather than sorting as zero,
-  // which would put "—" among the small values and read as data.
   if (Number.isNaN(x) && Number.isNaN(y)) return 0;
   if (Number.isNaN(x)) return 1;
   if (Number.isNaN(y)) return -1;
-  return x - y;
+  return descending ? y - x : x - y;
 }
 
 function addFilter(table) {
@@ -216,9 +224,8 @@ function addSort(table) {
       if (!body) return;
       descending = !descending;
       const rows = bodyRows(table);
-      rows.sort(
-        (a, b) =>
-          compare(cellText(a, column), cellText(b, column), how) * (descending ? -1 : 1),
+      rows.sort((a, b) =>
+        compare(cellText(a, column), cellText(b, column), how, descending),
       );
       for (const other of head.cells) other.removeAttribute("aria-sort");
       th.setAttribute("aria-sort", descending ? "descending" : "ascending");
