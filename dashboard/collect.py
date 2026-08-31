@@ -15,7 +15,13 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import store, trackers
+from . import github, jira, store
+
+# The collectors, in report order. Enumerated here rather than discovered by
+# scanning the package: a tracker is a deliberate addition with a decision
+# record behind it, and import-time discovery would let one appear because a
+# file landed in a directory.
+TRACKERS = (github, jira)
 
 GIT_WORKERS = 8
 REMOTE_PATTERN = re.compile(
@@ -142,33 +148,40 @@ def build_state(root: Path) -> dict:
     }
 
 
-def refresh_issues(connection, now: datetime | None = None, runner=None) -> dict:
-    """One tracker refresh: collect, upsert, and advance the watermark.
+def refresh_issues(connection, now: datetime | None = None, seams=None) -> dict:
+    """Every tracker, refreshed once: collect, upsert, and advance its watermark.
 
     The order is the whole design. Rows are written whether or not the collect
     succeeded -- a partial answer is still true, and the index is a cache -- but
-    the watermark moves **only on success**. A failed bucket therefore costs a
-    repeated window next run, never a skipped one, which is the only way a
-    windowed collector loses an issue permanently.
+    a tracker's watermark moves **only on its own success**. A failed bucket
+    therefore costs a repeated window next run, never a skipped one, which is
+    the only way a windowed collector loses an issue permanently.
+
+    Watermarks are per tracker, so Jira being unconfigured neither blocks
+    GitHub from collecting nor lets GitHub's success step Jira's window
+    forward over a gap it never read.
     """
     moment = datetime.now(timezone.utc) if now is None else now
-    stamp = trackers.iso(moment)
-    previous = store.watermark(connection, trackers.TRACKER)
-    result = trackers.collect(previous, moment, runner)
-    inserted, updated = store.upsert_issues(connection, result["issues"], stamp)
-    if result["ok"]:
-        store.set_watermark(
-            connection, trackers.TRACKER, stamp, result["window_start"]
-        )
-    return {
-        "ok": result["ok"],
-        "reason": result["reason"],
-        "inserted": inserted,
-        "updated": updated,
-        # Reported rather than swallowed: a bucket that hit the page ceiling
-        # collected less than it saw, and a count that silently omits the
-        # remainder reads as "that is all there is".
-        "truncated": result["truncated"],
-        "window_start": result["window_start"],
-        "watermark_moved": result["ok"],
-    }
+    stamp = github.iso(moment)
+    seams = seams or {}
+    results: dict[str, dict] = {}
+    for tracker in TRACKERS:
+        name = tracker.TRACKER
+        previous = store.watermark(connection, name)
+        result = tracker.collect(previous, moment, seams.get(name))
+        inserted, updated = store.upsert_issues(connection, result["issues"], stamp)
+        if result["ok"]:
+            store.set_watermark(connection, name, stamp, result["window_start"])
+        results[name] = {
+            "ok": result["ok"],
+            "reason": result["reason"],
+            "inserted": inserted,
+            "updated": updated,
+            # Reported rather than swallowed: a collector that hit its page
+            # ceiling collected less than it saw, and a count that silently
+            # omits the remainder reads as "that is all there is".
+            "truncated": result["truncated"],
+            "window_start": result["window_start"],
+            "watermark_moved": result["ok"],
+        }
+    return results

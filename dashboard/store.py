@@ -15,7 +15,7 @@ Two consequences follow, and both are deliberate rather than incidental:
   it was, carrying the `last_seen` that says when the index last had evidence.
 
 The honest gap in that second point, named here rather than discovered later:
-because collection is windowed (see `trackers.py`), a row whose only change was
+because collection is windowed (see `github.py` and `jira.py`), a row whose only change was
 a close **outside** the window is never revisited, so the index can hold an
 `open` row for something closed months ago. That is why `last_seen` is a column
 and why the page shows it. The fix is not a wider window -- it is remembering

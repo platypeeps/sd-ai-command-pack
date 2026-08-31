@@ -50,33 +50,42 @@ def cmd_index(args: argparse.Namespace, out) -> int:
         f"{counts['repos']} repos, {counts['dirty']} dirty, {counts['ahead']} ahead",
         file=out,
     )
-    print(issue_line(), file=out)
+    for line in issue_lines():
+        print(line, file=out)
     return 0
 
 
-def issue_line() -> str:
-    """The `issues:` half of the report, as one line.
+def issue_lines() -> list[str]:
+    """The `issues:` half of the report, one line per tracker.
 
     A tracker that cannot be reached is a reported row, never an exit code: the
     fleet half of this command answered fine, and failing the whole run because
-    GitHub is unreachable would make an observability tool refuse to observe
-    what it can still see.
+    GitHub is unreachable -- or because Jira was never configured on this
+    machine -- would make an observability tool refuse to observe what it can
+    still see. One line per tracker rather than a merged total, because
+    "18 open" hides that half the trackers never answered.
     """
     connection = store.connect()
     try:
-        result = collect.refresh_issues(connection)
-        open_rows = len(store.issues(connection, state="open"))
+        results = collect.refresh_issues(connection)
+        open_by_tracker: dict[str, int] = {}
+        for row in store.issues(connection, state="open"):
+            open_by_tracker[row["tracker"]] = open_by_tracker.get(row["tracker"], 0) + 1
     finally:
         connection.close()
-    if not result["ok"]:
-        return f"issues: not collected ({result['reason']})"
-    line = (
-        f"issues: {result['inserted']} new, {result['updated']} updated, "
-        f"{open_rows} open"
-    )
-    if result["truncated"]:
-        line += f" (page ceiling hit: {', '.join(result['truncated'])})"
-    return line
+    lines: list[str] = []
+    for name, result in results.items():
+        if not result["ok"]:
+            lines.append(f"issues[{name}]: not collected ({result['reason']})")
+            continue
+        line = (
+            f"issues[{name}]: {result['inserted']} new, {result['updated']} updated, "
+            f"{open_by_tracker.get(name, 0)} open"
+        )
+        if result["truncated"]:
+            line += f" (page ceiling hit: {', '.join(result['truncated'])})"
+        lines.append(line)
+    return lines
 
 
 def build_parser() -> argparse.ArgumentParser:

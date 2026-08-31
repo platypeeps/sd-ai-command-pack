@@ -1,8 +1,13 @@
-"""Issue trackers: what is waiting on you, collected from outside this machine.
+"""The GitHub tracker: what is waiting on you, over there.
 
-One tracker here for now -- GitHub. Jira is step 4b-ii and is deliberately not
-stubbed: an empty collector in the inventory answers nothing and reads as a
-feature that exists.
+One of two collectors -- `jira.py` is the other -- and they share exactly one
+thing, the shape of the function `collect.refresh_issues` calls: `TRACKER`, and
+`collect(watermark, now, seam)` returning `ok`/`reason`/`issues`/`truncated`/
+`window_start`. Everything else differs, because the services do: GitHub is
+reached through the `gh` CLI and answers GraphQL, Jira is reached over HTTP with
+basic auth and answers JQL. A shared base class would have to abstract over that
+split and would buy nothing, since there are two of them and the contract is
+five keys.
 
 The shape is four searches rather than one. `involves:@me` looks like it would
 do the job in a single call, but it collapses *why* an issue reached you, and
