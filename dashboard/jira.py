@@ -114,10 +114,12 @@ def missing(config: dict[str, str]) -> list[str]:
 def window_start(watermark: str | None, now: datetime) -> datetime:
     """Same rule as the GitHub collector: overlap on a mark, wide on nothing.
 
-    Imported from `github` rather than duplicated would couple the two
-    collectors for four lines; the shared thing here is the *policy*, and the
-    policy is stated in both places on purpose so changing one does not silently
-    change the other.
+    The *parser* is shared -- `github.parse_iso` reads back exactly what
+    `github.iso` wrote, and both trackers store their watermark in that one
+    spelling, so a second implementation of it could only ever drift. The
+    *constants* are deliberately not shared: `OVERLAP` and `FIRST_RUN_WINDOW`
+    are declared in each module, so widening one tracker's window is a decision
+    about that tracker rather than a change that silently moves the other.
     """
     from . import github
 
@@ -199,9 +201,16 @@ def search(jql: str, config: dict[str, str], transport=None) -> tuple[list[dict]
             return found, False, error
         page = payload or {}
         found.extend(page.get("issues") or [])
-        token = page.get("nextPageToken")
-        if page.get("isLast") or not token:
+        if page.get("isLast"):
             return found, False, ""
+        token = page.get("nextPageToken")
+        # `isLast: false` with no token to reach the next page is a malformed
+        # answer, not the end of the results. Reading it as the end would drop
+        # the remainder while reporting a complete walk -- the same failure the
+        # GitHub collector already guards against, and the reason both say so
+        # out loud rather than returning a bare False.
+        if not token:
+            return found, True, ""
     return found, True, ""
 
 

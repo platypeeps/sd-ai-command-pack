@@ -409,6 +409,17 @@ class JiraTests(unittest.TestCase):
         self.assertEqual(result["truncated"], ["jql"])
         self.assertEqual(len(result["issues"]), jira.MAX_PAGES)
 
+    def test_a_missing_page_token_is_truncation_not_the_end(self) -> None:
+        """`isLast: false` with no token is malformed, not "no more results".
+
+        Reading it as the end drops the remainder while reporting a complete
+        walk, which is the failure mode that looks right.
+        """
+        transport = jira_transport([{"issues": [jira_issue("ABC-1")], "isLast": False}])
+        result = jira.collect(None, NOW, transport, JIRA_ENV)
+        self.assertEqual(result["truncated"], ["jql"])
+        self.assertEqual(len(result["issues"]), 1)
+
     def test_window_minutes_rounds_up(self) -> None:
         """Truncating would shave the oldest edge off the overlap."""
         self.assertEqual(jira.window_minutes(NOW - timedelta(seconds=61), NOW), 2)
