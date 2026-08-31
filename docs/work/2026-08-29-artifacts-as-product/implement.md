@@ -1529,7 +1529,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `/api/state`, `/api/issues`). `sd-dashboard index --dump` returns 79
     checkouts, so the Repos half is real and not a stub.
   - **Where each tab lands**, per design.md's rule that system views stay
-    system-owned behind `dashboard.d/*.py` plugin tabs while the shell and the
+    system-owned behind plugin tabs declared in a registered manifest while
+    the shell and the
     framework-native facts fold into the backbone:
 
     | Tab | Destination | Built? |
@@ -1545,9 +1546,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
   - **The verdict: two of fifteen tabs exist, thirteen do not**, and four of
     those thirteen are new surfaces with no system counterpart to port from.
-  - Three pieces of the contract are absent beyond the tabs: no
-    `dashboard.d/*.py` plugin-tab loader (five tabs are supposed to arrive
-    through it), no `RUN_ALLOWLIST`, and `sd-dashboard` ships two of its five
+  - Three pieces of the contract are absent beyond the tabs: no plugin-tab
+    loader at all (five tabs are supposed to arrive through one), no
+    `RUN_ALLOWLIST`, and `sd-dashboard` ships two of its five
     verbs — `install`, the one that performs the swap, is among the three that
     do not exist.
   - So **6b is not a port swap gated by a checklist**: it is thirteen tabs, a
