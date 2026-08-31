@@ -104,9 +104,17 @@ class InventoryTests(unittest.TestCase):
                     self.assertTrue((entry / "SKILL.md").is_file(), "no SKILL.md")
 
     def test_the_folded_skills_are_here(self) -> None:
-        # Guards every "for each non-command surface" loop below from passing
-        # over an empty set if the fold were reverted or the glob broke.
-        self.assertGreater(len(surfaces()) - len(EXPECTED), 50)
+        """Guards every "for each non-command surface" loop from running empty.
+
+        A floor, deliberately, and not the exact count: 5-iii folded sixty-four,
+        and pinning that number would put back the roster this file just stopped
+        keeping -- retiring one skill would fail here rather than where the
+        retirement is decided. Sixty is close enough to the real number that
+        losing a meaningful part of the fold fails, and loose enough that
+        ordinary movement in either direction does not.
+        """
+
+        self.assertGreater(len(surfaces()) - len(EXPECTED), 60)
 
     def test_no_surface_kept_a_retired_prefix(self) -> None:
         for path in surfaces():
