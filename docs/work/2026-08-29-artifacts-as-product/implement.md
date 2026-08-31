@@ -672,7 +672,56 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       a cap test fails at its job while looking like it worked. Verified in both
       directions: green as written, and red with `6458 not less than or equal to 100` when
       the ceiling is lowered under the real count.
-- [ ] 4 / 4b
+- [x] 4 — 2026-08-31. Four router repositories archived, each carrying a pointer
+      rather than a redirect nobody can read.
+  - **The stated check was already met before the step began**, though not in the
+    spelling the table gives it. `git grep -c` prints one `path:count` line per file
+    that matches and *nothing at all* when none do, exiting 1 — so "`git grep -c
+    remoteIntegration bin/` = 0" describes an output the command cannot produce. What
+    was actually run, and what a reader should run: `git grep -q remoteIntegration --
+    bin/` exits **1**, and `git grep -l` prints nothing. Zero matches, and zero since
+    the remote half went at steps 1 and 2. So step 4 was never about deleting code
+    from here; it was about the repositories that code used to talk to, and the check
+    confirms there is nothing left pointing at them from `bin/`.
+  - Archived: `sd-github-review` (public, 5.1 MB), `sd-review-test`,
+    `sd-github-review-pilot`, and `sd-review-control-plane` (archived 2026-08-30, the
+    day before the rest). Each was verified first: 0 stars, 0 forks, 0 open issues,
+    0 open pull requests, and last commit already the 3-c footprint removal.
+  - **One live caller survives, named rather than assumed away.**
+    `mezmo/mezmo_benchmark` still has two workflows with `uses:
+    platypeeps/sd-github-review@…`. It is the D7 freeze repository, so it was matched
+    by filename and not opened. Archiving does not break it — GitHub serves an Action
+    from an archived repository — and that was verified rather than believed:
+    `action.yml` at tag `v0.6.1` still resolves, 12,799 bytes, after the archive
+    flag was set. Nothing else in the organisation calls the Action; the remaining
+    hits are two clone lists in `system` and two orphaned
+    `config/routed-review-setup-v1.json` descriptors, in `se-ai-command-pack` and
+    `people-profiles`. `people-profiles` was not a consumer in the 3-c wave and is
+    the one new name this sweep turned up.
+  - **`sd-github-review` got a real README tombstone**, not the description-only
+    fallback `sd-review-control-plane` had to take. Its protection carries
+    `enforce_admins: true` but requires **0** approving reviews, so a pull request
+    with green CI lands — #166, merged. The former README is kept below the notice as
+    the record of what the Action did, and the notice says plainly that pinned
+    callers keep working, because a tombstone that reads like a breakage announcement
+    would send someone editing a workflow that is fine. The two private repositories
+    got the same treatment by direct commit; all four also carry a `RETIRED <date>`
+    line in their description, which is the part visible without opening the repo.
+  - **Deliberately not swept here.** `docs/FLEET_ROLLOUT.md` (510 lines) and
+    `docs/fleet/consumers.json` (330) describe a rollout that has completed and a
+    fleet walk R10-D6 dropped; no code reads either, only `CONTRIBUTING.md` and two
+    spec pages. `docs/spec/` still runs to 7,839 lines, much of it documenting
+    machinery steps 0 through 2 deleted — `adapter-guidelines.md` still specifies a
+    coordinator at `templates/scripts/sd-ai-command-pack-review.py` and a
+    `.sd-ai-command-pack/review.json` schema, neither of which exists. That is step
+    7's "triage survivors", and folding it in here would have made a repository
+    archive into a documentation rewrite. Recorded so the next pass finds it by
+    reading rather than by grepping.
+  - The three `bin/` files that still name `sd-github-review` — `migrate-trellis`,
+    `sd_setup_github.py`, `sd-status` — keep it on purpose. They name the retired
+    footprint in order to detect and remove it from consuming repositories, and
+    archiving the source does not remove the footprint from anywhere it landed.
+- [ ] 4b
 - [ ] 5 / 5b
 - [ ] 6 / 6b
 - [ ] 7 — tag 1.0.0
