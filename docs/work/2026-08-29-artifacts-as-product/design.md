@@ -50,7 +50,7 @@ sd-ai-command-pack/
                         user-settings edit the installer ever makes, recorded in owned[],
                         removed on --uninstall; ensures ONE global-excludes line `CLAUDE.local.md`;
                         never edits AGENTS.md or any tracked repo file
-  skills/sd-*/SKILL.md  12 commands + templates (prd, design, implement, decision, work-README)
+  skills/sd-*/SKILL.md  11 commands + sd-help + templates (prd, design, implement, decision, work-README)
   skills/sd-*/SKILL.md  + 64 merged skills, renamed se-* → sd-* at fold (67 on disk − 3 retired:
                         se-help, se-brand-voice, se-humanizer — retired under old names)
   agents/               sd-rust-write/fill/reviewer, sd-claim-verifier, sd-source-reader —
@@ -70,7 +70,9 @@ sd-ai-command-pack/
 ```
 
 **LOC discipline (one decision record, restated after the feasibility audit):** bin/ ceiling
-**8,000** (accepted by user 2026-08-29). Itemized: core (sd_lib, sd_route, sd-check, docs-lint, pr-state, status, spec,
+**14,000** (R11-D15, 2026-08-31). The itemisation below derived the superseded **8,000** (accepted
+by user 2026-08-29) and is kept as the record of that derivation, not as a claim about the
+ceiling. Itemized: core (sd_lib, sd_route, sd-check, docs-lint, pr-state, status, spec,
 trackers incl. ~90 lifted Jira LOC) ~1,800 · review lane **1,700 sub-cap** (R11-D8) · r2 dashboard
 glue/index +900 · r4 sd-map +400 · r5 plugin/store **1,400 sub-cap** · r7 Lane B handoff +120 ·
 R10-D3 packet writer + restore hook + identity checks +250 · R10-D1 worktree/codex-exec/budget/
@@ -79,13 +81,16 @@ draft-PR lane +450 · R10-D2 draft-convert +40 · 45-day sweep +40 · google.acc
 count in R11-D13: `bin/` core is already at 7,492 with seven commands unbuilt. The itemisation
 stands as the record of how 8,000 was derived, not as a claim about today.* The earlier 6,000 and 6,500 figures
 were both busted on paper; setting 8,000 now is the honest number, still <1/11 of today's 95k.
+*Superseded by R11-D15: 8,000 was busted too, and the current ceiling is 14,000 — roughly a
+seventh of the 95k rather than an eleventh.*
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
 ceiling until then. dashboard/ ≤ **2,500** (justified as "credible: 457 lifted + one JS file" — *the 457
 is superseded by R11-D13's enumeration at 763; the cap's number stands, its stated justification does
 not*). Caps are CI tests; a cap is never raised in the PR
 that busts it. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
 
-### Commands (12 — grown from 8, each growth carried by a decision record)
+### Commands (11 — grown from 8, each growth carried by a decision record; `sd-help` left at
+R11-D15, being a catalog rather than a command)
 
 | Command | Purpose |
 |---|---|
@@ -96,7 +101,6 @@ that busts it. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
 | `sd-spec` | Update `docs/spec/**` on the PR branch; `--retro` appends review-learnings |
 | `sd-status` | Read-only: derived status, open PRs, detected setup + protection gaps — enforcement state first (`enforce_admins`, required contexts vs the jobs CI runs, PR-review requirement), then squash-message + rebase-merge flags (r7), resumable-handoff section (pending local packet for this directory + Lane B branches derived from origin), backend availability, legacy residue with exact removal commands, pack banner |
 | `sd-deps` | Batch-triage dependabot/renovate PRs |
-| `sd-help` | Runtime catalog of installed sd-* skills + registered plugins |
 | `sd-suggest` | File framework improvements to the configured tracker (gh dedup via list API; local draft deleted on successful filing) — r2 N7 |
 | `sd-skill-adopt <path\|url\|->` | One-command skill intake: safety pre-screen → lint → canonical transform → provenance → write per `--scope pack\|user`; `--from-repo --list` for external-repo survey (report-only) — r2 N8 |
 | `sd-map` | Supporting artifacts (repomix/index/kb) into `~/.local/share/sd-ai-command-pack/<repo-id>/artifacts/` — out-of-tree by construction, flock'd, never a gate, never scheduled — r4 |
@@ -714,7 +718,7 @@ auto-restored by one SessionStart hook — no git, no CI; `--push` opts into the
 branch. Explicit doctrine carve-out to the no-SessionStart rule.** Environment: editor=zed, browser=chrome.
 **One prefix (user, 2026-08-29): all
 merged se-* skills/agents rename to sd-* at step 5** — single namespace, collision check vs the
-12 commands, old se-* renders deleted; retired skills keep historical se- names in records only.
+11 commands, old se-* renders deleted; retired skills keep historical se- names in records only.
 
 **Proposed defaults — all accepted by user 2026-08-29 (R11-D0), now decided as written; exceptions noted inline:**
 - D3 import 386 archived tasks under `docs/work/archive/` · D5 protection: report + opt-in
@@ -825,6 +829,66 @@ stale, not the ceiling, and re-deriving it against a half-built `bin/` would rep
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
 
+**R11-D15 (user, 2026-08-31) — the `bin/` cap is 14,000, derived from built code; and `sd-help`
+leaves `bin/` because the taxonomy already said it is not a command.**
+
+R11-D13 said the cap would be re-derived from an itemised count at the landing that measured the
+overrun rather than raised on an estimate. 6b-1 is that landing: `bin/sd` came in at 264 lines,
+taking core to 7,756 of 8,000 with **244 left and seven commands unbuilt**, when the smallest
+command already built is 279. The trigger has fired.
+
+**Why this number is different from the last three.** 6,000, 6,500 and 8,000 were each derived by
+itemising work that did not exist yet — adding up guesses about unwritten commands. All three were
+busted, the last one before even half the commands were written. This one is derived from the five
+commands that exist:
+
+| | Lines |
+|---|---|
+| Shared support — `sd_lib`, `sd_route`, installer, `setup_github`, docs-lint, pr-state, trackers, dashboard CLI, restore hook | 3,720 |
+| Five built commands — `sd-check` 279, `sd-handoff` 434, `sd-skill-adopt` 631, `sd-status` 1,060, `sd-review` 1,368 | 3,772 |
+| `bin/sd`, registration slice | 264 |
+| **Today** | **7,756** |
+| Six remaining commands at the built mean of 754 | 4,524 |
+| `sd store\|issue\|config`, the design's own sub-cap | 1,400 |
+| Three missing `sd-dashboard` verbs | 300 |
+| **Derived** | **13,980 → cap 14,000** |
+
+Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
+weak instrument and saying so is part of the derivation: at the *smallest* built command the six
+land at ~2,600 and the total at ~12,100; at the *largest*, ~8,200 and ~17,700. **Every version of
+this clears 8,000 by thousands**, which is the robust part of the finding. 14,000 is the middle of
+a range the evidence supports, not a number chosen to be comfortable, and it is roughly a seventh
+of today's 95k — 95,000 over 14,000 is 6.8, so the original "<1/11" framing goes with the old
+number rather than being quietly carried onto the new one.
+
+**Standing rule 1 applied to a raise.** A cap that moves whenever it binds is not a cap. So: this
+is re-derived **once more, from counts and not projections, when the last of the six lands**, and
+that re-derivation may only lower it. If the final count comes in under 14,000 the cap follows the
+count down. It never rises again without a new incident, and "the PR in front of me does not fit"
+is not an incident — the rule that a cap is never raised in the PR that busts it stands untouched.
+
+**The scope half turned out to be a documentation defect, not a scope decision.** Before raising
+a ceiling it is worth asking whether everything under it earns its place, so the seven remaining
+commands were re-read against the taxonomy's own test: a surface is a COMMAND only when invocation
+pre-authorises external side effects. Six pass plainly — `sd-plan` writes and branches, `sd-ship`
+merges, `sd-spec` writes, `sd-deps` triages other people's PRs, `sd-suggest` files issues,
+`sd-map` writes artifacts. `sd-deps` was the one worth challenging on size (thirty-six characters
+of specification) and it survives on the test rather than on the spec: triaging somebody else's
+dependency PRs is exactly a pre-authorised external side effect.
+
+`sd-help` fails the test — a catalog reads and prints and authorises nothing — **and the rollout
+settled that at step 5b, not here.** `skills/sd-help/SKILL.md` exists, `tests/test_skill_
+frontmatter.py` pins the tree to eleven commands plus skills, and `sd-skill-adopt`'s collision
+check was corrected to eleven when it landed. What was never corrected is **this document**: the
+command table at line 88 still listed `sd-help` as one of twelve, four sections above the taxonomy
+paragraph stating it is a skill, and three other places recited the twelve. That is fixed here.
+
+So the count of eleven is not decided by this record — it is *recorded* by it, having been true in
+the code and the tests for some time while design.md said otherwise. The correction is worth
+making precisely because the design document is the thing a reader consults to learn what the
+surfaces are, and it has been wrong about that since step 5b. It changes no budget: the derivation
+above counts six remaining commands, never seven.
+
 **R11-D13 (2026-08-31) — plugin registration moves ahead of 6b, and the dashboard cap is
 re-derived from the split rather than from the estimate that set it.**
 
@@ -888,7 +952,8 @@ has already passed the total its own itemisation predicted for the *complete* tw
 by 322 lines, with seven of those commands not yet written. What still has to fit in the 508:
 
 - **seven of the twelve commands are unbuilt** — `sd-plan`, `sd-ship`, `sd-spec`, `sd-deps`,
-  `sd-help`, `sd-suggest`, `sd-map`. Five exist (`sd-check` 279, `sd-review` 1,368, `sd-status`
+  `sd-help`, `sd-suggest`, `sd-map`. *(R11-D15 later moved `sd-help` out of `bin/` as a skill,
+  leaving six and eleven commands; the seven stands as what this count found.)* Five exist (`sd-check` 279, `sd-review` 1,368, `sd-status`
   1,060, `sd-skill-adopt` 631, `sd-handoff` 434);
 - the entire `sd` CLI — `plugin`, `store`, `issue`, `config` verb groups — of which R11-D13's
   registration slice is the first piece;

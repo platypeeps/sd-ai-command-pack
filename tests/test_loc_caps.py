@@ -1,9 +1,12 @@
 """The three line-count ceilings, enforced instead of remembered.
 
 The design fixes a ceiling for each part of the replacement world -- `bin/` at
-8,000 lines, the temporary `migrate-*` tools at 1,500 outside it, `dashboard/`
-at 2,500 -- and says in as many words that "caps are CI tests; a cap is never
-raised in the PR that busts it". Until now they were prose. The retired stack
+14,000 lines (R11-D15, re-derived from built code after 8,000 was busted with
+seven commands still unwritten), the temporary `migrate-*` tools at 1,500
+outside it, `dashboard/` at 2,500 -- and says in as many words that "caps are
+CI tests; a cap is never raised in the PR that busts it". That rule survives
+the re-derivation: 14,000 was set in its own decision record, not in a PR that
+did not fit, and it may only move downward from here. Until now they were prose. The retired stack
 this repository is replacing reached 95,000 lines one defensible commit at a
 time, and no single one of those commits looked like the problem, which is
 exactly why the bound has to be mechanical: a number in a design document is
@@ -34,7 +37,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Each cap names the design decision it enforces, so a failure points at the
 # record rather than at a bare number.
-BIN_CAP = 8_000            # LOC discipline, restated after the feasibility audit
+BIN_CAP = 14_000           # R11-D15: derived from built code, not from unwritten scope
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 DASHBOARD_CAP = 2_500      # r2 dashboard: stdlib server plus one JS file
 

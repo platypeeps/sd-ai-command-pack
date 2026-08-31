@@ -1635,6 +1635,28 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `bin/` cap is re-derived from an itemised list in its own decision record,
     **before the dashboard tabs start**, not in the PR that trips
     `tests/test_loc_caps.py`.
+  - **The cap is re-derived: `bin/` is 14,000 (R11-D15).** 6b-1 was the
+    landing R11-D13 said would decide it, and it decided against the estimate.
+    Derived from code that exists rather than scope that does not: shared
+    support 3,720 + five built commands 3,772 + `bin/sd` 264 = **7,756 today**;
+    six remaining commands at the built mean of 754 = 4,524; `sd store|issue|
+    config` at the design's own 1,400 sub-cap; three `sd-dashboard` verbs ~300.
+    **13,980, so 14,000.** Bounded rather than pinned, because a mean over five
+    samples spanning 279 to 1,368 is a weak instrument: smallest-command
+    ~12,060, largest ~17,664. Every version clears 8,000 by thousands, which is
+    the part that does not depend on the estimator. `tests/test_loc_caps.py`
+    updated; it may only be re-derived **downward** when the last command
+    lands.
+  - **`sd-help` was already a skill; only design.md hadn't caught up.** Asking
+    whether all seven remaining commands earn their lines found six that pass
+    the taxonomy test outright (including `sd-deps`, thin on spec but squarely
+    a pre-authorised side effect) and one that fails — and step 5b had already
+    settled it. `skills/sd-help/SKILL.md` exists, `test_skill_frontmatter.py`
+    pins eleven commands, `sd-skill-adopt`'s collision check was corrected to
+    eleven when it landed. design.md's command table still said twelve, four
+    sections above its own taxonomy paragraph calling `sd-help` a skill, plus
+    three other recitations. Fixed. It moves no budget — the derivation counts
+    six remaining commands, never seven.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from

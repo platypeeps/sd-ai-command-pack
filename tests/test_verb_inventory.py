@@ -33,7 +33,7 @@ REPO_PATH_OPTIONS = frozenset({"--repo", "--repo-path", "--root", "--checkout", 
 def scanned_files() -> list[pathlib.Path]:
     """Everything in `bin/` except the migration tools.
 
-    Deliberately wider than the 12 commands: it also catches the library
+    Deliberately wider than the eleven commands: it also catches the library
     modules (`sd_lib.py`, `sd_route.py`), which is the point. Those are
     underscore-named, so a `sd-`-prefix filter would drop them from the scan
     and lose coverage exactly where a repo-path argument would do the most
