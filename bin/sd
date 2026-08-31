@@ -12,11 +12,23 @@ explicit act with a path in it.
 
 What `add` validates is deliberately narrow. It reads the whole manifest and
 checks `prefix` and `dashboard.tile` -- the two keys anything reads today --
-and carries `kinds`, `issues` and `vendor` through unexamined. Step 8 adds
-enforcement to this reader rather than writing a second one, which is the
-failure this pack has already paid for in duplicated scripts. The unenforced
-keys are not ignored: they are stored, so a manifest that declares them keeps
-them, and the step-8 parser inherits real data rather than a re-read.
+leaving `kinds`, `issues` and `vendor` unexamined. Step 8 adds enforcement to
+this reader rather than writing a second one, which is the failure this pack
+has already paid for in duplicated scripts.
+
+**The registry stores a path, not a copy of the manifest.** Registration
+decides exactly one fact -- that this checkout is a plugin of this machine --
+and that fact is the path. Everything else lives in the manifest and is read
+from it at use time, because a manifest copied into the machine config is
+committed derived state, and the plugin repository would go on editing the
+original while every reader saw the snapshot. That is the staleness this pack
+exists to stop doing (critique 3), and it does not become acceptable for being
+small.
+
+The cost is real and accepted: `list` opens every registered manifest, and a
+plugin whose checkout has been moved or deleted reports as unreadable instead
+of quietly listing stale values. Reporting it is the point -- a registry
+pointing at nothing is a fact worth seeing.
 
 Exit 0 when the verb did what it says, 1 when it refused, 2 when the
 invocation was wrong.
@@ -41,11 +53,6 @@ MANIFEST_NAME = "sd-plugin.json"
 # surfaces that folded into it, whose renders may still exist on some machine.
 RESERVED_PREFIXES = frozenset({"sd", "se"})
 PREFIX_PATTERN = re.compile(r"^[a-z]{2,5}$")
-
-# Read and carried, never enforced here. Named so that step 8 extends this
-# list rather than discovering it.
-CARRIED_KEYS = ("kinds", "issues", "vendor", "interface")
-
 
 class Refusal(Exception):
     """The invocation was understood and declined. Exit 1."""
@@ -73,7 +80,7 @@ def read_manifest(path: pathlib.Path) -> dict[str, object]:
     return loaded
 
 
-def validate_prefix(manifest: dict[str, object], *, known: dict[str, object]) -> str:
+def validate_prefix(manifest: dict[str, object], *, known: dict[str, pathlib.Path]) -> str:
     """The manifest's `prefix`, or a refusal naming why it cannot be used."""
 
     value = manifest.get("prefix")
@@ -89,7 +96,7 @@ def validate_prefix(manifest: dict[str, object], *, known: dict[str, object]) ->
         # testing the same single condition.
         raise Refusal(f"prefix {value!r} is reserved by the backbone")
     if value in known:
-        raise Refusal(f"prefix {value!r} is already registered by {known[value]}")
+        raise Refusal(f"prefix {value!r} is already registered by {known[value].parent}")
     return value
 
 
@@ -109,15 +116,35 @@ def validate_tile(manifest: dict[str, object]) -> str | None:
     return tile
 
 
-def registry(config: dict[str, object]) -> dict[str, object]:
-    """The `plugins` object, which a config without plugins simply lacks."""
+def registry(config: dict[str, object]) -> list[str]:
+    """The registered plugin roots. A config without plugins simply lacks it."""
 
     plugins = config.get("plugins")
     if plugins is None:
-        return {}
-    if not isinstance(plugins, dict):
-        raise Refusal("machine config `plugins` is not an object")
-    return plugins
+        return []
+    if not isinstance(plugins, list) or not all(isinstance(p, str) for p in plugins):
+        raise Refusal("machine config `plugins` is not a list of paths")
+    return [str(p) for p in plugins]
+
+
+def registered(roots: list[str]) -> dict[str, pathlib.Path]:
+    """Prefix -> manifest path, for every root whose manifest still reads.
+
+    A root that no longer holds a readable manifest is skipped rather than
+    fatal: it must not stop an unrelated registration, and `list` reports it.
+    """
+
+    found: dict[str, pathlib.Path] = {}
+    for root in roots:
+        path = pathlib.Path(root) / MANIFEST_NAME
+        try:
+            manifest = read_manifest(path)
+        except Refusal:
+            continue
+        prefix = manifest.get("prefix")
+        if isinstance(prefix, str) and prefix:
+            found[prefix] = path
+    return found
 
 
 def write_config(config: dict[str, object], path: pathlib.Path) -> None:
@@ -142,40 +169,57 @@ def add(args: argparse.Namespace) -> int:
 
     config_path = sd_lib.machine_config_path()
     config = sd_lib.machine_config(config_path)
-    known = registry(config)
+    roots = registry(config)
 
-    prefix = validate_prefix(manifest, known=known)
-    tile = validate_tile(manifest)
+    plugin_root = str(manifest_path.parent)
+    if plugin_root in roots:
+        raise Refusal(f"{plugin_root} is already registered")
+    prefix = validate_prefix(manifest, known=registered(roots))
+    validate_tile(manifest)
 
-    entry: dict[str, object] = {"root": str(manifest_path.parent), "prefix": prefix}
-    if tile is not None:
-        entry["tile"] = tile
-    for key in CARRIED_KEYS:
-        if key in manifest:
-            entry[key] = manifest[key]
-
-    config["plugins"] = {**known, prefix: entry}
+    config["plugins"] = sorted({*roots, plugin_root})
     write_config(config, config_path)
-    print(f"registered {prefix} from {manifest_path.parent}")
+    print(f"registered {prefix} from {plugin_root}")
     return 0
 
 
+def describe(root: str) -> dict[str, object]:
+    """One registered root, read from its manifest now rather than recalled."""
+
+    try:
+        manifest = read_manifest(pathlib.Path(root) / MANIFEST_NAME)
+    except Refusal as refusal:
+        return {"root": root, "readable": False, "why": str(refusal)}
+    entry: dict[str, object] = {"root": root, "readable": True}
+    prefix = manifest.get("prefix")
+    if isinstance(prefix, str):
+        entry["prefix"] = prefix
+    try:
+        tile = validate_tile(manifest)
+    except Refusal:
+        tile = None
+    if tile is not None:
+        entry["tile"] = tile
+    return entry
+
+
 def plugin_list(args: argparse.Namespace) -> int:
-    config = sd_lib.machine_config()
-    known = registry(config)
+    roots = registry(sd_lib.machine_config())
+    entries = [describe(root) for root in roots]
     if args.json:
-        json.dump(known, sys.stdout, indent=2, sort_keys=True)
+        json.dump(entries, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
-    if not known:
+    if not entries:
         print("no plugins registered")
         return 0
-    for prefix in sorted(known):
-        record = known[prefix]
-        entry: dict[str, object] = record if isinstance(record, dict) else {}
+    for entry in entries:
+        if not entry["readable"]:
+            print(f"?  {entry['root']}  UNREADABLE: {entry['why']}")
+            continue
         tile = entry.get("tile")
         suffix = f"  tile: {tile}" if tile else ""
-        print(f"{prefix}  {entry.get('root', '?')}{suffix}")
+        print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
     return 0
 
 
