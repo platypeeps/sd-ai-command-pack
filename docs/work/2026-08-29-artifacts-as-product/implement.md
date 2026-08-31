@@ -28,7 +28,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **5** | Fold se-ai-command-pack (64 skills + 5 agents, all renamed se-* → sd-*; machine locations replaced). **Vault-side first:** retarget the 8 scheduled-routine callers (`se-research` ×6, `se-scan` ×2 under `System/Scheduled Tasks/`) to `sd-*`, then delete old se-* renders | `grep -rln 'se-research\|se-scan' 'System/Scheduled Tasks/'` = 0 before deletion; count = 64; collision check vs 11 commands = 0; `ls ~/.claude/skills \| grep -c '^se-'` = 0; sdw-research resolves; next nightly routine run green |
 | **5b** | `sd-skill-adopt` lands; retire skill-proposal-accept + file-trellis-task.py; delete legacy gito/prism skill folders (backend rows stay) | adopt-lint green on all installed skills |
 | **6** | Machine cleanup = M3 (receipt-driven, legacy subdirs by name) | find both spellings = 0; plugin rows = 0; `handoff/` + `intents/` untouched (a packet written before the step is restorable after) |
-| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13: registration slice (`sd plugin add\|list` + manifest read, pulled forward from 8) → the tile loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the 2,500 cap's remaining headroom |
+| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the 2,500 cap's remaining headroom |
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers, BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
@@ -565,7 +565,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
       lane) and `export --obsidian` land with the tabs they serve, under the parity
       checklist. Shipping them as stubs would put three verbs in an inventory that is
       supposed to be a promise.
-    - Eight of the nine tabs, the plugin tile contract, and `RUN_ALLOWLIST`.
+    - Eight of the nine tabs, the plugin manifest contract (`dashboard.tile` +
+      `dashboard.tabs`), and `RUN_ALLOWLIST`.
       P3's checks name `/api/state` and the dump; the tabs are 4b and 6b work.
     - The SQLite index. `sd-dashboard index` collects and reports; it writes no store,
       because step 4b is where the schema and names are reconciled and inventing a
@@ -1547,7 +1548,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - **The verdict: two of fifteen tabs exist, thirteen do not**, and four of
     those thirteen are new surfaces with no system counterpart to port from.
   - Three pieces of the contract are absent beyond the tabs: no plugin-tab
-    loader at all (five tabs are supposed to arrive through one), no
+    loader at all (five tabs are supposed to arrive through one — 6b-2 has
+    since built it, recorded in its own entry below rather than backdated into
+    this survey), no
     `RUN_ALLOWLIST`, and `sd-dashboard` ships two of its five
     verbs — `install`, the one that performs the swap, is among the three that
     do not exist.

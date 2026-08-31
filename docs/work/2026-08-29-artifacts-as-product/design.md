@@ -204,7 +204,8 @@ Stdlib ThreadingHTTPServer + one vanilla JS file; ~457 LOC lifted verbatim from 
 (*superseded: R11-D13 enumerates the backbone-side lift at 763 — 79 collector lines plus 684 of JS.
 How much of that is liftable verbatim rather than rewritten is not separately measured*). Tabs:
 Now · Work · PRs · Issues · Repos · Queues · Suggestions · Skills · Sessions · plugin tabs
-(a registered manifest's `dashboard.tile` + `dashboard.tabs`, per tab — R11-D16; the
+(a registered manifest declares `dashboard.tile` and `dashboard.tabs`, and the loader
+invokes that one tile once per declared tab name — R11-D16; the
 `dashboard.d/*.py` spelling this record used until 6b-2 landed never existed, because a loader
 that globs a directory would be the disk scan the interface refuses). Now screen = externally derived facts only. Every UI
 mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes/runs agents.
