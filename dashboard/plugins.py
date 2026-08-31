@@ -124,12 +124,23 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
             if size > limit:
                 raise Bounded(f"wrote more than {limit} bytes")
             chunks.append(chunk)
+        # Closing stdout is not exiting, and the exit status is part of what
+        # the budget covers: a tile that prints its JSON and then fails has
+        # failed. Killing it on the way past would record -SIGKILL, and a
+        # loader that reads its own kill as a clean exit accepts the output of
+        # every tile that dies after writing.
+        try:
+            proc.wait(timeout=max(stop - time.monotonic(), 0.0))
+        except subprocess.TimeoutExpired:
+            raise Bounded(f"did not exit within {seconds:g}s") from None
+        if proc.returncode != 0:
+            raise Bounded(f"exited {proc.returncode}")
     finally:
-        _terminate(proc)
+        # Only on the way out of a refusal. A tile that exited on its own has
+        # nothing left to kill, and `poll()` is what tells the two apart.
+        if proc.poll() is None:
+            _terminate(proc)
         proc.stdout.close()
-
-    if proc.returncode not in (0, -signal.SIGKILL):
-        raise Bounded(f"exited {proc.returncode}")
     return b"".join(chunks)
 
 

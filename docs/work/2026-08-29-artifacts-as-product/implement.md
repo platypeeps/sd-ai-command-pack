@@ -1679,12 +1679,16 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     real subprocess: neither the 5s deadline (which kills the process group,
     so a backgrounded child cannot outlive it) nor the 64KB ceiling (enforced
     while reading, not after) survives being mocked.
-    **The measurement:** `dashboard/` is **1,871 of 2,500, 629 left**. The
-    loader cost 372 against the ~240 R11-D13 left for the loader *and*
-    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 629
-    does not fit, so `dashboard/` projects to ~2,634 with `RUN_ALLOWLIST` still
-    uncounted. Not raised here -- the test passes at 1,871, and the cap gets
+    **The measurement:** `dashboard/` is **1,882 of 2,500, 618 left**. The
+    loader cost 383 against the ~240 R11-D13 left for the loader *and*
+    `RUN_ALLOWLIST` together. R11-D13's backbone-side lift is 763; 763 into 618
+    does not fit, so `dashboard/` projects to ~2,645 with `RUN_ALLOWLIST` still
+    uncounted. Not raised here -- the test passes at 1,882, and the cap gets
     re-derived from counts at the landing that carries the backbone renders.
+    The loader also refuses a tile that prints good JSON and then exits
+    non-zero: closing stdout is not exiting, and the status is inside the
+    budget (found in review -- the first version killed the process on the
+    success path too, recording -SIGKILL and reading its own kill as clean).
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `dashboard.d/*.py` from

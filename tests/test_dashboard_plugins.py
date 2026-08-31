@@ -239,6 +239,58 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertFalse(self.only(loaded)["ok"])
         self.assertIn("exited 3", self.only(loaded)["reason"])
 
+    def test_a_tile_that_emits_output_and_then_fails_is_refused(self) -> None:
+        """Closing stdout is not exiting, and the exit status still counts.
+
+        The loader kills the tile's process group on its way out. If that kill
+        also ran on the success path, the recorded status would be -SIGKILL for
+        every tile that had not quite exited, and a loader that reads its own
+        kill as a clean exit accepts the output of every tile that dies after
+        writing. The JSON here is perfectly good; the run is not.
+        """
+        self.register(
+            self.plugin(
+                "qq",
+                tile_script(
+                    """
+                    import json, os, sys
+                    print(json.dumps({"tabs": [{"title": "t"}]}))
+                    sys.stdout.flush()
+                    os.close(1)
+                    os._exit(3)
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        self.assertFalse(self.only(loaded)["ok"])
+        self.assertIn("exited 3", self.only(loaded)["reason"])
+        self.assertEqual(loaded["tabs"], [])
+        self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
+
+    def test_a_tile_that_writes_then_hangs_is_refused_rather_than_accepted(self) -> None:
+        """Output in hand is not a finished run while the deadline is unmet."""
+        original = plugins.TILE_SECONDS
+        plugins.TILE_SECONDS = 0.4
+        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
+        self.register(
+            self.plugin(
+                "pp",
+                tile_script(
+                    """
+                    import json, os, sys, time
+                    print(json.dumps({"tabs": [{"title": "t"}]}))
+                    sys.stdout.flush()
+                    os.close(1)
+                    time.sleep(30)
+                    """
+                ),
+            )
+        )
+        loaded = plugins.load()
+        self.assertFalse(self.only(loaded)["ok"])
+        self.assertIn("did not exit", self.only(loaded)["reason"])
+
     def test_a_tile_that_does_not_emit_json_is_refused(self) -> None:
         self.register(self.plugin("ii", tile_script('print("not json")')))
         loaded = plugins.load()
