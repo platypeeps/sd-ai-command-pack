@@ -75,7 +75,9 @@ trackers incl. ~90 lifted Jira LOC) ~1,800 · review lane **1,700 sub-cap** (R11
 glue/index +900 · r4 sd-map +400 · r5 plugin/store **1,400 sub-cap** · r7 Lane B handoff +120 ·
 R10-D3 packet writer + restore hook + identity checks +250 · R10-D1 worktree/codex-exec/budget/
 draft-PR lane +450 · R10-D2 draft-convert +40 · 45-day sweep +40 · google.accounts resolution
-+50 · env reads +20 = **~7,170**, leaving ~830 headroom. The earlier 6,000 and 6,500 figures
++50 · env reads +20 = **~7,170**, leaving ~830 headroom — *superseded as a prediction by the
+count in R11-D13: `bin/` core is already at 7,492 with seven commands unbuilt. The itemisation
+stands as the record of how 8,000 was derived, not as a claim about today.* The earlier 6,000 and 6,500 figures
 were both busted on paper; setting 8,000 now is the honest number, still <1/11 of today's 95k.
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
 ceiling until then. dashboard/ ≤ **2,500** (credible: 457 lifted + one JS file). Caps are CI tests; a cap is never raised in the PR
@@ -795,6 +797,90 @@ and the ones that exist already total 2,811 (2,776 until #620) — `bin/sd-statu
 stale, not the ceiling, and re-deriving it against a half-built `bin/` would replace one estimate
 with another. Trigger: the next command to land under `bin/` re-derives the core line from the
 files that exist, with the same enumerate-then-assert shape used here. Owner: whoever lands it.
+
+**R11-D13 (2026-08-31) — plugin registration moves ahead of 6b, and the dashboard cap is
+re-derived from the split rather than from the estimate that set it.**
+
+Two findings from the same look, both about the master sequence rather than about a design.
+
+**One. The 6b plugin loader depends on machinery step 8 builds, and step 8 is scheduled after
+it.** The tile contract says *"Registration only via `sd plugin add` — no disk scanning, no repo
+writes"*, so the loader cannot glob `dashboard.d/*.py`; it has to read a registry that something
+else writes. Enumerating `bin/` finds no `sd` at all — no verb groups, no manifest parser, no
+registry format — and step 8 is where all of that is scheduled. R11-D12 flipped the order inside
+6b; this crosses steps, so it changes the master sequence.
+
+The fix is the smallest slice that unblocks the loader: **`sd plugin add|list` plus the manifest
+read, pulled forward as 6b's first PR.** Not `sd store`, not `sd config`, not the vault driver,
+not `sd plugin lock` — those stay at step 8 with the consumer that needs them. What moves is
+exactly what the `dashboard.tile` key requires in order to be found.
+
+The alternative considered and rejected: let the loader read a registry file of its own at 6b and
+fold it into `sd plugin` at step 8. That defines the same disk format twice and hands step 8 a
+migration, and it buys nothing except not touching the sequence. The deeper reason to reject it
+is that it would make one consumer an exception to "no disk scanning" — and an exception granted
+to the first consumer is how the rule stops being a rule.
+
+**Two. The dashboard cap's justification is off, in the direction that matters.** `dashboard/`
+is capped at 2,500 LOC, justified in this document as *"credible: 457 lifted + one JS file"*. The
+6b enumeration splits both system files by where the code lands after the swap:
+
+| | Lines | Fate |
+|---|---|---|
+| `dashboard.py` collectors, plugin-bound (toolbox, areas, ports, rtk, briefs, jira) | 301 | leaves the cap — `~/repos/system` |
+| `dashboard.py` collectors the pack already has (repos, issues, github_issues, prs) | 124 | already built |
+| `dashboard.py` collectors still to build (queues, research, work) | 79 | counts |
+| `dashboard.js` plugin-bound renders (Toolbox 171, Briefs 71, Ports 41, Areas 34) | 317 | leaves the cap |
+| `dashboard.js` backbone renders, shell and `attentionItems()` | 829 | counts, less the pack's existing 145 |
+
+So the backbone-side lift is **763**, not 457. Against 1,499 tracked today and a 2,500 cap, that
+leaves roughly **240 lines** for the two remaining things with no system counterpart: the loader
+and `RUN_ALLOWLIST`. The three missing `sd-dashboard` verbs are **not** in that number —
+`tests/test_loc_caps.py:110` charges `bin/sd-dashboard` to the `bin/` ceiling on purpose, so that
+the two caps do not overlap and neither means less than it says. The first draft of this record
+charged them here, which is the same mistake in the other direction.
+
+**And `bin/` is the tighter of the two.** Enumerated rather than taken from the itemisation:
+`bin/` core is at **7,492 against its 8,000 cap — 508 lines of headroom** (`migrate-*` sits under
+its own 1,500 ceiling and is excluded, which is why the raw 8,742 total passes). The itemisation
+above predicts **~7,170 for the finished pack, leaving ~830**. That is the comparison worth
+making, and it is worse than a headroom shortfall: 7,492 is what is built **today**, so the pack
+has already passed the total its own itemisation predicted for the *complete* twelve-command set,
+by 322 lines, with seven of those commands not yet written. What still has to fit in the 508:
+
+- **seven of the twelve commands are unbuilt** — `sd-plan`, `sd-ship`, `sd-spec`, `sd-deps`,
+  `sd-help`, `sd-suggest`, `sd-map`. Five exist (`sd-check` 279, `sd-review` 1,368, `sd-status`
+  1,060, `sd-skill-adopt` 631, `sd-handoff` 434);
+- the entire `sd` CLI — `plugin`, `store`, `issue`, `config` verb groups — of which R11-D13's
+  registration slice is the first piece;
+- the three missing `sd-dashboard` verbs.
+
+That does not fit, and saying so now is the point of enumerating it. It does not change this
+decision — registration has to precede the loader whatever the ceiling says — but it does mean
+the `bin/` cap, not the dashboard cap, is the one the rollout will hit first, and it will hit it
+inside 6b. The same discipline applies: measure at the next landing, and re-derive from an
+itemised list in its own record rather than raising a number to fit the PR in front of it. The
+8,000 was itself the third attempt after 6,000 and 6,500 were both busted on paper; a fourth
+estimate is worth less than one count.
+
+The cap is **not raised here**, and deliberately. Raising a cap against an estimate is how the
+6,000 and 6,500 `bin/` figures were busted twice before 8,000 was derived from an itemized list;
+the honest move is to measure first. The loader is the smallest of the three unknowns and it now
+comes first anyway, so **its PR reports its own line count against the remaining headroom**. If
+the three fit, the cap stands and this record is the measurement that says so. If they do not,
+the cap is re-derived from the itemized split in its own decision record — written before the
+tabs start, never in the PR that trips `tests/test_loc_caps.py`.
+
+What is recorded either way: the 457 figure is superseded by 763, so the cap's stated
+justification no longer matches its number even though the number may still be right.
+
+**Consequence for the sequence.** 6b's order, already flipped once by R11-D12, is now:
+registration slice → `dashboard.d` loader → the five plugin tabs → backbone tabs → Now →
+`RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`. Step 8 keeps
+everything else and loses only what moved.
+
+**Standing rule 1 does not apply to either half.** No gate, ledger, hook or rule is added: the
+first half moves scheduled work earlier, and the second half declines to change a number.
 
 **R11-D12 (2026-08-31) — a plugin tab contributes alert rows to Now, not only a rendered tile.**
 
