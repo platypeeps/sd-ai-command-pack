@@ -616,9 +616,14 @@ callers, sdw meter retires per R5-D4). Repos retain full ownership of their own 
 schedules — the framework never registers, edits, or removes repo automation.
 
 Generalized (user-confirmed 2026-08-29): **system views stay system-owned and plug into the
-framework dashboard** via plugin tabs a registered manifest declares (TaskNotes/Vault, Toolbox,
-Briefs, Jira personal, Research, and Ports since R11-D12 — six, not the five this record said
-before Ports was decided) — code + pinned actions live in `~/repos/system`. Only the
+framework dashboard** via plugin tabs a registered manifest declares — **five of them: Toolbox,
+Briefs, Vault, Research, and Ports** (R11-D12 gave Ports its own tab). This record said "Jira
+personal" for a year of drafts and there is no such tab: the system dashboard's fifteen tabs,
+enumerated from `dashboard.py` rather than from this list, are `attention work projects research
+repos issues areas toolbox briefs ports` plus five `db-*`, and Jira appears only *inside* `issues`,
+which R3-D13 already migrates to the backbone and which `dashboard/jira.py` already serves. A
+plugin tab that does not exist cannot be ported, and a phantom in the count is one more tab 6b-3
+would have gone looking for — code + pinned actions live in `~/repos/system`. Only the
 dashboard shell + framework-native facts fold into the backbone; Issues is the one migrating view
 (r3 tracker mapping, R3-D13). Repo packs contribute via the r5 manifest tile contract.
 
@@ -1239,7 +1244,7 @@ What is recorded either way: the 457 figure is superseded by 763, so the cap's s
 justification no longer matches its number even though the number may still be right.
 
 **Consequence for the sequence.** 6b's order, already flipped once by R11-D12, is now:
-registration slice → the tile loader → the six plugin tabs → backbone tabs → Now →
+registration slice → the tile loader → the five plugin tabs → backbone tabs → Now →
 `RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`. Step 8 keeps
 everything else and loses only what moved.
 
