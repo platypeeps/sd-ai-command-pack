@@ -1462,11 +1462,13 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     and `~/repos/platypeeps/omniroute-test` are all absent, `~/.claude.json`
     holds no matching project entry, and no `OMNIROUTE_*` name is exported.
     Recorded as a finding, not claimed as a deletion this step performed.
-  - **The plugin residue, listed first and then swept on Sven's word.** Three
-    orphaned cache trees survived their uninstalled plugins —
-    `kimi-marketplace` (45M), `google-gemini` (8.6M), `openai-codex` (320K) —
-    plus two `temp_git_*` directories and a `google-gemini` entry in
-    `extraKnownMarketplaces`. The first version of this record filed them under
+  - **The plugin residue: listed as a decision for Sven, then swept when he
+    took it** (2026-08-31, in the session that ran this step). Three orphaned
+    cache trees survived their uninstalled plugins under
+    `~/.claude/plugins/cache/` — `kimi-marketplace` (45M), `google-gemini`
+    (8.6M), `openai-codex` (320K) — plus two `temp_git_*` directories there and
+    a `google-gemini` entry in `extraKnownMarketplaces` in
+    `~/.claude/settings.json`. The first version of this record filed them under
     steps 3a/3b; that was wrong, and P2's own record says so: *"Left for step 6
     (M3), named so it is not rediscovered: the two marketplaces stay registered
     … and their `~/.claude/plugins/cache/` trees are still on disk."* They were
