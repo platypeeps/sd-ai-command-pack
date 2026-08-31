@@ -179,13 +179,22 @@ class RenderTests(unittest.TestCase):
         """
 
         self.install("--user")
-        for name in (p.name for p in agent_files()):
-            with self.subTest(agent=name):
-                self.assertFalse((self.home / ".codex" / "agents" / name).exists())
-                self.assertFalse((self.home / ".codex" / "skills" / name).exists())
-                self.assertFalse(
-                    (self.home / ".config" / "opencode" / "commands" / name).exists()
-                )
+        codex_agents = self.home / ".codex" / "agents"
+        # By stem and any extension, not by filename: Codex's native agent
+        # format is `.toml`, so a check for `sd-rust-fill.md` would pass over
+        # exactly the render this limit exists to forbid.
+        landed = sorted(
+            path.name
+            for path in (codex_agents.glob("*") if codex_agents.is_dir() else [])
+        )
+        self.assertEqual(landed, [], f"agents rendered to {codex_agents}")
+        for source in agent_files():
+            with self.subTest(agent=source.name):
+                self.assertEqual(sorted((self.home / ".codex" / "skills").glob(
+                    f"{source.stem}.*")), [])
+                self.assertEqual(sorted(
+                    (self.home / ".config" / "opencode" / "commands").glob(
+                        f"{source.stem}.*")), [])
 
     def test_uninstall_takes_them_with_it(self) -> None:
         self.install("--user")

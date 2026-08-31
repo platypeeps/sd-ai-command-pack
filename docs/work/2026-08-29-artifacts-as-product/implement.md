@@ -990,7 +990,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     A converter nobody can byte-check is worse than a documented gap, so the gap is
     documented in the README and pinned by a test asserting nothing lands in
     `~/.codex/agents`. The five `se-*.toml` files there are old-pack renders; what
-    to do about them is 5-iv's call, and it is a real one — deleting them without a
+    to do about them is 5-iii's call, and it is a real one — deleting them without a
     replacement loses the Codex agent lane.
   - **The `sandbox_mode` question step 5 owns, answered:** the key is *absent* from
     all five `~/.codex/agents/se-*.toml`. Nothing enforced read-only there; the
