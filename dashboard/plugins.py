@@ -206,12 +206,18 @@ def bounded_run(argv: list[str], cwd: Path | None, *, seconds: float, limit: int
             left = stop - time.monotonic()
             # Two different failures share this deadline and are not the same
             # thing to whoever reads the row: a tile that never spoke, and one
-            # that wrote and then stopped. Reporting the second as "no output"
+            # that wrote and then stopped. Reporting the second as "no stdout"
             # sends the operator looking for a tile that never started.
+            #
+            # Both name stdout rather than output, because since R11-D18 the
+            # refusal carries the tile's stderr tail: "no output within 5s:
+            # Traceback ..." contradicts itself, and the tile that talked only
+            # on stderr is exactly the case this message is read in. Found in
+            # review.
             stalled = (
-                f"no output within {seconds:g}s"
+                f"no stdout within {seconds:g}s"
                 if not size
-                else f"stopped writing within {seconds:g}s, after {size} bytes"
+                else f"stopped writing stdout within {seconds:g}s, after {size} bytes"
             )
             if left <= 0:
                 raise refuse(stalled)

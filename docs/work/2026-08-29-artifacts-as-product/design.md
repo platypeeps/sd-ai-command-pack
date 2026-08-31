@@ -1029,8 +1029,10 @@ calm is the failure, and a default supplied for missing output is how that gets 
 accident. Found in review.
 
 **The deadline covers two failures, and the row says which.** A tile that never wrote and a tile
-that wrote and then stopped both hit the same timeout. Calling the second "no output" sends whoever
+that wrote and then stopped both hit the same timeout. Calling the second "no stdout" sends whoever
 reads the row looking for a tile that never started, so the message names the bytes already in hand.
+(Both messages said "output" until R11-D18 gave them a stderr tail to carry; the wording is
+corrected there rather than here, since this record is about the split, not the noun.)
 The test keeps stdout open, which is what separates this path from the one where a tile closes the
 pipe and hangs — that is still `did not exit`. Found in review.
 
@@ -1714,6 +1716,19 @@ stack frame is not what anyone needs. Unbounded, a plugin would decide how long 
 Three properties, each tested: the reason carries what the tile said; a 20KB stderr still produces
 a bounded row that keeps the *end*; and a tile that floods stderr and then prints good JSON is
 served rather than killed — the test that fails against the naive fix and passes against this one.
+
+**And one message stopped being true when the tail was added.** The stall reasons read "no output
+within 5s" and "stopped writing within 5s"; with a stderr tail appended, the first became
+"no output within 5s: Traceback ..." — a sentence that contradicts itself, in exactly the case it
+is read in, since a tile that dies on import talks only on stderr. Both now name stdout. A guard
+correct in isolation and wrong once something else touches its output: the same shape as the two
+composed guards found in #652, and worth naming twice. Found in review.
+
+The flood test lost its clock in the same round. It asserted `load()` finished inside
+`TILE_SECONDS`, which measures interpreter startup and registry reads against a budget meant for
+one subprocess. It was also redundant: a tile blocked on a full stderr pipe never reaches its own
+exit, so the deadlock shows up as a refused tab, and `ok` is the decisive assertion. Found in
+review.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·

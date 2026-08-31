@@ -401,12 +401,17 @@ class PluginLoaderTest(unittest.TestCase):
                 ),
             )
         )
-        started = time.monotonic()
         loaded = plugins.load()
         tab = self.only_tab(loaded)
+        # `ok` is the whole assertion, and it is decisive: a tile blocked on a
+        # full stderr pipe never reaches its own exit, so the deadline fires
+        # and the tab is refused. Timing `load()` against TILE_SECONDS would
+        # add nothing -- the deadlock it is meant to catch already shows up
+        # here -- while making the test fail on a contended machine for
+        # interpreter startup this budget was never meant to cover. Found in
+        # review.
         self.assertTrue(tab["ok"], tab["reason"])
         self.assertEqual(tab["html"], "<p>survived</p>")
-        self.assertLess(time.monotonic() - started, plugins.TILE_SECONDS)
 
     # -- the markup filter -------------------------------------------------
 
@@ -672,8 +677,8 @@ class PluginLoaderTest(unittest.TestCase):
             )
         )
         reason = self.only_tab(plugins.load())["reason"]
-        self.assertIn("stopped writing", reason)
-        self.assertNotIn("no output", reason)
+        self.assertIn("stopped writing stdout", reason)
+        self.assertNotIn("no stdout", reason)
 
     def test_a_tile_that_prints_nothing_is_refused_rather_than_empty(self) -> None:
         """Printing `{}` and printing nothing are different events.
