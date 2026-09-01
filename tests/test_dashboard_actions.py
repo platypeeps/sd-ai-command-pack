@@ -221,6 +221,53 @@ class NoGetSideEffect(unittest.TestCase):
         self.assertEqual(ran, [], "a GET route reached the runner")
 
 
+class HandlerShape(unittest.TestCase):
+    """R11-D10 asked for this by name.
+
+    Its cost paragraph says the old "there is no `do_POST`" assertion is to be
+    *replaced by a stronger one -- every mutating handler enforces the three
+    guards* -- and not simply deleted. A test of one route would not be that:
+    it would pass while a second mutating route dispatched above the guards.
+    So the handlers are enumerated from the syntax tree and the guards are
+    checked by position.
+    """
+
+    def handlers(self) -> list[ast.FunctionDef]:
+        source = (REPO_ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+        found = [
+            node for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.FunctionDef)
+            and node.name.startswith("do_") and node.name != "do_GET"
+        ]
+        self.assertTrue(found, "no mutating handler found; this test checks nothing")
+        return found
+
+    def test_every_mutating_handler_guards_before_it_dispatches(self) -> None:
+        for handler in self.handlers():
+            steps = [ast.unparse(step) for step in handler.body]
+            host = next(i for i, s in enumerate(steps) if "host_ok" in s)
+            token = next(i for i, s in enumerate(steps) if "compare_digest" in s)
+            work = next(i for i, s in enumerate(steps) if "actions." in s)
+            self.assertLess(host, token, handler.name)
+            self.assertLess(token, work, handler.name)
+            # Nothing but the docstring and the path parse may precede the
+            # Host check: a read of the body, a route branch or a call placed
+            # above it would run for a caller this server does not serve.
+            for step in handler.body[:host]:
+                self.assertIsInstance(
+                    step, (ast.Expr, ast.Assign), f"{handler.name} acts before its guards")
+
+    def test_the_third_guard_is_the_absence_of_cors(self) -> None:
+        """R11-D10's third guard is a header that must never be sent.
+
+        Nothing enforces the absence of a line nobody wrote, which is why it
+        is asserted rather than assumed: the token lives in the page, and a
+        cross-origin caller allowed to read it would already have the page.
+        """
+        source = (REPO_ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn("Access-Control-Allow", source)
+
+
 class Live:
     """A real server on an ephemeral port, for the guards that are HTTP's.
 

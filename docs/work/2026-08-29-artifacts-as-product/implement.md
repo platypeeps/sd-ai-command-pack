@@ -2034,6 +2034,35 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     install did not happen. It does not yet *replace* the system LaunchAgent
     -- that is 6b-8's swap, and until then they are two services under two
     labels on two ports, deliberately.
+    **Three things R11-D10 named that 6b-7 did not build, said here rather
+    than left to be noticed at the swap.** It names three endpoints carried
+    from the system dashboard -- `POST /api/update`, `/api/ack`,
+    `/api/refresh`. One route exists, `/api/run`, and that is a deliberate
+    replacement rather than a shortfall for two of the three: R11-D21 turned
+    `/api/update`'s `{key, stem, field, value}` into a named action, and
+    `/api/refresh` is the `index` action. **`/api/ack` has no counterpart and
+    no producer.** R11-D20 says an alert id *is* an ack key, and nothing in
+    `dashboard/` stores an ack -- so the parity gate's "Now emits every rank-0
+    and rank-1 row it emits today" is satisfiable while the row the operator
+    already dismissed comes back every ten seconds. That is a tab-scoped
+    version of the dead-destination failure R11-D19 was written about, and it
+    belongs to whichever step builds the ack store, not to this one.
+    **And R11-D10's own deletion criterion is not measurable as built.** It
+    says the write path is deleted if, sixty days after the swap, the index
+    shows fewer than ten mutating requests from a tailnet Host. Nothing counts
+    them: `/api/run` writes no record of having run, the index has no table
+    for it, and the criterion therefore evaluates to "no evidence" rather than
+    to a number. Either the count lands with the swap or the criterion is
+    re-stated against something that does exist -- recorded now because a
+    deletion criterion nobody can evaluate is the failure mode standing rule 1
+    exists to prevent, and it would otherwise be discovered on day sixty.
+    **The manifest key R11-D21 left open is now decided: R11-D23.** It had to
+    be, to have a write path at all -- `{"id", "label", "run"}` under
+    `dashboard.actions`, id shaped like a tab name and namespaced by prefix,
+    validated at registration in `bin/sd`. The record carries the edge that
+    matters for 6b-6: an action is a command and not a form, so it takes no
+    arguments from the page, and Queues either declares one action per outcome
+    or R11-D21's mechanism needs a second record for parameters.
     **The measurement, and it is the one this record was told to make.**
     `dashboard/` is **3,994 of 4,000 -- 6 left**, and 6b-7 cost **337**
     against the ~200 the 6b-5d entry estimated. Over by 69%, said here rather
