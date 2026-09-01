@@ -277,12 +277,15 @@ class LineBudgetTests(unittest.TestCase):
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
-    def test_bin_stays_under_its_ceiling(self) -> None:
-        # `migrate-*` is outside the ceiling by design and carries its own,
-        # because it is deleted at step 7 and its lines are not the backbone's.
-        counted = [path for path in BIN_FILES if not path.name.startswith("migrate-")]
-        total = sum(_lines(path) for path in counted)
-        self.assertLessEqual(total, 8000, f"bin/ is {total} lines")
+    # The `bin/` ceiling used to be asserted here too, at 8,000. R11-D15
+    # re-derived it at 14,000 and updated `tests/test_loc_caps.py` and
+    # `tests/test_verb_inventory.py`, but not this third copy, which sat 6,000
+    # lines below the governing number until the next change to `bin/` tripped
+    # it. One cap, one place: `test_loc_caps.py::BIN_CAP`, which enumerates
+    # from `git ls-files` rather than from the directory and so cannot count a
+    # stray `__pycache__` entry. `test_the_migration_tools_stay_under_theirs`
+    # below is the same duplication, currently in agreement -- which is exactly
+    # the state the bin ceiling was in before it drifted.
 
     def test_the_shared_core_exemption_names_files_that_exist(self) -> None:
         # The one hand-written name in the lane's derivation. A rename that

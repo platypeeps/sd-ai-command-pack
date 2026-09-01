@@ -2424,16 +2424,35 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `COMMIT_MESSAGES`, so a carrier branch's `wip:` subjects stop reaching
     main's history; rebase merging is disallowed for the same reason. All
     three were confirmed by `sd-status` re-reporting each gap as gone, not by
-    reading back the call that set it. The fourth reads *"a review requirement
-    exists but asks for 0 approving reviews, so it gates nothing"* — and
-    closing it by raising the count locks the repository: `enforce_admins` is
-    on, GitHub does not let an author approve their own pull request, and
-    there is one maintainer. Deleting the requirement that gates nothing is
-    the honest close and leaves behaviour identical; the DELETE was refused by
-    the permission classifier, which is a reasonable guardrail and was
-    reported rather than worked around. Left open rather than done quietly,
-    because a protection rule removed without the owner deciding is worse than
-    a decorative one.
+    reading back the call that set it. The fourth used to read *"a review
+    requirement exists but asks for 0 approving reviews, so it gates
+    nothing"* — and closing it by raising the count locks the repository:
+    `enforce_admins` is on, GitHub does not let an author approve their own
+    pull request, and there is one maintainer.
+
+    **"Gates nothing" was wrong, and the plan written from it was wrong the
+    same way (2026-09-01).** This paragraph said deleting the requirement
+    "leaves behaviour identical". It does not. The
+    `required_pull_request_reviews` object is what requires a pull request at
+    all; `bin/sd-status:501-506` reports its *absence* as
+    `no pull-request review is required on {default_branch}` — the same `reviews`
+    gap id, a strictly worse state, on a branch anybody could then push to
+    directly. The DELETE was refused by the permission classifier before it
+    ran, which is the only reason the plan's error stayed on paper. The gap
+    text now says what is true — *"a pull request is required but no approving
+    review is: 0 approvals, so nothing blocks a self-merge"* — and
+    `test_a_missing_review_object_is_the_worse_gap_not_the_same_one` pins the
+    other branch, because both emit `reviews` and an assertion on the id alone
+    passes for either.
+
+    **Decision: left open, deliberately (user, 2026-09-01).** Not deferred and
+    not forgotten. Raising the count to 1 locks a single-maintainer repository
+    with `enforce_admins` on; deleting the object removes the requirement that
+    a pull request exist. Neither is an improvement, so the repository keeps a
+    review requirement that mandates the pull request and asks for zero
+    approvals, and `sd-status` goes on reporting it. A gap reported every run
+    with a recorded reason is the honest state; the failure mode this replaces
+    is a gap closed by making the tool stop mentioning it.
   - **`migrate-trellis` deleted (#669), and the evidence is on disk rather
     than in a ticked box.** `git ls-files .trellis` returns **0** in all nine
     consumer repositories of the 3-c wave; what remains is 17–41 untracked
@@ -2524,6 +2543,76 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     one commit ahead of its origin permanently, which is a trap for whoever
     finds it later; that is what this paragraph is for. If the repository is
     ever unarchived for an unrelated reason, push `414ff39` then.
+
+### `sd sweep` — the intake counterpart, as a reporter (2026-09-01)
+
+D2's one-time park drained 237 items and `design.md:549` names the 45-day rule
+as its intake counterpart, "so the backlog drains whether or not a worker
+runs." Nothing ran it. `sd_lib` defined the `parked:` field, `sd-status
+--parked` read it, and the writing half existed only as a sentence: the design
+puts the sweep inside `sd-plan`'s first commit (`design.md:106`), and
+`bin/sd-plan` is one of the six commands R11-D15 lists as still unwritten. So
+the rule that keeps the backlog drained has never executed once.
+
+`sd sweep` reports and does not park. That is a deviation from `design.md:106`,
+which has the sweep parking as a side effect of `sd-plan`, and it is
+deliberate: the parking half stays with `sd-plan` when that gets built, and
+what shipped here is the half that was missing entirely — the ability to see
+the backlog refilling. Two failures from the bulk-park argue against an
+unattended writer landing first. `git mv` relocates the blob already in the
+index, so an edit staged before the move is dropped and the commit still looks
+clean; three separate agents hit that. And parking broke every document citing
+an item's old path, needing hand-written fixes in four of the seven
+repositories, each one caught by review rather than by a script. Thirteen
+checkouts, unattended, with nobody reading the result, reproduces both.
+
+**The first run found 31 items over the threshold, and 34 before a
+one-character fix.** `design.md:106` writes the rule as ">45 days" and `:550`
+as "past 45 days"; the first implementation read it as `>=`, which swept three
+items sitting at exactly 45 days. The corrected operator is in
+`bin/sd_sweep.py` with both design lines cited beside it, and
+`test_the_boundary_is_exclusive_as_the_design_writes_it` pins it from both
+sides — a fixture asserting only that 46 is due passes against `>=` too.
+
+**All 31 sit in `mezmo/mezmo_benchmark`**, which is 48 of the fleet's 57 active
+items and was never in D2's scope — the park covered the seven platypeeps
+repositories. So the sweep's first output is not a report on the parked fleet
+at all; it is the observation that the one repository the park did not reach is
+where the entire remaining backlog lives. The other five checkouts with live
+items owe nothing: 3, 2, 2, 1, 1 active and zero due.
+
+**No path argument, in either mode.** R10-D6 says an `sd-*` command never takes
+a path to somebody else's repository. Per-repo mode reads the checkout it was
+run in; `--fleet` reads `SD_REPO_ROOT` from the environment — the same setting
+`dashboard/collect.py` reads, rather than a second way to say where the repos
+are. `test_verb_inventory.py`'s R10-D6 assertion covers this and passes.
+
+**Undated items are reported, never swept.** An item with no parseable
+`created:` and no `YYYY-MM-DD-` directory prefix has no age the module can
+prove. The alternatives are to call it zero days old, which hides it forever,
+or infinitely old, which sweeps whatever nobody dated. Fleet-wide there are
+currently 0 of these, which is a fact worth having rather than an unexercised
+branch — the tests carry the fixtures.
+
+**A stale duplicate of the `bin/` ceiling came out with it.** R11-D15
+re-derived that cap at 14,000 two commits ago and updated
+`tests/test_loc_caps.py` and `tests/test_verb_inventory.py`, but a third copy
+in `tests/test_sd_review_boundary.py:285` still said 8,000 and failed the
+moment `bin/` grew — at 8,166 lines against a governing ceiling of 14,000.
+Removing the duplicate is not raising a cap in the PR that busts it: the
+governing number was set in its own decision record with headroom, and this was
+a copy D15 missed. `test_loc_caps.py` enumerates from `git ls-files` rather
+than from the directory, so it is also the copy that cannot count a stray
+`__pycache__` entry. The migration-tool cap is duplicated the same way and
+currently agrees, which is the state the `bin/` ceiling was in before it
+drifted; the comment left behind says so.
+
+**Not done, and not claimed:** nothing schedules this. `bin/sd-dashboard:37`
+calls itself "the one LaunchAgent this pack owns", so a scheduled sweep needs
+either a second plist and a correction to that line, or a different mechanism,
+and it touches `~/repos/system/local-machine-setup/launchagents/` — a second
+repository. Until that lands, `sd sweep --fleet` is a command someone has to
+type.
 
 - [ ] 8 / 9 / 10 / 11
 

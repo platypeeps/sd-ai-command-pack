@@ -237,7 +237,27 @@ class ProtectionGapTests(unittest.TestCase):
         )
         found, _ = status._protection_gaps(protection, "main", {"lint"}, [])
         self.assertEqual([gap["id"] for gap in found], ["reviews"])
-        self.assertIn("gates nothing", found[0]["gap"])
+        self.assertIn("no approving review", found[0]["gap"])
+        # The distinction the old wording lost. Both branches report `reviews`,
+        # so an assertion on the id alone passes whichever text is emitted --
+        # and the two describe opposite states of the branch.
+        self.assertNotIn("no pull-request review is required", found[0]["gap"])
+
+    def test_a_missing_review_object_is_the_worse_gap_not_the_same_one(self) -> None:
+        """Deleting the requirement does not leave behaviour identical.
+
+        The `required_pull_request_reviews` object is what requires a pull
+        request at all. Removing it to silence the 0-approvals row trips this
+        branch instead, on a branch anybody can now push to directly. Written
+        because the plan said the two were equivalent and acted on it.
+        """
+        protection = self.enforcing()
+        # Absent, not empty: this is the shape the API returns for a branch
+        # whose protection carries no review requirement at all.
+        del protection["required_pull_request_reviews"]
+        found, _ = status._protection_gaps(protection, "main", {"lint"}, [])
+        self.assertEqual([gap["id"] for gap in found], ["reviews"])
+        self.assertIn("no pull-request review is required on main", found[0]["gap"])
 
 
 class MergeSettingsTests(unittest.TestCase):
