@@ -244,13 +244,13 @@ class ResolutionTests(StoreFixture):
         self.assertIn("vault path does not exist", done.stderr)
 
     @unittest.skipIf(os.geteuid() == 0, "root reads a directory with no permissions")
-    def test_a_vault_that_cannot_be_read_is_a_refusal_not_a_hang(self) -> None:
-        """The TCC case, reproduced with the one permission failure a test can cause.
+    def test_an_unreadable_vault_says_permission_denied_and_not_macos(self) -> None:
+        """Each probe answer gets its own sentence, and only one mentions macOS.
 
-        macOS answers an ungranted `~/Documents` read by waiting, not by
-        failing, which is why the driver probes in a bounded child at all. A
-        test cannot withhold a TCC grant, but it can withhold `r-x`, and both
-        arrive at the probe's `denied` branch.
+        Found in review. The first draft folded the timeout and the denial
+        together, so a directory with the read bit off reported "on macOS this
+        is Documents access" and sent somebody to System Settings for a
+        `chmod`. **A hang is the TCC signature; a refusal is not.**
         """
 
         self.plugin()
@@ -260,7 +260,16 @@ class ResolutionTests(StoreFixture):
         self.addCleanup(closed.chmod, 0o755)
         done = self.run_sd("store", "list", "pp.tip", vault=str(closed))
         self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("cannot read", done.stderr)
+        self.assertIn("permission denied", done.stderr)
+        self.assertNotIn("Full Disk Access", done.stderr)
+
+    def test_a_vault_that_is_a_file_says_so(self) -> None:
+        self.plugin()
+        flat = self.tmp / "flat"
+        flat.write_text("not a vault\n", encoding="utf-8")
+        done = self.run_sd("store", "list", "pp.tip", vault=str(flat))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("is not a directory", done.stderr)
 
     def test_an_unknown_prefix_and_an_unknown_kind_refuse_differently(self) -> None:
         self.plugin()
@@ -337,6 +346,31 @@ class ManifestTests(StoreFixture):
         for base in ("/etc", "../../etc", ""):
             with self.subTest(base=base):
                 self.refused({**STORE, "bases": {"tip": base}})
+
+    def test_a_windows_style_base_stays_inside_the_vault(self) -> None:
+        """Declined half of a review finding, proved rather than argued.
+
+        Review asked for a root-escape guard against Windows-style paths, on
+        this pull request and the one before it. On POSIX a backslash is a
+        filename character and not a separator, so `..\\..\\etc` names one
+        strangely-spelled directory *inside* the vault; `C:\\vault` likewise.
+        The pack's CI gates bash 3.2 and `/usr/bin/python3`, so there is no
+        Windows path to protect -- but the last thing declined on reasoning
+        alone turned out to be real on an interpreter the reasoning never ran,
+        so this one is a test: the base registers, and the path the driver then
+        fails to find is under the vault root.
+        """
+
+        root = self.plugin()
+        for base in ("..\\..\\etc", "C:\\vault"):
+            with self.subTest(base=base):
+                manifest = json.loads((root / "sd-plugin.json").read_text(encoding="utf-8"))
+                manifest["store"]["bases"]["tip"] = base
+                (root / "sd-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+                done = self.run_sd("store", "list", "pp.tip")
+                self.assertEqual(done.returncode, 1, done.stdout)
+                self.assertIn("does not exist", done.stderr)
+                self.assertIn(str(self.vault), done.stderr)
 
     def test_a_store_with_no_kinds_refuses(self) -> None:
         root = self.tmp / "pack"

@@ -1134,17 +1134,18 @@ def config_list(args: argparse.Namespace) -> int:
 # looks slow rather than blocked. Probing in a child bounds it.
 VAULT_PROBE_SECONDS = 15
 
-# The child answers which of three things is true, because the parent cannot
+# The child answers which of four things is true, because the parent cannot
 # tell them apart from out here: a `stat` from this process cannot distinguish
 # a vault that was moved from one macOS is refusing to open, and both leave the
-# parent directory standing. A timeout prints nothing, which reads as refused,
-# and that is the right reading -- an ungranted read does not fail, it waits.
+# parent directory standing.
 VAULT_PROBE = (
     "import os, sys\n"
     "try:\n"
     "    os.listdir(sys.argv[1])\n"
     "except FileNotFoundError:\n"
     "    print('missing')\n"
+    "except NotADirectoryError:\n"
+    "    print('notdir')\n"
     "except OSError:\n"
     "    print('denied')\n"
     "else:\n"
@@ -1153,23 +1154,44 @@ VAULT_PROBE = (
 
 
 def vault_reason(root: pathlib.Path) -> str:
-    """'' if `root` lists within the budget, otherwise why it does not."""
+    """'' if `root` lists within the budget, otherwise why it does not.
+
+    Each answer gets its own sentence, and the timeout is the only one that
+    mentions macOS. Folding them together was the first draft's mistake and
+    review caught it: a directory with the read bit off reported "on macOS this
+    is Documents access", sending somebody to System Settings for a `chmod`.
+    **A hang is the TCC signature and a refusal is not** -- an ungranted read
+    under launchd does not fail, it waits, which is the whole reason this
+    probes in a bounded child instead of calling `iterdir` here.
+    """
 
     try:
         done = subprocess.run(
             [sys.executable, "-c", VAULT_PROBE, str(root)],
             capture_output=True, text=True, timeout=VAULT_PROBE_SECONDS)
-        answer = done.stdout.strip()
     except subprocess.TimeoutExpired:
-        answer = ""
+        return (
+            f"{root} did not answer a directory listing in {VAULT_PROBE_SECONDS}s. "
+            f"On macOS that is a Documents access prompt, which nothing unattended "
+            f"can answer: allow Full Disk Access for {sys.executable} in System "
+            f"Settings > Privacy & Security, then run this again.")
+    except OSError as error:
+        return f"cannot probe {root}: {error}"
+    answer = done.stdout.strip()
     if answer == "ok":
         return ""
     if answer == "missing":
         return f"vault path does not exist: {root}"
-    return (
-        f"cannot read {root} after {VAULT_PROBE_SECONDS}s -- on macOS this is "
-        f"Documents access, which nothing unattended can grant. Allow Full Disk "
-        f"Access for {sys.executable} in System Settings > Privacy & Security.")
+    if answer == "notdir":
+        return f"vault path is not a directory: {root}"
+    if answer == "denied":
+        return f"cannot read {root}: permission denied"
+    # The probe said something this function does not know. Reported as the
+    # unknown it is, with what the child actually printed, rather than folded
+    # into the nearest familiar cause -- which is the failure mode this whole
+    # function was just rewritten to stop having.
+    detail = done.stderr.strip().splitlines()[-1:] or [f"exit {done.returncode}"]
+    return f"could not determine whether {root} is readable: {detail[0]}"
 
 
 def store_root(store: dict[str, object]) -> pathlib.Path:
