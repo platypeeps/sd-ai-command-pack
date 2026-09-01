@@ -918,8 +918,10 @@ not reported as a failure.
 **`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
 rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
 privilege, is what changes when a plugin reaches Now. Rows go into the backbone's most prominent
-view, so they are typed fields rendered as text, never markup, and `href` must match an in-page
-anchor. A row cannot navigate the operator anywhere.
+view, so they are typed fields rendered as text, never markup, and they carry no destination at
+all: R11-D19 removed the `href` this paragraph once confined to an in-page anchor, and the
+backbone resolves a row's panel from `source` instead. A row cannot navigate the operator
+anywhere.
 
 **Two. The loader must make its own failure loud, and this is an addition to R11-D12.** That
 record established that three plugin-bound sources own every rank-0 and rank-1 alert the view can
@@ -1285,8 +1287,8 @@ fourteen days old. Port conflicts, cron failures and vault rot would go silently
 
 **The change is one optional key.** A plugin tab's collector may return, alongside whatever it
 renders, a list of rows shaped exactly like the ones `add()` already takes — `{rank, kind, id,
-what, detail, href}` *(the shipped shape is `{rank, kind, id, what, detail}`: R11-D19 removed
-`href`)* — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
+what, detail}` *(this list carried a sixth key, `href`, until R11-D19 removed it: the anchor had
+no reachable target and nothing read it)* — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
 both halves; the row list is bounded by the same cap. No new machinery, no second call, no new
 verb.
 
@@ -1298,8 +1300,8 @@ Consequences recorded rather than left implicit:
 - **Trust boundary.** Plugin rows land in the backbone's most prominent view, so a plugin can
   make Now say anything. That is already true of a tile, which renders arbitrary markup in its
   own tab; the difference is placement, not privilege. Registration stays explicit via
-  `sd plugin add`, and `href` is confined to an in-page anchor so a row cannot navigate the user
-  off the dashboard. *(R11-D19 later removed `href` from the row contract outright: the anchor had
+  `sd plugin add`, and a row could not navigate the user off the dashboard: `href` was confined to
+  an in-page anchor. *(R11-D19 later removed `href` from the row contract outright: the anchor had
   nothing it could legitimately point at, and the backbone resolves a row's destination from
   `source` instead. The property this sentence protects is unchanged.)*
 - **"Now screen = externally derived facts only" still holds**, on the reading that has always
