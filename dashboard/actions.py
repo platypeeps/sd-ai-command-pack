@@ -112,8 +112,7 @@ def catalog(entries: list[dict]) -> list[dict]:
 def run(action_id: object, entries: list[dict]) -> tuple[dict, int]:
     """Run one allow-listed action. `(body, status)`.
 
-    Resolved rather than constructed: an id that is not in the map is a 404
-    and never an attempt.
+    Resolved, never constructed: an unknown id is a 404, not an attempt.
     """
     if not isinstance(action_id, str) or not action_id:
         return {"ok": False, "error": "no action named"}, 400

@@ -74,14 +74,18 @@ def tailnet_names() -> set[str]:
     return {name for name in names if name and re.fullmatch(r"[a-z0-9.-]+", name)}
 
 
-_HOSTS: set[str] | None = None
+_HOSTS: frozenset[str] | None = None
 
 
-def allowed_hosts() -> set[str]:
-    """The `Host` values this server answers to, asked once: this forks."""
+def allowed_hosts() -> frozenset[str]:
+    """The `Host` values this server answers to, asked once: this forks.
+
+    Frozen because it is a security boundary handed to every request, and a
+    mutable one could be widened in place. Found in review.
+    """
     global _HOSTS
     if _HOSTS is None:
-        _HOSTS = set(LOOPBACK) | tailnet_names()
+        _HOSTS = LOOPBACK | tailnet_names()
     return _HOSTS
 
 
@@ -344,9 +348,8 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 return self.send_body(body, "application/json")
             if path == "/api/actions":
                 # Ids and labels; the argv never leaves the process. The
-                # registry's complaint rides along: a loader that cannot be
-                # read has no actions to offer, and "none declared" would be
-                # the quiet it refuses. Found in review.
+                # registry's complaint rides along, because "none declared"
+                # for a loader that cannot be read is the quiet it refuses.
                 entries, failure = plugins.catalog()
                 body = json.dumps(
                     {"actions": actions.catalog(entries), "reason": failure}
@@ -378,16 +381,14 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 return self.send_error(403, "bad or missing token")
             if path != "/api/run":
                 return self.send_error(404)
-            # Required, not defaulted to zero: a chunked body has no length
-            # to bound, and reading it as empty answers a real POST with the
-            # wrong error. Found by pressing the button.
+            # A length is required and `-1` is not one. Both were once read
+            # as an empty body, which answers a real POST with "no action
+            # named" -- the allow-list blamed for a fault in the framing. The
+            # first was found by pressing the button, the second in review.
             try:
                 length = int(self.headers["Content-Length"])
             except (KeyError, TypeError, ValueError):
                 return self.send_error(411, "Content-Length required")
-            # `-1` parses, and reading it as an empty body gives the same
-            # wrong answer the missing header used to: "no action named" for a
-            # fault in the framing. Found in review.
             if length < 0:
                 return self.send_error(400, "Content-Length is not a length")
             if length > BODY_BYTES:

@@ -165,6 +165,12 @@ class Hosts(unittest.TestCase):
         for header in ["127.0.0.1", "127.0.0.1:8767", "localhost:8768", "[::1]:8767"]:
             self.assertTrue(server.host_ok(header), header)
 
+    def test_the_allow_list_cannot_be_widened_after_it_is_built(self) -> None:
+        """It is handed to every request; a mutable set is a widenable one."""
+        with unittest.mock.patch.object(server, "_HOSTS", None), \
+                unittest.mock.patch.object(server, "tailnet_names", set):
+            self.assertIsInstance(server.allowed_hosts(), frozenset)
+
     def test_a_tailnet_name_is_served_because_a_proxy_forwards_it(self) -> None:
         self.assertTrue(server.host_ok("tg-sol:8767"))
 
