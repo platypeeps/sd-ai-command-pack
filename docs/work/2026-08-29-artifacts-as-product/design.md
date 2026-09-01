@@ -918,8 +918,10 @@ not reported as a failure.
 **`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
 rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
 privilege, is what changes when a plugin reaches Now. Rows go into the backbone's most prominent
-view, so they are typed fields rendered as text, never markup, and `href` must match an in-page
-anchor. A row cannot navigate the operator anywhere.
+view, so they are typed fields rendered as text, never markup, and they carry no destination at
+all: R11-D19 removed the `href` this paragraph once confined to an in-page anchor, and the
+backbone resolves a row's panel from `source` instead. A row cannot navigate the operator
+anywhere.
 
 **Two. The loader must make its own failure loud, and this is an addition to R11-D12.** That
 record established that three plugin-bound sources own every rank-0 and rank-1 alert the view can
