@@ -107,14 +107,13 @@ _LOADED_AT = 0.0
 # command-line argument and `--anything` would arrive as a flag.
 TAB_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
-# An `href` may point within the page and nowhere else. A plugin row lands in
-# the backbone's most prominent view, and the difference between rendering
-# there and being able to navigate the operator somewhere is the whole of the
-# trust boundary R11-D12 drew.
-ANCHOR = re.compile(r"^#[A-Za-z0-9_:.-]{1,64}$")
-
+# A row names no destination of its own. R11-D19: the only anchor a plugin
+# could write is one it cannot know -- the panel id is composed by the backbone
+# and shifts on collision -- so Now links a row to the tab named by `source`,
+# which this module already stamps. The trust boundary R11-D12 drew is kept by
+# the backbone choosing the destination rather than by a regex hoping for one.
 REQUIRED_ROW = ("rank", "kind", "id", "what")
-OPTIONAL_ROW = ("detail", "href")
+OPTIONAL_ROW = ("detail",)
 
 # Rank 0 is the top of the view. A tab that failed is reported there rather
 # than at the bottom, because the rows it did not emit were rank 0 too.
@@ -414,12 +413,6 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
             complaints.append(f"{source}: row {index} has a non-string detail")
             continue
         clean["detail"] = detail or ""
-        href = row.get("href")
-        if href is not None:
-            if not isinstance(href, str) or not ANCHOR.fullmatch(href):
-                complaints.append(f"{source}: row {index} has an href that is not an in-page anchor")
-                continue
-            clean["href"] = href
         rows.append(clean)
     return rows, complaints
 

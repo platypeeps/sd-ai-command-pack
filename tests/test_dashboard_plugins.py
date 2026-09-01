@@ -498,7 +498,7 @@ class PluginLoaderTest(unittest.TestCase):
                         "title": "toolbox",
                         "html": "<p>ok</p>",
                         "rows": [{"rank": 0, "kind": "cron-exit", "id": "com.sven.x",
-                                  "what": "job failed", "detail": "rc=2", "href": "#toolbox"}],
+                                  "what": "job failed", "detail": "rc=2"}],
                     }))
                     """
                 ),
@@ -512,7 +512,6 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(len(loaded["rows"]), 1)
         row = loaded["rows"][0]
         self.assertEqual(row["kind"], "cron-exit")
-        self.assertEqual(row["href"], "#toolbox")
         # Stamped by the loader, not by the plugin: a row has to be traceable
         # to the tab that emitted it even when the plugin would rather it were
         # not. Tab and not just plugin, because one prefix now carries several.
@@ -854,17 +853,22 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(refusals[0]["rank"], 0)
         self.assertIn(because, refusals[0]["detail"])
 
-    def test_an_off_page_href_is_refused(self) -> None:
-        self.assert_refused(
-            '{"rank": 1, "kind": "k", "id": "i", "what": "w", "href": "https://evil.example"}',
-            "in-page anchor",
-        )
+    def test_a_row_key_outside_the_contract_is_dropped_rather_than_carried(self) -> None:
+        """R11-D19 removed `href`; a plugin still sending one must not be served it.
 
-    def test_a_javascript_href_is_refused(self) -> None:
-        self.assert_refused(
-            '{"rank": 1, "kind": "k", "id": "i", "what": "w", "href": "javascript:alert(1)"}',
-            "in-page anchor",
+        Refusing the row would punish a plugin for a key this contract used to
+        document, and carrying it would put an attacker-chosen `href` back into
+        the payload the backbone renders. Dropped is the only outcome that is
+        neither.
+        """
+        rows, complaints = plugins.validate_rows(
+            [{"rank": 1, "kind": "k", "id": "i", "what": "w",
+              "href": "javascript:alert(1)"}],
+            "bb/one",
         )
+        self.assertEqual(complaints, [])
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("href", rows[0])
 
     def test_a_non_integer_rank_is_refused(self) -> None:
         self.assert_refused('{"rank": "0", "kind": "k", "id": "i", "what": "w"}', "rank")
@@ -898,8 +902,7 @@ class PluginLoaderTest(unittest.TestCase):
                     import json
                     print(json.dumps({"rows": [
                         {"rank": 2, "kind": "good", "id": "i", "what": "w"},
-                        {"rank": 2, "kind": "bad", "id": "i", "what": "w",
-                         "href": "https://evil.example"},
+                        {"rank": "2", "kind": "bad", "id": "i", "what": "w"},
                     ]}))
                     """
                 ),

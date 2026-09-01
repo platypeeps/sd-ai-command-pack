@@ -1673,7 +1673,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     runs `<tile> <name>` once per declared name, and each call answers
     `{title?, html?, rows?}` for that one tab -- `html` is markup rendered into
     it, `rows` are R11-D12's typed alert rows with `href` confined to an
-    in-page anchor.
+    in-page anchor. *(Removed by R11-D19 while scoping 6b-5: the anchor had no
+    reachable target and nothing read it.)*
     **Two drafts were wrong before this one, and each was corrected by
     building against it rather than by reading it.** The first fixed a plugin
     at one tab; starting 6b-3 found that one repository has one manifest while
