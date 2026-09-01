@@ -853,6 +853,59 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(refusals[0]["rank"], 0)
         self.assertIn(because, refusals[0]["detail"])
 
+    def test_each_complaint_from_one_tab_gets_its_own_ack_key(self) -> None:
+        """R11-D20. An id is an ack key, so three losses must not share one.
+
+        The operator dismisses a row by its id; every row carrying that id goes
+        with it. One id per tab meant clearing the first refusal silently
+        cleared the rest, which is the disappearance the refusal row exists to
+        prevent.
+        """
+        rows, complaints = plugins.validate_rows(
+            [{"rank": 1, "kind": "k", "id": "i", "what": "w", "detail": 7},
+             {"rank": 1, "kind": "k", "id": "i", "what": "w", "detail": 8},
+             {"rank": 1, "kind": "k", "id": "i", "what": "w", "detail": 9}],
+            "bb/one",
+        )
+        self.assertEqual(rows, [])
+        self.assertEqual(len(complaints), 3)
+        tab = {"prefix": "bb", "name": "one", "title": "t", "html": "", "rows": [],
+               "complaints": complaints, "ok": True, "reason": ""}
+        found = [{"label": "bb", "prefix": "bb", "root": "/x", "ok": True,
+                  "declared": True, "reason": "", "tabs": [tab]}]
+        emitted = [row["id"] for row in plugins.alert_rows(found)]
+        self.assertEqual(len(set(emitted)), 3, emitted)
+
+    def test_a_complaint_keeps_its_ack_key_when_a_neighbour_clears(self) -> None:
+        """The id is a digest of the text, not a position in the list."""
+        def ids(complaints):
+            tab = {"prefix": "bb", "name": "one", "title": "t", "html": "", "rows": [],
+                   "complaints": complaints, "ok": True, "reason": ""}
+            found = [{"label": "bb", "prefix": "bb", "root": "/x", "ok": True,
+                      "declared": True, "reason": "", "tabs": [tab]}]
+            return {row["detail"]: row["id"] for row in plugins.alert_rows(found)}
+
+        before = ids(["first", "second", "third"])
+        after = ids(["second", "third"])
+        self.assertEqual(before["second"], after["second"])
+        self.assertEqual(before["third"], after["third"])
+
+    def test_a_plugin_cannot_mint_an_id_that_collides_with_the_backbone(self) -> None:
+        """Namespaced by source, so `pr:owner/repo#5` stays the plugin's own."""
+        rows, complaints = plugins.validate_rows(
+            [{"rank": 2, "kind": "pr", "id": "pr:owner/repo#5", "what": "w"}], "bb/one")
+        self.assertEqual(complaints, [])
+        self.assertEqual(rows[0]["id"], "bb/one:pr:owner/repo#5")
+
+    def test_an_id_too_long_for_the_ack_store_is_bounded_and_still_distinct(self) -> None:
+        """`/api/ack` refuses over 300 characters, and an unackable row cannot clear."""
+        made = [plugins.validate_rows(
+            [{"rank": 2, "kind": "k", "id": "x" * 400 + tail, "what": "w"}], "bb/one",
+        )[0][0]["id"] for tail in ("a", "b")]
+        for ident in made:
+            self.assertLessEqual(len(ident), plugins.ID_MAX)
+        self.assertNotEqual(made[0], made[1])
+
     def test_a_row_key_outside_the_contract_is_dropped_rather_than_carried(self) -> None:
         """R11-D19 removed `href`; a plugin still sending one must not be served it.
 
@@ -990,7 +1043,7 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual([tab["name"] for tab in loaded["tabs"]], ["fast"])
         # The lost tab is a rank-0 row naming exactly which tab went dark.
         self.assertEqual([row["id"] for row in self.rows_of("plugin-dark", loaded)],
-                         ["uu/slow"])
+                         ["uu/slow:dark"])
         # And the surviving tab's own row is still there.
         self.assertEqual(len(self.rows_of("fast", loaded)), 1)
 
