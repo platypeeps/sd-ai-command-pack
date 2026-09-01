@@ -219,7 +219,7 @@ twice — `item.archived or item.parked` at `:88`, then
 `item.status != SWEEPABLE_STATUS or item.branch` at `:91` — and this item trips
 the second condition on both halves: it reads `in_progress` and it names a
 branch. D2's bulk-park applied the same two exclusions, which is what makes the
-two passes comparable (`sd_sweep.py:46-49`), and is why the three siblings went
+two passes comparable (`bin/sd_sweep.py:46-49`), and is why the three siblings went
 to `docs/work/archive/2026-09/` on 2026-09-01 and this one did not.
 
 Both exclusions are deliberate and neither should change: `in_progress` is
