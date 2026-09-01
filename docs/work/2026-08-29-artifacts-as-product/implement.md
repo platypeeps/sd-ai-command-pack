@@ -2484,7 +2484,13 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `tests.yml`. Verified from the remote rather than from the local ref —
     `git ls-remote --tags origin v1.0.0` returns `daebee6c`;
     `git show v1.0.0:CHANGELOG.md` opens on `## 1.0.0 - 2026-09-01`; and
-    `git ls-tree v1.0.0 bin/` has no `migrate-trellis` in it.
+    `git cat-file -e v1.0.0:bin/migrate-trellis` exits non-zero on a path
+    that does not exist, with `bin/sd-status` as the control that it does
+    resolve. That last one replaced `git ls-tree v1.0.0 bin/`, which was
+    correct — the trailing slash makes it list the 15 entries under `bin/`
+    rather than the tree entry itself — but which silently proves nothing if a
+    later reader drops the slash. A check whose validity turns on one
+    character is worth trading for one that cannot be read two ways.
   - **Step 7's three checks, at the tag.** `sd-status` active is **2** against
     a ceiling of 20; **100** archived items carry `parked:` and
     `sd-status --parked` lists them; the `grep -rli trellis` criterion reads
