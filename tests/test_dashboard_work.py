@@ -91,6 +91,15 @@ class WorkCollection(unittest.TestCase):
         self.assertEqual(got["archived"], 2)
         self.assertEqual(got["active"], 0)
 
+    def test_a_file_in_an_archive_month_is_not_a_shipped_item(self) -> None:
+        """A README beside the archived items would inflate the count."""
+        repo = make_repo(self.root, "one")
+        month = repo / "docs" / "work" / "archive" / "2026-07"
+        (month / "2026-07-01-old").mkdir(parents=True)
+        (month / "README.md").write_text("what is in here", encoding="utf-8")
+        (repo / "docs" / "work" / "archive" / "stray.md").write_text("x", encoding="utf-8")
+        self.assertEqual(work.collect_work(self.root)["archived"], 1)
+
     def test_an_item_that_cannot_say_what_it_is_gets_its_own_list(self) -> None:
         """Not a blank status column: a blank cell is how it stays unnoticed."""
         repo = make_repo(self.root, "one")
@@ -153,10 +162,24 @@ class Frontmatter(unittest.TestCase):
         self.assertEqual(got, {"status": "planning"})
 
     def test_an_unterminated_fence_does_not_read_the_whole_document(self) -> None:
-        """These are whole PRDs, and there are hundreds of them."""
-        body = "---\nstatus: planning\n" + "filler: x\n" * 500
+        """These are whole PRDs, and there are hundreds of them.
+
+        The fixture size is a literal and does not scale with the constant
+        under test. Two earlier versions of this test proved nothing: the
+        first repeated one key, so the dict stayed small whether the cap held
+        or not; the second sized its input as `FRONTMATTER_LINES + 5`, so
+        raising the cap raised the fixture with it and the assertion moved out
+        of the way. Both survived a mutation that removed the cap entirely.
+        """
+        body = "---\nstatus: planning\n" + "".join(
+            f"filler{n}: x\n" for n in range(5000))
         got = work.frontmatter(self.write(body))
-        self.assertLessEqual(len(got), work.FRONTMATTER_LINES)
+        self.assertIn("status", got)
+        self.assertIn("filler0", got)
+        # Bounded well under the fixture but well over any plausible cap, so
+        # it fails only for a reader that consumed the document.
+        self.assertLess(len(got), 500)
+        self.assertNotIn("filler4999", got)
 
     def test_a_missing_file_is_not_an_error(self) -> None:
         self.assertEqual(work.frontmatter(self.root / "absent.md"), {})

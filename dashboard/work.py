@@ -122,11 +122,15 @@ def collect_work(root: Path) -> dict:
             if not item.is_dir():
                 continue
             if item.name == ARCHIVE:
+                # Directories only, on both levels: an item is a directory,
+                # and a README dropped into a month would otherwise be counted
+                # as one more thing that shipped.
                 archived += sum(
                     1
                     for month in item.iterdir()
                     if month.is_dir()
-                    for _ in month.iterdir()
+                    for old in month.iterdir()
+                    if old.is_dir()
                 )
                 continue
             row = {"repo": where, **read_item(item)}

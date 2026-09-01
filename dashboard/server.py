@@ -167,7 +167,7 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 # several hundred files across the fleet, and /api/state is
                 # cached against a git fan-out on a different timer. Neither
                 # should be able to hold up the other.
-                body = json.dumps(work.collect_work(collect.repo_root())).encode()
+                body = json.dumps(work.collect_work(cache.root)).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/issues":
                 body = json.dumps(issue_payload()).encode()
