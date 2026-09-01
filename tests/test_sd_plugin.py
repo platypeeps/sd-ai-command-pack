@@ -107,9 +107,9 @@ class PluginFixture(unittest.TestCase):
         """A plugin whose `kinds.tip` is well formed, with its files on disk.
 
         The template and the vendored directory are written for real because
-        the reader checks that both exist: a manifest naming a template that
-        is not there is the failure registration is the cheapest place to
-        catch, and a fixture that faked it would test the opposite.
+        the reader checks that both exist. A manifest naming a template that
+        is not there is exactly the failure registration is the cheapest place
+        to catch, and a fixture that faked the file would test the opposite.
         """
 
         root = self.tmp / name
@@ -445,6 +445,32 @@ class KindTests(PluginFixture):
         self.assert_kind_refused(
             "does not exist",
             sections={"order": ["Body"], "template": "templates/absent.md"})
+
+    def test_a_directory_where_the_template_should_be_refuses(self) -> None:
+        """Existence is not the check. Found by review on #678.
+
+        A directory at `templates/tip.md` satisfies "it is there" and fails
+        the moment somebody renders a note -- the deferral registration is
+        supposed to prevent. `vendor.*.path` keeps taking either, because a
+        vendored tree is the ordinary case there.
+        """
+
+        root = self.kinded()
+        (root / "templates" / "tip.md").unlink()
+        (root / "templates" / "tip.md").mkdir()
+        result = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("is not a regular file", result.stderr)
+
+    def test_a_vendored_path_may_be_a_directory_or_a_file(self) -> None:
+        for path in ("vendor", "vendor/upstream.py"):
+            with self.subTest(path=path):
+                root = self.kinded(f"v-{path.replace('/', '-')}",
+                                   vendor={"up": {"source": "o/up", "path": path}})
+                result = self.run_sd("plugin", "add", str(root))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.run_sd("plugin", "lock", str(root)).returncode, 0)
+                self.write_config({})
 
     def test_a_template_outside_the_checkout_refuses(self) -> None:
         for escape in ("../../etc/passwd", "/etc/passwd"):

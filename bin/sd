@@ -231,7 +231,8 @@ def validate_actions(manifest: dict[str, object]) -> list[dict[str, str]]:
     return seen
 
 
-def inside(root: pathlib.Path, value: object, what: str) -> pathlib.Path:
+def inside(root: pathlib.Path, value: object, what: str,
+           *, regular_file: bool = False) -> pathlib.Path:
     """`value` as a path under `root`, or a refusal saying why it is not.
 
     Three ways out of a checkout are closed rather than one, because each is a
@@ -256,6 +257,13 @@ def inside(root: pathlib.Path, value: object, what: str) -> pathlib.Path:
         raise Refusal(f"{what} {value!r} resolves outside the plugin checkout")
     if not resolved.exists():
         raise Refusal(f"{what} {value!r} does not exist")
+    if regular_file and not resolved.is_file():
+        # Existence alone is not the check a template needs. A directory at
+        # `templates/tip.md` satisfies "it is there" and fails the moment
+        # somebody renders a note, which is the deferral registration exists
+        # to prevent. A vendored `path` takes either, because a vendored tree
+        # is the ordinary case.
+        raise Refusal(f"{what} {value!r} is not a regular file")
     return resolved
 
 
@@ -347,7 +355,7 @@ def validate_sections(value: object, root: pathlib.Path, what: str) -> dict[str,
     template = value.get("template")
     if template is None:
         raise Refusal(f"{what} declares no `template`")
-    inside(root, template, f"{what}.template")
+    inside(root, template, f"{what}.template", regular_file=True)
     unknown = sorted(set(value) - {"order", "template"})
     if unknown:
         raise Refusal(f"{what} carries unknown key(s): {', '.join(unknown)}")
