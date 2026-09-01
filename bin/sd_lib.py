@@ -269,7 +269,10 @@ class WorkItem:
     branch: str
     archived: bool
     #: The frontmatter's `parked:` line verbatim, empty when the item is live.
-    #: The age sweep writes `parked: <date> age-sweep` here and nowhere else --
+    #: Written by whichever pass parked the item: `<date> age-sweep` from the
+    #: 45-day sweep, `<date> bulk-park (D2)` from the one-time fleet-wide park.
+    #: Read the value, do not assume the reason -- fleet-wide the split is 65
+    #: age-sweep to 172 bulk-park. Set here and nowhere else --
     #: parked is a property of the item, never a row in a separate ledger.
     parked: str = ""
     inconsistencies: tuple[str, ...] = ()
