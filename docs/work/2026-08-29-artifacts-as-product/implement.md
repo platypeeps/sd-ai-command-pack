@@ -1544,7 +1544,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Issues | backbone — the one migrating view (R3-D13) | **yes** |
     | Work | backbone | **yes** — 6b-5a, a rewrite against `docs/work/` and not the port this row implied |
     | Now · PRs | backbone | **yes** — Now at 6b-5b, PRs at 6b-5c |
-    | Queues | **plugin tab** — moved from backbone by R11-D21: it is a vault view with a write path, like Vault and Briefs | no |
+    | Queues | **plugin tab** — moved from backbone by R11-D21: it was a vault view with a write path, like Vault and Briefs | **yes** — 6b-6, read-only; the write did not come with it (R11-D25) |
     | Skills · Sessions | backbone, **new** — no system counterpart | **yes** — 6b-5d |
     | Suggestions | backbone, **new** — **blocked on `sd-suggest`**, which is unbuilt (R11-D22): no producer, no draft, nothing to render | n/a until the command exists |
     | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | **yes** — 6b-4, through `~/repos/system`'s own manifest |
@@ -1552,17 +1552,18 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Projects | derived; folds into Now/Work rather than porting | n/a |
     | Ports | **plugin tab** beside Toolbox (R11-D12) | **yes** — 6b-4, the fifth declared tab |
     | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
-  - **The verdict as surveyed: two of fifteen tabs exist, thirteen do not**,
-    and four of those thirteen are new surfaces with no system counterpart to
-    port from. *(Enumerated live 2026-09-01, from `app.js`'s tab list and the
-    loader's own reply rather than from this paragraph: **twelve tabs serve**
-    -- seven backbone (`repos`, `issues`, `work`, `now`, `prs`, `skills`,
-    `sessions`) and five plugin (`toolbox`, `briefs`, `vault`, `research`,
-    `ports`). Two of the four new surfaces shipped at 6b-5d. What is left is
-    Queues, which is 6b-6, and Suggestions, which R11-D22 blocked. An earlier
-    revision of this note said eight, and it was already stale when the PRs
-    tab landed -- which is the argument for enumerating rather than
-    updating.)*
+  - **The verdict as surveyed on 2026-08-30: two of fifteen tabs existed and
+    thirteen did not**, four of those thirteen being new surfaces with no
+    system counterpart to port from. *(Enumerated live 2026-09-01, from `app.js`'s tab list and the
+    loader's own reply rather than from this paragraph: **thirteen tabs
+    serve** -- seven backbone (`repos`, `issues`, `work`, `now`, `prs`,
+    `skills`, `sessions`) and six plugin (`toolbox`, `briefs`, `vault`,
+    `research`, `ports`, `queues`). Two of the four new surfaces shipped at
+    6b-5d and Queues at 6b-6; what is left is Suggestions, which R11-D22
+    blocked. An earlier revision of this note said eight, and it was already
+    stale when the PRs tab landed; this one said twelve and went stale the
+    same day -- which is the argument for enumerating rather than updating,
+    and the reason the enumeration is dated.)*
   - Three pieces of the contract are absent beyond the tabs: no plugin-tab
     loader at all (five tabs are supposed to arrive through one — 6b-2 has
     since built it, recorded in its own entry below rather than backdated into
@@ -2156,11 +2157,52 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     by enumerating from `app.js`'s tab list and the loader's own reply, not by
     editing the number -- an updated count goes stale on the next landing and
     an enumerated one does not.
+- [x] **6b-6 — Queues as a sixth plugin tab, read-only (R11-D25).** The last
+  unported tab, and the one R11-D21 moved out of the backbone. Zero lines of
+  pack code: the tab, its collectors and its actions are all in
+  `~/repos/system`, which is what "plugin tab" was supposed to mean and the
+  first time it has been proved by a tab that did not exist when the loader
+  shipped.
+  - **The edge R11-D23 recorded came due, and the answer was neither option.**
+    An action is a command, not a form. Setting a note's status needs
+    `{key, stem, field, value}`; one action per outcome cannot name the note,
+    and parameters would put caller text into an argv — the one property 6b-7
+    was built not to have — for ~100 lines against the 159 R11-D24 left. So
+    the tab reads and Obsidian keeps the writing, which is where it already
+    happened and where `update_note`'s guard against becoming the second
+    writer of a machine-owned field lives. **A carry-down, not a carry**, and
+    the swap gate should read it as one.
+  - **Each queue declares one action instead**, which is a fixed command with
+    the queue named in the manifest rather than by a caller. `sys/queue-blog`
+    and four siblings are the first plugin-declared actions to exist, so
+    R11-D21's mechanism and R11-D23's namespacing were exercised by something
+    other than the backbone's own `index` for the first time. *Pinned* in the
+    gate's sense means fixed in the manifest and never sent by the page:
+    `sd-plugin.lock` is in the layout and does not exist yet, so nothing here
+    is pinned by a hash, and the tick above should be read as claiming the
+    first and not the second.
+  - **Measured, not assumed:** the tile answers in **0.076s and 5.7KB** against
+    a 5s / 64KB budget, and the sanitiser drops nothing — `data-sd-sort` and
+    `data-sd-search` both survive, which matters because the table is only
+    sortable if they do. 80 notes wait across three queues today, the oldest
+    24 days.
+  - **End-to-end against a live server:** six plugin tabs load, `/api/now`
+    carries three rank-3 queue rows, an unknown id is 404, a missing token is
+    403, and pressing `sys/queue-blog` returns `opened blog in Obsidian`. One
+    row per queue in Now rather than one per note: 80 waiting notes is one decision
+    session, not 80 things asking for attention.
+  - **A search URL, not `obsidian://open`**, which wants a file — the thing to
+    open is a folder's worth of undecided notes, and `path:` plus the decide
+    status is exactly the set the table counted. Built in `~/repos/system`'s
+    `sd_tile.py` and not its `dashboard.py`, because that file is deleted two
+    steps from here. Every file named in this entry is that repository's, not
+    this one's: 6b-6 changed no pack code.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
-    - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own
+    - [x] every tab marked "plugin tab" loads through `~/repos/system`'s own
           registered manifest and its tile, code and pinned actions still
-          system-owned
+          system-owned — 6b-4 for five, 6b-6 for Queues; six tabs and five
+          `sys/`-namespaced actions verified against a live server
     - [x] Ports and rtk have a recorded decision — R11-D12, 2026-08-31
     - [ ] Now emits every rank-0 and rank-1 row it emits today, from plugin
           sources as well as backbone ones (R11-D12's optional row key wired,

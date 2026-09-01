@@ -2077,7 +2077,9 @@ never seen a command cannot be talked into echoing a different one back.
 interpolated into it. Queues needs `{key, stem, field, value}` to set one note's status, and this
 key cannot express that — which is the point at which 6b-6 must either declare one action per
 outcome, or R11-D21's mechanism needs a second decision record for parameters with its own
-validation story. Recorded here as the known edge rather than discovered there.
+validation story. Recorded here as the known edge rather than discovered there. *(Answered at
+6b-6 by R11-D25: neither — the tab reads, the writing stays in Obsidian, and each queue declares
+one fixed command that opens it.)*
 
 **Validated at registration, in `bin/sd`, not at load.** A malformed block refuses
 `sd plugin add` and is reported by `sd plugin list`, the same as a malformed `dashboard.tabs`. An
@@ -2165,6 +2167,37 @@ happens to free the most room, arrived at while looking for room. A code cap is 
 the failure that prompted it; a file-shaped cap is checkable against nothing.
 *Rejected: reduce instead.* Roughly half of `dashboard/` is prose and most of it is a decision
 somebody will need. Freeing 300 lines that way means deleting 300 lines of why.
+
+**R11-D25 (user, 2026-09-01) — the Queues tab is read-only, and setting a status stays in
+Obsidian.** R11-D23 recorded the edge and left it open: an action is a command and not a form, so
+it takes no arguments, and Queues needs `{key, stem, field, value}` to set one note's status. The
+two ways out were one action per outcome, which cannot name the *note* and so does not exist as
+an option once looked at, or parameters — a second decision record, a validation story per
+parameter, and caller text reaching an argv, which is the one property 6b-7 was built not to have.
+
+**Neither. The tab reads, and the writing stays where it already happens.** Obsidian is where
+these notes are written, and `update_note`'s guard — a status a routine owns is not offered to a
+human — lives beside the vault rather than in a dashboard. Each queue instead declares one action
+that opens it (`sys/queue-blog` and four siblings), which is a fixed command with the queue named
+in the manifest, so R11-D21's mechanism gets its first real plugin use without gaining a new
+shape. The pack's dashboard writes through `RUN_ALLOWLIST` and nothing else, unchanged.
+
+**The parity cost, stated rather than buried.** The system dashboard sets a status from its Queues
+table and the replacement does not; that is a carry-down, not a carry, and the swap gate should
+read it as one. What it buys: the write path keeps "nothing a caller sends is interpolated",
+6b-8's remaining headroom is not spent on a parameter validator, and the decision UI stays in the
+editor where the note is read. If parameterised actions are wanted later they arrive on their own
+evidence — a second surface asking for them — rather than as a side effect of the first plugin
+tab that needed a form.
+
+*Rejected: parameters now.* ~100 lines of code against the 159 R11-D24 left, spent widening the
+newest security boundary in the repository for one tab, before any second caller exists to say
+what the shape should be. *Rejected: an action per outcome.* `sys/queue-accept` acts on no note.
+
+**Standing rule 1.** *Incident:* R11-D23 recorded this edge in the pull request that created it
+and left the answer to the tab that would hit it, which is the right order and only works if the
+answer is then written down. *Deletion criterion:* this record dies with the Queues tab, and the
+tab dies when the `decide` statuses stop filling.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
