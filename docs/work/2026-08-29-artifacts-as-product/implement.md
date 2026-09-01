@@ -2361,6 +2361,125 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
+  - **The park was fleet-wide, and D2 says so.** `design.md:725` decides
+    `D2 backlog = bulk-park`; `design.md:549` makes the 45-day rule its
+    *intake counterpart*, "so the backlog drains whether or not a worker
+    runs." The sweep keeps the backlog from re-accumulating and is not the
+    instrument for draining it once. Read the other way round — sweep only —
+    step 7 parks **1 item of 102** in this repository and its own `≤20 active`
+    check cannot pass. That reading was tried first, in four repositories,
+    before the decision records were read properly; the age-sweep pass
+    survives in those PRs as the first of two commits rather than being
+    rewritten away.
+  - **237 items across seven repositories**, each `status: planning` with no
+    `branch:`, moved to `docs/work/archive/2026-09/` carrying
+    `parked: 2026-09-01 bulk-park (D2)` in their own frontmatter. This
+    repository: 100 of 102 (#670). rwbp-website 46, hoa-manager 50,
+    anomaly-metric-creator 20, loadsmith 18, se-ai-command-pack 2,
+    rwbp-coordinator 1. `mezmo_benchmark`'s 46 are untouched under the D7
+    freeze, and `sd-github-review`'s 17 are committed but unpushed — GitHub
+    reports that repository `archived: true`, so it is read-only. Parking an
+    already-frozen repository is close to moot; the commit is left on a local
+    branch rather than worked around.
+  - **Three survivors fleet-wide, every one kept by the rule rather than by an
+    exception.** Each carries a `branch:` and reads `in_progress`: this
+    rollout, `2026-08-21-port-integration-only-profile` here, and
+    `2026-08-17-store-decomposition-pr8` in loadsmith. The rollout being
+    protected by the rule and not by a special case in the script is the point
+    — a sweep that needs a hardcoded exemption for the thing running it is a
+    sweep nobody can trust to run again.
+  - **What the backlog was.** `prd.md:28` measured it: 101 open tasks, **98
+    about pack machinery**, 100 never left `planning`. A backlog of machinery,
+    in a repository whose thesis is that it built too much machinery. Listing
+    it once a day did not make it a plan. Parked is recoverable with `git mv`
+    and is not hidden: `sd-status --parked` derives the list from the
+    frontmatter field rather than a ledger, so it needed no change to report
+    all 100.
+  - **`git mv` silently drops an edit made before the move.** It relocates the
+    blob already in the index, so edit-then-move stages the *pre-edit*
+    content. Three of the six agents running this sweep hit it independently;
+    one caught 14 files staged `AM` with the old blob and said it would have
+    shipped 14 files that looked parked and were not. The order that works is
+    move first, then edit, then `git add` — or verify the index with
+    `git show :<path>`, never the working tree.
+  - **The check that was missed, and how.** Every repository verified that its
+    items moved correctly. None verified that anything pointing *at* them
+    still resolved. Copilot found it in two repositories; enumerating from the
+    filesystem found it in **four** — loadsmith 18 items referenced from
+    `ARCHITECTURE.md` and two spec files, hoa-manager 5 from four docs,
+    anomaly-metric-creator 4, rwbp-website 3, and several repositories carry a
+    generated `docs/repomix-map.md` that has to be regenerated when docs move.
+    This is the standing rule about scoping a check to the blast radius rather
+    than to what was edited, failed in the most ordinary way available: a
+    rename is exactly the case where the interesting files are the ones you
+    did not touch.
+  - **Protection: three of four gaps closed, and the fourth should not be.**
+    `route` is now a required check (verified it runs on every pull request
+    with no path filter, four for four green); squash commits build from
+    `PR_TITLE` / `PR_BODY` instead of `COMMIT_OR_PR_TITLE` /
+    `COMMIT_MESSAGES`, so a carrier branch's `wip:` subjects stop reaching
+    main's history; rebase merging is disallowed for the same reason. The
+    fourth reads *"a review requirement exists but asks for 0 approving
+    reviews, so it gates nothing"* — and closing it by raising the count locks
+    the repository: `enforce_admins` is on, GitHub does not let an author
+    approve their own pull request, and there is one maintainer. Deleting the
+    requirement that gates nothing is the honest close and leaves behaviour
+    identical; it is left open rather than done quietly, because a protection
+    rule removed without the owner deciding is worse than a decorative one.
+  - **`migrate-trellis` deleted (#669), and the evidence is on disk rather
+    than in a ticked box.** `git ls-files .trellis` returns **0** in all nine
+    consumer repositories of the 3-c wave; what remains is 17–41 untracked
+    files each, which belong to `sd-status`'s `RESIDUE` table — it survives
+    this step and prints the exact removal command. `~/repos/ai/Trellis` has
+    1,461 tracked and is the upstream project, not a consumer.
+  - **Step 7's `grep -rli trellis` → archive only cannot mean what it says,
+    but the park brought it most of the way.** Before the 100 items moved,
+    139 files outside `docs/work/archive/` named it; after, **42 do, against
+    534 inside the archive.** The fall is real and is a side effect rather
+    than an achievement — those journal entries did not stop naming it, they
+    became archive. What is left is not residue, and each group has to stay:
+    **18** under `docs/spec/`, a tree already known-stale and scheduled
+    separately; **5** belonging to the two work items still active, three of
+    them this record; `bin/sd-status`'s `RESIDUE` row, which *is* the detector
+    for the residue; and the rest — `CHANGELOG.md`, `.gitignore`, `AGENTS.md`,
+    `CONTRIBUTING.md`, the two tests, the two `dashboard/` docstrings — naming
+    it in past tense, which the supersede-don't-backdate convention exists to
+    protect. Reaching zero needs a rename that makes the record less true.
+    Read as live code paths it is met: `bin/migrate-trellis` and
+    `tests/test_migrate_trellis_consumer.py` are gone, no code reads
+    `.trellis` at all, and the one comment left in `bin/sd_setup_github.py`
+    is past-tensed.
+  - **One citation was wrong before this step touched it.** CONTRIBUTING.md
+    and `.gitignore` both said the managed-block markers were kept "only so
+    `migrate-trellis` can find and remove the equivalent block in consumer
+    repos" — but `grep '\.gitignore' bin/migrate-trellis` returned nothing.
+    It stripped marker pairs from `AGENTS.md`, never from a gitignore. The
+    markers were kept for a dependency that never existed. Said plainly rather
+    than dropped, and left in place because
+    `docs/spec/backend/manifest-and-filesystem.md:1868` still specifies them
+    and that tree is already known-stale.
+  - **Protection: three of four gaps closed, and the fourth is not mine to
+    close.** `route` is now a required check, squash is pinned to
+    PR_TITLE/PR_BODY, and rebase merges are disallowed -- each confirmed by
+    `sd-status` re-reporting the gap as gone rather than by reading back the
+    call that set it. What remains is `GAP [reviews] a review requirement
+    exists but asks for 0 approving reviews, so it gates nothing`. Every way
+    to close it costs something a solo maintainer pays: with
+    `enforce_admins: true` and one human, requiring 1 approval locks `main`
+    outright, and the DELETE that would drop the empty requirement was refused
+    by the permission classifier rather than worked around. Left open,
+    deliberately and in writing, instead of being recorded as closed.
+  - **The park invalidated two of this repository's own docstrings**, which is
+    the same class of bug step 6b's round 8 found in the system repo and the
+    reason that lesson is worth repeating. `dashboard/work.py` argued its
+    design from "of 310 active items fleet-wide, 300 read `planning`" and
+    `tests/test_dashboard_work.py` restated it; parking 237 items made both
+    false while every test still passed, because the numbers live in prose. Now
+    57 and 47, measured from the collector rather than estimated. The ratio the
+    argument rests on did not move -- which is exactly why the stale figure
+    would have survived a reading that only checked whether the point still
+    held.
+
 - [ ] 8 / 9 / 10 / 11
 
 ## Risks (consolidated)

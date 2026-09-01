@@ -42,7 +42,7 @@ class WorkCollection(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def test_a_settled_item_is_counted_and_not_listed(self) -> None:
-        """300 of 310 read `planning`; listing them is not a view."""
+        """47 of 57 read `planning`; listing them is not a view."""
         repo = make_repo(self.root, "one")
         for n in range(5):
             make_item(repo, f"2026-01-0{n}-thing", "planning")

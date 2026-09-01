@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.0.0 - 2026-09-01
+
+### Changed
+
+- **The successor, tagged.** 0.72.0 was the terminal release of the pack that
+  shipped through the release train and the plugin marketplace. 1.0.0 is the
+  same repository re-based on `docs/work/**` artifacts and installed
+  machine-scope from one checkout, which is what that entry pointed forward to.
+  The version is not a claim that the rollout is finished: it is tagged at
+  step 7 of eleven, because that is where the migration path could be deleted
+  rather than where the last step lands. Steps 8 through 11 -- `sd store` and
+  `sd config`, `sd plugin lock`, the vault driver, the remaining `pack.py`
+  callers, the sd-writing-pack migration, and the vault move -- follow after
+  this tag and will not carry a 1.x break with them.
+
+- **`bin/migrate-trellis` and its consumer test are deleted** (1,250 and 575
+  lines). `git ls-files .trellis` returns 0 in all nine consumer repositories
+  of the 3-c wave, so the migration it performed has no remaining input. The
+  untracked residue those checkouts still carry is reported by `sd-status`'s
+  `RESIDUE` table, which survives and prints the exact removal command.
+  `bin/migrate-vault` is untouched and survives to step 11.
+
+- **The backlog is parked, not deleted.** Every work item reading
+  `status: planning` with no `branch:` moved to `docs/work/archive/2026-09/`
+  carrying a `parked:` line naming the decision (D2) that moved it -- 100 items
+  here and 237 across seven repositories. `sd-status --parked` lists them from
+  that frontmatter, and `git mv` back to `docs/work/` restores any of them.
+  Nothing was dropped: the archive is a container, not a wastebasket.
+
+- **A citation that was never true is corrected.** `CONTRIBUTING.md` and
+  `.gitignore` both said the managed-block markers were kept "only so
+  `migrate-trellis` can find and remove the equivalent block in consumer
+  repos." It never touched a gitignore -- it stripped marker pairs from
+  `AGENTS.md`. The markers stay, for the reason that does hold:
+  `docs/spec/backend/manifest-and-filesystem.md` still specifies them.
+
 ## 0.72.0 - 2026-08-29
 
 ### Changed
