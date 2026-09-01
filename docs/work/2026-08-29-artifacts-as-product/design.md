@@ -1928,6 +1928,55 @@ digest so two long ids stay distinct.
 that failed emits its dark row and returns, so the two are mutually exclusive per tab. An earlier
 account of this finding said otherwise, and it was wrong.
 
+**R11-D21 (user, 2026-08-31) — Queues is a plugin tab, and the plugin contract grows a declared
+action.**
+
+The parity checklist put the five `db-*` queue tabs in the backbone. Specifying them found that
+they are not what the row implied: `DBS` maps each key to a folder of Obsidian markdown in the
+vault, every row is a note, and the status and rating dropdowns POST to `/api/update`, which
+rewrites the note's YAML frontmatter in place. Queues is a vault view with a write path — and every
+other vault-reading tab in the fold, Vault and Briefs, was already assigned plugin-side and
+system-owned. The checklist had one vault tab going one way and three going the other, on no stated
+distinction.
+
+**The distinction does not exist, so Queues moves.** A blog-idea queue is not a framework-native
+fact; it is personal vault content that a set of vault routines also write. The rule design.md
+already states — the shell and the framework-native facts fold into the backbone, system views stay
+system-owned behind a registered manifest — puts Queues with Vault and Briefs, and the checklist
+row is the thing that was wrong.
+
+**But read-only is not a port of this tab, and that is what forced the second half.** The queues
+exist to be decided in. Ported without their dropdowns they become a list of things awaiting a
+decision the dashboard can no longer take, while Now still emits five rank-4 rows pointing at them
+— an alert whose destination cannot act on it. So the plugin contract gains a declared action: a
+manifest may name actions alongside its tile, the backbone renders the control and routes the
+result back through `RUN_ALLOWLIST` to the named command, and the command stays in `~/repos/system`
+with the vault. This is not new doctrine. design.md already says *"code + pinned actions live in
+`~/repos/system`"*, and the swap gate already requires that every UI mutation map 1:1 to a `bin/`
+command through `RUN_ALLOWLIST`. What was missing was the mechanism, not the intent.
+
+**Standing rule 1 applies, and both halves are supplied rather than waived.** New `RUN_ALLOWLIST`
+ids need a linked incident and a deletion criterion.
+
+*Incident:* the five queue tabs are the only surface in the fold whose entire purpose is a decision
+made on the dashboard. Ported read-only, the tab becomes a list, and the rank-4 *"N awaiting your
+decision"* rows become alerts that route the operator somewhere they cannot act — the same
+dead-destination failure R11-D19 removed from the row contract, reintroduced as a whole tab.
+
+*Deletion criterion:* the action ids and the manifest key go when the queues stop carrying
+decisions — when every `decide` status is empty because the vault routines own the intake end to
+end, as `skill` already trends toward since `skill-proposal-accept` was retired. If no queue asks a
+question, nothing needs an answer, and the mechanism should not outlive the reason for it.
+
+**Standing rule 2 is not touched, and the check is worth recording because the name invites the
+error.** The frozen 8-key vocabulary is `kinds.*`, the store schema. A `dashboard.actions` key is a
+manifest key, and the manifest's top level is not the thing that rule freezes.
+
+**Consequence for the sequence, and it is the second time 6b has been reordered by a dependency
+found while specifying rather than while building.** Queues no longer rides with the backbone tabs.
+It lands after `RUN_ALLOWLIST` and the action mechanism, which is to say after the write path — so
+the parity checklist's Queues row moves from *backbone* to *plugin tab*, and 6b-5a is Work alone.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).

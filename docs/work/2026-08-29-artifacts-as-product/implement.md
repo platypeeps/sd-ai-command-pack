@@ -1538,7 +1538,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     |---|---|---|
     | Repos | backbone | **yes** |
     | Issues | backbone — the one migrating view (R3-D13) | **yes** |
-    | Work · Now · PRs · Queues | backbone | no |
+    | Work · Now · PRs | backbone | no |
+    | Queues | **plugin tab** — moved from backbone by R11-D21: it is a vault view with a write path, like Vault and Briefs | no |
     | Suggestions · Skills · Sessions | backbone, **new** — no system counterpart | no |
     | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | no |
     | ~~Jira personal~~ | **no such tab** — enumerated 2026-08-31; Jira renders inside `issues`, which is already backbone | n/a |
