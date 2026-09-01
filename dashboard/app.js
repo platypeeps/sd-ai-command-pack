@@ -677,3 +677,63 @@ drawPlugins();
 // five-second cache, and this is the view where a cron job going red is the
 // thing being watched.
 setInterval(drawPlugins, 10000);
+
+// --- run ----------------------------------------------------------------
+// The one place this page writes, below the tabs rather than inside one: an
+// action belongs to the dashboard, not to whichever view is open when somebody
+// wants to press it. A button sends an **id** -- the argv lives in
+// `RUN_ALLOWLIST` or a manifest and has never been sent here, so there is
+// nothing in this file to talk into running something else.
+
+const runButtons = document.getElementById("run-buttons");
+const runSub = document.getElementById("run-sub");
+// Delivered with the page, so anything able to read it could already read the
+// page. Missing means every POST is refused, which is the safe direction.
+const RUN_TOKEN =
+  (document.querySelector('meta[name="dashboard-token"]') || {}).content || "";
+
+async function press(button, id) {
+  button.disabled = true;
+  runSub.textContent = `running ${id}…`;
+  try {
+    const reply = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dashboard-Token": RUN_TOKEN },
+      body: JSON.stringify({ action: id }),
+    });
+    const body = await reply.json().catch(() => ({}));
+    // The last line of output, not all of it: `sd-dashboard index` prints its
+    // summary last, and the strip is one line tall.
+    runSub.textContent = body.ok
+      ? `${id}: ${(body.output || "finished").split("\n").pop()}`
+      : `${id} failed: ${body.error || reply.status}`;
+  } catch (err) {
+    runSub.textContent = `${id} could not be sent (${err})`;
+  }
+  button.disabled = false;
+  // Whatever it did, every view that reads what it wrote is now behind.
+  for (const redraw of [drawIssues, drawPrs, drawNow, drawPlugins]) redraw();
+}
+
+async function drawRun() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/actions")).json();
+  } catch (err) {
+    runSub.textContent = `cannot list actions (${err})`;
+    return;
+  }
+  runButtons.replaceChildren();
+  for (const action of payload.actions) {
+    const button = document.createElement("button");
+    button.textContent = action.label;
+    button.addEventListener("click", () => press(button, action.id));
+    runButtons.append(button);
+  }
+  runSub.textContent = payload.actions.length
+    ? "every button here is one allow-listed command"
+    : "no actions declared";
+}
+
+// Once. The set changes when a plugin is registered, which is a restart.
+drawRun();

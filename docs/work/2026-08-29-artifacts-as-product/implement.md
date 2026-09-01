@@ -28,7 +28,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **5** | Fold se-ai-command-pack (64 skills + 5 agents, all renamed se-* → sd-*; machine locations replaced). **Vault-side first:** retarget the 8 scheduled-routine callers (`se-research` ×6, `se-scan` ×2 under `System/Scheduled Tasks/`) to `sd-*`, then delete old se-* renders | `grep -rln 'se-research\|se-scan' 'System/Scheduled Tasks/'` = 0 before deletion; count = 64; collision check vs 11 commands = 0; `ls ~/.claude/skills \| grep -c '^se-'` = 0; sdw-research resolves; next nightly routine run green |
 | **5b** | `sd-skill-adopt` lands; retire skill-proposal-accept + file-trellis-task.py; delete legacy gito/prism skill folders (backend rows stay) | adopt-lint green on all installed skills |
 | **6** | Machine cleanup = M3 (receipt-driven, legacy subdirs by name) | find both spellings = 0; plugin rows = 0; `handoff/` + `intents/` untouched (a packet written before the step is restorable after) |
-| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the dashboard cap's remaining headroom, and the backbone-render PR re-derives that cap from files that exist (R11-D17: 4,000) |
+| **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13, then amended by R11-D21, which made Queues a sixth plugin tab landing after the write path rather than a backbone tab landing before Now: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the dashboard cap's remaining headroom, and the backbone-render PR re-derives that cap from files that exist (R11-D17: 4,000) |
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers, BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
@@ -1757,7 +1757,10 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     2,488 measured, plus R11-D13's 763-line backbone lift, plus estimates of
     ~120 for Now and ~200 for the write path, is ~3,571; 4,000 is that plus
     room for this repository's comment convention. Downward only, like
-    `bin/`'s 14,000.
+    `bin/`'s 14,000. *(Both estimates were later overrun and both overruns are
+    recorded where R11-D17 says they belong: Now cost 212 at 6b-5b, the write
+    path 330 at 6b-7. The derivation stands as written; the cap is not
+    re-derived twice.)*
   - **6b-3b: the loader keeps the tile's last words (R11-D18).** Writing the
     first real tile refused five tabs with `exited 2` and no reason --
     `bounded_run` opened the process with `stderr=subprocess.DEVNULL`, so the
@@ -1976,6 +1979,69 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     where there are 6,211 lines of headroom. If the write path lands over
     ~200, the honest move is to say so and re-scope, not to re-derive a cap
     twice in one step.
+  - **6b-7 landed: the write path, and the promise it replaced.** The
+    dashboard had one guarantee that was easy to state -- *GET is the only
+    verb* -- and R11-D21 made it untenable: the five queue tabs exist to be
+    decided in, and ported read-only they become a list of questions nobody
+    can answer while Now still emits rows pointing at them. So the guarantee
+    moved rather than went. **No GET has a side effect.** Writing is POST,
+    POST is Host-allowlisted and token-gated, and every mutation resolves to
+    an id in `RUN_ALLOWLIST` -- the server never builds a command from
+    anything a caller sent, and `bounded_run` takes a list and never a string.
+    **The shape being refused is a real one, in the code being replaced.**
+    `~/repos/system/local-project-dashboard/dashboard.py:1714` answers
+    `GET /api/state?refresh=1` by starting a rebuild behind the Host check
+    alone, while its POST twin at `:1788` demands the token -- so a link, a
+    prefetch or an `<img src>` on any page the operator has open can start it.
+    That is pinned two ways rather than asserted: `do_GET` is read out of the
+    syntax tree and must call neither `actions.run` nor anything in
+    `subprocess`, and every route the handler serves is walked live, with and
+    without `?refresh=1`, against a recorder that stays empty. Both halves
+    fail if the hole is reintroduced, which is how they were checked.
+    **A plugin may declare actions, and the id is the trust boundary.** A
+    manifest names actions beside its tile, `bin/sd` validates the block at
+    registration and reports it in `plugin list`, and the id is namespaced
+    with the plugin's prefix exactly as its rows and tabs are. A plugin
+    declaring `index` gets `sys/index`; the backbone's `index` is untouched.
+    Tested by trying it, and by two plugins declaring the same name.
+    **Four mutations, four failures.** Remove the namespacing, remove the Host
+    check from `do_GET`, make the token comparison unconditional, or add a
+    `?refresh=1` rebuild -- each one turns a passing suite red, and the last
+    one reds both halves of the no-GET pin.
+    **Two bugs came from pressing the button rather than from reading it.**
+    `RUN_ALLOWLIST` first named `sd-dashboard` and got a 502: the pack's
+    `bin/` is not on this machine's `PATH`, and under launchd it would be on
+    launchd's. It resolves from `__file__` now, the way `plugins.SD` already
+    did. Second, the handler defaulted a missing `Content-Length` to zero, so
+    a chunked POST -- which is what a client that does not set the header
+    sends -- was read as an empty body and answered *"no action named"*: a
+    request that was fine, refused with an error pointing at the allow-list.
+    It is a 411 now. Neither was reachable from a unit test of either half.
+    **`sd-dashboard install` is the third verb, and it is in `bin/`.** The
+    plist is rendered from the command every time rather than edited in place,
+    and `bootout` precedes `bootstrap` because `bootstrap` over a loaded label
+    fails and a reinstall that quietly kept the old arguments is the failure
+    the verb exists to prevent. launchd refusing is printed, not an exit code:
+    the plist is written and correct, and saying otherwise would suggest the
+    install did not happen. It does not yet *replace* the system LaunchAgent
+    -- that is 6b-8's swap, and until then they are two services under two
+    labels on two ports, deliberately.
+    **The measurement, and it is the one this record was told to make.**
+    `dashboard/` is **3,987 of 4,000 -- 13 left**, and 6b-7 cost **330**
+    against the ~200 the 6b-5d entry estimated. Over by 65%, said here rather
+    than absorbed. `install` went to `bin/` as that entry required, where the
+    total is now 7,925 of 14,000. Two reductions were taken inside this change
+    rather than after it -- `send_body` grew a status parameter so the POST
+    stopped hand-rolling a response, and `resolve()` replaced three copies of
+    the same merge -- and the prose written this step was tightened. What is
+    left is 13 lines, and **6b-8 needs more than that**: R11-D10's correction
+    of 2026-08-31 says the reach is two paths, a direct tailnet bind *and* a
+    `tailscale serve` proxy, and binding a second address is ~20 lines in
+    `serve()`. The cap may only move downward (R11-D17), so the choice at 6b-8
+    is a deliberate reduction change before it, or knowingly dropping the
+    IP-URL path that exists for a phone whose resolver ignores MagicDNS.
+    R11-D10 already framed that as "carry both or knowingly drop one"; this is
+    the point at which it stops being hypothetical.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own
@@ -1985,8 +2051,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     - [ ] Now emits every rank-0 and rank-1 row it emits today, from plugin
           sources as well as backbone ones (R11-D12's optional row key wired,
           and the count checked against `attentionItems()` rather than assumed)
-    - [ ] `RUN_ALLOWLIST` exists and every UI mutation maps 1:1 to a `bin/`
-          command
+    - [x] `RUN_ALLOWLIST` exists and every UI mutation maps 1:1 to a `bin/`
+          command — 6b-7. One action today (`index`); 6b-6's queue actions
+          arrive through the manifest and the same map
     - [ ] `sd-dashboard install` exists and replaces the system LaunchAgent
     - [ ] `index --dump` diffed against the system `/api/state` is empty for
           every shared fact

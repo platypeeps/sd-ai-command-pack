@@ -1217,7 +1217,11 @@ charged them here, which is the same mistake in the other direction.
 
 **And `bin/` is the tighter of the two.** Enumerated rather than taken from the itemisation:
 `bin/` core is at **7,492 against its 8,000 cap — 508 lines of headroom** (`migrate-*` sits under
-its own 1,500 ceiling and is excluded, which is why the raw 8,742 total passes). The itemisation
+its own 1,500 ceiling and is excluded, which is why the raw 8,742 total passes).
+*(Later: this is what closed the record's own escape hatch below — the three did not fit, and
+R11-D15 re-derived the ceiling at **14,000** from built code in its own record. Both numbers in
+this sentence are spent: re-measured 2026-08-31 at 6b-7, `bin/` core is **7,925 of 14,000**. The
+count is left as it was taken, because it is the evidence R11-D15 was derived from.)* The itemisation
 above predicts **~7,170 for the finished pack, leaving ~830**. That is the comparison worth
 making, and it is worse than a headroom shortfall: 7,492 is what is built **today**, so the pack
 has already passed the total its own itemisation predicted for the *complete* twelve-command set,
@@ -1252,7 +1256,10 @@ justification no longer matches its number even though the number may still be r
 
 **Consequence for the sequence.** 6b's order, already flipped once by R11-D12, is now:
 registration slice → the tile loader → the five plugin tabs → backbone tabs → Now →
-`RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`. Step 8 keeps
+`RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`.
+*(R11-D21 later moved Queues out of the backbone tabs and made it a **sixth** plugin tab that
+lands after the write path rather than with the other five, so "the five plugin tabs" is the
+count this order was written against and not the count that shipped.)* Step 8 keeps
 everything else and loses only what moved.
 
 **Standing rule 1 does not apply to either half.** No gate, ledger, hook or rule is added: the
@@ -1403,6 +1410,11 @@ at line 1658 with `host_ok()` (defined at 1532) and the token comparison at 1661
 spelled in full because a bare `dashboard.py:1661` reads as an in-repo citation and there is no
 such file here; `dashboard/server.py` is this repo's, and it is GET-only until 6b. Three write endpoints ride on that:
 `POST /api/update`, `/api/ack`, `/api/refresh`.
+*(Later, 6b-7: the pack dashboard has a POST now, so "GET-only until 6b" is spent rather than
+wrong. The line numbers above have drifted with the file they cite -- re-read 2026-08-31,
+`do_POST` opens at `:1785`, `host_ok` at `:1657`, the token comparison at `:1788` -- and the
+one this repository now cites in `dashboard/actions.py` is `:1714`, the `GET /api/state?refresh=1`
+rebuild that has no token in front of it and is the shape 6b-7 deliberately did not inherit.)*
 
 **The decision.** At 6b the replacement takes `:8767` *with* the tailnet reach and *with* those
 writes, under the same three guards. Options (a) loopback-only and (b) tailnet read-only were both
@@ -1691,6 +1703,11 @@ not an accident, and a cap derived from code alone would be busted by the next d
 `bin/`'s 14,000 it may move **downward** and not up, and the two estimates in the table are the
 part to check: if Now and the write path land materially over them, that is a finding for their
 own records, not a second re-derivation.
+*(Both did, and both are recorded where this says they should be. Now cost **212** against ~120
+(6b-5b); the write path cost **330** against ~200 (6b-7). The table is left as derived — the cap
+is not re-derived a second time — but a reader taking either estimate as settled is reading the
+part this paragraph flagged as the part to check. After 6b-7, `dashboard/` is **3,987 of 4,000**,
+and the 13 lines left are fewer than the tailnet bind R11-D10's correction still requires.)*
 
 The old number is not defended. 2,500 was set against a 457-line lift that R11-D13 measured at
 763, and the estimate it rested on was wrong before any of this was built. What the cap is for is
