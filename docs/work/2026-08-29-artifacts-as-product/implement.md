@@ -2138,6 +2138,18 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     9,175 minus the `migrate-*` tools that hold their own 1,500 ceiling --
     correct as written, and only correct because the cap test enumerates the
     same way.
+    **Review found two ways the measure could fail for the wrong reason.**
+    The counter routed every non-Python file through the JavaScript rule, so a
+    `README.md` dropped into `dashboard/` would have had every line of prose
+    counted as code -- the cap failing on exactly the thing it exists to make
+    free. It now dispatches by extension: Python tokenised, `.js` by the crude
+    rule, everything else zero and still charged to the total, which is where
+    a large prose file belongs. And the block-comment guard rejected the
+    substring `/*` anywhere in the file, so `const glob = "src/*.js"` would
+    have failed a check about comment style; it now looks only at what a line
+    opens with. Both mutation-checked: reverting the first reds the prose
+    fixture, adding a real block comment reds the second, and the string
+    literal that used to fail it now passes.
     **The parity table's live column was wrong while all this was being
     measured.** `Now · PRs` still read *no* after 6b-5b and 6b-5c built both,
     and the verdict paragraph said eight tabs exist when twelve serve. Fixed

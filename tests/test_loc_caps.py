@@ -101,16 +101,27 @@ def code_line_count(paths: list[pathlib.Path]) -> int:
     **conservative on purpose**: it counts a `/* */` block as code, so the
     error can only tighten this cap, never loosen it. `dashboard/app.js` holds
     no block comment today and the measure is checked, not assumed.
+
+    Every other suffix carries no code and is not counted. The rule is stated
+    by extension rather than as "not Python", because a `README.md` measured
+    by the JavaScript rule is every line of prose counted as code, failing
+    this cap for a reason that has nothing to do with what it protects. Such a
+    file still charges the total cap, which is where a large one belongs; and
+    should `dashboard/` ever hold a third language, this returns too low until
+    somebody adds it, so the omission surfaces as headroom that does not
+    behave, not as a silent pass. Found in review.
     """
 
     total = 0
     for path in paths:
         text = path.read_text(encoding="utf-8")
-        if path.suffix != ".py":
+        if path.suffix == ".js":
             total += sum(
                 1 for line in text.splitlines()
                 if line.strip() and not line.strip().startswith("//")
             )
+            continue
+        if path.suffix != ".py":
             continue
         seen = set()
         for token in tokenize.generate_tokens(io.StringIO(text).readline):
@@ -234,6 +245,12 @@ class LineCountCaps(unittest.TestCase):
         )
         self.assertEqual(code_line_count([script]), 1)
 
+        # Prose in a file the measure has no rule for is not code, and is not
+        # counted by the rule for a language it is not written in.
+        prose = scratch / "notes.md"
+        prose.write_text("# Heading\n\nA paragraph about the design.\n", encoding="utf-8")
+        self.assertEqual(code_line_count([prose]), 0)
+
     def test_no_javascript_under_the_cap_hides_prose_in_a_block_comment(self) -> None:
         """The JS measure cannot see `/* */`, so it is checked that none exists.
 
@@ -243,8 +260,15 @@ class LineCountCaps(unittest.TestCase):
         """
 
         for path in tracked("dashboard"):
-            if path.suffix == ".js":
-                self.assertNotIn("/*", path.read_text(encoding="utf-8"), str(path))
+            if path.suffix != ".js":
+                continue
+            # A line that *opens* with `/*`, not the substring anywhere: a
+            # regex or a string may hold `/*` mid-line without a byte of it
+            # being a comment, and failing on that would be a false positive
+            # about comment style. Found in review.
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                self.assertFalse(
+                    line.strip().startswith("/*"), f"{path}:{number} opens a block comment")
 
 
 if __name__ == "__main__":
