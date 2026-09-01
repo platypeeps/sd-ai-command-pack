@@ -24,8 +24,9 @@
 
 - **The backlog is parked, not deleted.** Every work item reading
   `status: planning` with no `branch:` moved to `docs/work/archive/2026-09/`
-  carrying a `parked:` line naming the decision (D2) that moved it -- 100 items
-  here and 237 across seven repositories. `sd-status --parked` lists them from
+  carrying a dated `parked:` line in its own frontmatter -- 100 items here, all
+  of them `bulk-park (D2)`, and 237 across seven repositories, of which 172 read
+  `bulk-park (D2)` and 65 read `age-sweep`. `sd-status --parked` lists them from
   that frontmatter, and `git mv` back to `docs/work/` restores any of them.
   Nothing was dropped: the archive is a container, not a wastebasket.
 
