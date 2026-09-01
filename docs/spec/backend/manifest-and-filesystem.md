@@ -29,6 +29,17 @@
 > `CONTRIBUTING.md` says they are left in place because this section still
 > specifies them. Whatever happens to this page has to settle that too.
 >
+> **Three more of its citations went on 2026-09-02, and the count above is not
+> re-run.** `docs/FLEET_ROLLOUT.md`, `docs/fleet/consumers.json` and
+> `docs/fleet/surface-partition.json` were deleted when the triage's delete
+> column was executed, so this page now cites them as absent rather than stale.
+> The 302/377 figure was measured on 2026-09-01 and is left as measured; a
+> figure in prose is a measurement with no owner, and re-running it here would
+> only move the date at which it goes stale. This page's body is deliberately
+> unedited -- the triage decided against rewriting the six mixed pages down to
+> their true parts, because that destroys the record of what the machinery was,
+> which is the only thing they are still good for.
+>
 > The text below is unedited. It is the record of what that machinery
 > specified, not guidance for the repository as it stands. The triage that
 > produced this notice is recorded under step 7 in

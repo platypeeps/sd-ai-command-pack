@@ -3092,6 +3092,77 @@ one command and does not depend on remembering where `.claude` roots.
 
 - [ ] 8 / 9 / 10 / 11
 
+### The delete column, executed (2026-09-02)
+
+The 2026-09-01 triage produced a per-file disposition -- keep 0, stale-notice
+6, delete 19 -- and stopped there, because 7,839 lines of specification is a
+content decision for the maintainer rather than a triage's call. The maintainer
+took the delete column on 2026-09-02. This entry records what that cost and the
+two places it could not be a straight deletion.
+
+**Eighteen files, 9,324 lines.** Not nineteen. `docs/spec/backend/index.md`
+carried a `delete` verdict marked *conditional*, and the condition bound:
+`sd-docs-lint` rule 4 requires an `index.md` in any spec directory that still
+holds pages, and three of `docs/spec/backend/`'s seven pages are staying. The
+triage stated the choice as delete-with-the-directory or
+rewrite-down-to-the-survivors, never delete alone. It was rewritten -- from 88
+lines to 42, an index of the three survivors plus a record of what left. Its
+Scope, Pre-Development Checklist and Quality Check sections went with the pages
+they pointed at, rather than standing as instructions a tree cannot follow.
+`docs/spec/frontend/` (4 of 4) and `docs/spec/tooling/` (8 of 8) left whole,
+index included, exactly as the triage said they could.
+
+**`docs/fleet/README.md` changed job rather than leaving.** It was written on
+2026-09-01 to carry a stale notice for two JSON files that cannot hold one.
+With both files deleted a notice about them is a tombstone, so it was rewritten
+as one: what each file was, why annotate-then-delete happened a day apart, and
+where the fuller record lives. It stays at its path because `CONTRIBUTING.md`,
+`CHANGELOG.md` and archived work items link into `docs/fleet/`, and a link that
+404s teaches nothing.
+
+**The reasoning that lasted one day, named rather than buried.** On 2026-09-01
+the two JSONs were annotated instead of deleted, on the argument that "a
+registry nothing reads is a record, and correcting a record in place is how a
+repository loses the ability to say what it once believed." That argument was
+right about correcting in place and wrong about the cost of keeping: the same
+triage had already recorded what both files were, in a table, with line counts
+and per-file citation counts. Keeping 4,859 unread lines to preserve a record
+that exists in two places is paying storage for the second copy. Git history
+holds the first.
+
+**What was deliberately not touched.** The six stale-notice pages keep their
+bodies. The triage decided against rewriting them down to their true parts --
+that is a content rewrite wearing a triage's clothes, and it destroys the record
+of what the machinery was, which is the only thing they are still good for.
+`docs/spec/backend/manifest-and-filesystem.md` gained one dated line saying
+three of its citations became absent rather than stale on 2026-09-02, and its
+302/377 figure was **left as measured** rather than re-run: a figure in prose is
+a measurement with no owner, and re-measuring only moves the date it goes stale.
+Its two open questions -- the vestigial `SD-AI-COMMAND-PACK` gitignore markers
+it is the sole justification for, and whether its Machine-Scope Installer
+section belongs in `docs/spec/` or `docs/work/archive/` -- are still open and
+were not resolved by this pass. `docs/review-learnings.md` still cites
+`docs/FLEET_ROLLOUT.md` in three entries marked **historical**; they are
+quotations from #184 and #188 review comments, true when written, and they stay.
+
+**The recommendation this pass corrected in itself.** The status report that
+proposed this work said to "lift out the bash 3.2 gate section and the
+planning-review checklist first, because they are live." Both were already
+safe: the bash 3.2 gate lives in `docs/spec/backend/quality-guidelines.md` and
+the planning-review checklist in `docs/spec/guides/index.md`, and **both pages
+are stale-notice, not delete**. The lift-out was work invented by not re-reading
+the verdict column before acting on a memory of it. Nothing was lifted, and
+nothing needed to be.
+
+**Verified.** `bin/sd-docs-lint` exits 0 -- "rule 4 spec index: checked 2 spec
+directory(ies)", down from 4, which is the two directories that left showing up
+in the checker's own enumeration rather than in a count I typed. `make check`
+exits 0. `git ls-files docs/spec | wc -l` is 7, down from 22. A path-exact grep
+for every deleted file across the tree returns hits only from `CHANGELOG.md`,
+`docs/work/**`, `docs/review-learnings.md` and the three rewritten pages -- all
+history or deliberate.
+
+
 ## Risks (consolidated)
 
 - Step 0 is the largest PR (pure deletion); mitigated by all-remaining-jobs-green check.

@@ -1,75 +1,42 @@
 # Installer CLI Guidelines
 
 > [!important]
-> **Stale as of 2026-09-01.**
-> Every subject in the Scope and Pre-Development Checklist below is gone.
+> **Stale as of 2026-09-01, and reduced on 2026-09-02.**
+> Every subject the original Scope and Pre-Development Checklist named is gone.
 > `install.py`, the `installer/` package, `manifest.json`, `templates/` and
 > `tests/install_test_support.py` were deleted on 2026-08-30 by step 3e of the
 > artifacts-as-product rollout (`43170716`, #610 -- 365 files, 183,433
 > deletions). What replaced them is one file, `bin/sd_install.py`, plus
 > `tests/test_sd_install.py`; `manifest.json` has no successor, because there is
-> no payload left to manifest. Every guide this index links describes that same
-> deleted installer.
+> no payload left to manifest.
 >
-> The text below is unedited. It is the record of what that machinery
-> specified, not guidance for the repository as it stands. The triage that
-> produced this notice is recorded under step 7 in
-> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
-
-> Project-specific guidance for the Python installer and pack metadata.
-
----
-
-## Scope
-
-Use these specs when changing:
-
-- `install.py`
-- `manifest.json`
-- installer behavior documented in `README.md`
-- tests that exercise installer behavior under `tests/`
-
-This repo is a small Python CLI package, not a backend service. "Backend" in
-this Trellis layer means installer logic, local filesystem writes, subprocess
-checks, and manifest handling.
+> **This page is now an index and nothing else.** Its Scope, Pre-Development
+> Checklist and Quality Check sections were deleted with the pages they pointed
+> at, rather than left standing as instructions for a tree that cannot follow
+> them. It survives because `sd-docs-lint` rule 4 requires an `index.md` in
+> every spec directory and three pages here are staying; the alternative was
+> deleting the directory whole, which those three pages rule out.
+>
+> The three guides below are unedited and each carries its own dated notice.
+> They are the record of what the machinery specified, not guidance for the
+> repository as it stands. The triage that reached this verdict is recorded
+> under step 7 in `docs/work/2026-08-29-artifacts-as-product/implement.md`;
+> the pass that executed it is recorded in the same file.
 
 ## Guides
 
-| Guide | Use When |
-|-------|----------|
-| [Directory Structure](./directory-structure.md) | Adding, moving, or organizing installer, manifest, template, or test files |
-| [Manifest And Filesystem](./manifest-and-filesystem.md) | Changing pack metadata, platform selection, target validation, conflict behavior, or file writes |
-| [Error Handling](./error-handling.md) | Changing CLI validation, conflict reporting, subprocess handling, or exit codes |
-| [Fleet Consumer Conversion](./fleet-consumer-conversion.md) | Running `install.py` against a registered fleet consumer rather than this repository. Documents that `--force` refreshes the whole payload rather than the cohort you named, the pre-install digest rule that protects locally owned files, the stash-and-branch ordering, and why the post-conversion fleet count reads incomplete |
-| [Logging Guidelines](./logging-guidelines.md) | Changing command output, warnings, or status summaries |
-| [Quality Guidelines](./quality-guidelines.md) | Changing installer behavior, tests, compatibility, or review expectations |
+| Guide | What it records |
+|-------|-----------------|
+| [Manifest And Filesystem](./manifest-and-filesystem.md) | The manifest/installer/plugin-generation/payload-gate/fleet-campaign model. Partly stale: its Trellis-gitignore section still specifies the vestigial `SD-AI-COMMAND-PACK` markers that `CONTRIBUTING.md` keeps `.gitignore` for, and its Machine-Scope Installer section is a design record for files that no longer exist |
+| [Error Handling](./error-handling.md) | The deleted `install.py` exit-code contract, plus three diagnostic lessons that outlive their subject |
+| [Quality Guidelines](./quality-guidelines.md) | 18 contracts for deleted shipped scripts, the **live** bash 3.2 gate, and "Silent Paths Must Say Why" |
 
-## Pre-Development Checklist
+## What was deleted from this directory
 
-Before editing installer behavior:
-
-1. Read `install.py`, especially `PackFile`, `load_manifest()`,
-   `selected_files()`, `install_file()`, and `main()`.
-2. Read `manifest.json` and confirm the behavior belongs in manifest data,
-   Python logic, or both.
-3. Read `tests/install_test_support.py` and the closest focused
-   `tests/test_*.py` module for the CLI-through-subprocess test style.
-4. If template files are involved, also read the frontend/template specs.
-
-## Quality Check
-
-Run:
-
-```bash
-python3 -m unittest discover -s tests
-git diff --check
-```
-
-For untracked spec or template files, also scan trailing whitespace directly:
-
-```bash
-rg -n "[ \t]+$" .trellis/spec templates tests install.py manifest.json README.md
-```
-
-Review that any new adapter or template path is listed in `manifest.json`,
-documented in `README.md`, and covered by an installer test.
+Three pages went on 2026-09-02, each a `delete` verdict from the 2026-09-01
+triage: `directory-structure.md` (the `install.py` + `installer/` + `templates/`
++ `scripts/` layout), `fleet-consumer-conversion.md` (running
+`install.py <consumer>` across a fleet that no longer exists), and
+`logging-guidelines.md` (installer status lines and a `_SECRET_SHAPES` constant
+in a deleted file). All three are reachable in git history; the triage table
+records what each specified.
