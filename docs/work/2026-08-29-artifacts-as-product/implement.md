@@ -1858,6 +1858,49 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     No re-derivation either way: R11-D17 rules one out and asks instead that
     Now and the write path be measured against their own estimates, so 6b-5b
     reports its LOC the way 6b-2 did.
+  - **6b-5b landed: Now, and it is the tab that opens.** The alert strip that
+    said *"shown here on every tab until Now lands"* is deleted; there is a
+    view now. Fourteen rows on this machine, reconciled against both halves
+    rather than eyeballed: nine from the loader, five from the fleet, and the
+    two sources agree with `/api/plugins` and `/api/state` exactly.
+    **The merge is server-side, and that was a testability decision before it
+    was an architectural one.** The rows arrive on two clocks from two routes
+    and the page could have joined them, but then the ranking, the ids and the
+    row text would exist only once a browser was running -- which is how 6b-5a
+    shipped its render untested. `/api/now` merges instead, `dashboard/now.py`
+    is ten unit tests, and what stays in the page is what cannot leave it: the
+    severity band, and the panel id a row links to.
+    **Severity comes from `rank` and nothing else** (R11-D20). The bands are
+    chosen here because choosing them is a rendering decision: 0-1 broken,
+    2-3 look, 4+ queued, and the nav badge counts everything not queued. Nine
+    of the fourteen, which is the number the operator is being asked to care
+    about.
+    **A row's destination is looked up and never recomputed.** The renderer
+    records the panel id it assigned, keyed on the `source` the loader
+    stamped; `panelId` normalises many-to-one, so re-deriving it would send a
+    row to a sibling tab's panel, which is worse than not linking. All
+    fourteen resolved here. The three sources that name no served panel are
+    exactly the failures, and those render unlinked by design.
+    **Two rules found by writing tests that could fail.** Ahead and dirty are
+    one row, not two -- the same repository at two ranks reads as two problems
+    -- and the sort key is `(rank, id)`, not `rank`: rank ties are the common
+    case, the git fan-out is a thread pool, and a rank-only sort reshuffles
+    the list under the operator every ten seconds. Both mutations were run and
+    both fail their test.
+    **And one bug the browser would have shown and no unit test could.** With
+    no Chrome available the client was run under a stub DOM against the live
+    server, which caught the plugin poll winning the load race and repainting
+    Now from an empty list -- flashing *"nothing is asking for anything"*
+    across the one view whose job is never to say that when it does not know.
+    `nowRowsSeen` is `null` until the first fetch answers.
+    **The measurement, and the finding R11-D17 asked for:** `dashboard/` is
+    **3,142 of 4,000, 858 left**, and Now cost **212** against R11-D17's
+    estimate of ~120. That is materially over, which that record names as a
+    finding for this one rather than grounds for a second re-derivation, so
+    here it is. What is left to fit is ~556 of backbone JS plus ~200 for the
+    write path -- **~756 against 858**, still under, by about a hundred lines.
+    The estimate that is now worth doubting is the ~556: it covers the PRs tab
+    and three surfaces with no system counterpart, and one tab just cost 212.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own

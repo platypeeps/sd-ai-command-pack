@@ -9,6 +9,16 @@ const issueSub = document.getElementById("issue-sub");
 const workMoving = document.getElementById("work-moving");
 const workUnstated = document.getElementById("work-unstated");
 const workSub = document.getElementById("work-sub");
+const nowRows = document.getElementById("now-rows");
+const nowSub = document.getElementById("now-sub");
+const nowBadge = document.getElementById("now-badge");
+
+// Where a plugin row goes when clicked, keyed on the source the loader
+// stamped. Written by the plugin renderer as it assigns panel ids and read by
+// Now. Declared up here because the renderer runs long before Now's section
+// is reached, and a `const` further down would still be in its temporal dead
+// zone by then.
+const PANELS = { bySource: new Map() };
 
 const cell = (text, cls) => {
   const td = document.createElement("td");
@@ -203,6 +213,7 @@ async function drawWork() {
 // list that only grows would keep serving a tab nothing feeds.
 
 const STATIC = [
+  ["tab-now", "panel-now"],
   ["tab-repos", "panel-repos"],
   ["tab-issues", "panel-issues"],
   ["tab-work", "panel-work"],
@@ -211,7 +222,6 @@ let tabs = STATIC.slice();
 
 const pluginNav = document.getElementById("plugin-tabs");
 const pluginPanels = document.getElementById("plugin-panels");
-const alerts = document.getElementById("alerts");
 
 function select(chosen) {
   for (const [button, panel] of tabs) {
@@ -226,7 +236,7 @@ function wire(button) {
 }
 
 for (const [button] of STATIC) wire(button);
-select("tab-repos");
+select("tab-now");
 
 // --- generic table behaviour --------------------------------------------
 // A plugin declares what its table can do and the backbone provides the doing:
@@ -335,24 +345,112 @@ function panelId(tab, used) {
   return id;
 }
 
-function showAlerts(rows) {
-  alerts.replaceChildren();
-  alerts.hidden = rows.length === 0;
-  if (!rows.length) return;
-  const heading = document.createElement("p");
-  heading.className = "sub";
-  heading.textContent =
-    `${rows.length} plugin alert${rows.length === 1 ? "" : "s"}` +
-    " \u00b7 shown here on every tab until Now lands";
-  const list = document.createElement("ul");
-  for (const row of rows) {
-    const item = document.createElement("li");
-    item.textContent = row.detail
-      ? `${row.source}: ${row.what} \u2014 ${row.detail}`
-      : `${row.source}: ${row.what}`;
-    list.append(item);
+// --- now -----------------------------------------------------------------
+// The one view that outranks its own tabs. The rows come merged and ranked
+// from /api/now; what is left here is the two things that cannot be decided
+// server-side -- how loud a rank looks, and which panel on this page a row
+// belongs to.
+
+// Severity is derived from `rank` and never from `kind` (R11-D20). `kind` is
+// the category of thing that happened and a plugin names its own, so styling
+// from it paints `plugin-dark` -- a rank-0 row -- with whatever the ternary's
+// catch-all branch happens to be. The bands are chosen here because choosing
+// them is a rendering decision; the ruling is that nothing else may choose.
+function band(rank) {
+  if (rank <= 1) return "broken";
+  if (rank <= 3) return "look";
+  return "queued";
+}
+
+// A plugin row's destination is looked up, never recomputed (R11-D20). The
+// renderer records the id it assigned; `panelId` normalises with a many-to-one
+// regex, so deriving it again here could send a row to a sibling tab's panel,
+// which is worse than not linking it. Three sources name no served panel, and
+// they are exactly the failures: `dashboard` for a registry that did not load,
+// a bare prefix for a plugin that is dark, and `prefix/name` for a tab that was
+// refused and filtered out at the moment its alert was created. Those render
+// unlinked by design -- sending a reader to a tab that is not on screen is the
+// same disappearance one layer along.
+function destination(row) {
+  if (row.source === "repos") return "panel-repos";
+  return PANELS.bySource.get(row.source) || "";
+}
+
+function whereCell(row) {
+  const td = cell(row.source);
+  const panel = destination(row);
+  if (!panel) return td;
+  // In-page, and only ever in-page: the destination is a tab this page is
+  // already showing, chosen by the backbone rather than supplied by a plugin.
+  // A button rather than an anchor because selecting a tab is what it does,
+  // and an href would need the panel to be a scroll target.
+  const link = document.createElement("button");
+  link.className = "linklike";
+  link.textContent = row.source;
+  link.addEventListener("click", () => {
+    const found = tabs.find(([, id]) => id === panel);
+    if (found) select(found[0]);
+  });
+  td.replaceChildren(link);
+  return td;
+}
+
+function paintNow(all) {
+  const loud = all.filter((row) => band(row.rank) !== "queued").length;
+  nowBadge.textContent = loud ? String(loud) : "";
+  nowSub.textContent = all.length
+    ? `${all.length} thing${all.length === 1 ? "" : "s"} \u00b7 ${loud} above the fold`
+    : "nothing is asking for anything";
+  nowRows.replaceChildren();
+  if (!all.length) {
+    emptyRow(nowRows, 4, "nothing is asking for anything");
+    return;
   }
-  alerts.append(heading, list);
+  for (const row of all) {
+    const how = band(row.rank);
+    const pill = document.createElement("span");
+    pill.className = `pill ${how}`;
+    pill.textContent = how;
+    const rank = document.createElement("td");
+    rank.append(pill);
+    const tr = document.createElement("tr");
+    if (how === "broken") tr.className = "you";
+    tr.append(rank, cell(row.what), cell(row.detail || ""), whereCell(row));
+    nowRows.append(tr);
+  }
+}
+
+// null until the first fetch answers, and the distinction is the point: the
+// plugin poll repaints this view whenever the panel map moves, and it can win
+// the race on page load. Painting an empty list then would flash "nothing is
+// asking for anything" across the one view whose whole job is not to say that
+// when it does not know.
+let nowRowsSeen = null;
+
+async function drawNow() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/now")).json();
+  } catch (err) {
+    // A Now that cannot be reached is itself the loudest thing there is: every
+    // source has gone quiet at once, and an empty table would say the opposite.
+    paintNow([{
+      rank: 0,
+      id: "now-unreachable",
+      source: "dashboard",
+      what: `cannot reach the server (${err})`,
+      detail: "",
+    }]);
+    return;
+  }
+  nowRowsSeen = payload.rows;
+  paintNow(nowRowsSeen);
+}
+
+// Called by the plugin poll too, which is why this repaints from what was last
+// fetched rather than fetching again: the panel map changed, the rows did not.
+function repaintNow() {
+  if (nowRowsSeen) paintNow(nowRowsSeen);
 }
 
 let pluginSignature = "";
@@ -364,9 +462,6 @@ async function drawPlugins() {
   } catch (err) {
     // A loader that cannot be reached is itself a rank-0 event: every plugin
     // has gone quiet at once, and an empty strip would say the opposite.
-    showAlerts([
-      { source: "dashboard", what: `cannot reach the server (${err})`, detail: "" },
-    ]);
     return;
   }
   // Rebuilt only when what the tiles returned actually changed. The poll is
@@ -385,7 +480,6 @@ async function drawPlugins() {
     payload.tabs.map((tab) => [tab.prefix, tab.name, tab.title, tab.html]),
   );
   if (signature === pluginSignature) {
-    showAlerts(payload.rows.filter((row) => row.rank === 0));
     return;
   }
   pluginSignature = signature;
@@ -395,9 +489,11 @@ async function drawPlugins() {
   pluginNav.replaceChildren();
   pluginPanels.replaceChildren();
   tabs = STATIC.slice();
+  PANELS.bySource = new Map();
   const used = new Set();
   for (const tab of payload.tabs) {
     const id = panelId(tab, used);
+    PANELS.bySource.set(`${tab.prefix}/${tab.name}`, `panel-plugin-${id}`);
     const button = document.createElement("button");
     button.id = `tab-plugin-${id}`;
     button.setAttribute("role", "tab");
@@ -423,7 +519,8 @@ async function drawPlugins() {
   // A plugin tab that vanished takes the selection back to a tab that exists,
   // rather than leaving every panel hidden and the page apparently blank.
   select(document.getElementById(previous) ? previous : STATIC[0][0]);
-  showAlerts(payload.rows.filter((row) => row.rank === 0));
+  // The panel map just changed, so every plugin row's destination did too.
+  repaintNow();
 }
 
 drawIssues();
@@ -431,6 +528,11 @@ setInterval(drawIssues, 30000);
 
 drawWork();
 setInterval(drawWork, 30000);
+
+drawNow();
+// The same ten seconds as the plugin poll: this is the view where a cron job
+// going red is the thing being watched, and half its rows come from there.
+setInterval(drawNow, 10000);
 
 drawPlugins();
 // Deliberately not the 30s of the other two: the plugin loader has its own
