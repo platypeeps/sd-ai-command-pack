@@ -17,7 +17,9 @@
 > `se-ai-command-pack`, archived on 2026-09-01 once its fold was verified
 > complete -- agents and skills diffed both directions from the filesystem,
 > with the only three skills lacking an `sd-*` counterpart confirmed as the
-> recorded retirements at `implement.md:1074-1077` rather than drops.
+> recorded retirements at
+> `docs/work/2026-08-29-artifacts-as-product/implement.md:1074-1077` rather
+> than drops.
 >
 > **The rows stay as written, and that is the point of this notice.** A
 > registry nothing reads is a record, and correcting a record in place is how
