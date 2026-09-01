@@ -53,13 +53,14 @@ def node(number: int, why_url: str = "", *, kind: str = "Issue", state: str = "O
     }
 
 
-def issue_row(url: str, why: list[str], *, state: str = "open", updated: str = "2026-08-30T00:00:00Z"):
+def issue_row(url: str, why: list[str], *, state: str = "open",
+              updated: str = "2026-08-30T00:00:00Z", kind: str = "issue"):
     return {
         "tracker": "github",
         "url": url,
         "repo": "o/r",
         "number": 1,
-        "kind": "issue",
+        "kind": kind,
         "title": "one",
         "state": state,
         "author": "sven",
@@ -526,7 +527,7 @@ class PayloadTests(unittest.TestCase):
         self.path = pathlib.Path(self.tmp.name) / "index.sqlite"
 
     def test_an_absent_index_is_reported_without_being_created(self) -> None:
-        payload = server.issue_payload(self.path)
+        payload = server.tracker_payload("issue", self.path)
         self.assertFalse(payload["available"])
         self.assertIn("no index yet", payload["reason"])
         self.assertFalse(
@@ -544,9 +545,28 @@ class PayloadTests(unittest.TestCase):
             "2026-08-31T00:00:00Z",
         )
         connection.close()
-        payload = server.issue_payload(self.path)
+        payload = server.tracker_payload("issue", self.path)
         self.assertEqual([row["url"] for row in payload["needsYou"]], ["https://x/1"])
         self.assertEqual([row["url"] for row in payload["other"]], ["https://x/2"])
+
+    def test_a_pull_request_does_not_show_up_on_the_issues_tab(self) -> None:
+        """One table, two tabs. GitHub's search does not separate them and the
+        index stores them together, so the `kind` filter is the only thing
+        keeping seventeen open pull requests off the Issues tab."""
+        connection = store.connect(self.path)
+        store.upsert_issues(
+            connection,
+            [
+                issue_row("https://x/1", ["assigned"]),
+                issue_row("https://x/2", ["assigned"], kind="pull"),
+            ],
+            "2026-08-31T00:00:00Z",
+        )
+        connection.close()
+        issues = server.tracker_payload("issue", self.path)
+        pulls = server.tracker_payload("pull", self.path)
+        self.assertEqual([row["url"] for row in issues["needsYou"]], ["https://x/1"])
+        self.assertEqual([row["url"] for row in pulls["needsYou"]], ["https://x/2"])
 
     def test_an_index_with_nothing_open_still_reports_when_it_was_collected(self) -> None:
         """The staleness stamp is a fact about the collect, not about the queue.
@@ -561,7 +581,7 @@ class PayloadTests(unittest.TestCase):
             "2026-08-31T00:00:00Z",
         )
         connection.close()
-        payload = server.issue_payload(self.path)
+        payload = server.tracker_payload("issue", self.path)
         self.assertTrue(payload["available"])
         self.assertEqual(payload["needsYou"], [])
         self.assertEqual(payload["other"], [])

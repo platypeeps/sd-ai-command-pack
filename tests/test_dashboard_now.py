@@ -70,6 +70,63 @@ class BackboneRows(unittest.TestCase):
         self.assertEqual({row["source"] for row in rows}, {"repos"})
 
 
+class PullRequestRows(unittest.TestCase):
+    def payload(self, *prs: dict) -> dict:
+        return {"available": True, "needsYou": [], "other": list(prs)}
+
+    def pr(self, number: int, updated: str) -> dict:
+        return {"repo": "o/r", "number": number, "title": "t",
+                "updated_at": updated}
+
+    def test_a_pull_request_nobody_has_touched_ranks_above_a_dirty_tree(self) -> None:
+        """Staleness, not age -- and the swap was forced by the index.
+
+        The view this replaces ranked on how long ago a PR was opened, and
+        there is no `created_at` column to answer that. The question changed
+        to the better one rather than the cache being migrated for the worse
+        one: a three-week PR still being pushed to is working as intended.
+        """
+        rows = now.pr_rows(self.payload(self.pr(1, "2026-08-01")), "2026-08-31")
+        self.assertEqual(rows[0]["rank"], now.STALE)
+        self.assertLess(rows[0]["rank"], now.DIRTY)
+        self.assertIn("quiet 30d", rows[0]["what"])
+
+    def test_a_pull_request_touched_today_is_a_reminder_and_not_an_alarm(self) -> None:
+        rows = now.pr_rows(self.payload(self.pr(2, "2026-08-31")), "2026-08-31")
+        self.assertEqual(rows[0]["rank"], now.FRESH)
+        self.assertNotIn("quiet", rows[0]["what"])
+
+    def test_the_id_does_not_carry_the_age(self) -> None:
+        """An ack has to survive the clock.
+
+        Keyed with the day count, a dismissed PR would un-dismiss itself every
+        morning -- the one row guaranteed to come back forever.
+        """
+        one = now.pr_rows(self.payload(self.pr(3, "2026-08-01")), "2026-08-31")
+        two = now.pr_rows(self.payload(self.pr(3, "2026-08-01")), "2026-09-30")
+        self.assertEqual(one[0]["id"], two[0]["id"])
+
+    def test_an_unusable_stamp_still_renders_and_is_not_called_quiet(self) -> None:
+        """The index stores what the tracker returned, and Now has to work
+        when nothing else does. A row it cannot rank is still a row."""
+        rows = now.pr_rows(self.payload(self.pr(4, "not-a-date")), "2026-08-31")
+        self.assertEqual(rows[0]["rank"], now.FRESH)
+        self.assertNotIn("quiet", rows[0]["what"])
+
+    def test_no_index_is_no_rows_rather_than_an_exception(self) -> None:
+        """`available: False` is what an uncollected index answers, and Now
+        must not be the view that goes blank because of it."""
+        self.assertEqual(now.pr_rows({"available": False}), [])
+
+    def test_both_groups_contribute(self) -> None:
+        """The split is a rendering concern for the PRs tab; Now wants all of
+        them, and dropping `needsYou` would hide the ones assigned to you."""
+        payload = {"available": True,
+                   "needsYou": [self.pr(1, "2026-08-31")],
+                   "other": [self.pr(2, "2026-08-31")]}
+        self.assertEqual(len(now.pr_rows(payload, "2026-08-31")), 2)
+
+
 class Merge(unittest.TestCase):
     def test_a_plugin_rank_zero_outranks_every_backbone_row(self) -> None:
         """The rank-0 and rank-1 rows all come from plugin-bound sources.

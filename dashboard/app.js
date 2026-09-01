@@ -6,6 +6,9 @@ const sub = document.getElementById("sub");
 const needs = document.getElementById("needs");
 const other = document.getElementById("other");
 const issueSub = document.getElementById("issue-sub");
+const prNeeds = document.getElementById("pr-needs");
+const prOther = document.getElementById("pr-other");
+const prSub = document.getElementById("pr-sub");
 const workMoving = document.getElementById("work-moving");
 const workUnstated = document.getElementById("work-unstated");
 const workSub = document.getElementById("work-sub");
@@ -116,26 +119,35 @@ function fillIssues(tbody, list, emphasise) {
   }
 }
 
-async function drawIssues() {
+// Issues and PRs are one renderer because they are one table: the search that
+// fills the index does not separate them, and the only thing that differs
+// between the two tabs is which `kind` the route asked for.
+async function drawTracker(route, into, subLine, noun) {
   let payload;
   try {
-    payload = await (await fetch("/api/issues")).json();
+    payload = await (await fetch(route)).json();
   } catch (err) {
-    issueSub.textContent = `cannot reach the server (${err})`;
+    subLine.textContent = `cannot reach the server (${err})`;
     return;
   }
   if (!payload.available) {
-    issueSub.textContent = payload.reason;
-    fillIssues(needs, [], true);
-    fillIssues(other, [], false);
+    subLine.textContent = payload.reason;
+    fillIssues(into[0], [], true);
+    fillIssues(into[1], [], false);
     return;
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
-  issueSub.textContent =
-    `${payload.needsYou.length} waiting on you, ${payload.other.length} other open${stamp}`;
-  fillIssues(needs, payload.needsYou, true);
-  fillIssues(other, payload.other, false);
+  subLine.textContent =
+    `${payload.needsYou.length} waiting on you, ` +
+    `${payload.other.length} other open ${noun}${stamp}`;
+  fillIssues(into[0], payload.needsYou, true);
+  fillIssues(into[1], payload.other, false);
 }
+
+const drawIssues = () =>
+  drawTracker("/api/issues", [needs, other], issueSub, "issues");
+const drawPrs = () =>
+  drawTracker("/api/prs", [prNeeds, prOther], prSub, "pull requests");
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:
@@ -215,6 +227,7 @@ async function drawWork() {
 const STATIC = [
   ["tab-now", "panel-now"],
   ["tab-repos", "panel-repos"],
+  ["tab-prs", "panel-prs"],
   ["tab-issues", "panel-issues"],
   ["tab-work", "panel-work"],
 ];
@@ -371,8 +384,10 @@ function band(rank) {
 // refused and filtered out at the moment its alert was created. Those render
 // unlinked by design -- sending a reader to a tab that is not on screen is the
 // same disappearance one layer along.
+const BACKBONE_PANELS = { repos: "panel-repos", prs: "panel-prs" };
+
 function destination(row) {
-  if (row.source === "repos") return "panel-repos";
+  if (BACKBONE_PANELS[row.source]) return BACKBONE_PANELS[row.source];
   return PANELS.bySource.get(row.source) || "";
 }
 
@@ -534,6 +549,9 @@ async function drawPlugins() {
 
 drawIssues();
 setInterval(drawIssues, 30000);
+
+drawPrs();
+setInterval(drawPrs, 30000);
 
 drawWork();
 setInterval(drawWork, 30000);
