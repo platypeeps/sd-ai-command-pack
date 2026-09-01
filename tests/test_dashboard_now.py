@@ -127,6 +127,43 @@ class PullRequestRows(unittest.TestCase):
         self.assertEqual(len(now.pr_rows(payload, "2026-08-31")), 2)
 
 
+def gone(count: int, live: int = 0) -> list[dict]:
+    """Registrations as `fleet_worktrees` returns them: abandoned first."""
+    return ([{"repo": "o", "name": f"x{n}", "live": False} for n in range(count)]
+            + [{"repo": "o", "name": f"y{n}", "live": True} for n in range(live)])
+
+
+class SessionRows(unittest.TestCase):
+    def test_abandoned_worktrees_are_one_row_and_not_one_each(self) -> None:
+        """Eight of them is one piece of housekeeping. Eight rows would push
+        the fleet's real problems off the top of the view to say so eight
+        times."""
+        rows = now.session_rows(gone(8))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["what"], "8 abandoned worktrees")
+        self.assertEqual(rows[0]["source"], "sessions")
+
+    def test_none_abandoned_is_no_row_at_all(self) -> None:
+        """Now reports what needs doing, not what does not."""
+        self.assertEqual(now.session_rows(gone(0)), [])
+
+    def test_the_id_carries_the_count(self) -> None:
+        """Like the repository rows: the ack covers the eight that were
+        dismissed, not whatever number this grows to next week."""
+        self.assertNotEqual(now.session_rows(gone(8))[0]["id"],
+                            now.session_rows(gone(9))[0]["id"])
+
+    def test_a_live_worktree_is_not_counted_as_abandoned(self) -> None:
+        """Now takes the registrations rather than a precomputed count, so
+        the counting rule has to hold here as well as in the collector."""
+        self.assertEqual(now.session_rows(gone(2, live=5))[0]["what"],
+                         "2 abandoned worktrees")
+
+    def test_one_of_them_is_not_plural(self) -> None:
+        self.assertEqual(now.session_rows(gone(1))[0]["what"],
+                         "1 abandoned worktree")
+
+
 class Merge(unittest.TestCase):
     def test_a_plugin_rank_zero_outranks_every_backbone_row(self) -> None:
         """The rank-0 and rank-1 rows all come from plugin-bound sources.

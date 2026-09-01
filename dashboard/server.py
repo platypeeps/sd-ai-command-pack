@@ -26,7 +26,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import collect, now, plugins, store, work
+from . import collect, now, plugins, sessions, skills, store, work
 
 DEFAULT_PORT = 8768
 DEFAULT_HOST = "127.0.0.1"
@@ -90,6 +90,10 @@ PAGE = """<!doctype html>
   aria-controls="panel-issues">issues</button>
  <button id="tab-work" role="tab" aria-selected="false"
   aria-controls="panel-work">work</button>
+ <button id="tab-skills" role="tab" aria-selected="false"
+  aria-controls="panel-skills">skills</button>
+ <button id="tab-sessions" role="tab" aria-selected="false"
+  aria-controls="panel-sessions">sessions</button>
  <span id="plugin-tabs"></span>
 </nav>
 <section id="panel-now" role="tabpanel" aria-labelledby="tab-now">
@@ -136,6 +140,23 @@ PAGE = """<!doctype html>
 <table><thead><tr>
  <th>repo</th><th>item</th><th>missing</th>
 </tr></thead><tbody id="work-unstated"></tbody></table>
+</section>
+<section id="panel-skills" role="tabpanel" aria-labelledby="tab-skills" hidden>
+<p class="sub" id="skill-sub"></p>
+<table data-sd-search="filter skills"><thead><tr>
+ <th>skill</th><th>ships here</th><th>installed</th><th>what it does</th>
+</tr></thead><tbody id="skill-rows"></tbody></table>
+</section>
+<section id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" hidden>
+<p class="sub" id="session-sub"></p>
+<h2>worktrees</h2>
+<table><thead><tr>
+ <th>repo</th><th>worktree</th><th>branch</th><th>state</th><th>path</th>
+</tr></thead><tbody id="session-trees"></tbody></table>
+<h2>running</h2>
+<table><thead><tr>
+ <th>pid</th><th>elapsed</th><th>command</th>
+</tr></thead><tbody id="session-procs"></tbody></table>
 </section>
 <div id="plugin-panels"></div>
 <script src="/app.js"></script>
@@ -208,10 +229,22 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 body = json.dumps({
                     "rows": now.merge(
                         now.backbone_rows(cache.state()["repos"])
-                        + now.pr_rows(tracker_payload("pull")),
+                        + now.pr_rows(tracker_payload("pull"))
+                        + now.session_rows(sessions.fleet_worktrees(cache.root)),
                         plugins.cached_load()["rows"],
                     ),
                 }).encode()
+                return self.send_body(body, "application/json")
+            if path == "/api/sessions":
+                body = json.dumps(sessions.collect_sessions(cache.root)).encode()
+                return self.send_body(body, "application/json")
+            if path == "/api/skills":
+                # The pack's own checkout, not the fleet root: this compares
+                # what this repository ships against what is installed, and
+                # `cache.root` is the directory full of everybody's checkouts.
+                body = json.dumps(
+                    skills.collect_skills(Path(__file__).resolve().parent.parent)
+                ).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/issues":
                 body = json.dumps(tracker_payload("issue")).encode()

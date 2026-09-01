@@ -1545,7 +1545,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Work | backbone | **yes** — 6b-5a, a rewrite against `docs/work/` and not the port this row implied |
     | Now · PRs | backbone | no |
     | Queues | **plugin tab** — moved from backbone by R11-D21: it is a vault view with a write path, like Vault and Briefs | no |
-    | Suggestions · Skills · Sessions | backbone, **new** — no system counterpart | no |
+    | Skills · Sessions | backbone, **new** — no system counterpart | **yes** — 6b-5d |
+    | Suggestions | backbone, **new** — **blocked on `sd-suggest`**, which is unbuilt (R11-D22): no producer, no draft, nothing to render | n/a until the command exists |
     | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | **yes** — 6b-4, through `~/repos/system`'s own manifest |
     | ~~Jira personal~~ | **no such tab** — enumerated 2026-08-31; Jira renders inside `issues`, which is already backbone | n/a |
     | Projects | derived; folds into Now/Work rather than porting | n/a |
@@ -1929,6 +1930,52 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     **After:** Now carries **31 rows** -- 9 plugin, 5 fleet, 17 pull requests
     -- and all 31 resolve to a panel. `dashboard/` is **3,259 of 4,000, 741
     left**.
+  - **6b-5d landed: Skills and Sessions. Suggestions did not, and R11-D22
+    says why.** The three were one parity row -- new surfaces with no system
+    counterpart -- and two of them had data waiting the moment they were
+    asked. The third has no producer: `sd-suggest` is one of the six `bin/`
+    commands that do not exist, there is no draft directory and no schema for
+    one, and a tab whose only content is *"the command that fills this has not
+    been written"* is worse than no tab. The parity row splits rather than the
+    gate being weakened.
+    **Sessions replaces a ledger with no ledger.** Trellis wrote
+    `.runtime/sessions`; no hook carries over, and nothing replaces it -- a
+    worktree is registered in git's own `.git/worktrees/` and a running
+    command is in the process table, both already true without anything having
+    recorded them. Read from files rather than through `git worktree list`:
+    the fleet is 79 checkouts and the repo table already fans `git` across all
+    of them, so a second fan-out to answer a question three `open()` calls
+    settle would double a page load for nothing. **0.030s** for the fleet.
+    **And it found something on the first run.** Eight worktrees registered
+    across eight repositories, **all eight abandoned** -- every one pointing at
+    a scratchpad path from an earlier parallel run that no longer exists, each
+    still holding a branch reference. Invisible from every other tab, nothing
+    fails because of it, and it accumulates. Now carries it as one rank-3 row
+    rather than eight: eight of them is one piece of housekeeping, and eight
+    rows would push the fleet's real problems off the top of the view to say
+    so eight times.
+    **And that row put a `ps` on the ten-second poll, which review caught.**
+    Now took the whole Sessions payload for one number, so `/api/now` forked a
+    process every ten seconds for a count that came from file reads -- whether
+    or not the tab was open. Split: `fleet_worktrees` is **2.4ms**,
+    `collect_sessions` is **30.2ms**, so the subprocess was 27.8ms of it and
+    the poll was spending ten seconds an hour on it.
+    **Skills is the gap between two directories, and the gap runs both ways.**
+    76 ship here, 138 are installed, **0 unadopted and 62 from somewhere
+    else**. Counted as two numbers rather than one because they are different
+    facts: shipped-and-not-installed is a skill the agent cannot reach, while
+    installed-and-not-shipped is not this repository's business. The 138
+    corroborates the `--lint-only ~/.claude/skills` run recorded at step 5.
+    **The measurement, and it is the tight one:** `dashboard/` is **3,640 of
+    4,000 -- 360 left**, and 6b-5d cost **381**. Two tabs at roughly the price
+    R11-D17 estimated for the whole of Now. What still has to fit is the
+    write path (~200) and 6b-6's pack-side half, against 360. The cap may only
+    move downward (R11-D17), so this does not get raised; what it means is
+    that `sd-dashboard install` must land in `bin/sd-dashboard`, which
+    `tests/test_loc_caps.py` charges to the `bin/` ceiling on purpose and
+    where there are 6,211 lines of headroom. If the write path lands over
+    ~200, the honest move is to say so and re-scope, not to re-derive a cap
+    twice in one step.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own

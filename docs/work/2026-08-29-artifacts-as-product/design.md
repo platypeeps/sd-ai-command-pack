@@ -205,6 +205,7 @@ Stdlib ThreadingHTTPServer + one vanilla JS file; ~457 LOC lifted verbatim from 
 (*superseded: R11-D13 enumerates the backbone-side lift at 763 — 79 collector lines plus 684 of JS.
 How much of that is liftable verbatim rather than rewritten is not separately measured*). Tabs:
 Now · Work · PRs · Issues · Repos · Queues · Suggestions · Skills · Sessions · plugin tabs
+*(R11-D21 later moved Queues to a plugin tab, and R11-D22 took Suggestions out of the backbone list until `sd-suggest` exists to fill it)*
 (a registered manifest declares `dashboard.tile` and `dashboard.tabs`, and the loader
 invokes that one tile once per declared tab name — R11-D16; the
 `dashboard.d/*.py` spelling this record used until 6b-2 landed never existed, because a loader
@@ -1978,6 +1979,39 @@ manifest key, and the manifest's top level is not the thing that rule freezes.
 found while specifying rather than while building.** Queues no longer rides with the backbone tabs.
 It lands after `RUN_ALLOWLIST` and the action mechanism, which is to say after the write path — so
 the parity checklist's Queues row moves from *backbone* to *plugin tab*, and 6b-5a is Work alone.
+
+**R11-D22 (2026-08-31) — Suggestions leaves the backbone tab list until something fills it.**
+
+Found by building the other two tabs it was grouped with. `Suggestions · Skills · Sessions` was
+one row of the parity checklist — three new surfaces with no system counterpart — and two of the
+three had data waiting for them the moment they were asked. Skills reads two directories: 76 ship
+here, 138 are installed, 62 of those came from somewhere else. Sessions reads `.git/worktrees`
+and the process table: eight registrations across the fleet, all eight pointing at scratchpad
+paths that no longer exist.
+
+**The third has no producer.** Suggestions renders what `sd-suggest` files — *"file framework
+improvements to the configured tracker; local draft deleted on successful filing"* — and
+`sd-suggest` is one of the six commands in `bin/` that do not exist. There is no draft directory,
+no schema for one, and nothing anywhere on this machine that a Suggestions collector could read.
+A tab whose only content is *"the command that fills this has not been written"* is worse than no
+tab: it occupies a place in the nav, it has to be maintained, and it teaches the operator that a
+tab can mean nothing.
+
+**So the tab is not built, and the parity checklist stops claiming it will be.** The row splits:
+Skills and Sessions are marked built at 6b-5d; Suggestions moves to a row of its own whose
+destination reads *backbone, blocked on `sd-suggest`*. The swap gate at 6b-8 is unblocked by this
+rather than weakened — it requires every tab marked *backbone* to serve, and Suggestions is no
+longer one.
+
+**The deletion criterion is the producer.** When `sd-suggest` is built, whatever it writes is what
+Suggestions renders, and that landing carries the tab. If `sd-suggest` is never built, the tab is
+not a gap in this rollout; it goes with the command, and this record is what says so rather than
+a checklist item that stays unticked forever.
+
+*Rejected: build it against a schema chosen now.* That is a producer designed by its consumer,
+with no user of either to check it against — the same shape as the `dashboard.d/*.py` spelling
+this document carried for weeks describing a loader that never existed. One unbuilt thing is
+cheaper to carry than two things that disagree.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
