@@ -2461,6 +2461,44 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     approvals, and `sd-status` goes on reporting it. A gap reported every run
     with a recorded reason is the honest state; the failure mode this replaces
     is a gap closed by making the tool stop mentioning it.
+
+    **Accepted policy now, with a mechanism (user, 2026-09-01).** The
+    paragraph above stands as written — it was true on the day, and "left
+    open, deliberately" is what the decision was. What changed is the
+    reporting, not the branch: `sd-status` reads `.github/sd-status.json`, a
+    tracked sibling of `.github/sd-review.json`, and prints this finding as
+    `ok  [reviews] accepted 2026-09-01: …` with its ending condition on the
+    line below. Not suppressed and not deleted. The row still prints every
+    run and still names the state; `--json` moves it out of
+    `protection.gaps` into `protection.accepted`, so a consumer counting gaps
+    counts the open ones only and never mistakes an accepted finding for an
+    absent one. The all-clear line is guarded too: "protection is fully
+    enforcing" no longer prints over the top of an accepted finding.
+
+    The incident is the one this bullet already described from the other
+    side. A gap that prints on every run with nothing to do about it is what
+    teaches a reader to skim the section — and the protection section is
+    where a real regression would arrive. The deletion criterion lives in the
+    file rather than here: `until: a second account with merge rights on this
+    repository exists, or enforce_admins is turned off`. When that comes true
+    the entry is deleted and the gap returns on its own; nothing in
+    `bin/sd-status` has to change for that to happen.
+
+    **Keyed on the observed protection state, never on the gap id** — the
+    correction two paragraphs up, made executable rather than restated. Both
+    `reviews` branches emit the same id, so an entry matched on the id would
+    accept *no pull request is required at all* while meaning *a pull request
+    is required and asks for zero approvals*. An entry therefore pins facts —
+    `required_pull_request_reviews: true`, `required_approving_review_count: 0`,
+    `enforce_admins: true` — and any drift stops it applying, at which point
+    the gap prints as a gap carrying a line that an acknowledgement exists and
+    no longer matches.
+    `test_the_zero_approval_entry_never_accepts_the_missing_review_object`
+    holds that line, built on the
+    `test_a_missing_review_object_is_the_worse_gap_not_the_same_one` that
+    found the distinction in the first place. A malformed file accepts
+    nothing at all and reports each fault as its own gap: it fails closed, and
+    loudly.
   - **`migrate-trellis` deleted (#669), and the evidence is on disk rather
     than in a ticked box.** `git ls-files .trellis` returns **0** in all nine
     consumer repositories of the 3-c wave; what remains is 17–41 untracked

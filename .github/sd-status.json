@@ -1,0 +1,16 @@
+{
+  "$schema": "./sd-status.schema.json",
+  "accepted_gaps": [
+    {
+      "id": "reviews",
+      "state": {
+        "required_pull_request_reviews": true,
+        "required_approving_review_count": 0,
+        "enforce_admins": true
+      },
+      "because": "one maintainer, enforce_admins on; GitHub forbids self-approval, so requiring 1 approval locks the repository, and deleting the review object loses the pull-request requirement. The required status checks still block a red pull request, which is what makes 0 approvals survivable here",
+      "since": "2026-09-01",
+      "until": "a second account with merge rights on this repository exists, or enforce_admins is turned off"
+    }
+  ]
+}
