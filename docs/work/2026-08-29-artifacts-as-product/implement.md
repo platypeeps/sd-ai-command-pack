@@ -1781,9 +1781,10 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     load through the pack's loader timed out on `sys/toolbox`, which is how
     R11-D19 found its rank-0 case -- a row sourced to a tab that was never
     served. Profiled rather than guessed: `machine-setup.sh status` cost
-    **3.57s** of the 5s per-tab budget (3.50s re-timed for this entry, so the
-    figure is the command and not that afternoon), 90-95% of the tile's whole
-    runtime,
+    **3.57s** of the 5s per-tab budget -- 90-95% of the tile's whole runtime
+    (re-timed at 3.50s while writing this entry, which is the same finding and
+    not a competing figure: the cost belongs to the command, not to that
+    afternoon),
     and the nightly `machine-setup-drift` job already runs that exact command
     at 03:30 and writes its output verbatim to a log. Reading the log instead
     costs **1.8ms** on today's 89KB, and stays in milliseconds as it grows: the
