@@ -3059,9 +3059,10 @@ with the reason left in `bin/sd` where the next person will meet it.
 
 **C-2 (addressed) -- the 14,000 derivation no longer describes its own code.**
 `design.md:1153` itemises `bin/sd, registration slice | 264`. `bin/sd` is
-**1,548 lines** today, so the table that derives `13,980 -> cap 14,000` sums
-line items that are 1,284 lines short of reality in one row. Nothing is
-*broken* -- `bin/` measures 9,288 against the 14,000 cap, and the cap is
+**1,553 lines** at this commit -- close to six times that -- so the table
+deriving `13,980 -> cap 14,000` sums line items one of which is short of
+reality by more than a thousand lines. Nothing is *broken* -- `bin/` measures
+9,574 against the 14,000 cap, and the cap is
 enforced by `tests/test_loc_caps.py` from `git ls-files` rather than from that
 table -- but a derivation whose inputs have drifted cannot be re-run to check
 the number it produced. Corrected beside the table rather than in it: 264 was
@@ -3074,6 +3075,15 @@ of 1,400 with `sd issue` and the store write verbs still unwritten. No change.
 
 **Implementation is unblocked.** No concern blocks; the only additional lane
 this repository could define, it does not define, so no lane was skipped.
+
+**A fourth, found by review inside this correction.** The first draft of the
+paragraph above said 1,548, measured before the same commit added six lines of
+docstring to `bin/sd` -- so the note correcting stale figures went stale inside
+itself, between measurement and commit. The number is now 1,553 with "at this
+commit" beside it and the durable claim stated as a ratio, close to six times
+264, because that is the part that stays true while the count moves. **A figure
+in prose is a measurement with no owner**; the one that cannot rot is
+`tests/test_loc_caps.py`, which enumerates `git ls-files` at every run.
 
 **And the cheap check that would have caught the original error:** resolve a
 relative link from the directory the link lives in, not from the one you happen
