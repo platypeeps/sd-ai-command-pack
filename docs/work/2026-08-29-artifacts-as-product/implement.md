@@ -2510,6 +2510,21 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     keeps the wrong line, because retagging to hide it would be worse than a
     superseded sentence that the record explains.
 
+  - **`sd-github-review`'s 17 items are parked locally and will stay that way,
+    decided rather than deferred (user, 2026-09-01).** The commit is `414ff39`
+    on the local checkout and it is not pushed, because GitHub reports the
+    repository `archived: true` — it was retired at step 4 and carries a README
+    tombstone saying so. Unarchiving to push, then re-archiving, is three state
+    changes on a retired repository, each one leavable half-done, and it buys
+    nothing anyone reads: the park is already effective everywhere it is read.
+    The local tree has **0 active items and 17 under `archive/2026-09/`, all
+    carrying `parked:`**, and the dashboard — which enumerates checkouts from
+    the filesystem, not from GitHub — contributes **0 rows** for this
+    repository to `moving` or `unstated`. The cost is that the checkout sits
+    one commit ahead of its origin permanently, which is a trap for whoever
+    finds it later; that is what this paragraph is for. If the repository is
+    ever unarchived for an unrelated reason, push `414ff39` then.
+
 - [ ] 8 / 9 / 10 / 11
 
 ## Risks (consolidated)

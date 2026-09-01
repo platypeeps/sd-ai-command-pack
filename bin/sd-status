@@ -14,7 +14,8 @@ Eight sections, in the order a human wants them:
 
   pack        the checkout these tools came from
   work        derived item status from `docs/work`, counted; `--parked` lists
-              the items the age sweep parked, read from their own frontmatter
+              every parked item, read from their own frontmatter -- the age
+              sweep and the D2 bulk-park both write the field
   prs         open pull requests, via the same code path as `sd-pr-state`
   setup       mode and the detected check entrypoints
   protection  branch-protection *enforcement*, gap by gap, plus the two r7
@@ -1010,7 +1011,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--parked",
         action="store_true",
-        help="list only the work items the age sweep parked, from their own frontmatter",
+        help="list only parked work items, from their own frontmatter",
     )
     parser.add_argument(
         "--limit",
