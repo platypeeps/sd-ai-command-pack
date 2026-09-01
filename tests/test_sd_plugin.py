@@ -668,6 +668,181 @@ class LockTests(PluginFixture):
         self.assertEqual(self.run_sd("plugin", "lock", str(root), "--check").returncode, 1)
 
 
+class ConfigTests(PluginFixture):
+    """`sd config`, and the declaration in the manifest that gates it."""
+
+    DECLARED: dict[str, object] = {
+        "google_account": {"description": "alias in google.accounts to send as",
+                           "pattern": "[a-z]+"},
+        "drive_writing_folder": {"description": "Drive folder ID for private drafts"},
+    }
+
+    def configured(self, name: str = "pack", declared: object = None,
+                   **manifest: object) -> pathlib.Path:
+        root = self.plugin(name, config=self.DECLARED if declared is None else declared,
+                           **manifest)
+        added = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(added.returncode, 0, added.stderr)
+        return root
+
+    def test_a_declared_key_round_trips(self) -> None:
+        self.configured()
+        done = self.run_sd("config", "set", "pp.google_account", "personal")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("(unset) -> personal", done.stdout)
+        got = self.run_sd("config", "get", "pp.google_account")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.strip(), "personal")
+
+    def test_settings_live_under_their_own_namespace(self) -> None:
+        """Not at the config root, where `plugins` and `google` already are.
+
+        A plugin free to write beside them could shadow one, and the registry
+        is the key `sd plugin add` owns. The namespace makes that collision
+        impossible rather than policed.
+        """
+
+        self.configured()
+        self.assertEqual(self.run_sd("config", "set", "pp.google_account", "work").returncode, 0)
+        config = self.config()
+        self.assertEqual(config["config"], {"pp": {"google_account": "work"}})
+        self.assertIn("plugins", config)
+
+    def test_an_unrelated_config_key_survives_a_setting(self) -> None:
+        self.write_config({"google": {"accounts": {"personal": {"roles": ["mail_send"]}}}})
+        self.configured()
+        self.assertEqual(self.run_sd("config", "set", "pp.google_account", "work").returncode, 0)
+        self.assertEqual(self.config()["google"],
+                         {"accounts": {"personal": {"roles": ["mail_send"]}}})
+
+    def test_an_undeclared_key_refuses_and_lists_what_is_declared(self) -> None:
+        """The behaviour `pack.py config set` had, kept rather than dropped.
+
+        Step 10 deletes that surface. A generic key-value store would have
+        turned this typo into a setting nothing reads -- strictly worse than
+        what is being removed, which is not what a replacement is for.
+        """
+
+        self.configured()
+        done = self.run_sd("config", "set", "pp.nonsense", "x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no config key 'nonsense'", done.stderr)
+        self.assertIn("drive_writing_folder", done.stderr)
+
+    def test_an_unregistered_prefix_refuses(self) -> None:
+        self.configured()
+        done = self.run_sd("config", "set", "ppp.google_account", "personal")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("no plugin registered under prefix 'ppp'", done.stderr)
+
+    def test_a_value_that_fails_the_pattern_refuses(self) -> None:
+        self.configured()
+        done = self.run_sd("config", "set", "pp.google_account", "Person@example.com")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("does not match", done.stderr)
+
+    def test_a_pattern_is_anchored_even_when_the_manifest_forgot(self) -> None:
+        """`fullmatch`, not `search`.
+
+        A plugin author who writes `[a-z]+` without `^...$` would otherwise
+        ship a rule that accepts anything *containing* a match -- the
+        permissive failure that reads as a working validation.
+        """
+
+        self.configured()
+        done = self.run_sd("config", "set", "pp.google_account", "personal!")
+        self.assertEqual(done.returncode, 1, done.stdout)
+
+    def test_a_key_with_no_pattern_takes_any_non_empty_value(self) -> None:
+        self.configured()
+        done = self.run_sd("config", "set", "pp.drive_writing_folder", "1AbC_-9")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_getting_an_unset_key_refuses_with_the_remedy(self) -> None:
+        """Inherited from `pack.py`: the remedy matters more than the diagnosis.
+
+        The skills calling this are told to stop and show the user exactly
+        this output, so "is not set" alone leaves somebody hunting for the
+        command that fixes it.
+        """
+
+        self.configured()
+        done = self.run_sd("config", "get", "pp.google_account")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("is not set", done.stderr)
+        self.assertIn("sd config set pp.google_account <value>", done.stderr)
+        self.assertIn("alias in google.accounts", done.stderr)
+
+    def test_list_shows_every_declared_key_set_or_not(self) -> None:
+        self.configured()
+        self.assertEqual(self.run_sd("config", "set", "pp.google_account", "work").returncode, 0)
+        done = self.run_sd("config", "list", "pp")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("google_account", done.stdout)
+        self.assertIn("work", done.stdout)
+        self.assertIn("drive_writing_folder", done.stdout)
+        self.assertIn("(unset)", done.stdout)
+
+    def test_list_reports_a_key_the_manifest_stopped_declaring(self) -> None:
+        """Reported, not deleted. The plugin may be mid-rename."""
+
+        root = self.configured()
+        self.assertEqual(self.run_sd("config", "set", "pp.google_account", "work").returncode, 0)
+        (root / "sd-plugin.json").write_text(json.dumps(
+            {"prefix": "pp", "config": {"drive_writing_folder": {"description": "d"}}}),
+            encoding="utf-8")
+        done = self.run_sd("config", "list", "pp")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("not declared by pp any more: google_account", done.stdout)
+
+    def test_unset_removes_the_namespace_when_it_empties(self) -> None:
+        self.configured()
+        self.assertEqual(self.run_sd("config", "set", "pp.google_account", "work").returncode, 0)
+        done = self.run_sd("config", "unset", "pp.google_account")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("config", self.config())
+
+    def test_unsetting_what_is_not_set_refuses(self) -> None:
+        self.configured()
+        done = self.run_sd("config", "unset", "pp.google_account")
+        self.assertEqual(done.returncode, 1, done.stdout)
+
+    def test_a_plugin_that_declares_no_config_refuses(self) -> None:
+        self.assertEqual(self.run_sd("plugin", "add", str(self.plugin())).returncode, 0)
+        done = self.run_sd("config", "get", "pp.anything")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no `config` keys", done.stderr)
+
+    def test_a_key_without_a_prefix_is_a_usage_error(self) -> None:
+        """Exit 2, not 1: malformed invocation rather than a refusal."""
+
+        self.configured()
+        self.assertEqual(self.run_sd("config", "get", "google_account").returncode, 2)
+
+    def test_a_declaration_with_no_description_refuses_at_registration(self) -> None:
+        root = self.plugin(config={"k": {"pattern": "x"}})
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no `description`", done.stderr)
+
+    def test_a_pattern_that_does_not_compile_refuses_at_registration(self) -> None:
+        """At registration, not at the first `set`.
+
+        A regex that only fails when somebody tries to use it is a manifest
+        that registered clean and was broken the whole time.
+        """
+
+        root = self.plugin(config={"k": {"description": "d", "pattern": "[unclosed"}})
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("does not compile", done.stderr)
+
+    def test_an_empty_config_block_refuses(self) -> None:
+        done = self.run_sd("plugin", "add", str(self.plugin(config={})))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("not a non-empty object", done.stderr)
+
+
 class ListTests(PluginFixture):
     def test_listing_nothing_is_not_a_failure(self) -> None:
         result = self.run_sd("plugin", "list")
