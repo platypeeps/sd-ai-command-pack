@@ -2210,11 +2210,11 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
           sources as well as backbone ones — checked against `attentionItems()`
           rather than assumed: the system's own function, run over its live
           state, yields **7 rows at rank ≤1** and the pack's `/api/now` yields
-          **the same 7 signals**: one cron exit, five cron failure lines, and one
-          overdue-tasks row that counts 52. Seven rows, not fifty-eight --
-          the overdue row is a count, which is what makes it one row and
-          what makes it re-appear when the count changes. Every one of them arrives through a plugin tile, which
-          is what R11-D12's row key was for
+          **the same 7 signals**: one cron exit, five cron failure lines, and
+          one overdue-tasks row that counts 52. Seven rows, not fifty-eight --
+          the overdue row is a count, which is what makes it one row and what
+          brings it back when the count changes. Every one of them arrives
+          through a plugin tile, which is what R11-D12's row key was for
     - [x] `RUN_ALLOWLIST` exists and every UI mutation maps 1:1 to a `bin/`
           command — 6b-7. One action today (`index`); 6b-6's queue actions
           arrive through the manifest and the same map
