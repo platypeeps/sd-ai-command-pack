@@ -330,11 +330,47 @@ class Guards(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_a_negative_length_is_a_framing_error_not_an_empty_body(self) -> None:
+        """`-1` parses. Reading it as zero blames the allow-list for the framing."""
+        with Live(self) as live:
+            status, _ = live.request(
+                "POST", "/api/run", b"",
+                {server.TOKEN_HEADER: server.TOKEN, "Content-Length": "-1"})
+        self.assertEqual(status, 400)
+
     def test_a_body_that_is_not_json_is_a_400_not_a_traceback(self) -> None:
         with Live(self) as live:
             status, _ = live.request(
                 "POST", "/api/run", b"action=index", {server.TOKEN_HEADER: server.TOKEN})
         self.assertEqual(status, 400)
+
+
+class RegistryFailure(unittest.TestCase):
+    def test_a_registry_that_will_not_read_is_said_and_not_shown_as_none(self) -> None:
+        """`plugins.catalog` returns a complaint; dropping it is the quiet it refuses.
+
+        A broken loader and a machine with no plugins are different answers,
+        and the run strip would otherwise render both as an empty row of
+        buttons.
+        """
+        broken = unittest.mock.patch.object(
+            plugins, "catalog", lambda: ([], "plugin registry is not JSON"))
+        broken.start()
+        self.addCleanup(broken.stop)
+        handler = server.make_handler(server.Cache(REPO_ROOT / "missing"), "// none")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            conn = http.client.HTTPConnection(*httpd.server_address, timeout=10)
+            conn.request("GET", "/api/actions")
+            payload = json.loads(conn.getresponse().read())
+            conn.close()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+        self.assertEqual(payload["reason"], "plugin registry is not JSON")
 
 
 class TokenDelivery(unittest.TestCase):

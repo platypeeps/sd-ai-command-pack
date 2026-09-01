@@ -344,10 +344,13 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 body = json.dumps(tracker_payload("pull")).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/actions":
-                # Ids and labels. The argv never leaves the process -- see the
-                # module docstring of `dashboard/actions.py`.
+                # Ids and labels; the argv never leaves the process. The
+                # registry's own complaint rides along, because a loader that
+                # cannot be read has no actions to offer and reporting that as
+                # "none declared" is the quiet it refuses. Found in review.
+                entries, failure = plugins.catalog()
                 body = json.dumps(
-                    {"actions": actions.catalog(plugins.catalog()[0])}
+                    {"actions": actions.catalog(entries), "reason": failure}
                 ).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/plugins":
@@ -377,13 +380,17 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
             if path != "/api/run":
                 return self.send_error(404)
             # Required, not defaulted to zero: a chunked body has no length
-            # to bound, and reading it as empty answers a real POST with "no
-            # action named" -- which sends the reader to the allow-list for a
-            # bug that is in the framing. Found by pressing the button.
+            # to bound, and reading it as empty answers a real POST with the
+            # wrong error. Found by pressing the button.
             try:
                 length = int(self.headers["Content-Length"])
             except (KeyError, TypeError, ValueError):
                 return self.send_error(411, "Content-Length required")
+            # `-1` parses, and reading it as an empty body gives the same
+            # wrong answer the missing header used to: "no action named" for a
+            # fault in the framing. Found in review.
+            if length < 0:
+                return self.send_error(400, "Content-Length is not a length")
             if length > BODY_BYTES:
                 return self.send_error(413, "body too large")
             try:

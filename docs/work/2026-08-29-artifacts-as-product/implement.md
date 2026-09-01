@@ -2017,6 +2017,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     sends -- was read as an empty body and answered *"no action named"*: a
     request that was fine, refused with an error pointing at the allow-list.
     It is a 411 now. Neither was reachable from a unit test of either half.
+    **Review found two more of the same kind, both about a wrong error rather
+    than a missing guard.** A `Content-Length: -1` parses, so the negative case
+    fell through the size cap into `read(0)` and answered *"no action named"*
+    -- the identical misdirection the missing header had just been fixed for,
+    one branch over. And `/api/actions` dropped the failure string
+    `plugins.catalog` returns, so a registry that will not parse rendered as
+    *"no actions declared"*: a broken loader reported as a machine with no
+    plugins, which is the exact quiet that module refuses everywhere else.
     **`sd-dashboard install` is the third verb, and it is in `bin/`.** The
     plist is rendered from the command every time rather than edited in place,
     and `bootout` precedes `bootstrap` because `bootstrap` over a loaded label
@@ -2027,14 +2035,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     -- that is 6b-8's swap, and until then they are two services under two
     labels on two ports, deliberately.
     **The measurement, and it is the one this record was told to make.**
-    `dashboard/` is **3,987 of 4,000 -- 13 left**, and 6b-7 cost **330**
-    against the ~200 the 6b-5d entry estimated. Over by 65%, said here rather
+    `dashboard/` is **3,994 of 4,000 -- 6 left**, and 6b-7 cost **337**
+    against the ~200 the 6b-5d entry estimated. Over by 69%, said here rather
     than absorbed. `install` went to `bin/` as that entry required, where the
     total is now 7,925 of 14,000. Two reductions were taken inside this change
     rather than after it -- `send_body` grew a status parameter so the POST
     stopped hand-rolling a response, and `resolve()` replaced three copies of
     the same merge -- and the prose written this step was tightened. What is
-    left is 13 lines, and **6b-8 needs more than that**: R11-D10's correction
+    left is 6 lines, and **6b-8 needs more than that**: R11-D10's correction
     of 2026-08-31 says the reach is two paths, a direct tailnet bind *and* a
     `tailscale serve` proxy, and binding a second address is ~20 lines in
     `serve()`. The cap may only move downward (R11-D17), so the choice at 6b-8

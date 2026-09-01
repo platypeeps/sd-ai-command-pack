@@ -730,9 +730,12 @@ async function drawRun() {
     button.addEventListener("click", () => press(button, action.id));
     runButtons.append(button);
   }
-  runSub.textContent = payload.actions.length
-    ? "every button here is one allow-listed command"
-    : "no actions declared";
+  // "none declared" would report a broken loader as a machine with no plugins.
+  runSub.textContent = payload.reason
+    ? `every button here is one allow-listed command — ${payload.reason}`
+    : payload.actions.length
+      ? "every button here is one allow-listed command"
+      : "no actions declared";
 }
 
 // Once. The set changes when a plugin is registered, which is a restart.

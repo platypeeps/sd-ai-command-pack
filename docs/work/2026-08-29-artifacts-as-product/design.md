@@ -1704,10 +1704,10 @@ not an accident, and a cap derived from code alone would be busted by the next d
 part to check: if Now and the write path land materially over them, that is a finding for their
 own records, not a second re-derivation.
 *(Both did, and both are recorded where this says they should be. Now cost **212** against ~120
-(6b-5b); the write path cost **330** against ~200 (6b-7). The table is left as derived — the cap
+(6b-5b); the write path cost **337** against ~200 (6b-7). The table is left as derived — the cap
 is not re-derived a second time — but a reader taking either estimate as settled is reading the
-part this paragraph flagged as the part to check. After 6b-7, `dashboard/` is **3,987 of 4,000**,
-and the 13 lines left are fewer than the tailnet bind R11-D10's correction still requires.)*
+part this paragraph flagged as the part to check. After 6b-7, `dashboard/` is **3,994 of 4,000**,
+and the 6 lines left are fewer than the tailnet bind R11-D10's correction still requires.)*
 
 The old number is not defended. 2,500 was set against a 457-line lift that R11-D13 measured at
 763, and the estimate it rested on was wrong before any of this was built. What the cap is for is

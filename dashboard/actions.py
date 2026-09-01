@@ -1,23 +1,20 @@
 """The write path: every mutation is a named command, and the list is closed.
 
 **`RUN_ALLOWLIST` is the whole security model of writing.** The server does not
-take a command from the page, does not build one from a parameter, and does not
-interpolate anything a caller sends into one. A POST names an **id**; the id
-resolves to an argv that was written down here or declared in a registered
-plugin's manifest; and an id that resolves to nothing is a 404. There is no
-path from request text to a shell -- `bounded_run` takes a list and never a
-string, and nothing in this module joins one.
+take a command from the page, build one from a parameter, or interpolate
+anything a caller sends into one. A POST names an **id**; the id resolves to an
+argv written down here or declared in a registered plugin's manifest; an id
+that resolves to nothing is a 404. There is no path from request text to a
+shell -- `bounded_run` takes a list and never a string, and nothing here joins
+one.
 
 **A plugin may declare actions, and that is the point of the mechanism**
-(R11-D21). The five queue tabs exist to be decided in; ported read-only they
-become a list of things awaiting a decision the dashboard can no longer take,
-while Now still emits rows pointing at them -- an alert whose destination
-cannot act on it. So a manifest names actions beside its tile, the backbone
-renders the control, and the command stays in the plugin's own repository with
-the data it writes.
+(R11-D21, which has the reasoning). A manifest names actions beside its tile,
+the backbone renders the control, and the command stays in the plugin's own
+repository with the data it writes.
 
 **Declared is not the same as trusted, and the ids say so.** A plugin's action
-id is namespaced with its prefix, exactly as its rows and tabs are, so a plugin
+id is namespaced with its prefix, exactly as its rows and tabs are, so it
 cannot claim `index` or shadow another plugin's id. The argv runs with the
 plugin's root as its working directory -- the same treatment its tile gets,
 because it is the same trust boundary and not a wider one.
