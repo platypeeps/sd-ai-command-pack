@@ -2296,7 +2296,20 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     explaining what it "edits". Fixed rather than left — that file outlived the
     thing they describe. Two citations in *this* repository had the same
     problem and are now marked as pointing into history: `dashboard/actions.py`
-    and design.md's write-path survey.
+    and design.md's write-path survey. Four more were in the system
+    repository's own README and CLAUDE.md, and review found them one at a
+    time rather than as a set: the port table still handed `8767` to
+    `local-project-dashboard` with a `PROJECT_DASHBOARD_PORT` override
+    that exists nowhere any more, and three others described things this
+    change deleted — the LaunchAgent, the vendored `tokens.css`, and the
+    startup probe that WARNed within 15s when `brew upgrade python`
+    dropped the Full Disk Access grant. That last one documented a
+    *recovery*, so it was replaced rather than removed:
+    `collectors.vault_blocked()` names the same fix on whichever
+    vault-reading tile is asked first — later, and only when looked at,
+    which is written down rather than implied to be parity. **The lesson
+    is the enumeration**: `grep -rn 8767` across the repo found all four
+    in one pass, and the review that found them found one.
   - **The rm-test, which is step 6's own end-to-end check, and did not pass
     quietly.** "Remove the cache and state; only acks, intents and time are
     lost." Rebuilding the index into an empty `XDG_CACHE_HOME` gave **1,135
@@ -2319,9 +2332,32 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     it closed or merged, none of it anything currently waiting — and it now
     says so out loud instead of reporting a full collect. Nothing currently
     open was lost on this machine.
+  - **Nine review rounds, and at round 5 the split stopped being pure
+    movement.** Three live bugs in the carried half, none of them written
+    here and all three exposed by moving the code out from under the
+    server. `collect_ports()` could never report a conflict: `CLASH` and
+    `BUSY` are emitted *after* the service rows they refer to, so a
+    per-row match scored 0/0 on a transcript holding one of each — and
+    6b-4 had already recorded that gap in `sd_tile.py` and deferred it
+    "upstream in the collector", so this is the deferral coming due, not
+    a new discovery. `vault_blocked()` told the operator to grant Full
+    Disk Access for a path that does not exist, because
+    `VAULT.parent.exists()` was the only check and TCC was blamed for
+    everything else. And `collect_briefs` and `db_rows` read the vault
+    unguarded while `collect_areas` did not — the two with nowhere to put
+    an error, where an empty list is indistinguishable from an empty
+    vault, which is the failure the probe exists to prevent. Under
+    launchd an ungranted read does not fail, it waits, so those tiles
+    would have blown the 5s budget rather than reported. A deletion PR
+    carrying three fixes is not the shape that was planned; it is the
+    shape the work turned out to have, and hiding it in a follow-up
+    would have made the parity claim above less true, not more.
   - **Cost:** +4 lines of code in `dashboard/`, which stands at **4,119 of
     4,300** and **2,190 of 2,300 carrying code**. The system repository lost
-    **4,112 lines** and gained 844.
+    **4,313 lines** and gained 1,145 across 22 files — measured at the
+    squash (87a7d5e), not at the first push, because four review rounds
+    landed between them and the earlier figure (4,112 and 844) counted
+    neither the fixes nor the docs they invalidated.
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
