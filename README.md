@@ -119,7 +119,7 @@ deliberate act; every other surface, `sd-help` included, does not.
 | `sd-review` | Local review on the exact diff; findings dispositioned locally, never posted |
 | `sd-ship` | Verify, commit enumerated paths, push, open the PR, settle, squash-merge |
 | `sd-spec` | Update `docs/spec/**` on the PR branch |
-| `sd-status` | Read-only: derived status, open PRs, branch-protection gaps |
+| `sd-status` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
 | `sd-deps` | Batch-triage dependabot and renovate PRs |
 | `sd-help` | Runtime catalog of installed `sd-*` surfaces |
 | `sd-suggest` | File framework improvements to the configured tracker |
@@ -148,6 +148,15 @@ CI is four jobs, named here as branch protection sees them:
 The matrix means five reporting contexts and, with `strict: true`, six required
 ones. `sd-status` reads the live protection object rather than any list written
 here, so this table cannot silently disagree with what is enforced.
+
+One protection state on `main` is accepted rather than open, and it is recorded
+in tracked `.github/sd-status.json` rather than in prose: a pull request is
+required and asks for **zero** approving reviews, because with `enforce_admins`
+on and one maintainer, GitHub's refusal of self-approval makes requiring one
+approval a lock and deleting the review object a loss of the pull-request
+requirement. `sd-status` prints it every run as `ok  [reviews] accepted …` with
+the condition that ends it, and stops accepting it the moment the live
+protection state stops matching what the file pins.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its
 subject from git rather than matching a glob, and declares a statement floor, so
