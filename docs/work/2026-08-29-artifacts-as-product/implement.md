@@ -2461,6 +2461,44 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     approvals, and `sd-status` goes on reporting it. A gap reported every run
     with a recorded reason is the honest state; the failure mode this replaces
     is a gap closed by making the tool stop mentioning it.
+
+    **Accepted policy now, with a mechanism (user, 2026-09-01, #680).** The
+    paragraph above stands as written — it was true on the day, and "left
+    open, deliberately" is what the decision was. What changed is the
+    reporting, not the branch: `sd-status` reads `.github/sd-status.json`, a
+    tracked sibling of `.github/sd-review.json`, and prints this finding as
+    `ok  [reviews] accepted 2026-09-01: …` with its ending condition on the
+    line below. Not suppressed and not deleted. The row still prints every
+    run and still names the state; `--json` moves it out of
+    `protection.gaps` into `protection.accepted`, so a consumer counting gaps
+    counts the open ones only and never mistakes an accepted finding for an
+    absent one. The all-clear line is guarded too: "protection is fully
+    enforcing" no longer prints over the top of an accepted finding.
+
+    The incident is the one this bullet already described from the other
+    side. A gap that prints on every run with nothing to do about it is what
+    teaches a reader to skim the section — and the protection section is
+    where a real regression would arrive. The deletion criterion lives in the
+    file rather than here: `until: a second account with merge rights on this
+    repository exists, or enforce_admins is turned off`. When that comes true
+    the entry is deleted and the gap returns on its own; nothing in
+    `bin/sd-status` has to change for that to happen.
+
+    **Keyed on the observed protection state, never on the gap id** — the
+    correction two paragraphs up, made executable rather than restated. Both
+    `reviews` branches emit the same id, so an entry matched on the id would
+    accept *no pull request is required at all* while meaning *a pull request
+    is required and asks for zero approvals*. An entry therefore pins facts —
+    `required_pull_request_reviews: true`, `required_approving_review_count: 0`,
+    `enforce_admins: true` — and any drift stops it applying, at which point
+    the gap prints as a gap carrying a line that an acknowledgement exists and
+    no longer matches.
+    `test_the_zero_approval_entry_never_accepts_the_missing_review_object`
+    holds that line, built on the
+    `test_a_missing_review_object_is_the_worse_gap_not_the_same_one` that
+    found the distinction in the first place. A malformed file accepts
+    nothing at all and reports each fault as its own gap: it fails closed, and
+    loudly.
   - **`migrate-trellis` deleted (#669), and the evidence is on disk rather
     than in a ticked box.** `git ls-files .trellis` returns **0** in all nine
     consumer repositories of the 3-c wave; what remains is 17–41 untracked
@@ -2773,6 +2811,284 @@ timeout, because macOS TCC turns an unauthorized read of `~/Documents` into a
 *silent hang* rather than an error. A driver that distinguishes only "path
 missing" from "path present" will hang instead of reporting, and an unattended
 caller will look slow rather than blocked.
+
+  - **7-triage — 2026-09-01. The survivors, enumerated.** Step 7's checklist row
+    said "triage survivors" and the step closed without it; the step 4 entry said
+    the next pass should "find it by reading rather than by grepping", so this is
+    that pass. Three trees, **25 tracked files, 15,006 lines**, every one of them
+    dispositioned against the working tree rather than against the earlier note.
+    **Nothing was deleted.** 7,839 lines of specification is a content decision
+    for the maintainer, so what landed is the non-destructive half: a dated
+    notice at the top of every stale page, `CONTRIBUTING.md` and `AGENTS.md`
+    corrected, and the delete column left standing as a recommendation with its
+    evidence attached.
+
+    **The recorded note was right about the fleet files and wrong about
+    `docs/spec/`, and the difference matters.** "No code reads either, only
+    `CONTRIBUTING.md` and two spec pages" holds for `docs/FLEET_ROLLOUT.md` and
+    `docs/fleet/**` — verified rather than trusted, below. It does **not** hold
+    for `docs/spec/`, which three live code paths and one skill still touch:
+    `bin/sd-docs-lint` rule 4 enumerates the tree at run time and fails a spec
+    directory that holds pages without an `index.md` linking each of them;
+    `.github/sd-review.json:19` and `bin/sd_route.py:24` both carry
+    `docs/spec/**` in `never_skip`, so a change there is never routed past
+    review; and `skills/sd-spec/SKILL.md` writes into it as `sd-ship`'s second
+    stage. The tree is a live surface whose *content* is stale — not orphan
+    text. That is why the delete column below carries an ordering constraint the
+    fleet files do not: rule 4 tolerates an index linking a page that is gone,
+    so a page may leave alone, but a directory has to leave **with** its index.
+
+    **Where the "nothing reads this" claim was checked, since it is only as good
+    as the grep behind it.** Inside the repository: every tracked and untracked
+    file except `.git`, for `FLEET_ROLLOUT`, `docs/fleet`, `consumers.json` and
+    `surface-partition.json` — six files match, and all six are prose:
+    `CONTRIBUTING.md`, `CHANGELOG.md` (history), `docs/review-learnings.md`
+    (historical PR entries), `docs/spec/backend/manifest-and-filesystem.md`
+    (itself stale), the rollout journal, and `docs/FLEET_ROLLOUT.md` itself. No
+    hit in `bin/`, `dashboard/`, `skills/`, `tests/`, `.github/`, `actions/` or
+    `agents/`. Outside it: `~/.claude/skills`, `~/.claude/agents`,
+    `~/.claude/commands`, `~/.claude/plugins`, `~/.claude/*.json|*.md` and
+    `~/.config` — **0**; and all seventeen sibling repositories under
+    `~/repos/platypeeps/` plus `~/repos/system`, `~/repos/mezmo`, `~/repos/rwbp`,
+    `~/repos/hoa`, `~/repos/ai` and `~/repos/github-commit-audit` — **0**. The
+    three consumer repositories that have a `docs/spec/` of their own have their
+    own, and do not reference this one.
+
+    **The existence check was mechanical, not impressionistic.** Every
+    backticked token in every page that parses as a path was resolved against
+    `git ls-files` (script kept out of tree; the counts are reproducible from
+    it). Aggregate: **807 path citations across the 23 markdown pages, 681 of
+    them naming something that is not in the tree.** Per-page counts are in the
+    table. It is a floor, not a ceiling — it cannot see a command name or a
+    schema field that no longer exists, only a path.
+
+    | File | Lines | Missing/total paths | What it specifies | Disposition |
+    |---|---:|---:|---|---|
+    | `docs/spec/backend/index.md` | 59 | 7/11 | Scope and checklist for `install.py`, `manifest.json`, `installer/`, `tests/install_test_support.py` | **delete** — conditional |
+    | `docs/spec/backend/directory-structure.md` | 88 | 22/23 | `install.py` + six `installer/` modules + `manifest.json` + `templates/` + `scripts/` layout; `PLATFORM_REGISTRY` | **delete** |
+    | `docs/spec/backend/error-handling.md` | 198 | 2/2 | `install.py` exit-code contract; three transferable diagnostic lessons | **stale-notice** |
+    | `docs/spec/backend/fleet-consumer-conversion.md` | 140 | 3/4 | running `install.py <consumer>` across the fleet; `--thin`/`--resweep-verdict`; `sd-status fleet` | **delete** |
+    | `docs/spec/backend/logging-guidelines.md` | 80 | 1/2 | installer status lines; `_SECRET_SHAPES` in `templates/scripts/sd_ai_command_pack_lib.py` | **delete** |
+    | `docs/spec/backend/manifest-and-filesystem.md` | 2,998 | 302/377 | the whole manifest/installer/plugin-generation/payload-gate/fleet-campaign model | **stale-notice** |
+    | `docs/spec/backend/quality-guidelines.md` | 2,015 | 67/80 | 18 named contracts for deleted shipped scripts; the live bash 3.2 gate; "Silent Paths Must Say Why" | **stale-notice** |
+    | `docs/spec/frontend/index.md` | 76 | 14/16 | `templates/`, `.github/command-sources/`, `manifest.json`, `make generate` | **delete** |
+    | `docs/spec/frontend/directory-structure.md` | 60 | 9/9 | the per-platform adapter layout under `templates/` | **delete** |
+    | `docs/spec/frontend/adapter-guidelines.md` | 2,042 | 81/93 | 13 `Scenario:` sections, each a deleted command surface; the review coordinator and `.sd-ai-command-pack/review.json` | **delete** |
+    | `docs/spec/frontend/quality-guidelines.md` | 83 | 11/11 | adapter drift rules keyed on `manifest.json` | **delete** |
+    | `docs/spec/guides/index.md` | 183 | 8/11 | thinking-guide index + AI-review verification checklists | **stale-notice** |
+    | `docs/spec/guides/code-reuse-thinking-guide.md` | 223 | 9/9 | general reuse guidance; a Trellis-CLI tail that never applied here | **stale-notice** |
+    | `docs/spec/guides/cross-layer-thinking-guide.md` | 281 | 22/22 | general cross-layer guidance; three template/docs-site sections that do not | **stale-notice** |
+    | `docs/spec/tooling/index.md` | 81 | 24/26 | scope list of six deleted scripts and two deleted test modules | **delete** |
+    | `docs/spec/tooling/bookkeeping-validator.md` | 226 | 8/9 | `review-preflight.mjs` internals; Trellis bundles and receipts | **delete** |
+    | `docs/spec/tooling/fleet-publish-acceptance-criteria.md` | 112 | 6/7 | `fleet-publish.py` PRD tick; `sd-fleet-refresh`; `task.py archive` | **delete** |
+    | `docs/spec/tooling/fleet-publish-generated-content.md` | 110 | 9/10 | `fleet-publish.py` ordering; `docs/repomix-map.md`; `.obsidian-kb` block | **delete** |
+    | `docs/spec/tooling/review-attempt-state.md` | 145 | 3/3 | the deleted review coordinator's per-attempt state cache | **delete** |
+    | `docs/spec/tooling/runtime-coverage-lanes.md` | 97 | 14/16 | the kcov shell-coverage lane, retired by R11-D6 | **delete** |
+    | `docs/spec/tooling/surface-retirement-doc-gates.md` | 126 | 23/25 | two doc gates that were themselves deleted at 3e | **delete** |
+    | `docs/spec/tooling/vendored-trellis-compatibility.md` | 214 | 26/29 | wrappers around `.trellis/scripts/task.py` and `add_session.py` | **delete** |
+    | `docs/FLEET_ROLLOUT.md` | 510 | 10/12 | the campaign controller, refresh shape, cohort waves, thin conversion | **delete** |
+    | `docs/fleet/consumers.json` | 330 | n/a | schema-5 rollout order, cohorts and install mode for ten consumers | **delete** |
+    | `docs/fleet/surface-partition.json` | 4,529 | 731/740 targets | the 0.72.0 payload partitioned across eighteen platforms | **delete** |
+
+    **Keep 0, stale-notice 6, delete 19.** No page in these trees is accurate as
+    it stands, which is why the keep column is empty rather than generous — the
+    six marked stale-notice are mixed, not correct.
+
+    **The one conditional row, and it is a real constraint rather than a
+    hedge.** `docs/spec/backend/index.md` is the rule-4 index for a directory
+    three of whose seven pages are staying. Deleting it while `error-handling.md`,
+    `manifest-and-filesystem.md` and `quality-guidelines.md` remain makes
+    `sd-docs-lint` fail on `docs/spec/backend` — "every spec directory has an
+    index.md". So it is delete-with-the-directory or rewrite-down-to-the-
+    survivors, never delete alone. `docs/spec/frontend/` (4 files) and
+    `docs/spec/tooling/` (8 files) carry no such constraint: every page in each
+    goes, index included, and the directory leaves whole. `docs/spec/guides/`
+    stays whole.
+
+    **Two facts that would change a disposition if they turned out otherwise,
+    stated so they can be checked rather than assumed.** First, the
+    `docs/spec/backend/manifest-and-filesystem.md` Trellis-gitignore section is
+    load-bearing in one direction: `CONTRIBUTING.md` keeps the vestigial
+    `SD-AI-COMMAND-PACK` markers in `.gitignore` *because* that section still
+    specifies them, so deleting the page without settling the markers moves the
+    problem rather than closing it. Second, that page's Machine-Scope Installer
+    section is the design `bin/sd_install.py` implements, told through
+    `installer/machinescope.py`, `installer/machinepayload.py` and
+    `bin/sd-machine-install` — files that no longer exist. It is a design
+    record, and whether a design record belongs in `docs/spec/` or in
+    `docs/work/archive/` is the question its disposition actually turns on.
+    Neither was decided here.
+
+    **Three things were decided against.** Rewriting the six mixed pages down to
+    their true parts — that is a content rewrite wearing a triage's clothes, and
+    it would have destroyed the record of what the machinery was, which is the
+    only thing these pages are still good for. Putting the notice inside the two
+    JSON files — JSON takes no comment, and inventing a `"_stale"` key changes a
+    schema to carry prose; `docs/fleet/README.md` says it beside them instead.
+    And retitling each page the way the `sd-github-review` README tombstone
+    retitled its repository — the H1 of a spec page is not a claim that can go
+    stale, so the notice carries the date and the H1 is left alone.
+
+    **Verified**: `make check` green before and after
+    (`VENV=/Users/sven/repos/platypeeps/sd-ai-command-pack/.venv`, since a fresh
+    worktree has none) — "All checks passed!"; `bin/sd-docs-lint` clean, which is
+    the check that matters here because rule 4 is the only automated thing that
+    reads this tree.
+### Step 8, slices i-iii: the manifest gets teeth, and the vault gets read (2026-09-01)
+
+Three PRs, landed in order. Step 8 is not done -- the write verbs and the
+golden-corpus baseline are still ahead -- and what is here is written down now
+rather than at the end, because two of the three carry findings that outlived
+their slice.
+
+**8-i (#678) -- enforce the manifest, and pin it.** `sd plugin add` validated
+`prefix` and `dashboard.tile` and nothing else; the `kinds`, `issues` and
+`vendor` blocks it accepted since 6b-1 were accepted *unread*. All three are
+now checked generically -- the backbone learns that a kind is well formed and
+internally consistent and never learns what a `score` or a `tip` is -- and
+`sd plugin lock` writes the `sd-plugin.lock` the layout has always named and
+nothing has ever produced. The manifest half of that lock hashes the **bytes on
+disk**, not re-serialised JSON, so a key reorder is drift.
+
+The consistency checks are the point, not the type checks. A `protected-fields`
+naming a field the kind does not declare protects nothing and reads in every
+review as though it protects something -- the vacuous-check failure this
+rollout keeps finding, this time in its own new code before it shipped. `test_the_shape_6b_accepted_is_now_refused` keeps the manifest 6b-1
+would have taken, verbatim, as the record of what the inversion was.
+
+**Two review findings, one accepted and one that taught a lesson about
+probes.** Copilot's first pass was right: `sections.template` checked existence
+only, so a *directory* at `templates/tip.md` registered clean and failed at
+render -- exactly the deferral registration exists to prevent. Fixed with a
+regular-file check; `vendor.*.path` still takes either, because a vendored tree
+is the ordinary case, and both are pinned.
+
+Its second pass said `inside()` could raise out of a symlink loop. I probed
+3.9.6 and 3.14.7, found the loop harmless on both -- `resolve()` returns the
+link itself and `exists()` swallows the `OSError` -- found a *different* real
+crash (a NUL byte, which JSON can write and no filesystem can hold), fixed
+that, and declined the loop half in the commit message. **CI failed on
+`unittest (ubuntu-latest, 3.10)` with a traceback out of the loop.** On
+3.10-3.12 `resolve()` raises `RuntimeError("Symlink loop from ...")`, which is
+neither of the classes I had caught. The two ends of the supported range agree
+with each other and disagree with the middle, and the middle is an interpreter
+the pull request was already testing against. **Sampling the extremes is not
+sampling the range** -- and the check that caught it was one CI already ran, not
+one I chose. `inside()` now catches all three classes, and the loop test asserts
+a refusal naming the offending key rather than one particular sentence, because
+the wording legitimately differs by version.
+
+**8-ii (#681) -- one resolution home for plugin settings.** `sd config
+get|set|unset|list`, with the keys **declared in the manifest** (`description`
+required, `pattern` optional and compiled at registration) and the values
+namespaced under the machine config's `config` key. `set` matches with
+`re.fullmatch`, so an unanchored pattern cannot be quietly permissive.
+
+**8-iii -- the `store` block and the vault driver.** `sd store list|get`, and
+the answer to a gap the plan carried without noticing: **the eight keys have no
+slot for where a kind is kept.** R11-D26 puts it in a `store` block beside
+`dashboard` rather than in a ninth key, so standing rule 2's count is untouched
+and step 11 reorganises the vault by rewriting `bases`.
+
+Three things in it are load-bearing beyond the verbs:
+
+- **The root is `$OBSIDIAN_VAULT`, never a literal path, and has no default.**
+  `pack.py:146` is the incident. An unset variable is a sentence naming the
+  knob; a default would be a fourth spelling of a path that already has three.
+- **The 15-second probe came across from `collectors.py:173-227`**, as the
+  2026-09-01 scoping entry required. macOS answers an ungranted `~/Documents`
+  read by waiting, not by failing; a driver that told "missing" from "present"
+  apart and nothing else would inherit that 1605-second hang.
+- **`fields` now keeps its declared order.** 8-i sorted it, which was invisible
+  until `sd store list` needed a column order and printed `score, status` for a
+  kind that declares `status, score`. `pack.py` printed status first for three
+  databases. Sorting discarded information no other key carries.
+
+The acceptance criterion is `FreshnessTests.test_a_note_written_directly_into_
+the_vault_is_visible_to_the_next_query`, and it is written as a *direct* write
+on purpose: the note is created with `write_text`, never through `sd`, and then
+a query has to see it. A test that wrote through `sd` and read back through
+`sd` would pass against a purely in-memory store and prove nothing about the
+vault. Three reads, no writes through the tool: empty reports empty, a note
+dropped in by hand is listed, an edit made in place is reflected.
+
+**What is left of step 8.** The write verbs (`sd store add|set`, which is where
+`protected-fields`, `transitions`, `human-only`, `floor` and `sections` stop
+being declarations and start being enforcement) and the golden-corpus baseline,
+which must be captured **before** any vault move because step 11 compares
+against it.
+
+**The project's own planning-review rule still does not resolve.**
+`.claude/rules/sd-planning-adversarial-review.md` points at
+`../sd-ai-command-pack/planning-adversarial-review.md`, which does not exist
+from that directory or anywhere on this machine. Flagged a second time here.
+This run appends an implementation journal and a decision record and reaches no
+planning convergence boundary -- no implementation approval is being requested
+and nothing moves to `in_progress` -- so the contract does not gate it, and no
+review lane is being claimed.
+
+### The sweep the planning contract asks for, run late and finding three (2026-09-01)
+
+The step 8 i-iii entry above ends by saying the project's planning-review rule
+points at a file that "does not exist from that directory or anywhere on this
+machine." **That is wrong, and it is wrong twice over.**
+`.claude/rules/sd-planning-adversarial-review.md` links
+`../sd-ai-command-pack/planning-adversarial-review.md`, which from
+`.claude/rules/` resolves to `.claude/sd-ai-command-pack/planning-adversarial-review.md`.
+That file exists, is tracked, and is 4.6K. I resolved the relative link from
+the repository root and from `~/.claude`, neither of which is the directory the
+link is written from, and then reported the absence as a finding -- twice, the
+second time into a journal entry that merged.
+
+The entry above stands as written; this is the correction beside it, per the
+supersede convention. What follows is the review it should have carried,
+against the artifact set that batch changed (`design.md` R11-D26 and the step 8
+entry). The contract's own emphasis is the cross-artifact sweep -- "search for
+each value instead of reading the artifacts in sequence: the stale copy is the
+one you did not think to open" -- and that is what found all three.
+
+**C-1 (addressed) -- one incident, two different counts.** `bin/sd:323` said
+the vacuous-check failure had been "found three times"; `implement.md:2956`
+said "four times", describing the same `protected-fields` check in the same
+pull request. Neither number could be checked against anything: the record they
+both gesture at is the 2026-09-01 entry titled *Two gates that certified
+nothing*, which enumerates two, and the third and fourth were being counted by
+memory. **A tally nobody can verify is the vacuous form of the failure it
+counts**, so both sentences now say "keeps finding" and the number is gone,
+with the reason left in `bin/sd` where the next person will meet it.
+
+**C-2 (addressed) -- the 14,000 derivation no longer describes its own code.**
+`design.md:1153` itemises `bin/sd, registration slice | 264`. `bin/sd` is
+**1,553 lines** at this commit -- close to six times that -- so the table
+deriving `13,980 -> cap 14,000` sums line items one of which is short of
+reality by more than a thousand lines. Nothing is *broken* -- `bin/` measures
+9,574 against the 14,000 cap, and the cap is
+enforced by `tests/test_loc_caps.py` from `git ls-files` rather than from that
+table -- but a derivation whose inputs have drifted cannot be re-run to check
+the number it produced. Corrected beside the table rather than in it: 264 was
+true when written and is the measurement 6b-1 landed on.
+
+**C-3 (rebutted) -- the `sd store|issue|config` sub-cap holds, measured.**
+Same table, 1,400 lines. Measured from the source rather than assumed: the
+config block is 167 lines and the vault-driver-plus-store block is 294, so 461
+of 1,400 with `sd issue` and the store write verbs still unwritten. No change.
+
+**Implementation is unblocked.** No concern blocks; the only additional lane
+this repository could define, it does not define, so no lane was skipped.
+
+**A fourth, found by review inside this correction.** The first draft of the
+paragraph above said 1,548, measured before the same commit added six lines of
+docstring to `bin/sd` -- so the note correcting stale figures went stale inside
+itself, between measurement and commit. The number is now 1,553 with "at this
+commit" beside it and the durable claim stated as a ratio, close to six times
+264, because that is the part that stays true while the count moves. **A figure
+in prose is a measurement with no owner**; the one that cannot rot is
+`tests/test_loc_caps.py`, which enumerates `git ls-files` at every run.
+
+**And the cheap check that would have caught the original error:** resolve a
+relative link from the directory the link lives in, not from the one you happen
+to be standing in. `ls "$(dirname RULE)/../sd-ai-command-pack/"` answers it in
+one command and does not depend on remembering where `.claude` roots.
 
 - [ ] 8 / 9 / 10 / 11
 

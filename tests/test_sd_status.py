@@ -19,6 +19,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from typing import Any
 
@@ -266,6 +267,151 @@ class ProtectionGapTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", found[0]["gap"])
 
 
+class AcknowledgementTests(unittest.TestCase):
+    """`.github/sd-status.json`: what it accepts, and when it stops accepting.
+
+    The one property worth more than the rest: an acknowledgement is keyed on
+    the *observed protection state*, never on the gap id. `reviews` is emitted
+    for two opposite states of the branch, so an entry keyed on the id would
+    accept "nothing requires a pull request" while meaning "a pull request is
+    required and asks for no approvals". Half of this class exists to hold
+    that line.
+    """
+
+    ZERO_APPROVALS = {
+        "id": "reviews",
+        "state": {
+            "required_pull_request_reviews": True,
+            "required_approving_review_count": 0,
+            "enforce_admins": True,
+        },
+        "because": "one maintainer, enforce_admins on",
+        "since": "2026-09-01",
+        "until": "a second account with merge rights exists",
+    }
+
+    def enforcing(self, **overrides: Any) -> dict[str, Any]:
+        record: dict[str, Any] = {
+            "enforce_admins": {"enabled": True},
+            "required_status_checks": {"strict": True, "contexts": ["lint"]},
+            "required_pull_request_reviews": {"required_approving_review_count": 0},
+        }
+        record.update(overrides)
+        return record
+
+    def split(
+        self, protection: dict[str, Any], entries: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        gaps, _ = status._protection_gaps(protection, "main", {"lint"}, [])
+        return status._apply_acknowledgements(
+            gaps, status._observed_state(protection), entries
+        )
+
+    def written(self, body: str) -> tuple[list[dict[str, Any]], list[str]]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / ".github").mkdir()
+            (root / ".github" / "sd-status.json").write_text(body, encoding="utf-8")
+            return status.load_acknowledgements(root)
+
+    def test_a_matching_acknowledgement_moves_the_finding_out_of_the_gaps(self) -> None:
+        still_open, accepted = self.split(self.enforcing(), [self.ZERO_APPROVALS])
+        self.assertEqual(still_open, [])
+        self.assertEqual([entry["id"] for entry in accepted], ["reviews"])
+        # The finding text travels with the acceptance rather than being
+        # dropped: what was accepted has to stay readable.
+        self.assertIn("0 approvals", accepted[0]["gap"])
+
+    def test_an_acknowledgement_stops_applying_when_the_state_drifts(self) -> None:
+        """The whole point. Accepting a state is not accepting an id forever.
+
+        `enforce_admins` going off is half of what makes 0 approvals
+        survivable here, so an entry that pinned it must not go on accepting
+        the branch once it is gone.
+        """
+        protection = self.enforcing(enforce_admins={"enabled": False})
+        still_open, accepted = self.split(protection, [self.ZERO_APPROVALS])
+        self.assertEqual(accepted, [])
+        ids = [gap["id"] for gap in still_open]
+        self.assertIn("reviews", ids)
+        stale = [gap for gap in still_open if gap["id"] == "reviews"][0]
+        self.assertIn("no longer matches", stale["acknowledgement_stale"])
+        self.assertIn("enforce_admins acknowledged True, observed False", stale["acknowledgement_stale"])
+
+    def test_the_zero_approval_entry_never_accepts_the_missing_review_object(self) -> None:
+        """The security case: both states are `reviews`, and only one is accepted.
+
+        Deleting `required_pull_request_reviews` leaves a branch anybody can
+        push to directly -- strictly worse than the state that was accepted.
+        An acknowledgement matched on the id alone would silence exactly that.
+        """
+        protection = self.enforcing()
+        del protection["required_pull_request_reviews"]
+        still_open, accepted = self.split(protection, [self.ZERO_APPROVALS])
+        self.assertEqual(accepted, [])
+        self.assertEqual([gap["id"] for gap in still_open], ["reviews"])
+        self.assertIn("no pull-request review is required on main", still_open[0]["gap"])
+        self.assertIn("no longer matches", still_open[0]["acknowledgement_stale"])
+
+    def test_an_unrelated_gap_is_untouched_by_an_acknowledgement(self) -> None:
+        protection = self.enforcing(
+            required_status_checks={"strict": False, "contexts": ["lint"]}
+        )
+        still_open, accepted = self.split(protection, [self.ZERO_APPROVALS])
+        self.assertEqual([entry["id"] for entry in accepted], ["reviews"])
+        self.assertEqual([gap["id"] for gap in still_open], ["strict"])
+
+    def test_an_absent_file_accepts_nothing_and_is_not_a_fault(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            entries, problems = status.load_acknowledgements(pathlib.Path(directory))
+        self.assertEqual((entries, problems), ([], []))
+
+    def test_this_repos_own_file_loads_clean(self) -> None:
+        entries, problems = status.load_acknowledgements(BIN.parent)
+        self.assertEqual(problems, [])
+        self.assertEqual([entry["id"] for entry in entries], ["reviews"])
+
+    def test_an_empty_state_is_rejected_rather_than_accepting_the_id(self) -> None:
+        # An entry with no facts would accept `reviews` whatever the branch
+        # looked like, which is the shape this file must not be able to take.
+        entry = dict(self.ZERO_APPROVALS, state={})
+        entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(entries, [])
+        self.assertTrue(any("must be a non-empty object" in problem for problem in problems))
+
+    def test_a_fact_name_this_reader_cannot_observe_is_rejected(self) -> None:
+        entry = dict(self.ZERO_APPROVALS, state={"requred_approving_review_count": 0})
+        entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(entries, [])
+        self.assertTrue(any("not an observable protection fact" in p for p in problems))
+
+    def test_a_reason_and_an_end_condition_are_both_required(self) -> None:
+        entry = {"id": "reviews", "state": {"enforce_admins": True}, "since": "2026-09-01"}
+        entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(entries, [])
+        self.assertTrue(any("missing because, until" in problem for problem in problems))
+
+    def test_a_malformed_file_accepts_nothing_at_all(self) -> None:
+        """Fail closed, and fail loudly. Never a partial application.
+
+        One bad entry disables the file rather than the entry, because the
+        author who wrote it meant all of it, and the failure direction that is
+        safe is the one where every gap goes on printing.
+        """
+        entries, problems = self.written("{not json")
+        self.assertEqual(entries, [])
+        self.assertTrue(any("not valid JSON" in problem for problem in problems))
+
+    def test_an_unknown_top_level_key_is_named(self) -> None:
+        entries, problems = self.written(json.dumps({"accepted_gap": []}))
+        self.assertEqual(entries, [])
+        self.assertTrue(any("unknown key(s) accepted_gap" in problem for problem in problems))
+        # `$schema` is named as known too. Listing only `accepted_gaps` would
+        # read as though the schema pointer this repository's own file carries
+        # were itself the mistake.
+        self.assertTrue(any("known keys are $schema, accepted_gaps" in p for p in problems))
+
+
 class MergeSettingsTests(unittest.TestCase):
     """The two r7 flags: what the merge button does when a human presses it."""
 
@@ -406,11 +552,97 @@ class ProtectionSectionTests(StatusFixture):
         self.assertIn("GAP [enforce_admins]", completed.stdout)
         self.assertIn("prose, not authority", completed.stdout)
 
+    def acknowledge(self, *entries: dict[str, Any]) -> None:
+        directory = self.repo / ".github"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "sd-status.json").write_text(
+            json.dumps({"accepted_gaps": list(entries)}), encoding="utf-8"
+        )
+
+    ZERO_APPROVALS = AcknowledgementTests.ZERO_APPROVALS
+
+    def test_an_accepted_finding_prints_as_accepted_and_leaves_the_gaps(self) -> None:
+        self.acknowledge(self.ZERO_APPROVALS)
+        self.with_github(
+            pulls=[],
+            protection={
+                "enforce_admins": {"enabled": True},
+                "required_status_checks": {"strict": True, "contexts": []},
+                "required_pull_request_reviews": {"required_approving_review_count": 0},
+            },
+        )
+        section = self.report()["protection"]
+        # A consumer counting `gaps` sees none; one reading `accepted` sees the
+        # decision. Neither has to know about the other to stay correct.
+        self.assertEqual(section["gaps"], [])
+        self.assertEqual([entry["id"] for entry in section["accepted"]], ["reviews"])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("ok  [reviews] accepted 2026-09-01: one maintainer", completed.stdout)
+        self.assertIn("until a second account with merge rights exists", completed.stdout)
+        # An accepted finding is not an absent one: the all-clear must not
+        # print over the top of a state the repository wrote down.
+        self.assertNotIn("fully enforcing", completed.stdout)
+
+    def test_a_drifted_acknowledgement_prints_the_gap_and_says_it_no_longer_matches(self) -> None:
+        self.acknowledge(self.ZERO_APPROVALS)
+        self.with_github(
+            pulls=[],
+            protection={
+                # The review object is gone: nothing requires a pull request
+                # any more, which is the worse of the two `reviews` states.
+                "enforce_admins": {"enabled": True},
+                "required_status_checks": {"strict": True, "contexts": []},
+            },
+        )
+        section = self.report()["protection"]
+        self.assertEqual(section["accepted"], [])
+        self.assertEqual([gap["id"] for gap in section["gaps"]], ["reviews"])
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("GAP [reviews] no pull-request review is required", completed.stdout)
+        self.assertIn("no longer matches the live protection state", completed.stdout)
+
+    def test_an_unreadable_acknowledgement_file_is_itself_a_gap(self) -> None:
+        directory = self.repo / ".github"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "sd-status.json").write_text("[]", encoding="utf-8")
+        self.with_github(
+            pulls=[],
+            protection={
+                "enforce_admins": {"enabled": True},
+                "required_status_checks": {"strict": True, "contexts": []},
+                "required_pull_request_reviews": {"required_approving_review_count": 0},
+            },
+        )
+        section = self.report()["protection"]
+        self.assertEqual(
+            [gap["id"] for gap in section["gaps"]], ["acknowledgements", "reviews"]
+        )
+        self.assertEqual(section["accepted"], [])
+
     def test_protection_degrades_with_no_github_remote(self) -> None:
         self.install_gh()
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("no GitHub remote", completed.stdout)
+
+    def test_a_broken_acknowledgement_file_reaches_the_terminal_without_github(self) -> None:
+        """The one finding this branch can still make must not be `--json`-only.
+
+        A malformed file is a fact about the checkout, not about GitHub. If it
+        printed only when the protection object could be fetched, the file
+        would silently accept nothing in exactly the situation -- no `gh`, no
+        network -- where nobody is reading the JSON.
+        """
+        directory = self.repo / ".github"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "sd-status.json").write_text("{not json", encoding="utf-8")
+        self.install_gh()
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("unavailable:", completed.stdout)
+        self.assertIn("GAP [acknowledgements]", completed.stdout)
+        self.assertIn("not valid JSON", completed.stdout)
 
 
 class WorkItemTests(StatusFixture):

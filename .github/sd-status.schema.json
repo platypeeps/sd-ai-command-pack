@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/platypeeps/sd-ai-command-pack/.github/sd-status.schema.json",
+  "title": "sd-status accepted protection states",
+  "description": "Read by `bin/sd-status` from `.github/sd-status.json`. It records protection states this repository has looked at and decided to keep, so the protection section reports them as accepted rather than as open gaps. JSON, not YAML or TOML, per decision D-C1. A sibling of `.github/sd-review.json` rather than a key inside it: that file is `bin/sd-review`'s routing policy and rejects unknown keys by design, and a malformed acknowledgement must not take the review lane down with it. An absent FILE means nothing is accepted. A file that exists and is malformed accepts nothing and reports each fault as a gap of its own -- it fails closed and loudly, never silently. This suppresses nothing: an entry only applies while the live protection state still matches the facts it pins, and the `until` condition is printed on every run beside the acceptance.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this schema. Ignored by the reader."
+    },
+    "accepted_gaps": {
+      "type": "array",
+      "description": "Findings this repository accepts, each keyed on the protection state it was accepted in.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "state", "because", "since", "until"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The gap id from the protection section. Necessary but never sufficient: `reviews` is emitted for two opposite states of the branch -- the review object being absent, so no pull request is required at all, and the object existing while asking for 0 approvals -- so `state` is what actually decides whether an entry applies."
+          },
+          "state": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "description": "The observed protection facts this acceptance is conditional on. Every fact listed must equal the live one or the entry does not apply and the gap prints, saying an acknowledgement exists and no longer matches. Must not be empty: an entry with no facts would accept the id whatever the branch looked like. Unknown fact names are rejected at load time rather than quietly matching nothing.",
+            "properties": {
+              "required_pull_request_reviews": {
+                "type": "boolean",
+                "description": "Whether the `required_pull_request_reviews` object exists at all. This is the fact that separates 'a pull request is required and asks for no approvals' from 'nothing requires a pull request', which are the same gap id and opposite states."
+              },
+              "required_approving_review_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Approving reviews the branch requires. 0 when the review object is absent."
+              },
+              "enforce_admins": {
+                "type": "boolean",
+                "description": "Whether protection applies to admins."
+              },
+              "strict": {
+                "type": "boolean",
+                "description": "Whether required status checks must run against an up-to-date base."
+              }
+            }
+          },
+          "because": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Why this state is kept. Required, and printed on every run: an acknowledgement without a reason is a suppression."
+          },
+          "since": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The date the decision was taken, as `YYYY-MM-DD`. Printed with the acceptance so its age is visible."
+          },
+          "until": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The condition that ends this acceptance -- the deletion criterion. Required, and printed on every run. When it comes true the entry is deleted from this file and the gap returns on its own; nothing in `bin/sd-status` needs changing for that to happen."
+          }
+        }
+      }
+    }
+  }
+}

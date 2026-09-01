@@ -1,5 +1,22 @@
 # Bookkeeping Tooling Guidelines
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> Every file in this index's Scope list is gone, and so is the subject of every
+> guide it links. `templates/scripts/sd-ai-command-pack-review-preflight.mjs`,
+> `-pr-eligibility.py` and `-review.py`, and the tests
+> `tests/test_bookkeeping_validator.py` and `tests/test_pr_eligibility.py`, were
+> deleted with the whole of `templates/` on 2026-08-30 by step 3e (`43170716`,
+> #610); `scripts/sd-ai-command-pack-fleet-publish.py` and
+> `tests/test_fleet_publish.py` went with the release train at step 0
+> (2026-08-29, #597); `install.py` went at 3e as well. The Quality Check block
+> below runs `node --check` against a file that does not exist.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Project-specific guidance for the Trellis bookkeeping validator and PR
 > eligibility scripts.
 

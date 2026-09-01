@@ -51,6 +51,29 @@ missing leg prints as a named gap:
 found any. Exit 2 is reserved for an invocation or configuration fault, printed
 as a sentence, never a traceback.
 
+## Accepted states are not silenced states
+
+A repository can record, in tracked `.github/sd-status.json`, a protection
+state it has looked at and decided to keep. Those findings print as
+`ok  [id] accepted <date>: <reason>` with the ending condition on the line
+below, and move from `protection.gaps` to `protection.accepted` in `--json` —
+so a consumer counting gaps counts open ones only, and never mistakes an
+accepted finding for an absent one.
+
+What makes it an acknowledgement rather than a suppression:
+
+- **Keyed on the observed protection state, never on the gap id.** `reviews`
+  is emitted for two opposite states — the review object being absent, so no
+  pull request is required at all, and the object existing while asking for
+  zero approvals. An entry pins the facts it was accepted under, and stops
+  applying the moment any of them changes; the gap then prints as a gap,
+  carrying a line saying an acknowledgement exists and no longer matches.
+- **`because` and `until` are both required, and both print every run.**
+  `until` is the deletion criterion: when it comes true the entry is deleted
+  and the gap returns on its own.
+- **A malformed file accepts nothing and says so** — each fault prints as its
+  own gap. It fails closed and loudly, never silently.
+
 ## Flags
 
 `--json` (one machine-readable object) · `--parked` (list only the items the
@@ -62,6 +85,9 @@ age sweep parked, read from their own `parked:` frontmatter, not from a ledger)
 - **Never present the absence of gaps you did not read as safety.** If the
   protection section could not be fetched, say the enforcement state is
   unknown; do not say the repo is protected.
+- **Never report an accepted finding as an absent one.** "No open gaps" is a
+  different sentence from "protection is fully enforcing", and only the second
+  is a claim about the branch. Read `protection.accepted` before saying either.
 - **Never claim a guarantee the config does not provide.** In a repo with no
   protection, the honest statement is that nothing enforces merge authority
   there.

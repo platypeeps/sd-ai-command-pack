@@ -1,5 +1,25 @@
 # Error Handling
 
+> [!important]
+> **Partly stale as of 2026-09-01.**
+> The Overview, Error Types, Error Handling Patterns and Common Mistakes
+> sections specify `install.py` -- its `SystemExit` sites, its `0`/`2`/`3` exit
+> contract, `require_trellis_repo()`, `install_file()`, `run_diff_check()` -- and
+> that file was deleted on 2026-08-30 by step 3e (`43170716`, #610). The
+> `.trellis/config.yaml` mention already carries an inline absent marker.
+>
+> Three lessons below outlive their subject and are worth keeping: "Don't:
+> treat multiplicity as ambiguity" (its `claude plugin list --json` example is
+> still live, and `dashboard/plugins.py` reads a `sd plugin list --json` of the
+> same shape), "Don't: block on a normal steady state", and "Don't: say 'this
+> command' in a diagnostic that gets forwarded". That last one's example names
+> `sd-ai-command-pack-review.py`, which is gone; the rule is not about that file.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > How errors are handled in this project.
 
 ---

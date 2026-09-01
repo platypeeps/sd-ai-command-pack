@@ -1,5 +1,21 @@
 # Review Attempt State: What May Be Memoized
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> The review coordinator this page is entirely about,
+> `templates/scripts/sd-ai-command-pack-review.py`, was deleted on 2026-08-30
+> with the whole of `templates/` by step 3e (`43170716`, #610), and
+> `tests/test_review_controller.py` with it. Its replacement, `bin/sd-review`,
+> keeps no per-attempt state file at all -- `grep -n 'attempt' bin/sd-review`
+> returns two unrelated lines -- so `_state_identity`, `_advance`,
+> `_record_stage` and the memoization rule they carry have no subject here. The
+> lesson outlived the file: `bin/sd-review` recomputes rather than caches.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > When changing what `templates/scripts/sd-ai-command-pack-review.py` — the
 > single source, installed into consuming repositories as `scripts/` — stores
 > in, or serves from, its per-attempt state file.

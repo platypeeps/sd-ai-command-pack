@@ -1,5 +1,32 @@
 # Fleet Rollout
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> This document describes a rollout that has completed and a fleet walk that no
+> longer exists. Decision R10-D6 dropped the fleet walk -- `bin/sd-status` opens
+> with "There is no repo-path argument and no fleet walk (R10-D6)" -- and every
+> command, script and state file named below is gone:
+> `templates/scripts/sd-ai-command-pack-status.py`,
+> `sd-ai-command-pack-fleet-controller.py`, the `templates/scripts/` toolchain
+> wrapper and `install.py` were deleted on 2026-08-30 by step 3e (`43170716`,
+> #610); the campaign controller's state files and
+> `.sd-ai-command-pack/provenance.json` went with the consumer footprint; and
+> 0.72.0 was the terminal release, so there is no further rollout to order.
+> `docs/fleet/consumers.json`, which this page reads `mode` out of, is stale by
+> the same construction -- see `docs/fleet/README.md`.
+>
+> Nothing reads this file. Outside `docs/work/archive/`, the only references to
+> it are `CONTRIBUTING.md`, `docs/review-learnings.md` (historical PR entries),
+> `CHANGELOG.md` (history),
+> `docs/spec/backend/manifest-and-filesystem.md:2155,2274,2532` and the rollout
+> journal. No code path in `bin/`, `dashboard/`, `skills/`, `tests/`,
+> `.github/`, `actions/` or `agents/` names it.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 This repository tracks the known sd-ai-command-pack consumer fleet in
 `docs/fleet/consumers.json`. The manifest is operator-triggered inventory, not
 an unattended rollout system.

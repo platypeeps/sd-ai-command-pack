@@ -1,5 +1,20 @@
 # Fleet publish: tick only what the run proved
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> `scripts/sd-ai-command-pack-fleet-publish.py` and `tests/test_fleet_publish.py`
+> already carry inline absent markers; they were deleted with the release train
+> at step 0 (2026-08-29, #597). The rest of the page has lost its subject too:
+> the `sd-fleet-refresh` skill and its `templates/.agents/skills/` source went
+> with `templates/` on 2026-08-30 (step 3e, `43170716`, #610), `task.py archive`
+> and `.trellis/tasks/<slug>/prd.md` were removed at step 2, and the fleet of
+> consumer checkouts the publish helper wrote into was dropped by R10-D6.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 Scope/trigger: any change to how `scripts/sd-ai-command-pack-fleet-publish.py` [absent: removed with the release train in 0.72.0]
 writes a consumer's archived PRD, and any change to the acceptance criteria the
 `sd-fleet-refresh` skill authors. Established by the

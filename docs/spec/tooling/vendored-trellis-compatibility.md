@@ -1,5 +1,22 @@
 # Vendored Trellis compatibility contract
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> There is no vendored Trellis left to be compatible with. `.trellis/` was
+> replaced by `docs/work/` at step 2, and the wrappers that shelled out to
+> `.trellis/scripts/task.py` and `add_session.py` -- along with
+> `templates/scripts/sd-ai-command-pack-status.py` and `tests/test_status.py` --
+> were deleted on 2026-08-30 by step 3e (`43170716`, #610). `bin/migrate-trellis`,
+> the last tool that knew this contract, was deleted on 2026-09-01 at step 7
+> (#669) having finished its job: `git ls-files .trellis` returns 0 in all nine
+> consumer repositories of the 3-c wave. The upstream project at
+> `~/repos/ai/Trellis` is not a consumer, and this page never governed it.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 Scope/trigger: any pack wrapper that shells out to the vendored Trellis
 scripts (`.trellis/scripts/task.py` [absent: target-repo Trellis path], `add_session.py`), and any future
 Trellis version bump. Established during the 0.6.7 → 0.6.14 upgrade

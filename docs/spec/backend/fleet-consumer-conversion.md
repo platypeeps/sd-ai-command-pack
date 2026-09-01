@@ -1,5 +1,21 @@
 # Fleet Consumer Conversion: Running The Installer Against Another Repository
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> This page describes running `install.py <consumer>` from this checkout against
+> another repository. Neither half survives: `install.py` was deleted on
+> 2026-08-30 by step 3e (`43170716`, #610), and the fleet-of-consumer-checkouts
+> model was dropped by decision R10-D6 -- `bin/sd-status` now opens with "There
+> is no repo-path argument and no fleet walk (R10-D6)". `bin/sd_install.py` is
+> machine-scope and never writes a tracked file in any repository. The
+> `sd-status fleet` report, the `--thin`/`--resweep-verdict` cohort and the
+> `.trellis/**` row in the error matrix all name surfaces that no longer exist.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > When a task refreshes one or more registered fleet consumers by running
 > `install.py <consumer>` from this checkout.
 
