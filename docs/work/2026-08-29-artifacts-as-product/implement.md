@@ -2358,7 +2358,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     squash (87a7d5e), not at the first push, because four review rounds
     landed between them and the earlier figure (4,112 and 844) counted
     neither the fixes nor the docs they invalidated.
-- [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
+- [x] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
   - **The park was fleet-wide, and D2 says so.** `design.md:725` decides
@@ -2472,6 +2472,22 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     argument rests on did not move — which is exactly why the stale figure
     would have survived a reading that only checked whether the point still
     held.
+
+  - **`v1.0.0` is tagged at `daebee6c`**, the merge of the record above, so the
+    tagged tree carries its own CHANGELOG entry rather than promising one. It
+    is a lightweight tag, matching `v0.72.0` and everything before it, and no
+    release workflow fires: the two that remain are `sd-review-route.yml` and
+    `tests.yml`. Verified from the remote rather than from the local ref —
+    `git ls-remote --tags origin v1.0.0` returns `daebee6c`, `git show
+    v1.0.0:CHANGELOG.md` opens on `## 1.0.0 - 2026-09-01`, and
+    `git ls-tree v1.0.0 bin/` has no `migrate-trellis` in it.
+  - **Step 7's three checks, at the tag.** `sd-status` active is **2** against
+    a ceiling of 20; **100** archived items carry `parked:` and
+    `sd-status --parked` lists them; the `grep -rli trellis` criterion reads
+    42 outside the archive against 534 inside, which is the bullet above —
+    met as live code paths, unmeetable as written. The box is ticked on the
+    first two and on the substantive reading of the third, with the literal
+    reading recorded as unsatisfiable rather than quietly counted as passed.
 
 - [ ] 8 / 9 / 10 / 11
 
