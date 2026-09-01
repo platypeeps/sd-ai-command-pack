@@ -1901,6 +1901,34 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     write path -- **~756 against 858**, still under, by about a hundred lines.
     The estimate that is now worth doubting is the ~556: it covers the PRs tab
     and three surfaces with no system counterpart, and one tab just cost 212.
+  - **6b-5c landed: PRs, and the collector it was supposed to need already
+    existed.** The parity row implied porting `collect_prs` -- a `gh search
+    prs --author @me` shell-out on a timer. It is not needed: GitHub's search
+    does not separate issues from pull requests, `type: ISSUE` returns both,
+    and the pack's index has been storing them side by side under `kind` since
+    step 4. There were **17 open pull requests already indexed** and the
+    Issues tab was rendering them as issues. So this is one `kind` filter in
+    `store.issues`, one generalised payload serving two routes, and one
+    renderer serving two tabs -- 117 lines, against a row that read like a
+    network collector.
+    **The bug it fixes is the one it was not looking for.** Issues showed 18
+    rows, of which 17 were pull requests. It shows one now, and the test that
+    pins the split says why the filter is the only thing keeping them apart.
+    **Staleness replaced age, and the index forced the question.** The system
+    view ranked a PR by how long ago it was opened; there is no `created_at`
+    column and adding one means migrating a cache that has no migration
+    machinery. Rather than build that for the worse question, the question
+    changed: a three-week PR still being pushed to is working as intended, and
+    a fortnight of silence is the thing worth a row. Ranked from `updated_at`,
+    which the index has had all along.
+    **Two mutation-checked rules.** The staleness threshold is real (`days >=
+    0` fails the fresh-PR test), and the row id does not carry the day count
+    (adding it fails the ack test) -- keyed with the age, a dismissed PR would
+    un-dismiss itself every morning, which is the one row guaranteed to come
+    back forever.
+    **After:** Now carries **31 rows** -- 9 plugin, 5 fleet, 17 pull requests
+    -- and all 31 resolve to a panel. `dashboard/` is **3,259 of 4,000, 741
+    left**.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own

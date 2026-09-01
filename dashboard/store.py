@@ -246,16 +246,26 @@ def latest_seen(connection: sqlite3.Connection) -> str:
     return (row[0] if row else "") or ""
 
 
-def issues(connection: sqlite3.Connection, state: str | None = None) -> list[dict]:
-    """Every indexed issue, newest activity first; `why` decoded back to a list."""
-    if state is None:
-        rows = connection.execute(
-            "SELECT * FROM issue ORDER BY updated_at DESC"
-        ).fetchall()
-    else:
-        rows = connection.execute(
-            "SELECT * FROM issue WHERE state = ? ORDER BY updated_at DESC", (state,)
-        ).fetchall()
+def issues(connection: sqlite3.Connection, state: str | None = None,
+           kind: str | None = None) -> list[dict]:
+    """Every indexed issue, newest activity first; `why` decoded back to a list.
+
+    `kind` is `issue` or `pull`. The search that fills this table returns both
+    -- GitHub's own search does not separate them -- so the two tabs that
+    render them are the thing that has to, and doing it here keeps the filter
+    in the query rather than in four callers.
+    """
+    where, values = [], []
+    if state is not None:
+        where.append("state = ?")
+        values.append(state)
+    if kind is not None:
+        where.append("kind = ?")
+        values.append(kind)
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    rows = connection.execute(
+        f"SELECT * FROM issue{clause} ORDER BY updated_at DESC", values
+    ).fetchall()
     out = []
     for row in rows:
         record = dict(row)

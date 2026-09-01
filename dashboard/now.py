@@ -20,10 +20,20 @@ of "2 unpushed" should not silently cover "9 unpushed" tomorrow.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
+
 # Ranks, not severities. 0 is loudest, and the page derives how loud to look
 # from the number alone -- `kind` is a category and never a severity (R11-D20).
 AHEAD = 3
 DIRTY = 4
+# A pull request nobody has touched for a fortnight, and one that is simply
+# open. `FRESH` shares rank 4 with `DIRTY` deliberately: both are reminders
+# rather than problems, and the two tie into one band that the page paints
+# `queued`. Nothing decides between them and nothing should -- an ordering
+# between "uncommitted files" and "an open PR" would be invented, not derived.
+# Ties break on `id`, which only has to be stable, not meaningful.
+STALE = 2
+FRESH = 4
 
 
 def plural(count: int, one: str, many: str) -> str:
@@ -64,6 +74,56 @@ def backbone_rows(repos: list[dict]) -> list[dict]:
                 "detail": f"{branch} · last commit {repo.get('last') or '?'}",
                 "source": "repos",
             })
+    return out
+
+
+# A pull request nobody has touched in this long is the one worth a row.
+# **Staleness, not age.** The system view this replaces ranked on how long ago
+# a PR was opened, and the index cannot answer that -- it stores `updated_at`
+# and there is no `created_at` column. Rather than migrate a cache for it, the
+# question changed to the better one: a three-week PR still being pushed to is
+# working as intended, and a four-day-old one nobody has looked at is not.
+STALE_DAYS = 14
+
+
+def stale_days(updated: str, today: str) -> int | None:
+    """Whole days between two `YYYY-MM-DD` prefixes, or None if either is unusable.
+
+    Compared as dates rather than parsed as timestamps because the index
+    stores whatever the tracker returned, and a row with a malformed stamp
+    must still render -- it just cannot be ranked by one.
+    """
+    try:
+        was = date.fromisoformat(updated[:10])
+        now = date.fromisoformat(today[:10])
+    except (TypeError, ValueError):
+        return None
+    return (now - was).days
+
+
+def pr_rows(payload: dict, today: str = "") -> list[dict]:
+    """Open pull requests, loudest when they have gone quiet.
+
+    Keyed without the age, so acking a PR does not un-ack itself tomorrow --
+    the row identifies the pull request, and how long it has been sitting is
+    a property of it rather than a different alert.
+    """
+    if not payload.get("available"):
+        return []
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    out = []
+    for pr in [*payload.get("needsYou", []), *payload.get("other", [])]:
+        days = stale_days(pr.get("updated_at") or "", today)
+        quiet = days is not None and days >= STALE_DAYS
+        out.append({
+            "rank": STALE if quiet else FRESH,
+            "kind": "pr",
+            "id": f"pr:{pr.get('repo')}#{pr.get('number')}",
+            "what": f"{pr.get('repo')}#{pr.get('number')} open"
+                    + (f", quiet {days}d" if quiet else ""),
+            "detail": pr.get("title") or "",
+            "source": "prs",
+        })
     return out
 
 

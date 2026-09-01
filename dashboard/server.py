@@ -84,6 +84,8 @@ PAGE = """<!doctype html>
   aria-controls="panel-now">now<span class="badge" id="now-badge"></span></button>
  <button id="tab-repos" role="tab" aria-selected="false"
   aria-controls="panel-repos">repos</button>
+ <button id="tab-prs" role="tab" aria-selected="false"
+  aria-controls="panel-prs">prs</button>
  <button id="tab-issues" role="tab" aria-selected="false"
   aria-controls="panel-issues">issues</button>
  <button id="tab-work" role="tab" aria-selected="false"
@@ -101,6 +103,17 @@ PAGE = """<!doctype html>
  <th>repo</th><th>group</th><th>branch</th><th class="n">dirty</th>
  <th class="n">ahead</th><th class="n">behind</th><th>last</th><th>subject</th>
 </tr></thead><tbody id="rows"></tbody></table>
+</section>
+<section id="panel-prs" role="tabpanel" aria-labelledby="tab-prs" hidden>
+<p class="sub" id="pr-sub"></p>
+<h2>waiting on you</h2>
+<table><thead><tr>
+ <th>where</th><th>what</th><th>why</th><th>updated</th>
+</tr></thead><tbody id="pr-needs"></tbody></table>
+<h2>other open</h2>
+<table><thead><tr>
+ <th>where</th><th>what</th><th>why</th><th>updated</th>
+</tr></thead><tbody id="pr-other"></tbody></table>
 </section>
 <section id="panel-issues" role="tabpanel" aria-labelledby="tab-issues" hidden>
 <p class="sub" id="issue-sub"></p>
@@ -194,13 +207,20 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 # the loader for five -- so this adds a merge, not a collect.
                 body = json.dumps({
                     "rows": now.merge(
-                        now.backbone_rows(cache.state()["repos"]),
+                        now.backbone_rows(cache.state()["repos"])
+                        + now.pr_rows(tracker_payload("pull")),
                         plugins.cached_load()["rows"],
                     ),
                 }).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/issues":
-                body = json.dumps(issue_payload()).encode()
+                body = json.dumps(tracker_payload("issue")).encode()
+                return self.send_body(body, "application/json")
+            if path == "/api/prs":
+                # The same index and the same shape as /api/issues. A pull
+                # request is not a different fact about the world, only a
+                # different tab, and the collect never knew the difference.
+                body = json.dumps(tracker_payload("pull")).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/plugins":
                 # Not folded into /api/state: that payload is cached for
@@ -215,8 +235,12 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def issue_payload(path: Path | None = None) -> dict:
-    """What the Issues tab renders, read straight from the index.
+def tracker_payload(kind: str, path: Path | None = None) -> dict:
+    """What the Issues or PRs tab renders, read straight from the index.
+
+    One function for both because they are one table: GitHub's search returns
+    issues and pull requests together and the index stores them together, so
+    the only thing that differs between the two tabs is a `kind`.
 
     An absent index is a reported state, not an empty list and not an error: the
     two are different answers, and "no issues" where the truth is "nothing has
@@ -235,7 +259,7 @@ def issue_payload(path: Path | None = None) -> dict:
         }
     connection = store.connect(target)
     try:
-        rows = store.issues(connection, state="open")
+        rows = store.issues(connection, state="open", kind=kind)
         # From every row, not from `rows`: an index holding only closed issues
         # has still been collected, and saying otherwise would report a fresh
         # index as never filled.
