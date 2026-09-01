@@ -64,7 +64,10 @@ sd-ai-command-pack/
                         sd-pr-state, sd-review(+-local), sd-status, sd-spec, sd-map, sd-handoff,
                         sd-trackers, sd-handoff-restore (hook), sd CLI (plugin|store|issue|config groups),
                         migrate-* (temp)
-  dashboard/            stdlib HTTP server + one JS file + sd-dashboard CLI (≤4,000 LOC cap)
+  dashboard/            stdlib HTTP server + one JS file (≤4,300 total and ≤2,300 carrying
+                        code -- R11-D24 split the ceiling in two). The `sd-dashboard` CLI in
+                        front of it is listed under bin/ and charges there, so the two caps
+                        do not overlap
   actions/              docs-lint + review-route composite actions (SHA/tag-pinned, opt-in only)
   docs/work|spec|decisions   dogfood
   tests/                ~3k lines: install, docs-lint, route fixtures, store invariants,
@@ -86,11 +89,14 @@ were both busted on paper, and on 2026-08-29 the record called 8,000 the honest 
 "still <1/11 of today's 95k". *8,000 was busted too. R11-D15 re-derived the ceiling at 14,000
 from built code — roughly a seventh of the 95k rather than an eleventh.*
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
-ceiling until then. dashboard/ ≤ **4,000** (*R11-D17 re-derived it at 6b-3 from files that exist:
+ceiling until then. dashboard/ ≤ **4,300 total and ≤ 2,300 carrying code** (*R11-D24 re-derived
+and split it at 6b-7; the 4,000 below is what it replaced.* R11-D17 had re-derived it at 6b-3 from files that exist:
 2,488 measured plus R11-D13's 763-line lift and two estimates. The old 2,500 rested on "credible:
 457 lifted + one JS file", and R11-D13 measured that lift at 763*). Caps are CI tests; a cap is
 never raised in the PR that busts it — 4,000 was set in its own record by a change that fit under
-2,500, and like `bin/`'s 14,000 it may only move downward. Still <1/10 of today's 54k scripts + 30k router + 11k installer.
+2,500, and 4,300 in its own record by a change that fit under 4,000. *`bin/`'s 14,000 may only move
+downward, untouched. The dashboard total may be re-derived with an itemisation, once R11-D24 spent
+that clause on it; its **code** half inherited the clause and is the one that may only fall.* Still <1/10 of today's 54k scripts + 30k router + 11k installer.
 
 ### Commands (11 — grown from 8, each growth carried by a decision record; `sd-help` left at
 R11-D15, being a catalog rather than a command)
@@ -1630,7 +1636,8 @@ evidence that the removal was quietly widened.
 
 **R11-D17 (user, 2026-08-31) — a plugin declares what its table can do and the backbone does
 it; the markup it sends is filtered on the way out of the loader; and `dashboard/` is re-derived
-at 4,000.**
+at 4,000.** *(The number is superseded by R11-D24, which re-derived it at 4,300 and split a
+code-only ceiling out of it. The two plugin-contract halves of this record stand unchanged.)*
 
 6b-3 is the backbone rendering plugin tabs. R11-D16 fixed what a tile returns and left two
 questions it could not answer without a consumer, and building the consumer answered both.
@@ -1700,8 +1707,9 @@ re-derivation, all of it from measurement or from an enumeration already made:
 Set at **4,000**, which is the derived total plus room for this repository's comment convention
 rather than for more scope — roughly half of every file here is prose, which is house style and
 not an accident, and a cap derived from code alone would be busted by the next docstring. Like
-`bin/`'s 14,000 it may move **downward** and not up, and the two estimates in the table are the
-part to check: if Now and the write path land materially over them, that is a finding for their
+`bin/`'s 14,000 it may move **downward** and not up *(spent: R11-D24 raised it once, for the
+reason this very sentence set up — see the note below the paragraph)*, and the two estimates in
+the table are the part to check: if Now and the write path land materially over them, that is a finding for their
 own records, not a second re-derivation.
 *(Both did, and both are recorded where this says they should be. Now cost **212** against ~120
 (6b-5b); the write path cost **343** against ~200 (6b-7). The table is left as derived — the cap
@@ -2085,6 +2093,78 @@ manifest key (R11-D21 already says so).
 own `index`, so the mechanism R11-D21 committed to had no shape and 6b-6 would have invented one
 in a pull request. *Deletion criterion:* the key goes with the actions it declares — R11-D21 ties
 those to the `decide` statuses emptying, and nothing here outlives them.
+
+**R11-D24 (user, 2026-09-01) — the dashboard cap is re-derived at 4,300 and split in two: a
+total, and a code-only ceiling prose cannot pay for.**
+
+R11-D17 set 4,000 and said, like R11-D15 before it, that the number may only move **downward**.
+This raises it. That clause is the reason any of these numbers mean anything, so what is
+overturned, and what is not, is written out below rather than implied by a new constant.
+
+**What happened.** 6b-7 landed at **4,000 of 4,000, exactly**, and the last hour of it was spent deleting
+rationale to fit a write path: a docstring here, a comment there, three separate passes, each one
+trimming an explanation that was written because somebody needed it. The change was not
+oversized. `sd-dashboard install` had already been pushed into `bin/` exactly as the 6b-5d entry
+required. What ran out was the allowance R11-D17 made *for prose* — its own words: "4,000 is that
+plus room for this repository's comment convention... roughly half of every file here is prose,
+which is house style and not an accident, and a cap derived from code alone would be busted by
+the next docstring."
+
+**Measured, because the estimate is the thing under review.** `dashboard/` is 4,000 lines, of
+which **2,141 carry code and 1,859 are comments, docstrings and blanks — 46%** (counted by the
+same function the cap test uses, so the number in this record and the number CI enforces cannot
+drift apart). R11-D17's guess
+of "roughly half" was right; its allowance for that half was not. One ceiling over both halves
+means a branch and a paragraph bid for the same line, and the paragraph loses every time, because
+the branch is what the change is for. That is the failure this record fixes, and it is not the
+failure caps exist to prevent.
+
+**Second reason, and it cuts the other way.** The 4,000 was derived from a scope that has since
+moved. R11-D17 counted 2,488 measured plus R11-D13's 763-line backbone lift, and that lift
+included `research` and `queues` — both of which left `dashboard/` altogether when 6b-4 and
+R11-D21 made them plugin tabs. So the ceiling covers less work than it was drawn for, while the
+two estimates inside it (Now ~120, the write path ~200) came in at **212 and 337**. Neither
+correction was applied to the number. Re-deriving is overdue in both directions.
+
+**The derivation, from files that exist.**
+
+| | lines | |
+|---|---|---|
+| measured today, `dashboard/` at 6b-7 | 4,000 | counted |
+| 6b-8: the second address bind R11-D10's correction requires | ~25 | estimate |
+| the ack store, route, Now filter and control — R11-D20 says an id **is** an ack key, and nothing stores one | ~100 | estimate |
+| swap-time carry: whatever `index --dump` diffed against `/api/state` turns up | ~50 | estimate |
+| **derived** | **~4,175** | |
+| the overrun this project has measured twice (Now +77%, the write path +69%) applied to the estimates | ~4,300 | |
+
+**Set at 4,300 total and 2,300 code.** The second number is 2,141 measured plus the ~54% of the
+remaining ~300 that is code rather than prose. The two bind at almost the same point on purpose:
+new work in house style exhausts both together, and work that is *only* code hits the code cap
+first, which is the whole intent.
+
+**What is overturned, precisely.** R11-D17's downward-only clause, for the dashboard total, once.
+Not for `bin/`: R11-D15's 14,000 keeps it untouched and is nowhere near binding — `bin/` is 7,925.
+And **the code cap inherits the clause instead**: 2,300 may move downward and not up. A total that
+can be re-derived with an itemisation and a code ceiling that cannot is a stronger pair than one
+number nobody may touch, because the number nobody may touch is the one that gets busted by a
+docstring and then argued about in a pull request.
+
+**Standing rule 1.** *Incident:* 6b-7 spent its last hour deleting reasoning to fit a branch, under
+a ceiling explicitly widened to hold that reasoning; the cap was working against the convention it
+was drawn for. *Deletion criterion:* both dashboard caps go when `dashboard.py` is deleted at 6b-8
+and the replacement is the only dashboard — at that point the pack is not racing a 1,728-line
+incumbent and the ceiling has no argument left to settle. Until then they are CI tests, and
+neither is raised in the pull request that crosses it.
+
+*Rejected: raise the total and leave it undivided.* That is the fifth cap raise in this rollout
+(`bin/` 6,000 → 6,500 → 8,000 → 14,000, `dashboard/` 2,500 → 4,000) and the first with no
+structural change to show for it. A ceiling that moves whenever it binds is a logging statement.
+*Rejected: give `app.js` its own cap.* It is 741 lines of the 4,000 and 29% prose against Python's
+50%, so a separate ceiling would be a real measurement — and it would also be the answer that
+happens to free the most room, arrived at while looking for room. A code cap is checkable against
+the failure that prompted it; a file-shaped cap is checkable against nothing.
+*Rejected: reduce instead.* Roughly half of `dashboard/` is prose and most of it is a decision
+somebody will need. Freeing 300 lines that way means deleting 300 lines of why.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·

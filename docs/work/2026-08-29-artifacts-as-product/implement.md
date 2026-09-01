@@ -1543,7 +1543,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Repos | backbone | **yes** |
     | Issues | backbone — the one migrating view (R3-D13) | **yes** |
     | Work | backbone | **yes** — 6b-5a, a rewrite against `docs/work/` and not the port this row implied |
-    | Now · PRs | backbone | no |
+    | Now · PRs | backbone | **yes** — Now at 6b-5b, PRs at 6b-5c |
     | Queues | **plugin tab** — moved from backbone by R11-D21: it is a vault view with a write path, like Vault and Briefs | no |
     | Skills · Sessions | backbone, **new** — no system counterpart | **yes** — 6b-5d |
     | Suggestions | backbone, **new** — **blocked on `sd-suggest`**, which is unbuilt (R11-D22): no producer, no draft, nothing to render | n/a until the command exists |
@@ -1554,9 +1554,15 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
   - **The verdict as surveyed: two of fifteen tabs exist, thirteen do not**,
     and four of those thirteen are new surfaces with no system counterpart to
-    port from. *(Eight of the fifteen exist now -- 6b-4 built five of them as
-    plugin tabs and 6b-5a built Work. The four new surfaces are still four:
-    none of them has been started.)*
+    port from. *(Enumerated live 2026-09-01, from `app.js`'s tab list and the
+    loader's own reply rather than from this paragraph: **twelve tabs serve**
+    -- seven backbone (`repos`, `issues`, `work`, `now`, `prs`, `skills`,
+    `sessions`) and five plugin (`toolbox`, `briefs`, `vault`, `research`,
+    `ports`). Two of the four new surfaces shipped at 6b-5d. What is left is
+    Queues, which is 6b-6, and Suggestions, which R11-D22 blocked. An earlier
+    revision of this note said eight, and it was already stale when the PRs
+    tab landed -- which is the argument for enumerating rather than
+    updating.)*
   - Three pieces of the contract are absent beyond the tabs: no plugin-tab
     loader at all (five tabs are supposed to arrive through one — 6b-2 has
     since built it, recorded in its own entry below rather than backdated into
@@ -2090,6 +2096,54 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     IP-URL path that exists for a phone whose resolver ignores MagicDNS.
     R11-D10 already framed that as "carry both or knowingly drop one"; this is
     the point at which it stops being hypothetical.
+  - **The cap is re-derived and split: R11-D24.** 6b-7 finished at **4,000 of
+    4,000**, and the honest account of its last hour is that it was spent
+    deleting rationale to fit a branch -- a docstring, a comment, three
+    separate passes, each trimming an explanation somebody had written because
+    they needed it. The change was not oversized and `install` had already
+    gone to `bin/` as required. What ran out was the allowance R11-D17 made
+    *for prose*, in its own words: "4,000 is that plus room for this
+    repository's comment convention."
+    **Measured rather than argued:** 4,000 lines, **2,141 carrying code and
+    1,859 comments, docstrings and blanks -- 46%**. R11-D17's "roughly half"
+    was right and its allowance for that half was not. One ceiling over both
+    halves puts a branch and a paragraph in a bid for the same line, and the
+    paragraph loses every time, because the branch is what the change is for.
+    **So the ceiling is two numbers: 4,300 total, 2,300 carrying code.** The
+    total is 4,000 measured plus an itemised ~175 for what is left (6b-8's
+    second address bind ~25, the ack store and its control ~100, swap-time
+    carry ~50) times the overrun this project has now measured twice -- Now at
+    +77%, the write path at +69%. The code half is 2,141 plus the ~54% of that
+    remainder which is code rather than prose. They bind at nearly the same
+    point on purpose: work in house style exhausts both together, and work
+    that is only code hits the code cap first.
+    **What the split is worth, checked by breaking it.** 200 lines of pure
+    code reds the code cap while the total still passes; 200 lines of pure
+    comment passes both; 400 lines of pure comment reds the total. Prose can
+    grow into the room the raise bought and code cannot, which is the entire
+    point and would be a claim rather than a fact without those three runs.
+    **And the downward-only clause moved rather than went.** R11-D17 said
+    4,000 could only fall. This raises it, once, in its own record, by a
+    change that fits under the old ceiling -- and hands the clause to the code
+    cap, which may only fall. `bin/`'s 14,000 keeps the original rule
+    untouched and is not close to binding at 7,925. Today: **4,000 of 4,300,
+    300 left; 2,141 of 2,300, 159 left.**
+    **The adversarial pass found one overlap and rebutted one figure.** The
+    layout table listed `sd-dashboard` inside the `dashboard/` bucket and hung
+    the new ceiling on that bucket, while `tests/test_loc_caps.py:110` charges
+    the CLI to `bin/` on purpose -- so the written cap covered a file the
+    enforced cap did not, and the two would have overlapped the moment anyone
+    reconciled them. The layout line now says where the CLI charges. The
+    figure challenged and kept: `bin/` at **7,925**, which is a raw count of
+    9,175 minus the `migrate-*` tools that hold their own 1,500 ceiling --
+    correct as written, and only correct because the cap test enumerates the
+    same way.
+    **The parity table's live column was wrong while all this was being
+    measured.** `Now · PRs` still read *no* after 6b-5b and 6b-5c built both,
+    and the verdict paragraph said eight tabs exist when twelve serve. Fixed
+    by enumerating from `app.js`'s tab list and the loader's own reply, not by
+    editing the number -- an updated count goes stale on the next landing and
+    an enumerated one does not.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own

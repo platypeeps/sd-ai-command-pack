@@ -4,11 +4,21 @@ The design fixes a ceiling for each part of the replacement world -- `bin/` at
 14,000 lines (R11-D15, re-derived from built code after 8,000 was busted with
 six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`, `sd-spec`,
 `sd-deps`, `sd-suggest`, `sd-map`), the temporary `migrate-*` tools at 1,500
-outside it, `dashboard/` at 4,000 (R11-D17) -- and says in as many words that "caps are
+outside it, `dashboard/` at 4,300 with 2,300 of it carrying code (R11-D24) -- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
-both re-derivations: 14,000 and 4,000 were each set in their own decision
-record by a change that fit under the ceiling it replaced, not in a pull
-request that did not fit, and both may only move downward from here.
+every re-derivation: 14,000, 4,000 and 4,300 were each set in their own
+decision record by a change that fit under the ceiling it replaced, not in a
+pull request that did not fit.
+
+**Downward-only now attaches to the code cap, not to the dashboard total.**
+R11-D17 said 4,000 could only fall; R11-D24 raised it anyway, and said so in
+its own record rather than in the change that crossed it. The reason is the
+thing this file measures: 46% of `dashboard/` is comments, docstrings and
+blanks, which is house style, and one ceiling over both halves means a branch
+and a paragraph bid for the same line -- the paragraph loses, because the
+branch is what the change is for. So the total may be re-derived with an
+itemisation, and `DASHBOARD_CODE_CAP` is the one that may only move downward.
+`bin/`'s 14,000 keeps the original clause, untouched and nowhere near binding.
 
 Until now they were prose. The retired stack this repository is replacing
 reached 95,000 lines one defensible commit at a time, and no single one of
@@ -33,8 +43,12 @@ asked.
 
 from __future__ import annotations
 
+import io
 import pathlib
+import shutil
 import subprocess
+import tempfile
+import tokenize
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -43,7 +57,13 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # record rather than at a bare number.
 BIN_CAP = 14_000           # R11-D15: derived from built code, not from unwritten scope
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
-DASHBOARD_CAP = 4_000      # R11-D17: re-derived at 6b-3 from files that exist
+DASHBOARD_CAP = 4_300      # R11-D24: re-derived at 6b-7 from files that exist
+# The half that cannot be paid for with prose. R11-D24 split the dashboard
+# ceiling in two because a single total let a docstring and a branch compete
+# for the same line, and 6b-7 was spent deleting rationale to fit a write path
+# -- which is the cap working against the comment convention it was explicitly
+# widened to hold. This one bounds what the other cannot: code.
+DASHBOARD_CODE_CAP = 2_300 # R11-D24: the half a docstring cannot buy back
 
 
 def tracked(*pathspecs: str) -> list[pathlib.Path]:
@@ -57,6 +77,47 @@ def tracked(*pathspecs: str) -> list[pathlib.Path]:
         check=True,
     ).stdout
     return [REPO_ROOT / name for name in output.split("\0") if name]
+
+
+# Everything that is not a line of code: a comment, a docstring, a blank. The
+# string tokens are the load-bearing exclusion -- roughly half of every Python
+# file here is docstring, which is house style and the reason a code-only
+# measure had to exist at all.
+NOT_CODE = frozenset({
+    tokenize.COMMENT, tokenize.STRING, tokenize.NL, tokenize.NEWLINE,
+    tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER,
+})
+
+
+def code_line_count(paths: list[pathlib.Path]) -> int:
+    """Lines carrying code, with comments, docstrings and blanks left out.
+
+    Python is tokenised rather than pattern-matched, because the alternative
+    is a regex that cannot tell `# a comment` from `url = "http://x/#frag"`
+    and would drift in whichever direction its author was hoping for.
+
+    JavaScript has no tokeniser in the standard library, so it is measured by
+    the crude rule -- a non-blank line that does not open with `//`. That is
+    **conservative on purpose**: it counts a `/* */` block as code, so the
+    error can only tighten this cap, never loosen it. `dashboard/app.js` holds
+    no block comment today and the measure is checked, not assumed.
+    """
+
+    total = 0
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        if path.suffix != ".py":
+            total += sum(
+                1 for line in text.splitlines()
+                if line.strip() and not line.strip().startswith("//")
+            )
+            continue
+        seen = set()
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type not in NOT_CODE and token.string.strip():
+                seen.add(token.start[0])
+        total += len(seen)
+    return total
 
 
 def line_count(paths: list[pathlib.Path]) -> int:
@@ -123,6 +184,67 @@ class LineCountCaps(unittest.TestCase):
         paths = tracked("dashboard")
         self.assertTrue(paths, "dashboard/ enumeration matched no tracked files")
         self.assert_cap("dashboard/", paths, DASHBOARD_CAP)
+
+    def test_the_dashboard_code_stays_under_its_own_ceiling(self) -> None:
+        """The half a docstring cannot buy back (R11-D24).
+
+        The total above may be paid for in prose; this one may not. It is the
+        cap that binds when code grows, so that fitting a change never means
+        deleting the reasoning for a different one -- which is what 6b-7 spent
+        its last hour doing under a single combined ceiling.
+        """
+
+        paths = tracked("dashboard")
+        self.assertTrue(paths, "dashboard/ enumeration matched no tracked files")
+        total = code_line_count(paths)
+        self.assertLessEqual(
+            total,
+            DASHBOARD_CODE_CAP,
+            f"dashboard/ carries {total} lines of code against a cap of "
+            f"{DASHBOARD_CODE_CAP}. Prose is not what busted this one, so prose "
+            f"is not what fixes it: the cap is a design decision (R11-D24), "
+            f"raised only in its own record and never in the pull request that "
+            f"crossed it.",
+        )
+
+    def test_the_code_measure_does_not_count_prose_as_code(self) -> None:
+        """The measure is the cap, so a measure that drifts is a cap that lies.
+
+        Checked against a file whose answer is known by construction rather
+        than against `dashboard/`, whose answer changes with every commit.
+        """
+
+        scratch = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        module = scratch / "sample.py"
+        module.write_text(
+            '"""A docstring.\n\nSpanning several lines, none of them code.\n"""\n'
+            "\n"
+            "# A comment.\n"
+            "VALUE = 1  # code, despite the comment\n"
+            'TEXT = """\nstill an assignment, and only its first line is code\n"""\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(code_line_count([module]), 2)
+
+        script = scratch / "sample.js"
+        script.write_text(
+            "// a comment\n\nconst x = 1; // trailing\n  // indented comment\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(code_line_count([script]), 1)
+
+    def test_no_javascript_under_the_cap_hides_prose_in_a_block_comment(self) -> None:
+        """The JS measure cannot see `/* */`, so it is checked that none exists.
+
+        Without this the conservative direction is only an assumption: a file
+        that started using block comments would have them counted as code,
+        and the first person to notice would be whoever the cap failed on.
+        """
+
+        for path in tracked("dashboard"):
+            if path.suffix == ".js":
+                self.assertNotIn("/*", path.read_text(encoding="utf-8"), str(path))
 
 
 if __name__ == "__main__":
