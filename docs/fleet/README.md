@@ -12,8 +12,17 @@
 > no repo-path argument and no fleet walk (R10-D6)" -- and the tools that
 > consumed it (`templates/scripts/sd-ai-command-pack-status.py fleet`,
 > `install.py --configure-fleet`) were deleted on 2026-08-30 by step 3e
-> (`43170716`, #610). One of its ten rows, `sd-github-review`, names a
-> repository that step 4 archived on 2026-08-31.
+> (`43170716`, #610). Two of its ten rows name repositories that are now
+> archived: `sd-github-review`, archived by step 4 on 2026-08-31, and
+> `se-ai-command-pack`, archived on 2026-09-01 once its fold was verified
+> complete -- agents and skills diffed both directions from the filesystem,
+> with the only three skills lacking an `sd-*` counterpart confirmed as the
+> recorded retirements at `implement.md:1074-1077` rather than drops.
+>
+> **The rows stay as written, and that is the point of this notice.** A
+> registry nothing reads is a record, and correcting a record in place is how
+> a repository loses the ability to say what it once believed. Neither file
+> below is edited; what changes is what this page says about them.
 >
 > `surface-partition.json` (schema version 1, 4,529 lines) partitions the
 > `manifest.json` payload of release 0.72.0 into machine, repo-native and
