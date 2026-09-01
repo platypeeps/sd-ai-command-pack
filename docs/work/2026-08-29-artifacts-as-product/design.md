@@ -219,7 +219,8 @@ that globs a directory would be the disk scan the interface refuses). Now screen
 mutation maps 1:1 to a bin/ command (RUN_ALLOWLIST); server never commits/pushes/runs agents.
 Sessions tab = `git worktree list` + running sd-* processes (replaces Trellis `.runtime/sessions`
 — the Trellis-hooks answer: **no hook carries over**). Lands on **:8768 beside** the system
-dashboard; per-tab parity checklist gates the swap to :8767 at step 6b. Deferred behind standing
+dashboard; per-tab parity checklist gates the swap to :8767 at step 6b. *(Taken at 6b-8:
+`DEFAULT_PORT` is 8767, and the LaunchAgent carries the tailnet bind.)* Deferred behind standing
 rule 1: FTS/Search, log streaming, session launcher. Phone access is **decided as (c)** — see
 R11-D10 below; the swap at 6b carries today's tailnet reach and its token-gated writes rather
 than regressing them. A plugin tab may also return **alert rows for Now** — see R11-D12; a

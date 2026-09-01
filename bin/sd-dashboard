@@ -42,6 +42,10 @@ LABEL = "com.sven.sd-dashboard"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOGS = Path.home() / "Library" / "Logs"
 
+# Homebrew first, because that is where `tailscale` and a current `git` live
+# on this machine; the system paths follow so nothing is lost.
+LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
 PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -55,7 +59,18 @@ PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
  <key>StandardOutPath</key><string>{logs}/{label}.log</string>
  <key>StandardErrorPath</key><string>{logs}/{label}.err</string>
  <key>EnvironmentVariables</key>
- <dict><key>SD_REPO_ROOT</key><string>{root}</string></dict>
+ <dict><key>SD_REPO_ROOT</key><string>{root}</string>
+  <!-- launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin, which holds neither
+       `git` nor `tailscale`. Under it the fleet reads as zero repositories and
+       the tailnet bind silently does nothing, both of them looking like a
+       quiet dashboard rather than a broken one. -->
+  <key>PATH</key><string>{path}</string>
+  <!-- Also listen on this node's tailnet addresses, not just loopback: an IP
+       URL keeps working on a device whose resolver ignores MagicDNS. On here
+       and off in a hand-run `serve`, because installing is asking for the
+       service the system dashboard provided, and R11-D10 says carry both
+       paths or knowingly drop one. -->
+  <key>{bind}</key><string>1</string></dict>
 </dict></plist>
 """
 
@@ -92,7 +107,8 @@ def cmd_install(args: argparse.Namespace, out) -> int:
     program = str(Path(__file__).resolve())
     body = PLIST_BODY.format(
         label=LABEL, program=program, port=args.port,
-        logs=LOGS, root=collect.repo_root(),
+        logs=LOGS, root=collect.repo_root(), path=LAUNCHD_PATH,
+        bind=server.TAILNET_BIND,
     )
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     PLIST.write_text(body, encoding="utf-8")
