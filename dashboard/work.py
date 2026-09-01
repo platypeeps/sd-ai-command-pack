@@ -146,10 +146,13 @@ def collect_work(root: Path) -> dict:
             row = {"repo": where, **read_item(item)}
             if not row["status"]:
                 unstated.append(row)
-            elif row["status"] in SETTLED:
-                counts[row["status"]] = counts.get(row["status"], 0) + 1
-            else:
-                counts[row["status"]] = counts.get(row["status"], 0) + 1
+                continue
+            # Counted once, on one path: every status the fleet states lands
+            # here, and `moving` is a subset chosen afterwards. The increment
+            # used to sit in both branches, which is what made it readable as
+            # "settled only" and put that error in two docstrings.
+            counts[row["status"]] = counts.get(row["status"], 0) + 1
+            if row["status"] not in SETTLED:
                 moving.append(row)
 
     moving.sort(key=lambda row: (row["status"], row["repo"], row["name"]))
