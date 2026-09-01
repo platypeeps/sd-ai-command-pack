@@ -2198,25 +2198,79 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     steps from here. Every file named in this entry is that repository's, not
     this one's: 6b-6 changed no pack code.
   - **What must be true before the swap**, the gate itself:
-    - [ ] every tab marked "backbone" above serves from the pack dashboard
+    - [x] every tab marked "backbone" above serves from the pack dashboard
+          — all nine routes answer with data: 79 repos, 6 moving work items,
+          44 Now rows, 138 skills, 8 worktrees, 23 PRs needing you
     - [x] every tab marked "plugin tab" loads through `~/repos/system`'s own
           registered manifest and its tile, code and pinned actions still
           system-owned — 6b-4 for five, 6b-6 for Queues; six tabs and five
           `sys/`-namespaced actions verified against a live server
     - [x] Ports and rtk have a recorded decision — R11-D12, 2026-08-31
-    - [ ] Now emits every rank-0 and rank-1 row it emits today, from plugin
-          sources as well as backbone ones (R11-D12's optional row key wired,
-          and the count checked against `attentionItems()` rather than assumed)
+    - [x] Now emits every rank-0 and rank-1 row it emits today, from plugin
+          sources as well as backbone ones — checked against `attentionItems()`
+          rather than assumed: the system's own function, run over its live
+          state, yields **7 rows at rank ≤1** and the pack's `/api/now` yields
+          **the same 7 signals**: one cron exit, five cron failure lines, and
+          one overdue-tasks row that counts 52. Seven rows, not fifty-eight --
+          the overdue row is a count, which is what makes it one row and what
+          brings it back when the count changes. Every one of them arrives
+          through a plugin tile, which is what R11-D12's row key was for
     - [x] `RUN_ALLOWLIST` exists and every UI mutation maps 1:1 to a `bin/`
           command — 6b-7. One action today (`index`); 6b-6's queue actions
           arrive through the manifest and the same map
-    - [ ] `sd-dashboard install` exists and replaces the system LaunchAgent
-    - [ ] `index --dump` diffed against the system `/api/state` is empty for
-          every shared fact
-    - [ ] tailnet reach and token-gated writes carried, not regressed (R11-D10
-          decided phone access as (c))
-    - [ ] `lsof -i :8767` shows exactly one listening process, and it is the
-          pack's dashboard rather than the system one
+    - [x] `sd-dashboard install` exists and replaces the system LaunchAgent
+          — `com.sven.project-dashboard` stopped and unloaded,
+          `com.sven.sd-dashboard` bootstrapped in its place
+    - [x] `index --dump` diffed against the system `/api/state` is empty for
+          every shared fact — **0 differences** over 79 repositories and the
+          12 fields both report, against a system state refreshed first so the
+          diff could not be staleness
+    - [x] tailnet reach and token-gated writes carried, not regressed —
+          three sockets, the same three the system dashboard held, and
+          `/api/actions` answers over the tailnet v4 bind. The v6 path is the
+          one thing not provable from this host: the system dashboard's own v6
+          socket times out from here too
+    - [x] `lsof -i :8767` shows exactly one listening process, and it is the
+          pack's dashboard rather than the system one — pid 83558,
+          `bin/sd-dashboard serve --port 8767`
+- [x] **6b-8 — the swap. The pack dashboard holds :8767.** The system
+  dashboard is stopped and unloaded; `com.sven.sd-dashboard` is bootstrapped in
+  its place, binding the same three addresses on the same port. Every gate item
+  above is now ticked, and each was measured rather than asserted.
+  - **The bind was the part that could not be assumed.** R11-D10's correction
+    said the reach is two paths and 6b had to carry both or knowingly drop one.
+    `serve` now binds one server per address and never the wildcard, which
+    would publish this on every network the machine joins. **An address it
+    binds is an address it must answer to** — the allow-list holds the bound
+    addresses as well as the MagicDNS names, or the bind serves 403s to the one
+    path it exists for. Review found two more: one probe now feeds both the
+    allow-list and the binding, since asking twice lets the tailnet come up in
+    between; and `tailscale ip` is trusted only when it succeeded and only for
+    lines that parse as addresses.
+  - **launchd's PATH was the quiet one.** It holds neither `git` nor
+    `tailscale`, so the installed service would have read the fleet as zero
+    repositories and bound nothing but loopback — a dashboard that looks calm
+    rather than broken. The plist sets a PATH and turns the bind on, and the
+    test reads the parsed plist rather than the template.
+  - **What the parity checks actually found: nothing.** 79 repositories, 12
+    shared fields, zero differences; seven rank-≤1 rows on both sides. That is
+    the outcome the four preceding sub-steps were building toward, and it is
+    worth recording that the diff was empty on the first run rather than after
+    a round of corrections.
+  - **What did not come across, stated plainly.** `/api/ack` has no counterpart
+    here, so a dismissed row will return; the system dashboard's per-note
+    status writing went with Queues under R11-D25; and the v6 URL is unverified
+    from this machine because nothing on it can reach a tailnet v6 address,
+    including the dashboard being replaced.
+  - **Cost:** +93 lines in `dashboard/`, which stands at **4,093 of 4,300** and
+    **2,186 of 2,300 carrying code**. R11-D24 itemised ~25 for this bind and
+    it took ~60 once the review fixes were in — another overrun, after Now at
+    +77% and the write path at +69%, and the reason that record multiplied its
+    estimates rather than trusting them. The ~175 it budgeted has ~93 spent
+    and the ack store still unbuilt.
+  - Remaining in 6b: the deletion of the system `dashboard.py`, which cannot be
+    a bare `rm` — `sd_tile.py` imports it for the collectors behind all six
+    plugin tabs, so the server half goes and the collectors stay.
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.
