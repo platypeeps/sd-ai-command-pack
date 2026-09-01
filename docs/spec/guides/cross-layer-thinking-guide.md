@@ -1,5 +1,22 @@
 # Cross-Layer Thinking Guide
 
+> [!important]
+> **Partly stale as of 2026-09-01.**
+> The general sections -- data flow, boundaries, contracts, the four cross-layer
+> mistakes, the event-log/projection boundary -- stand. Three later ones do not.
+> "Cross-Platform Template Consistency" and "Generated Runtime Template Upgrade
+> Consistency" are about the per-platform command templates under `templates/`,
+> deleted on 2026-08-30 by step 3e (`43170716`, #610), and "Versioned
+> Documentation Boundary" is about the upstream Trellis docs site
+> (`docs-site/beta/**`, `docs-site/rc/**`), which is not part of this
+> repository. `.trellis/workflow.md`, `.trellis/.version`, `get_context.py` and
+> `workflow_phase.py` are target-repo Trellis paths and unreachable from here.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > **Purpose**: Think through data flow across layers before implementing.
 
 ---

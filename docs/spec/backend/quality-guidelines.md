@@ -1,5 +1,40 @@
 # Quality Guidelines
 
+> [!important]
+> **Partly stale as of 2026-09-01.**
+> Eighteen of this page's twenty-four sections are named contracts for shipped
+> scripts that no longer exist -- the review preflight, the PR eligibility
+> evaluator, the housekeeping result, the status work-loop snapshot, the session
+> recorder, the shipped-script coverage gate, the JavaScript coverage lane, the
+> bookkeeping-only CI fast lane and the rest. Their subjects went in two waves:
+> the release train at step 0 (2026-08-29, #597) and the whole of
+> `templates/` plus `installer/`, `install.py`, `scripts/` and `manifest.json`
+> at step 3e (2026-08-30, `43170716`, #610). The Trellis task directories,
+> `task.json` files and `.trellis/workspace/` journals that several contracts
+> read were replaced by `docs/work/` at step 2. A mechanical check of the page's
+> citations: of 80 backticked paths, **67 name something that is not in
+> `git ls-files`**.
+>
+> Three parts still hold and are worth not losing.
+> **"Silent Paths Must Say Why"** is a general rule with no deleted
+> subject, and the four defects it was adopted from are still the argument for
+> it. The **bash 3.2 warning block** inside Testing Requirements is
+> **live and accurate**: `.github/scripts/check-bash32-syntax.sh` exists, `make
+> lint` runs it, and CI runs it under `STRICT=1` in the `bash32` job, exactly as
+> described -- `CONTRIBUTING.md` carries the same account. The surrounding
+> Testing Requirements prose is not: it names a Ruff scope over `install.py`,
+> `installer/`, `scripts/` and `templates/scripts/` (the live scope is
+> `LINT_RUFF_PATHS` in the Makefile) and a macOS unittest leg that R11-D4
+> dropped. Most of the manifest-path, symlink-escape and occupied-target rules
+> under **Required Patterns** and the **Code Review Checklist** describe an
+> installer that wrote into other repositories; `bin/sd_install.py` is
+> machine-scope and writes no tracked file anywhere.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Code quality standards for backend and CLI development.
 
 ---

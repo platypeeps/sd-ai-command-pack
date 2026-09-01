@@ -1,5 +1,35 @@
 # Adapter Guidelines
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> Every one of the thirteen `Scenario:` sections below specifies a command
+> surface that shipped as a `templates/` adapter plus a `templates/scripts/`
+> coordinator, and both directories were deleted on 2026-08-30 by step 3e
+> (`43170716`, #610). The example this triage was pointed at is the routed review
+> coordinator `python3 templates/scripts/sd-ai-command-pack-review.py`, under
+> "Scenario: Unified exact-scope routed review", together with the consumer
+> configuration it reads, `.sd-ai-command-pack/review.json` schema version 1.
+> Neither exists. The live review surface is `bin/sd-review` with
+> `.github/sd-review.json`, written by `sd-review setup-github` -- a different
+> file with a different schema, in a different place, opted into per repository
+> rather than installed.
+>
+> The rest of the page's machinery went the same way: `.github/command-sources/`
+> and the generated `.commands/`, `.claude/`, `.gemini/` and `.github/prompts/`
+> adapter sets, `templates/.agents/skills/**/SKILL.md` (one per command),
+> `templates/scripts/sd-ai-command-pack-full-check.sh`, `-work-loop.py`,
+> `-update-spec-kb.py`, `docs/repomix-map.md` and the `.obsidian-kb` export.
+> A mechanical check of the page's citations: of 93 backticked paths,
+> **81 name something that is not in `git ls-files`**. The Shared Skill Pattern,
+> Platform Adapter Pattern, Drift Control and Anti-Patterns sections at the top
+> and bottom are about keeping many copies of one workflow in step, which is a
+> problem the pack no longer has: `skills/sd-*/SKILL.md` is the one copy.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > How shared workflow instructions and platform entry points are written.
 
 ---

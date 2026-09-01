@@ -1,5 +1,20 @@
 # Bookkeeping Validator Notes
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> The file this page documents,
+> `templates/scripts/sd-ai-command-pack-review-preflight.mjs`, was deleted on
+> 2026-08-30 with the whole of `templates/` by step 3e (`43170716`, #610), and
+> `tests/test_review_preflight.py` and `tests/test_bookkeeping_validator.py`
+> with it. The Trellis task directories, journal bundles and completion receipts
+> its contracts are about were removed at step 2, when `docs/work/` replaced
+> `.trellis/`. Nothing in the repository validates a bookkeeping bundle today.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Non-obvious gotchas and conventions specific to
 > `templates/scripts/sd-ai-command-pack-review-preflight.mjs`, learned from
 > `docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor`.

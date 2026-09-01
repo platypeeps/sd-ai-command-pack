@@ -2774,6 +2774,128 @@ timeout, because macOS TCC turns an unauthorized read of `~/Documents` into a
 missing" from "path present" will hang instead of reporting, and an unattended
 caller will look slow rather than blocked.
 
+  - **7-triage — 2026-09-01. The survivors, enumerated.** Step 7's checklist row
+    said "triage survivors" and the step closed without it; the step 4 entry said
+    the next pass should "find it by reading rather than by grepping", so this is
+    that pass. Three trees, **25 tracked files, 15,006 lines**, every one of them
+    dispositioned against the working tree rather than against the earlier note.
+    **Nothing was deleted.** 7,839 lines of specification is a content decision
+    for the maintainer, so what landed is the non-destructive half: a dated
+    notice at the top of every stale page, `CONTRIBUTING.md` and `AGENTS.md`
+    corrected, and the delete column left standing as a recommendation with its
+    evidence attached.
+
+    **The recorded note was right about the fleet files and wrong about
+    `docs/spec/`, and the difference matters.** "No code reads either, only
+    `CONTRIBUTING.md` and two spec pages" holds for `docs/FLEET_ROLLOUT.md` and
+    `docs/fleet/**` — verified rather than trusted, below. It does **not** hold
+    for `docs/spec/`, which three live code paths and one skill still touch:
+    `bin/sd-docs-lint` rule 4 enumerates the tree at run time and fails a spec
+    directory that holds pages without an `index.md` linking each of them;
+    `.github/sd-review.json:19` and `bin/sd_route.py:24` both carry
+    `docs/spec/**` in `never_skip`, so a change there is never routed past
+    review; and `skills/sd-spec/SKILL.md` writes into it as `sd-ship`'s second
+    stage. The tree is a live surface whose *content* is stale — not orphan
+    text. That is why the delete column below carries an ordering constraint the
+    fleet files do not: rule 4 tolerates an index linking a page that is gone,
+    so a page may leave alone, but a directory has to leave **with** its index.
+
+    **Where the "nothing reads this" claim was checked, since it is only as good
+    as the grep behind it.** Inside the repository: every tracked and untracked
+    file except `.git`, for `FLEET_ROLLOUT`, `docs/fleet`, `consumers.json` and
+    `surface-partition.json` — six files match, and all six are prose:
+    `CONTRIBUTING.md`, `CHANGELOG.md` (history), `docs/review-learnings.md`
+    (historical PR entries), `docs/spec/backend/manifest-and-filesystem.md`
+    (itself stale), the rollout journal, and `docs/FLEET_ROLLOUT.md` itself. No
+    hit in `bin/`, `dashboard/`, `skills/`, `tests/`, `.github/`, `actions/` or
+    `agents/`. Outside it: `~/.claude/skills`, `~/.claude/agents`,
+    `~/.claude/commands`, `~/.claude/plugins`, `~/.claude/*.json|*.md` and
+    `~/.config` — **0**; and all seventeen sibling repositories under
+    `~/repos/platypeeps/` plus `~/repos/system`, `~/repos/mezmo`, `~/repos/rwbp`,
+    `~/repos/hoa`, `~/repos/ai` and `~/repos/github-commit-audit` — **0**. The
+    three consumer repositories that have a `docs/spec/` of their own have their
+    own, and do not reference this one.
+
+    **The existence check was mechanical, not impressionistic.** Every
+    backticked token in every page that parses as a path was resolved against
+    `git ls-files` (script kept out of tree; the counts are reproducible from
+    it). Aggregate: **807 path citations across the 23 markdown pages, 681 of
+    them naming something that is not in the tree.** Per-page counts are in the
+    table. It is a floor, not a ceiling — it cannot see a command name or a
+    schema field that no longer exists, only a path.
+
+    | File | Lines | Missing/total paths | What it specifies | Disposition |
+    |---|---:|---:|---|---|
+    | `docs/spec/backend/index.md` | 59 | 7/11 | Scope and checklist for `install.py`, `manifest.json`, `installer/`, `tests/install_test_support.py` | **delete** — conditional |
+    | `docs/spec/backend/directory-structure.md` | 88 | 22/23 | `install.py` + six `installer/` modules + `manifest.json` + `templates/` + `scripts/` layout; `PLATFORM_REGISTRY` | **delete** |
+    | `docs/spec/backend/error-handling.md` | 198 | 2/2 | `install.py` exit-code contract; three transferable diagnostic lessons | **stale-notice** |
+    | `docs/spec/backend/fleet-consumer-conversion.md` | 140 | 3/4 | running `install.py <consumer>` across the fleet; `--thin`/`--resweep-verdict`; `sd-status fleet` | **delete** |
+    | `docs/spec/backend/logging-guidelines.md` | 80 | 1/2 | installer status lines; `_SECRET_SHAPES` in `templates/scripts/sd_ai_command_pack_lib.py` | **delete** |
+    | `docs/spec/backend/manifest-and-filesystem.md` | 2,998 | 302/377 | the whole manifest/installer/plugin-generation/payload-gate/fleet-campaign model | **stale-notice** |
+    | `docs/spec/backend/quality-guidelines.md` | 2,015 | 67/80 | 18 named contracts for deleted shipped scripts; the live bash 3.2 gate; "Silent Paths Must Say Why" | **stale-notice** |
+    | `docs/spec/frontend/index.md` | 76 | 14/16 | `templates/`, `.github/command-sources/`, `manifest.json`, `make generate` | **delete** |
+    | `docs/spec/frontend/directory-structure.md` | 60 | 9/9 | the per-platform adapter layout under `templates/` | **delete** |
+    | `docs/spec/frontend/adapter-guidelines.md` | 2,042 | 81/93 | 13 `Scenario:` sections, each a deleted command surface; the review coordinator and `.sd-ai-command-pack/review.json` | **delete** |
+    | `docs/spec/frontend/quality-guidelines.md` | 83 | 11/11 | adapter drift rules keyed on `manifest.json` | **delete** |
+    | `docs/spec/guides/index.md` | 183 | 8/11 | thinking-guide index + AI-review verification checklists | **stale-notice** |
+    | `docs/spec/guides/code-reuse-thinking-guide.md` | 223 | 9/9 | general reuse guidance; a Trellis-CLI tail that never applied here | **stale-notice** |
+    | `docs/spec/guides/cross-layer-thinking-guide.md` | 281 | 22/22 | general cross-layer guidance; three template/docs-site sections that do not | **stale-notice** |
+    | `docs/spec/tooling/index.md` | 81 | 24/26 | scope list of six deleted scripts and two deleted test modules | **delete** |
+    | `docs/spec/tooling/bookkeeping-validator.md` | 226 | 8/9 | `review-preflight.mjs` internals; Trellis bundles and receipts | **delete** |
+    | `docs/spec/tooling/fleet-publish-acceptance-criteria.md` | 112 | 6/7 | `fleet-publish.py` PRD tick; `sd-fleet-refresh`; `task.py archive` | **delete** |
+    | `docs/spec/tooling/fleet-publish-generated-content.md` | 110 | 9/10 | `fleet-publish.py` ordering; `docs/repomix-map.md`; `.obsidian-kb` block | **delete** |
+    | `docs/spec/tooling/review-attempt-state.md` | 145 | 3/3 | the deleted review coordinator's per-attempt state cache | **delete** |
+    | `docs/spec/tooling/runtime-coverage-lanes.md` | 97 | 14/16 | the kcov shell-coverage lane, retired by R11-D6 | **delete** |
+    | `docs/spec/tooling/surface-retirement-doc-gates.md` | 126 | 23/25 | two doc gates that were themselves deleted at 3e | **delete** |
+    | `docs/spec/tooling/vendored-trellis-compatibility.md` | 214 | 26/29 | wrappers around `.trellis/scripts/task.py` and `add_session.py` | **delete** |
+    | `docs/FLEET_ROLLOUT.md` | 510 | 10/12 | the campaign controller, refresh shape, cohort waves, thin conversion | **delete** |
+    | `docs/fleet/consumers.json` | 330 | n/a | schema-5 rollout order, cohorts and install mode for ten consumers | **delete** |
+    | `docs/fleet/surface-partition.json` | 4,529 | 731/740 targets | the 0.72.0 payload partitioned across eighteen platforms | **delete** |
+
+    **Keep 0, stale-notice 6, delete 19.** No page in these trees is accurate as
+    it stands, which is why the keep column is empty rather than generous — the
+    six marked stale-notice are mixed, not correct.
+
+    **The one conditional row, and it is a real constraint rather than a
+    hedge.** `docs/spec/backend/index.md` is the rule-4 index for a directory
+    three of whose seven pages are staying. Deleting it while `error-handling.md`,
+    `manifest-and-filesystem.md` and `quality-guidelines.md` remain makes
+    `sd-docs-lint` fail on `docs/spec/backend` — "every spec directory has an
+    index.md". So it is delete-with-the-directory or rewrite-down-to-the-
+    survivors, never delete alone. `docs/spec/frontend/` (4 files) and
+    `docs/spec/tooling/` (8 files) carry no such constraint: every page in each
+    goes, index included, and the directory leaves whole. `docs/spec/guides/`
+    stays whole.
+
+    **Two facts that would change a disposition if they turned out otherwise,
+    stated so they can be checked rather than assumed.** First, the
+    `docs/spec/backend/manifest-and-filesystem.md` Trellis-gitignore section is
+    load-bearing in one direction: `CONTRIBUTING.md` keeps the vestigial
+    `SD-AI-COMMAND-PACK` markers in `.gitignore` *because* that section still
+    specifies them, so deleting the page without settling the markers moves the
+    problem rather than closing it. Second, that page's Machine-Scope Installer
+    section is the design `bin/sd_install.py` implements, told through
+    `installer/machinescope.py`, `installer/machinepayload.py` and
+    `bin/sd-machine-install` — files that no longer exist. It is a design
+    record, and whether a design record belongs in `docs/spec/` or in
+    `docs/work/archive/` is the question its disposition actually turns on.
+    Neither was decided here.
+
+    **Three things were decided against.** Rewriting the six mixed pages down to
+    their true parts — that is a content rewrite wearing a triage's clothes, and
+    it would have destroyed the record of what the machinery was, which is the
+    only thing these pages are still good for. Putting the notice inside the two
+    JSON files — JSON takes no comment, and inventing a `"_stale"` key changes a
+    schema to carry prose; `docs/fleet/README.md` says it beside them instead.
+    And retitling each page the way the `sd-github-review` README tombstone
+    retitled its repository — the H1 of a spec page is not a claim that can go
+    stale, so the notice carries the date and the H1 is left alone.
+
+    **Verified**: `make check` green before and after
+    (`VENV=/Users/sven/repos/platypeeps/sd-ai-command-pack/.venv`, since a fresh
+    worktree has none) — "All checks passed!"; `bin/sd-docs-lint` clean, which is
+    the check that matters here because rule 4 is the only automated thing that
+    reads this tree.
 ### Step 8, slices i-iii: the manifest gets teeth, and the vault gets read (2026-09-01)
 
 Three PRs, landed in order. Step 8 is not done -- the write verbs and the

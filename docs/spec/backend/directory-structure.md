@@ -1,5 +1,20 @@
 # Directory Structure
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> This page describes a layout that no longer exists. `install.py`, the six
+> `installer/` modules it names (`manifest.py`, `registry.py`, `fileops.py`,
+> `localonly.py`, `provenance.py`, `removal.py`), `manifest.json`,
+> `templates/`, `scripts/`, `.github/command-sources/` and
+> `tests/install_test_support.py` were all deleted on 2026-08-30 by step 3e
+> (`43170716`, #610). `PLATFORM_REGISTRY` went with `installer/registry.py`.
+> The installer surface today is `bin/sd_install.py`, one file.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > How backend and CLI code is organized in this project.
 
 ---

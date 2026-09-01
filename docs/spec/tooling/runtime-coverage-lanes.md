@@ -1,5 +1,21 @@
 # Runtime Coverage Lanes
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> The lane this page documents was retired, not moved.
+> `.github/scripts/kcov-bash-shim.sh`, `summarize_shell_coverage.py` and
+> `report-shell-coverage.sh` are gone, and the `Shell coverage` job was removed
+> from `.github/workflows/tests.yml` at step 3e under decision R11-D6 -- the one
+> retirement in that step that also required a branch-protection change, since
+> it was a required context. Nothing it measured is now unmeasured: the shipped
+> shell payload it ran against was deleted in the same step (2026-08-30,
+> `43170716`, #610). `CONTRIBUTING.md` records all three retired coverage lanes.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > How the shipped runtime surface (Python, Node, shell) is measured in CI, and
 > the non-obvious gotchas that cost real debugging time. Read before touching
 > `.github/scripts/kcov-bash-shim.sh`, `summarize_shell_coverage.py`,

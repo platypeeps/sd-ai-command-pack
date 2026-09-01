@@ -1,5 +1,21 @@
 # Installer CLI Guidelines
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> Every subject in the Scope and Pre-Development Checklist below is gone.
+> `install.py`, the `installer/` package, `manifest.json`, `templates/` and
+> `tests/install_test_support.py` were deleted on 2026-08-30 by step 3e of the
+> artifacts-as-product rollout (`43170716`, #610 -- 365 files, 183,433
+> deletions). What replaced them is one file, `bin/sd_install.py`, plus
+> `tests/test_sd_install.py`; `manifest.json` has no successor, because there is
+> no payload left to manifest. Every guide this index links describes that same
+> deleted installer.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Project-specific guidance for the Python installer and pack metadata.
 
 ---

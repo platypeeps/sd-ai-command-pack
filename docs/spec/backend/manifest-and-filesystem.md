@@ -1,5 +1,39 @@
 # Manifest And Filesystem
 
+> [!important]
+> **Partly stale as of 2026-09-01.**
+> This is the longest page in the tree (2,998 lines) and almost all of it
+> specifies things that were deleted. `manifest.json` -- the source of truth the
+> first section names, and the file the other twenty-nine sections are written
+> around -- and the whole `installer/` package (`manifest.py`, `machinescope.py`,
+> `machinepayload.py`, `machinestage.py`, `fileops.py`, `references.py`,
+> `registry.py`, `removal.py`, `thin.py`), `install.py`, `templates/`,
+> `scripts/`, `.github/scripts/generate-plugin.py`,
+> `.github/scripts/partition-surfaces.py` and the tests
+> `tests/test_install_core.py`, `tests/test_install_audit.py`,
+> `tests/test_pack_drift.py`, `tests/test_generate_plugin.py` and
+> `tests/test_partition_surfaces.py` were all deleted on 2026-08-30 by step 3e
+> (`43170716`, #610). The Release Payload Gate section describes a gate deleted
+> at step 0 with the release train (2026-08-29, #597), and the three fleet
+> campaign scenarios describe a fleet walk decision R10-D6 dropped.
+> A mechanical check of the page's own citations: of 377 backticked paths in it,
+> **302 name something that is not in `git ls-files`**.
+>
+> Two things here are still load-bearing and should be read before this page is
+> acted on. The **Machine-Scope Installer** section describes the
+> *design* that `bin/sd_install.py` implements, but by way of files that no
+> longer exist -- `installer/machinescope.py`, `bin/sd-machine-install`,
+> `install.py --machine` -- so it is a design record, not a map of the code.
+> And the **Trellis Gitignore Maintenance** section is the only reason the
+> vestigial `SD-AI-COMMAND-PACK` markers in `.gitignore` are still there:
+> `CONTRIBUTING.md` says they are left in place because this section still
+> specifies them. Whatever happens to this page has to settle that too.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Manifest-driven install behavior and local filesystem conventions.
 
 ---
