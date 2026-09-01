@@ -33,6 +33,12 @@ section reports enforcement state rather than mere presence, and every missing
 leg prints as a named gap. That is what makes the doctrine conditional in
 tooling instead of only in prose.
 
+One kind of gap prints as accepted instead: a state the repository has looked
+at, decided to keep, and written down in `.github/sd-status.json`. The
+acknowledgement is keyed on the observed protection facts and not on the gap
+id, so it stops applying the moment the branch changes underneath it -- see
+`load_acknowledgements`, which carries the incident and the deletion criterion.
+
 A gap is a report, not a failure: this command exits 0 whether or not it found
 any. Exit 2 is reserved for an invocation or configuration fault, which prints
 a sentence and never a traceback.
@@ -77,7 +83,13 @@ try:
 except ImportError:  # pragma: no cover - exercised by the copied-tools test
     store = None  # type: ignore[assignment]
 
-SCHEMA_VERSION = 1
+#: Bumped to 2 when `protection.accepted` arrived. Not merely additive: a
+#: finding the repository has accepted leaves `protection.gaps` for the new
+#: list, so a consumer counting gaps sees a smaller number for the same branch.
+#: That is the intended meaning -- an accepted finding is not an open one --
+#: but it is a semantic change to an existing key, which is what a version is
+#: for.
+SCHEMA_VERSION = 2
 GIT_TIMEOUT_SECONDS = 15
 
 
@@ -434,6 +446,187 @@ def _job_names(
     produced.update(names)
 
 
+#: Where a repository records that it has looked at a protection state and
+#: decided to keep it. A sibling of `.github/sd-review.json` rather than a key
+#: inside it: that file is `bin/sd-review`'s routing policy, it rejects unknown
+#: keys by design, and a malformed acknowledgement must not take the review
+#: lane down with it. Same directory, same `<command>.json` convention, same
+#: property that matters -- it is in git, so a collaborator sees it in a diff
+#: instead of finding it in somebody's machine config.
+ACKNOWLEDGEMENT_RELATIVE_PATH = pathlib.Path(".github") / "sd-status.json"
+
+#: The facts an acknowledgement may pin, and the whole vocabulary it may use.
+#: Deliberately not the gap id: `reviews` is emitted for two opposite states of
+#: the branch -- the review object being absent, which means no pull request is
+#: required at all, and the object existing while asking for 0 approvals. An
+#: acknowledgement keyed on the id alone would accept the first while meaning
+#: the second, which is how a suppression becomes a hole. A key outside this
+#: tuple is rejected at load time rather than quietly matching nothing.
+ACKNOWLEDGED_FACTS = (
+    "enforce_admins",
+    "required_approving_review_count",
+    "required_pull_request_reviews",
+    "strict",
+)
+
+
+def _observed_state(protection: dict[str, Any]) -> dict[str, Any]:
+    """The live protection object reduced to the facts an acknowledgement pins.
+
+    `required_pull_request_reviews` is a boolean here on purpose: what the
+    acknowledgement has to be able to say is *whether the object exists*, which
+    is the difference between "a pull request is required and asks for no
+    approvals" and "nothing requires a pull request".
+    """
+    reviews = protection.get("required_pull_request_reviews")
+    admins = protection.get("enforce_admins") or {}
+    checks = protection.get("required_status_checks") or {}
+    return {
+        "enforce_admins": (
+            bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
+        ),
+        "required_approving_review_count": (
+            int(reviews.get("required_approving_review_count") or 0)
+            if isinstance(reviews, dict)
+            else 0
+        ),
+        "required_pull_request_reviews": isinstance(reviews, dict),
+        "strict": bool(checks.get("strict")) if isinstance(checks, dict) else False,
+    }
+
+
+def load_acknowledgements(root: pathlib.Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Accepted protection states, read from `.github/sd-status.json`.
+
+    **Incident.** One of this repository's protection gaps cannot be closed:
+    `main` requires a pull request but zero approving reviews, and with
+    `enforce_admins` on, one maintainer, and GitHub refusing self-approval,
+    raising the count locks the repository while deleting the review object
+    loses the pull-request requirement outright. So the row printed `GAP` on
+    every run with no action behind it -- and a section that always has a
+    standing red line is a section a reader learns to skim, which is where a
+    real regression would land unread.
+
+    **Deletion criterion.** Each entry carries `until:`, the condition that
+    ends it, and it is printed every run beside the acceptance. When that
+    condition is met the entry is deleted from the file and the gap returns on
+    its own; nothing here needs changing for that to happen. An entry whose
+    `until` has come true and which is still in the file is a bug in the file,
+    not in this reader.
+
+    Returns `(entries, problems)`. A file that exists and is wrong yields no
+    entries and a problem per fault: never a silent fall back, and never a
+    partial application. Failing this way fails closed -- every gap the file
+    meant to accept goes on printing as a gap.
+    """
+    path = root / ACKNOWLEDGEMENT_RELATIVE_PATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [], []
+    except (OSError, UnicodeDecodeError) as error:
+        return [], [f"{ACKNOWLEDGEMENT_RELATIVE_PATH}: cannot be read ({error})"]
+    try:
+        loaded = json.loads(text)
+    except ValueError as error:
+        return [], [f"{ACKNOWLEDGEMENT_RELATIVE_PATH}: not valid JSON ({error})"]
+
+    where = str(ACKNOWLEDGEMENT_RELATIVE_PATH)
+    if not isinstance(loaded, dict):
+        return [], [f"{where}: the top level must be a JSON object"]
+    known = ("$schema", "accepted_gaps")
+    unknown = sorted(set(loaded) - set(known))
+    if unknown:
+        # Both known keys are named, `$schema` included: a message that listed
+        # only `accepted_gaps` would read as though the schema pointer this
+        # repository's own file carries were itself the mistake.
+        return [], [
+            f"{where}: unknown key(s) {', '.join(unknown)}; known keys are {', '.join(known)}"
+        ]
+    raw = loaded.get("accepted_gaps", [])
+    if not isinstance(raw, list):
+        return [], [f"{where}: accepted_gaps must be a list"]
+
+    entries: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for index, entry in enumerate(raw):
+        label = f"{where}: accepted_gaps[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{label} must be an object")
+            continue
+        missing = [key for key in ("id", "state", "because", "since", "until") if key not in entry]
+        if missing:
+            # `because` and `until` are required rather than optional because
+            # an acknowledgement without a reason and an end condition is a
+            # suppression, and a suppression is the thing this replaces.
+            problems.append(f"{label} is missing {', '.join(missing)}")
+            continue
+        for key in ("id", "because", "since", "until"):
+            if not isinstance(entry[key], str) or not entry[key].strip():
+                problems.append(f"{label}.{key} must be a non-empty string")
+        state = entry["state"]
+        if not isinstance(state, dict) or not state:
+            # An empty `state` would accept the id whatever the branch looks
+            # like, which is exactly the shape this file must not be able to
+            # take: see ACKNOWLEDGED_FACTS.
+            problems.append(f"{label}.state must be a non-empty object of observed facts")
+        else:
+            for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS)):
+                problems.append(
+                    f"{label}.state.{fact} is not an observable protection fact; "
+                    f"known facts are {', '.join(ACKNOWLEDGED_FACTS)}"
+                )
+        entries.append(entry)
+    if problems:
+        return [], problems
+    return entries, []
+
+
+def _apply_acknowledgements(
+    gaps: list[dict[str, str]],
+    observed: dict[str, Any],
+    acknowledgements: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split findings into the ones still open and the ones already decided.
+
+    A gap is accepted only when an entry names its id *and* every fact that
+    entry pins equals the live one. An entry that names the id and no longer
+    matches does not suppress anything -- the gap prints, carrying a line that
+    says an acknowledgement exists and has stopped applying. That is the case
+    worth having: the review object vanishing, the count moving, or
+    `enforce_admins` being turned off all reach the reader as gaps.
+    """
+    still_open: list[dict[str, Any]] = []
+    accepted: list[dict[str, Any]] = []
+    for gap in gaps:
+        candidates = [entry for entry in acknowledgements if entry["id"] == gap["id"]]
+        matched = next(
+            (
+                entry
+                for entry in candidates
+                if all(observed.get(fact) == value for fact, value in entry["state"].items())
+            ),
+            None,
+        )
+        if matched is not None:
+            accepted.append(dict(matched, gap=gap["gap"]))
+            continue
+        row: dict[str, Any] = dict(gap)
+        if candidates:
+            drift = [
+                f"{fact} acknowledged {value!r}, observed {observed.get(fact)!r}"
+                for entry in candidates
+                for fact, value in sorted(entry["state"].items())
+                if observed.get(fact) != value
+            ]
+            row["acknowledgement_stale"] = (
+                f"an acknowledgement recorded {candidates[0]['since']} no longer matches "
+                f"the live protection state: {'; '.join(drift)}"
+            )
+        still_open.append(row)
+    return still_open, accepted
+
+
 def _protection_gaps(
     protection: dict[str, Any], default_branch: str, produced: set[str], notes: list[str]
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
@@ -575,14 +768,32 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
 
 def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
     produced, notes = workflow_checks(root)
+    acknowledgements, problems = load_acknowledgements(root)
+    # A file that exists and is wrong is itself a finding, reported wherever
+    # this section gets to -- including the branches that never reach GitHub.
+    # It is a gap and not a note because it fails closed: while it is wrong,
+    # nothing is accepted, and the reader should know why.
+    unreadable: list[dict[str, Any]] = [
+        {"id": "acknowledgements", "gap": problem} for problem in problems
+    ]
     result: dict[str, Any] = {
         "available": False,
         "reason": gh["reason"] or "",
         "default_branch": None,
         "protected": None,
-        "gaps": [],
+        "gaps": list(unreadable),
+        # `accepted` is a sibling of `gaps`, never a flag inside it. A consumer
+        # that counts `gaps` must not start counting a finding the repository
+        # has decided to keep, and must not stop counting one it has not.
+        "accepted": [],
         "merge_settings": [],
-        "detail": {"produced_contexts": sorted(produced), "workflow_notes": notes},
+        "detail": {
+            "produced_contexts": sorted(produced),
+            "workflow_notes": notes,
+            "acknowledgement_source": str(ACKNOWLEDGEMENT_RELATIVE_PATH)
+            if (root / ACKNOWLEDGEMENT_RELATIVE_PATH).is_file()
+            else "none",
+        },
     }
     if not gh["available"]:
         return result
@@ -601,7 +812,7 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     if not isinstance(protection, dict):
         # 404 is the answer, not an outage: this branch has no protection.
         result["protected"] = False
-        result["gaps"] = [
+        result["gaps"] = unreadable + [
             {
                 "id": "unprotected",
                 "gap": (
@@ -615,7 +826,12 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         return result
     result["protected"] = True
     gaps, detail = _protection_gaps(protection, default_branch, produced, notes)
-    result["gaps"] = gaps
+    still_open, accepted = _apply_acknowledgements(
+        gaps, _observed_state(protection), acknowledgements
+    )
+    result["gaps"] = unreadable + still_open
+    result["accepted"] = accepted
+    detail["acknowledgement_source"] = result["detail"]["acknowledgement_source"]
     result["detail"] = detail
     return result
 
@@ -917,13 +1133,32 @@ def _render_protection(section: dict[str, Any], write: Any) -> None:
     write("\nprotection\n")
     if not section["available"]:
         write(f"  unavailable: {section['reason']}\n")
+        # A malformed acknowledgement file is a fact about this checkout, not
+        # about GitHub, and it is the one finding this branch can still make.
+        # Without this loop it would reach `--json` and never the terminal --
+        # a file that silently accepts nothing, reported nowhere a human
+        # looks, which is the failure this whole feature exists to avoid.
+        for gap in section["gaps"]:
+            write(f"  GAP [{gap['id']}] {gap['gap']}\n")
     else:
         branch = section["default_branch"]
-        if not section["gaps"]:
+        accepted = section.get("accepted") or []
+        # The all-clear is claimed only when there is genuinely nothing to
+        # report. An accepted finding is not an absent one, and printing
+        # "fully enforcing" over the top of one would be the tool lying about
+        # a state the repository deliberately wrote down.
+        if not section["gaps"] and not accepted:
             write(f"  {branch}: protection is fully enforcing -- admins included, "
                   "checks strict and matched, review required\n")
         for gap in section["gaps"]:
             write(f"  GAP [{gap['id']}] {gap['gap']}\n")
+            if gap.get("acknowledgement_stale"):
+                write(f"      ! {gap['acknowledgement_stale']}\n")
+        for entry in accepted:
+            write(f"  ok  [{entry['id']}] accepted {entry['since']}: {entry['because']}\n")
+            # The end condition prints every run beside the acceptance: it is
+            # what stops this being a permanent silence nobody rereads.
+            write(f"      until {entry['until']}\n")
         for flag in section["merge_settings"]:
             label = "FLAG" if flag["flagged"] else "ok  "
             body = flag["gap"] if flag["flagged"] else f"{flag['id']}: {flag['value']}"

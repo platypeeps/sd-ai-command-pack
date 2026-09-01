@@ -20,6 +20,7 @@
   "sensitive": [
     ".github/workflows/**",
     ".github/sd-review.json",
+    ".github/sd-status.json",
     "bin/sd_install.py",
     "bin/sd-review"
   ],
