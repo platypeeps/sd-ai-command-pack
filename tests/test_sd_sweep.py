@@ -223,8 +223,8 @@ class Render(unittest.TestCase):
         }
         lines = sd_sweep.render(report)
         self.assertLess(
-            next(i for i, l in enumerate(lines) if "older" in l),
-            next(i for i, l in enumerate(lines) if "younger" in l),
+            next(i for i, line in enumerate(lines) if "older" in line),
+            next(i for i, line in enumerate(lines) if "younger" in line),
         )
 
 
