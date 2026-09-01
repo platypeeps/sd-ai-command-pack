@@ -9,6 +9,11 @@ const issueSub = document.getElementById("issue-sub");
 const prNeeds = document.getElementById("pr-needs");
 const prOther = document.getElementById("pr-other");
 const prSub = document.getElementById("pr-sub");
+const skillRows = document.getElementById("skill-rows");
+const skillSub = document.getElementById("skill-sub");
+const sessionTrees = document.getElementById("session-trees");
+const sessionProcs = document.getElementById("session-procs");
+const sessionSub = document.getElementById("session-sub");
 const workMoving = document.getElementById("work-moving");
 const workUnstated = document.getElementById("work-unstated");
 const workSub = document.getElementById("work-sub");
@@ -218,6 +223,93 @@ async function drawWork() {
   }
 }
 
+// --- skills --------------------------------------------------------------
+// Two directories and the gap between them. Nothing keeps `skills/` and
+// ~/.claude/skills in step -- installing is a deliberate act -- so the gap is
+// the view, not a fault to hide.
+
+async function drawSkills() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/skills")).json();
+  } catch (err) {
+    skillSub.textContent = `cannot reach the server (${err})`;
+    return;
+  }
+  const seen = payload.counts;
+  skillSub.textContent = payload.installedExists
+    ? `${seen.shipped} ship here \u00b7 ${seen.installed} installed in ` +
+      `${payload.installedAt} \u00b7 ${seen.unadopted} not installed \u00b7 ` +
+      `${seen.foreign} installed from elsewhere`
+    : `${seen.shipped} ship here \u00b7 nothing installed at ${payload.installedAt}`;
+  skillRows.replaceChildren();
+  if (!payload.skills.length) {
+    emptyRow(skillRows, 4, "no skills anywhere");
+    return;
+  }
+  for (const skill of payload.skills) {
+    const tr = document.createElement("tr");
+    // The one row shape worth emphasising: shipped here and not installed
+    // means the agent cannot reach a skill this repository thinks it has.
+    if (skill.shipped && !skill.installed) tr.className = "you";
+    tr.append(
+      cell(skill.name),
+      cell(skill.shipped ? "yes" : ""),
+      cell(skill.installed ? "yes" : ""),
+      cell(skill.description),
+    );
+    skillRows.append(tr);
+  }
+}
+
+// --- sessions ------------------------------------------------------------
+// No ledger replaces `.runtime/sessions`: a worktree is registered in git's
+// own directory and a running command is in the process table, and both are
+// already true without anything having written them down.
+
+async function drawSessions() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/sessions")).json();
+  } catch (err) {
+    sessionSub.textContent = `cannot reach the server (${err})`;
+    return;
+  }
+  sessionSub.textContent =
+    `${payload.counts.worktrees} worktree${payload.counts.worktrees === 1 ? "" : "s"}` +
+    ` \u00b7 ${payload.abandoned} abandoned \u00b7 ` +
+    `${payload.counts.processes} sd-* running`;
+
+  sessionTrees.replaceChildren();
+  if (!payload.worktrees.length) {
+    emptyRow(sessionTrees, 5, "no worktrees registered anywhere in the fleet");
+  } else {
+    for (const tree of payload.worktrees) {
+      const tr = document.createElement("tr");
+      if (!tree.live) tr.className = "you";
+      tr.append(
+        cell(tree.repo),
+        cell(tree.name),
+        cell(tree.branch),
+        cell(tree.live ? "live" : "abandoned"),
+        cell(tree.path),
+      );
+      sessionTrees.append(tr);
+    }
+  }
+
+  sessionProcs.replaceChildren();
+  if (!payload.processes.length) {
+    emptyRow(sessionProcs, 3, "nothing sd-* is running");
+  } else {
+    for (const proc of payload.processes) {
+      const tr = document.createElement("tr");
+      tr.append(cell(proc.pid), cell(proc.elapsed), cell(proc.command));
+      sessionProcs.append(tr);
+    }
+  }
+}
+
 // --- tabs ---------------------------------------------------------------
 // The backbone's own tabs are fixed; plugin tabs arrive from the registry and
 // are rebuilt on every poll, so the list is rebuilt with them rather than
@@ -230,6 +322,8 @@ const STATIC = [
   ["tab-prs", "panel-prs"],
   ["tab-issues", "panel-issues"],
   ["tab-work", "panel-work"],
+  ["tab-skills", "panel-skills"],
+  ["tab-sessions", "panel-sessions"],
 ];
 let tabs = STATIC.slice();
 
@@ -249,6 +343,11 @@ function wire(button) {
 }
 
 for (const [button] of STATIC) wire(button);
+// The generic table behaviour is not a plugin privilege. Skills is 138 rows
+// and asks for the filter by the same attribute a tile would use, so the
+// backbone's own panels go through `enhance` once at startup -- plugin panels
+// go through it on every rebuild because they are rebuilt.
+for (const [, panel] of STATIC) enhance(document.getElementById(panel));
 select("tab-now");
 
 // --- generic table behaviour --------------------------------------------
@@ -384,7 +483,11 @@ function band(rank) {
 // refused and filtered out at the moment its alert was created. Those render
 // unlinked by design -- sending a reader to a tab that is not on screen is the
 // same disappearance one layer along.
-const BACKBONE_PANELS = { repos: "panel-repos", prs: "panel-prs" };
+const BACKBONE_PANELS = {
+  repos: "panel-repos",
+  prs: "panel-prs",
+  sessions: "panel-sessions",
+};
 
 function destination(row) {
   if (BACKBONE_PANELS[row.source]) return BACKBONE_PANELS[row.source];
@@ -555,6 +658,14 @@ setInterval(drawPrs, 30000);
 
 drawWork();
 setInterval(drawWork, 30000);
+
+drawSkills();
+// Slower than the rest on purpose: two directory listings answer a question
+// whose answer changes when somebody runs an installer, not on a timer.
+setInterval(drawSkills, 120000);
+
+drawSessions();
+setInterval(drawSessions, 30000);
 
 drawNow();
 // The same ten seconds as the plugin poll: this is the view where a cron job

@@ -127,6 +127,31 @@ class PullRequestRows(unittest.TestCase):
         self.assertEqual(len(now.pr_rows(payload, "2026-08-31")), 2)
 
 
+class SessionRows(unittest.TestCase):
+    def test_abandoned_worktrees_are_one_row_and_not_one_each(self) -> None:
+        """Eight of them is one piece of housekeeping. Eight rows would push
+        the fleet's real problems off the top of the view to say so eight
+        times."""
+        rows = now.session_rows({"abandoned": 8})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["what"], "8 abandoned worktrees")
+        self.assertEqual(rows[0]["source"], "sessions")
+
+    def test_none_abandoned_is_no_row_at_all(self) -> None:
+        """Now reports what needs doing, not what does not."""
+        self.assertEqual(now.session_rows({"abandoned": 0}), [])
+
+    def test_the_id_carries_the_count(self) -> None:
+        """Like the repository rows: the ack covers the eight that were
+        dismissed, not whatever number this grows to next week."""
+        self.assertNotEqual(now.session_rows({"abandoned": 8})[0]["id"],
+                            now.session_rows({"abandoned": 9})[0]["id"])
+
+    def test_one_of_them_is_not_plural(self) -> None:
+        self.assertEqual(now.session_rows({"abandoned": 1})[0]["what"],
+                         "1 abandoned worktree")
+
+
 class Merge(unittest.TestCase):
     def test_a_plugin_rank_zero_outranks_every_backbone_row(self) -> None:
         """The rank-0 and rank-1 rows all come from plugin-bound sources.

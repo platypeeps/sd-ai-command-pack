@@ -127,6 +127,33 @@ def pr_rows(payload: dict, today: str = "") -> list[dict]:
     return out
 
 
+# One row for all of them, not one row each. Eight abandoned worktrees are
+# one piece of housekeeping, and eight rows would push the fleet's real
+# problems off the top of the view to say so eight times.
+ABANDONED = 3
+
+
+def session_rows(payload: dict) -> list[dict]:
+    """Worktrees the fleet has registered whose directories are gone.
+
+    Keyed on the count, like the repository rows and for the same reason: the
+    ack should cover the eight that were dismissed, not whatever number this
+    grows to next week.
+    """
+    count = payload.get("abandoned") or 0
+    if not count:
+        return []
+    return [{
+        "rank": ABANDONED,
+        "kind": "worktree",
+        "id": f"worktrees:{count}",
+        "what": f"{count} abandoned {plural(count, 'worktree', 'worktrees')}",
+        "detail": "registered in .git/worktrees with no directory left; "
+                  "`git worktree prune` clears them",
+        "source": "sessions",
+    }]
+
+
 def merge(backbone: list[dict], plugin: list[dict]) -> list[dict]:
     """Every row there is, loudest first.
 
