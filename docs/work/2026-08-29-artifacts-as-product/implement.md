@@ -31,8 +31,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13, then amended by R11-D21, which made Queues a sixth plugin tab landing after the write path rather than a backbone tab landing before Now: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the dashboard cap's remaining headroom, and the backbone-render PR re-derives that cap from files that exist (R11-D17: 4,000) |
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
-| **9** | Vault-side retarget of 6 pack.py callers, BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
-| **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC) | `grep -c 'System/Databases' pack.py` = 0; E2E on one piece |
+| **9** | Vault-side retarget of 6 pack.py callers (5 routines + the permission grant, which goes **last**), BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
+| **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC, and the hardcoded vault root at `pack.py:146` goes with them -- the driver takes `OBSIDIAN_VAULT`) | `grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py` = 0; E2E on one piece |
 | **11** | Vault move, **last** — per the r2 D12 per-base list (Skill Proposals → files store; Tips / Blog Ideas / Topics / Market Watch / Briefs / Prompts / TaskNotes / Learning → keep; empty Followups → retire — each confirmed by the user first), enumerated coordinated list in the PR; then delete `migrate-vault` | golden-corpus byte-compare (baseline captured at step 8, **before** any move) green; `migrate-vault` refuses if any reader still points at the old path; every vault routine's next run green |
 
 ## Step checklist
@@ -2636,6 +2636,106 @@ that PATH, `python3` resolves to the system **3.9.6** and the sweep still
 reports 57 active — so it is reading the fleet, not an empty one.
 `cron-jobs.sh verify` says `ok`, `run` exits 0 and logs `done`, and
 `failures.log` has no entry for it.
+
+### Two gates that certified nothing, and the vault root (2026-09-01)
+
+Found while scoping step 8, before writing any of it. All three are checks or
+facts the plan already carried; none is a design change.
+
+**Step 10's criterion was vacuous.** It read `grep -c 'System/Databases'
+pack.py` = 0. That returns **1** today, and the one hit is a *comment* --
+`pack.py:838`, `# Not "Mezmo": \`System/Databases/Market Watch/Mezmo.md\`
+already holds`. The four real bindings are built with `os.path.join(VAULT,
+"System", "Databases", ...)` at `pack.py:147-150`, so they never produce that
+literal, and **40 call sites** reference the joined constants. Deleting one
+comment would have passed the gate with the entire migration undone. Replaced
+with a check that names the constants the migration has to remove rather than
+a string that happens to appear near them. The lesson is the one this rollout
+keeps re-learning: a check built from a string you expect to see cannot find
+what you did not know was there.
+
+**And the replacement was vacuous too, for a third reason.** It was first
+written `grep -cE 'BI_DB\|SP_DB\|TT_DB\|TP_DB\|VAULT' pack.py`, because a `|`
+inside a markdown table cell has to be escaped to survive the table. Markdown
+renders that back to a bare `|`, but the raw source is what anybody copies,
+and `\|` in an ERE is a *literal pipe* -- so the pasted command searches for
+one long string containing pipes, matches nothing, and reports `0`. Measured
+against today's unmigrated `pack.py`: the escaped form returns **0** and the
+correct form returns **43**. A third gate certifying nothing, in the commit
+written to fix the first two, and it would have read as a pass. Now
+`grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py`, which needs no
+alternation and so needs no escaping. Any verification command living in a
+table has this hazard; the fix is to write it pipe-free rather than to escape
+it correctly, because the escape is invisible in every rendered view of the
+document where somebody might check it.
+
+**Step 9's caller list named the wrong sixth file.** `design.md:289` listed
+`market-watch`; `grep -c "pack\.py"` on that SKILL.md returns **0**. The real
+sixth is `settings.vault.json` -- the permission grant,
+`"Bash(python3 .../pack.py *)"`, which is what makes the other five legal.
+That is not a bookkeeping fix: it **inverts the migration order**. The five
+routines retarget first and the grant goes **last**, because a grant rewritten
+early leaves every routine unable to run `pack.py` mid-migration, with the
+replacement not yet reachable. `tips-weekly/SKILL.md:110` constrains the
+replacement further -- "If a mechanical need shows up that `pack.py` doesn't
+cover, extend `pack.py` -- the grant covers it automatically" -- so `sd store`
+needs an equivalently narrow single-binary grant, or all five settings files
+need editing again later.
+
+**The vault root is two names, not one, and two callers defect.** The
+convention is a two-layer one and it is coherent where it is followed:
+`OBSIDIAN_VAULT` is the public knob a person sets, and the shell resolves it
+into `VAULT` for the process it launches --
+`task-actions.sh:19` (`VAULT="${OBSIDIAN_VAULT:-$HOME/Documents/Sven Delmas Vault}"`,
+re-exported at `:52`), `obsidian-tasks.sh:14`, `obsidian-review.sh:13`,
+`machine-setup.sh:911`. Two callers break it:
+
+- `local-project-dashboard/collectors.py:48` reads **`VAULT`** directly with
+  its own default, and nothing resolves `OBSIDIAN_VAULT` into it any more. Its
+  own comment at `:27` records why -- "with the server went the shell that used
+  to resolve them". The file is still live: 6b-8 deleted the server half and
+  kept the collectors. This is *not* a broken promise inside that repository:
+  `dashboard.sh:80` documents `VAULT` as the knob, "vault path, read by
+  collectors.py itself", so the repo is internally consistent and setting the
+  name it documents works. The defect is fleet-level -- one path with two
+  documented names, each correct in its own README -- which is why it reads as
+  fine from inside either one.
+- `pack.py:146` reads **neither**. `grep -cE 'os.environ|getenv' pack.py` is
+  **0**; the root is a hardcoded absolute string with a username in it.
+
+Step 8's vault driver has to pick one, and the answer is `OBSIDIAN_VAULT` as
+the knob with `VAULT` reserved for process-internal handoff -- five files to
+one, and it is the name the READMEs already document.
+
+**The two defectors get different dispositions, and neither gets a linter.**
+`pack.py` is not fixed at all: step 10 deletes those four bindings outright
+when `sd store` replaces them, so an env-var patch now is work thrown away.
+It is added to step 10's scope explicitly rather than left implicit, because
+"the migration removes it" is exactly the kind of assumption that survives a
+step being descoped. The one thing that would change this is step 10 slipping
+far: the root is a hardcoded absolute string with a username in it, which is a
+portability defect on its own terms and would then be worth one line.
+
+`collectors.py` is a small standalone change in the system repo -- read
+`OBSIDIAN_VAULT`, fall back to `VAULT`, then the default -- which is
+backward-compatible, since nothing that sets `VAULT` today stops working. It
+is worth doing only because it is cheap; it fixes nothing that is broken now.
+
+What neither disposition buys is prevention, and that is deliberate. Nothing
+enforces this convention, and nothing should: R10-D6 keeps `sd-*` commands out
+of other repositories, so the pack cannot lint for it, and a cross-repo checker
+built for two files whose count is about to become one is more machinery than
+the problem. The convention is enforced where it is *read* -- step 8's driver,
+one place -- and documented everywhere else. That is the honest state, and it
+is written down here so the next person does not rediscover the divergence and
+assume it was missed.
+
+**One thing the driver must carry across regardless of the name.**
+`collectors.py:173-227` wraps its vault read in a subprocess with a 15-second
+timeout, because macOS TCC turns an unauthorized read of `~/Documents` into a
+*silent hang* rather than an error. A driver that distinguishes only "path
+missing" from "path present" will hang instead of reporting, and an unattended
+caller will look slow rather than blocked.
 
 - [ ] 8 / 9 / 10 / 11
 
