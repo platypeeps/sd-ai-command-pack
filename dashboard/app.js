@@ -6,6 +6,9 @@ const sub = document.getElementById("sub");
 const needs = document.getElementById("needs");
 const other = document.getElementById("other");
 const issueSub = document.getElementById("issue-sub");
+const workMoving = document.getElementById("work-moving");
+const workUnstated = document.getElementById("work-unstated");
+const workSub = document.getElementById("work-sub");
 
 const cell = (text, cls) => {
   const td = document.createElement("td");
@@ -124,6 +127,75 @@ async function drawIssues() {
   fillIssues(other, payload.other, false);
 }
 
+// --- work ---------------------------------------------------------------
+// Two tables rather than one, because the second is not a subset of the first:
+// an item with no status is not "moving slowly", it is an item the fleet
+// cannot describe, and burying it in a status column reading blank is how it
+// stays that way.
+
+function emptyRow(tbody, span, text) {
+  const tr = document.createElement("tr");
+  const td = cell(text);
+  td.colSpan = span;
+  td.style.opacity = ".6";
+  tr.append(td);
+  tbody.append(tr);
+}
+
+async function drawWork() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/work")).json();
+  } catch (err) {
+    workSub.textContent = `cannot reach the server (${err})`;
+    return;
+  }
+  // Every status, not just the ones missing from the table below. Showing six
+  // rows without saying that 300 more exist would read as the whole set, and
+  // a breakdown that omitted the six would not add up to `active`.
+  const breakdown = Object.entries(payload.counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `${count} ${name}`)
+    .join(" \u00b7 ");
+  workSub.textContent =
+    `${payload.active} active across ${payload.repos} repos` +
+    `${breakdown ? ` \u00b7 ${breakdown}` : ""}` +
+    ` \u00b7 ${payload.archived} archived`;
+
+  workMoving.replaceChildren();
+  if (!payload.moving.length) {
+    emptyRow(workMoving, 5, "nothing in flight");
+  } else {
+    for (const item of payload.moving) {
+      const tr = document.createElement("tr");
+      tr.append(
+        cell(item.repo),
+        cell(item.title || item.name),
+        cell(item.status),
+        cell(item.detail),
+        cell(item.created),
+      );
+      workMoving.append(tr);
+    }
+  }
+
+  workUnstated.replaceChildren();
+  if (!payload.unstated.length) {
+    emptyRow(workUnstated, 3, "every item says what it is");
+  } else {
+    for (const item of payload.unstated) {
+      const tr = document.createElement("tr");
+      tr.className = "you";
+      tr.append(
+        cell(item.repo),
+        cell(item.name),
+        cell(item.hasPrd ? "prd.md has no status" : "no prd.md"),
+      );
+      workUnstated.append(tr);
+    }
+  }
+}
+
 // --- tabs ---------------------------------------------------------------
 // The backbone's own tabs are fixed; plugin tabs arrive from the registry and
 // are rebuilt on every poll, so the list is rebuilt with them rather than
@@ -133,6 +205,7 @@ async function drawIssues() {
 const STATIC = [
   ["tab-repos", "panel-repos"],
   ["tab-issues", "panel-issues"],
+  ["tab-work", "panel-work"],
 ];
 let tabs = STATIC.slice();
 
@@ -355,6 +428,9 @@ async function drawPlugins() {
 
 drawIssues();
 setInterval(drawIssues, 30000);
+
+drawWork();
+setInterval(drawWork, 30000);
 
 drawPlugins();
 // Deliberately not the 30s of the other two: the plugin loader has its own

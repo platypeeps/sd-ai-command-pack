@@ -26,7 +26,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import collect, plugins, store
+from . import collect, plugins, store, work
 
 DEFAULT_PORT = 8768
 DEFAULT_HOST = "127.0.0.1"
@@ -75,6 +75,8 @@ PAGE = """<!doctype html>
   aria-controls="panel-repos">repos</button>
  <button id="tab-issues" role="tab" aria-selected="false"
   aria-controls="panel-issues">issues</button>
+ <button id="tab-work" role="tab" aria-selected="false"
+  aria-controls="panel-work">work</button>
  <span id="plugin-tabs"></span>
 </nav>
 <section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos">
@@ -93,6 +95,17 @@ PAGE = """<!doctype html>
 <table><thead><tr>
  <th>where</th><th>what</th><th>why</th><th>updated</th>
 </tr></thead><tbody id="other"></tbody></table>
+</section>
+<section id="panel-work" role="tabpanel" aria-labelledby="tab-work" hidden>
+<p class="sub" id="work-sub"></p>
+<h2>moving</h2>
+<table><thead><tr>
+ <th>repo</th><th>item</th><th>status</th><th>why</th><th>created</th>
+</tr></thead><tbody id="work-moving"></tbody></table>
+<h2>no status</h2>
+<table><thead><tr>
+ <th>repo</th><th>item</th><th>missing</th>
+</tr></thead><tbody id="work-unstated"></tbody></table>
 </section>
 <div id="plugin-panels"></div>
 <script src="/app.js"></script>
@@ -148,6 +161,13 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 )
             if path == "/api/state":
                 body = json.dumps(cache.state()).encode()
+                return self.send_body(body, "application/json")
+            if path == "/api/work":
+                # Its own endpoint for the reason /api/plugins is: this reads
+                # several hundred files across the fleet, and /api/state is
+                # cached against a git fan-out on a different timer. Neither
+                # should be able to hold up the other.
+                body = json.dumps(work.collect_work(cache.root)).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/issues":
                 body = json.dumps(issue_payload()).encode()
