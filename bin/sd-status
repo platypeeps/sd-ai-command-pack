@@ -534,9 +534,15 @@ def load_acknowledgements(root: pathlib.Path) -> tuple[list[dict[str, Any]], lis
     where = str(ACKNOWLEDGEMENT_RELATIVE_PATH)
     if not isinstance(loaded, dict):
         return [], [f"{where}: the top level must be a JSON object"]
-    unknown = sorted(set(loaded) - {"$schema", "accepted_gaps"})
+    known = ("$schema", "accepted_gaps")
+    unknown = sorted(set(loaded) - set(known))
     if unknown:
-        return [], [f"{where}: unknown key(s) {', '.join(unknown)}; known keys are accepted_gaps"]
+        # Both known keys are named, `$schema` included: a message that listed
+        # only `accepted_gaps` would read as though the schema pointer this
+        # repository's own file carries were itself the mistake.
+        return [], [
+            f"{where}: unknown key(s) {', '.join(unknown)}; known keys are {', '.join(known)}"
+        ]
     raw = loaded.get("accepted_gaps", [])
     if not isinstance(raw, list):
         return [], [f"{where}: accepted_gaps must be a list"]
@@ -1127,6 +1133,13 @@ def _render_protection(section: dict[str, Any], write: Any) -> None:
     write("\nprotection\n")
     if not section["available"]:
         write(f"  unavailable: {section['reason']}\n")
+        # A malformed acknowledgement file is a fact about this checkout, not
+        # about GitHub, and it is the one finding this branch can still make.
+        # Without this loop it would reach `--json` and never the terminal --
+        # a file that silently accepts nothing, reported nowhere a human
+        # looks, which is the failure this whole feature exists to avoid.
+        for gap in section["gaps"]:
+            write(f"  GAP [{gap['id']}] {gap['gap']}\n")
     else:
         branch = section["default_branch"]
         accepted = section.get("accepted") or []

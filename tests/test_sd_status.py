@@ -366,7 +366,7 @@ class AcknowledgementTests(unittest.TestCase):
             entries, problems = status.load_acknowledgements(pathlib.Path(directory))
         self.assertEqual((entries, problems), ([], []))
 
-    def test_this_repositorys_own_file_loads_clean(self) -> None:
+    def test_this_repos_own_file_loads_clean(self) -> None:
         entries, problems = status.load_acknowledgements(BIN.parent)
         self.assertEqual(problems, [])
         self.assertEqual([entry["id"] for entry in entries], ["reviews"])
@@ -406,6 +406,10 @@ class AcknowledgementTests(unittest.TestCase):
         entries, problems = self.written(json.dumps({"accepted_gap": []}))
         self.assertEqual(entries, [])
         self.assertTrue(any("unknown key(s) accepted_gap" in problem for problem in problems))
+        # `$schema` is named as known too. Listing only `accepted_gaps` would
+        # read as though the schema pointer this repository's own file carries
+        # were itself the mistake.
+        self.assertTrue(any("known keys are $schema, accepted_gaps" in p for p in problems))
 
 
 class MergeSettingsTests(unittest.TestCase):
@@ -621,6 +625,24 @@ class ProtectionSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("no GitHub remote", completed.stdout)
+
+    def test_a_broken_acknowledgement_file_reaches_the_terminal_without_github(self) -> None:
+        """The one finding this branch can still make must not be `--json`-only.
+
+        A malformed file is a fact about the checkout, not about GitHub. If it
+        printed only when the protection object could be fetched, the file
+        would silently accept nothing in exactly the situation -- no `gh`, no
+        network -- where nobody is reading the JSON.
+        """
+        directory = self.repo / ".github"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "sd-status.json").write_text("{not json", encoding="utf-8")
+        self.install_gh()
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("unavailable:", completed.stdout)
+        self.assertIn("GAP [acknowledgements]", completed.stdout)
+        self.assertIn("not valid JSON", completed.stdout)
 
 
 class WorkItemTests(StatusFixture):
