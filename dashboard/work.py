@@ -19,12 +19,17 @@ same reason `discover_checkouts` enumerates the fleet instead of reading a
 configured list. A work item nobody registered anywhere is the one worth
 seeing.
 
-**The tab shows what is moving, and moving is defined by exclusion.** Of 310
-active items fleet-wide, 300 read `planning` -- so the full inventory is one
-value repeated three hundred times across twelve repositories, and a reader
-learns nothing from it. What is left after removing `planning` and `done` is
-six items, which is a view. Defining it by exclusion rather than by an
-allow-list of interesting statuses is deliberate: a status this module has
+**The tab shows what is moving, and moving is defined by exclusion.** Of 57
+active items fleet-wide, 47 read `planning` -- and 46 of those sit in a single
+frozen repository -- so the full inventory is one value repeated across
+thirteen repositories, and a reader learns nothing from it. What is left after
+removing `planning` and `done` is six items, which is a view. Step 7's
+fleet-wide park cut the active set from 310 to 57 and `planning` from 300 to
+47 without moving the ratio the argument rests on, which is the reason to keep
+these numbers measured rather than round them into "most".
+
+Defining it by exclusion rather than by an allow-list of interesting statuses
+is deliberate: a status this module has
 never heard of shows up instead of being silently dropped, and the vocabulary
 is not frozen anywhere that would have to be kept in step.
 """
