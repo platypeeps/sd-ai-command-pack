@@ -49,9 +49,10 @@ ACTION_SUBPATH = "actions/review-route"
 CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 CHECKOUT_VERSION = "v7.0.1"
 WORKFLOW_RELATIVE_PATH = pathlib.Path(".github") / "workflows" / "sd-review-route.yml"
-# The footprint sd-github-review's installer left. `bin/migrate-trellis` removes
-# the same three; this list exists so the installer can refuse over them rather
-# than quietly add a second router beside the first.
+# The footprint sd-github-review's installer left. `bin/migrate-trellis` removed
+# the same three until step 7 deleted it; this list is now the only place they
+# are named, and it exists so the installer can refuse over them rather than
+# quietly add a second router beside the first.
 LEGACY_ROUTER_PATHS = (
     ".github/workflows/ai-review-router.yml",
     ".github/workflows/sd-review.yml",

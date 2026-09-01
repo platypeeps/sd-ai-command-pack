@@ -31,9 +31,9 @@ coverage/
 # consuming repo. The machine-scope installer writes no gitignore block
 # anywhere -- one global-excludes line is the whole footprint -- so nothing
 # regenerates this and it is now an ordinary hand-maintained section. The
-# markers are kept only so `migrate-trellis` can still find and remove the
-# equivalent block in consumer repos at step 3-c. Edit it like any other part
-# of this file.
+# markers are read by nothing. They were kept for `migrate-trellis`, which
+# never touched a .gitignore in the first place and was deleted at step 7.
+# Edit it like any other part of this file.
 # Ignore local/runtime files without hiding shared Trellis or AI-tool adapters.
 # Common local secrets and environment files.
 .env
