@@ -43,6 +43,7 @@ already let an unbounded plugin decide how much memory the dashboard uses.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
@@ -132,6 +133,32 @@ OPTIONAL_ROW = ("detail",)
 # Rank 0 is the top of the view. A tab that failed is reported there rather
 # than at the bottom, because the rows it did not emit were rank 0 too.
 FAILURE_RANK = 0
+
+# R11-D20. An alert id is an ack key: the operator dismisses a row by its id and
+# every row sharing it goes too. So an id identifies one alert, and it is
+# namespaced by its source, because a plugin minting `pr:owner/repo#5` would
+# otherwise dismiss the backbone's row of that name. Bounded at 300 because the
+# ack store refuses anything longer, and a row that cannot be acked is a row
+# that cannot be cleared.
+ID_MAX = 300
+
+
+def alert_id(source: str, *parts: str) -> str:
+    """One stable, bounded, source-namespaced id for one alert.
+
+    Stable rather than positional: a complaint's ordinal shifts when a
+    neighbouring complaint clears, which would silently move an ack from the
+    row it was granted to onto a different one. A digest of the text does not
+    move, and the text is what the operator read when they dismissed it.
+    """
+    ident = ":".join((source,) + parts)
+    if len(ident) <= ID_MAX:
+        return ident
+    keep = ID_MAX - 13  # room for "~" plus a 12-character digest
+    return ident[:keep] + "~" + hashlib.sha256(ident.encode()).hexdigest()[:12]
+def _digest(text: str) -> str:
+    """Twelve hex characters of a complaint, used as its stable identity."""
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 class Bounded(Exception):
@@ -421,6 +448,9 @@ def validate_rows(payload: object, source: str) -> tuple[list[dict], list[str]]:
         if not all(isinstance(value, str) for value in text.values()):
             complaints.append(f"{source}: row {index} has a non-string kind, id or what")
             continue
+        # Namespaced here rather than at render time: an id that is only unique
+        # once somebody remembers to prefix it is not unique.
+        text["id"] = alert_id(source, text["id"])
         clean = {"source": source, "rank": row["rank"], **text}
         detail = row.get("detail")
         if detail is not None and not isinstance(detail, str):
@@ -643,7 +673,7 @@ def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
                 "source": "dashboard",
                 "rank": FAILURE_RANK,
                 "kind": "plugin-registry",
-                "id": "registry",
+                "id": alert_id("dashboard", "registry"),
                 # Not "unreadable": since the registry also reports entries it
                 # had to drop, a readable registry can fail here too, and a row
                 # that names the wrong failure is a row that misdirects.
@@ -653,7 +683,7 @@ def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
         )
     def dark(where: str, what: str, detail: str) -> dict:
         return {"source": where, "rank": FAILURE_RANK, "kind": "plugin-dark",
-                "id": where, "what": what, "detail": detail}
+                "id": alert_id(where, "dark"), "what": what, "detail": detail}
 
     for plugin in found:
         label = plugin["label"]
@@ -675,7 +705,10 @@ def alert_rows(found: list[dict], failure: str = "") -> list[dict]:
                         "source": where,
                         "rank": FAILURE_RANK,
                         "kind": "plugin-refused",
-                        "id": where,
+                        # Per complaint, not per tab: a tab refusing three rows
+                        # is three things the operator lost, and one shared id
+                        # would let dismissing the first hide the other two.
+                        "id": alert_id(where, "refused", _digest(complaint)),
                         "what": f"plugin tab {where} emitted something the contract refused",
                         "detail": complaint,
                     }

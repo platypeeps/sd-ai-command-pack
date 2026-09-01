@@ -1876,6 +1876,58 @@ inside a tab the operator chose to open, and a row appears in the most prominent
 This record was written after first mistaking those two rules for a contradiction, which is the
 reason the distinction is now stated here rather than left to be re-derived.
 
+**R11-D20 (2026-08-31) — `kind` is a category and never a severity; an alert id identifies one
+alert.**
+
+Found by specifying Now against the view it is replacing, before writing it. Two defects, both in
+contracts that have already shipped, and both invisible until a plugin row is asked to render.
+
+**One. The two `kind`s are different fields wearing one name.** `attentionItems()` uses `kind` as a
+closed severity — `bad`, `warn`, `flat` — and `renderAttention` styles from it with a ternary whose
+final branch is a catch-all: `bad` → the "broken" pill, `warn` → "look", *everything else* →
+"queued". The pack's `kind` is a free-form category: `plugin-dark`, `plugin-refused`,
+`plugin-registry` from the loader, `cron` and `port` from the system tile. Neither is `bad` or
+`warn`, so **a rank-0 row saying a plugin has gone dark would sort to the top of Now and be painted
+as the lowest severity there is.**
+
+Checked rather than assumed, and the check corrected the first reading. The nav badge counts
+`kind !== 'flat'`, which is a test against the literal string — so `plugin-dark` *is* counted. The
+failure is therefore not that the row disappears from the count; it is that the count and the row
+disagree in the operator's face: the badge says something needs attention, and the row it points at
+is styled like a queue item. A first pass had this as a disappearance, which would have been the
+easier bug to accept, because it matches the shape R11-D12 already taught us to look for.
+
+**The ruling: Now derives severity from `rank` alone, and never reads `kind`.** `kind` stays what
+the pack made it — the category of thing that happened, useful for grouping and for a plugin to
+name its own domain — and it never reaches a stylesheet. The system's severity column does not
+port; it is redundant with an ordering the pack already has, and keeping both is what let one name
+mean two things. The bands belong with Now's implementation at 6b-5b rather than here, because
+choosing them is a rendering decision and this record's job is to stop the conflation.
+
+**Two. An id is an ack key, and one tab's failures were sharing one.** An operator dismisses a row
+by its id, and the ack suppresses every row carrying that id. `alert_rows` gave every complaint
+from a tab the same id — the tab's own `prefix/name` — so a tab refusing three rows produced three
+losses under one key, and clearing the first cleared all three without saying so. Measured before
+the fix: three distinct complaints, one distinct id. That is the disappearance R11-D18 chased out
+of the loader, reintroduced one layer up in the thing that reports it.
+
+Fixed with `alert_id`, which composes an id from the source and a stable digest of the complaint's
+own text. Stable rather than positional: a complaint's ordinal moves when a neighbour clears, which
+would silently transfer an ack from the row it was granted to onto a different one. The digest does
+not move, and the text is what the operator read when they dismissed it.
+
+**Two smaller ones settled in the same pass, because they are the same field.** Plugin-minted ids
+were passed through verbatim, so a plugin could mint `pr:owner/repo#5` and dismiss the backbone's
+row of that name; ids are now namespaced by `source` at validation, not at render time, because an
+id that is only unique once somebody remembers to prefix it is not unique. And nothing bounded an
+id's length while the ack store refuses anything over 300 characters — so a long refusal produced a
+row that could never be cleared. `ID_MAX` bounds it, keeping the readable head and appending a
+digest so two long ids stay distinct.
+
+**What is not claimed.** The dark row and the refused rows cannot collide with each other: a tab
+that failed emits its dark row and returns, so the two are mutually exclusive per tab. An earlier
+account of this finding said otherwise, and it was wrong.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).
