@@ -32,7 +32,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers (5 routines + the permission grant, which goes **last**), BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
-| **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC) | `grep -cE 'BI_DB\|SP_DB\|TT_DB\|TP_DB\|VAULT' pack.py` = 0; E2E on one piece |
+| **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC) | `grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py` = 0; E2E on one piece |
 | **11** | Vault move, **last** — per the r2 D12 per-base list (Skill Proposals → files store; Tips / Blog Ideas / Topics / Market Watch / Briefs / Prompts / TaskNotes / Learning → keep; empty Followups → retire — each confirmed by the user first), enumerated coordinated list in the PR; then delete `migrate-vault` | golden-corpus byte-compare (baseline captured at step 8, **before** any move) green; `migrate-vault` refuses if any reader still points at the old path; every vault routine's next run green |
 
 ## Step checklist
@@ -2649,11 +2649,25 @@ already holds`. The four real bindings are built with `os.path.join(VAULT,
 "System", "Databases", ...)` at `pack.py:147-150`, so they never produce that
 literal, and **40 call sites** reference the joined constants. Deleting one
 comment would have passed the gate with the entire migration undone. Replaced
-with `grep -cE 'BI_DB|SP_DB|TT_DB|TP_DB|VAULT' pack.py` = 0, which names the
-constants the migration has to remove rather than a string that happens to
-appear near them. The lesson is the one this rollout keeps re-learning: a
-check built from a string you expect to see cannot find what you did not know
-was there.
+with a check that names the constants the migration has to remove rather than
+a string that happens to appear near them. The lesson is the one this rollout
+keeps re-learning: a check built from a string you expect to see cannot find
+what you did not know was there.
+
+**And the replacement was vacuous too, for a third reason.** It was first
+written `grep -cE 'BI_DB\|SP_DB\|TT_DB\|TP_DB\|VAULT' pack.py`, because a `|`
+inside a markdown table cell has to be escaped to survive the table. Markdown
+renders that back to a bare `|`, but the raw source is what anybody copies,
+and `\|` in an ERE is a *literal pipe* -- so the pasted command searches for
+one long string containing pipes, matches nothing, and reports `0`. Measured
+against today's unmigrated `pack.py`: the escaped form returns **0** and the
+correct form returns **43**. A third gate certifying nothing, in the commit
+written to fix the first two, and it would have read as a pass. Now
+`grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py`, which needs no
+alternation and so needs no escaping. Any verification command living in a
+table has this hazard; the fix is to write it pipe-free rather than to escape
+it correctly, because the escape is invisible in every rendered view of the
+document where somebody might check it.
 
 **Step 9's caller list named the wrong sixth file.** `design.md:289` listed
 `market-watch`; `grep -c "pack\.py"` on that SKILL.md returns **0**. The real
