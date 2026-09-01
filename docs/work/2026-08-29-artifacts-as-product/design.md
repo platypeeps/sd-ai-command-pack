@@ -1808,11 +1808,25 @@ chose it, not because a regex hoped so.
 checked rather than argued, because the whole ruling rests on them, and the second half is the one
 two review passes reasoned past.
 
-*Unambiguous:* `source` is `prefix/name` and `panelId` derives its base from the same pair, so the
-two agree by construction — provided no two served tabs share a pair. They cannot: `bin/sd` refuses
-a prefix another plugin has registered (*"already registered by …"*), and `read_plugin` refuses a
-tab name a manifest declares twice, marking it `ok: False` so it never reaches the renderer. A
-resolution that silently picks the *wrong* panel is not a case that exists.
+*Unique at the source, lossy at the id — and the difference is a design constraint, not a
+footnote.* `source` is unique per served tab: `bin/sd` refuses a prefix another plugin has
+registered (*"already registered by …"*), and `read_plugin` refuses a tab name a manifest declares
+twice, marking it `ok: False` so it never reaches the renderer. The panel id derived from it is not
+unique, because `panelId` normalises with `[^a-z0-9]+ → -`, which is many-to-one: `a-b` and `a--b`
+both satisfy `TAB_NAME`, `read_plugin` refuses only exact-string duplicates, and both land on
+`sys-a-b` — so the `-2` suffix is reachable after all. **Now must therefore read the panel id from
+a map the renderer builds as it assigns them, keyed on `prefix/name`, and never recompute the
+normalisation.** Recomputing sends a row to a sibling tab's panel, which is worse than the row not
+linking at all.
+
+This claim was wrong twice before it was right, and both failures are kept because the shape
+repeats. The first draft called the id unstable, citing a collision suffix; checking found the
+registry and manifest reader refuse the duplicates that would cause one. The correction then
+overreached into *"a resolution that silently picks the wrong panel is not a case that exists"* —
+true of `source`, false of the id, because it reasoned about the inputs to a normalisation without
+asking whether the normalisation was injective. Review round 2 supplied the counterexample. A
+uniqueness argument that stops at the key and never looks at the function applied to it is the
+error, and it survived one self-review and one reviewer lane.
 
 *But not total, and the exceptions are precisely the rank-0 rows.* `load()` serves only tabs with
 `ok` true, while `alert_rows` emits a row for every tab and plugin that failed. Three sources

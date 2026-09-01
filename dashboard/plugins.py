@@ -110,13 +110,22 @@ TAB_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 # A row names no destination of its own. R11-D19: the only anchor a plugin
 # could write is one it cannot know, since the panel id is composed by the
 # backbone from `prefix/name` and published nowhere. The destination is
-# therefore resolved from the `source` this module already stamps rather than
-# carried in the payload -- and resolved unambiguously, because `bin/sd` refuses
-# a duplicate prefix and `read_plugin` a duplicate tab name, so no two served
-# tabs share the pair. Now is not built yet (6b-5b): until it is, nothing links
-# a row anywhere, and `showAlerts` renders source, what and detail as text. The
-# trust boundary R11-D12 drew is kept by the backbone choosing the destination
-# rather than by a regex hoping for one.
+# therefore resolved from the `source` this module stamps below, rather than
+# carried in the payload.
+#
+# `source` is unique per served tab -- `bin/sd` refuses a duplicate prefix and
+# `read_plugin` a duplicate tab name -- but the panel id derived from it is
+# NOT, because `panelId` normalises with `[^a-z0-9]+ -> -`, which is lossy:
+# `a-b` and `a--b` are both valid `TAB_NAME`s and both land on `sys-a-b`, so
+# the collision suffix is reachable. Now must therefore read the id from a map
+# the renderer builds as it assigns them, keyed on `prefix/name` -- never by
+# recomputing the normalisation. Recomputing would send a row to a sibling
+# tab's panel, which is worse than not linking it.
+#
+# Now is not built yet (6b-5b): until it is, nothing links a row anywhere and
+# `showAlerts` renders source, what and detail as text. The trust boundary
+# R11-D12 drew is kept by the backbone choosing the destination rather than by
+# a regex hoping for one.
 REQUIRED_ROW = ("rank", "kind", "id", "what")
 OPTIONAL_ROW = ("detail",)
 
