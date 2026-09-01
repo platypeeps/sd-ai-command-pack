@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """The pack's service surface for plugins, stores and config.
 
-Today `sd` carries three verb groups: `plugin`, `config` and `sweep`. `store`
-lands last in step 8, with the vault driver. `sweep` arrived ahead of all of
-them because it had a consumer already: D2's one-time park drained the backlog
-and the 45-day rule that keeps it drained had nothing to run it.
+Today `sd` carries four verb groups: `plugin`, `store`, `config` and `sweep`.
+`sweep` arrived ahead of the other three because it had a consumer already:
+D2's one-time park drained the backlog and the 45-day rule that keeps it
+drained had nothing to run it.
+
+`sd store` reads the vault, and reads it every time. The vault is the
+system-of-record (R5-D1) and SQLite is an index for observability, never a
+source, so a note written by hand or by Obsidian is visible to the next
+`sd store list` with nothing to sync in between. Where a kind is kept comes
+from the manifest's `store` block -- a sibling of `dashboard`, not a ninth
+`kinds.*` key, because the eight describe what a kind *is* and none of that
+changes when the same kind is kept somewhere else.
 
 `sd config` is the one resolution home for a plugin's settings, and the keys
 are **declared in the manifest** rather than free-form. The surface it
@@ -60,6 +68,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -111,6 +120,24 @@ FIELD_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 # and exactly two segments -- a third would name a path inside a repository
 # rather than a repository.
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+# `store` is a sibling of `dashboard`, not a ninth `kinds.*` key. The eight
+# describe the *shape* of a kind -- what fields it has, what statuses it moves
+# between, what a person may not overwrite -- and none of that changes when the
+# same kind is kept somewhere else. Where it is kept is a driver's business, so
+# it lives in the driver's block, standing rule 2's count of eight is untouched,
+# and step 11's vault reorganisation rewrites `bases` and nothing else.
+STORE_KEYS = frozenset({"driver", "root", "bases"})
+# One driver, spelled as a closed set rather than an `if`. A manifest that says
+# `"driver": "vualt"` refuses by name instead of falling through to a default
+# that happens to be the only one there is.
+DRIVERS = frozenset({"vault"})
+# The root is an environment variable reference and never a literal path.
+# `pack.py:146` is the incident: a hardcoded absolute string with a username in
+# it, in a file four bindings and forty call sites read, portable to exactly
+# one machine. A committed manifest is the worst possible home for a path like
+# that, so the manifest names the knob and the person sets it.
+ROOT_PATTERN = re.compile(r"^\$[A-Z][A-Z0-9_]*$")
 
 class Refusal(Exception):
     """The invocation was understood and declined. Exit 1."""
@@ -421,8 +448,15 @@ def validate_kind(name: str, kind: object, root: pathlib.Path) -> dict[str, obje
     if missing:
         raise Refusal(f"{what} declares no {', '.join(repr(key) for key in missing)}")
 
-    fields = frozenset(name_list(kind["fields"], f"{what}.fields"))
-    checked: dict[str, object] = {"fields": sorted(fields)}
+    # Declaration order is kept, not sorted. It is the column order `sd store
+    # list` prints, and the manifest is where the plugin says which field
+    # matters most -- `pack.py` printed status, score, rating in that order and
+    # not alphabetically. `name_list` already refuses duplicates, so keeping
+    # the order costs nothing and sorting discards information no other key
+    # carries.
+    declared = name_list(kind["fields"], f"{what}.fields")
+    fields = frozenset(declared)
+    checked: dict[str, object] = {"fields": declared}
 
     if "transitions" in kind:
         statuses = validate_transitions(kind["transitions"], f"{what}.transitions")
@@ -590,6 +624,69 @@ def validate_vendor(manifest: dict[str, object], root: pathlib.Path) -> dict[str
     return checked
 
 
+def validate_store(manifest: dict[str, object], kinds: dict[str, object]) -> dict[str, object] | None:
+    """`store`: which driver holds this plugin's kinds, and where.
+
+    Coverage is checked in **both** directions and that is the whole point of
+    validating it here. A `bases` naming a kind the manifest does not declare
+    is a directory nothing will ever read, and a kind with no base is a kind
+    every store verb refuses at use time for a reason the manifest could have
+    given at registration. The second is the one that bites: kinds get added,
+    and an inventory written by hand beside them drifts silently.
+
+    The bases are **not** checked for existence, unlike `vendor.*.path` and
+    `sections.template`. Those live inside the checkout, which is present by
+    definition on the machine registering it. A vault is not: it may be
+    unmounted, on another volume, or -- on macOS -- behind a TCC grant this
+    process does not hold. Refusing registration for that would make
+    `sd plugin add` fail on a manifest that is correct, so the vault's absence
+    is reported by the verb that needs to read it, which is where somebody can
+    do something about it.
+    """
+
+    store = manifest.get("store")
+    if store is None:
+        return None
+    if not isinstance(store, dict):
+        raise Refusal("`store` is not an object")
+    unknown = sorted(set(store) - STORE_KEYS)
+    if unknown:
+        raise Refusal(f"`store` carries unknown key(s): {', '.join(unknown)}")
+    missing = sorted(STORE_KEYS - set(store))
+    if missing:
+        raise Refusal(f"`store` declares no {', '.join(repr(key) for key in missing)}")
+    if not kinds:
+        raise Refusal("`store` is declared but the manifest declares no `kinds` to keep")
+
+    driver = store["driver"]
+    if driver not in DRIVERS:
+        raise Refusal(
+            f"`store.driver` is {driver!r}; the driver(s) are {', '.join(sorted(DRIVERS))}")
+    root = store["root"]
+    if not isinstance(root, str) or not ROOT_PATTERN.fullmatch(root):
+        raise Refusal(
+            f"`store.root` is {root!r}, not an environment variable "
+            f"reference like $OBSIDIAN_VAULT")
+
+    bases = store["bases"]
+    if not isinstance(bases, dict) or not bases:
+        raise Refusal("`store.bases` is not a non-empty object")
+    for name in sorted(set(bases) - set(kinds)):
+        raise Refusal(f"`store.bases` names {name!r}, which is not a declared kind")
+    for name in sorted(set(kinds) - set(bases)):
+        raise Refusal(f"kind {name!r} has no `store.bases` entry, so nothing can hold it")
+    checked: dict[str, str] = {}
+    for name, base in sorted(bases.items()):
+        if not isinstance(base, str) or not base.strip():
+            raise Refusal(f"`store.bases[{name!r}]` is not a non-empty path")
+        relative = pathlib.PurePosixPath(base)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise Refusal(
+                f"`store.bases[{name!r}]` is {base!r}; it must be relative to {root}")
+        checked[name] = base
+    return {"driver": driver, "root": root, "bases": checked}
+
+
 def registry(config: dict[str, object]) -> list[str]:
     """The registered plugin roots. A config without plugins simply lacks it."""
 
@@ -651,10 +748,11 @@ def add(args: argparse.Namespace) -> int:
     prefix = validate_prefix(manifest, known=registered(roots))
     validate_dashboard(manifest)
     validate_actions(manifest)
-    validate_kinds(manifest, manifest_path.parent)
+    kinds = validate_kinds(manifest, manifest_path.parent)
     validate_config(manifest)
     validate_issues(manifest)
     validate_vendor(manifest, manifest_path.parent)
+    validate_store(manifest, kinds)
 
     config["plugins"] = sorted({*roots, plugin_root})
     write_config(config, config_path)
@@ -693,6 +791,7 @@ def describe(root: str) -> dict[str, object]:
         settings = validate_config(manifest)
         issues = validate_issues(manifest)
         vendor = validate_vendor(manifest, pathlib.Path(root))
+        store = validate_store(manifest, kinds)
     except Refusal as refusal:
         # Same treatment as `dashboardError` and for the same reason: a
         # manifest that has gone bad since registration is a store that
@@ -707,6 +806,8 @@ def describe(root: str) -> dict[str, object]:
         entry["issues"] = issues
     if vendor:
         entry["vendor"] = sorted(vendor)
+    if store is not None:
+        entry["store"] = store
     return entry
 
 
@@ -744,6 +845,9 @@ def plugin_list(args: argparse.Namespace) -> int:
                 suffix += f"  {key}: {', '.join(str(n) for n in declared)}"
         if entry.get("issues"):
             suffix += f"  issues: {entry['issues']}"
+        store = entry.get("store")
+        if isinstance(store, dict):
+            suffix += f"  store: {store['driver']} at {store['root']}"
         print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
     return 0
 
@@ -1019,6 +1123,254 @@ def config_list(args: argparse.Namespace) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ the vault driver
+
+# Carried across from `local-project-dashboard/collectors.py:173-227`, and the
+# reason is the whole of it: macOS gates `~/Documents` behind TCC, and a
+# process with nobody to click the prompt does not get an error -- it waits.
+# On 2026-08-28 an unanswered prompt held a collector for 1605 seconds with the
+# page stuck on "collecting...". A driver that distinguishes only "path
+# missing" from "path present" inherits that hang, and an unattended caller
+# looks slow rather than blocked. Probing in a child bounds it.
+VAULT_PROBE_SECONDS = 15
+
+# The child answers which of three things is true, because the parent cannot
+# tell them apart from out here: a `stat` from this process cannot distinguish
+# a vault that was moved from one macOS is refusing to open, and both leave the
+# parent directory standing. A timeout prints nothing, which reads as refused,
+# and that is the right reading -- an ungranted read does not fail, it waits.
+VAULT_PROBE = (
+    "import os, sys\n"
+    "try:\n"
+    "    os.listdir(sys.argv[1])\n"
+    "except FileNotFoundError:\n"
+    "    print('missing')\n"
+    "except OSError:\n"
+    "    print('denied')\n"
+    "else:\n"
+    "    print('ok')\n"
+)
+
+
+def vault_reason(root: pathlib.Path) -> str:
+    """'' if `root` lists within the budget, otherwise why it does not."""
+
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", VAULT_PROBE, str(root)],
+            capture_output=True, text=True, timeout=VAULT_PROBE_SECONDS)
+        answer = done.stdout.strip()
+    except subprocess.TimeoutExpired:
+        answer = ""
+    if answer == "ok":
+        return ""
+    if answer == "missing":
+        return f"vault path does not exist: {root}"
+    return (
+        f"cannot read {root} after {VAULT_PROBE_SECONDS}s -- on macOS this is "
+        f"Documents access, which nothing unattended can grant. Allow Full Disk "
+        f"Access for {sys.executable} in System Settings > Privacy & Security.")
+
+
+def store_root(store: dict[str, object]) -> pathlib.Path:
+    """The vault root the manifest points at, resolved through the environment.
+
+    There is no default. `pack.py` had one -- an absolute string with a
+    username in it -- and five shell callers have another, spelled
+    `${OBSIDIAN_VAULT:-$HOME/Documents/Sven Delmas Vault}`. A default here
+    would make a fourth spelling of the same path, and the failure it prevents
+    is the mild one: an unset variable is a sentence naming the knob, where a
+    default is a silent read of somebody else's vault layout.
+    """
+
+    name = str(store["root"])[1:]
+    value = os.environ.get(name)
+    if not value:
+        raise Refusal(f"{name} is not set; it names the vault this plugin stores into")
+    root = pathlib.Path(value).expanduser()
+    reason = vault_reason(root)
+    if reason:
+        raise Refusal(reason)
+    return root
+
+
+def frontmatter(text: str) -> dict[str, str]:
+    """A note's frontmatter, read the way the vault's own notes were written.
+
+    Deliberately the same reader as `pack.py:244-258`, down to what it cannot
+    see: a block value spanning lines (`contexts:` followed by `  - Personal`)
+    comes back as the empty string, because the continuation line does not
+    match and the key does. That is a limitation and not a bug to fix here --
+    the notes in the vault were written by that reader's twin, and a stricter
+    parser would disagree with the corpus it has to read. A real YAML parser is
+    not an option either: D-C1 keeps this to the standard library.
+    """
+
+    fields: dict[str, str] = {}
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return fields
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        match = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
+        if match:
+            fields[match.group(1)] = match.group(2).strip().strip('"')
+    return fields
+
+
+def note_body(text: str) -> str:
+    """Everything after the frontmatter, or the whole note when it has none."""
+
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return text
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return "".join(lines[index + 1:])
+    # An unterminated block is not frontmatter at all. Returning the tail would
+    # silently drop the top of a note whose first line happened to be `---`.
+    return text
+
+
+def read_note(path: pathlib.Path) -> tuple[dict[str, str], str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+    return frontmatter(text), note_body(text)
+
+
+def resolve_kind(reference: object) -> tuple[dict[str, object], dict[str, object], str]:
+    """`<prefix>.<kind>` -> that kind, its plugin's store block, and the kind name.
+
+    Read from the manifest on disk at every invocation, never from the machine
+    config: the registry holds a path and the manifest holds the truth, which
+    is the same reason `sd plugin list` opens every manifest it lists.
+    """
+
+    if not isinstance(reference, str) or reference.count(".") != 1:
+        raise UsageError(f"{reference!r} is not a <prefix>.<kind> reference")
+    prefix, name = reference.split(".")
+    roots = registry(sd_lib.machine_config())
+    for root in roots:
+        manifest_path = pathlib.Path(root) / MANIFEST_NAME
+        try:
+            manifest = read_manifest(manifest_path)
+        except Refusal:
+            continue
+        if manifest.get("prefix") != prefix:
+            continue
+        kinds = validate_kinds(manifest, manifest_path.parent)
+        if name not in kinds:
+            raise Refusal(
+                f"plugin {prefix!r} declares no kind {name!r}"
+                f" (it declares {', '.join(sorted(kinds)) or 'none'})")
+        store = validate_store(manifest, kinds)
+        if store is None:
+            raise Refusal(f"plugin {prefix!r} declares no `store`, so {reference} is not kept")
+        kind = kinds[name]
+        assert isinstance(kind, dict)  # validate_kind builds it; narrows for the type checker
+        return kind, store, name
+    raise Refusal(f"no registered plugin has prefix {prefix!r}")
+
+
+def kind_base(store: dict[str, object], name: str) -> pathlib.Path:
+    bases = store["bases"]
+    assert isinstance(bases, dict)  # validate_store builds it; narrows for the type checker
+    return store_root(store) / str(bases[name])
+
+
+def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
+    try:
+        return sorted(path for path in base.iterdir() if path.suffix == ".md")
+    except FileNotFoundError:
+        raise Refusal(f"{base} does not exist; the vault does not hold this kind") from None
+    except OSError as error:
+        raise Refusal(f"cannot list {base}: {error}") from None
+
+
+def store_fields(kind: dict[str, object]) -> list[str]:
+    declared = kind["fields"]
+    assert isinstance(declared, list)  # validate_kind builds it; narrows for the type checker
+    return [str(field) for field in declared]
+
+
+def status_filter(kind: dict[str, object], wanted: str | None) -> str | None:
+    """`--status`, refused when the kind has no `status` field to filter on.
+
+    Without this the flag silently matches nothing, which reads as "no notes in
+    that status" rather than "this kind has no statuses" -- the vacuous-check
+    failure this rollout keeps finding, in the shape of a filter instead of a
+    gate.
+    """
+
+    if wanted is None:
+        return None
+    if "status" not in store_fields(kind):
+        raise Refusal("this kind declares no `status` field, so --status cannot select anything")
+    return wanted
+
+
+def store_list(args: argparse.Namespace) -> int:
+    """Every note of one kind, read from the vault at the moment of asking.
+
+    Nothing is cached and no index is consulted. The vault is the
+    system-of-record (R5-D1), so a note written by hand, by Obsidian, or by
+    another tool is visible to the next `sd store list` with no sync step in
+    between -- which is the property step 8 exists to establish and the one the
+    replaced stack could not offer.
+    """
+
+    kind, store, name = resolve_kind(args.kind)
+    wanted = status_filter(kind, args.status)
+    fields = store_fields(kind)
+    rows = []
+    for path in note_paths(kind_base(store, name)):
+        found, _ = read_note(path)
+        if wanted is not None and found.get("status") != wanted:
+            continue
+        rows.append({"title": path.stem, **{field: found.get(field, "") for field in fields}})
+    if args.json:
+        json.dump(rows, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    for row in rows:
+        print("\t".join([*(row[field] or "?" for field in fields), row["title"]]))
+    print(f"# {len(rows)} note(s)", file=sys.stderr)
+    return 0
+
+
+def store_get(args: argparse.Namespace) -> int:
+    """One note: its fields and its whole body.
+
+    This is the only thing `interface = 1` promises beyond the exit codes, so
+    `--json` reports **every** frontmatter key the note carries rather than the
+    subset the kind declares. A note that grew a field the manifest has not
+    caught up with is exactly the case a caller needs to see, and filtering to
+    the declared list would hide it while looking complete.
+    """
+
+    kind, store, name = resolve_kind(args.kind)
+    base = kind_base(store, name)
+    if "/" in args.title or args.title in {"", ".", ".."}:
+        raise UsageError(f"{args.title!r} is not a note title")
+    path = base / f"{args.title}.md"
+    if not path.is_file():
+        raise Refusal(f"no note titled {args.title!r} in {base}")
+    fields, body = read_note(path)
+    if args.json:
+        json.dump(
+            {"kind": args.kind, "title": args.title, "path": str(path),
+             "fields": fields, "body": body},
+            sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    print(f"=== {args.title} ===")
+    sys.stdout.write(path.read_text(encoding="utf-8"))
+    return 0
+
+
 def sweep(args: argparse.Namespace) -> int:
     """What the 45-day rule would park, in this checkout or across the fleet.
 
@@ -1078,6 +1430,20 @@ def build_parser() -> argparse.ArgumentParser:
                         help="refuse if the checkout has drifted from its lock; write nothing")
     locker.set_defaults(handler=plugin_lock)
 
+    store = groups.add_parser("store", help="read the notes a plugin's kinds hold")
+    kept = store.add_subparsers(dest="verb", required=True)
+
+    notes = kept.add_parser("list", help="every note of one kind")
+    notes.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
+    notes.add_argument("--status", help="only notes whose `status` is this")
+    notes.add_argument("--json", action="store_true", help="machine-readable")
+    notes.set_defaults(handler=store_list)
+
+    note = kept.add_parser("get", help="one note: its fields and its whole body")
+    note.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
+    note.add_argument("title", help="the note's title, without the .md")
+    note.add_argument("--json", action="store_true", help="machine-readable")
+    note.set_defaults(handler=store_get)
     config = groups.add_parser("config", help="read and write a plugin's declared settings")
     setting_verbs = config.add_subparsers(dest="verb", required=True)
 

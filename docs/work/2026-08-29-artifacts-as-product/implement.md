@@ -2774,6 +2774,100 @@ timeout, because macOS TCC turns an unauthorized read of `~/Documents` into a
 missing" from "path present" will hang instead of reporting, and an unattended
 caller will look slow rather than blocked.
 
+### Step 8, slices i-iii: the manifest gets teeth, and the vault gets read (2026-09-01)
+
+Three PRs, landed in order. Step 8 is not done -- the write verbs and the
+golden-corpus baseline are still ahead -- and what is here is written down now
+rather than at the end, because two of the three carry findings that outlived
+their slice.
+
+**8-i (#678) -- enforce the manifest, and pin it.** `sd plugin add` validated
+`prefix` and `dashboard.tile` and nothing else; the `kinds`, `issues` and
+`vendor` blocks it accepted since 6b-1 were accepted *unread*. All three are
+now checked generically -- the backbone learns that a kind is well formed and
+internally consistent and never learns what a `score` or a `tip` is -- and
+`sd plugin lock` writes the `sd-plugin.lock` the layout has always named and
+nothing has ever produced. The manifest half of that lock hashes the **bytes on
+disk**, not re-serialised JSON, so a key reorder is drift.
+
+The consistency checks are the point, not the type checks. A `protected-fields`
+naming a field the kind does not declare protects nothing and reads in every
+review as though it protects something -- the vacuous-check failure this
+rollout has now found four times, this time in its own new code before it
+shipped. `test_the_shape_6b_accepted_is_now_refused` keeps the manifest 6b-1
+would have taken, verbatim, as the record of what the inversion was.
+
+**Two review findings, one accepted and one that taught a lesson about
+probes.** Copilot's first pass was right: `sections.template` checked existence
+only, so a *directory* at `templates/tip.md` registered clean and failed at
+render -- exactly the deferral registration exists to prevent. Fixed with a
+regular-file check; `vendor.*.path` still takes either, because a vendored tree
+is the ordinary case, and both are pinned.
+
+Its second pass said `inside()` could raise out of a symlink loop. I probed
+3.9.6 and 3.14.7, found the loop harmless on both -- `resolve()` returns the
+link itself and `exists()` swallows the `OSError` -- found a *different* real
+crash (a NUL byte, which JSON can write and no filesystem can hold), fixed
+that, and declined the loop half in the commit message. **CI failed on
+`unittest (ubuntu-latest, 3.10)` with a traceback out of the loop.** On
+3.10-3.12 `resolve()` raises `RuntimeError("Symlink loop from ...")`, which is
+neither of the classes I had caught. The two ends of the supported range agree
+with each other and disagree with the middle, and the middle is an interpreter
+the pull request was already testing against. **Sampling the extremes is not
+sampling the range** -- and the check that caught it was one CI already ran, not
+one I chose. `inside()` now catches all three classes, and the loop test asserts
+a refusal naming the offending key rather than one particular sentence, because
+the wording legitimately differs by version.
+
+**8-ii (#681) -- one resolution home for plugin settings.** `sd config
+get|set|unset|list`, with the keys **declared in the manifest** (`description`
+required, `pattern` optional and compiled at registration) and the values
+namespaced under the machine config's `config` key. `set` matches with
+`re.fullmatch`, so an unanchored pattern cannot be quietly permissive.
+
+**8-iii -- the `store` block and the vault driver.** `sd store list|get`, and
+the answer to a gap the plan carried without noticing: **the eight keys have no
+slot for where a kind is kept.** R11-D26 puts it in a `store` block beside
+`dashboard` rather than in a ninth key, so standing rule 2's count is untouched
+and step 11 reorganises the vault by rewriting `bases`.
+
+Three things in it are load-bearing beyond the verbs:
+
+- **The root is `$OBSIDIAN_VAULT`, never a literal path, and has no default.**
+  `pack.py:146` is the incident. An unset variable is a sentence naming the
+  knob; a default would be a fourth spelling of a path that already has three.
+- **The 15-second probe came across from `collectors.py:173-227`**, as the
+  2026-09-01 scoping entry required. macOS answers an ungranted `~/Documents`
+  read by waiting, not by failing; a driver that told "missing" from "present"
+  apart and nothing else would inherit that 1605-second hang.
+- **`fields` now keeps its declared order.** 8-i sorted it, which was invisible
+  until `sd store list` needed a column order and printed `score, status` for a
+  kind that declares `status, score`. `pack.py` printed status first for three
+  databases. Sorting discarded information no other key carries.
+
+The acceptance criterion is `FreshnessTests.test_a_note_written_directly_into_
+the_vault_is_visible_to_the_next_query`, and it is written as a *direct* write
+on purpose: the note is created with `write_text`, never through `sd`, and then
+a query has to see it. A test that wrote through `sd` and read back through
+`sd` would pass against a purely in-memory store and prove nothing about the
+vault. Three reads, no writes through the tool: empty reports empty, a note
+dropped in by hand is listed, an edit made in place is reflected.
+
+**What is left of step 8.** The write verbs (`sd store add|set`, which is where
+`protected-fields`, `transitions`, `human-only`, `floor` and `sections` stop
+being declarations and start being enforcement) and the golden-corpus baseline,
+which must be captured **before** any vault move because step 11 compares
+against it.
+
+**The project's own planning-review rule still does not resolve.**
+`.claude/rules/sd-planning-adversarial-review.md` points at
+`../sd-ai-command-pack/planning-adversarial-review.md`, which does not exist
+from that directory or anywhere on this machine. Flagged a second time here.
+This run appends an implementation journal and a decision record and reaches no
+planning convergence boundary -- no implementation approval is being requested
+and nothing moves to `in_progress` -- so the contract does not gate it, and no
+review lane is being claimed.
+
 - [ ] 8 / 9 / 10 / 11
 
 ## Risks (consolidated)
