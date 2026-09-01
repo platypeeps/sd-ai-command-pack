@@ -1544,7 +1544,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Issues | backbone — the one migrating view (R3-D13) | **yes** |
     | Work | backbone | **yes** — 6b-5a, a rewrite against `docs/work/` and not the port this row implied |
     | Now · PRs | backbone | **yes** — Now at 6b-5b, PRs at 6b-5c |
-    | Queues | **plugin tab** — moved from backbone by R11-D21: it is a vault view with a write path, like Vault and Briefs | **yes** — 6b-6, reading only |
+    | Queues | **plugin tab** — moved from backbone by R11-D21: it was a vault view with a write path, like Vault and Briefs | **yes** — 6b-6, reading only; the write did not come with it (R11-D25) |
     | Skills · Sessions | backbone, **new** — no system counterpart | **yes** — 6b-5d |
     | Suggestions | backbone, **new** — **blocked on `sd-suggest`**, which is unbuilt (R11-D22): no producer, no draft, nothing to render | n/a until the command exists |
     | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | **yes** — 6b-4, through `~/repos/system`'s own manifest |
@@ -1552,9 +1552,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Projects | derived; folds into Now/Work rather than porting | n/a |
     | Ports | **plugin tab** beside Toolbox (R11-D12) | **yes** — 6b-4, the fifth declared tab |
     | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
-  - **The verdict as surveyed: two of fifteen tabs exist, thirteen do not**,
-    and four of those thirteen are new surfaces with no system counterpart to
-    port from. *(Enumerated live 2026-09-01, from `app.js`'s tab list and the
+  - **The verdict as surveyed on 2026-08-30: two of fifteen tabs existed and
+    thirteen did not**, four of those thirteen being new surfaces with no
+    system counterpart to port from. *(Enumerated live 2026-09-01, from `app.js`'s tab list and the
     loader's own reply rather than from this paragraph: **thirteen tabs
     serve** -- seven backbone (`repos`, `issues`, `work`, `now`, `prs`,
     `skills`, `sessions`) and six plugin (`toolbox`, `briefs`, `vault`,
@@ -2193,8 +2193,10 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     session, not 80 things asking for attention.
   - **A search URL, not `obsidian://open`**, which wants a file — the thing to
     open is a folder's worth of undecided notes, and `path:` plus the decide
-    status is exactly the set the table counted. Built in `sd_tile.py` and not
-    `dashboard.py`, because that file is deleted two steps from here.
+    status is exactly the set the table counted. Built in `~/repos/system`'s
+    `sd_tile.py` and not its `dashboard.py`, because that file is deleted two
+    steps from here. Every file named in this entry is that repository's, not
+    this one's: 6b-6 changed no pack code.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [x] every tab marked "plugin tab" loads through `~/repos/system`'s own
