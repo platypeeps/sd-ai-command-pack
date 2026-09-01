@@ -19,10 +19,9 @@ plugin's root as its working directory -- the same treatment its tile gets,
 because it is the same trust boundary and not a wider one.
 
 **What is NOT here, deliberately: no GET has a side effect.** The dashboard
-this replaces answers `GET /api/state?refresh=1` by starting a rebuild behind
-the Host check alone while its POST twin requires the token
-(`~/repos/system/local-project-dashboard/dashboard.py:1714` against `:1788`),
-which a link or an `<img src>` on any page the operator has open can reach.
+this replaces starts a rebuild on `GET /api/state?refresh=1` behind the Host
+check alone while its POST twin requires the token
+(`~/repos/system/local-project-dashboard/dashboard.py:1714` against `:1788`).
 `tests/test_dashboard_actions.py` pins that this does not inherit it.
 """
 
@@ -102,8 +101,7 @@ def catalog(entries: list[dict]) -> list[dict]:
     back.
 
     Declaration order, not sorted: R11-D23 chose a list over an object keyed
-    by id to keep it, and sorting threw away what the shape was chosen for.
-    Found in review, against this repository's own record.
+    by id to keep it. Found in review, against this repository's own record.
     """
     return [{"id": name, "label": spec["label"]}
             for name, spec in resolve(entries).items()]

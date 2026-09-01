@@ -460,6 +460,24 @@ class RegistryFailure(unittest.TestCase):
 
 
 class TokenDelivery(unittest.TestCase):
+    def test_nothing_served_here_may_be_cached(self) -> None:
+        """The page carries a secret and every route carries live state.
+
+        A cached page persists a per-process token to disk, which is the
+        opposite of what minting it in memory was for, and it POSTs a dead
+        token after a restart -- a 403 that looks like a broken dashboard.
+        """
+        with Live(self) as live:
+            for path in ("/", "/api/state"):
+                conn = http.client.HTTPConnection("127.0.0.1", live.port, timeout=10)
+                try:
+                    conn.request("GET", path)
+                    reply = conn.getresponse()
+                    self.assertEqual(reply.getheader("Cache-Control"), "no-store", path)
+                    reply.read()
+                finally:
+                    conn.close()
+
     def test_the_page_carries_the_token_and_the_source_does_not(self) -> None:
         """Per process, in memory: a token on disk is a credential nothing rotates."""
         self.assertIn(server.TOKEN_SLOT, server.PAGE)

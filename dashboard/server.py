@@ -286,6 +286,9 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
 
         def send_body(self, body: bytes, content_type: str, status: int = 200) -> None:
             self.send_response(status)
+            # Live fleet state, and the page carries a per-process token: a
+            # cached copy is stale and a secret on somebody's disk. In review.
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
