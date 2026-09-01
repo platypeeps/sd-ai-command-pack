@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The pack's service surface for plugins, stores and config.
 
-Today `sd` carries two verb groups: `plugin` and `sweep`. The rest --
-`store`, `issue`, `config` -- land at step 8 with the consumer that needs them
-(R11-D13). `sweep` arrives ahead of them because it has a consumer already:
-D2's one-time park drained the backlog and the 45-day rule that keeps it
-drained had nothing to run it.
+Today `sd` carries two verb groups: `plugin` and `sweep`. `store` and `config`
+land later in step 8 with the consumer that needs them (R11-D13). `sweep`
+arrived ahead of them because it had a consumer already: D2's one-time park
+drained the backlog and the 45-day rule that keeps it drained had nothing to
+run it.
 
 `sd plugin add` is the only way a plugin becomes known to this machine. There
 is no disk scanning: the backbone never goes looking for manifests, because a
@@ -13,11 +13,20 @@ surface that discovers plugins by walking the filesystem is a surface that
 loads whatever someone drops in the right directory. Registration is an
 explicit act with a path in it.
 
-What `add` validates is deliberately narrow. It reads the whole manifest and
-checks `prefix` and `dashboard.tile` -- the two keys anything reads today --
-leaving `kinds`, `issues` and `vendor` unexamined. Step 8 adds enforcement to
-this reader rather than writing a second one, which is the failure this pack
-has already paid for in duplicated scripts.
+What `add` validates was deliberately narrow at 6b-1 -- `prefix` and
+`dashboard.tile`, the two keys anything read then -- and step 8-i widened it to
+`kinds`, `issues` and `vendor`, in this reader rather than in a second one.
+Enforcement is **generic**: the backbone checks that a kind is well formed and
+internally consistent, and never learns what a `score` or a `tip` is. The
+closed 8-key vocabulary is `KIND_KEYS` below, and standing rule 2 makes any
+change to it a decision record.
+
+`sd plugin lock` writes the `sd-plugin.lock` the layout has always named and
+nothing has ever produced. It pins two things: the manifest's own bytes, and
+the content of each declared `vendor.*` path. The manifest half is the one
+6b-6 asked for -- a registered plugin's declared tabs and actions are "pinned"
+today only in the sense that the page cannot send them, and nothing notices if
+the manifest itself changes under a registration.
 
 **The registry stores a path, not a copy of the manifest.** Registration
 decides exactly one fact -- that this checkout is a plugin of this machine --
@@ -41,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -53,6 +63,27 @@ import sd_lib  # noqa: E402
 import sd_sweep  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
+LOCK_NAME = "sd-plugin.lock"
+
+# The closed vocabulary a plugin may use to describe one kind (R11-D14). Eight
+# keys, and standing rule 2 says a ninth is a decision record rather than a
+# commit. The invariant is enforced here, once: a kind carrying a key that is
+# not in this set is refused by name, because the failure it prevents is a
+# typo -- `protected_fields` for `protected-fields` -- that would otherwise
+# read as a kind with no protected fields at all and pass every other check.
+KIND_KEYS = frozenset({
+    "fields", "initial-status", "protected-fields", "transitions",
+    "human-only", "unique-fields", "floor", "sections",
+})
+
+# Of the eight, these two are what a kind cannot be missing and still be a
+# kind: nothing can be stored without a field list, and nothing can be created
+# without a status to create it in. The other six are optional, and the verb
+# that needs one refuses at use time rather than at registration -- a kind with
+# no `sections` is a kind `sd store add` cannot render, which is a fact about
+# `add` and not about the manifest. Requiring all eight here would refuse
+# well-formed manifests for verbs their plugin never calls.
+KIND_REQUIRED = ("fields", "initial-status")
 
 # `sd` and `se` are reserved: the backbone owns one and the other names the
 # surfaces that folded into it, whose renders may still exist on some machine.
@@ -61,6 +92,20 @@ PREFIX_PATTERN = re.compile(r"^[a-z]{2,5}$")
 # A tab name reaches the tile as a command-line argument. Leading dashes and
 # anything shell-shaped are excluded so a name can never read as a flag.
 TAB_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+# Kind names, statuses and action names travel the same way -- into an argv, or
+# into a path segment -- so they answer to the same shape. Spelled as its own
+# name rather than reused under `TAB_PATTERN` because the two are equal by
+# argument and not by coincidence, and a future tab rule must not silently
+# become a status rule.
+NAME_PATTERN = TAB_PATTERN
+# A frontmatter key, matching what the vault's own notes already carry: this is
+# the character set `pack.py`'s frontmatter reader accepts, so a field this
+# refuses is a field that would not have parsed anyway.
+FIELD_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+# `owner/name`, the only shape `issues.repo` may hold. GitHub's own charset,
+# and exactly two segments -- a third would name a path inside a repository
+# rather than a repository.
+REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 class Refusal(Exception):
     """The invocation was understood and declined. Exit 1."""
@@ -186,6 +231,306 @@ def validate_actions(manifest: dict[str, object]) -> list[dict[str, str]]:
     return seen
 
 
+def inside(root: pathlib.Path, value: object, what: str,
+           *, regular_file: bool = False) -> pathlib.Path:
+    """`value` as a path under `root`, or a refusal saying why it is not.
+
+    Three ways out of a checkout are closed rather than one, because each is a
+    different mistake and only the first is the one people think of: an
+    absolute path, a `..` segment, and a symlink that lands outside after
+    resolution. The last is the one a `..` check misses entirely -- a manifest
+    may name `vendor/upstream`, and `vendor/upstream` may be a link to
+    somewhere else on the machine.
+
+    A path that does not exist refuses too. Registration is the one moment
+    somebody is looking, and a template or vendored tree that is missing
+    becomes a failure at use time in a command that has no idea why.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        raise Refusal(f"{what} is not a non-empty path")
+    relative = pathlib.PurePosixPath(value)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise Refusal(f"{what} {value!r} must be a relative path inside the plugin")
+    try:
+        resolved = (root / value).resolve()
+    except (OSError, ValueError, RuntimeError) as error:
+        # Three classes, because `resolve()` picks a different one per version
+        # and per fault, and a manifest that names a bad path must refuse in
+        # every combination rather than print a stack trace at the person
+        # holding it. A symlink loop raises `RuntimeError("Symlink loop from
+        # ...")` on 3.10-3.12 and quietly returns the link itself on 3.9 and
+        # 3.13+; a NUL byte, which JSON can write as an escape and no
+        # filesystem can hold, raises `ValueError` on 3.9 and 3.14 alike.
+        #
+        # Found by CI, not by the probe that preceded it: that probe ran 3.9.6
+        # and 3.14.7 -- the two ends -- and the behaviour that crashes lives in
+        # the middle, on the interpreter the pull request was already testing
+        # against. Sampling the extremes is not sampling the range.
+        raise Refusal(f"{what} {value!r} is not a usable path: {error}") from error
+    if resolved != root.resolve() and root.resolve() not in resolved.parents:
+        raise Refusal(f"{what} {value!r} resolves outside the plugin checkout")
+    if not resolved.exists():
+        raise Refusal(f"{what} {value!r} does not exist")
+    if regular_file and not resolved.is_file():
+        # Existence alone is not the check a template needs. A directory at
+        # `templates/tip.md` satisfies "it is there" and fails the moment
+        # somebody renders a note, which is the deferral registration exists
+        # to prevent. A vendored `path` takes either, because a vendored tree
+        # is the ordinary case.
+        raise Refusal(f"{what} {value!r} is not a regular file")
+    return resolved
+
+
+def name_list(value: object, what: str, *, within: frozenset[str] | None = None) -> list[str]:
+    """A non-empty list of unique names, optionally drawn from `within`.
+
+    The `within` check is the one that earns its place. A `protected-fields`
+    naming a field the kind does not declare protects nothing, and reads in
+    every review as though it protects something -- the same vacuous-check
+    failure this rollout has now found three times in its own gates.
+    """
+
+    if not isinstance(value, list) or not value:
+        raise Refusal(f"{what} is not a non-empty list")
+    seen: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str) or not FIELD_PATTERN.fullmatch(entry):
+            raise Refusal(f"{what} holds {entry!r}, which is not {FIELD_PATTERN.pattern}")
+        if entry in seen:
+            raise Refusal(f"{what} names {entry!r} twice")
+        if within is not None and entry not in within:
+            raise Refusal(f"{what} names {entry!r}, which is not one of the kind's `fields`")
+        seen.append(entry)
+    return seen
+
+
+def validate_transitions(value: object, what: str) -> set[str]:
+    """`transitions` as a status graph, returning every status it mentions.
+
+    The status set is the return value rather than the graph, because it is
+    what the other keys are checked against: an `initial-status` or a
+    `human-only` target that names a status no transition mentions is a status
+    nothing can ever leave or reach, and the manifest is where that is cheap
+    to see.
+    """
+
+    if not isinstance(value, dict) or not value:
+        raise Refusal(f"{what} is not a non-empty object")
+    statuses: set[str] = set()
+    for source, targets in value.items():
+        if not isinstance(source, str) or not NAME_PATTERN.fullmatch(source):
+            raise Refusal(f"{what} holds status {source!r}, which is not {NAME_PATTERN.pattern}")
+        if not isinstance(targets, list) or not targets:
+            raise Refusal(f"{what}[{source!r}] is not a non-empty list of statuses")
+        seen: list[str] = []
+        for target in targets:
+            if not isinstance(target, str) or not NAME_PATTERN.fullmatch(target):
+                raise Refusal(
+                    f"{what}[{source!r}] holds {target!r}, which is not {NAME_PATTERN.pattern}")
+            if target in seen:
+                raise Refusal(f"{what}[{source!r}] names {target!r} twice")
+            if target == source:
+                # Not pedantry: a self-transition is how a caller asks the
+                # store to "move" an item and have nothing happen, which is a
+                # no-op that reads in a log as a state change.
+                raise Refusal(f"{what}[{source!r}] transitions to itself")
+            seen.append(target)
+        statuses.add(source)
+        statuses.update(seen)
+    return statuses
+
+
+def validate_sections(value: object, root: pathlib.Path, what: str) -> dict[str, object]:
+    """`sections`: the ordered H2 list, and the template that renders them.
+
+    Both halves, because r5 wrote this key as "ordered H2 list plus the
+    template path in the plugin repo" and either alone is unusable -- an order
+    with no template renders nothing, a template with no order is a body
+    whose shape no reader can check.
+
+    Section titles are free text rather than `NAME_PATTERN`: they are headings
+    a person reads (`## Score`, `## Drive docs`), and constraining them to
+    lowercase-hyphen would be the backbone deciding how a plugin's notes are
+    written.
+    """
+
+    if not isinstance(value, dict):
+        raise Refusal(f"{what} is not an object")
+    order = value.get("order")
+    if not isinstance(order, list) or not order:
+        raise Refusal(f"{what}.order is not a non-empty list")
+    seen: list[str] = []
+    for title in order:
+        if not isinstance(title, str) or not title.strip():
+            raise Refusal(f"{what}.order holds {title!r}, which is not a non-empty heading")
+        if title in seen:
+            raise Refusal(f"{what}.order names {title!r} twice")
+        seen.append(title)
+    template = value.get("template")
+    if template is None:
+        raise Refusal(f"{what} declares no `template`")
+    inside(root, template, f"{what}.template", regular_file=True)
+    unknown = sorted(set(value) - {"order", "template"})
+    if unknown:
+        raise Refusal(f"{what} carries unknown key(s): {', '.join(unknown)}")
+    return {"order": seen, "template": str(template)}
+
+
+def validate_floor(value: object, fields: frozenset[str], what: str) -> dict[str, float]:
+    """`floor`: field -> numeric minimum.
+
+    Field-keyed rather than a bare number, because a bare number cannot say
+    what it bounds. The one floor that exists in the fleet today is
+    `pack.py`'s `SCORE_FLOOR = 6` on the `score` field, and the backbone must
+    be able to enforce it without knowing that `score` means anything.
+
+    `bool` is excluded explicitly: `isinstance(True, int)` is true in Python,
+    so `"floor": {"score": true}` would otherwise register as a minimum of 1.
+    """
+
+    if not isinstance(value, dict) or not value:
+        raise Refusal(f"{what} is not a non-empty object")
+    floors: dict[str, float] = {}
+    for field, minimum in value.items():
+        if not isinstance(field, str) or field not in fields:
+            raise Refusal(f"{what} floors {field!r}, which is not one of the kind's `fields`")
+        if isinstance(minimum, bool) or not isinstance(minimum, (int, float)):
+            raise Refusal(f"{what}[{field!r}] is {minimum!r}, which is not a number")
+        floors[field] = minimum
+    return floors
+
+
+def validate_kind(name: str, kind: object, root: pathlib.Path) -> dict[str, object]:
+    """One `kinds.<name>` entry, checked for shape and internal consistency."""
+
+    what = f"kinds[{name!r}]"
+    if not isinstance(kind, dict):
+        raise Refusal(f"{what} is not an object")
+    unknown = sorted(set(kind) - KIND_KEYS)
+    if unknown:
+        raise Refusal(
+            f"{what} carries key(s) outside the closed vocabulary: {', '.join(unknown)}"
+            f" (the eight are {', '.join(sorted(KIND_KEYS))})")
+    missing = [key for key in KIND_REQUIRED if key not in kind]
+    if missing:
+        raise Refusal(f"{what} declares no {', '.join(repr(key) for key in missing)}")
+
+    fields = frozenset(name_list(kind["fields"], f"{what}.fields"))
+    checked: dict[str, object] = {"fields": sorted(fields)}
+
+    if "transitions" in kind:
+        statuses = validate_transitions(kind["transitions"], f"{what}.transitions")
+        checked["transitions"] = kind["transitions"]
+    else:
+        statuses = None
+
+    initial = kind["initial-status"]
+    if not isinstance(initial, str) or not NAME_PATTERN.fullmatch(initial):
+        raise Refusal(f"{what}.initial-status is {initial!r}, not {NAME_PATTERN.pattern}")
+    if statuses is not None and initial not in statuses:
+        raise Refusal(
+            f"{what}.initial-status is {initial!r}, which no transition mentions")
+    checked["initial-status"] = initial
+
+    for key in ("protected-fields", "unique-fields"):
+        if key in kind:
+            checked[key] = name_list(kind[key], f"{what}.{key}", within=fields)
+
+    if "human-only" in kind:
+        actions = kind["human-only"]
+        if not isinstance(actions, dict) or not actions:
+            raise Refusal(f"{what}.human-only is not a non-empty object")
+        for action, status in actions.items():
+            if not isinstance(action, str) or not NAME_PATTERN.fullmatch(action):
+                raise Refusal(
+                    f"{what}.human-only holds action {action!r}, not {NAME_PATTERN.pattern}")
+            if not isinstance(status, str) or not NAME_PATTERN.fullmatch(status):
+                raise Refusal(
+                    f"{what}.human-only[{action!r}] is {status!r}, not {NAME_PATTERN.pattern}")
+            if statuses is not None and status not in statuses:
+                raise Refusal(
+                    f"{what}.human-only[{action!r}] is {status!r},"
+                    " which no transition mentions")
+        checked["human-only"] = actions
+
+    if "floor" in kind:
+        checked["floor"] = validate_floor(kind["floor"], fields, f"{what}.floor")
+    if "sections" in kind:
+        checked["sections"] = validate_sections(kind["sections"], root, f"{what}.sections")
+    return checked
+
+
+def validate_kinds(manifest: dict[str, object], root: pathlib.Path) -> dict[str, object]:
+    """`kinds`, when declared. Absent is not an error; empty is."""
+
+    kinds = manifest.get("kinds")
+    if kinds is None:
+        return {}
+    if not isinstance(kinds, dict) or not kinds:
+        # Empty is refused rather than treated as absent, for the same reason
+        # `dashboard.actions` is: a block that declares nothing is a block
+        # somebody meant to fill, and silence here is a store with no kinds
+        # discovered as a puzzle much later.
+        raise Refusal("`kinds` is not a non-empty object")
+    checked: dict[str, object] = {}
+    for name, kind in kinds.items():
+        if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name):
+            raise Refusal(f"kind name {name!r} is not {NAME_PATTERN.pattern}")
+        checked[name] = validate_kind(name, kind, root)
+    return checked
+
+
+def validate_issues(manifest: dict[str, object]) -> str | None:
+    """`issues.repo`: where this plugin's issues live, when it says."""
+
+    issues = manifest.get("issues")
+    if issues is None:
+        return None
+    if not isinstance(issues, dict):
+        raise Refusal("`issues` is not an object")
+    repo = issues.get("repo")
+    if repo is None:
+        raise Refusal("`issues` declares no `repo`")
+    if not isinstance(repo, str) or not REPO_PATTERN.fullmatch(repo):
+        raise Refusal(f"`issues.repo` is {repo!r}, which is not owner/name")
+    unknown = sorted(set(issues) - {"repo"})
+    if unknown:
+        raise Refusal(f"`issues` carries unknown key(s): {', '.join(unknown)}")
+    return repo
+
+
+def validate_vendor(manifest: dict[str, object], root: pathlib.Path) -> dict[str, dict[str, str]]:
+    """`vendor.*`: upstream content this plugin carries a copy of.
+
+    Each entry names where the copy came from and where it lives, and both are
+    required: a `source` with no `path` pins nothing, and a `path` with no
+    `source` is a directory nobody can trace back. `sd plugin lock` hashes
+    exactly what is declared here.
+    """
+
+    vendor = manifest.get("vendor")
+    if vendor is None:
+        return {}
+    if not isinstance(vendor, dict) or not vendor:
+        raise Refusal("`vendor` is not a non-empty object")
+    checked: dict[str, dict[str, str]] = {}
+    for name, entry in vendor.items():
+        if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name):
+            raise Refusal(f"vendor name {name!r} is not {NAME_PATTERN.pattern}")
+        if not isinstance(entry, dict):
+            raise Refusal(f"vendor[{name!r}] is not an object")
+        source = entry.get("source")
+        if not isinstance(source, str) or not source.strip():
+            raise Refusal(f"vendor[{name!r}] declares no `source`")
+        inside(root, entry.get("path"), f"vendor[{name!r}].path")
+        unknown = sorted(set(entry) - {"source", "path"})
+        if unknown:
+            raise Refusal(f"vendor[{name!r}] carries unknown key(s): {', '.join(unknown)}")
+        checked[name] = {"source": source, "path": str(entry["path"])}
+    return checked
+
+
 def registry(config: dict[str, object]) -> list[str]:
     """The registered plugin roots. A config without plugins simply lacks it."""
 
@@ -247,6 +592,9 @@ def add(args: argparse.Namespace) -> int:
     prefix = validate_prefix(manifest, known=registered(roots))
     validate_dashboard(manifest)
     validate_actions(manifest)
+    validate_kinds(manifest, manifest_path.parent)
+    validate_issues(manifest)
+    validate_vendor(manifest, manifest_path.parent)
 
     config["plugins"] = sorted({*roots, plugin_root})
     write_config(config, config_path)
@@ -280,6 +628,22 @@ def describe(root: str) -> dict[str, object]:
     # a write-only plugin is a plugin.
     if actions:
         entry["actions"] = actions
+    try:
+        kinds = validate_kinds(manifest, pathlib.Path(root))
+        issues = validate_issues(manifest)
+        vendor = validate_vendor(manifest, pathlib.Path(root))
+    except Refusal as refusal:
+        # Same treatment as `dashboardError` and for the same reason: a
+        # manifest that has gone bad since registration is a store that
+        # stopped working, and `list` is where somebody finds out.
+        entry["manifestError"] = str(refusal)
+        return entry
+    if kinds:
+        entry["kinds"] = sorted(kinds)
+    if issues:
+        entry["issues"] = issues
+    if vendor:
+        entry["vendor"] = sorted(vendor)
     return entry
 
 
@@ -309,8 +673,120 @@ def plugin_list(args: argparse.Namespace) -> int:
         actions = entry.get("actions")
         if isinstance(actions, list) and actions:
             suffix += f"  actions: {', '.join(a['id'] for a in actions)}"
+        if entry.get("manifestError"):
+            suffix += f"  manifest: {entry['manifestError']}"
+        for key in ("kinds", "vendor"):
+            declared = entry.get(key)
+            if isinstance(declared, list) and declared:
+                suffix += f"  {key}: {', '.join(str(n) for n in declared)}"
+        if entry.get("issues"):
+            suffix += f"  issues: {entry['issues']}"
         print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
     return 0
+
+
+def digest(path: pathlib.Path) -> str:
+    """A content hash of one file, or of a tree, that does not depend on where.
+
+    A directory is hashed from its POSIX-relative paths in sorted order plus
+    each file's bytes, so the same content pins to the same value on a
+    different machine and under a different checkout name. Path and content are
+    separated by a NUL and each entry framed by its length, so `a/bc` + `d`
+    cannot hash as `a/b` + `cd`.
+
+    A symlink inside a vendored tree refuses. Following it would pin content
+    from outside the checkout under a name that claims to be inside it, and
+    hashing the link text instead would pin a string rather than the content
+    the lock exists to fix.
+    """
+
+    sha = hashlib.sha256()
+    if path.is_file() and not path.is_symlink():
+        sha.update(path.read_bytes())
+        return f"sha256:{sha.hexdigest()}"
+    if not path.is_dir():
+        raise Refusal(f"{path} is neither a regular file nor a directory")
+    for child in sorted(path.rglob("*"), key=lambda p: p.relative_to(path).as_posix()):
+        if child.is_symlink():
+            raise Refusal(f"{child} is a symlink; a vendored tree must hold real files")
+        if child.is_dir():
+            continue
+        if not child.is_file():
+            raise Refusal(f"{child} is not a regular file")
+        name = child.relative_to(path).as_posix().encode("utf-8")
+        body = child.read_bytes()
+        sha.update(str(len(name)).encode("ascii") + b"\0" + name)
+        sha.update(str(len(body)).encode("ascii") + b"\0" + body)
+    return f"sha256:{sha.hexdigest()}"
+
+
+def compute_lock(manifest_path: pathlib.Path) -> dict[str, object]:
+    """What `sd-plugin.lock` should say about the plugin at `manifest_path`.
+
+    The manifest is hashed as **bytes on disk** rather than as re-serialised
+    JSON. A lock over the parsed object would go on matching after a key was
+    reordered or a comment-shaped whitespace change landed, which is a diff a
+    reviewer sees and the lock does not -- and the point of pinning the
+    manifest is that the two agree.
+    """
+
+    manifest = read_manifest(manifest_path)
+    root = manifest_path.parent
+    vendor = validate_vendor(manifest, root)
+    interface = manifest.get("interface")
+    return {
+        "interface": interface if isinstance(interface, int) else None,
+        "manifest": digest(manifest_path),
+        "vendor": {
+            name: {**entry, "hash": digest(root / entry["path"])}
+            for name, entry in sorted(vendor.items())
+        },
+    }
+
+
+def plugin_lock(args: argparse.Namespace) -> int:
+    """Write `sd-plugin.lock`, or report how the checkout has drifted from it.
+
+    `--check` is the half with a consumer: it is what a plugin's own CI runs to
+    assert that neither its manifest nor its vendored content moved without the
+    lock moving with them. Writing is the maintainer's act and needs no
+    ceremony beyond doing it.
+    """
+
+    root = pathlib.Path(args.path).expanduser().resolve()
+    manifest_path = root / MANIFEST_NAME if root.is_dir() else root
+    computed = compute_lock(manifest_path)
+    lock_path = manifest_path.parent / LOCK_NAME
+
+    if not args.check:
+        lock_path.write_text(json.dumps(computed, indent=2, sort_keys=True) + "\n",
+                             encoding="utf-8")
+        print(f"locked {manifest_path.parent}")
+        return 0
+
+    if not lock_path.exists():
+        raise Refusal(f"no {LOCK_NAME} at {manifest_path.parent}; run `sd plugin lock` first")
+    try:
+        recorded = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise Refusal(f"cannot read {lock_path}: {error}") from None
+    if recorded == computed:
+        print(f"{manifest_path.parent} matches its {LOCK_NAME}")
+        return 0
+    # Named rather than counted. "drifted" sends somebody diffing two hashes by
+    # eye; the entry that moved is the one they need.
+    drifted: list[str] = []
+    if recorded.get("manifest") != computed["manifest"]:
+        drifted.append(MANIFEST_NAME)
+    now = computed["vendor"]
+    assert isinstance(now, dict)  # compute_lock builds it; narrows for the type checker
+    was = recorded.get("vendor") if isinstance(recorded.get("vendor"), dict) else {}
+    for name in sorted(set(was) | set(now)):
+        if was.get(name) != now.get(name):
+            drifted.append(f"vendor.{name}")
+    if recorded.get("interface") != computed["interface"]:
+        drifted.append("interface")
+    raise Refusal(f"{lock_path} is stale: {', '.join(drifted)} changed")
 
 
 def sweep(args: argparse.Namespace) -> int:
@@ -364,6 +840,13 @@ def build_parser() -> argparse.ArgumentParser:
     lister = verbs.add_parser("list", help="list registered plugins")
     lister.add_argument("--json", action="store_true", help="machine-readable")
     lister.set_defaults(handler=plugin_list)
+
+    locker = verbs.add_parser("lock", help=f"pin the manifest and vendored content in {LOCK_NAME}")
+    locker.add_argument("path", nargs="?", default=".",
+                        help=f"plugin checkout, or the {MANIFEST_NAME} itself (default: .)")
+    locker.add_argument("--check", action="store_true",
+                        help="refuse if the checkout has drifted from its lock; write nothing")
+    locker.set_defaults(handler=plugin_lock)
 
     sweeper = groups.add_parser(
         "sweep", help="report the planning items the 45-day rule would park")
