@@ -2953,8 +2953,7 @@ disk**, not re-serialised JSON, so a key reorder is drift.
 The consistency checks are the point, not the type checks. A `protected-fields`
 naming a field the kind does not declare protects nothing and reads in every
 review as though it protects something -- the vacuous-check failure this
-rollout has now found four times, this time in its own new code before it
-shipped. `test_the_shape_6b_accepted_is_now_refused` keeps the manifest 6b-1
+rollout keeps finding, this time in its own new code before it shipped. `test_the_shape_6b_accepted_is_now_refused` keeps the manifest 6b-1
 would have taken, verbatim, as the record of what the inversion was.
 
 **Two review findings, one accepted and one that taught a lesson about
@@ -3027,6 +3026,69 @@ This run appends an implementation journal and a decision record and reaches no
 planning convergence boundary -- no implementation approval is being requested
 and nothing moves to `in_progress` -- so the contract does not gate it, and no
 review lane is being claimed.
+
+### The sweep the planning contract asks for, run late and finding three (2026-09-01)
+
+The step 8 i-iii entry above ends by saying the project's planning-review rule
+points at a file that "does not exist from that directory or anywhere on this
+machine." **That is wrong, and it is wrong twice over.**
+`.claude/rules/sd-planning-adversarial-review.md` links
+`../sd-ai-command-pack/planning-adversarial-review.md`, which from
+`.claude/rules/` resolves to `.claude/sd-ai-command-pack/planning-adversarial-review.md`.
+That file exists, is tracked, and is 4.6K. I resolved the relative link from
+the repository root and from `~/.claude`, neither of which is the directory the
+link is written from, and then reported the absence as a finding -- twice, the
+second time into a journal entry that merged.
+
+The entry above stands as written; this is the correction beside it, per the
+supersede convention. What follows is the review it should have carried,
+against the artifact set that batch changed (`design.md` R11-D26 and the step 8
+entry). The contract's own emphasis is the cross-artifact sweep -- "search for
+each value instead of reading the artifacts in sequence: the stale copy is the
+one you did not think to open" -- and that is what found all three.
+
+**C-1 (addressed) -- one incident, two different counts.** `bin/sd:323` said
+the vacuous-check failure had been "found three times"; `implement.md:2956`
+said "four times", describing the same `protected-fields` check in the same
+pull request. Neither number could be checked against anything: the record they
+both gesture at is the 2026-09-01 entry titled *Two gates that certified
+nothing*, which enumerates two, and the third and fourth were being counted by
+memory. **A tally nobody can verify is the vacuous form of the failure it
+counts**, so both sentences now say "keeps finding" and the number is gone,
+with the reason left in `bin/sd` where the next person will meet it.
+
+**C-2 (addressed) -- the 14,000 derivation no longer describes its own code.**
+`design.md:1153` itemises `bin/sd, registration slice | 264`. `bin/sd` is
+**1,553 lines** at this commit -- close to six times that -- so the table
+deriving `13,980 -> cap 14,000` sums line items one of which is short of
+reality by more than a thousand lines. Nothing is *broken* -- `bin/` measures
+9,574 against the 14,000 cap, and the cap is
+enforced by `tests/test_loc_caps.py` from `git ls-files` rather than from that
+table -- but a derivation whose inputs have drifted cannot be re-run to check
+the number it produced. Corrected beside the table rather than in it: 264 was
+true when written and is the measurement 6b-1 landed on.
+
+**C-3 (rebutted) -- the `sd store|issue|config` sub-cap holds, measured.**
+Same table, 1,400 lines. Measured from the source rather than assumed: the
+config block is 167 lines and the vault-driver-plus-store block is 294, so 461
+of 1,400 with `sd issue` and the store write verbs still unwritten. No change.
+
+**Implementation is unblocked.** No concern blocks; the only additional lane
+this repository could define, it does not define, so no lane was skipped.
+
+**A fourth, found by review inside this correction.** The first draft of the
+paragraph above said 1,548, measured before the same commit added six lines of
+docstring to `bin/sd` -- so the note correcting stale figures went stale inside
+itself, between measurement and commit. The number is now 1,553 with "at this
+commit" beside it and the durable claim stated as a ratio, close to six times
+264, because that is the part that stays true while the count moves. **A figure
+in prose is a measurement with no owner**; the one that cannot rot is
+`tests/test_loc_caps.py`, which enumerates `git ls-files` at every run.
+
+**And the cheap check that would have caught the original error:** resolve a
+relative link from the directory the link lives in, not from the one you happen
+to be standing in. `ls "$(dirname RULE)/../sd-ai-command-pack/"` answers it in
+one command and does not depend on remembering where `.claude` roots.
 
 - [ ] 8 / 9 / 10 / 11
 

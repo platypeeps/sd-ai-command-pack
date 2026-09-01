@@ -320,7 +320,12 @@ def name_list(value: object, what: str, *, within: frozenset[str] | None = None)
     The `within` check is the one that earns its place. A `protected-fields`
     naming a field the kind does not declare protects nothing, and reads in
     every review as though it protects something -- the same vacuous-check
-    failure this rollout has now found three times in its own gates.
+    failure this rollout keeps finding in its own gates.
+
+    The running tally that used to sit in this sentence is gone on purpose. It
+    said three here and four in the journal entry describing the same incident,
+    and neither number could be checked against anything -- a count nobody can
+    verify is the vacuous form of the very failure it was counting.
     """
 
     if not isinstance(value, list) or not value:
