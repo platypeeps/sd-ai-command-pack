@@ -156,6 +156,8 @@ def alert_id(source: str, *parts: str) -> str:
         return ident
     keep = ID_MAX - 13  # room for "~" plus a 12-character digest
     return ident[:keep] + "~" + hashlib.sha256(ident.encode()).hexdigest()[:12]
+
+
 def _digest(text: str) -> str:
     """Twelve hex characters of a complaint, used as its stable identity."""
     return hashlib.sha256(text.encode()).hexdigest()[:12]
