@@ -1954,6 +1954,12 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     rather than eight: eight of them is one piece of housekeeping, and eight
     rows would push the fleet's real problems off the top of the view to say
     so eight times.
+    **And that row put a `ps` on the ten-second poll, which review caught.**
+    Now took the whole Sessions payload for one number, so `/api/now` forked a
+    process every ten seconds for a count that came from file reads -- whether
+    or not the tab was open. Split: `fleet_worktrees` is **2.4ms**,
+    `collect_sessions` is **30.2ms**, so the subprocess was 27.8ms of it and
+    the poll was spending ten seconds an hour on it.
     **Skills is the gap between two directories, and the gap runs both ways.**
     76 ship here, 138 are installed, **0 unadopted and 62 from somewhere
     else**. Counted as two numbers rather than one because they are different

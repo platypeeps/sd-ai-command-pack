@@ -230,7 +230,7 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                     "rows": now.merge(
                         now.backbone_rows(cache.state()["repos"])
                         + now.pr_rows(tracker_payload("pull"))
-                        + now.session_rows(sessions.collect_sessions(cache.root)),
+                        + now.session_rows(sessions.fleet_worktrees(cache.root)),
                         plugins.cached_load()["rows"],
                     ),
                 }).encode()

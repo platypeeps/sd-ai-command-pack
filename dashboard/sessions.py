@@ -102,12 +102,25 @@ def running(runner=None) -> list[dict]:
     return out
 
 
-def collect_sessions(root: Path, runner=None) -> dict:
-    """Every worktree the fleet has registered, and every sd-* now running."""
+def fleet_worktrees(root: Path) -> list[dict]:
+    """Every registration in the fleet, abandoned ones first.
+
+    Split out from `collect_sessions` because Now wants the count and nothing
+    else. Folded together, the ten-second poll behind `/api/now` forked a `ps`
+    for a number that never came from it -- and did so whether or not the
+    Sessions tab was open. File reads are what this costs now; the subprocess
+    belongs to the tab that shows its output.
+    """
     trees: list[dict] = []
     for group, repo in discover_checkouts(root):
         trees.extend(read_worktrees(group, repo))
     trees.sort(key=lambda row: (row["live"], row["repo"], row["name"]))
+    return trees
+
+
+def collect_sessions(root: Path, runner=None) -> dict:
+    """Every worktree the fleet has registered, and every sd-* now running."""
+    trees = fleet_worktrees(root)
     procs = running(runner)
     return {
         "worktrees": trees,

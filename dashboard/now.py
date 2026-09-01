@@ -133,14 +133,18 @@ def pr_rows(payload: dict, today: str = "") -> list[dict]:
 ABANDONED = 3
 
 
-def session_rows(payload: dict) -> list[dict]:
+def session_rows(trees: list[dict]) -> list[dict]:
     """Worktrees the fleet has registered whose directories are gone.
+
+    Takes the registrations rather than the whole Sessions payload, so the
+    ten-second poll behind Now never has to run the `ps` that payload also
+    carries.
 
     Keyed on the count, like the repository rows and for the same reason: the
     ack should cover the eight that were dismissed, not whatever number this
     grows to next week.
     """
-    count = payload.get("abandoned") or 0
+    count = sum(1 for tree in trees if not tree.get("live"))
     if not count:
         return []
     return [{
