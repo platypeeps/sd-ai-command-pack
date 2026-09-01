@@ -2551,6 +2551,43 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     one commit ahead of its origin permanently, which is a trap for whoever
     finds it later; that is what this paragraph is for. If the repository is
     ever unarchived for an unrelated reason, push `414ff39` then.
+  - **Superseded the same day — the push happened, and the trap is gone
+    (2026-09-01).** The bullet above was true when written and its operative
+    half is now false, so it stays and this says what changed. The repository
+    was unarchived, `414ff39` was pushed as `task/09-01-bulk-park`, and
+    [PR #167](https://github.com/platypeeps/sd-github-review/pull/167) —
+    *"chore(work): bulk-park 17 planning items with no branch (D2)"* — opened
+    at `2026-09-01T20:25:23Z` and merged at `2026-09-01T20:28:52Z`, head sha
+    `414ff3971a38581afadfc5b4b6af3f2822874371`. The repository is archived
+    again: `gh api repos/platypeeps/sd-github-review` returns
+    `{"archived":true,...,"pushed_at":"2026-09-01T20:28:53Z"}`, one second
+    after the merge. All three state changes the bullet declined to make were
+    made, and none was left half-done.
+  - **The premise that failed was "the park is already effective everywhere it
+    is read."** It was effective everywhere the *dashboard* reads, which
+    enumerates checkouts from the filesystem — that part of the bullet was
+    right and stays right. Anything reading the remote saw the opposite: #167's
+    own body records that `main` was still reporting **17** active items that
+    had already been parked locally. A finished commit on an unpushed branch is
+    invisible to every check that reads GitHub, which is a second reader the
+    cost/benefit line did not count.
+  - **The trap the bullet existed to warn about no longer exists, so do not act
+    on its standing instruction.** In `~/repos/platypeeps/sd-github-review`,
+    `git rev-list --left-right --count origin/main...HEAD` prints `0	0`,
+    `git branch -a --list '*bulk-park*'` prints nothing, and
+    `git ls-remote --heads origin` returns exactly one ref,
+    `dd9293dcb16a7de6792891061a6f0d81d930bbb8	refs/heads/main` — the merge of
+    #167. "If the repository is ever unarchived for an unrelated reason, push
+    `414ff39` then" has nothing left to do.
+  - **What it cost, priced honestly.** Three state changes on a retired
+    repository, plus one the original did not price: a pull request merged into
+    an archived repository's `main`, which is a branch-protection surface
+    nobody maintains any more. What it bought is that the two readers now
+    agree. The park's shape did not change — #167 is 49 files with **17**
+    additions, every file `R100` except each `prd.md` at `R099` for its one
+    added `parked: 2026-09-01 bulk-park (D2)` line. Pure renames, nothing
+    rewritten, and the local numbers the bullet above quotes are now the
+    numbers on `origin/main`.
 
 ### `sd sweep` — the intake counterpart, as a reporter (2026-09-01)
 
