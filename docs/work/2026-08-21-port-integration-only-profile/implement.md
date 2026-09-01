@@ -90,3 +90,100 @@ mirror trees agree.
 
 All seven acceptance criteria in `prd.md` ticked, with criterion 1 backed by
 recorded output from the manual step-5 run rather than by inspection.
+
+## Findings, 2026-09-01 — the surface this plan was written against is gone
+
+Recorded, not acted on. This note decides nothing: the item's status, location,
+and fate are the maintainer's call. What follows is what a check of the tree and
+the remote returns today, so that call is made against facts rather than against
+the plan above.
+
+### The branch existed, landed, and was deleted
+
+`prd.md:5` names `branch: feat/port-integration-only-profile` and `prd.md:3`
+still reads `status: in_progress`. The branch is not anywhere on this machine
+and not on the remote:
+
+- `git branch -a --list '*port-integration*'` — no output.
+- `git ls-remote --heads origin | grep -i port-integration` — no output.
+- `git worktree list` — three worktrees, all at `75d39c18` on `main` or an
+  agent branch; none carries it.
+- `find ~/repos -path '*refs/heads/feat/port-integration-only-profile'` and a
+  `packed-refs` grep across `~/repos` — no output from either.
+
+It is absent because it merged, not because it was lost.
+[PR #535](https://github.com/platypeeps/sd-ai-command-pack/pull/535),
+*"feat(review): run the fleet integration-only profile on sd-review"*, head
+`feat/port-integration-only-profile` at `372035762b01a5630b1974ca4c0b7c3dfdcf1560`,
+merged `2026-08-22T10:58:45Z` as `176d1819`, 32 files, +804/-223. GitHub deleted
+the head branch at merge, which is the whole of the mystery. The `31e5950a`
+that `prd.md`'s Evidence table names as the verified head still resolves in this
+checkout.
+
+### Every path this plan cites has been deleted
+
+Not stale — absent. Checked with `git ls-files`, not with `ls`, so an untracked
+leftover could not answer for a tracked file:
+
+| Cited at | Path | State today |
+| --- | --- | --- |
+| `implement.md:15`, `prd.md:35` | `templates/.agents/skills/sd-review-pr/SKILL.md` | `git ls-files templates` returns nothing; `templates/` does not exist |
+| `implement.md:17`, `:63` | `templates/.agents/skills/sd-fleet-refresh/SKILL.md` | same — the whole tree went at step 3e |
+| `implement.md:21` | `scripts/sd-ai-command-pack-surface-check.py` | `git ls-files scripts` returns nothing; `scripts/` does not exist |
+| `implement.md:24` | `manifest.json` | deleted at step 3e (`CONTRIBUTING.md`, Payload Rules) |
+| `implement.md:77` | `make generate` | removed; `CONTRIBUTING.md:36-39` records why |
+
+The named tests are gone with them: `tests/` holds no
+`test_review_trusted_context.py` and no `test_sdlc_commands.py`, the two files
+`prd.md`'s Evidence table rests on. So six of the seven acceptance criteria are
+ticked against evidence that no longer exists in the tree, though it is still
+reachable in history and in #535.
+
+### The capability is not in today's `bin/sd-review` under any name
+
+Searched rather than assumed, and the search is the part worth recording:
+
+- `grep -i 'integration-only\|classified-head\|trusted\|caller\|defer-finish-work\|HEAD_SHA\|LOCAL_HEAD' bin/sd-review`
+  returns exactly one line, `bin/sd-review:555`, and it is about a subprocess
+  environment — *"place, so a caller cannot forget to pass it and inherit the
+  parent's."* Nothing about a trusted caller contract.
+- `git grep -l -i 'integration-only\|classified-head\|trusted caller'` matches
+  no file under `bin/`, `skills/`, `tests/`, `agents/`, or `plugins/` — only
+  `CHANGELOG.md`, the known-stale `docs/spec/` and `docs/FLEET_ROLLOUT.md`, this
+  item, and archived work.
+- `git grep -l 'sd-review-pr\|sd-fleet-refresh' -- bin skills tests agents plugins`
+  returns nothing. Neither skill exists in any form.
+
+It is not a rename. Today's `bin/sd-review` is a different shape: its own
+docstring says *"Nothing here writes to a network. There is no pull-request
+comment, no review submission, no label, no check-run update, and no HTTP client
+of any kind"* (`bin/sd-review:16-18`), and *"The repository comes from the
+current directory (R10-D6). There is no `--repo` argument and there will not be
+one"* (`bin/sd-review:26-28`). A profile whose entire job is to review another
+repository's pull-request head on behalf of a trusted fleet caller has no seam
+to land on in that design, and R10-D6 forecloses the argument it would need.
+
+### The three siblings were all parked on 2026-09-01; this one was missed
+
+- `docs/work/archive/2026-09/2026-08-09-retire-review-pr-surface/prd.md` —
+  parent — `parked: 2026-09-01 bulk-park (D2)`.
+- `docs/work/archive/2026-09/2026-08-21-delete-review-pr-surface/prd.md` —
+  child 2 — same line.
+- `docs/work/archive/2026-09/2026-08-22-verify-ported-integration-only-path/prd.md`
+  — the task `prd.md`'s Evidence section hands acceptance criterion 1 to — same
+  line.
+
+All three carry `status: planning`. D2's bulk-park moved `status: planning`
+items with no branch, so this item was not swept for one reason only: it reads
+`in_progress`. It is the sole survivor of its own family, and `sd-status`
+counts it as one of the pack's two active items.
+
+### The one open criterion, and what would have to be true to close it
+
+`prd.md`'s criterion 1 — *"`sd-fleet-refresh` completes an integration-only
+review through `sd-review` against a real PR head"* — is the only unticked box
+and the stated reason the item must stay `in_progress` and must not be archived.
+Closing it needs three things that no longer exist: an `sd-fleet-refresh` skill
+to run it, a consumer fleet with a live PR head to run it against (the nine
+consumers' framework footprint was removed in the step 3-c PRs), and the
+verifier task that was assigned to tick it — parked above.
