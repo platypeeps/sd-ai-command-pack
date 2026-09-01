@@ -1157,6 +1157,18 @@ commands that exist:
 | Three missing `sd-dashboard` verbs | 300 |
 | **Derived** | **13,980 → cap 14,000** |
 
+*(**The itemisation is stale as of 2026-09-01, and the cap is not.** `bin/sd`
+is **1,548 lines**, not the 264 the third row records -- step 8 grew it by
+manifest enforcement, `sd plugin lock`, `sd config` and the vault driver. 264
+was true when written and is the measurement 6b-1 landed on, so it stays;
+what is corrected is the claim that these rows still sum to the number below
+them. The cap itself is unaffected and was never derived from this table alone
+-- `bin/` measures **9,288** against 14,000, and `tests/test_loc_caps.py`
+enforces it by enumerating `git ls-files`, never from a list written here. The
+`sd store|issue|config` row was re-measured at the same time and holds: 167
+lines of config plus 294 of vault driver and store verbs, 461 of 1,400, with
+`sd issue` and the store write verbs still unwritten.)*
+
 Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
 weak instrument and saying so is part of the derivation: at the *smallest* built command, `sd-check`
 at 279, the six land at 1,674 and the total at **11,130**; at the *largest*, `sd-review` at 1,368,
