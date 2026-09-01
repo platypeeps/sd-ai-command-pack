@@ -2615,12 +2615,27 @@ than from the directory, so it is also the copy that cannot count a stray
 currently agrees, which is the state the `bin/` ceiling was in before it
 drifted; the comment left behind says so.
 
-**Not done, and not claimed:** nothing schedules this. `bin/sd-dashboard:37`
-calls itself "the one LaunchAgent this pack owns", so a scheduled sweep needs
-either a second plist and a correction to that line, or a different mechanism,
-and it touches `~/repos/system/local-machine-setup/launchagents/` — a second
-repository. Until that lands, `sd sweep --fleet` is a command someone has to
-type.
+**Scheduled, and not by this pack.** The first plan here was a second
+LaunchAgent beside `sd-dashboard`'s, which `design.md:620` forbids in as many
+words: *"The backbone ships no scheduler and schedules nothing… Sole pack-owned
+LaunchAgent = `sd-dashboard install`"*, with cron ownership assigned to
+`local-cron-jobs`. So the job is `jobs/sd-sweep-weekly.job` in the system
+repository (platypeeps/system#191), Monday 07:15, a quarter hour after
+`secret-scan-weekly` so the two do not contend for the same wake. Weekly rather
+than nightly because a 45-day threshold reprints substantially the same list 45
+times otherwise. It exits 0 whether or not anything is due — finding items is
+the rule working, and failing would fire the banner every week the sweep did
+its job, which is the opposite call from `secret-scan-weekly` where findings
+*are* the incident.
+
+The check that mattered was not that launchd loaded it. `bin/sd-dashboard`
+carries a comment about exactly this: under launchd's own PATH
+(`/usr/bin:/bin:/usr/sbin:/sbin`) a fleet walk can read as zero repositories
+and look like a quiet job rather than a broken one. Run under `env -i` with
+that PATH, `python3` resolves to the system **3.9.6** and the sweep still
+reports 57 active — so it is reading the fleet, not an empty one.
+`cron-jobs.sh verify` says `ok`, `run` exits 0 and logs `done`, and
+`failures.log` has no entry for it.
 
 - [ ] 8 / 9 / 10 / 11
 
