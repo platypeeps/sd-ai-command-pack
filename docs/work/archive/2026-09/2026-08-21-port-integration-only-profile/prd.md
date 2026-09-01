@@ -3,6 +3,7 @@ title: Port the fleet integration-only review profile into sd-review
 status: in_progress
 created: 2026-08-21
 branch: feat/port-integration-only-profile
+parked: 2026-09-01 superseded by PR #535 (missed by D2 bulk-park)
 ---
 # Port the fleet integration-only review profile into sd-review
 

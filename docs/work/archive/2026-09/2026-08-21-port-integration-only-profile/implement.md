@@ -187,3 +187,45 @@ Closing it needs three things that no longer exist: an `sd-fleet-refresh` skill
 to run it, a consumer fleet with a live PR head to run it against (the nine
 consumers' framework footprint was removed in the step 3-c PRs), and the
 verifier task that was assigned to tick it — parked above.
+### Disposition, 2026-09-01 — parked as superseded
+
+The findings above are facts; this is the call made against them. The item is
+parked, not finished and not abandoned.
+
+**Not finished.** Acceptance criterion 1 — *"`sd-fleet-refresh` completes an
+integration-only review through `sd-review` against a real PR head"* — is not
+met and cannot be. Closing it needs three subjects that no longer exist: the
+`sd-fleet-refresh` skill, a consumer fleet with a live PR head, and the
+verifier task assigned to tick it. Ticking a box whose subject is gone is the
+vacuous check this rollout keeps finding in its own gates; the box stays
+unticked and the item stays out of `done` by declaration.
+
+**Not abandoned.** The work landed. PR #535 merged `2026-08-22T10:58:45Z` as
+`176d1819`, 32 files, +804/-223, and GitHub deleted the head branch at merge.
+Six of the seven criteria were ticked against evidence that is still reachable
+in history even though every path it cites has since been deleted from the
+tree.
+
+`status: in_progress` and `branch:` are left exactly as written. Both were true
+when written; the `parked:` line and this note supersede them rather than
+backdating the record. `sd_lib.status_report` reports any item under
+`archive/` as `done` by location, so the `parked:` line is what distinguishes a
+parked item from a finished one in `sd-status --parked`.
+
+### Why no automated pass would ever have surfaced this
+
+Worth recording as a class, not as this one instance. `bin/sd_sweep.py` excludes
+twice — `item.archived or item.parked` at `:88`, then
+`item.status != SWEEPABLE_STATUS or item.branch` at `:91` — and this item trips
+the second condition on both halves: it reads `in_progress` and it names a
+branch. D2's bulk-park applied the same two exclusions, which is what makes the
+two passes comparable (`sd_sweep.py:46-49`), and is why the three siblings went
+to `docs/work/archive/2026-09/` on 2026-09-01 and this one did not.
+
+Both exclusions are deliberate and neither should change: `in_progress` is
+somebody's open work whatever its age, and a `branch:` field claims a branch
+exists. But the two together describe a state nothing checks — **an
+`in_progress` item whose branch has already merged**. The branch field outlives
+the branch, the status outlives the work, and no sweep will ever nominate it.
+That state is closed by a person reading the tree or it is not closed at all.
+This item sat in it for ten days.
