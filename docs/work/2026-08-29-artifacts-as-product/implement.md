@@ -2372,8 +2372,12 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     survives in those PRs as the first of two commits rather than being
     rewritten away.
   - **237 items across seven repositories**, each `status: planning` with no
-    `branch:`, moved to `docs/work/archive/2026-09/` carrying
-    `parked: 2026-09-01 bulk-park (D2)` in their own frontmatter. This
+    `branch:`, moved to `docs/work/archive/2026-09/` carrying a dated `parked:`
+    line in their own frontmatter — **172 read `bulk-park (D2)` and 65 read
+    `age-sweep`**, because the four repositories worked before the decision
+    records were read properly kept their age-sweep pass as the first of two
+    commits rather than having it rewritten away. Saying all 237 name D2 was
+    the tidier sentence and it was false in 65 places. This
     repository: 100 of 102 (#670). rwbp-website 46, hoa-manager 50,
     anomaly-metric-creator 20, loadsmith 18, se-ai-command-pack 2,
     rwbp-coordinator 1. `mezmo_benchmark`'s 46 are untouched under the D7
@@ -2478,8 +2482,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     is a lightweight tag, matching `v0.72.0` and everything before it, and no
     release workflow fires: the two that remain are `sd-review-route.yml` and
     `tests.yml`. Verified from the remote rather than from the local ref —
-    `git ls-remote --tags origin v1.0.0` returns `daebee6c`, `git show
-    v1.0.0:CHANGELOG.md` opens on `## 1.0.0 - 2026-09-01`, and
+    `git ls-remote --tags origin v1.0.0` returns `daebee6c`;
+    `git show v1.0.0:CHANGELOG.md` opens on `## 1.0.0 - 2026-09-01`; and
     `git ls-tree v1.0.0 bin/` has no `migrate-trellis` in it.
   - **Step 7's three checks, at the tag.** `sd-status` active is **2** against
     a ceiling of 20; **100** archived items carry `parked:` and
@@ -2488,6 +2492,17 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     met as live code paths, unmeetable as written. The box is ticked on the
     first two and on the substantive reading of the third, with the literal
     reading recorded as unsatisfiable rather than quietly counted as passed.
+
+  - **The tag shipped a CHANGELOG line that overclaims, and this is the
+    correction.** `v1.0.0`'s entry says every parked item carries a `parked:`
+    line "naming the decision (D2) that moved it". 65 of the 237 name
+    `age-sweep` instead, so the sentence is wrong for the four repositories
+    that ran the sweep pass first. Found from a Copilot comment on one line of
+    one file in `hoa-manager` — it checked that a doc's claim about frontmatter
+    matched the frontmatter, which pointed straight at the same claim made
+    fleet-wide two documents away. `main` is corrected here; the tagged tree
+    keeps the wrong line, because retagging to hide it would be worse than a
+    superseded sentence that the record explains.
 
 - [ ] 8 / 9 / 10 / 11
 
