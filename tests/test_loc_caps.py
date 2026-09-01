@@ -114,14 +114,18 @@ def code_line_count(paths: list[pathlib.Path]) -> int:
 
     total = 0
     for path in paths:
+        # The suffix decides before the file is opened. Reading first would
+        # make "every other suffix counts nothing" fail on the one case it
+        # most obviously covers -- an icon or a font under `dashboard/`, which
+        # is not text and would raise rather than be ignored. Found in review.
+        if path.suffix not in {".py", ".js"}:
+            continue
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".js":
             total += sum(
                 1 for line in text.splitlines()
                 if line.strip() and not line.strip().startswith("//")
             )
-            continue
-        if path.suffix != ".py":
             continue
         seen = set()
         for token in tokenize.generate_tokens(io.StringIO(text).readline):
@@ -252,11 +256,18 @@ class LineCountCaps(unittest.TestCase):
         self.assertEqual(code_line_count([prose]), 0)
 
     def test_no_javascript_under_the_cap_hides_prose_in_a_block_comment(self) -> None:
-        """The JS measure cannot see `/* */`, so it is checked that none exists.
+        """The JS measure cannot see `/* */`, so it is checked that none opens a line.
 
         Without this the conservative direction is only an assumption: a file
         that started using block comments would have them counted as code,
         and the first person to notice would be whoever the cap failed on.
+
+        A line *opening* one is the whole check, and deliberately not every
+        `/*` in the file: `const glob = "src/*.js"` holds the substring and no
+        comment. A block opened mid-line after real code leaves that line
+        counted as code, which it is, and its continuation lines counted as
+        code, which is the conservative direction this measure already
+        accepts. Narrowed in review, with the gap stated rather than implied.
         """
 
         for path in tracked("dashboard"):
