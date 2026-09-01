@@ -509,12 +509,20 @@ def _protection_gaps(
     else:
         approvals = int(reviews.get("required_approving_review_count") or 0)
         if approvals < 1:
+            # "Gates nothing" is what this said, and it was wrong in the
+            # direction that matters. The `required_pull_request_reviews`
+            # object is what requires a pull request at all: delete it to
+            # silence this row and the branch to which nobody can push
+            # directly becomes one to which anybody can, which is the branch
+            # above reporting `no pull-request review is required` -- a worse
+            # state than the one being described. What asks for nothing is the
+            # approval count, not the requirement.
             gaps.append(
                 {
                     "id": "reviews",
                     "gap": (
-                        "a review requirement exists but asks for 0 approving reviews, "
-                        "so it gates nothing"
+                        "a pull request is required but no approving review is: "
+                        "0 approvals, so one with green CI self-merges"
                     ),
                 }
             )

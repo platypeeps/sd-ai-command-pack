@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """The pack's service surface for plugins, stores and config.
 
-Today `sd` carries one verb group: `plugin`. The rest -- `store`, `issue`,
-`config` -- land at step 8 with the consumer that needs them (R11-D13).
+Today `sd` carries two verb groups: `plugin` and `sweep`. The rest --
+`store`, `issue`, `config` -- land at step 8 with the consumer that needs them
+(R11-D13). `sweep` arrives ahead of them because it has a consumer already:
+D2's one-time park drained the backlog and the 45-day rule that keeps it
+drained had nothing to run it.
 
 `sd plugin add` is the only way a plugin becomes known to this machine. There
 is no disk scanning: the backbone never goes looking for manifests, because a
@@ -37,6 +40,7 @@ invocation was wrong.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import pathlib
@@ -46,6 +50,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_lib  # noqa: E402
+import sd_sweep  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
 
@@ -308,6 +313,43 @@ def plugin_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def sweep(args: argparse.Namespace) -> int:
+    """What the 45-day rule would park, in this checkout or across the fleet.
+
+    Read-only by design, not by omission -- `sd_sweep`'s docstring records why
+    the acting half is withheld. Exit 0 whether or not anything is due: a sweep
+    that found work is not a failure, and a non-zero exit would make the
+    scheduled run look broken every time the rule did its job.
+    """
+
+    if args.fleet:
+        # Imported here rather than at module scope: `dashboard.collect` pulls
+        # in the tracker modules, and `sd plugin list` has no business paying
+        # for a GitHub client it will never construct.
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+        from dashboard.collect import discover_checkouts, repo_root
+
+        roots = [
+            (repo.name if group == "." else f"{group}/{repo.name}", repo)
+            for group, repo in discover_checkouts(repo_root())
+        ]
+        if not roots:
+            raise Refusal(f"no checkouts under {repo_root()}")
+    else:
+        here = sd_lib.repo_root(pathlib.Path.cwd())
+        if here is None:
+            raise Refusal("not inside a git checkout; --fleet reads SD_REPO_ROOT")
+        roots = [(here.name, here)]
+    report = sd_sweep.sweep(roots, datetime.date.today(), args.days)
+    if args.json:
+        json.dump(report, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    for line in sd_sweep.render(report):
+        print(line)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
     groups = parser.add_subparsers(dest="group", required=True)
@@ -322,6 +364,17 @@ def build_parser() -> argparse.ArgumentParser:
     lister = verbs.add_parser("list", help="list registered plugins")
     lister.add_argument("--json", action="store_true", help="machine-readable")
     lister.set_defaults(handler=plugin_list)
+
+    sweeper = groups.add_parser(
+        "sweep", help="report the planning items the 45-day rule would park")
+    sweeper.add_argument(
+        "--days", type=int, default=sd_sweep.DEFAULT_DAYS,
+        help=f"age threshold in days (default {sd_sweep.DEFAULT_DAYS})")
+    sweeper.add_argument(
+        "--fleet", action="store_true",
+        help="every checkout under SD_REPO_ROOT, not just this one")
+    sweeper.add_argument("--json", action="store_true", help="machine-readable")
+    sweeper.set_defaults(handler=sweep)
 
     return parser
 
