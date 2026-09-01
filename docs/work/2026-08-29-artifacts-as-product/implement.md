@@ -2187,9 +2187,9 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     sortable if they do. 80 notes wait across three queues today, the oldest
     24 days.
   - **End-to-end against a live server:** six plugin tabs load, `/api/now`
-    carries three rank-3 queue rows, pressing `sys/queue-blog` returns `opened blog in
-    Obsidian`, an unknown id is 404 and a missing token is 403. One row per
-    queue in Now rather than one per note: 80 waiting notes is one decision
+    carries three rank-3 queue rows, an unknown id is 404, a missing token is
+    403, and pressing `sys/queue-blog` returns `opened blog in Obsidian`. One
+    row per queue in Now rather than one per note: 80 waiting notes is one decision
     session, not 80 things asking for attention.
   - **A search URL, not `obsidian://open`**, which wants a file — the thing to
     open is a folder's worth of undecided notes, and `path:` plus the decide
