@@ -861,7 +861,7 @@ argument, and each call answers for that one tab:
 
 // `./bin/dashboard-tile toolbox` prints:
 {"title": "Toolbox", "html": "<table>…</table>", "rows": [{"rank": 0, "kind": "cron-exit",
- "id": "com.sven.x", "what": "job failed", "detail": "rc=2", "href": "#toolbox"}]}
+ "id": "com.sven.x", "what": "job failed", "detail": "rc=2"}]}
 ```
 
 **Per-tab invocation is forced by the budget, and it took a measurement to see it.** The first
@@ -918,8 +918,10 @@ not reported as a failure.
 **`html` is markup and `rows` are data, and the split is the trust boundary.** A tile has always
 rendered arbitrary markup into its own tab — R11-D12 said so when it noted that placement, not
 privilege, is what changes when a plugin reaches Now. Rows go into the backbone's most prominent
-view, so they are typed fields rendered as text, never markup, and `href` must match an in-page
-anchor. A row cannot navigate the operator anywhere.
+view, so they are typed fields rendered as text, never markup, and they carry no destination at
+all: R11-D19 removed the `href` this paragraph once confined to an in-page anchor, and the
+backbone resolves a row's panel from `source` instead. A row cannot navigate the operator
+anywhere.
 
 **Two. The loader must make its own failure loud, and this is an addition to R11-D12.** That
 record established that three plugin-bound sources own every rank-0 and rank-1 alert the view can
@@ -1285,7 +1287,8 @@ fourteen days old. Port conflicts, cron failures and vault rot would go silently
 
 **The change is one optional key.** A plugin tab's collector may return, alongside whatever it
 renders, a list of rows shaped exactly like the ones `add()` already takes — `{rank, kind, id,
-what, detail, href}` — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
+what, detail}` *(this list carried a sixth key, `href`, until R11-D19 removed it: the anchor had
+no reachable target and nothing read it)* — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
 both halves; the row list is bounded by the same cap. No new machinery, no second call, no new
 verb.
 
@@ -1297,8 +1300,10 @@ Consequences recorded rather than left implicit:
 - **Trust boundary.** Plugin rows land in the backbone's most prominent view, so a plugin can
   make Now say anything. That is already true of a tile, which renders arbitrary markup in its
   own tab; the difference is placement, not privilege. Registration stays explicit via
-  `sd plugin add`, and `href` is confined to an in-page anchor so a row cannot navigate the user
-  off the dashboard.
+  `sd plugin add`, and a row could not navigate the user off the dashboard: `href` was confined to
+  an in-page anchor. *(R11-D19 later removed `href` from the row contract outright: the anchor had
+  nothing it could legitimately point at, and the backbone resolves a row's destination from
+  `source` instead. The property this sentence protects is unchanged.)*
 - **"Now screen = externally derived facts only" still holds**, on the reading that has always
   been load-bearing: *derived at run time rather than stored*, not *fetched from a remote
   service*. Every plugin row qualifies — `launchctl list`, `machine-setup.sh candidates`, and the
@@ -1767,6 +1772,111 @@ The flood test lost its clock in the same round. It asserted `load()` finished i
 one subprocess. It was also redundant: a tile blocked on a full stderr pipe never reaches its own
 exit, so the deadlock shows up as a refused tab, and `ok` is the decisive assertion. Found in
 review.
+
+**R11-D19 (2026-08-31) — a plugin row's destination is resolved by the backbone, and `href`
+leaves the row contract.**
+
+Found while scoping 6b-5, by asking what a row's anchor actually points at. R11-D12 gave a row an
+optional `href`, and R11-D16 confined it to an in-page anchor so that "a row cannot navigate the
+operator anywhere". Both halves are implemented and neither is wrong. What neither record checked
+is whether the anchor has anything to land on.
+
+**It does not, in either direction.** A plugin cannot name a backbone id: `panelId`
+(`dashboard/app.js:255`) composes the DOM id from the plugin's own prefix and tab name, lowercased
+with non-alphanumerics collapsed, and the panel is `panel-plugin-<that>`. So the system plugin's
+Toolbox tab is `panel-plugin-sys-toolbox`, and none of that composition is published anywhere a
+plugin author reads. A plugin cannot name an id inside its own tile either: `id` is absent from
+`GLOBAL_ATTRS` (`dashboard/markup.py:63`), so the sanitizer strips every anchor target a tile
+tries to create — deliberately, and that is not being reversed here.
+
+**The contract's own example is the proof.** design.md gives `"href": "#toolbox"`. Against the
+real id that is a dead link, and `validate_rows` accepts it, because `#toolbox` is a well-formed
+anchor and well-formed is all `ANCHOR` can check. The one line a plugin author copies produces
+silent breakage that passes validation — the same shape as a rule that is enforced on spelling
+rather than on what reached the operator.
+
+**And nothing reads it.** `showAlerts` (`dashboard/app.js:265`) renders `source`, `what` and
+`detail` as text and never touches `row.href`. The key is validated, carried across the loader,
+and dropped. That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
+
+**So the backbone resolves the destination instead.** The loader already stamps `source` on every
+row it accepts (`dashboard/plugins.py`, in `validate_rows`), and the tab that emitted a row is the
+only destination the row can legitimately have — a plugin alert exists to send its reader to the
+plugin's own tab. Now therefore links each row to its origin panel, looked up from `source` in the
+map the renderer fills as it assigns ids — never recomputed from `source`, for the reason the next
+paragraph gives. Nothing for a plugin author to guess, nothing to get wrong, and the R11-D16
+property is kept rather than restated: the destination is in-page because the backbone chose it,
+not because a regex hoped so.
+
+**The mapping is unambiguous where it resolves, and it does not always resolve.** Both halves were
+checked rather than argued, because the whole ruling rests on them, and the second half is the one
+two review passes reasoned past.
+
+*Unique at the source, lossy at the id — and the difference is a design constraint, not a
+footnote.* `source` is unique per served tab: `bin/sd` refuses a prefix another plugin has
+registered (*"already registered by …"*), and `read_plugin` refuses a tab name a manifest declares
+twice, marking it `ok: False` so it never reaches the renderer. The panel id derived from it is not
+unique, because `panelId` normalises with `[^a-z0-9]+ → -`, which is many-to-one: `a-b` and `a--b`
+both satisfy `TAB_NAME`, `read_plugin` refuses only exact-string duplicates, and both land on
+`sys-a-b` — so the `-2` suffix is reachable after all. **Now must therefore read the panel id from
+a map the renderer builds as it assigns them, keyed on `prefix/name`, and never recompute the
+normalisation.** Recomputing sends a row to a sibling tab's panel, which is worse than the row not
+linking at all.
+
+This claim was wrong twice before it was right, and both failures are kept because the shape
+repeats. The first draft called the id unstable, citing a collision suffix; checking found the
+registry and manifest reader refuse the duplicates that would cause one. The correction then
+overreached into *"a resolution that silently picks the wrong panel is not a case that exists"* —
+true of `source`, false of the id, because it reasoned about the inputs to a normalisation without
+asking whether the normalisation was injective. Review round 2 supplied the counterexample. A
+uniqueness argument that stops at the key and never looks at the function applied to it is the
+error, and it survived one self-review and one reviewer lane.
+
+*But not total, and the exceptions are precisely the rank-0 rows.* `load()` serves only tabs with
+`ok` true, while `alert_rows` emits a row for every tab and plugin that failed. Three sources
+therefore name no rendered panel: `dashboard`, for a registry that did not load; the bare prefix,
+for a plugin that is dark as a whole; and `prefix/name` for a tab that was refused, whose panel was
+filtered out at exactly the moment its alert was created. Found by running the loader against
+`~/repos/system` rather than by reading it — one cold invocation timed out on `sys/toolbox` and
+produced a row sourced to a tab that was not in the served list, which is the shape in the wild.
+
+**So Now renders a row unlinked when its source resolves to no panel**, and that is a property of
+the design rather than a hole in it. A failing plugin is the case R11-D12 exists to preserve, and
+sending its reader to a tab that is not on screen would be the same disappearance one layer along.
+The old key could not have done better: an `href` written by a tile that then failed to render is a
+dead anchor that still looks clickable, and nothing in `ANCHOR` could have told the difference.
+
+`href` is removed from the row contract and its validation branch deleted. Its two refusal tests
+— an off-page href, a `javascript:` one — are replaced by a single test that a plugin still
+sending the key is neither refused nor served it: dropping is the only outcome that punishes
+nobody for a key this contract used to document while keeping an attacker-chosen string out of the
+rendered payload. This subtracts a key that never worked; it does not subtract a capability.
+
+**Two rejected alternatives, and what would bring each back.**
+
+*Allow-list `id` in tile markup and let a row deep-link inside its own panel.* This is the only
+option that adds reach, and it is refused for now on cost rather than on principle: an `id` a tile
+controls can be `panel-repos` or `tab-issues`, so the filter would have to namespace every id on
+the way out and rewrite the matching fragments in the same pass — a rewriting sanitiser rather
+than a filtering one, which is a materially larger thing to get right. No tile has asked for it.
+If one does, this record is what to revisit, and the namespacing is the price.
+
+*Publish `panelId`'s algorithm so plugins can compute the id.* Refused because it buys nothing and
+costs the freedom to rename. A plugin computing the id would be reproducing, by hand and in every
+plugin, the one mapping the backbone already holds — and the moment it is published, `panel-plugin-`
+is a contract and the backbone cannot restructure its own DOM without breaking every plugin that
+copied the recipe. The first draft of this record refused it on instability instead, citing
+`panelId`'s `-2` collision suffix, and reasoned that the registry and the manifest reader make it
+unreachable. Both the reason and its correction are kept rather than quietly swapped: the suffix
+*is* reachable, by the lossy-normalisation counterexample above, which is a second argument against
+publishing the recipe rather than a rescue of the first. A plugin computing the id would have to
+reproduce the collision handling too, and get it right against tabs it cannot see.
+
+**The tile-html rule is untouched.** `SAFE_HREF` (`dashboard/markup.py:78`) stays absolute and
+external only. The asymmetry is the trust boundary, not an inconsistency: a link in a tile is
+inside a tab the operator chose to open, and a row appears in the most prominent view unbidden.
+This record was written after first mistaking those two rules for a contradiction, which is the
+reason the distinction is now stated here rather than left to be re-derived.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
