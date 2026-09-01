@@ -27,7 +27,11 @@ from datetime import date, datetime, timezone
 AHEAD = 3
 DIRTY = 4
 # A pull request nobody has touched for a fortnight, and one that is simply
-# open. The second is a reminder and sorts below everything that is not.
+# open. `FRESH` shares rank 4 with `DIRTY` deliberately: both are reminders
+# rather than problems, and the two tie into one band that the page paints
+# `queued`. Nothing decides between them and nothing should -- an ordering
+# between "uncommitted files" and "an open PR" would be invented, not derived.
+# Ties break on `id`, which only has to be stable, not meaningful.
 STALE = 2
 FRESH = 4
 
