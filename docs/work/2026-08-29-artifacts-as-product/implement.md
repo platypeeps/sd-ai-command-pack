@@ -2440,10 +2440,18 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     directly. The DELETE was refused by the permission classifier before it
     ran, which is the only reason the plan's error stayed on paper. The gap
     text now says what is true — *"a pull request is required but no approving
-    review is: 0 approvals, so nothing blocks a self-merge"* — and
-    `test_a_missing_review_object_is_the_worse_gap_not_the_same_one` pins the
-    other branch, because both emit `reviews` and an assertion on the id alone
-    passes for either.
+    review is: 0 approvals, so one with green CI self-merges"* — matching
+    what this journal already said correctly 1,700 lines above, at the
+    `sd-github-review` tombstone: "requires **0** approving reviews, so a pull
+    request with green CI lands". The first correction read *"nothing blocks a
+    self-merge"*, which over-claimed in the other direction: the required
+    status checks do block it, which is the whole reason 0 approvals is
+    survivable here. `test_zero_required_approvals_is_a_gap` now asserts the
+    message verbatim, so tightening it again fails the test rather than
+    silently leaving this quote stale — which is exactly how it went stale the
+    first time. `test_a_missing_review_object_is_the_worse_gap_not_the_same_one`
+    pins the other branch, because both emit `reviews` and an assertion on the
+    id alone passes for either.
 
     **Decision: left open, deliberately (user, 2026-09-01).** Not deferred and
     not forgotten. Raising the count to 1 locks a single-maintainer repository

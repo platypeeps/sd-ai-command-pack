@@ -522,7 +522,7 @@ def _protection_gaps(
                     "id": "reviews",
                     "gap": (
                         "a pull request is required but no approving review is: "
-                        "0 approvals, so nothing blocks a self-merge"
+                        "0 approvals, so one with green CI self-merges"
                     ),
                 }
             )

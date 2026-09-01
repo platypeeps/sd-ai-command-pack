@@ -237,7 +237,13 @@ class ProtectionGapTests(unittest.TestCase):
         )
         found, _ = status._protection_gaps(protection, "main", {"lint"}, [])
         self.assertEqual([gap["id"] for gap in found], ["reviews"])
-        self.assertIn("no approving review", found[0]["gap"])
+        # Verbatim, not a substring. `implement.md` quotes this string as a
+        # transcript of current behaviour, and a substring assertion let the
+        # message be reworded with the quote left stale.
+        self.assertEqual(
+            found[0]["gap"],
+            "a pull request is required but no approving review is: 0 approvals, so one with green CI self-merges",
+        )
         # The distinction the old wording lost. Both branches report `reviews`,
         # so an assertion on the id alone passes whichever text is emitted --
         # and the two describe opposite states of the branch.
