@@ -1799,10 +1799,11 @@ and dropped. That is not a gap to fill at 6b-5b; it is the absence of anything t
 **So the backbone resolves the destination instead.** The loader already stamps `source` on every
 row it accepts (`dashboard/plugins.py`, in `validate_rows`), and the tab that emitted a row is the
 only destination the row can legitimately have — a plugin alert exists to send its reader to the
-plugin's own tab. Now therefore links each row to its origin panel, computed from `source` by the
-same code that built the id. Nothing for a plugin author to guess, nothing to get wrong, and the
-R11-D16 property is kept rather than restated: the destination is in-page because the backbone
-chose it, not because a regex hoped so.
+plugin's own tab. Now therefore links each row to its origin panel, looked up from `source` in the
+map the renderer fills as it assigns ids — never recomputed from `source`, for the reason the next
+paragraph gives. Nothing for a plugin author to guess, nothing to get wrong, and the R11-D16
+property is kept rather than restated: the destination is in-page because the backbone chose it,
+not because a regex hoped so.
 
 **The mapping is unambiguous where it resolves, and it does not always resolve.** Both halves were
 checked rather than argued, because the whole ruling rests on them, and the second half is the one
@@ -1862,10 +1863,11 @@ costs the freedom to rename. A plugin computing the id would be reproducing, by 
 plugin, the one mapping the backbone already holds — and the moment it is published, `panel-plugin-`
 is a contract and the backbone cannot restructure its own DOM without breaking every plugin that
 copied the recipe. The first draft of this record refused it on instability instead, citing
-`panelId`'s `-2` collision suffix; that reason was wrong and is recorded here rather than quietly
-swapped, because it was found by checking the claim rather than by rereading the prose. The suffix
-is unreachable for served tabs, per the uniqueness above — it is defence against a case the
-registry and the manifest reader both already refuse.
+`panelId`'s `-2` collision suffix, and reasoned that the registry and the manifest reader make it
+unreachable. Both the reason and its correction are kept rather than quietly swapped: the suffix
+*is* reachable, by the lossy-normalisation counterexample above, which is a second argument against
+publishing the recipe rather than a rescue of the first. A plugin computing the id would have to
+reproduce the collision handling too, and get it right against tabs it cannot see.
 
 **The tile-html rule is untouched.** `SAFE_HREF` (`dashboard/markup.py:78`) stays absolute and
 external only. The asymmetry is the trust boundary, not an inconsistency: a link in a tile is
