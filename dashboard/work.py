@@ -5,11 +5,19 @@ step 2 replaced that layout with `docs/work/`. Exactly one checkout fleet-wide
 still has a `.trellis/workspace`, so this is a rewrite against the current
 layout rather than the port the parity checklist implies.
 
-An item is a directory under `docs/work/` holding a `prd.md`, and its state is
-the `status:` line in that file's frontmatter. Nothing indexes this: the
-directory listing is the index, which is the same reason `discover_checkouts`
-enumerates the fleet instead of reading a configured list. A work item nobody
-registered anywhere is the one worth seeing.
+An item is a directory under `docs/work/` -- that alone, not a directory that
+also holds a `prd.md`. Its state is the `status:` line in that file's
+frontmatter when there is one, and the ones with no `prd.md` at all, or a
+`prd.md` that never says, are items too: they are reported under `unstated`
+rather than skipped. Requiring the file to qualify as an item would hide
+exactly the directories nobody finished, which is the reverse of what this is
+for, so a later reader tightening this sentence into a filter would be
+removing the feature.
+
+Nothing indexes any of it: the directory listing is the index, which is the
+same reason `discover_checkouts` enumerates the fleet instead of reading a
+configured list. A work item nobody registered anywhere is the one worth
+seeing.
 
 **The tab shows what is moving, and moving is defined by exclusion.** Of 310
 active items fleet-wide, 300 read `planning` -- so the full inventory is one
