@@ -80,6 +80,22 @@ class Catalog(unittest.TestCase):
             actions.RUN_ALLOWLIST["index"]["argv"],
             [str(actions.SD_DASHBOARD), "index"])
 
+    def test_the_order_is_declaration_order_and_not_sorted(self) -> None:
+        """R11-D23 chose a list over an object keyed by id to keep this.
+
+        Sorting reads as tidier and throws away the thing the shape was chosen
+        for: the buttons would reorder themselves when an id was renamed. The
+        backbone's own action comes first, then each manifest in its order.
+        """
+        entry = plugin_entry(actions=[
+            {"id": "zebra", "label": "z", "run": "sd-sys z"},
+            {"id": "alpha", "label": "a", "run": "sd-sys a"},
+        ])
+        self.assertEqual(
+            [action["id"] for action in actions.catalog([entry])],
+            ["index", "sys/zebra", "sys/alpha"],
+        )
+
     def test_a_plugin_cannot_shadow_another_plugins_action(self) -> None:
         first = plugin_entry(prefix="sys")
         second = plugin_entry(prefix="ops", root="/tmp/other")
@@ -256,6 +272,23 @@ class HandlerShape(unittest.TestCase):
             for step in handler.body[:host]:
                 self.assertIsInstance(
                     step, (ast.Expr, ast.Assign), f"{handler.name} acts before its guards")
+
+    def test_the_host_list_is_resolved_before_the_socket_opens(self) -> None:
+        """`allowed_hosts` forks; lazily it would fork inside the first request.
+
+        Position, not presence: a call placed after `serve_forever` would be
+        no call at all, and one left out entirely puts a ten-second timeout in
+        front of whoever loads the page first.
+        """
+        source = (REPO_ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.FunctionDef) and node.name == "serve":
+                steps = [ast.unparse(step) for step in node.body]
+                asked = next(i for i, s in enumerate(steps) if "allowed_hosts()" in s)
+                served = next(i for i, s in enumerate(steps) if "ThreadingHTTPServer" in s)
+                self.assertLess(asked, served)
+                return
+        raise AssertionError("serve is gone")
 
     def test_the_third_guard_is_the_absence_of_cors(self) -> None:
         """R11-D10's third guard is a header that must never be sent.

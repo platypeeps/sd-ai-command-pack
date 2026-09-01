@@ -682,8 +682,7 @@ setInterval(drawPlugins, 10000);
 // The one place this page writes, below the tabs rather than inside one: an
 // action belongs to the dashboard, not to whichever view is open when somebody
 // wants to press it. A button sends an **id** -- the argv lives in
-// `RUN_ALLOWLIST` or a manifest and has never been sent here, so there is
-// nothing in this file to talk into running something else.
+// `RUN_ALLOWLIST` or a manifest and has never been sent here.
 
 const runButtons = document.getElementById("run-buttons");
 const runSub = document.getElementById("run-sub");
@@ -702,8 +701,8 @@ async function press(button, id) {
       body: JSON.stringify({ action: id }),
     });
     const body = await reply.json().catch(() => ({}));
-    // The last line of output, not all of it: `sd-dashboard index` prints its
-    // summary last, and the strip is one line tall.
+    // The last line of output: the summary is printed last, and the strip is
+    // one line tall.
     runSub.textContent = body.ok
       ? `${id}: ${(body.output || "finished").split("\n").pop()}`
       : `${id} failed: ${body.error || reply.status}`;

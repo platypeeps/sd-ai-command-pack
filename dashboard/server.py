@@ -57,10 +57,9 @@ def tailnet_names() -> set[str]:
     """This node's own MagicDNS names, or nothing.
 
     A `tailscale serve` proxy forwards the name the browser typed, so a list
-    holding only the loopback names answers `http://tg-sol:8767/` with a 403
-    indistinguishable from a network fault. Both spellings, because `serve`
-    publishes the short name and the FQDN as separate vhosts. Best effort: no
-    tailscale is a loopback-only dashboard, which is smaller, not broken.
+    of only loopback names answers `http://tg-sol:8767/` with a 403 that looks
+    like a network fault. Both spellings: `serve` publishes the short name and
+    the FQDN as separate vhosts. No tailscale is a loopback-only dashboard.
     """
     try:
         out = subprocess.run(["tailscale", "status", "--json"],
@@ -345,9 +344,9 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 return self.send_body(body, "application/json")
             if path == "/api/actions":
                 # Ids and labels; the argv never leaves the process. The
-                # registry's own complaint rides along, because a loader that
-                # cannot be read has no actions to offer and reporting that as
-                # "none declared" is the quiet it refuses. Found in review.
+                # registry's complaint rides along: a loader that cannot be
+                # read has no actions to offer, and "none declared" would be
+                # the quiet it refuses. Found in review.
                 entries, failure = plugins.catalog()
                 body = json.dumps(
                     {"actions": actions.catalog(entries), "reason": failure}
@@ -453,6 +452,10 @@ def script_source() -> str:
 
 
 def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> None:
+    # Asked before the socket opens: `allowed_hosts` forks, and lazily it
+    # would do it inside the first request, putting a ten-second timeout in
+    # front of a page load. Found in review.
+    allowed_hosts()
     handler = make_handler(Cache(root), script_source())
     with ThreadingHTTPServer((host, port), handler) as httpd:
         httpd.serve_forever()

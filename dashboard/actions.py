@@ -2,11 +2,10 @@
 
 **`RUN_ALLOWLIST` is the whole security model of writing.** The server does not
 take a command from the page, build one from a parameter, or interpolate
-anything a caller sends into one. A POST names an **id**; the id resolves to an
-argv written down here or declared in a registered plugin's manifest; an id
-that resolves to nothing is a 404. There is no path from request text to a
-shell -- `bounded_run` takes a list and never a string, and nothing here joins
-one.
+anything a caller sends into one. A POST names an **id**; it resolves to an
+argv written down here or declared in a registered manifest; an id that
+resolves to nothing is a 404. There is no path from request text to a shell --
+`bounded_run` takes a list and never a string, and nothing here joins one.
 
 **A plugin may declare actions, and that is the point of the mechanism**
 (R11-D21, which has the reasoning). A manifest names actions beside its tile,
@@ -101,9 +100,13 @@ def catalog(entries: list[dict]) -> list[dict]:
     The command is not sent to the browser. Nothing there needs it, and a page
     that has never seen an argv cannot be talked into echoing a different one
     back.
+
+    Declaration order, not sorted: R11-D23 chose a list over an object keyed
+    by id to keep it, and sorting threw away what the shape was chosen for.
+    Found in review, against this repository's own record.
     """
     return [{"id": name, "label": spec["label"]}
-            for name, spec in sorted(resolve(entries).items())]
+            for name, spec in resolve(entries).items()]
 
 
 def run(action_id: object, entries: list[dict]) -> tuple[dict, int]:
