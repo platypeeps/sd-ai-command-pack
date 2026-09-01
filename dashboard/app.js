@@ -150,15 +150,16 @@ async function drawWork() {
     workSub.textContent = `cannot reach the server (${err})`;
     return;
   }
-  // The settled counts ride the summary rather than the table. Showing six
-  // rows without saying that 300 more exist would read as the whole set.
-  const settled = Object.entries(payload.counts)
+  // Every status, not just the ones missing from the table below. Showing six
+  // rows without saying that 300 more exist would read as the whole set, and
+  // a breakdown that omitted the six would not add up to `active`.
+  const breakdown = Object.entries(payload.counts)
     .sort((a, b) => b[1] - a[1])
     .map(([name, count]) => `${count} ${name}`)
     .join(" \u00b7 ");
   workSub.textContent =
     `${payload.active} active across ${payload.repos} repos` +
-    `${settled ? ` \u00b7 ${settled}` : ""}` +
+    `${breakdown ? ` \u00b7 ${breakdown}` : ""}` +
     ` \u00b7 ${payload.archived} archived`;
 
   workMoving.replaceChildren();

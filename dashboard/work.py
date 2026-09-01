@@ -99,12 +99,14 @@ def read_item(path: Path) -> dict:
 
 
 def collect_work(root: Path) -> dict:
-    """Every work item under the fleet, with the settled ones counted only.
+    """Every work item under the fleet: the moving ones listed, all of them counted.
 
-    The counts are returned alongside the rows rather than derived from them
-    in the page, because the rows are deliberately not the whole set: a view
-    that showed `6` while hiding that 300 more exist would be worse than the
-    inventory it replaces.
+    `counts` covers every status seen, moving included -- it is a breakdown of
+    the whole active set, not of the part `moving` leaves out. Returned
+    alongside the rows rather than derived from them in the page, because the
+    rows are deliberately not the whole set: a view showing six while hiding
+    that 300 more exist would be worse than the inventory it replaces, and a
+    breakdown that omitted the six would not add up to `active`.
     """
     moving: list[dict] = []
     unstated: list[dict] = []

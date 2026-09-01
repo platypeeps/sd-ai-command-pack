@@ -113,6 +113,22 @@ class WorkCollection(unittest.TestCase):
         self.assertEqual(got["moving"], [])
         self.assertEqual(got["active"], 2)
 
+    def test_the_breakdown_covers_the_moving_items_too(self) -> None:
+        """`counts` is the whole active set, not the part the table omits.
+
+        The summary line prints it beside `active`, so a breakdown missing the
+        moving items would not add up and the page would quietly disagree with
+        itself.
+        """
+        repo = make_repo(self.root, "one")
+        make_item(repo, "2026-01-01-a", "planning")
+        make_item(repo, "2026-01-02-b", "in_progress")
+        make_item(repo, "2026-01-03-c", "blocked | why")
+        make_item(repo, "2026-01-04-d", None)
+        got = work.collect_work(self.root)
+        self.assertEqual(got["counts"], {"planning": 1, "in_progress": 1, "blocked": 1})
+        self.assertEqual(sum(got["counts"].values()) + len(got["unstated"]), got["active"])
+
     def test_a_repo_without_docs_work_is_not_counted_as_one_with_none(self) -> None:
         """`repos` names the denominator of the summary line."""
         make_repo(self.root, "has")
