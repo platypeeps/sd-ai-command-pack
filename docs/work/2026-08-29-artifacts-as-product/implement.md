@@ -1630,7 +1630,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     that leaves ~240 lines for the loader and `RUN_ALLOWLIST`. The three
     missing `sd-dashboard` verbs are not in that number: the test charges
     `bin/sd-dashboard` to `bin/` deliberately so the caps do not overlap
-    (`tests/test_loc_caps.py:110`).
+    (`tests/test_loc_caps.py`'s `test_the_dashboard_stays_under_its_ceiling`).
   - **`bin/` is the tighter cap, and the rollout hits it first.** Counted:
     `bin/` core is **7,492 of 8,000 — 508 lines left** (`migrate-*` is excluded
     under its own 1,500 ceiling, which is why a raw 8,742 total still passes).
@@ -2130,7 +2130,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     300 left; 2,141 of 2,300, 159 left.**
     **The adversarial pass found one overlap and rebutted one figure.** The
     layout table listed `sd-dashboard` inside the `dashboard/` bucket and hung
-    the new ceiling on that bucket, while `tests/test_loc_caps.py:110` charges
+    the new ceiling on that bucket, while `tests/test_loc_caps.py`'s `test_the_dashboard_stays_under_its_ceiling` charges
     the CLI to `bin/` on purpose -- so the written cap covered a file the
     enforced cap did not, and the two would have overlapped the moment anyone
     reconciled them. The layout line now says where the CLI charges. The

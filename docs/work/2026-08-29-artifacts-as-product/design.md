@@ -1217,7 +1217,7 @@ is capped at 2,500 LOC, justified in this document as *"credible: 457 lifted + o
 So the backbone-side lift is **763**, not 457. *(Later: none of the 79 is still to build against this cap. `research` shipped as a plugin tab in 6b-4 and R11-D21 moved `queues` to one, so both left `dashboard/` altogether, and `work` was built in 6b-5a and is inside the measured total. The table above is left as counted; subtracting the 79 again is the error this note exists to stop.)* Against 1,499 tracked today and a 2,500 cap, that
 leaves roughly **240 lines** for the two remaining things with no system counterpart: the loader
 and `RUN_ALLOWLIST`. The three missing `sd-dashboard` verbs are **not** in that number —
-`tests/test_loc_caps.py:110` charges `bin/sd-dashboard` to the `bin/` ceiling on purpose, so that
+`tests/test_loc_caps.py`'s `test_the_dashboard_stays_under_its_ceiling` charges `bin/sd-dashboard` to the `bin/` ceiling on purpose, so that
 the two caps do not overlap and neither means less than it says. The first draft of this record
 charged them here, which is the same mistake in the other direction.
 
