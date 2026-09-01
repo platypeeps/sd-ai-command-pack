@@ -2462,7 +2462,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     with a recorded reason is the honest state; the failure mode this replaces
     is a gap closed by making the tool stop mentioning it.
 
-    **Accepted policy now, with a mechanism (user, 2026-09-01).** The
+    **Accepted policy now, with a mechanism (user, 2026-09-01, #680).** The
     paragraph above stands as written — it was true on the day, and "left
     open, deliberately" is what the decision was. What changed is the
     reporting, not the branch: `sd-status` reads `.github/sd-status.json`, a
