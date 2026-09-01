@@ -40,6 +40,13 @@ PAGE_SIZE = 100
 # demonstrably not enough: a 90-day `author:@me` window on this account returned
 # a truncated first page on the very first run.
 MAX_PAGES = 10
+# GitHub's search returns at most 1,000 results per query and reports
+# `hasNextPage: false` at that boundary, so the walk cannot tell the end of the
+# list from the end of what the API will hand over. Ten pages of 100 lands
+# exactly there. `issueCount` is the only thing that disagrees -- measured
+# 2026-09-01, a 90-day `author:@me` window said 2,968 while the walk collected
+# 1,000 and reported a clean finish -- so the count is what truncation is
+# decided against, not the page ceiling alone.
 OVERLAP = timedelta(hours=1)
 # A first collect has no watermark and an unbounded query would drag in years
 # of closed work to render a "needs you" list. Ninety days is the same horizon
@@ -58,6 +65,7 @@ BUCKETS = (
 QUERY = """
 query($q: String!, $n: Int!, $after: String) {
   search(query: $q, type: ISSUE, first: $n, after: $after) {
+    issueCount
     pageInfo { hasNextPage endCursor }
     nodes {
       __typename
@@ -195,20 +203,38 @@ def _page(query: str, cursor: str | None, runner=None) -> tuple[dict, str]:
 def search(query: str, runner=None) -> tuple[list[dict], bool, str]:
     """One search, followed across pages. Returns (nodes, truncated, error).
 
-    `truncated` means the ceiling stopped the walk with more still to come --
-    not merely that a page boundary was crossed. It is the honest signal the
-    caller reports, so a capped collect never renders as a complete one.
+    `truncated` means rows exist that this walk did not return -- not merely
+    that a page boundary was crossed. It is the honest signal the caller
+    reports, so a capped collect never renders as a complete one.
+
+    Two things can cut a walk short and only one of them is this module's. The
+    page ceiling is: ten pages and stop. GitHub's 1,000-result search cap is
+    not, and it is the one that actually fires here -- it arrives disguised as
+    `hasNextPage: false`, which is why the finish is checked against
+    `issueCount` rather than believed. Found by step 6's own rm-test: an index
+    rebuilt from nothing held 1,000 `author` rows to the live index's 1,037 and
+    reported a clean collect.
     """
     nodes: list[dict] = []
     cursor: str | None = None
+    available = 0
     for _ in range(MAX_PAGES):
         block, error = _page(query, cursor, runner)
         if error:
             return nodes, False, error
         nodes.extend(node for node in (block.get("nodes") or []) if node)
+        # The search's own total, which is answered on every page and is the
+        # only field that survives the result cap: at 1,000 the walk is told
+        # `hasNextPage: false` while this still reads 2,968. Read from every
+        # page rather than from the first, so a page that omits it costs
+        # nothing; type-checked rather than truth-checked, because a non-int
+        # would compare against the row count and raise mid-walk.
+        count = block.get("issueCount")
+        if isinstance(count, int):
+            available = count
         info = block.get("pageInfo") or {}
         if not info.get("hasNextPage"):
-            return nodes, False, ""
+            return nodes, len(nodes) < available, ""
         cursor = info.get("endCursor") or None
         # A next page with no cursor to reach it would loop on page one
         # forever; stop and say the walk was cut short.

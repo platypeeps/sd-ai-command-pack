@@ -101,8 +101,17 @@ class FakeGh:
         return 0, json.dumps({"data": {"search": block}}), ""
 
 
-def page(nodes: list[dict], *, next_cursor: str | None = None) -> dict:
+def page(nodes: list[dict], *, next_cursor: str | None = None,
+         issue_count: int | None = None) -> dict:
+    """One search page. `issue_count` defaults to what was actually returned.
+
+    Defaulting to "the search found exactly these" rather than to 0 or to a
+    missing key, because a page that claims fewer results than it carries is a
+    shape GitHub never sends, and a fixture that sends it would let a
+    truncation bug pass by accident.
+    """
     return {
+        "issueCount": len(nodes) if issue_count is None else issue_count,
         "pageInfo": {"hasNextPage": next_cursor is not None, "endCursor": next_cursor},
         "nodes": nodes,
     }
@@ -242,6 +251,110 @@ class CollectTests(unittest.TestCase):
         result = github.collect(None, NOW, gh)
         self.assertEqual(result["truncated"], ["assigned"])
         self.assertEqual(len(result["issues"]), github.MAX_PAGES)
+
+    def test_the_search_asks_for_the_total_it_checks_against(self) -> None:
+        """The one part of the cap check no fixture can exercise.
+
+        `FakeGh` hands back whatever the fixture says, so every test above
+        passes whether or not the real query requests `issueCount`. Drop the
+        field and GitHub stops sending it, `available` stays 0 for every
+        bucket, and truncation silently never fires again -- against a live
+        service, with nothing red.
+        """
+        self.assertIn("issueCount", github.QUERY)
+
+    def test_the_result_cap_is_reported_even_though_the_walk_ends_cleanly(self) -> None:
+        """The truncation that actually happens, and the only one GitHub hides.
+
+        A search stops handing over results at 1,000 and says `hasNextPage:
+        false` at that boundary -- the same answer it gives when the list is
+        genuinely exhausted. Measured on this account 2026-09-01: a 90-day
+        `author:@me` window walked ten clean pages to exactly 1,000 rows while
+        `issueCount` read 2,968, and the collect reported no ceiling. Only the
+        count disagrees, so only the count can catch it.
+        """
+        gh = FakeGh(
+            {
+                "assignee": [page([node(1), node(2)], issue_count=2968)],
+                "mentions": [page([])],
+                "review-requested": [page([])],
+                "author": [page([])],
+            }
+        )
+        result = github.collect(None, NOW, gh)
+        self.assertEqual(result["truncated"], ["assigned"])
+        self.assertEqual(len(result["issues"]), 2)
+
+    def test_a_search_that_returned_everything_is_not_called_truncated(self) -> None:
+        """The other half of the same rule: a complete walk must stay complete.
+
+        Without this, "report truncation whenever the walk ends" would pass the
+        test above and mark every collect on the machine as capped, which is
+        the failure mode that makes an honest signal worthless.
+        """
+        gh = FakeGh(
+            {
+                "assignee": [page([node(1)], next_cursor="1"), page([node(2)], issue_count=2)],
+                "mentions": [page([])],
+                "review-requested": [page([])],
+                "author": [page([])],
+            }
+        )
+        result = github.collect(None, NOW, gh)
+        self.assertEqual(result["truncated"], [])
+
+    def test_the_total_is_read_from_whichever_page_carries_it(self) -> None:
+        """`issueCount` is answered per page, and the walk must not need page one.
+
+        The fixture puts it on the second page only. A walk that reads the
+        total from page one and keeps it would see no total at all here and
+        call a capped search complete.
+        """
+        gh = FakeGh(
+            {
+                "assignee": [
+                    {"pageInfo": {"hasNextPage": True, "endCursor": "1"},
+                     "nodes": [node(1)]},
+                    page([node(2)], issue_count=99),
+                ],
+                "mentions": [page([])],
+                "review-requested": [page([])],
+                "author": [page([])],
+            }
+        )
+        result = github.collect(None, NOW, gh)
+        self.assertEqual(result["truncated"], ["assigned"])
+
+    def test_a_page_without_a_total_is_not_read_as_an_empty_search(self) -> None:
+        """A missing or unusable `issueCount` must not invent truncation.
+
+        Two shapes, because they fail differently: a page that omits the field
+        would report a complete walk as capped if a missing value were read as
+        zero rows found, and a page that answers a string would raise mid-walk
+        if the value were compared instead of type-checked. Neither is a shape
+        GitHub sends today, which is the point -- the walk must survive the
+        answer changing without turning it into a wrong number.
+        """
+        for label, block in (
+            ("omitted", {"pageInfo": {"hasNextPage": False}, "nodes": [node(1)]}),
+            ("a string", {"issueCount": "2968",
+                          "pageInfo": {"hasNextPage": False}, "nodes": [node(1)]}),
+        ):
+            with self.subTest(total=label):
+                self.assert_no_truncation_for(block)
+
+    def assert_no_truncation_for(self, block: dict) -> None:
+        gh = FakeGh(
+            {
+                "assignee": [block],
+                "mentions": [page([])],
+                "review-requested": [page([])],
+                "author": [page([])],
+            }
+        )
+        result = github.collect(None, NOW, gh)
+        self.assertEqual(result["truncated"], [])
+        self.assertEqual(len(result["issues"]), 1)
 
     def test_a_failing_bucket_keeps_the_rows_and_fails_the_collect(self) -> None:
         gh = FakeGh(
