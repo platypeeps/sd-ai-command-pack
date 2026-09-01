@@ -68,7 +68,10 @@ def frontmatter(path: Path) -> dict[str, str]:
                 if not line or line.strip() == "---":
                     break
                 key, sep, value = line.partition(":")
-                if sep and key.strip() and not key.startswith(" "):
+                # Any leading whitespace, not just a space: a tab-indented
+                # line is nested under the field above it, and reading it as
+                # top-level would let a nested `status:` outrank the real one.
+                if sep and key.strip() and not key[:1].isspace():
                     fields[key.strip()] = value.strip()
     except OSError:
         return {}

@@ -197,6 +197,17 @@ class Frontmatter(unittest.TestCase):
         self.assertLess(len(got), 500)
         self.assertNotIn("filler4999", got)
 
+    def test_a_nested_field_does_not_read_as_a_top_level_one(self) -> None:
+        """Indented by a tab as readily as by a space.
+
+        A nested `status:` outranking the real one would misreport the item,
+        and the guard checked only for a leading space.
+        """
+        got = work.frontmatter(self.write(
+            "---\nstatus: planning\nmeta:\n\tstatus: in_progress\n  owner: someone\n---\n"))
+        self.assertEqual(got["status"], "planning")
+        self.assertNotIn("owner", got)
+
     def test_a_missing_file_is_not_an_error(self) -> None:
         self.assertEqual(work.frontmatter(self.root / "absent.md"), {})
 
