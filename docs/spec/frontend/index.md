@@ -1,5 +1,20 @@
 # Prompt And Adapter Guidelines
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> This index and the three guides it lists all describe the render payload.
+> `templates/` (175 files, 64,142 lines), `.github/command-sources/`,
+> `manifest.json`, `tests/test_generated_parity.py` and the `make generate`
+> target were deleted on 2026-08-30 by step 3e (`43170716`, #610); the loss of
+> `make generate` is recorded in `CONTRIBUTING.md`. There is now exactly one
+> copy of each skill, at `skills/sd-*/SKILL.md`, and no per-platform adapters to
+> keep in sync -- `bin/sd_install.py --user` renders at install time.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Project-specific guidance for the user-facing skill and platform adapters.
 
 ---

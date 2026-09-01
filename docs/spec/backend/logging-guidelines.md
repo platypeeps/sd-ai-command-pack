@@ -1,5 +1,21 @@
 # Logging Guidelines
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> The installer whose output this page pins -- `created`/`skipped`/`preserved`/
+> `symlink-conflict` per-file lines, `--force --backup` paths, the install audit
+> -- was deleted on 2026-08-30 by step 3e (`43170716`, #610). The Secret
+> Redaction section's single definition site,
+> `templates/scripts/sd_ai_command_pack_lib.py`, went with the whole of
+> `templates/`; `grep -rn '_SECRET_SHAPES' bin/ dashboard/` returns nothing, so
+> neither of the two consumers it kept in lockstep exists either, and the
+> fleet-timing path it names was deleted with the release train at step 0.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > How logging is done in this project.
 
 ---

@@ -291,6 +291,31 @@ aaif-brief-compile, and `settings.vault.json`) retargeted **before** any deletio
 `market-watch` was named here for a year and contains no `pack.py` reference at all. pp-* is the named
 second consumer that validates the interface before any freeze.
 
+**Where a kind is kept: the `store` block (R11-D26, 2026-09-01).** A sibling of `dashboard`,
+never a ninth `kinds.*` key — the eight describe what a kind *is*, and none of that changes when
+the same kind is kept somewhere else.
+
+```json
+"store": {
+  "driver": "vault",
+  "root": "$OBSIDIAN_VAULT",
+  "bases": { "blog-idea": "System/Databases/Blog Ideas" }
+}
+```
+
+| Key | Rule |
+|---|---|
+| `driver` | a closed set, `vault` today; a typo refuses by name rather than falling through to the only default there is |
+| `root` | an environment-variable reference, `^\$[A-Z][A-Z0-9_]*$`; a literal path refuses (incident: `pack.py:146`), and there is no default |
+| `bases` | one entry per declared kind and no others, relative to the root; **not** checked for existence, because a vault may be unmounted or behind a TCC grant while the manifest is correct |
+
+`sd store list|get` read the vault at every invocation — no index, no cached manifest, nothing to
+sync — which is R5-D1's system-of-record promise made checkable. The driver probes the root in a
+bounded child before reading it (`VAULT_PROBE_SECONDS` = 15, carried from
+`local-project-dashboard/collectors.py:173-227`): macOS answers an ungranted `~/Documents` read by
+waiting rather than failing, and a driver that told "missing" from "present" apart and nothing
+else would inherit a 1605-second hang.
+
 ### Session handoff (r7)
 
 **Two handoff lanes, split by what they actually solve (R10-D3, user 2026-08-29).**
@@ -1131,6 +1156,19 @@ commands that exist:
 | `sd store\|issue\|config`, the design's own sub-cap | 1,400 |
 | Three missing `sd-dashboard` verbs | 300 |
 | **Derived** | **13,980 → cap 14,000** |
+
+*(**The itemisation is stale as of 2026-09-01, and the cap is not.** `bin/sd`
+is **1,553 lines** at this commit -- close to six times the 264 the third row
+records -- because step 8 grew it by
+manifest enforcement, `sd plugin lock`, `sd config` and the vault driver. 264
+was true when written and is the measurement 6b-1 landed on, so it stays;
+what is corrected is the claim that these rows still sum to the number below
+them. The cap itself is unaffected and was never derived from this table alone
+-- `bin/` measures **9,574** against 14,000, and `tests/test_loc_caps.py`
+enforces it by enumerating `git ls-files`, never from a list written here. The
+`sd store|issue|config` row was re-measured at the same time and holds: 167
+lines of config plus 294 of vault driver and store verbs, 461 of 1,400, with
+`sd issue` and the store write verbs still unwritten.)*
 
 Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
 weak instrument and saying so is part of the derivation: at the *smallest* built command, `sd-check`
@@ -2205,6 +2243,53 @@ what the shape should be. *Rejected: an action per outcome.* `sys/queue-accept` 
 and left the answer to the tab that would hit it, which is the right order and only works if the
 answer is then written down. *Deletion criterion:* this record dies with the Queues tab, and the
 tab dies when the `decide` statuses stop filling.
+
+**R11-D26 (user, 2026-09-01) — where a kind is *kept* is a `store` block beside `dashboard`, not
+a ninth `kinds.*` key.** Step 8-iii needed `sd store` to turn `sdw.blog-idea` into
+`System/Databases/Blog Ideas`, and R11-D14's eight keys carry no location: `fields`,
+`initial-status`, `protected-fields`, `transitions`, `human-only`, `unique-fields`, `floor`,
+`sections` all describe what a kind *is*, and not one of them changes when the same kind is kept
+somewhere else. The gap was real and had to be closed somewhere.
+
+**The block is a sibling of `dashboard`.** `"store": {"driver", "root", "bases"}`, with `bases`
+mapping each declared kind to a path relative to the root. Standing rule 2's count of eight is
+untouched, because nothing was added to the vocabulary it fixes — the same move `config` made at
+8-ii, and for the same reason. Step 11 reorganises the vault by rewriting `bases` and nothing
+else.
+
+**The root is an environment variable reference and never a literal path.** `ROOT_PATTERN` is
+`^\$[A-Z][A-Z0-9_]*$`, so `/Users/someone/Documents/Vault` refuses at registration. *Incident:*
+`pack.py:146` is a hardcoded absolute vault path with a username in it, read by four bindings and
+forty call sites, portable to exactly one machine — and a manifest is the file most likely to be
+copied to a second one. The knob is `OBSIDIAN_VAULT`, which the 2026-09-01 vault-root entry
+already settled at five callers to one. There is **no default**: an unset variable is a sentence
+naming the knob, where a default would be a silent read of somebody else's vault layout and a
+fourth spelling of the same path.
+
+**Coverage is checked in both directions, and the bases are not checked for existence.** A base
+naming an undeclared kind is a directory nothing reads; a kind with no base is a store verb that
+refuses at use time for a reason registration could have given. Existence is the deliberate
+exception to `vendor.*.path` and `sections.template`, which are checked: those live inside the
+checkout, which is present by definition on the machine registering it, and a vault is not — it
+may be unmounted, on another volume, or behind a macOS TCC grant this process does not hold.
+Refusing registration for that would fail a correct manifest.
+
+*Rejected: a ninth key `base` inside each kind.* It reads better and keeps one kind's facts
+together, and it is a vocabulary change wearing the clothes of a convenience — which is the exact
+substitution standing rule 2 exists to catch. *Rejected: convention, deriving `Blog Ideas` from
+`blog-idea`.* Nothing to declare and nothing to drift, and it hardcodes today's vault layout into
+the backbone: step 11's move would become a code change instead of a manifest change.
+
+**One key of the eight changed meaning, and it is a widening rather than a change.** `fields` now
+keeps its **declared order** through registration instead of being sorted. It is the column order
+`sd store list` prints — `pack.py` printed status, score, rating in that order and not
+alphabetically — and no other key carries that information. `name_list` already refuses
+duplicates, so the order costs nothing and sorting discarded it.
+
+**Standing rule 1.** *Incident:* 8-iii could not name a directory for a kind and would otherwise
+have grown the vocabulary in a pull request. *Deletion criterion:* the block dies with the last
+plugin that keeps anything outside its own checkout; a plugin whose kinds live in its repository
+declares no `store` and every store verb refuses by name.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·

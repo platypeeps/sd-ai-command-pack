@@ -29,6 +29,13 @@ Instructions for AI assistants working in this repository.
   before changing the installer or the command set. The `docs/spec/**` pages on
   adapters, manifests, and provenance describe the pre-3e model and are stale
   until later steps reach them.
+  - Amended 2026-09-01: no later step reached them. Steps 4 and 7 closed
+    without the triage, so each stale page now carries a dated notice at the
+    top instead of waiting for one. Read the notice before the page; where it
+    says "partly stale" it names which sections still hold. The pages that
+    describe only deleted machinery are still on disk pending a deletion
+    decision, listed with evidence under step 7 in
+    [docs/work/2026-08-29-artifacts-as-product/implement.md](docs/work/2026-08-29-artifacts-as-product/implement.md).
 - Planning artifacts live in [docs/work](docs/work/README.md): one directory per
   item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
   is the whole tracked footprint of the workflow.

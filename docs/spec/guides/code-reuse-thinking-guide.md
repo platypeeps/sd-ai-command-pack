@@ -1,5 +1,22 @@
 # Code Reuse Thinking Guide
 
+> [!important]
+> **Partly stale as of 2026-09-01.**
+> Everything above "Gotcha: Asymmetric Mechanisms Producing Same Output" is
+> general guidance and stands. From there to the end the page teaches the
+> upstream Trellis CLI's own layout -- `src/templates/trellis/scripts/`,
+> `src/templates/trellis/index.ts`, `getAllScripts()`, `commands/update.ts`,
+> `trellis update`, and an rsync between `.trellis/scripts/` and
+> `packages/cli/src/templates/trellis/scripts/`. None of those paths has ever
+> existed in this repository, and the Trellis integration that made them worth
+> reading here was removed at steps 2 and 3e. `cli_adapter.py` is not a file
+> here either.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > **Purpose**: Stop and think before creating new code - does it already exist?
 
 ---

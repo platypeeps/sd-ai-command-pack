@@ -1,5 +1,21 @@
 # Fleet publish: generated content belongs in the work commit
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> Same subject and same fate as its sibling: the publish helper and its tests
+> already carry inline absent markers, deleted with the release train at step 0
+> (2026-08-29, #597). `sd-ai-command-pack-update-spec-kb.py`,
+> `sd-ai-command-pack-housekeeping.sh` and `docs/repomix-map.md` were deleted on
+> 2026-08-30 by step 3e (`43170716`, #610); the `.sd-ai-command-pack/` consumer
+> footprint whose manifest `derive_allowed_paths()` read is gone with the
+> installer; and the completion-bundle shape the ordering rule protects was
+> removed at step 2.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 Scope/trigger: any pack-managed content that a consumer regenerates from a
 script — `docs/repomix-map.md`, the `.gitignore` `.obsidian-kb` block, and
 anything added later. Established by
