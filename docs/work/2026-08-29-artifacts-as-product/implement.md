@@ -1544,7 +1544,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Issues | backbone — the one migrating view (R3-D13) | **yes** |
     | Work | backbone | **yes** — 6b-5a, a rewrite against `docs/work/` and not the port this row implied |
     | Now · PRs | backbone | **yes** — Now at 6b-5b, PRs at 6b-5c |
-    | Queues | **plugin tab** — moved from backbone by R11-D21: it was a vault view with a write path, like Vault and Briefs | **yes** — 6b-6, reading only; the write did not come with it (R11-D25) |
+    | Queues | **plugin tab** — moved from backbone by R11-D21: it was a vault view with a write path, like Vault and Briefs | **yes** — 6b-6, read-only; the write did not come with it (R11-D25) |
     | Skills · Sessions | backbone, **new** — no system counterpart | **yes** — 6b-5d |
     | Suggestions | backbone, **new** — **blocked on `sd-suggest`**, which is unbuilt (R11-D22): no producer, no draft, nothing to render | n/a until the command exists |
     | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | **yes** — 6b-4, through `~/repos/system`'s own manifest |
@@ -2186,8 +2186,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `data-sd-search` both survive, which matters because the table is only
     sortable if they do. 80 notes wait across three queues today, the oldest
     24 days.
-  - **End-to-end against a live server:** six tabs load, `/api/now` carries
-    three rank-3 queue rows, pressing `sys/queue-blog` returns `opened blog in
+  - **End-to-end against a live server:** six plugin tabs load, `/api/now`
+    carries three rank-3 queue rows, pressing `sys/queue-blog` returns `opened blog in
     Obsidian`, an unknown id is 404 and a missing token is 403. One row per
     queue in Now rather than one per note: 80 waiting notes is one decision
     session, not 80 things asking for attention.
