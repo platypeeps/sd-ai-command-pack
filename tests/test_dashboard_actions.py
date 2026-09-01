@@ -232,12 +232,54 @@ class TailnetBind(unittest.TestCase):
         with unittest.mock.patch.object(server, "_HOSTS", None), \
                 unittest.mock.patch.object(server, "tailnet_names", set), \
                 unittest.mock.patch.object(
-                    server, "tailnet_addrs", lambda: ["100.82.165.108", "fd7a::1"]):
+                    server, "bound_addrs", lambda: ["100.82.165.108", "fd7a::1"]):
             hosts = server.allowed_hosts()
             self.assertTrue(server.host_ok("100.82.165.108:8767"))
             self.assertTrue(server.host_ok("[fd7a::1]:8767"))
             self.assertIn("fd7a::1", hosts)
             self.assertFalse(server.host_ok("evil.example:8767"))
+
+    def test_a_tailscale_that_failed_reports_nothing_rather_than_its_output(self) -> None:
+        """Its stdout on a bad exit is a diagnostic, not an address list.
+
+        The fixture prints an address *and* exits non-zero on purpose: a
+        failure whose output happens to be unparseable is caught by the shape
+        filter one line below, and a test built on that one proves the shape
+        filter twice and the exit code never. This is the case where only the
+        exit code can say no -- half-written output from a command that then
+        failed, which would otherwise widen the allow-list.
+        """
+        done = subprocess.CompletedProcess([], 1, stdout="100.82.165.108\nlost it\n")
+        with unittest.mock.patch.object(server.subprocess, "run", return_value=done):
+            self.assertEqual(self.run_with("1"), [])
+
+    def test_only_lines_that_are_addresses_widen_the_allow_list(self) -> None:
+        """`tailnet_names` filters a hostname by shape; this is the same rule.
+
+        These become `Host` values this server answers to, so a stray line on
+        stdout must not be able to add one.
+        """
+        done = subprocess.CompletedProcess(
+            [], 0, stdout="100.82.165.108\nWarning: something\nfd7a::1\n \n")
+        with unittest.mock.patch.object(server.subprocess, "run", return_value=done):
+            self.assertEqual(self.run_with("1"), ["100.82.165.108", "fd7a::1"])
+
+    def test_the_allow_list_and_the_binding_read_one_answer(self) -> None:
+        """Asked twice, the tailnet can come up between them.
+
+        The server would then bind an address the cached allow-list never
+        heard of, and answer 403 on exactly the path the bind exists for. So
+        the probe happens once and both callers read the same list.
+        """
+        with unittest.mock.patch.object(server, "_ADDRS", None), \
+                unittest.mock.patch.object(server, "_HOSTS", None), \
+                unittest.mock.patch.object(server, "tailnet_names", set), \
+                unittest.mock.patch.object(
+                    server, "tailnet_addrs", return_value=["100.82.165.108"]) as probe:
+            server.allowed_hosts()
+            self.assertEqual(server.bound_addrs(), ["100.82.165.108"])
+            self.assertEqual(probe.call_count, 1)
+            self.assertTrue(server.host_ok("100.82.165.108:8767"))
 
     def test_the_wildcard_address_is_never_bound(self) -> None:
         """`0.0.0.0` publishes this on every network the machine joins.

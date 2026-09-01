@@ -28,6 +28,7 @@ reads. `sd-dashboard index` is what fills the index; this serves what it finds.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -102,10 +103,37 @@ def tailnet_addrs() -> list[str]:
                              text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
         return []
-    return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+    if out.returncode:
+        return []
+    # Kept only if it parses as an address, the same treatment `tailnet_names`
+    # gives a hostname and for the same reason: this widens a security
+    # boundary, so a diagnostic line printed on stdout must not be able to add
+    # a `Host` this server answers to. Found in review.
+    addrs = []
+    for line in out.stdout.splitlines():
+        try:
+            addrs.append(str(ipaddress.ip_address(line.strip())))
+        except ValueError:
+            continue
+    return addrs
 
 
 _HOSTS: frozenset[str] | None = None
+_ADDRS: list[str] | None = None
+
+
+def bound_addrs() -> list[str]:
+    """The tailnet addresses, probed once and answered the same way after.
+
+    One answer feeds both the allow-list and the binding. Asked twice, the
+    tailnet could come up between them, and the server would bind an address
+    the cached allow-list had never heard of -- 403 on exactly the path the
+    bind exists to serve. Found in review.
+    """
+    global _ADDRS
+    if _ADDRS is None:
+        _ADDRS = tailnet_addrs()
+    return _ADDRS
 
 
 def allowed_hosts() -> frozenset[str]:
@@ -121,7 +149,7 @@ def allowed_hosts() -> frozenset[str]:
     """
     global _HOSTS
     if _HOSTS is None:
-        addrs = tailnet_addrs()
+        addrs = bound_addrs()
         _HOSTS = LOOPBACK | tailnet_names() | set(addrs) | {
             f"[{addr}]" for addr in addrs if ":" in addr}
     return _HOSTS
@@ -514,7 +542,7 @@ def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> Non
     allowed_hosts()
     handler = make_handler(Cache(root), script_source())
     bound = []
-    for addr in [host] + tailnet_addrs():
+    for addr in [host] + bound_addrs():
         server = ServerV6 if ":" in addr else ThreadingHTTPServer
         try:
             httpd = server((addr, port), handler)
