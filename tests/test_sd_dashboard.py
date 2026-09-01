@@ -1,11 +1,12 @@
-"""Behaviour tests for the read-only dashboard.
+"""Behaviour tests for the dashboard's collector and CLI.
 
 Real git repositories in a scratch root, because every fact the collector
 reports comes out of `git` and a mocked one would only prove the mock agrees
 with itself. The properties worth pinning are the ones a future tab could break
 without noticing: that discovery enumerates rather than recites, that a missing
 upstream reports absence instead of zero, that the dump is canonical, and that
-the server has no write path at all.
+the server's verb surface stays two (`tests/test_dashboard_actions.py` holds
+what the write path is allowed to do).
 """
 
 from __future__ import annotations
@@ -287,11 +288,76 @@ class CommandLineTests(FleetHarness):
         self.assertEqual(named & banned, set())
 
 
+class InstallTests(FleetHarness):
+    """The one LaunchAgent this pack owns, written to a scratch HOME.
+
+    Never to the real one: this test would otherwise install a service on the
+    machine running the suite, and `--uninstall` would delete a plist it did
+    not write if the label ever drifted.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.plist = self.root / "LaunchAgents" / "com.sven.sd-dashboard.plist"
+        self.said: list[tuple[str, ...]] = []
+        # Captured before the patch, not after: an `addCleanup` whose argument
+        # is read after the assignment restores the patch instead of removing
+        # it, and the leak shows up in whatever test runs next.
+        for module, name in [(sd_dashboard, "PLIST"), (sd_dashboard, "launchctl"),
+                             (collect, "repo_root")]:
+            self.addCleanup(setattr, module, name, getattr(module, name))
+        sd_dashboard.PLIST = self.plist
+        sd_dashboard.launchctl = lambda *argv: (self.said.append(argv), (0, ""))[1]
+        collect.repo_root = lambda environ=None: self.root  # type: ignore[assignment]
+
+    def install(self, *argv: str) -> str:
+        out = io.StringIO()
+        sd_dashboard.main(["install", *argv], out=out)
+        return out.getvalue()
+
+    def test_the_plist_names_this_checkout_and_the_port_it_was_given(self):
+        """Rendered from the command, so a reinstall cannot keep old arguments."""
+        self.install("--port", "8767")
+        body = self.plist.read_text(encoding="utf-8")
+        self.assertIn("<string>8767</string>", body)
+        self.assertIn(str(REPO_ROOT / "bin" / "sd-dashboard"), body)
+        self.assertIn(f"<string>{self.root}</string>", body)
+
+    def test_it_is_unloaded_before_it_is_loaded(self):
+        """`bootstrap` over a loaded label fails, and a stale service is the bug."""
+        self.install()
+        self.assertEqual([argv[0] for argv in self.said], ["bootout", "bootstrap"])
+
+    def test_uninstall_removes_the_plist_and_the_service(self):
+        self.install()
+        self.said.clear()
+        output = self.install("--uninstall")
+        self.assertFalse(self.plist.exists())
+        self.assertEqual([argv[0] for argv in self.said], ["bootout"])
+        self.assertIn("removed", output)
+
+    def test_launchd_refusing_is_reported_and_not_an_exit_code(self):
+        """The plist is written and correct; failing would say it was not."""
+        sd_dashboard.launchctl = lambda *argv: (1, "Bootstrap failed: 5: Input/output error")
+        out = io.StringIO()
+        code = sd_dashboard.main(["install"], out=out)
+        self.assertEqual(code, 0)
+        self.assertIn("Bootstrap failed", out.getvalue())
+        self.assertTrue(self.plist.exists())
+
+
 class ServerRouteTests(FleetHarness):
-    def test_the_handler_serves_three_paths_and_refuses_the_rest(self):
+    def test_the_handler_reads_and_writes_by_one_verb_each(self):
+        """This test used to assert there was no `do_POST` at all.
+
+        6b-7 gave the handler one, and the guarantee moved rather than went:
+        writing is POST, POST is Host-allowlisted and token-gated, and no GET
+        has a side effect. `tests/test_dashboard_actions.py` is where that is
+        pinned; what is left here is the verb surface, which is still two.
+        """
         handler = server.make_handler(server.Cache(self.root), "// script")
         self.assertTrue(hasattr(handler, "do_GET"))
-        self.assertFalse(hasattr(handler, "do_POST"), "the view grew a write path")
+        self.assertTrue(hasattr(handler, "do_POST"))
         self.assertFalse(hasattr(handler, "do_PUT"))
         self.assertFalse(hasattr(handler, "do_DELETE"))
 

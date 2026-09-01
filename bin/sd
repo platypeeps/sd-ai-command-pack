@@ -138,6 +138,49 @@ def validate_dashboard(manifest: dict[str, object]) -> tuple[str, list[str]] | N
     return tile, seen
 
 
+def validate_actions(manifest: dict[str, object]) -> list[dict[str, str]]:
+    """`dashboard.actions`: commands the dashboard may run on request (R11-D21).
+
+    Declared in the manifest for the same reason the tab names are: the
+    dashboard renders a control before anything has run, so it has to know
+    what it may offer without asking the plugin. The command stays here, in
+    the plugin's own repository, beside the data it writes -- the backbone
+    learns an id and a label and never builds a command of its own.
+
+    A malformed block is a refusal rather than a silent drop. An action that
+    quietly stops being offered is a button that used to work, and the
+    registry is the cheapest place to catch it.
+    """
+
+    dashboard = manifest.get("dashboard")
+    if not isinstance(dashboard, dict):
+        return []
+    actions = dashboard.get("actions")
+    if actions is None:
+        return []
+    if not isinstance(actions, list) or not actions:
+        raise Refusal("`dashboard.actions` is not a non-empty list")
+    seen: list[dict[str, str]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            raise Refusal("`dashboard.actions` holds something that is not an object")
+        name, label, run = action.get("id"), action.get("label"), action.get("run")
+        # The same shape as a tab name, for the same reason: it is namespaced
+        # into an id the dashboard routes on, and it must not read as a flag.
+        if not isinstance(name, str) or not TAB_PATTERN.fullmatch(name):
+            raise Refusal(f"action id {name!r} is not {TAB_PATTERN.pattern}")
+        if any(before["id"] == name for before in seen):
+            raise Refusal(f"action id {name!r} is declared twice")
+        if not isinstance(run, str) or not run.strip():
+            raise Refusal(f"action {name!r} declares no `run` command")
+        # Required, not defaulted to the id: this is the text on the button,
+        # and `queue-set` is not a sentence anyone wants to press.
+        if not isinstance(label, str) or not label.strip():
+            raise Refusal(f"action {name!r} declares no `label`")
+        seen.append({"id": name, "label": label, "run": run})
+    return seen
+
+
 def registry(config: dict[str, object]) -> list[str]:
     """The registered plugin roots. A config without plugins simply lacks it."""
 
@@ -198,6 +241,7 @@ def add(args: argparse.Namespace) -> int:
         raise Refusal(f"{plugin_root} is already registered")
     prefix = validate_prefix(manifest, known=registered(roots))
     validate_dashboard(manifest)
+    validate_actions(manifest)
 
     config["plugins"] = sorted({*roots, plugin_root})
     write_config(config, config_path)
@@ -218,6 +262,7 @@ def describe(root: str) -> dict[str, object]:
         entry["prefix"] = prefix
     try:
         declared = validate_dashboard(manifest)
+        actions = validate_actions(manifest)
     except Refusal as refusal:
         # Reported rather than dropped: a manifest whose dashboard block has
         # gone bad since registration is a tab that stopped appearing, and the
@@ -226,6 +271,10 @@ def describe(root: str) -> dict[str, object]:
         return entry
     if declared is not None:
         entry["tile"], entry["tabs"] = declared
+    # Independent of the tile: a plugin may declare an action and no tab, and
+    # a write-only plugin is a plugin.
+    if actions:
+        entry["actions"] = actions
     return entry
 
 
@@ -252,6 +301,9 @@ def plugin_list(args: argparse.Namespace) -> int:
             suffix = f"  tile: {tile}  tabs: {names}"
         else:
             suffix = ""
+        actions = entry.get("actions")
+        if isinstance(actions, list) and actions:
+            suffix += f"  actions: {', '.join(a['id'] for a in actions)}"
         print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
     return 0
 

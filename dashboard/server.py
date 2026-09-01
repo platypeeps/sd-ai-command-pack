@@ -1,16 +1,21 @@
-"""A read-only HTTP view over the fleet, on stdlib only.
+"""An HTTP view over the fleet, on stdlib only.
 
-GET is the only verb the handler implements. That is the design, not an
-oversight to be filled in later: the plan's rule is that every UI mutation maps
-to a `bin/` command the operator runs, and a server that cannot write cannot
-drift into running agents, committing, or pushing on a page load.
+**No GET has a side effect, and that is the promise rather than "GET is the
+only verb".** 6b-7 gave the handler a POST, because the queue tabs exist to be
+decided in and a read-only port of them is a list of questions nobody can
+answer. Writing is POST, POST is Host-allowlisted and token-gated, and every
+mutation resolves to an id in `RUN_ALLOWLIST` -- see `dashboard/actions.py`,
+which is where the write path is reasoned about and what it deliberately does
+not inherit from the dashboard being replaced.
 
-Binds loopback, and still will until step 6b. D14 is now decided as option (c)
-(R11-D10): the replacement dashboard takes :8767 with the tailnet reach and the
-token-gated writes the phone uses today. None of that lands here. The GET-only
-property above is therefore known to be temporary, and it stays exactly as it is
-until 6b replaces it with the stronger guarantee -- writes exist, Host-
-allowlisted, token-gated, no CORS header -- rather than simply deleting it.
+Binds loopback. D14 is decided as option (c) (R11-D10): the replacement
+dashboard takes :8767 with the tailnet reach and the token-gated writes the
+phone uses today. The Host allow-list is what makes the second half safe -- a
+`tailscale serve` proxy in front of the loopback socket sends its own name, so
+the list holds this node's MagicDNS names as well as the loopback ones, and
+nothing else. No CORS header is sent, and none should be: the token lives in
+the page, and a cross-origin caller that could read it would already have the
+page.
 
 The issue endpoint reads the index and never collects. A page load that could
 reach GitHub would make refresh latency a property of opening a browser tab, and
@@ -20,20 +25,93 @@ reads. `sd-dashboard index` is what fills the index; this serves what it finds.
 
 from __future__ import annotations
 
+import hmac
 import json
+import re
+import secrets
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import collect, now, plugins, sessions, skills, store, work
+from . import actions, collect, now, plugins, sessions, skills, store, work
+
+# Per process, in memory, never written down. A restart invalidates it, which
+# is correct: the page fetches it with the page, and a token that outlived the
+# process would be a credential on disk that nothing rotates.
+TOKEN = secrets.token_hex(16)
+TOKEN_HEADER = "X-Dashboard-Token"
+TOKEN_SLOT = "__SD_DASHBOARD_TOKEN__"
+
+LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 DEFAULT_PORT = 8768
+# A POST body names an action id and nothing else. Anything larger is not a
+# request this server has a shape for, and reading it would be reading it.
+BODY_BYTES = 4096
 DEFAULT_HOST = "127.0.0.1"
 CACHE_SECONDS = 20
 
+def tailnet_names() -> set[str]:
+    """This node's own MagicDNS names, or nothing.
+
+    A `tailscale serve` proxy forwards the name the browser typed, so a list
+    of only loopback names answers `http://tg-sol:8767/` with a 403 that looks
+    like a network fault. Both spellings: `serve` publishes the short name and
+    the FQDN as separate vhosts. No tailscale is a loopback-only dashboard.
+    """
+    try:
+        out = subprocess.run(["tailscale", "status", "--json"],
+                             capture_output=True, text=True, timeout=10, check=False)
+        node = json.loads(out.stdout)["Self"]
+        fqdn = (node.get("DNSName") or "").rstrip(".").lower()
+        names = {fqdn, fqdn.split(".", 1)[0], (node.get("HostName") or "").lower()}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return set()
+    # `HostName` is a display name -- "Sven's Mac Studio" -- and not always a
+    # label, so it is filtered by shape rather than trusted for being reported.
+    return {name for name in names if name and re.fullmatch(r"[a-z0-9.-]+", name)}
+
+
+_HOSTS: frozenset[str] | None = None
+
+
+def allowed_hosts() -> frozenset[str]:
+    """The `Host` values this server answers to, asked once: this forks.
+
+    Frozen because it is a security boundary handed to every request, and a
+    mutable one could be widened in place. Found in review.
+    """
+    global _HOSTS
+    if _HOSTS is None:
+        _HOSTS = LOOPBACK | tailnet_names()
+    return _HOSTS
+
+
+def host_ok(header: str | None) -> bool:
+    """Whether a request's `Host` is one this server serves.
+
+    This is what stops DNS rebinding: a name resolving to 127.0.0.1 makes a
+    page on the open internet same-origin with this port, and the binding
+    cannot tell it from the operator's own. The `Host` is what differs, so it
+    is what is checked -- on reads too, because the reads are the fleet.
+    """
+    if not header:
+        return False
+    name = header.strip().lower()
+    # `[::1]:8767` splits at the bracket; everything else at the last colon,
+    # and only when there is exactly one to split at.
+    if name.startswith("["):
+        name = name.partition("]")[0] + "]"
+    elif name.count(":") == 1:
+        name = name.rsplit(":", 1)[0]
+    return name in allowed_hosts()
+
+
 PAGE = """<!doctype html>
 <meta charset="utf-8"><title>sd dashboard</title>
+<meta name="dashboard-token" content="__SD_DASHBOARD_TOKEN__">
 <link rel="icon" href="data:,">
 <style>
  :root{color-scheme:light dark}
@@ -59,6 +137,10 @@ PAGE = """<!doctype html>
  /* A button that reads as a link. It is a button because what it does is
     select a tab on this page, and a real `<a href>` would need a scroll
     target the panels do not have. */
+ #run-buttons{display:flex;gap:.5rem;flex-wrap:wrap;margin:0 0 1rem}
+ #run-buttons button{font:inherit;padding:.2rem .8rem;cursor:pointer;background:none;
+  border:1px solid rgba(128,128,128,.4);border-radius:.25rem;color:inherit}
+ #run-buttons button[disabled]{opacity:.5;cursor:progress}
  .linklike{font:inherit;padding:0;border:0;background:none;color:inherit;
   cursor:pointer;text-decoration:underline}
  input.filter{font:inherit;margin:0 0 .5rem;padding:.2rem .4rem;width:14rem;
@@ -159,6 +241,9 @@ PAGE = """<!doctype html>
 </tr></thead><tbody id="session-procs"></tbody></table>
 </section>
 <div id="plugin-panels"></div>
+<h2>run</h2>
+<p class="sub" id="run-sub">every button here is one allow-listed command</p>
+<div id="run-buttons"></div>
 <script src="/app.js"></script>
 """
 
@@ -189,14 +274,21 @@ class Cache:
 
 
 def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
+    # Substituted rather than formatted: `PAGE` is full of CSS braces, and
+    # `.format` would have to escape every one of them to reach one slot.
+    page = PAGE.replace(TOKEN_SLOT, TOKEN)
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "sd-dashboard"
 
         def log_message(self, fmt: str, *args: object) -> None:
             """Silent by default; the access log is noise nobody reads."""
 
-        def send_body(self, body: bytes, content_type: str) -> None:
-            self.send_response(200)
+        def send_body(self, body: bytes, content_type: str, status: int = 200) -> None:
+            self.send_response(status)
+            # Live fleet state, and the page carries a per-process token: a
+            # cached copy is stale and a secret on somebody's disk. In review.
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -204,8 +296,10 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib's spelling
             path = self.path.split("?", 1)[0]
+            if not host_ok(self.headers.get("Host")):
+                return self.send_error(403, "host not allowed")
             if path == "/":
-                return self.send_body(PAGE.encode(), "text/html; charset=utf-8")
+                return self.send_body(page.encode(), "text/html; charset=utf-8")
             if path == "/app.js":
                 return self.send_body(
                     script.encode(), "text/javascript; charset=utf-8"
@@ -255,6 +349,15 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 # different tab, and the collect never knew the difference.
                 body = json.dumps(tracker_payload("pull")).encode()
                 return self.send_body(body, "application/json")
+            if path == "/api/actions":
+                # Ids and labels; the argv never leaves the process. The
+                # registry's complaint rides along, because "none declared"
+                # for a loader that cannot be read is the quiet it refuses.
+                entries, failure = plugins.catalog()
+                body = json.dumps(
+                    {"actions": actions.catalog(entries), "reason": failure}
+                ).encode()
+                return self.send_body(body, "application/json")
             if path == "/api/plugins":
                 # Not folded into /api/state: that payload is cached for
                 # twenty seconds against a git fan-out, and a tile budgeted at
@@ -264,6 +367,44 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 body = json.dumps(plugins.cached_load()).encode()
                 return self.send_body(body, "application/json")
             self.send_error(404)
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib's spelling
+            """The only verb that writes, behind three guards (R11-D10).
+
+            Host, then token, then an id that resolves in `RUN_ALLOWLIST`. In
+            that order: a request from somewhere this server does not serve is
+            refused before it can learn whether its token was right.
+            """
+            path = self.path.split("?", 1)[0]
+            if not host_ok(self.headers.get("Host")):
+                return self.send_error(403, "host not allowed")
+            # Constant-time, because the comparison is against a secret and
+            # the caller controls one side of it.
+            if not hmac.compare_digest(self.headers.get(TOKEN_HEADER, ""), TOKEN):
+                return self.send_error(403, "bad or missing token")
+            if path != "/api/run":
+                return self.send_error(404)
+            # A length is required and `-1` is not one. Both were once read
+            # as an empty body, which answers a real POST with "no action
+            # named" -- the allow-list blamed for a fault in the framing. The
+            # first was found by pressing the button, the second in review.
+            try:
+                length = int(self.headers["Content-Length"])
+            except (KeyError, TypeError, ValueError):
+                return self.send_error(411, "Content-Length required")
+            if length < 0:
+                return self.send_error(400, "Content-Length is not a length")
+            if length > BODY_BYTES:
+                return self.send_error(413, "body too large")
+            try:
+                sent = json.loads(self.rfile.read(max(length, 0)) or b"{}")
+            except (OSError, ValueError):
+                return self.send_error(400, "body is not JSON")
+            body, status = actions.run(
+                sent.get("action") if isinstance(sent, dict) else None,
+                plugins.catalog()[0],
+            )
+            self.send_body(json.dumps(body).encode(), "application/json", status)
 
     return Handler
 
@@ -315,6 +456,10 @@ def script_source() -> str:
 
 
 def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> None:
+    # Asked before the socket opens: `allowed_hosts` forks, and lazily it
+    # would do it inside the first request, putting a ten-second timeout in
+    # front of a page load. Found in review.
+    allowed_hosts()
     handler = make_handler(Cache(root), script_source())
     with ThreadingHTTPServer((host, port), handler) as httpd:
         httpd.serve_forever()

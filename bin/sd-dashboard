@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""The dashboard CLI: serve the view, or dump what it would serve.
+"""The dashboard CLI: serve the view, keep it running, or dump what it serves.
 
-Two verbs now, not the five the design lists. `install` (the LaunchAgent),
-`item set-status` (the intents lane) and `export --obsidian` land with the tabs
-they belong to, under the 3c-to-6b parity checklist -- shipping them as stubs
-would put three verbs in the inventory that answer nothing, and the inventory is
-supposed to be a promise.
+Three verbs now, not the five the design lists. `item set-status` (the intents
+lane) and `export --obsidian` land with the tabs they belong to, under the
+3c-to-6b parity checklist -- shipping them as stubs would put two verbs in the
+inventory that answer nothing, and the inventory is supposed to be a promise.
+`install` arrived at 6b-7 with the write path, because a dashboard nobody has
+to start by hand is the one that gets pressed.
 
 No verb takes a path to a repository. The fleet root comes from `SD_REPO_ROOT`
 or defaults to `~/repos`, so R10-D6 holds here the same as everywhere else: the
@@ -16,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,6 +31,81 @@ def cmd_serve(args: argparse.Namespace, out) -> int:
     root = collect.repo_root()
     print(f"serving {root} on http://{server.DEFAULT_HOST}:{args.port}", file=out)
     server.serve(root, port=args.port)
+    return 0
+
+
+# The one LaunchAgent this pack owns (design: "Sole pack-owned LaunchAgent =
+# `sd-dashboard install`"). Named for the command rather than for the machine,
+# so it cannot collide with the system dashboard's plist while both exist --
+# 6b-8 is where one replaces the other, and until then they are two services.
+LABEL = "com.sven.sd-dashboard"
+PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+LOGS = Path.home() / "Library" / "Logs"
+
+PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+ <key>Label</key><string>{label}</string>
+ <key>ProgramArguments</key>
+ <array><string>{program}</string><string>serve</string>
+  <string>--port</string><string>{port}</string></array>
+ <key>RunAtLoad</key><true/>
+ <key>KeepAlive</key><true/>
+ <key>StandardOutPath</key><string>{logs}/{label}.log</string>
+ <key>StandardErrorPath</key><string>{logs}/{label}.err</string>
+ <key>EnvironmentVariables</key>
+ <dict><key>SD_REPO_ROOT</key><string>{root}</string></dict>
+</dict></plist>
+"""
+
+
+def launchctl(*argv: str) -> tuple[int, str]:
+    """`launchctl`, reported rather than raised.
+
+    Every failure mode here is one the operator has to be told about and none
+    is one this command can fix: a domain that is not bootstrapped, a service
+    already loaded, a plist launchd will not read. Printing what launchd said
+    beats a traceback that hides it.
+    """
+    done = subprocess.run(
+        ["launchctl", *argv], capture_output=True, text=True, check=False)
+    return done.returncode, (done.stderr or done.stdout).strip()
+
+
+def cmd_install(args: argparse.Namespace, out) -> int:
+    """Write the LaunchAgent and hand it to launchd, or take it away again.
+
+    The plist is rendered from this file every time rather than edited in
+    place: it is generated state, and a hand-edit that survived an install
+    would make the running service disagree with the command that installed
+    it. Bootout-then-bootstrap for the same reason -- `bootstrap` over a
+    loaded label fails, and a reinstall that quietly kept the old arguments is
+    the failure this verb exists to prevent.
+    """
+    domain = f"gui/{os.getuid()}"
+    if args.uninstall:
+        code, said = launchctl("bootout", f"{domain}/{LABEL}")
+        PLIST.unlink(missing_ok=True)
+        print(f"removed {PLIST}" + (f" (launchd: {said})" if code else ""), file=out)
+        return 0
+    program = str(Path(__file__).resolve())
+    body = PLIST_BODY.format(
+        label=LABEL, program=program, port=args.port,
+        logs=LOGS, root=collect.repo_root(),
+    )
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
+    PLIST.write_text(body, encoding="utf-8")
+    launchctl("bootout", f"{domain}/{LABEL}")
+    code, said = launchctl("bootstrap", domain, str(PLIST))
+    print(f"wrote {PLIST}", file=out)
+    if code:
+        # Not an exit code: the plist is written and correct, and `launchctl
+        # kickstart` after a login is a thing the operator can do. Failing the
+        # command would suggest the install did not happen.
+        print(f"launchd did not load it: {said or code}", file=out)
+        return 0
+    print(f"serving on http://{server.DEFAULT_HOST}:{args.port}", file=out)
     return 0
 
 
@@ -91,9 +169,15 @@ def issue_lines() -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd-dashboard", description=__doc__)
     verbs = parser.add_subparsers(dest="verb", required=True)
-    serve_verb = verbs.add_parser("serve", help="run the read-only view")
+    serve_verb = verbs.add_parser("serve", help="run the view")
     serve_verb.add_argument("--port", type=int, default=server.DEFAULT_PORT)
     serve_verb.set_defaults(handler=cmd_serve)
+    install_verb = verbs.add_parser(
+        "install", help="run the view as a LaunchAgent at login")
+    install_verb.add_argument("--port", type=int, default=server.DEFAULT_PORT)
+    install_verb.add_argument(
+        "--uninstall", action="store_true", help="unload it and delete the plist")
+    install_verb.set_defaults(handler=cmd_install)
     index_verb = verbs.add_parser("index", help="collect the fleet once")
     index_verb.add_argument(
         "--dump",

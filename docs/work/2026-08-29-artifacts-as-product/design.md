@@ -1217,7 +1217,11 @@ charged them here, which is the same mistake in the other direction.
 
 **And `bin/` is the tighter of the two.** Enumerated rather than taken from the itemisation:
 `bin/` core is at **7,492 against its 8,000 cap — 508 lines of headroom** (`migrate-*` sits under
-its own 1,500 ceiling and is excluded, which is why the raw 8,742 total passes). The itemisation
+its own 1,500 ceiling and is excluded, which is why the raw 8,742 total passes).
+*(Later: this is what closed the record's own escape hatch below — the three did not fit, and
+R11-D15 re-derived the ceiling at **14,000** from built code in its own record. Both numbers in
+this sentence are spent: re-measured 2026-08-31 at 6b-7, `bin/` core is **7,925 of 14,000**. The
+count is left as it was taken, because it is the evidence R11-D15 was derived from.)* The itemisation
 above predicts **~7,170 for the finished pack, leaving ~830**. That is the comparison worth
 making, and it is worse than a headroom shortfall: 7,492 is what is built **today**, so the pack
 has already passed the total its own itemisation predicted for the *complete* twelve-command set,
@@ -1252,7 +1256,10 @@ justification no longer matches its number even though the number may still be r
 
 **Consequence for the sequence.** 6b's order, already flipped once by R11-D12, is now:
 registration slice → the tile loader → the five plugin tabs → backbone tabs → Now →
-`RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`. Step 8 keeps
+`RUN_ALLOWLIST` and `sd-dashboard install` → swap to :8767 → delete `dashboard.py`.
+*(R11-D21 later moved Queues out of the backbone tabs and made it a **sixth** plugin tab that
+lands after the write path rather than with the other five, so "the five plugin tabs" is the
+count this order was written against and not the count that shipped.)* Step 8 keeps
 everything else and loses only what moved.
 
 **Standing rule 1 does not apply to either half.** No gate, ledger, hook or rule is added: the
@@ -1403,6 +1410,11 @@ at line 1658 with `host_ok()` (defined at 1532) and the token comparison at 1661
 spelled in full because a bare `dashboard.py:1661` reads as an in-repo citation and there is no
 such file here; `dashboard/server.py` is this repo's, and it is GET-only until 6b. Three write endpoints ride on that:
 `POST /api/update`, `/api/ack`, `/api/refresh`.
+*(Later, 6b-7: the pack dashboard has a POST now, so "GET-only until 6b" is spent rather than
+wrong. The line numbers above have drifted with the file they cite -- re-read 2026-08-31,
+`do_POST` opens at `:1785`, `host_ok` at `:1657`, the token comparison at `:1788` -- and the
+one this repository now cites in `dashboard/actions.py` is `:1714`, the `GET /api/state?refresh=1`
+rebuild that has no token in front of it and is the shape 6b-7 deliberately did not inherit.)*
 
 **The decision.** At 6b the replacement takes `:8767` *with* the tailnet reach and *with* those
 writes, under the same three guards. Options (a) loopback-only and (b) tailnet read-only were both
@@ -1691,6 +1703,12 @@ not an accident, and a cap derived from code alone would be busted by the next d
 `bin/`'s 14,000 it may move **downward** and not up, and the two estimates in the table are the
 part to check: if Now and the write path land materially over them, that is a finding for their
 own records, not a second re-derivation.
+*(Both did, and both are recorded where this says they should be. Now cost **212** against ~120
+(6b-5b); the write path cost **343** against ~200 (6b-7). The table is left as derived — the cap
+is not re-derived a second time — but a reader taking either estimate as settled is reading the
+part this paragraph flagged as the part to check. After 6b-7, `dashboard/` is **4,000 of 4,000**
+exactly, with nothing left for the tailnet bind R11-D10's correction still requires -- which is
+what R11-D24 was written to settle.)*
 
 The old number is not defended. 2,500 was set against a 457-line lift that R11-D13 measured at
 763, and the estimate it rested on was wrong before any of this was built. What the cap is for is
@@ -2012,6 +2030,61 @@ a checklist item that stays unticked forever.
 with no user of either to check it against — the same shape as the `dashboard.d/*.py` spelling
 this document carried for weeks describing a loader that never existed. One unbuilt thing is
 cheaper to carry than two things that disagree.
+
+**R11-D23 (2026-09-01) — the declared-action manifest key, decided by building it.**
+
+R11-D21 committed to the mechanism and deliberately left its shape open: *a manifest may name
+actions alongside its tile*. 6b-7 had to pick one to have a write path at all, so this records
+what was picked, why, and what a reader may rely on — a plugin contract is an external interface,
+and an interface whose only specification is the code that reads it is one nobody can write
+against.
+
+```json
+"dashboard": {
+  "tile": "./local-project-dashboard/dashboard.sh tile",
+  "tabs": ["toolbox", "briefs"],
+  "actions": [{"id": "queue-set", "label": "sort the queue", "run": "sd-sys queue --sort"}]
+}
+```
+
+**`id` is `^[a-z][a-z0-9-]{0,31}$` — the same shape as a tab name, and for the same two reasons.**
+It becomes part of a routed identifier, and it is passed nowhere it could be mistaken for a flag.
+The dashboard namespaces it with the plugin's prefix, exactly as it namespaces rows and tabs, so
+the id the page sends is `sys/queue-set` and a plugin declaring `index` gets `sys/index` rather
+than the backbone's. That is the whole defence against a plugin claiming a backbone command or
+shadowing a sibling's, and it is tested by trying both.
+
+**`label` is required rather than defaulted to the id.** It is the text on the button, and
+`queue-set` is not a sentence anyone wants to press. Defaulting would produce a working control
+that reads like a variable name, which is the failure that never gets reported.
+
+**`run` is a command string, `shlex.split` at load, run with the plugin's root as its working
+directory.** The same treatment the tile already gets, because it is the same trust boundary and
+not a wider one: a plugin that can name a tile command can already run code on this machine. The
+argv never reaches the browser — `/api/actions` serves ids and labels only — so a page that has
+never seen a command cannot be talked into echoing a different one back.
+
+**No arguments from the page, and that is the decision, not an omission.** An action is a
+*command*, not a *form*: the id resolves to a fixed argv and nothing a caller sends is
+interpolated into it. Queues needs `{key, stem, field, value}` to set one note's status, and this
+key cannot express that — which is the point at which 6b-6 must either declare one action per
+outcome, or R11-D21's mechanism needs a second decision record for parameters with its own
+validation story. Recorded here as the known edge rather than discovered there.
+
+**Validated at registration, in `bin/sd`, not at load.** A malformed block refuses
+`sd plugin add` and is reported by `sd plugin list`, the same as a malformed `dashboard.tabs`. An
+action that quietly stopped being offered is a button that used to work, and the registry is the
+cheapest place to catch it.
+
+*Rejected: a `dashboard.actions` object keyed by id.* It reads more naturally and it loses the
+declaration order, which is the order the buttons render in. *Rejected: reusing `kinds.*`.*
+Different namespace — standing rule 2 freezes the store's eight-key vocabulary, and this is a
+manifest key (R11-D21 already says so).
+
+**Standing rule 1.** *Incident:* 6b-7 shipped a write path whose only action is the backbone's
+own `index`, so the mechanism R11-D21 committed to had no shape and 6b-6 would have invented one
+in a pull request. *Deletion criterion:* the key goes with the actions it declares — R11-D21 ties
+those to the `decide` statuses emptying, and nothing here outlives them.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
