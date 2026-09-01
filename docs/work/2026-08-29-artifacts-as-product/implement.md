@@ -1525,10 +1525,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     (`collect_ports`, `machine-setup.sh candidates service`), and five `db-*` queue tabs — blog,
     tip, skill, topic, watch — from `collect_queues`. Two collectors feed no
     tab of their own: `collect_prs` and `collect_rtk`.
-    The pack dashboard (`dashboard/app.js:129`) has **two** tabs, Repos and
-    Issues, from two collectors and four HTTP routes (`/`, `/app.js`,
+    The pack dashboard had, when this was surveyed, **two** tabs -- Repos and
+    Issues -- from two collectors and four HTTP routes (`/`, `/app.js`,
     `/api/state`, `/api/issues`). `sd-dashboard index --dump` returns 79
-    checkouts, so the Repos half is real and not a stub.
+    checkouts, so the Repos half is real and not a stub. *(The survey is left
+    at its date, as the rest of this entry is; the `Built?` column below is the
+    live one, and it is what the swap gate reads. Today: three backbone tabs
+    and five plugin tabs, six routes -- `/api/work` and `/api/plugins` joined
+    the four.)*
   - **Where each tab lands**, per design.md's rule that system views stay
     system-owned behind plugin tabs declared in a registered manifest while
     the shell and the
@@ -1547,8 +1551,11 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     | Projects | derived; folds into Now/Work rather than porting | n/a |
     | Ports | **plugin tab** beside Toolbox (R11-D12) | **yes** — 6b-4, the fifth declared tab |
     | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
-  - **The verdict: two of fifteen tabs exist, thirteen do not**, and four of
-    those thirteen are new surfaces with no system counterpart to port from.
+  - **The verdict as surveyed: two of fifteen tabs exist, thirteen do not**,
+    and four of those thirteen are new surfaces with no system counterpart to
+    port from. *(Eight of the fifteen exist now -- 6b-4 built five of them as
+    plugin tabs and 6b-5a built Work. The four new surfaces are still four:
+    none of them has been started.)*
   - Three pieces of the contract are absent beyond the tabs: no plugin-tab
     loader at all (five tabs are supposed to arrive through one — 6b-2 has
     since built it, recorded in its own entry below rather than backdated into
@@ -1774,10 +1781,12 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     load through the pack's loader timed out on `sys/toolbox`, which is how
     R11-D19 found its rank-0 case -- a row sourced to a tab that was never
     served. Profiled rather than guessed: `machine-setup.sh status` cost
-    **3.57s** of the 5s per-tab budget, 90-95% of the tile's whole runtime,
+    **3.57s** of the 5s per-tab budget (3.50s re-timed for this entry, so the
+    figure is the command and not that afternoon), 90-95% of the tile's whole
+    runtime,
     and the nightly `machine-setup-drift` job already runs that exact command
     at 03:30 and writes its output verbatim to a log. Reading the log instead
-    costs **2ms** on today's 89KB, and stays in milliseconds as it grows: the
+    costs **1.8ms** on today's 89KB, and stays in milliseconds as it grows: the
     read walks backwards in doubling windows, and a 2.16MB synthetic log with
     a 100KB final block resolves in 3.8ms (platypeeps/system#188).
     **Freshness became the thing to report rather than the thing to lose.**
