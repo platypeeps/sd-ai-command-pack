@@ -93,7 +93,7 @@ PAGE = """<!doctype html>
 <section id="panel-now" role="tabpanel" aria-labelledby="tab-now">
 <p class="sub" id="now-sub"></p>
 <table><thead><tr>
- <th></th><th>what</th><th>detail</th><th>where</th>
+ <th>how</th><th>what</th><th>detail</th><th>where</th>
 </tr></thead><tbody id="now-rows"></tbody></table>
 </section>
 <section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos" hidden>

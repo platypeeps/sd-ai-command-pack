@@ -441,6 +441,11 @@ async function drawNow() {
       what: `cannot reach the server (${err})`,
       detail: "",
     }]);
+    // What was last seen is no longer what is true, and the plugin poll
+    // repaints from it. Left in place, a tab rebuild ten seconds from now
+    // would quietly replace the error with the rows from before the server
+    // went away -- the failure erased by the thing that reports failures.
+    nowRowsSeen = null;
     return;
   }
   nowRowsSeen = payload.rows;
@@ -450,7 +455,11 @@ async function drawNow() {
 // Called by the plugin poll too, which is why this repaints from what was last
 // fetched rather than fetching again: the panel map changed, the rows did not.
 function repaintNow() {
-  if (nowRowsSeen) paintNow(nowRowsSeen);
+  // Against the sentinel, not for truthiness. Both read the same here -- an
+  // empty array is truthy in JS, so no fetched-but-empty list was ever being
+  // skipped -- but the guard is about whether Now has an answer yet, and
+  // saying so is the only way that stays true if the shape changes.
+  if (nowRowsSeen !== null) paintNow(nowRowsSeen);
 }
 
 let pluginSignature = "";
