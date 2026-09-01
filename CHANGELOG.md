@@ -4,16 +4,16 @@
 
 ### Changed
 
-- **The successor, tagged.** 0.72.0 was the terminal release of the pack that
-  shipped through the release train and the plugin marketplace. 1.0.0 is the
-  same repository re-based on `docs/work/**` artifacts and installed
-  machine-scope from one checkout, which is what that entry pointed forward to.
-  The version is not a claim that the rollout is finished: it is tagged at
-  step 7 of eleven, because that is where the migration path could be deleted
-  rather than where the last step lands. Steps 8 through 11 -- `sd store` and
-  `sd config`, `sd plugin lock`, the vault driver, the remaining `pack.py`
-  callers, the sd-writing-pack migration, and the vault move -- follow after
-  this tag and will not carry a 1.x break with them.
+- **The successor.** 0.72.0 was the terminal release of the pack that shipped
+  through the release train and the plugin marketplace. 1.0.0 is the same
+  repository re-based on `docs/work/**` artifacts and installed machine-scope
+  from one checkout, which is what that entry pointed forward to. The version
+  is not a claim that the rollout is finished: it lands at step 7 of eleven,
+  because that is where the migration path could be deleted rather than where
+  the last step lands. Steps 8 through 11 -- `sd store` and `sd config`,
+  `sd plugin lock`, the vault driver, the remaining `pack.py` callers, the
+  sd-writing-pack migration, and the vault move -- follow this version and
+  will not carry a 1.x break with them.
 
 - **`bin/migrate-trellis` and its consumer test are deleted** (1,250 and 575
   lines). `git ls-files .trellis` returns 0 in all nine consumer repositories

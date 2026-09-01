@@ -26,8 +26,10 @@ thirteen repositories, and a reader learns nothing from it. What is left after
 removing `planning` and `done` is six items, which is a view. Step 7's
 fleet-wide park cut the active set from 310 to 57 and `planning` from 300 to
 47 without moving the ratio the argument rests on, which is the reason to keep
-these numbers measured rather than round them into "most". Defining it by exclusion rather than by an
-allow-list of interesting statuses is deliberate: a status this module has
+these numbers measured rather than round them into "most".
+
+Defining it by exclusion rather than by an allow-list of interesting statuses
+is deliberate: a status this module has
 never heard of shows up instead of being silently dropped, and the vocabulary
 is not frozen anywhere that would have to be kept in step.
 """

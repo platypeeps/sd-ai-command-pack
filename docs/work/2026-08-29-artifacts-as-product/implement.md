@@ -2418,14 +2418,18 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     with no path filter, four for four green); squash commits build from
     `PR_TITLE` / `PR_BODY` instead of `COMMIT_OR_PR_TITLE` /
     `COMMIT_MESSAGES`, so a carrier branch's `wip:` subjects stop reaching
-    main's history; rebase merging is disallowed for the same reason. The
-    fourth reads *"a review requirement exists but asks for 0 approving
-    reviews, so it gates nothing"* — and closing it by raising the count locks
-    the repository: `enforce_admins` is on, GitHub does not let an author
-    approve their own pull request, and there is one maintainer. Deleting the
-    requirement that gates nothing is the honest close and leaves behaviour
-    identical; it is left open rather than done quietly, because a protection
-    rule removed without the owner deciding is worse than a decorative one.
+    main's history; rebase merging is disallowed for the same reason. All
+    three were confirmed by `sd-status` re-reporting each gap as gone, not by
+    reading back the call that set it. The fourth reads *"a review requirement
+    exists but asks for 0 approving reviews, so it gates nothing"* — and
+    closing it by raising the count locks the repository: `enforce_admins` is
+    on, GitHub does not let an author approve their own pull request, and
+    there is one maintainer. Deleting the requirement that gates nothing is
+    the honest close and leaves behaviour identical; the DELETE was refused by
+    the permission classifier, which is a reasonable guardrail and was
+    reported rather than worked around. Left open rather than done quietly,
+    because a protection rule removed without the owner deciding is worse than
+    a decorative one.
   - **`migrate-trellis` deleted (#669), and the evidence is on disk rather
     than in a ticked box.** `git ls-files .trellis` returns **0** in all nine
     consumer repositories of the 3-c wave; what remains is 17–41 untracked
@@ -2458,17 +2462,6 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     than dropped, and left in place because
     `docs/spec/backend/manifest-and-filesystem.md:1868` still specifies them
     and that tree is already known-stale.
-  - **Protection: three of four gaps closed, and the fourth is not mine to
-    close.** `route` is now a required check, squash is pinned to
-    PR_TITLE/PR_BODY, and rebase merges are disallowed -- each confirmed by
-    `sd-status` re-reporting the gap as gone rather than by reading back the
-    call that set it. What remains is `GAP [reviews] a review requirement
-    exists but asks for 0 approving reviews, so it gates nothing`. Every way
-    to close it costs something a solo maintainer pays: with
-    `enforce_admins: true` and one human, requiring 1 approval locks `main`
-    outright, and the DELETE that would drop the empty requirement was refused
-    by the permission classifier rather than worked around. Left open,
-    deliberately and in writing, instead of being recorded as closed.
   - **The park invalidated two of this repository's own docstrings**, which is
     the same class of bug step 6b's round 8 found in the system repo and the
     reason that lesson is worth repeating. `dashboard/work.py` argued its
