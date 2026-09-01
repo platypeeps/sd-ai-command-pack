@@ -286,8 +286,9 @@ them to snake_case while transcribing would be a vocabulary change wearing the c
 format change, and standing rule 2 says that is a decision record. Repo-scoped skills ARE the contract (no
 `sd plugin sync` copy machinery). **sd-writing-pack is the first plugin**: pack.py 2,532 → ~1,250
 LOC (store verbs/gh/config/help/adversarial deleted → backbone; pieces/build-html/companion ledger
-stay). Vault-side routines (intel-brief, intel-weekly, tips-weekly, tips-accept,
-aaif-brief-compile, market-watch) retargeted **before** any deletion (step 9). pp-* is the named
+stay). Vault-side callers (intel-brief, intel-weekly, tips-weekly, tips-accept,
+aaif-brief-compile, and `settings.vault.json`) retargeted **before** any deletion (step 9);
+`market-watch` was named here for a year and contains no `pack.py` reference at all. pp-* is the named
 second consumer that validates the interface before any freeze.
 
 ### Session handoff (r7)
