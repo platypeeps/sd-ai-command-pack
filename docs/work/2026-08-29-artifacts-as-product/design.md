@@ -1207,7 +1207,7 @@ is capped at 2,500 LOC, justified in this document as *"credible: 457 lifted + o
 | `dashboard.js` plugin-bound renders (Toolbox 171, Briefs 71, Ports 41, Areas 34) | 317 | leaves the cap |
 | `dashboard.js` backbone renders, shell and `attentionItems()` | 829 | counts, less the pack's existing 145 |
 
-So the backbone-side lift is **763**, not 457. Against 1,499 tracked today and a 2,500 cap, that
+So the backbone-side lift is **763**, not 457. *(Later: none of the 79 is still to build against this cap. `research` shipped as a plugin tab in 6b-4 and R11-D21 moved `queues` to one, so both left `dashboard/` altogether, and `work` was built in 6b-5a and is inside the measured total. The table above is left as counted; subtracting the 79 again is the error this note exists to stop.)* Against 1,499 tracked today and a 2,500 cap, that
 leaves roughly **240 lines** for the two remaining things with no system counterpart: the loader
 and `RUN_ALLOWLIST`. The three missing `sd-dashboard` verbs are **not** in that number —
 `tests/test_loc_caps.py:110` charges `bin/sd-dashboard` to the `bin/` ceiling on purpose, so that
