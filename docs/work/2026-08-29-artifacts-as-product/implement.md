@@ -32,7 +32,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers (5 routines + the permission grant, which goes **last**), BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
-| **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC) | `grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py` = 0; E2E on one piece |
+| **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC, and the hardcoded vault root at `pack.py:146` goes with them -- the driver takes `OBSIDIAN_VAULT`) | `grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py` = 0; E2E on one piece |
 | **11** | Vault move, **last** — per the r2 D12 per-base list (Skill Proposals → files store; Tips / Blog Ideas / Topics / Market Watch / Briefs / Prompts / TaskNotes / Learning → keep; empty Followups → retire — each confirmed by the user first), enumerated coordinated list in the PR; then delete `migrate-vault` | golden-corpus byte-compare (baseline captured at step 8, **before** any move) green; `migrate-vault` refuses if any reader still points at the old path; every vault routine's next run green |
 
 ## Step checklist
@@ -2693,16 +2693,42 @@ re-exported at `:52`), `obsidian-tasks.sh:14`, `obsidian-review.sh:13`,
 - `local-project-dashboard/collectors.py:48` reads **`VAULT`** directly with
   its own default, and nothing resolves `OBSIDIAN_VAULT` into it any more. Its
   own comment at `:27` records why -- "with the server went the shell that used
-  to resolve them" -- so setting the documented knob does not reach it. The
-  file is still live: 6b-8 deleted the server half and kept the collectors.
+  to resolve them". The file is still live: 6b-8 deleted the server half and
+  kept the collectors. This is *not* a broken promise inside that repository:
+  `dashboard.sh:80` documents `VAULT` as the knob, "vault path, read by
+  collectors.py itself", so the repo is internally consistent and setting the
+  name it documents works. The defect is fleet-level -- one path with two
+  documented names, each correct in its own README -- which is why it reads as
+  fine from inside either one.
 - `pack.py:146` reads **neither**. `grep -cE 'os.environ|getenv' pack.py` is
   **0**; the root is a hardcoded absolute string with a username in it.
 
 Step 8's vault driver has to pick one, and the answer is `OBSIDIAN_VAULT` as
 the knob with `VAULT` reserved for process-internal handoff -- five files to
-one, and it is the name the READMEs already document. Recorded here rather
-than fixed in passing: `collectors.py` and `pack.py` are two other
-repositories, and the second of them is step 10's subject anyway.
+one, and it is the name the READMEs already document.
+
+**The two defectors get different dispositions, and neither gets a linter.**
+`pack.py` is not fixed at all: step 10 deletes those four bindings outright
+when `sd store` replaces them, so an env-var patch now is work thrown away.
+It is added to step 10's scope explicitly rather than left implicit, because
+"the migration removes it" is exactly the kind of assumption that survives a
+step being descoped. The one thing that would change this is step 10 slipping
+far: the root is a hardcoded absolute string with a username in it, which is a
+portability defect on its own terms and would then be worth one line.
+
+`collectors.py` is a small standalone change in the system repo -- read
+`OBSIDIAN_VAULT`, fall back to `VAULT`, then the default -- which is
+backward-compatible, since nothing that sets `VAULT` today stops working. It
+is worth doing only because it is cheap; it fixes nothing that is broken now.
+
+What neither disposition buys is prevention, and that is deliberate. Nothing
+enforces this convention, and nothing should: R10-D6 keeps `sd-*` commands out
+of other repositories, so the pack cannot lint for it, and a cross-repo checker
+built for two files whose count is about to become one is more machinery than
+the problem. The convention is enforced where it is *read* -- step 8's driver,
+one place -- and documented everywhere else. That is the honest state, and it
+is written down here so the next person does not rediscover the divergence and
+assume it was missed.
 
 **One thing the driver must carry across regardless of the name.**
 `collectors.py:173-227` wraps its vault read in a subprocess with a 15-second
