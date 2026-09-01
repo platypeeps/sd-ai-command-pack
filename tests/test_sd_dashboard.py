@@ -264,6 +264,27 @@ class CommandLineTests(FleetHarness):
         # never answered.
         self.assertIn("issues[jira]: not collected", output)
 
+    def test_an_incomplete_search_says_which_one_and_does_not_blame_a_ceiling(self):
+        """The report has to name the searches whose rows are missing.
+
+        `truncated` covers two causes and only one of them is this program's:
+        GitHub stops handing over results at 1,000 and says the list ended,
+        which no `MAX_PAGES` change can lift. A report reading "page ceiling
+        hit" sends the operator to the wrong knob, and one that omits the
+        bucket names sends them nowhere at all.
+        """
+        self.make_repo("a")
+        original = collect.refresh_issues
+        collect.refresh_issues = lambda connection, now=None, seams=None: {  # type: ignore[assignment]
+            "github": {"ok": True, "reason": "", "inserted": 1000, "updated": 0,
+                       "truncated": ["author"], "window_start": "", "watermark_moved": True},
+        }
+        self.addCleanup(lambda: setattr(collect, "refresh_issues", original))
+        code, output = self.run_cli("index")
+        self.assertEqual(code, 0)
+        self.assertIn("author", output)
+        self.assertNotIn("page ceiling", output)
+
     def test_dump_is_json_and_identical_across_runs(self):
         self.make_repo("a")
         self.make_repo("group/b")

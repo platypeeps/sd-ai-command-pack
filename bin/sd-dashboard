@@ -177,7 +177,12 @@ def issue_lines() -> list[str]:
             f"{open_by_tracker.get(name, 0)} open"
         )
         if result["truncated"]:
-            line += f" (page ceiling hit: {', '.join(result['truncated'])})"
+            # Not "page ceiling": the walk stops for two reasons and the one
+            # that actually fires is the service's own result cap, which is
+            # not this program's ceiling and cannot be raised by changing it.
+            # What the operator needs is that rows exist which this collect
+            # did not return, and which searches they are.
+            line += f" (incomplete: {', '.join(result['truncated'])})"
         lines.append(line)
     return lines
 
