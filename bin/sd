@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """The pack's service surface for plugins, stores and config.
 
-Today `sd` carries two verb groups: `plugin` and `sweep`. `store` and `config`
-land later in step 8 with the consumer that needs them (R11-D13). `sweep`
-arrived ahead of them because it had a consumer already: D2's one-time park
-drained the backlog and the 45-day rule that keeps it drained had nothing to
-run it.
+Today `sd` carries three verb groups: `plugin`, `config` and `sweep`. `store`
+lands last in step 8, with the vault driver. `sweep` arrived ahead of all of
+them because it had a consumer already: D2's one-time park drained the backlog
+and the 45-day rule that keeps it drained had nothing to run it.
+
+`sd config` is the one resolution home for a plugin's settings, and the keys
+are **declared in the manifest** rather than free-form. The surface it
+replaces -- `pack.py config` -- already refused an unknown key and printed a
+sentence of help per key, so a generic store would have been a regression
+wearing the clothes of a simplification.
 
 `sd plugin add` is the only way a plugin becomes known to this machine. There
 is no disk scanning: the backbone never goes looking for manifests, because a
@@ -481,6 +486,60 @@ def validate_kinds(manifest: dict[str, object], root: pathlib.Path) -> dict[str,
     return checked
 
 
+def validate_config(manifest: dict[str, object]) -> dict[str, dict[str, str]]:
+    """`config.*`: the settings this plugin will accept, declared up front.
+
+    Declared rather than free-form, because the surface this replaces already
+    refused an unknown key. `pack.py config set` carried a closed
+    `CONFIG_KEYS` map with a sentence of help per key, and step 10 deletes it;
+    a generic key-value store would have quietly turned a typo into a setting
+    nothing reads, which is a strictly worse surface than the one being
+    removed. The description is required for the same reason it existed there:
+    `config list` prints it, and the skills that call this are told to show
+    the user its output rather than paraphrase it.
+
+    `pattern` is optional and, when present, must compile **here**. A regex
+    that only fails the first time somebody sets a value is a manifest that
+    registered clean and is broken anyway.
+
+    What this deliberately cannot express is a rule spanning two keys --
+    sdw's "the publishing folder and the writing folder must differ", where
+    which folder a document sits in is the only thing saying whether it
+    cleared the gates. That is business logic and it stays with the plugin.
+    Encoding it here would mean the backbone learning what a Drive folder is.
+    """
+
+    config = manifest.get("config")
+    if config is None:
+        return {}
+    if not isinstance(config, dict) or not config:
+        raise Refusal("`config` is not a non-empty object")
+    declared: dict[str, dict[str, str]] = {}
+    for key, spec in config.items():
+        if not isinstance(key, str) or not FIELD_PATTERN.fullmatch(key):
+            raise Refusal(f"config key {key!r} is not {FIELD_PATTERN.pattern}")
+        if not isinstance(spec, dict):
+            raise Refusal(f"config[{key!r}] is not an object")
+        description = spec.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise Refusal(f"config[{key!r}] declares no `description`")
+        entry = {"description": description}
+        pattern = spec.get("pattern")
+        if pattern is not None:
+            if not isinstance(pattern, str) or not pattern:
+                raise Refusal(f"config[{key!r}].pattern is not a non-empty string")
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise Refusal(f"config[{key!r}].pattern does not compile: {error}") from None
+            entry["pattern"] = pattern
+        unknown = sorted(set(spec) - {"description", "pattern"})
+        if unknown:
+            raise Refusal(f"config[{key!r}] carries unknown key(s): {', '.join(unknown)}")
+        declared[key] = entry
+    return declared
+
+
 def validate_issues(manifest: dict[str, object]) -> str | None:
     """`issues.repo`: where this plugin's issues live, when it says."""
 
@@ -593,6 +652,7 @@ def add(args: argparse.Namespace) -> int:
     validate_dashboard(manifest)
     validate_actions(manifest)
     validate_kinds(manifest, manifest_path.parent)
+    validate_config(manifest)
     validate_issues(manifest)
     validate_vendor(manifest, manifest_path.parent)
 
@@ -630,6 +690,7 @@ def describe(root: str) -> dict[str, object]:
         entry["actions"] = actions
     try:
         kinds = validate_kinds(manifest, pathlib.Path(root))
+        settings = validate_config(manifest)
         issues = validate_issues(manifest)
         vendor = validate_vendor(manifest, pathlib.Path(root))
     except Refusal as refusal:
@@ -640,6 +701,8 @@ def describe(root: str) -> dict[str, object]:
         return entry
     if kinds:
         entry["kinds"] = sorted(kinds)
+    if settings:
+        entry["config"] = sorted(settings)
     if issues:
         entry["issues"] = issues
     if vendor:
@@ -675,7 +738,7 @@ def plugin_list(args: argparse.Namespace) -> int:
             suffix += f"  actions: {', '.join(a['id'] for a in actions)}"
         if entry.get("manifestError"):
             suffix += f"  manifest: {entry['manifestError']}"
-        for key in ("kinds", "vendor"):
+        for key in ("kinds", "config", "vendor"):
             declared = entry.get(key)
             if isinstance(declared, list) and declared:
                 suffix += f"  {key}: {', '.join(str(n) for n in declared)}"
@@ -789,6 +852,173 @@ def plugin_lock(args: argparse.Namespace) -> int:
     raise Refusal(f"{lock_path} is stale: {', '.join(drifted)} changed")
 
 
+# Plugin settings live under one machine-config key, namespaced by prefix,
+# rather than at the config root. The root already holds keys this command
+# knows nothing about -- `plugins`, `google.accounts` -- and a plugin free to
+# write beside them could shadow one. A namespace makes the collision
+# impossible instead of policed.
+SETTINGS_KEY = "config"
+
+
+def declared_config(prefix: str) -> tuple[dict[str, dict[str, str]], pathlib.Path]:
+    """What `prefix` says it accepts, read from its manifest now.
+
+    Resolving through the registry rather than taking the prefix on trust is
+    what makes a typo a refusal: `sd config set sdww.google_account x` names a
+    plugin that is not registered, and without this it would write a setting
+    into a namespace nothing will ever read.
+    """
+
+    roots = registry(sd_lib.machine_config())
+    known = registered(roots)
+    if prefix not in known:
+        listed = ", ".join(sorted(known)) or "none"
+        raise Refusal(f"no plugin registered under prefix {prefix!r} (registered: {listed})")
+    manifest_path = known[prefix]
+    declared = validate_config(read_manifest(manifest_path))
+    if not declared:
+        raise Refusal(f"{prefix} declares no `config` keys in {manifest_path}")
+    return declared, manifest_path
+
+
+def split_setting(dotted: str) -> tuple[str, str]:
+    """`prefix.key` as its two halves, or a usage error.
+
+    A usage error rather than a refusal: `sd config get google_account` with
+    no prefix is a malformed invocation, not a request the command
+    understood and declined.
+    """
+
+    prefix, separator, key = dotted.partition(".")
+    if not separator or not prefix or not key:
+        raise UsageError(f"{dotted!r} is not `<prefix>.<key>`")
+    return prefix, key
+
+
+def settings(config: dict[str, object], prefix: str) -> dict[str, object]:
+    """One plugin's stored settings out of the machine config."""
+
+    stored = config.get(SETTINGS_KEY)
+    if stored is None:
+        return {}
+    if not isinstance(stored, dict):
+        raise Refusal(f"machine config `{SETTINGS_KEY}` is not an object")
+    mine = stored.get(prefix)
+    if mine is None:
+        return {}
+    if not isinstance(mine, dict):
+        raise Refusal(f"machine config `{SETTINGS_KEY}.{prefix}` is not an object")
+    return mine
+
+
+def config_get(args: argparse.Namespace) -> int:
+    prefix, key = split_setting(args.key)
+    declared, _ = declared_config(prefix)
+    if key not in declared:
+        raise Refusal(
+            f"{prefix} declares no config key {key!r}"
+            f" -- declared: {', '.join(sorted(declared))}")
+    value = settings(sd_lib.machine_config(), prefix).get(key)
+    if value in (None, ""):
+        # The remedy matters more than the diagnosis, and this is inherited
+        # rather than invented: the skills calling this are told to stop and
+        # show the user exactly this output, so "is not set" alone leaves
+        # somebody to go looking for the command that would fix it.
+        raise Refusal(
+            f"{args.key} is not set ({declared[key]['description']}). Run:\n"
+            f"    sd config set {args.key} <value>")
+    print(value)
+    return 0
+
+
+def config_set(args: argparse.Namespace) -> int:
+    prefix, key = split_setting(args.key)
+    declared, manifest_path = declared_config(prefix)
+    if key not in declared:
+        raise Refusal(
+            f"{prefix} declares no config key {key!r}"
+            f" -- declared: {', '.join(sorted(declared))}")
+    value = args.value.strip()
+    if not value:
+        raise Refusal(f"{args.key} cannot be set to an empty value; use `sd config unset`")
+    pattern = declared[key].get("pattern")
+    if pattern is not None and not re.fullmatch(pattern, value):
+        # Anchored by `fullmatch` rather than by asking the manifest to write
+        # `^...$`. A plugin author who forgets the anchors would otherwise
+        # ship a pattern that accepts anything containing a match, which is
+        # the permissive failure nobody notices.
+        raise Refusal(f"{value!r} does not match {pattern!r} ({declared[key]['description']})")
+
+    config_path = sd_lib.machine_config_path()
+    config = sd_lib.machine_config(config_path)
+    stored = config.get(SETTINGS_KEY)
+    if stored is not None and not isinstance(stored, dict):
+        raise Refusal(f"machine config `{SETTINGS_KEY}` is not an object")
+    mine = dict(settings(config, prefix))
+    was = mine.get(key)
+    mine[key] = value
+    config[SETTINGS_KEY] = {**(stored or {}), prefix: mine}
+    write_config(config, config_path)
+    print(f"{args.key}: {was or '(unset)'} -> {value}")
+    return 0
+
+
+def config_unset(args: argparse.Namespace) -> int:
+    prefix, key = split_setting(args.key)
+    declared_config(prefix)
+    config_path = sd_lib.machine_config_path()
+    config = sd_lib.machine_config(config_path)
+    mine = dict(settings(config, prefix))
+    if key not in mine:
+        raise Refusal(f"{args.key} is not set")
+    del mine[key]
+    held = config.get(SETTINGS_KEY)
+    stored = dict(held) if isinstance(held, dict) else {}
+    # An emptied namespace is removed rather than left as `{}`. The config is
+    # read by eye often enough that a residue of every plugin ever configured
+    # is noise, and absence and emptiness already mean the same thing here.
+    if mine:
+        stored[prefix] = mine
+    else:
+        stored.pop(prefix, None)
+    if stored:
+        config[SETTINGS_KEY] = stored
+    else:
+        config.pop(SETTINGS_KEY, None)
+    write_config(config, config_path)
+    print(f"unset {args.key}")
+    return 0
+
+
+def config_list(args: argparse.Namespace) -> int:
+    """Every declared key of one plugin, set or not, with what it is for.
+
+    Unset keys are listed rather than skipped: the question this answers is
+    "what can I configure", and a list of only what somebody already set
+    cannot answer it.
+    """
+
+    declared, _ = declared_config(args.prefix)
+    stored = settings(sd_lib.machine_config(), args.prefix)
+    if args.json:
+        json.dump(
+            {key: {**spec, "value": stored.get(key)} for key, spec in sorted(declared.items())},
+            sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    width = max(len(key) for key in declared)
+    for key, spec in sorted(declared.items()):
+        print(f"{key:<{width}}  {stored.get(key) or '(unset)'}")
+        print(f"{'':<{width}}  {spec['description']}")
+    unread = sorted(set(stored) - set(declared))
+    if unread:
+        # A key the manifest stopped declaring. Reported rather than deleted:
+        # the plugin may be mid-rename, and this command does not get to
+        # decide that a setting somebody wrote is rubbish.
+        print(f"\nnot declared by {args.prefix} any more: {', '.join(unread)}")
+    return 0
+
+
 def sweep(args: argparse.Namespace) -> int:
     """What the 45-day rule would park, in this checkout or across the fleet.
 
@@ -847,6 +1077,27 @@ def build_parser() -> argparse.ArgumentParser:
     locker.add_argument("--check", action="store_true",
                         help="refuse if the checkout has drifted from its lock; write nothing")
     locker.set_defaults(handler=plugin_lock)
+
+    config = groups.add_parser("config", help="read and write a plugin's declared settings")
+    setting_verbs = config.add_subparsers(dest="verb", required=True)
+
+    getter = setting_verbs.add_parser("get", help="print one setting, or refuse with the remedy")
+    getter.add_argument("key", help="<prefix>.<key>")
+    getter.set_defaults(handler=config_get)
+
+    setter = setting_verbs.add_parser("set", help="set one declared setting")
+    setter.add_argument("key", help="<prefix>.<key>")
+    setter.add_argument("value")
+    setter.set_defaults(handler=config_set)
+
+    unsetter = setting_verbs.add_parser("unset", help="remove one setting")
+    unsetter.add_argument("key", help="<prefix>.<key>")
+    unsetter.set_defaults(handler=config_unset)
+
+    listing = setting_verbs.add_parser("list", help="every key one plugin declares")
+    listing.add_argument("prefix", help="a registered plugin prefix")
+    listing.add_argument("--json", action="store_true", help="machine-readable")
+    listing.set_defaults(handler=config_list)
 
     sweeper = groups.add_parser(
         "sweep", help="report the planning items the 45-day rule would park")
