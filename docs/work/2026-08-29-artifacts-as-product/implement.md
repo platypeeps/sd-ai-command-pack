@@ -2469,7 +2469,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     `tests/test_dashboard_work.py` restated it; parking 237 items made both
     false while every test still passed, because the numbers live in prose. Now
     57 and 47, measured from the collector rather than estimated. The ratio the
-    argument rests on did not move -- which is exactly why the stale figure
+    argument rests on did not move — which is exactly why the stale figure
     would have survived a reading that only checked whether the point still
     held.
 
