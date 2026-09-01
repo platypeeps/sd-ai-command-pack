@@ -221,6 +221,40 @@ class ReadTests(StoreFixture):
         self.assertEqual(gone.returncode, 1, gone.stdout)
         self.assertIn("does not exist", gone.stderr)
 
+    def test_one_strange_entry_does_not_take_out_the_whole_listing(self) -> None:
+        """A directory and a dangling link both end in `.md` and are not notes.
+
+        Without the `is_file()` filter the directory raises `IsADirectoryError`
+        on read and refuses the entire query, so one odd entry in a vault makes
+        every note of that kind unreachable. Found in review.
+        """
+
+        self.plugin()
+        self.note("Real")
+        (self.tips / "Folder.md").mkdir()
+        (self.tips / "Dangling.md").symlink_to(self.tmp / "absent.md")
+        done = self.run_sd("store", "list", "pp.tip", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual([row["title"] for row in json.loads(done.stdout)], ["Real"])
+
+    def test_a_symlink_to_a_real_note_is_read(self) -> None:
+        """Declined half of a review finding, pinned so the decision is visible.
+
+        The vault is the user's own data and its owner is the manifest's
+        author; refusing a symlinked note would reject a legitimate layout to
+        guard a boundary that does not exist here. `digest()` refuses symlinks
+        for a different job -- a lock must pin content that is where it says.
+        """
+
+        self.plugin()
+        elsewhere = self.tmp / "elsewhere.md"
+        elsewhere.write_text("---\nstatus: inbox\nscore: 3\n---\n\nLinked.\n",
+                             encoding="utf-8")
+        (self.tips / "Linked.md").symlink_to(elsewhere)
+        done = self.run_sd("store", "get", "pp.tip", "Linked", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("Linked.", json.loads(done.stdout)["body"])
+
     def test_a_title_holding_a_path_separator_is_a_usage_error(self) -> None:
         self.plugin()
         for title in ("../secret", "a/b", ".."):
@@ -270,6 +304,14 @@ class ResolutionTests(StoreFixture):
         done = self.run_sd("store", "list", "pp.tip", vault=str(flat))
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn("is not a directory", done.stderr)
+
+    def test_a_relative_vault_root_refuses(self) -> None:
+        """The same command must not answer differently from two directories."""
+
+        self.plugin()
+        done = self.run_sd("store", "list", "pp.tip", vault="vault")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("must be an absolute path", done.stderr)
 
     def test_an_unknown_prefix_and_an_unknown_kind_refuse_differently(self) -> None:
         self.plugin()

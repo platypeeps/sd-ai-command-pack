@@ -1210,6 +1210,13 @@ def store_root(store: dict[str, object]) -> pathlib.Path:
     if not value:
         raise Refusal(f"{name} is not set; it names the vault this plugin stores into")
     root = pathlib.Path(value).expanduser()
+    if not root.is_absolute():
+        # A relative root makes the same command answer differently from two
+        # directories, which is the one property a system-of-record must not
+        # have. Refused rather than resolved against the cwd, because resolving
+        # it silently is how a query reads the wrong vault and reports it as
+        # empty. Found in review.
+        raise Refusal(f"{name} is {value!r}; it must be an absolute path")
     reason = vault_reason(root)
     if reason:
         raise Refusal(reason)
@@ -1304,8 +1311,25 @@ def kind_base(store: dict[str, object], name: str) -> pathlib.Path:
 
 
 def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
+    """The kind's notes: `*.md` under `base`, one level deep, regular files only.
+
+    `is_file()` rather than a suffix test alone, and it is not cosmetic. A
+    directory named `Draft.md` and a symlink pointing at nothing both match the
+    suffix, and the first would fail the whole listing on `IsADirectoryError`
+    -- one strange entry in a vault taking out every query against it. They are
+    skipped instead.
+
+    A symlink to a real note **is** read, deliberately. `digest()` refuses
+    symlinks because a lock must pin content that is where it claims to be;
+    this is a read of the user's own vault, whose owner and whose manifest
+    author are the same person, and refusing a symlinked database folder would
+    reject a legitimate layout to guard a boundary that does not exist here.
+    Declined in review, with the reasoning recorded rather than assumed.
+    """
+
     try:
-        return sorted(path for path in base.iterdir() if path.suffix == ".md")
+        return sorted(
+            path for path in base.iterdir() if path.suffix == ".md" and path.is_file())
     except FileNotFoundError:
         raise Refusal(f"{base} does not exist; the vault does not hold this kind") from None
     except OSError as error:
