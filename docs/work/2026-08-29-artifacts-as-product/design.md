@@ -1285,8 +1285,8 @@ fourteen days old. Port conflicts, cron failures and vault rot would go silently
 
 **The change is one optional key.** A plugin tab's collector may return, alongside whatever it
 renders, a list of rows shaped exactly like the ones `add()` already takes — `{rank, kind, id,
-what, detail, href}` *(the shipped shape is `{rank, kind, id, what, detail}`: R11-D19 removed
-`href`)* — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
+what, detail}` *(this list carried a sixth key, `href`, until R11-D19 removed it: the anchor had
+no reachable target and nothing read it)* — and Now merges plugin rows with backbone rows. The 5s/64KB budget covers
 both halves; the row list is bounded by the same cap. No new machinery, no second call, no new
 verb.
 
