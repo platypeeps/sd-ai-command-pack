@@ -1500,7 +1500,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     and OS-managed paths that come and go, not framework residue, and a missing
     directory on `PATH` costs nothing. Named so the next reader does not take
     the plugin sweep for a full audit.
-- [ ] 6b — dashboard swap to :8767 behind the parity checklist.
+- [x] 6b — dashboard swap to :8767 behind the parity checklist. Nine
+  sub-steps, closed 2026-09-01 with 6b-9.
   - **The checklist is written, and it lives here.** It was drafted as a
     separate `dashboard-parity.md` and `sd-docs-lint` refused it — *"a work item
     holds prd.md, design.md and implement.md only"*, rule 1, on the pack's own
@@ -2271,6 +2272,55 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
   - Remaining in 6b: the deletion of the system `dashboard.py`, which cannot be
     a bare `rm` — `sd_tile.py` imports it for the collectors behind all six
     plugin tabs, so the server half goes and the collectors stay.
+- [x] **6b-9 — the deletion, and what it could not be.** `rm dashboard.py`
+  would have taken the six plugin tabs with it: `sd_tile.py` imports that file
+  for the collectors behind every one of them. So the 1,854-line server was
+  split rather than deleted — `collectors.py` is the 19 functions the tiles
+  transitively need, carried over by line-range deletion so every comment
+  survives verbatim, and the 37 that served a page are gone: `Handler`, `page`,
+  `listen`, `rebuild`, `set_field`, `update_note`, the ack store, and the
+  repos, work, PR, issue and Jira collectors whose replacements are this
+  repository's. With it went the LaunchAgent and its captured copy, `assets/`,
+  and eight `dashboard.sh` verbs. `tile` and `queue-open` are what the manifest
+  names, and they are what is left (platypeeps/system#190).
+  - **The check was named before the work, and it was the tiles.** All six
+    payloads captured byte-for-byte *before* the first edit; after it, five
+    identical and `toolbox` differing only in log-age hours, which advance with
+    the clock. Running the old and the new code back to back in the same second
+    gives **15,107 identical bytes** — without that, the drift would have hidden
+    whatever else changed. `--url blog` identical, the exit codes still the
+    plugin contract's, and the live server on `:8767` renders all six tabs
+    `ok`.
+  - **What a diff does not show: three docstrings still spoke of the system
+    dashboard in the present tense**, including the one on the Queues tab
+    explaining what it "edits". Fixed rather than left — that file outlived the
+    thing they describe. Two citations in *this* repository had the same
+    problem and are now marked as pointing into history: `dashboard/actions.py`
+    and design.md's write-path survey.
+  - **The rm-test, which is step 6's own end-to-end check, and did not pass
+    quietly.** "Remove the cache and state; only acks, intents and time are
+    lost." Rebuilding the index into an empty `XDG_CACHE_HOME` gave **1,135
+    rows against the live 1,175**, and the 48 missing ones split in two: 5
+    `review-requested` rows that no longer match their search — the documented
+    `last_seen` gap, behaving as designed — and 43 `author` rows lost to a walk
+    that stopped at exactly 1,000 and called itself complete.
+  - **That second half was a bug, and the fix is #667.** GitHub's search hands
+    over at most 1,000 results and answers `hasNextPage: false` at that
+    boundary: the same answer as an exhausted list. `MAX_PAGES * PAGE_SIZE` is
+    also exactly 1,000, so the page ceiling never fired first and `search()`'s
+    promise that *"a capped collect never renders as a complete one"* could not
+    hold for the one bucket that overflows. Measured on this account
+    2026-09-01: ten clean pages to 1,000 rows while `issueCount` read **2,968**
+    on every one of them. The walk now finishes against that count, and the
+    live first collect says `(page ceiling hit: author)`.
+  - **So the rm-test's claim stands, but narrower than written.** A rebuilt
+    index loses history beyond what the trackers will still hand over — all of
+    it closed or merged, none of it anything currently waiting — and it now
+    says so out loud instead of reporting a full collect. Nothing currently
+    open was lost on this machine.
+  - **Cost:** +4 lines of code in `dashboard/`, which stands at **4,119 of
+    4,300** and **2,190 of 2,300 carrying code**. The system repository lost
+    **4,112 lines** and gained 844.
 - [ ] 7 — tag 1.0.0. Does **not** restore the macOS CI leg: that moved to a
   manual trigger at the end of the rollout (R11-D4 amendment, 2026-08-31),
   so step 7 keeps "verify protection" and nothing else changes here.

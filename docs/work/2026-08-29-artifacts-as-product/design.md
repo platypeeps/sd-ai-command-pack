@@ -1422,6 +1422,11 @@ wrong. The line numbers above have drifted with the file they cite -- re-read 20
 `do_POST` opens at `:1785`, `host_ok` at `:1657`, the token comparison at `:1788` -- and the
 one this repository now cites in `dashboard/actions.py` is `:1714`, the `GET /api/state?refresh=1`
 rebuild that has no token in front of it and is the shape 6b-7 deliberately did not inherit.)*
+*(Later, 6b-9: that file no longer exists -- platypeeps/system#190 deleted the
+server half and kept the collectors. The line numbers above are citations into
+its history, not into a working tree, and are left as written because a survey
+keeps its date. What replaced each of the three endpoints is recorded in
+`implement.md`'s 6b-7 and 6b-9 entries.)*
 
 **The decision.** At 6b the replacement takes `:8767` *with* the tailnet reach and *with* those
 writes, under the same three guards. Options (a) loopback-only and (b) tailnet read-only were both
