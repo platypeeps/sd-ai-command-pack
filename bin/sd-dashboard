@@ -56,6 +56,20 @@ PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
   <string>--port</string><string>{port}</string></array>
  <key>RunAtLoad</key><true/>
  <key>KeepAlive</key><true/>
+ <!-- KeepAlive with no throttle is a crashloop waiting for a reason to
+      happen: launchd restarts on exit, so a serve that dies immediately (port
+      already bound, a dependency missing after an upgrade) gets restarted as
+      fast as it can exit, burning CPU and filling the log with one traceback
+      repeated. Naming the interval makes it a decision rather than a default.
+      Every other KeepAlive agent on this machine sets both keys, five of five,
+      at 15 or 30 seconds with ProcessType Background; this one set neither.
+      Note for whoever edits this next: a double hyphen is illegal inside an
+      XML comment, and `plutil -lint` accepts the malformed file anyway. The
+      parser that rejects it is the one in the test suite. -->
+ <key>ThrottleInterval</key><integer>30</integer>
+ <!-- Background tells the scheduler this is not interactive, so it is throttled
+      under load rather than competing with the user's foreground work. -->
+ <key>ProcessType</key><string>Background</string>
  <key>StandardOutPath</key><string>{logs}/{label}.log</string>
  <key>StandardErrorPath</key><string>{logs}/{label}.err</string>
  <key>EnvironmentVariables</key>
