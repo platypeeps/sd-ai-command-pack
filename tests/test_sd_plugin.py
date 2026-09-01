@@ -503,12 +503,9 @@ class KindTests(PluginFixture):
     def test_a_path_the_filesystem_cannot_express_refuses_instead_of_crashing(self) -> None:
         """A NUL byte in a declared path is a refusal, not a traceback.
 
-        Review guessed a symlink loop; the loop turned out to be harmless --
-        `resolve()` returns the link itself and `exists()` swallows the
-        `OSError`. The value that actually escapes every guard is one JSON can
-        write and a filesystem cannot hold: `\u0000`, on which `resolve()`
-        raises `ValueError` on 3.9 and 3.14 alike. Both are pinned here, so
-        the harmless case stays harmless if pathlib changes its mind.
+        One of two faults `resolve()` cannot answer for. This one JSON can
+        write and no filesystem can hold, and it raises `ValueError` on 3.9
+        and 3.14 alike. Its sibling below is the symlink loop.
         """
 
         result = self.add_kind(sections={"order": ["Body"], "template": "templates/a\u0000b.md"})
@@ -516,7 +513,18 @@ class KindTests(PluginFixture):
         self.assertIn("not a usable path", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-    def test_a_symlink_loop_is_an_absent_template_not_a_crash(self) -> None:
+    def test_a_symlink_loop_refuses_on_every_interpreter_rather_than_crashing(self) -> None:
+        """The fault whose *class* changes with the interpreter.
+
+        `resolve()` raises `RuntimeError("Symlink loop from ...")` on
+        3.10-3.12 and returns the link itself on 3.9 and 3.13+, where the
+        refusal then comes from `exists()` instead. So the assertion is the
+        refusal and the absence of a traceback, not one particular sentence:
+        pinning the 3.13 wording would turn a version difference into a red
+        build, and pinning neither is how this shipped crashing on the one
+        interpreter CI was already running.
+        """
+
         root = self.kinded()
         first, second = root / "templates" / "one.md", root / "templates" / "two.md"
         first.symlink_to(second)
@@ -527,7 +535,7 @@ class KindTests(PluginFixture):
             json.dumps({"prefix": "pp", "kinds": {"tip": kind}}), encoding="utf-8")
         result = self.run_sd("plugin", "add", str(root))
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("does not exist", result.stderr)
+        self.assertIn("sections.template", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_an_empty_kinds_block_refuses(self) -> None:

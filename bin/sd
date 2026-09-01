@@ -254,14 +254,19 @@ def inside(root: pathlib.Path, value: object, what: str,
         raise Refusal(f"{what} {value!r} must be a relative path inside the plugin")
     try:
         resolved = (root / value).resolve()
-    except (OSError, ValueError) as error:
-        # The crash a review went looking for in symlink loops, found one
-        # layer over. A loop resolves to itself rather than raising, and
-        # `exists()` and `is_file()` swallow both exception classes, so the
-        # only value that reaches here is one the filesystem cannot express --
-        # a NUL byte, which JSON writes as `\u0000` and `resolve()` raises
-        # `ValueError` on, on 3.9 and 3.14 alike. Uncaught, a bad manifest
-        # prints a traceback instead of naming the key that was wrong.
+    except (OSError, ValueError, RuntimeError) as error:
+        # Three classes, because `resolve()` picks a different one per version
+        # and per fault, and a manifest that names a bad path must refuse in
+        # every combination rather than print a stack trace at the person
+        # holding it. A symlink loop raises `RuntimeError("Symlink loop from
+        # ...")` on 3.10-3.12 and quietly returns the link itself on 3.9 and
+        # 3.13+; a NUL byte, which JSON can write as an escape and no
+        # filesystem can hold, raises `ValueError` on 3.9 and 3.14 alike.
+        #
+        # Found by CI, not by the probe that preceded it: that probe ran 3.9.6
+        # and 3.14.7 -- the two ends -- and the behaviour that crashes lives in
+        # the middle, on the interpreter the pull request was already testing
+        # against. Sampling the extremes is not sampling the range.
         raise Refusal(f"{what} {value!r} is not a usable path: {error}") from error
     if resolved != root.resolve() and root.resolve() not in resolved.parents:
         raise Refusal(f"{what} {value!r} resolves outside the plugin checkout")
