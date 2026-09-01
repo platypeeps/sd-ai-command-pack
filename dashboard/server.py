@@ -26,7 +26,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import collect, plugins, store, work
+from . import collect, now, plugins, store, work
 
 DEFAULT_PORT = 8768
 DEFAULT_HOST = "127.0.0.1"
@@ -48,9 +48,19 @@ PAGE = """<!doctype html>
     than in a box of their own -- the container exists to be replaced wholesale
     on every poll, not to group anything visually. */
  #plugin-tabs{display:contents}
- #alerts{border:1px solid #c2410c;border-radius:.25rem;padding:.5rem .8rem;margin:0 0 1rem}
- #alerts ul{margin:0;padding-left:1.1rem}
- #alerts .sub{margin:0 0 .3rem}
+ /* Severity is a band derived from `rank` and never from `kind` (R11-D20):
+    the pill says how loud, the row says what. */
+ .pill{display:inline-block;padding:0 .45rem;border-radius:.75rem;font-size:.8rem;
+  border:1px solid currentColor}
+ .broken{color:#c2410c}.look{color:#a16207}.queued{opacity:.6}
+ nav .badge{display:inline-block;margin-left:.4rem;padding:0 .4rem;border-radius:.7rem;
+  font-size:.75rem;background:#c2410c;color:#fff}
+ nav .badge:empty{display:none}
+ /* A button that reads as a link. It is a button because what it does is
+    select a tab on this page, and a real `<a href>` would need a scroll
+    target the panels do not have. */
+ .linklike{font:inherit;padding:0;border:0;background:none;color:inherit;
+  cursor:pointer;text-decoration:underline}
  input.filter{font:inherit;margin:0 0 .5rem;padding:.2rem .4rem;width:14rem;
   background:none;color:inherit;border:1px solid rgba(128,128,128,.4);border-radius:.25rem}
  th.sortable{cursor:pointer}
@@ -69,9 +79,10 @@ PAGE = """<!doctype html>
 </style>
 <h1>sd dashboard</h1>
 <p class="sub" id="sub">loading\u2026</p>
-<div id="alerts" hidden></div>
 <nav role="tablist" aria-label="views">
- <button id="tab-repos" role="tab" aria-selected="true"
+ <button id="tab-now" role="tab" aria-selected="true"
+  aria-controls="panel-now">now<span class="badge" id="now-badge"></span></button>
+ <button id="tab-repos" role="tab" aria-selected="false"
   aria-controls="panel-repos">repos</button>
  <button id="tab-issues" role="tab" aria-selected="false"
   aria-controls="panel-issues">issues</button>
@@ -79,7 +90,13 @@ PAGE = """<!doctype html>
   aria-controls="panel-work">work</button>
  <span id="plugin-tabs"></span>
 </nav>
-<section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos">
+<section id="panel-now" role="tabpanel" aria-labelledby="tab-now">
+<p class="sub" id="now-sub"></p>
+<table><thead><tr>
+ <th>how</th><th>what</th><th>detail</th><th>where</th>
+</tr></thead><tbody id="now-rows"></tbody></table>
+</section>
+<section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos" hidden>
 <table><thead><tr>
  <th>repo</th><th>group</th><th>branch</th><th class="n">dirty</th>
  <th class="n">ahead</th><th class="n">behind</th><th>last</th><th>subject</th>
@@ -168,6 +185,19 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 # cached against a git fan-out on a different timer. Neither
                 # should be able to hold up the other.
                 body = json.dumps(work.collect_work(cache.root)).encode()
+                return self.send_body(body, "application/json")
+            if path == "/api/now":
+                # Merged here rather than in the page: the two halves arrive
+                # on two clocks, and joining them client-side would put the
+                # ranking and the row text somewhere no test can reach. Both
+                # sources are already cached -- the fleet for twenty seconds,
+                # the loader for five -- so this adds a merge, not a collect.
+                body = json.dumps({
+                    "rows": now.merge(
+                        now.backbone_rows(cache.state()["repos"]),
+                        plugins.cached_load()["rows"],
+                    ),
+                }).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/issues":
                 body = json.dumps(issue_payload()).encode()
