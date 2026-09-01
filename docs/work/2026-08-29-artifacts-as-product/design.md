@@ -1203,7 +1203,7 @@ is capped at 2,500 LOC, justified in this document as *"credible: 457 lifted + o
 |---|---|---|
 | `dashboard.py` collectors, plugin-bound (toolbox, areas, ports, rtk, briefs, jira) | 301 | leaves the cap — `~/repos/system` |
 | `dashboard.py` collectors the pack already has (repos, issues, github_issues, prs) | 124 | already built |
-| `dashboard.py` collectors still to build (queues, research, work) | 79 | counts |
+| `dashboard.py` collectors still to build (queues, research, work) | 79 | counts *(none of it still does: research shipped as a plugin tab in 6b-4, R11-D21 moved queues to one, and work is built)* |
 | `dashboard.js` plugin-bound renders (Toolbox 171, Briefs 71, Ports 41, Areas 34) | 317 | leaves the cap |
 | `dashboard.js` backbone renders, shell and `attentionItems()` | 829 | counts, less the pack's existing 145 |
 

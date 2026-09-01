@@ -1538,13 +1538,14 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     |---|---|---|
     | Repos | backbone | **yes** |
     | Issues | backbone — the one migrating view (R3-D13) | **yes** |
-    | Work · Now · PRs | backbone | no |
+    | Work | backbone | **yes** — 6b-5a, a rewrite against `docs/work/` and not the port this row implied |
+    | Now · PRs | backbone | no |
     | Queues | **plugin tab** — moved from backbone by R11-D21: it is a vault view with a write path, like Vault and Briefs | no |
     | Suggestions · Skills · Sessions | backbone, **new** — no system counterpart | no |
-    | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | no |
+    | Toolbox · Briefs · Vault · Research | **plugin tab**, stays system-owned | **yes** — 6b-4, through `~/repos/system`'s own manifest |
     | ~~Jira personal~~ | **no such tab** — enumerated 2026-08-31; Jira renders inside `issues`, which is already backbone | n/a |
     | Projects | derived; folds into Now/Work rather than porting | n/a |
-    | Ports | **plugin tab** beside Toolbox (R11-D12) | no |
+    | Ports | **plugin tab** beside Toolbox (R11-D12) | **yes** — 6b-4, the fifth declared tab |
     | rtk savings | rides Toolbox — it is a card in `renderToolbox()`, not a tab | n/a |
   - **The verdict: two of fifteen tabs exist, thirteen do not**, and four of
     those thirteen are new surfaces with no system counterpart to port from.
@@ -1762,6 +1763,91 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     stderr yields a bounded row that keeps the end rather than the start, and a
     tile that floods stderr and then prints good JSON is served rather than
     killed.
+  - **6b-4 landed, in `~/repos/system` rather than here: the five system views
+    are a plugin now (platypeeps/system#186, +652/-7 across 4 files).** The
+    repository grew an `sd-plugin.json` declaring prefix `sys` and five tabs,
+    and an `sd_tile.py` that answers `dashboard.sh tile <name>` once per
+    declared name. Nothing crossed the boundary that was not supposed to: the
+    tile returns `{title?, html?, rows?}` and the styling stayed system-side,
+    so the numbers cross and the boxes do not.
+    **The budget is not theoretical, and the first tile broke it.** A cold
+    load through the pack's loader timed out on `sys/toolbox`, which is how
+    R11-D19 found its rank-0 case -- a row sourced to a tab that was never
+    served. Profiled rather than guessed: `machine-setup.sh status` cost
+    **3.57s** of the 5s per-tab budget, 90-95% of the tile's whole runtime,
+    and the nightly `machine-setup-drift` job already runs that exact command
+    at 03:30 and writes its output verbatim to a log. Reading the log instead
+    costs **2ms** on today's 89KB, and stays in milliseconds as it grows: the
+    read walks backwards in doubling windows, and a 2.16MB synthetic log with
+    a 100KB final block resolves in 3.8ms (platypeeps/system#188).
+    **Freshness became the thing to report rather than the thing to lose.**
+    A nightly number shown as a live one is worse than a slow tile, so the
+    tab carries a `drift checked` figure, and where the figure cannot be
+    trusted -- no log, a run still going, a run that died before reporting, a
+    stamp that will not parse, or a measurement past 48h -- it raises a rank-1
+    row saying which. Seven review rounds, one of them rebutted with a
+    constructed case rather than complied with: dropping the first line of
+    each backward-read window cannot return a stale run, because a window that
+    opens on the newest `starting` stamp contains nothing older by
+    construction.
+    **After:** the five tabs cost 0.12s, 0.06s, 0.08s, 0.39s and 2.16s timed
+    one at a time, and the loader returns all five with nine alert rows in
+    **2.33s** -- not their sum, because `dashboard/plugins.py` runs the tabs
+    concurrently, so the wall clock is the slowest of them plus overhead and
+    `sys/ports` is now what the budget is spent on. Every row is sourced to a
+    tab that was actually served.
+  - **6b-5a landed: the Work tab, and it was never a port (#657, +483/-1
+    across 4 files).** The parity table above called it backbone and implied a
+    lift from the system dashboard. That tab reads
+    `.trellis/workspace/journal-*.md`; step 2 replaced that layout with
+    `docs/work/`, and exactly one checkout fleet-wide still has a
+    `.trellis/workspace`. The row is corrected above rather than left to be
+    re-derived.
+    **What `docs/work/` actually holds was bigger than the scoping note, and
+    the note was measured on one repository.** Enumerated from the filesystem
+    across the fleet: **twelve repos, 310 active items, 1,226 archived**, and
+    `300 planning · 6 in_progress · 1 done · 3 with no status`. So the full
+    inventory is one value repeated three hundred times across twelve
+    repositories, and the tab does not render it -- it renders the six that
+    are moving and carries every status as counts in the summary, because six
+    rows without "300 planning" beside them would read as the whole set.
+    **Moving is defined by exclusion, and that is the design decision.** Not
+    an allow-list of interesting statuses: an allow-list needs editing every
+    time the templates grow a word, and until someone noticed, the item would
+    be missing from the only view that would have shown it. A status this
+    module has never seen surfaces itself instead.
+    Three shapes the fleet contains that the obvious implementation gets
+    wrong, each now carrying a test: `archive/` matches the same glob as an
+    item and holds no `prd.md`, so it reported once per repository as an item
+    whose state could not be read -- which is the row that is supposed to mean
+    something; `status: blocked | phase: check | diagnostic: ...` is a real
+    line, and the reason is the most useful thing on the row; and three items
+    have no `prd.md` at all, which earns them their own table rather than a
+    blank status cell, because a blank cell is how they stay unnoticed.
+    **Two of the tests proved nothing, and a mutation found the second one.**
+    The frontmatter cap test first repeated a single key, so the dict stayed
+    small whether the cap held or not; the repair sized its fixture as
+    `FRONTMATTER_LINES + 5`, which scales with the constant under test, so
+    raising the cap raised the fixture and moved the assertion out of the way.
+    Both survived removing the cap entirely. The fixture is a literal now, and
+    mutating the constant does fail it. Worth recording because the second
+    version looked correct and was reached by fixing the first.
+    **The measurement, and the cap:** `dashboard/` is **2,930 of 4,000, 1,070
+    left**. Setting that against R11-D17's ~1,083 of remaining estimate says
+    the two just crossed over by thirteen lines -- and that subtraction is
+    wrong, which is worth recording because it is the one a later reader will
+    redo. The estimate was drawn at 2,488; part of it has since landed *inside*
+    the 2,930, and part left the cap altogether. R11-D13 splits its 763 into 79
+    collector lines (queues, research, work) and 684 of JS: `research` shipped
+    as a plugin tab in 6b-4 and R11-D21 moved `queues` to one, so both leave
+    `dashboard/` entirely, and `work` is built and already counted in the
+    2,930. Of the 684, the system dashboard's Work render is 128 lines
+    (`assets/dashboard.js:673-800`), rewritten here in about 60. So what is
+    still to fit is ~556 of backbone JS plus R11-D17's ~120 for Now and ~200
+    for the write path -- **~876 against 1,070 left**, under rather than over.
+    No re-derivation either way: R11-D17 rules one out and asks instead that
+    Now and the write path be measured against their own estimates, so 6b-5b
+    reports its LOC the way 6b-2 did.
   - **What must be true before the swap**, the gate itself:
     - [ ] every tab marked "backbone" above serves from the pack dashboard
     - [ ] every tab marked "plugin tab" loads through `~/repos/system`'s own
