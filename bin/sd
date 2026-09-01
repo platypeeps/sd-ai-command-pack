@@ -252,7 +252,17 @@ def inside(root: pathlib.Path, value: object, what: str,
     relative = pathlib.PurePosixPath(value)
     if relative.is_absolute() or ".." in relative.parts:
         raise Refusal(f"{what} {value!r} must be a relative path inside the plugin")
-    resolved = (root / value).resolve()
+    try:
+        resolved = (root / value).resolve()
+    except (OSError, ValueError) as error:
+        # The crash a review went looking for in symlink loops, found one
+        # layer over. A loop resolves to itself rather than raising, and
+        # `exists()` and `is_file()` swallow both exception classes, so the
+        # only value that reaches here is one the filesystem cannot express --
+        # a NUL byte, which JSON writes as `\u0000` and `resolve()` raises
+        # `ValueError` on, on 3.9 and 3.14 alike. Uncaught, a bad manifest
+        # prints a traceback instead of naming the key that was wrong.
+        raise Refusal(f"{what} {value!r} is not a usable path: {error}") from error
     if resolved != root.resolve() and root.resolve() not in resolved.parents:
         raise Refusal(f"{what} {value!r} resolves outside the plugin checkout")
     if not resolved.exists():

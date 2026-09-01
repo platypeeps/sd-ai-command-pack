@@ -500,6 +500,36 @@ class KindTests(PluginFixture):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("outside the plugin checkout", result.stderr)
 
+    def test_a_path_the_filesystem_cannot_express_refuses_instead_of_crashing(self) -> None:
+        """A NUL byte in a declared path is a refusal, not a traceback.
+
+        Review guessed a symlink loop; the loop turned out to be harmless --
+        `resolve()` returns the link itself and `exists()` swallows the
+        `OSError`. The value that actually escapes every guard is one JSON can
+        write and a filesystem cannot hold: `\u0000`, on which `resolve()`
+        raises `ValueError` on 3.9 and 3.14 alike. Both are pinned here, so
+        the harmless case stays harmless if pathlib changes its mind.
+        """
+
+        result = self.add_kind(sections={"order": ["Body"], "template": "templates/a\u0000b.md"})
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("not a usable path", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_a_symlink_loop_is_an_absent_template_not_a_crash(self) -> None:
+        root = self.kinded()
+        first, second = root / "templates" / "one.md", root / "templates" / "two.md"
+        first.symlink_to(second)
+        second.symlink_to(first)
+        kind = dict(WELL_FORMED_KIND)
+        kind["sections"] = {"order": ["Body"], "template": "templates/one.md"}
+        (root / "sd-plugin.json").write_text(
+            json.dumps({"prefix": "pp", "kinds": {"tip": kind}}), encoding="utf-8")
+        result = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("does not exist", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_an_empty_kinds_block_refuses(self) -> None:
         result = self.run_sd("plugin", "add", str(self.plugin(kinds={})))
         self.assertEqual(result.returncode, 1, result.stdout)
