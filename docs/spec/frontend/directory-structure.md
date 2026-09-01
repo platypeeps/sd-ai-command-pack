@@ -1,5 +1,18 @@
 # Directory Structure
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> Every path in the Directory Layout block below is gone. `templates/` and
+> `.github/command-sources/` were deleted on 2026-08-30 by step 3e
+> (`43170716`, #610), and with them the generated `.commands/`, `.claude/`,
+> `.gemini/` and `.github/prompts/` adapter sets and the `make generate` target
+> that produced them. The payload is now `skills/sd-*/SKILL.md`, one copy.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > How user-facing prompt and command files are organized in this project.
 
 ---

@@ -1,5 +1,22 @@
 # Thinking Guides
 
+> [!important]
+> **Partly stale as of 2026-09-01.**
+> The two thinking guides this page indexes are largely repository-agnostic and
+> still readable as such; so are the review-verification checklists below, which
+> were adopted from real review rounds and depend on nothing that was deleted.
+> Two references in them are stale: the enforcement pointer ending "When a
+> Reviewer Reports Nothing" names
+> `templates/.agents/skills/sd-review-pr/SKILL.md`, deleted on 2026-08-30 by
+> step 3e (`43170716`, #610) -- the live equivalent is
+> `skills/sd-review/SKILL.md` -- and the sweep in "When Closing Out a Task Whose
+> Work Already Landed" names a `scripts/` directory the same step deleted.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > **Purpose**: Expand your thinking to catch things you might not have considered.
 
 ---

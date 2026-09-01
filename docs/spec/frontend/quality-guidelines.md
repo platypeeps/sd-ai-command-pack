@@ -1,5 +1,19 @@
 # Quality Guidelines
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> The adapter files this page sets standards for do not exist. `templates/` and
+> `.github/command-sources/` were deleted on 2026-08-30 by step 3e
+> (`43170716`, #610), along with `manifest.json` -- which four of the rules
+> below require every adapter path to appear in -- and the generation step the
+> Testing Requirements section tells you to run. The Copilot, Cursor, Gemini and
+> OpenCode filename rules govern files the pack no longer ships.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Quality standards for prompt and command adapter files.
 
 ---

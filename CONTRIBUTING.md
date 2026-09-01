@@ -216,3 +216,29 @@ steps 4 and 7) rather than rewritten speculatively here. Deleting them in 3e was
 considered and rejected: a deletion widened because the tree is already open is
 how a reviewable pull request stops being one. Read
 `docs/work/2026-08-29-artifacts-as-product/` for what is actually true now.
+
+That deferral did not hold, and the paragraph above is left standing as the
+record of the plan rather than rewritten to match what happened. Steps 4 and 7
+both closed without reaching these trees — step 7's checklist row said "triage
+survivors" and the step closed on 2026-09-01 with the row unaddressed — so the
+triage ran on **2026-09-01** as its own pass instead. Every page under
+`docs/spec/**` and `docs/FLEET_ROLLOUT.md` now opens with a dated notice naming
+what was deleted, when, and which record explains it; `docs/fleet/` carries the
+same notice in a new `README.md`, because JSON takes no header. The notices
+supersede: nothing below them was edited.
+
+Deletion was **not** part of that pass. 7,839 lines of specification is a
+content decision for the maintainer, so the pass produced a per-file
+disposition with evidence — keep, stale-notice, or delete — and left the delete
+column as a recommendation. It is in the step 7 entry of
+`docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
+One thing to know before acting on that recommendation: `docs/spec/**` is not
+orphan text, even where its content is. `bin/sd-docs-lint` rule 4 enumerates
+the tree at run time and fails any spec directory that holds pages without an
+`index.md` linking each of them; `.github/sd-review.json` and `bin/sd_route.py`
+both carry `docs/spec/**` in `never_skip`, so a change there is never routed
+past review; and `skills/sd-spec/SKILL.md` writes into it as the second stage
+of `sd-ship`. Rule 4 tolerates an index that links a page which is gone, so
+deleting a page is safe — but a directory has to leave with its index, not
+before it.

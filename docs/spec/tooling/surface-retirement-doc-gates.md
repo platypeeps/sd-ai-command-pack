@@ -1,5 +1,22 @@
 # Surface Retirement Doc Gates
 
+> [!important]
+> **Stale as of 2026-09-01.**
+> Both gates this page warns about are themselves retired.
+> `.github/scripts/check-shipped-script-docs.sh` and the documentation
+> path-reference exemptions in
+> `templates/scripts/sd-ai-command-pack-review-preflight.mjs` were deleted on
+> 2026-08-30 by step 3e (`43170716`, #610), along with the shipped scripts and
+> command surfaces they classified. `docs/SD_AI_COMMAND_PACK.md`,
+> `docs/repomix-map.md`, `.github/command-sources/` and the `.trellis/tasks/`
+> PRDs the gate read are all gone. Retiring a surface here today trips neither
+> gate, because neither runs.
+>
+> The text below is unedited. It is the record of what that machinery
+> specified, not guidance for the repository as it stands. The triage that
+> produced this notice is recorded under step 7 in
+> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+
 > Two doc gates fire when a command surface or shipped script is deleted, and
 > both fail in ways that look unrelated to the deletion. Read this before
 > retiring a surface.
