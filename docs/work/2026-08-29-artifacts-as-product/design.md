@@ -1946,7 +1946,7 @@ system-owned behind a registered manifest — puts Queues with Vault and Briefs,
 row is the thing that was wrong.
 
 **But read-only is not a port of this tab, and that is what forced the second half.** The queues
-exist to be decided in. Ported without their dropdowns they become a list of things awaiting a
+exist to be decided in. Ported without their dropdowns, they become a list of things awaiting a
 decision the dashboard can no longer take, while Now still emits five rank-4 rows pointing at them
 — an alert whose destination cannot act on it. So the plugin contract gains a declared action: a
 manifest may name actions alongside its tile, the backbone renders the control and routes the
