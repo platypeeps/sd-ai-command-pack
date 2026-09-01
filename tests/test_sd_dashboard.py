@@ -16,6 +16,7 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -322,6 +323,31 @@ class InstallTests(FleetHarness):
         self.assertIn("<string>8767</string>", body)
         self.assertIn(str(REPO_ROOT / "bin" / "sd-dashboard"), body)
         self.assertIn(f"<string>{self.root}</string>", body)
+
+    def test_the_installed_service_carries_the_reach_and_a_usable_path(self):
+        """launchd's PATH holds neither `git` nor `tailscale`.
+
+        Under the default one the fleet reads as zero repositories and the
+        tailnet bind silently does nothing -- both of which look like a quiet
+        dashboard rather than a broken one, which is why this is checked on
+        the parsed plist rather than trusted to a template.
+
+        The bind is on here and off in a hand-run `serve`: installing is
+        asking for the service the system dashboard provided, and R11-D10 says
+        carry both reach paths or knowingly drop one.
+        """
+        self.install()
+        env = plistlib.loads(self.plist.read_bytes())["EnvironmentVariables"]
+        self.assertEqual(env[server.TAILNET_BIND], "1")
+        self.assertIn("/opt/homebrew/bin", env["PATH"].split(":"))
+        self.assertEqual(env["SD_REPO_ROOT"], str(self.root))
+
+    def test_the_default_port_is_the_one_being_taken_over(self):
+        """8768 was the side-by-side port; 8767 is what makes it a swap."""
+        self.install()
+        args = plistlib.loads(self.plist.read_bytes())["ProgramArguments"]
+        self.assertEqual(args[-2:], ["--port", "8767"])
+        self.assertEqual(server.DEFAULT_PORT, 8767)
 
     def test_it_is_unloaded_before_it_is_loaded(self):
         """`bootstrap` over a loaded label fails, and a stale service is the bug."""

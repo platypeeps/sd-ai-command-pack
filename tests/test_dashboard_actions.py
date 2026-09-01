@@ -14,6 +14,9 @@ from __future__ import annotations
 import ast
 import http.client
 import json
+import os
+import socket
+import subprocess
 import sys
 import threading
 import unittest
@@ -183,6 +186,130 @@ class Hosts(unittest.TestCase):
         """
         for header in ["evil.example", "evil.example:8767", "", None]:
             self.assertFalse(server.host_ok(header), repr(header))
+
+
+class TailnetBind(unittest.TestCase):
+    """The second address, and the reason it is opt-in.
+
+    R11-D10's correction: the system dashboard reaches a phone by two paths,
+    a direct tailnet bind and a `tailscale serve` proxy, and 6b had to carry
+    both or knowingly drop one.
+    """
+
+    def run_with(self, value: object) -> list[str]:
+        env = {} if value is None else {server.TAILNET_BIND: str(value)}
+        with unittest.mock.patch.dict(os.environ, env, clear=False):
+            if value is None:
+                os.environ.pop(server.TAILNET_BIND, None)
+            return server.tailnet_addrs()
+
+    def test_the_second_bind_is_off_unless_it_is_asked_for(self) -> None:
+        """It widens the audience from this machine to a whole tailnet.
+
+        `tailscale` is not called at all when it is off, which is what the
+        mock proves: the guard is before the probe, not after it.
+        """
+        with unittest.mock.patch.object(server.subprocess, "run") as run:
+            for value in [None, "0", "", "false", "no", "NO", " 0 "]:
+                self.assertEqual(self.run_with(value), [], repr(value))
+            run.assert_not_called()
+
+    def test_asking_for_it_returns_the_addresses_tailscale_reports(self) -> None:
+        done = subprocess.CompletedProcess([], 0, stdout="100.82.165.108\nfd7a::1\n\n")
+        with unittest.mock.patch.object(server.subprocess, "run", return_value=done):
+            self.assertEqual(self.run_with("1"), ["100.82.165.108", "fd7a::1"])
+
+    def test_a_tailscale_that_is_not_there_is_a_loopback_dashboard(self) -> None:
+        with unittest.mock.patch.object(server.subprocess, "run", side_effect=OSError):
+            self.assertEqual(self.run_with("1"), [])
+
+    def test_an_address_it_binds_is_an_address_it_answers_to(self) -> None:
+        """Otherwise the bind serves 403s to the one path it exists for.
+
+        A browser at `http://100.82.165.108:8767/` sends that as its `Host`,
+        and v6 arrives bracketed, which is the spelling `host_ok` keeps.
+        """
+        with unittest.mock.patch.object(server, "_HOSTS", None), \
+                unittest.mock.patch.object(server, "tailnet_names", set), \
+                unittest.mock.patch.object(
+                    server, "bound_addrs", lambda: ["100.82.165.108", "fd7a::1"]):
+            hosts = server.allowed_hosts()
+            self.assertTrue(server.host_ok("100.82.165.108:8767"))
+            self.assertTrue(server.host_ok("[fd7a::1]:8767"))
+            self.assertIn("fd7a::1", hosts)
+            self.assertFalse(server.host_ok("evil.example:8767"))
+
+    def test_a_tailscale_that_failed_reports_nothing_rather_than_its_output(self) -> None:
+        """Its stdout on a bad exit is a diagnostic, not an address list.
+
+        The fixture prints an address *and* exits non-zero on purpose: a
+        failure whose output happens to be unparseable is caught by the shape
+        filter one line below, and a test built on that one proves the shape
+        filter twice and the exit code never. This is the case where only the
+        exit code can say no -- half-written output from a command that then
+        failed, which would otherwise widen the allow-list.
+        """
+        done = subprocess.CompletedProcess([], 1, stdout="100.82.165.108\nlost it\n")
+        with unittest.mock.patch.object(server.subprocess, "run", return_value=done):
+            self.assertEqual(self.run_with("1"), [])
+
+    def test_only_lines_that_are_addresses_widen_the_allow_list(self) -> None:
+        """`tailnet_names` filters a hostname by shape; this is the same rule.
+
+        These become `Host` values this server answers to, so a stray line on
+        stdout must not be able to add one.
+        """
+        done = subprocess.CompletedProcess(
+            [], 0, stdout="100.82.165.108\nWarning: something\nfd7a::1\n \n")
+        with unittest.mock.patch.object(server.subprocess, "run", return_value=done):
+            self.assertEqual(self.run_with("1"), ["100.82.165.108", "fd7a::1"])
+
+    def test_the_allow_list_and_the_binding_read_one_answer(self) -> None:
+        """Asked twice, the tailnet can come up between them.
+
+        The server would then bind an address the cached allow-list never
+        heard of, and answer 403 on exactly the path the bind exists for. So
+        the probe happens once and both callers read the same list.
+        """
+        with unittest.mock.patch.object(server, "_ADDRS", None), \
+                unittest.mock.patch.object(server, "_HOSTS", None), \
+                unittest.mock.patch.object(server, "tailnet_names", set), \
+                unittest.mock.patch.object(
+                    server, "tailnet_addrs", return_value=["100.82.165.108"]) as probe:
+            server.allowed_hosts()
+            self.assertEqual(server.bound_addrs(), ["100.82.165.108"])
+            self.assertEqual(probe.call_count, 1)
+            self.assertTrue(server.host_ok("100.82.165.108:8767"))
+
+    def test_the_wildcard_address_is_never_bound(self) -> None:
+        """`0.0.0.0` publishes this on every network the machine joins.
+
+        Read out of `serve`'s source rather than asserted about a running
+        server: the point is that the string is not there to be reached.
+        """
+        source = (REPO_ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        serve = next(n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == "serve")
+        literals = {c.value for c in ast.walk(serve)
+                    if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+        for wildcard in ["0.0.0.0", "::", "*"]:
+            self.assertNotIn(wildcard, literals)
+
+    def test_a_second_address_that_refuses_does_not_cost_the_first(self) -> None:
+        """The tailnet coming up after login is the ordinary case."""
+        source = (REPO_ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+        serve = next(n for n in ast.walk(ast.parse(source))
+                     if isinstance(n, ast.FunctionDef) and n.name == "serve")
+        handlers = [h for n in ast.walk(serve) if isinstance(n, ast.Try) for h in n.handlers]
+        self.assertTrue(any(isinstance(h.body[-1], ast.Continue) for h in handlers),
+                        "a refused bind must be skipped, not fatal")
+        self.assertTrue(any(isinstance(n, ast.Raise) for n in ast.walk(serve)),
+                        "nothing bound at all must still be fatal")
+
+    def test_the_v6_server_is_the_same_server_on_a_different_family(self) -> None:
+        self.assertEqual(server.ServerV6.address_family, socket.AF_INET6)
+        self.assertTrue(issubclass(server.ServerV6, server.ThreadingHTTPServer))
 
 
 def get_routes() -> list[str]:

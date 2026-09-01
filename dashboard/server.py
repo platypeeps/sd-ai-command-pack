@@ -8,9 +8,11 @@ mutation resolves to an id in `RUN_ALLOWLIST` -- see `dashboard/actions.py`,
 which is where the write path is reasoned about and what it deliberately does
 not inherit from the dashboard being replaced.
 
-Binds loopback. D14 is decided as option (c) (R11-D10): the replacement
-dashboard takes :8767 with the tailnet reach and the token-gated writes the
-phone uses today. The Host allow-list is what makes the second half safe -- a
+Binds loopback, and this node's tailnet addresses when
+`SD_DASHBOARD_TAILNET_BIND` asks -- never the wildcard, which would publish it
+on every network the machine ever joins. D14 is decided as option (c)
+(R11-D10): the replacement dashboard takes :8767 with the tailnet reach and
+the token-gated writes the phone uses today. The Host allow-list is what makes the second half safe -- a
 `tailscale serve` proxy in front of the loopback socket sends its own name, so
 the list holds this node's MagicDNS names as well as the loopback ones, and
 nothing else. No CORS header is sent, and none should be: the token lives in
@@ -26,9 +28,12 @@ reads. `sd-dashboard index` is what fills the index; this serves what it finds.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
+import os
 import re
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -46,7 +51,10 @@ TOKEN_SLOT = "__SD_DASHBOARD_TOKEN__"
 
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
-DEFAULT_PORT = 8768
+# 8767, which the system dashboard held until 6b-8. It landed on 8768 at P3 so
+# the two could run side by side while the parity checks ran; taking the port
+# is what makes the swap a swap rather than a second dashboard.
+DEFAULT_PORT = 8767
 # A POST body names an action id and nothing else. Anything larger is not a
 # request this server has a shape for, and reading it would be reading it.
 BODY_BYTES = 4096
@@ -74,7 +82,58 @@ def tailnet_names() -> set[str]:
     return {name for name in names if name and re.fullmatch(r"[a-z0-9.-]+", name)}
 
 
+TAILNET_BIND = "SD_DASHBOARD_TAILNET_BIND"
+OFF = frozenset({"0", "", "false", "no"})
+
+
+def tailnet_addrs() -> list[str]:
+    """This node's own tailnet addresses, when the operator has asked for them.
+
+    Off unless `SD_DASHBOARD_TAILNET_BIND` says otherwise, because it widens
+    the audience from this machine to every device on the tailnet. Why bind
+    them at all when a `tailscale serve` proxy already forwards to loopback:
+    an IP URL is the path that survives a phone whose resolver ignores
+    MagicDNS, and a stale DNS answer cannot point it somewhere else. R11-D10's
+    correction says carry both paths or knowingly drop one.
+    """
+    if os.environ.get(TAILNET_BIND, "0").strip().lower() in OFF:
+        return []
+    try:
+        out = subprocess.run(["tailscale", "ip"], capture_output=True,
+                             text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode:
+        return []
+    # Kept only if it parses as an address, the same treatment `tailnet_names`
+    # gives a hostname and for the same reason: this widens a security
+    # boundary, so a diagnostic line printed on stdout must not be able to add
+    # a `Host` this server answers to. Found in review.
+    addrs = []
+    for line in out.stdout.splitlines():
+        try:
+            addrs.append(str(ipaddress.ip_address(line.strip())))
+        except ValueError:
+            continue
+    return addrs
+
+
 _HOSTS: frozenset[str] | None = None
+_ADDRS: list[str] | None = None
+
+
+def bound_addrs() -> list[str]:
+    """The tailnet addresses, probed once and answered the same way after.
+
+    One answer feeds both the allow-list and the binding. Asked twice, the
+    tailnet could come up between them, and the server would bind an address
+    the cached allow-list had never heard of -- 403 on exactly the path the
+    bind exists to serve. Found in review.
+    """
+    global _ADDRS
+    if _ADDRS is None:
+        _ADDRS = tailnet_addrs()
+    return _ADDRS
 
 
 def allowed_hosts() -> frozenset[str]:
@@ -82,11 +141,24 @@ def allowed_hosts() -> frozenset[str]:
 
     Frozen because it is a security boundary handed to every request, and a
     mutable one could be widened in place. Found in review.
+
+    An address it binds is an address it must answer to: a browser typing
+    `http://100.82.165.108:8767/` sends that as its `Host`, and a list of
+    names alone would 403 the one path the bind exists to serve. Both
+    spellings for v6, since `host_ok` keeps the brackets the URL had.
     """
     global _HOSTS
     if _HOSTS is None:
-        _HOSTS = LOOPBACK | tailnet_names()
+        addrs = bound_addrs()
+        _HOSTS = LOOPBACK | tailnet_names() | set(addrs) | {
+            f"[{addr}]" for addr in addrs if ":" in addr}
     return _HOSTS
+
+
+class ServerV6(ThreadingHTTPServer):
+    """The same server, for an address that is not IPv4."""
+
+    address_family = socket.AF_INET6
 
 
 def host_ok(header: str | None) -> bool:
@@ -456,10 +528,31 @@ def script_source() -> str:
 
 
 def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> None:
+    """One server per address, never `0.0.0.0`.
+
+    Binding the wildcard would publish this on every network the machine ever
+    joins; binding named addresses publishes it on exactly the ones asked for.
+    An address that refuses is reported and skipped rather than fatal -- the
+    tailnet coming up after login is the ordinary case, and losing loopback
+    because of it would be the wrong trade. Nothing bound at all is fatal.
+    """
     # Asked before the socket opens: `allowed_hosts` forks, and lazily it
     # would do it inside the first request, putting a ten-second timeout in
     # front of a page load. Found in review.
     allowed_hosts()
     handler = make_handler(Cache(root), script_source())
-    with ThreadingHTTPServer((host, port), handler) as httpd:
-        httpd.serve_forever()
+    bound = []
+    for addr in [host] + bound_addrs():
+        server = ServerV6 if ":" in addr else ThreadingHTTPServer
+        try:
+            httpd = server((addr, port), handler)
+        except OSError as error:
+            print(f"cannot bind {addr}:{port}: {error}", flush=True)
+            continue
+        bound.append(f"[{addr}]" if ":" in addr else addr)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    if not bound:
+        raise SystemExit(f"nothing bound on port {port}")
+    print("dashboard on " + " ".join(f"http://{a}:{port}/" for a in bound), flush=True)
+    while True:
+        time.sleep(3600)
