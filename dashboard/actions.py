@@ -21,10 +21,12 @@ because it is the same trust boundary and not a wider one.
 **What is NOT here, deliberately: no GET has a side effect.** The dashboard
 this replaces started a rebuild on `GET /api/state?refresh=1` behind the Host
 check alone while its POST twin required the token
-(`~/repos/system/local-project-dashboard/dashboard.py:1714` against `:1788`,
-as that file stood before platypeeps/system#190 deleted it at 6b-9 -- read it
-there, not on disk). `tests/test_dashboard_actions.py` pins that this does not
-inherit the habit, which outlives the file it was learned from.
+(`local-project-dashboard/dashboard.py:1714` against `:1788` in
+`platypeeps/system`, as that file stood at its last commit before
+platypeeps/system#190 deleted it at 6b-9 -- a citation into that repository's
+history, not into any working tree; nothing on disk answers to the path any
+more). `tests/test_dashboard_actions.py` pins that this does not inherit the
+habit, which outlives the file it was learned from.
 """
 
 from __future__ import annotations

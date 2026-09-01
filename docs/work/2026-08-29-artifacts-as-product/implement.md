@@ -2312,7 +2312,8 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
     hold for the one bucket that overflows. Measured on this account
     2026-09-01: ten clean pages to 1,000 rows while `issueCount` read **2,968**
     on every one of them. The walk now finishes against that count, and the
-    live first collect says `(page ceiling hit: author)`.
+    live first collect says `(incomplete: author)` -- reworded in review from
+    "page ceiling hit", which named the one cause that never fires.
   - **So the rm-test's claim stands, but narrower than written.** A rebuilt
     index loses history beyond what the trackers will still hand over — all of
     it closed or merged, none of it anything currently waiting — and it now
