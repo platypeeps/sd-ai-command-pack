@@ -291,6 +291,23 @@ class CommittedBaseListTests(unittest.TestCase):
                 self.assertFalse(base.startswith("/"), f"{base} is absolute")
                 self.assertNotIn("..", pathlib.PurePosixPath(base).parts, f"{base} climbs out")
 
+    def test_a_base_that_is_absolute_or_climbs_out_is_refused_by_the_tool(self) -> None:
+        """`vault / "/etc"` is `/etc`: pathlib drops the left side.
+
+        These were asserted about the committed file and not enforced anywhere,
+        so a line added to that file tomorrow would scan wherever it pointed.
+        """
+
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        listing = pathlib.Path(holder.name) / "bases.txt"
+        for bad in ("/etc", "../../elsewhere", "System/../../out", "Real\nReal"):
+            with self.subTest(base=bad):
+                listing.write_text(f"{bad}\n", encoding="utf-8")
+                self.tool.BASES_FILE = listing
+                with self.assertRaises(self.tool.UsageError):
+                    self.tool.read_bases()
+
     def test_an_indented_comment_is_a_comment_here_too(self) -> None:
         """The exact divergence that removed the duplicate parser, pinned."""
 

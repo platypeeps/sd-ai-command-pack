@@ -100,6 +100,20 @@ def read_bases() -> list[str]:
     bases = [b for b in bases if b and not b.startswith("#")]
     if not bases:
         raise UsageError(f"{BASES_FILE} lists no bases")
+    # Validated here rather than only in the test that reads the committed
+    # file. Every base is joined onto the vault root, and `vault / "/etc"` is
+    # `/etc` -- pathlib drops the left side for an absolute right side -- so an
+    # absolute line silently scans somewhere else entirely, and `..` climbs out
+    # of the vault the same way. The committed list is well-formed today; what
+    # this stops is the next line somebody adds to it.
+    for base in bases:
+        if base.startswith("/") or pathlib.PurePosixPath(base).is_absolute():
+            raise UsageError(f"the base {base!r} is absolute; bases are relative to the vault")
+        if ".." in pathlib.PurePosixPath(base).parts:
+            raise UsageError(f"the base {base!r} climbs out of the vault")
+    if len(set(bases)) != len(bases):
+        duplicate = next(b for b in bases if bases.count(b) > 1)
+        raise UsageError(f"the base {duplicate!r} is listed twice")
     return bases
 
 
@@ -162,7 +176,7 @@ def parse_manifest(text: str) -> dict[str, str]:
         if not line:
             continue
         digest, separator, path = line.partition("  ")
-        if not separator or len(digest) != 64:
+        if not separator or len(digest) != 64 or not all(c in "0123456789abcdef" for c in digest):
             raise UsageError(f"{MANIFEST_NAME} line {number} is not `<sha256>  <path>`")
         found[path] = digest
     return found

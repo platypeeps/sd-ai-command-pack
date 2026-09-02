@@ -3376,8 +3376,10 @@ taken from the local manifest and searched for across the whole repository
 working tree, tracked and untracked. Seven matched, all coincidental generic
 words that are also ordinary English in these documents (`Learning`,
 `Observability`, `Traversal`, `Baseten`). Exactly one full relative path
-appears -- `System/Databases/Market Watch/Mezmo.md`, in this file at line 2722
--- and it predates this step. 8-v introduces no note title to the repository.
+appears, at line 2722 of this file, and it predates this step by a month. It
+is deliberately not repeated here: naming it again would add a second copy of
+the one string this whole layout exists to keep out, and a line number points
+at it just as well. 8-v introduces no note title to the repository.
 
 **Two things the base list records that the step-11 row gets wrong.** "Tips" is
 `System/Databases/Tips and Tricks`; there is no `Tips`. And `System/Databases/`
