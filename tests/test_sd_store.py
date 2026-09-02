@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -742,6 +743,46 @@ class WriteTests(StoreFixture):
         self.assertEqual(
             path.read_text(encoding="utf-8"),
             "---   \nstatus: approved\n---\n\nThe body.\n")
+
+    def test_a_missing_kind_directory_is_reported_as_itself(self) -> None:
+        """Not as a uniqueness failure, which is how it surfaced.
+
+        `refuse_duplicate_unique` scans the kind directory, so a kind carrying
+        `unique-fields` reported a missing base through a check about
+        duplicate values. A kind without them reached the write and got an
+        `OSError`. Both now refuse on the directory, before either.
+
+        The directory is deliberately not created: `bases` comes from the
+        manifest, so a missing one is far more likely a typo there than a
+        vault waiting to be filled.
+        """
+
+        self.check_missing_base(["score"])
+
+    def test_a_missing_kind_directory_refuses_without_unique_fields_too(self) -> None:
+        """The other half: without `unique-fields` this reached the write."""
+
+        self.check_missing_base([])
+
+    def check_missing_base(self, unique: list[str]) -> None:
+        kind = self.kind_with_template()
+        if unique:
+            kind["unique-fields"] = unique
+        root = self.plugin(kinds={"tip": kind}, register=False)
+        self.template(root)
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        shutil.rmtree(self.tips)
+
+        done = self.run_sd("store", "add", "pp.tip", "First", "--field", "score=7")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn(str(self.tips), done.stderr)
+        self.assertNotIn("unique", done.stderr)
+        self.assertFalse(self.tips.exists(), "the vault must not gain a directory")
+
+        self.tips.mkdir(parents=True)
+        again = self.run_sd("store", "add", "pp.tip", "First", "--field", "score=7")
+        self.assertEqual(again.returncode, 0, again.stderr)
 
     def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
         """`float("nan") < 6` is False, so an unguarded floor lets it through.

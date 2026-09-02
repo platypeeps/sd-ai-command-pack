@@ -1635,9 +1635,9 @@ def note_path(base: pathlib.Path, title: str) -> pathlib.Path:
 
     Containment is the whole check, and deliberately not a list of forbidden
     characters. A blacklist encodes a fact about *this platform* -- `/`
-    separates here and `\` is an ordinary filename character -- into a rule
-    about titles, so it refuses a legal title on one system while missing a
-    traversal on another. Resolving the built path and requiring it to sit
+    separates here and a backslash is an ordinary filename character -- into a
+    rule about titles, so it refuses a legal title on one system while missing
+    a traversal on another. Resolving the built path and requiring it to sit
     directly in `base` is the same check everywhere, and it is what the tests
     exercise: with it removed, `a/b` and `../escaped` are both accepted.
 
@@ -1743,6 +1743,19 @@ def store_add(args: argparse.Namespace) -> int:
 
     kind, store, name, root = resolve_kind(args.kind)
     base = kind_base(store, name)
+    # Before anything reads the directory. `refuse_duplicate_unique` scans it,
+    # so a kind with `unique-fields` reported a missing base as a *uniqueness*
+    # failure -- "the vault does not hold this kind", raised by a check about
+    # duplicate values -- while a kind without them got an `OSError` from the
+    # write instead. The directory is not created here: `bases` comes from the
+    # manifest, and the overwhelmingly likely cause of a missing one is a typo
+    # in that manifest rather than a vault waiting to be populated. Making a
+    # directory in someone's vault on the strength of a typo is the silent
+    # side effect this store exists to avoid.
+    if not base.is_dir():
+        raise Refusal(
+            f"{base} does not exist; `store.bases` maps {name!r} there and the vault"
+            " does not have it. Create it, or fix the mapping in the manifest")
     path = note_path(base, args.title)
     if path.exists():
         raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")

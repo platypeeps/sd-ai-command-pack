@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import subprocess
 import unittest
+import warnings
 
 TESTS = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = TESTS.parent
 
 
 def main_guard_line(tree: ast.Module) -> int | None:
@@ -93,6 +96,62 @@ class SuiteShapeTests(unittest.TestCase):
         """
 
         self.assertNotEqual(list(TESTS.glob("test_*.py")), [], "the suite was not reached")
+
+
+class SourceWarningTests(unittest.TestCase):
+    """No tracked source emits a `SyntaxWarning` when Python reads it.
+
+    Found the ordinary way -- running `bin/sd` by hand printed an invalid
+    escape sequence warning on every invocation, from a docstring written
+    earlier the same day. The suite was green throughout, because warnings do
+    not fail tests, and no reviewer saw it, because a warning appears when the
+    tool is used rather than when the diff is read. Python 3.12 raised this
+    class from DeprecationWarning and 3.15 makes it a SyntaxError, so the same
+    docstring that only prints noise today stops the program later.
+
+    Enumerated from `git ls-files` rather than from a list of the files that
+    were wrong once.
+    """
+
+    def tracked_sources(self) -> list[pathlib.Path]:
+        listed = subprocess.run(
+            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
+        found = []
+        for name in listed.stdout.split():
+            path = REPO_ROOT / name
+            if not path.is_file():
+                continue
+            if path.suffix == ".py":
+                found.append(path)
+                continue
+            # The `bin/sd-*` commands carry no suffix; a shebang naming python
+            # is what makes them python, and reading it is how the check finds
+            # a command added later without being told about it.
+            head = path.read_bytes()[:64]
+            if head.startswith(b"#!") and b"python" in head:
+                found.append(path)
+        return found
+
+    def test_no_tracked_source_warns_when_python_reads_it(self) -> None:
+        noisy = []
+        for path in self.tracked_sources():
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                try:
+                    ast.parse(path.read_text(encoding="utf-8"))
+                except (SyntaxError, UnicodeDecodeError):
+                    continue
+            for warning in caught:
+                if issubclass(warning.category, SyntaxWarning):
+                    noisy.append(f"{path.relative_to(REPO_ROOT)}: {warning.message}")
+        self.assertEqual(noisy, [], "\n".join(noisy))
+
+    def test_the_source_scan_reaches_the_commands(self) -> None:
+        """The control: an empty list would make the test above vacuous."""
+
+        found = self.tracked_sources()
+        self.assertNotEqual(found, [], "no tracked source was scanned")
+        self.assertIn(REPO_ROOT / "bin" / "sd", found, "the main entry point was not scanned")
 
 
 if __name__ == "__main__":
