@@ -4022,11 +4022,12 @@ tree; and 769 beyond that are
 imports, constants and module-level code. Measured from the AST rather than
 estimated.
 
-*(Superseded at 10b-iv. The deletion was made and `pack.py` landed at 1,857,
-not 2,013; `main` is 112, not the 172 predicted here. `design.md` carries the
-measurement now, and the section below explains why this estimate was still
-short. The figures in this paragraph are kept as what was believed on the way
-there, not as facts.)*
+*(Superseded at 10b-iv, and again at 10b-iv-iv. The deletion was made and
+`pack.py` landed at 1,857 rather than the 2,013 predicted here, then at 1,721
+once the `protected-fields` decision freed the last two verbs. `design.md`
+carries whatever the current measurement is; this paragraph is kept as what was
+believed on the way there, not as facts, and makes no new estimate of its own
+-- the figures above are the measured outcomes that replaced the prediction.)*
 
 **The first census of that deletion was wrong twice, both in the same
 direction as wanting the number to be small.** It counted function bodies only,
@@ -4218,3 +4219,91 @@ empty. `skill-proposal` protects four fields and only `my-rating` is genuinely
 never-machine-writable, so it joins `blog-idea` as the second of the four kinds
 mixing both meanings in one key -- which, with `tip` and `topic` sitting at
 either pure extreme, is the evidence the open decision needs.
+
+### Step 10b-iv-iv: `protected-fields` decided, and the last two verbs moved (2026-09-02)
+
+`sd-writing-pack` #9. `protected-fields` now declares `my-rating` and nothing
+else, `ideas add` and `ideas set-published` are gone, and `pack.py` is 1,721
+lines. This is the decision record standing rule 2 asked for -- and the answer
+is that no vocabulary change is needed, which is why it can live here rather
+than as a change to the eight keys.
+
+#### The key was carrying two meanings
+
+`my-rating` is never machine-writable. `System/Schema.md` states that more
+plainly than any other rule in the vault: *"No routine may ever write, edit, or
+clear a `my-rating`"*, because a default would destroy the distinction between
+"I read this and it was a 3" and "nobody has looked". Everything else in the
+key was creation-time data -- a value a creating run is the right writer for
+and a later run is not.
+
+**The corpus decided it, not the argument.** Across all 207 notes in the four
+databases, `content-type` equals the kind name 207 times with no exceptions and
+`dateCreated` is set 207 times. Neither is caller data at all: one is the
+kind's own name, the other is the day the note was made. `slug` differs from
+the filename in 4 of 11 topics, so that one *is* data. Two of the four disputed
+fields turned out not to be a policy question, and the tension mostly went with
+them.
+
+So: `protected-fields` holds `my-rating`, omitted entirely for `topic`, which
+declares no `my-rating`. The validator requires a non-empty list when the key
+is present, and `if key in kind` makes omission the supported way to say none.
+
+#### Why this reading and not the other
+
+It fixes the silent empty-write **by construction**. `store_add` iterates the
+fields it was given when refusing, then writes every declared field with absent
+ones as `""`, so a protected field could neither be supplied nor omitted
+correctly. The only field still protected is the one whose empty value is
+*meaningful*, so absent now means the right thing rather than the wrong one.
+
+`floor` had already found and fixed this exact bug inside the same function.
+`refuse_protected` (`bin/sd:2339`) loops over the fields the *caller supplied*.
+`refuse_below_floor` (`bin/sd:2361`) loops over the fields the *kind declares*,
+twenty-two lines below it, under a comment saying in as many words why the
+first shape is wrong -- iterating the supplied values let a floor be skipped by
+omitting the field.
+
+Two loops, two different key sets, close enough to read in a single screen: one
+of them had already been corrected and the other had not. The same lesson
+reached `protected-fields` by removing the fields that made it necessary rather
+than by adding a second loop.
+
+One meaning also means the key reads the same on `add` and `set`, so no
+verb-scoping rule is needed; and none of it touches the eight-key vocabulary.
+Nothing is given up, either: `pack.py` wrote `url`, `dateCreated` and
+`content-type` freely, so the exposure is unchanged rather than new.
+
+**Rejected:** *not editable after creation* -- allow on `add`, refuse on `set`.
+It would let a creating run write `my-rating: 7`. That one reading cannot cover
+both fields is the whole finding.
+
+**Deferred, not rejected:** a ninth key so the store derives `content-type`
+(it knows the kind) and `dateCreated` (it knows the date). That is the better
+end state and it removes two flags from every caller. It is worth opening the
+closed vocabulary for once there is a second reason to, and one reason is not
+enough.
+
+#### What the move cost, and what it caught
+
+`sdw-ideate` now spells out every default `ideas add` supplied, with
+`$(date +%F)` in place of `today()`. One thing had to *move* rather than be
+translated: `pack.py`'s floor refusal printed a warning that re-running with an
+inflated score is the one failure the floor cannot survive, and `sd`'s refusal
+is terse. The warning now lives in the skill beside the call. That is the third
+leg of the tool-swap rule -- what it is called, what authorizes it, and what it
+can *do* -- and what a tool stops saying is part of the third.
+
+`sdw-publish` gets stricter for free. `ideas set-published` did a blind
+`re.sub` and would publish an idea straight out of `inbox`. `sd store set`
+walks the transition graph, where only `drafting` reaches `published` and
+`accepted` is `human-only` besides.
+
+Eight orphans went with the two functions, and **four were left behind by #7**:
+`SP_DB`, `db_rows`, `db_show`, `topic_path`. That sweep enumerated orphaned
+*constants* and never asked the same question about *functions*. Third instance
+of this shape in the rollout, after the two census errors above, so the sweep
+here closes over both kinds of definition and repeats until it reaches a fixed
+point instead of running once. `remaining orphans: none` is the output that
+ends it, and that is the form the check should take from here on: not a list of
+what to look for, but a loop that stops when it finds nothing.
