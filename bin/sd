@@ -1560,6 +1560,61 @@ def edit_field(text: str, key: str, value: str) -> str:
     return "".join(lines)
 
 
+#: A block-sequence continuation: an indented `- ` under a key that has no
+#: inline value. This is the shape `frontmatter()` cannot see and `edit_field`
+#: would orphan, so it is matched on the raw line rather than parsed.
+LIST_ITEM = re.compile(r"^\s+-\s")
+
+#: A YAML comment line. Skipped between a key and its items for the same
+#: reason a blank line is: neither is a value, and stopping at one steps over
+#: the sequence it precedes.
+YAML_COMMENT = re.compile(r"^\s*#")
+
+#: A Markdown H2 as a *renderer* sees it: CommonMark permits up to three
+#: leading spaces. `body_headings` deliberately reads column 0 only, so this is
+#: the wider pattern used to refuse section text, not to find headings.
+SMUGGLED_HEADING = re.compile(r"^ {0,3}## ")
+
+
+def refuse_list_value(text: str, key: str) -> None:
+    """A field whose value is a YAML block sequence, refused rather than edited.
+
+    `edit_field` replaces the one line that declares the key. For a scalar that
+    is the whole value; for a list it is only the header, and the `  - ` items
+    below it would be left behind as orphans under whatever scalar replaced
+    them. The note would still parse -- that is what makes it dangerous -- and
+    the orphaned items would read as a sequence belonging to the *next* key.
+
+    This is R11-D27's hazard reached from the other side. That decision is why
+    the write path is a line edit and not a parse-and-rewrite; this is the case
+    a line edit gets wrong on its own, and it is detected from the note's own
+    bytes rather than from a manifest declaration. A manifest can only protect
+    the fields someone remembered to declare, and the 244 notes carrying
+    `contexts:` and `tags:` today are declared by nothing.
+    """
+
+    lines, first, close = frontmatter_span(text)
+    hits = field_lines(lines, first, close, key)
+    if not hits:
+        return
+    header = FIELD_LINE.match(lines[hits[0]])
+    assert header is not None   # field_lines matched it with the same pattern
+    if header.group(2).strip():
+        return                  # an inline value; the line is the whole value
+    for line in lines[hits[0] + 1:close]:
+        # Blanks and comments are both skipped rather than treated as the end
+        # of the block. Returning on a comment let `contexts:\n# note\n  - x`
+        # through the guard and straight into the orphaning edit.
+        if not line.strip() or YAML_COMMENT.match(line):
+            continue
+        if LIST_ITEM.match(line):
+            raise Refusal(
+                f"{key!r} holds a list, and `sd store set` edits a single line;"
+                " editing it would leave its items orphaned."
+                " Edit the note in the vault instead")
+        return
+
+
 def refuse_protected(kind: dict[str, object], field: str, verb: str) -> None:
     """The verb is passed in because both write verbs call this.
 
@@ -1711,18 +1766,44 @@ def body_headings(body: str) -> list[str]:
     return [line[3:].strip() for line in body.splitlines() if line.startswith("## ")]
 
 
-def parse_assignments(pairs: list[str], fields: list[str]) -> dict[str, str]:
-    values: dict[str, str] = {}
+def parse_assignments(
+        pairs: list[str], fields: list[str]) -> dict[str, str | list[str]]:
+    """`NAME=VALUE` for a scalar, `NAME+=VALUE` repeated for a block sequence.
+
+    The two spellings exist so that a repeat stays an error where a repeat is a
+    typo. Accumulating every duplicate `=` into a list instead would have made
+    `--field score=7 --field score=8` a two-item list rather than the mistake
+    it plainly is, and no manifest key can tell those apart -- which is the
+    reason this is a CLI spelling and not a ninth `kinds.*` key. Standing rule
+    2 stays where it is.
+
+    `+=` is unambiguous against a value that contains one: the field name is
+    matched before the separator, and `[A-Za-z0-9_-]+` cannot hold a `+`, so
+    `note=a+=b` splits on the `=` and keeps `a+=b` whole.
+    """
+
+    values: dict[str, str | list[str]] = {}
     for pair in pairs:
-        if "=" not in pair:
-            raise UsageError(f"{pair!r} is not field=value")
-        field, value = pair.split("=", 1)
+        head, sep, tail = pair.partition("+=")
+        if sep and "=" not in head:
+            field, value, append = head, tail, True
+        elif "=" in pair:
+            field, _, value = pair.partition("=")
+            append = False
+        else:
+            raise UsageError(f"{pair!r} is not field=value or field+=value")
         if field not in fields:
             raise Refusal(
                 f"the kind declares no field {field!r} (it declares {', '.join(fields)})")
         if field in values:
-            raise UsageError(f"{field!r} is given twice")
-        values[field] = value
+            existing = values[field]
+            if not append or not isinstance(existing, list):
+                raise UsageError(
+                    f"{field!r} is given twice;"
+                    " use `+=` on every one of them to build a list")
+            existing.append(value)
+        else:
+            values[field] = [value] if append else value
     return values
 
 
@@ -1768,6 +1849,98 @@ def write_atomically(path: pathlib.Path, text: str) -> None:
         raise Refusal(f"cannot write {path}: {error}") from None
 
 
+def render_field(field: str, value: str | list[str]) -> str:
+    """One frontmatter line, or a key and the block sequence under it.
+
+    The empty list renders as a bare `key:`, which a YAML reader gives back as
+    `None` and **not** as `[]` -- those are different values, and an earlier
+    version of this comment claimed they were the same. The bare form is still
+    the right one to write: it is what every note in the corpus carries for a
+    list nobody has filled in yet, and `used-by:` and `my-rating:` are written
+    exactly that way by the tool this replaces.
+
+    No CLI input reaches here with an empty list -- `parse_assignments` appends
+    a value for every `+=`, so a list it builds holds at least one item. This
+    branch is `render_field`'s contract rather than a shape `add` produces.
+    """
+
+    if not isinstance(value, list):
+        return f"{field}: {render_value(value)}\n"
+    return f"{field}:\n" + "".join(f"  - {render_value(item)}\n" for item in value)
+
+
+def parse_sections(pairs: list[str]) -> dict[str, str]:
+    """`NAME=TEXT`, once per section.
+
+    Text carrying its own `## ` line is refused. `store_add` compares the
+    template's headings against `sections.order` *after* the fill, so a heading
+    smuggled in through section text would either fail that comparison with a
+    message about the template -- which would be innocent -- or, if it happened
+    to match, write a note with two headings of the same name.
+    """
+
+    filled: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise UsageError(f"{pair!r} is not section=text")
+        name, _, text = pair.partition("=")
+        name = name.strip()
+        if not name:
+            raise UsageError(f"{pair!r} names no section")
+        if name in filled:
+            raise UsageError(f"section {name!r} is given twice")
+        for line in text.splitlines():
+            # `^ {0,3}## `, not `startswith`. CommonMark renders a heading
+            # indented by up to three spaces, so `   ## Score` reaches Obsidian
+            # as a heading while `body_headings` -- which reads column 0 -- does
+            # not see it. Refusing the wider shape keeps the two from
+            # disagreeing about what the note contains.
+            if SMUGGLED_HEADING.match(line):
+                raise Refusal(
+                    f"section {name!r} carries its own `## ` heading;"
+                    " section text is the body under a heading, not more headings")
+        filled[name] = text
+    return filled
+
+
+def fill_sections(body: str, filled: dict[str, str]) -> str:
+    """Section text placed under the headings the template already renders.
+
+    The text goes immediately after its `## Heading` line, above whatever the
+    template puts there. A template's own content is boilerplate the plugin
+    chose to ship, and dropping it would make `--section` a silent template
+    override rather than a way to fill one in.
+
+    A heading the template does not render is refused rather than appended. An
+    appended section would sit outside `sections.order`, which the check above
+    has just compared against the template -- so `add` would be writing a note
+    whose shape its own manifest says is wrong.
+    """
+
+    if not filled:
+        return body
+    rendered = body_headings(body)
+    for name in filled:
+        if name not in rendered:
+            raise Refusal(
+                f"the template renders no `## {name}` heading"
+                f" (it renders {', '.join(rendered) or 'none'})")
+    out: list[str] = []
+    for line in body.splitlines(keepends=True):
+        out.append(line)
+        if not line.startswith("## "):
+            continue
+        text = filled.get(line[3:].strip())
+        if text is None:
+            continue
+        # The heading's own line ending, never a hardcoded "\n" -- the same
+        # rule `edit_field` follows. A CRLF template took LF-terminated text
+        # and came back with both endings in one file.
+        ending = line[len(line.rstrip("\r\n")):] or "\n"
+        out.append(ending + ending.join(text.rstrip("\r\n").splitlines()) + ending)
+    return "".join(out)
+
+
 def read_template(root: pathlib.Path, template: str) -> str:
     """The kind's template, read from the plugin checkout.
 
@@ -1802,27 +1975,49 @@ def store_add(args: argparse.Namespace) -> int:
     values = parse_assignments(args.field or [], fields)
     for field in values:
         refuse_protected(kind, field, "add")
+    # Three things read a field's value as a scalar: the floor compares it to a
+    # number, `status` walks the transition graph with it, and `unique-fields`
+    # compares it across the base. A list in any of those is not a value they
+    # can act on, so it is refused by name here rather than reaching them as a
+    # `list` where a `str` was expected.
+    floors = kind.get("floor") or {}
+    assert isinstance(floors, dict)
+    unique = kind.get("unique-fields") or []
+    assert isinstance(unique, list)
+    scalar_only = {"status", *(str(f) for f in floors), *(str(f) for f in unique)}
+    for field, value in values.items():
+        if isinstance(value, list) and field in scalar_only:
+            raise Refusal(
+                f"{field!r} is compared as a single value"
+                " (by `status`, `floor` or `unique-fields`), so `+=` cannot build a list on it")
     # Every floored field, not only the ones supplied. Iterating the supplied
     # values let a floor be skipped by omission: the field then defaulted to
     # `""` at render time and the note was written under its own floor.
-    floors = kind.get("floor") or {}
-    assert isinstance(floors, dict)
     for field in floors:
-        refuse_below_floor(kind, str(field), values.get(str(field), ""))
+        value = values.get(str(field), "")
+        assert not isinstance(value, list)   # scalar_only refused it above
+        refuse_below_floor(kind, str(field), value)
     if "status" in fields:
         initial = str(kind["initial-status"])
-        values.setdefault("status", initial)
-        if values["status"] != initial:
-            refuse_bad_transition(kind, initial, values["status"])
-        refuse_human_only(kind, values["status"])
-    refuse_duplicate_unique(kind, base, values)
+        wanted = values.setdefault("status", initial)
+        assert isinstance(wanted, str)       # scalar_only refused a list above
+        if wanted != initial:
+            refuse_bad_transition(kind, initial, wanted)
+        refuse_human_only(kind, wanted)
+    # The list-valued fields are dropped rather than passed through. Every
+    # `unique-fields` entry is in `scalar_only`, so nothing a uniqueness check
+    # would have read can be a list, and filtering here says that in the type
+    # rather than leaving the checker to take it on trust.
+    refuse_duplicate_unique(
+        kind, base, {f: v for f, v in values.items() if isinstance(v, str)})
 
     sections = kind.get("sections") or {}
     assert isinstance(sections, dict)
     template = sections.get("template")
     if template is None:
         raise Refusal("the kind declares no `sections.template`, so there is nothing to render")
-    body = read_template(root, str(template))
+    body = fill_sections(
+        read_template(root, str(template)), parse_sections(args.section or []))
 
     order = declared_sections(kind)
     rendered = body_headings(body)
@@ -1834,7 +2029,7 @@ def store_add(args: argparse.Namespace) -> int:
         raise Refusal(
             f"`sections.order` declares {order} but the template renders {rendered}")
 
-    block = "".join(f"{field}: {render_value(values.get(field, ''))}\n" for field in fields)
+    block = "".join(render_field(field, values.get(field, "")) for field in fields)
     try:
         base.mkdir(parents=True, exist_ok=True)
     except OSError as error:
@@ -1887,6 +2082,10 @@ def store_set(args: argparse.Namespace) -> int:
         refuse_human_only(kind, args.value)
         refuse_bad_transition(kind, found.get("status", ""), args.value)
     refuse_duplicate_unique(kind, base, {args.field: args.value}, skip=path)
+    # Last of the refusals, and the only one that reads the note's shape rather
+    # than the manifest: a field holding a block sequence cannot be edited by
+    # the line without orphaning its items.
+    refuse_list_value(text, args.field)
 
     updated = edit_field(text, args.field, args.value)
     if updated == text:
@@ -2032,7 +2231,10 @@ def build_parser() -> argparse.ArgumentParser:
     made.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
     made.add_argument("title", help="the note's title; becomes <title>.md")
     made.add_argument("--field", action="append", metavar="NAME=VALUE",
-                      help="a declared field's value; repeatable")
+                      help="a declared field's value; repeatable."
+                           " `NAME+=VALUE`, repeated, builds a list instead")
+    made.add_argument("--section", action="append", metavar="NAME=TEXT",
+                      help="text for one of the template's `## ` sections; repeatable")
     made.set_defaults(handler=store_add)
 
     # No `--force`. `human-only` is the whole reason this verb refuses, and a
