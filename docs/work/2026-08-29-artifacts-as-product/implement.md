@@ -4258,12 +4258,16 @@ correctly. The only field still protected is the one whose empty value is
 *meaningful*, so absent now means the right thing rather than the wrong one.
 
 `floor` had already found and fixed this exact bug inside the same function.
-`refuse_protected` (`bin/sd:2339`) is called over the fields the caller
-supplied; `refuse_below_floor` (`bin/sd:2361`) is called over the fields the
-*kind declares*, twenty-two lines below it, under a comment saying in as many
-words why the first shape is wrong. Two loops over the same values, one
-corrected and one not, close enough to read in a single screen. The same lesson reached `protected-fields` by removing the fields
-that made it necessary rather than by adding a second loop.
+`refuse_protected` (`bin/sd:2339`) loops over the fields the *caller supplied*.
+`refuse_below_floor` (`bin/sd:2361`) loops over the fields the *kind declares*,
+twenty-two lines below it, under a comment saying in as many words why the
+first shape is wrong -- iterating the supplied values let a floor be skipped by
+omitting the field.
+
+Two loops, two different key sets, close enough to read in a single screen: one
+of them had already been corrected and the other had not. The same lesson
+reached `protected-fields` by removing the fields that made it necessary rather
+than by adding a second loop.
 
 One meaning also means the key reads the same on `add` and `set`, so no
 verb-scoping rule is needed; and none of it touches the eight-key vocabulary.
