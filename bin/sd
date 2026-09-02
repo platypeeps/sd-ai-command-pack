@@ -69,6 +69,7 @@ import math
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1415,7 +1416,7 @@ FIELD_LINE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
 #: A value needing quotes to survive a YAML reader: one holding a colon-space,
 #: opening a wikilink, a flow collection or a comment, or bounded by spaces.
 #: The corpus quotes exactly these, so writing them bare is what breaks it.
-NEEDS_QUOTING = re.compile(r':\s|^[\[{>|&*!%@`#]|^\s|\s$')
+NEEDS_QUOTING = re.compile(r':\s|\s#|^[\[{>|&*!%@`#]|^\s|\s$')
 
 
 def render_value(value: str) -> str:
@@ -1717,6 +1718,11 @@ def write_atomically(path: pathlib.Path, text: str) -> None:
     the rename never crosses one.
     """
 
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        mode = None   # a new note; the process umask decides, as `write_text` would
+
     tmp = None
     try:
         # `newline=""` disables translation on write. The default rewrites
@@ -1730,6 +1736,13 @@ def write_atomically(path: pathlib.Path, text: str) -> None:
         tmp = pathlib.Path(handle.name)
         with handle:
             handle.write(text)
+        # `NamedTemporaryFile` creates at 0600 and `os.replace` carries the
+        # temporary's mode onto the target, so editing one field of a
+        # world-readable note quietly made it owner-only. The note's own mode
+        # is the one to keep: this is an edit, and an edit does not decide who
+        # may read the file.
+        if mode is not None:
+            os.chmod(tmp, mode)
         os.replace(tmp, path)
     except OSError as error:
         if tmp is not None and tmp.exists():

@@ -23,6 +23,7 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -782,6 +783,40 @@ class WriteTests(StoreFixture):
             self.assertIn("unique", clash.stderr)
         else:
             self.assertEqual(clash.returncode, 0, clash.stderr)
+
+    def test_a_hash_anywhere_in_a_value_gets_quoted_not_only_at_the_start(self) -> None:
+        """YAML starts a comment at ` #`, not only at the first column.
+
+        `NEEDS_QUOTING` tested `#` in the first-character class, so
+        `released in v2 # not really` was emitted bare and a real parser read
+        it as `released in v2`. Same shape as the backslash case: this
+        repository's reader takes the whole line and never sees the loss, so
+        the note is wrong only for everything else that opens the vault.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        self.note("Ship it", extra="note: old\n")
+        value = "released in v2 # not really"
+        self.assertEqual(
+            self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+        self.assertIn(
+            f'note: "{value}"\n', (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+
+    def test_an_edit_does_not_change_who_may_read_the_note(self) -> None:
+        """`os.replace` carries the temporary file's mode onto the target.
+
+        `NamedTemporaryFile` creates at 0600, so editing one field of a
+        world-readable note silently made it owner-only -- a permission change
+        nobody asked for, from a command whose contract is that it changes one
+        line.
+        """
+
+        self.plugin()
+        path = self.note("Ship it")
+        path.chmod(0o644)
+        self.assertEqual(
+            self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved").returncode, 0)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
 
     def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
         """`float("nan") < 6` is False, so an unguarded floor lets it through.
