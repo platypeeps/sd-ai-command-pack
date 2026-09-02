@@ -2291,6 +2291,120 @@ have grown the vocabulary in a pull request. *Deletion criterion:* the block die
 plugin that keeps anything outside its own checkout; a plugin whose kinds live in its repository
 declares no `store` and every store verb refuses by name.
 
+**R11-D27 (2026-09-01) — `sd store add|set` edits frontmatter by the line, never by parsing
+a note and writing it back.** Step 8-iv is where `protected-fields`, `transitions`, `human-only`,
+`floor`, `unique-fields` and `sections` stop being declarations and start refusing. The
+enforcement is the easy half. The half that decides whether the step is safe to ship is how a
+note gets back to disk.
+
+**The reader this repository already has is lossy, and that is deliberate.** `frontmatter()`
+(`bin/sd:1231`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
+step 10 deletes, in the sibling repository of that name, not in this one -- down to what it cannot
+see: a value spanning
+lines comes back as the empty string, because the continuation line does not match the key
+pattern and is skipped. 8-iii wrote that down as a limitation and not a bug, correctly, because
+the corpus was written by that reader's twin and a stricter parser would disagree with it. What
+8-iii did not have to ask is what happens when the same reader is put in front of a *write*.
+
+**Read-modify-write through it destroys every note it touches, in two independent ways.**
+Measured against the four bases that hold notes today by running the repository's own
+`frontmatter()` over the corpus and rebuilding each block from what came back, not reasoned
+about.
+
+*List values vanish.* **244 of 244 notes** carry at least one key whose value is a YAML list —
+`tags` (895 items), `contexts` (244), `aliases` (17) and `category` (10), **1,166 list items in
+all**. Each key reads back as `""` and its items are not in the dictionary at all, so the rebuild
+emits a bare `tags:` and drops what was under it.
+
+*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1252`), which is
+correct for reading and destructive for writing: **146 of the 244** carry a quoted value whose
+text contains a `:` or opens a `[[wikilink]]`, and re-emitting those bare is not lossy YAML but
+*malformed* YAML — `source-brief: [[2026-08-15 - Daily Intel Brief]]` and a `description:` with a
+sentence colon in it both stop parsing.
+
+One real note makes the size of it concrete: changing `status` alone takes its frontmatter from
+twelve lines to eight, taking `contexts`, `tags` and three tag items with it. There is no partial
+version of this failure and no kind it spares — it is total, and it is invisible until somebody
+opens a note in Obsidian and finds its tags gone.
+
+**So the write is a line edit, and the incumbent already proves it works.**
+`sd-writing-pack/scripts/pack.py:375` is
+`re.sub(r"(?m)^status: .*$", "status: published", text, count=1)` — it never builds a dictionary,
+so it never had this problem. The generic replacement is the thing that could regress it, because
+a parsed round trip is what a reviewer would call the cleaner implementation. `set` locates the
+one line whose key matches, replaces the text after the colon, and writes the file otherwise
+byte-for-byte unchanged. It does not touch the body. It does not reflow, requote, or reorder
+anything it did not edit.
+
+**Three cases the line edit has to answer, and one it must refuse.** A key the note does not
+carry is appended immediately before the closing `---`, which is the only position the backbone
+can choose without knowing what the keys mean; `pack.py` inserted after a named anchor per field,
+and that knowledge is exactly what the backbone is forbidden to hold. A key carried **twice** is
+refused rather than edited: frontmatter with a duplicate key is malformed, and `count=1` picking
+the first of two is a silent choice wearing the clothes of a fix. A note with no frontmatter block
+at all is refused by the same reasoning — `add` creates notes, `set` edits them, and inventing a
+block is `add`'s job.
+
+**`add` renders through `sections.template` and is the safe verb**, because a new note has nothing
+to preserve. `initial-status` supplies `status` and `unique-fields` is checked against the base
+before the file is created.
+
+**`sections.order` is where 8-iv finds a key that is recorded and never checked.** `validate_sections`
+confirms the order is a non-empty list of unique non-empty headings and that `template` is a regular
+file inside the plugin checkout, and stops there — nothing opens the template, so a template that
+renders none of the declared headings registers clean. The order is currently data that no code
+consults. 8-iv makes `add` assert that the note it just rendered carries the declared H2s in the
+declared sequence, which is the first thing in the rollout that gives the key a consequence. That
+assertion belongs on the write and not on registration, for the reason R11-D26 gave for not checking
+base existence: registration must not fail a correct manifest, and a template is only proven by
+rendering it.
+
+**`human-only` has no bypass, and specifically no `--force`.** An action the manifest reserves for
+a person is refused, full stop. A flag that lifts the refusal makes the key decorative and reads in
+every review as though it protects something — the vacuous-check shape this rollout has now found
+in a gate, a filter, and its own registration code. The escape hatch is not a flag: the human edits
+the note in the vault, and 8-iii's freshness test is the standing proof that a direct write is
+visible to the next query with no sync step. *Rejected: `--force` with a receipt.* A receipt records
+that the line was crossed; it does not stop the tool from crossing it unattended, which is the only
+thing `human-only` is for.
+
+**A gap 8-i left, found by asking where `initial-status` gets written.** `validate_kind` requires
+`initial-status` of every kind and accepts `transitions` and `human-only` from any kind, but never
+checks that the kind declares a `status` **field** for any of them to act on. A kind can therefore
+declare a status graph that governs nothing, and 8-iv would have no place to put the initial status
+it is required to write. `status_filter` (`bin/sd:1350`) already refuses `--status` on a kind with
+no `status` field for exactly this reason, on the read side. 8-iv closes it on the declaration side:
+`initial-status`, `transitions` and `human-only` each require `status` in `fields`, refused at
+registration with the key named. This is a tightening of 8-i's validator, landed in 8-iv because
+that is when it became falsifiable.
+
+**Acceptance criterion, inverted from 8-iii's on purpose.** 8-iii wrote with `write_text` and read
+through `sd`, so that an in-memory store could not pass it. 8-iv writes through `sd store add` and
+reads the bytes back with `read_text`, asserting the note on disk. The load-bearing case is a
+`set` against a note carrying a list value: the assertion is that the edited key changed **and the
+list survived byte-identical**, which is the failure this decision exists to prevent and the one no
+write-then-read-through-`sd` test can see.
+
+**Refusals name the key that refused.** 8-i's symlink-loop lesson was that asserting one particular
+sentence pins a wording that legitimately varies; the tests assert that a refusal names
+`protected-fields`, or `floor`, or the offending field, and not that it phrases the complaint a
+given way.
+
+*Rejected: a real YAML parser for the write path.* `frontmatter()`'s own docstring already cites D-C1
+for this, and the citation is to its rationale rather than its scope: D-C1 fixed the format of
+**pack-owned** files and a vault note is not one, but the reason it gives — PyYAML is not in the
+standard library, and `/usr/bin/python3` is 3.9.6 — does not care who owns the file. The dependency
+would also be taken on to solve a problem the line edit does not have — a round trip through
+any parser, strict or lossy, reformats what it did not change. *Rejected: enforcing `floor` at read
+time.* A floor that filters what `list` shows leaves the under-floor note on disk and calls the
+store clean.
+
+**Standing rule 1.** *Incident:* `pack.py` preserved list-valued frontmatter by construction rather
+than by decision, so nothing recorded that it mattered; the backbone that replaces it reads those
+values through a parser that cannot see them. *Deletion criterion:* this record dies when no
+declared kind is kept in a Markdown-with-frontmatter store — when the last `store.driver` is
+something with a schema, the line-edit discipline has nothing left to protect.
+
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
 B5a = adoption-purity check (r4/05) · T1-g = guest-mode variant of the T1 handoff (r7/05).

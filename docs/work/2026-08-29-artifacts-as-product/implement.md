@@ -3018,6 +3018,20 @@ being declarations and start being enforcement) and the golden-corpus baseline,
 which must be captured **before** any vault move because step 11 compares
 against it.
 
+**8-iv has a design now, and the table row above cannot see it (2026-09-01).**
+The step 8 row's criterion is "direct-write-then-query freshness test green",
+which 8-iii met -- so the row reads satisfied while two thirds of the step is
+unbuilt. The row is left as written rather than edited, per this rollout's
+habit of superseding instead of backdating; what it needs is stated here.
+**8-iv's criterion is the inverse of 8-iii's**: a note created through
+`sd store add` and read back with `read_text`, plus a `set` against a note
+carrying a list value that asserts the edited key changed *and* the list
+survived byte-identical. R11-D27 records why -- `frontmatter()` is a lossy
+reader, and 244 of the 244 notes in the live bases lose data to a
+parse-and-rewrite. A write-through-`sd`, read-through-`sd` test passes against
+an in-memory store and would not see it. The golden-corpus baseline (8-v)
+keeps the criterion the row already gives it.
+
 **The project's own planning-review rule still does not resolve.**
 `.claude/rules/sd-planning-adversarial-review.md` points at
 `../sd-ai-command-pack/planning-adversarial-review.md`, which does not exist
