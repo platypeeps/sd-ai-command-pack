@@ -4020,7 +4020,13 @@ the verbs: `pieces` is 214 lines addressing git files under
 `main` is 198 today and 172 once its wiring goes, holding the entire argparse
 tree; and 769 beyond that are
 imports, constants and module-level code. Measured from the AST rather than
-estimated, and `design.md` now says so.
+estimated.
+
+*(Superseded at 10b-iv. The deletion was made and `pack.py` landed at 1,857,
+not 2,013; `main` is 112, not the 172 predicted here. `design.md` carries the
+measurement now, and the section below explains why this estimate was still
+short. The figures in this paragraph are kept as what was believed on the way
+there, not as facts.)*
 
 **The first census of that deletion was wrong twice, both in the same
 direction as wanting the number to be small.** It counted function bodies only,
@@ -4032,3 +4038,133 @@ because its name matches a prefix, only because nothing that stays reaches it.
 
 The goal 10b set -- get the vault-facing half of `pack.py` onto `sd` -- is
 unaffected; only the number attached to it was wrong.
+
+### Step 10b-iv: the deletion, and the one it could not make (2026-09-02)
+
+Twenty-one `pack.py` invocations across six `sd-writing-pack` skills, two
+reference documents and `.gitignore` moved to `sd`; twenty-one `pack.py`
+functions went with them; and
+`pack.py` fell from 2,532 lines to **1,857** (`sd-writing-pack` #7). Ten places
+in the vault's own prose still described the deleted verbs in the present tense
+and were corrected in the same pass.
+
+**The number missed the restated target in both directions, which is worth
+more than the number.** The section above set ~2,000 and predicted 2,013. The
+actual figure is 156 lines lower, and the two errors point opposite ways:
+
+* **Upward.** The 2,013 assumed `ideas add` and `ideas set-published` were
+  deleted. They are not (below). Retaining them alone would have landed the
+  file higher than predicted.
+* **Downward, and further.** The census counted function bodies and argparse
+  wiring, which is what the previous correction had just taught it to count. It
+  still did not count what a deletion *orphans*: nine module-level constants
+  (`TT_DROPDOWN`, `SURFACED_STATUS`, `TOPIC_SURFACED_STATUS`, `RATING_DBS`,
+  `DRIVE_DOCS_HEADER`, `CONFIG_PATH`, `CONFIG_KEYS`, `DRIVE_URL`, `DRIVE_ID`)
+  and two catalogue blocks in the module docstring that named verbs no longer
+  present.
+
+That is the third consecutive census of this same deletion to come out wrong,
+and the pattern across all three is the same: each counted the code it could
+*see from the verb* and missed the code the verb was the only remaining reason
+to keep. A deletion census is a reachability question, not a text-span
+question. The check that would have caught all three on the first pass is the
+one that was eventually run at the end: delete, then ask the tooling what is
+now unreferenced, rather than asking a reading of the source what should be.
+
+#### Two verbs the deletion could not make
+
+`ideas add` and `ideas set-published` both write `url`. `blog-idea` declares
+`url` in `protected-fields`, and `sd store` enforces `protected-fields` on
+`add` as well as on `set`, so both are refused. Both stay on `pack.py`.
+
+The question underneath is whether `protected-fields` means *never
+machine-writable* or *not editable after creation*. `tip` is why 10b-ii never
+met it: `tip` protects exactly one field, `my-rating`, which genuinely is the
+first thing -- Sven's own signal, which no run may write at any time.
+
+`blog-idea` protects six, and that list is the actual finding, because it
+**mixes both categories in one key**: `my-rating` is never machine-writable,
+while `url`, `content-type`, `dateCreated`, `brief-item` and `source-brief` are
+values a creating run is exactly the right writer for and a later run is not.
+`skill-proposal` and `topic` are mixed the same way (`topic` protects `slug`,
+which is the field a topic is looked up by).
+
+So the decision cannot be a single global reading of `protected-fields`. Either
+the vocabulary grows a way to say which of the two a field is, or the four
+manifests move the creation-time fields out of that key and something else
+carries them -- and the second is not free, because nothing else currently
+stops a *later* run from rewriting a `dateCreated`.
+
+That is a change to the closed 8-key `kinds.*` vocabulary, so under standing
+rule 2 it is a decision record, not a call to be made inside a deletion. It is
+not made here.
+
+Two things about the current behaviour belong in that record when it is
+written. `sd store add sdw.blog-idea` does not refuse when a protected field is
+merely *absent* -- it succeeds and writes `content-type:` and `dateCreated:`
+empty, where `pack.py` filled them in. So the protection is loud on the path
+nobody takes and silent on the path every caller takes, which is backwards. And
+the same rule reaches an *edit* verb, not only creation: `ideas set-published`
+is blocked for writing the `url` of a piece that has just gone live, which is
+the one moment the value is knowable.
+
+#### What retargeting cost and what it bought
+
+Two of the seven retargets are not one-for-one.
+
+`ideas set-drive-docs` merged a partial set of URLs into whatever the section
+already held, and both call sites depend on that merge -- each supplies only
+the URLs it has. There is no `sd` verb for "merge into a section", so it became
+an explicit read-edit-write: `sd store get`, edit, `sd store set-section-file`.
+That is more lines at the call site and the merge is now the skill's
+responsibility rather than the tool's. It is the honest shape of what was
+always happening.
+
+`tips set-published` went the other way and got smaller. It wrote three fields
+in three sequential `pack.py` calls, which could stop after the first and leave
+a tip published with no URL -- a state the vault's schema forbids and nothing
+enforced. `sd store set` takes all three in one atomic write (#707), so that
+state is now unreachable. `sd` is also stricter here than what it replaced: it
+refuses to publish a tip that never reached `approved`, which `sdw-publish`'s
+own step 1 already required and `pack.py` never checked.
+
+#### A single-writer property genuinely lost
+
+`## Ground truth` and `## Feeds` on a topic note each had exactly one writer:
+`topics set-ground-truth` replaced the section wholesale and restamped the
+date, and `topics add-feed` / `topics rm-feed` added or removed one
+duplicate-checked entry. All three are deleted, and both sections are now
+edited through the generic `sd store set-section`.
+
+`sd` keeps the structural half of what they guaranteed -- it refuses an
+undeclared heading, refuses a note whose heading appears twice, and edits by
+the line rather than by parse-and-rewrite. It cannot keep the shape *inside*
+the section: the ground-truth date stamp with its re-verification caveat, and
+the one-entry-per-line duplicate check on feeds. Those lived in the deleted
+functions.
+
+This is written into `System/Schema.md` as a loss rather than smoothed into a
+rename, because `## Ground truth` going quietly stale is precisely the failure
+the stamp existed to make visible, and a routine that inherits the section
+without inheriting the caveat will not know it was ever promised.
+
+#### The blast-radius grep found what the work missed
+
+The check named before the deletion was a repo-and-vault-wide grep for
+`pack.py <deleted verb>`, expecting only past-tense prose. It found two live
+sites the retargeting pass had missed -- `sdw-ideate/SKILL.md:50`, a
+`topics list` inside a bullet rather than in a fenced block, and the
+`.gitignore` comment describing `scripts/config.json` as written by
+`pack.py config set`. Both were fixed before the commit.
+
+It also found that `scripts/config.example.json` documented the shape of a file
+nothing reads any more; it is deleted. `scripts/config.json` stays ignored so a
+leftover copy on an existing checkout is never committed, and all three of its
+values were verified byte-identical to `sd`'s config store *before* anything
+was deleted.
+
+Verified: no new ruff finding (rule-code counts identical except `ISC004`
+2 -> 1; no `F401`, no `F821`); every surviving subcommand group parses and
+`pieces list` still returns its ten pieces; each deleted verb exits non-zero;
+and `migrate-golden-corpus verify` still reports `784 notes byte-identical to
+the baseline`.
