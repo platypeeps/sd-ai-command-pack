@@ -1628,8 +1628,15 @@ class FullListingTests(StoreFixture):
         incidental spacing.
         """
 
+        # A note whose file does not end in a newline is the case that breaks
+        # this: `print()` then only terminates its last line, and the next
+        # header follows with no separator at all.
+        (self.tips / "Ragged.md").write_text(
+            "---\nstatus: approved\nscore: 7\n---\n\nNo trailing newline.",
+            encoding="utf-8")
         done = self.run_sd("store", "list", "pp.tip", "--full")
         self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("No trailing newline.\n\n", done.stdout)
         for chunk in done.stdout.split("=== ")[1:]:
             self.assertTrue(chunk.endswith("\n\n"), repr(chunk[-20:]))
 
