@@ -2291,14 +2291,16 @@ have grown the vocabulary in a pull request. *Deletion criterion:* the block die
 plugin that keeps anything outside its own checkout; a plugin whose kinds live in its repository
 declares no `store` and every store verb refuses by name.
 
-**R11-D27 (2026-09-01) — `sd store add|set` edits frontmatter **by the line**, never by parsing
+**R11-D27 (2026-09-01) — `sd store add|set` edits frontmatter by the line, never by parsing
 a note and writing it back.** Step 8-iv is where `protected-fields`, `transitions`, `human-only`,
 `floor`, `unique-fields` and `sections` stop being declarations and start refusing. The
 enforcement is the easy half. The half that decides whether the step is safe to ship is how a
 note gets back to disk.
 
 **The reader this repository already has is lossy, and that is deliberate.** `frontmatter()`
-(`bin/sd:1231`) is the twin of `pack.py:244-258` down to what it cannot see: a value spanning
+(`bin/sd:1231`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
+step 10 deletes, in the sibling repository of that name, not in this one -- down to what it cannot
+see: a value spanning
 lines comes back as the empty string, because the continuation line does not match the key
 pattern and is skipped. 8-iii wrote that down as a limitation and not a bug, correctly, because
 the corpus was written by that reader's twin and a stricter parser would disagree with it. What
@@ -2325,7 +2327,8 @@ twelve lines to eight, taking `contexts`, `tags` and three tag items with it. Th
 version of this failure and no kind it spares — it is total, and it is invisible until somebody
 opens a note in Obsidian and finds its tags gone.
 
-**So the write is a line edit, and the incumbent already proves it works.** `pack.py:375` is
+**So the write is a line edit, and the incumbent already proves it works.**
+`sd-writing-pack/scripts/pack.py:375` is
 `re.sub(r"(?m)^status: .*$", "status: published", text, count=1)` — it never builds a dictionary,
 so it never had this problem. The generic replacement is the thing that could regress it, because
 a parsed round trip is what a reviewer would call the cleaner implementation. `set` locates the
