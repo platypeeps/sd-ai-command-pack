@@ -3875,3 +3875,66 @@ that sentence is true until this merges and false afterwards -- correcting it
 before the merge would simply be wrong in the other direction. It is corrected
 immediately after, in the same session, and the split it describes still
 stands until `sdw-tips` moves.
+
+### Step 10b-ii: the split closes, and step 9's delta was wrong by two (2026-09-02)
+
+`sdw-tips` was the one caller step 9 could not move. 10b-i landed the flag it
+was waiting for, so this moves it: the add call to
+`sd store add sdw.tip … --section-file Tip=<path>`, and the two read verbs it
+uses to gather and dedupe to `sd store list`. Landed as
+`sd-writing-pack` #5. Both halves of the two-path tip contract now write
+through the same command, which is what the contract has claimed since step 9
+and what was not true until today.
+
+**Proved before the skill was edited, not after.** A tip whose text carries
+both a backtick and a `$(date)` substitution, written into a scratch vault
+against the real `sd-plugin.json`, comes back verbatim. That is the check the
+flag exists for, and running it against a scratch vault rather than the live
+one is the same choice step 9 made for the same reason.
+
+**Step 9 recorded the delta as "exactly one line" and it is three.** Measured
+this time against a `pack.py`-written note in the live vault rather than
+recalled: `sd` writes `acted-on:` **and** `url:` -- both declared by the kind,
+both omitted by `pack.py` -- and `pack.py` writes `description:` always quoted
+where `render_value` quotes only when the value needs it. The `url` line was
+not step 9's error: `sd-writing-pack` #4 added that key to the kind after step
+9 measured, so the record went stale rather than starting wrong. The quoting
+difference is the one step 9 could have caught and did not, because it compared
+*structure* and quoting is not structural. **With both paths now on `sd`, all
+three are history inside the notes written before today rather than drift
+between two live writers**, which is the only reason this does not need fixing.
+
+**The floor stopped being one constant, and that is a real cost of the
+migration.** `pack.py` had a single `SCORE_FLOOR = 6` that the tip, blog-idea
+and skill-proposal floors all read, so the three could not drift apart. The
+manifest declares `"floor": {"score": 6}` once per kind, three times over, and
+nothing checks that they agree. This is inherent to a per-kind declaration
+rather than a defect in one -- the eight `kinds.*` keys describe what a kind
+*is*, and a constant shared across kinds has no home there. Named in the skill
+and here rather than papered over; `sd-writing-pack` ships no test harness to
+enforce it, and building one for a single shared integer is not worth the
+surface.
+
+**What the bracket proves, stated narrowly.** `migrate-golden-corpus verify`
+read `784 notes byte-identical to the baseline` before the work and again
+after. The corpus records notes under the declared bases, so it does not track
+`SKILL.md` or `System/Schema.md` at all: what this run proves is that **no note
+was written by accident**, which is the useful half for a slice that was only
+ever meant to change prose. It is not evidence about the edit. Saying so
+matters because a verify that reports clean over files it never recorded is the
+vacuous-check shape this rollout keeps meeting.
+
+**One flag, two answers, because the constraint is the grant.** `sdw-tips` can
+use `--section-file`; `tips-weekly` cannot, and its SKILL.md now says why
+rather than pointing at a flag it must not call. Reading text from a file means
+writing that file first, and the vault's only Bash grant is `bin/sd` itself --
+a `Write` at 07:00 on a Sunday stops for a permission prompt nobody is there to
+answer, which is the 2026-07-28 failure step 9 already recorded once. The
+attended path has a person at the keyboard and the unattended one does not, so
+the same tool gets different instructions. Checked against
+`.claude/settings.json` before the sentence was written, because the tempting
+edit -- "the twin exists, use it" -- would have broken the routine.
+
+**Still on `pack.py` for tips:** `tips attach`, which appends a section to an
+existing note and has no `sd` equivalent, and the `gh` verbs. 10b-iii and
+10b-iv respectively.
