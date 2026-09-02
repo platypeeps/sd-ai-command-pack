@@ -1882,6 +1882,66 @@ def parse_assignments(
     return values
 
 
+def read_pair_file(flag: str, name: str, path: str) -> str:
+    """The text for one `--field-file` or `--section-file`, read from disk.
+
+    Prose on a command line has already been through a shell, and a backtick
+    there is a command substitution. The loss is silent: the note is written,
+    it just comes out with the words between the backticks missing, under
+    somebody's name. That is why `sdw-tips` passed its tip text to `pack.py`
+    as `--tip-file`, and why it could not move to `sd store add` until this
+    existed -- moving it inline would have reintroduced exactly the loss the
+    flag was added to prevent.
+
+    `.strip()`, and the refusal on an empty result, are the incumbent's
+    (`resolve_text_pairs`, `sd-writing-pack/scripts/pack.py:2226`). Kept rather
+    than reconsidered: both writers are live until 10b lands, and the notes
+    they write have to stay identical while that is true.
+    """
+
+    if not path:
+        raise UsageError(f"{flag} {name}: no path after the separator")
+    try:
+        text = pathlib.Path(path).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"{flag} {name}: cannot read {path}: {error}") from None
+    if not text:
+        raise Refusal(
+            f"{flag} {name}: {path} is empty; a note written from it would be too")
+    return text
+
+
+def resolve_pair_files(
+        entries: list[tuple[bool, str]], flag: str, *, sequences: bool) -> list[str]:
+    """`NAME=PATH` entries replaced by `NAME=<the file's text>`, in order.
+
+    The result goes through the same parser the inline spelling goes through,
+    so a file-supplied value meets the same refusals -- a smuggled `## `
+    heading, a field the kind does not declare, a `+=` on a field something
+    compares as a scalar -- rather than reaching the write down a second,
+    laxer path.
+
+    Re-spelling the pair rather than splitting it here is what makes that
+    sharing safe, and it is safe because a name holds neither `=` nor `+`:
+    both parsers partition on the *first* separator, so file text carrying an
+    `=` or a `+=` of its own stays whole.
+    """
+
+    out: list[str] = []
+    for from_file, pair in entries:
+        if not from_file:
+            out.append(pair)
+            continue
+        head, sep, path = pair.partition("+=")
+        if not (sequences and sep and "=" not in head):
+            head, sep, path = pair.partition("=")
+        if not sep:
+            spellings = "name=path or name+=path" if sequences else "name=path"
+            raise UsageError(f"{pair!r} is not {spellings}")
+        out.append(f"{head}{sep}{read_pair_file(flag, head, path)}")
+    return out
+
+
 def write_atomically(path: pathlib.Path, text: str) -> None:
     """Write via a temporary file in the same directory, then rename.
 
@@ -2085,7 +2145,8 @@ def store_add(args: argparse.Namespace) -> int:
     refuse_title_taken(vault, path)
 
     fields = store_fields(kind)
-    values = parse_assignments(args.field or [], fields)
+    values = parse_assignments(
+        resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
     for field in values:
         refuse_protected(kind, field, "add")
     # Three things read a field's value as a scalar: the floor compares it to a
@@ -2131,7 +2192,8 @@ def store_add(args: argparse.Namespace) -> int:
         raise Refusal("the kind declares no `sections.template`, so there is nothing to render")
     body = fill_sections(
         fill_placeholders(read_template(root, str(template)), args.title),
-        parse_sections(args.section or []))
+        parse_sections(
+            resolve_pair_files(args.section or [], "--section-file", sequences=False)))
 
     order = declared_sections(kind)
     rendered = body_headings(body)
@@ -2332,6 +2394,37 @@ def sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+class Pair(argparse.Action):
+    """`--x` and `--x-file` accumulate into one list, in command-line order.
+
+    Two `action="append"` options with separate destinations would have made
+    the order of a block sequence depend on which spelling supplied each item
+    rather than on where it was typed: `--field tags+=a --field-file tags+=b
+    --field tags+=c` would write a, c, b. A note's tag order is visible in its
+    frontmatter and compared byte-for-byte by `migrate-golden-corpus`, so a
+    reordering here is a diff nobody asked for and nothing downstream would
+    call wrong.
+
+    `const` carries which spelling matched, not `option_string`: argparse
+    accepts an unambiguous prefix of a long option, and deciding what a value
+    *means* by matching the text of the flag makes that abbreviation a
+    behaviour change.
+
+    The file is not opened here. An unreadable path is a `Refusal` (exit 1),
+    and anything raised inside an action reaches the user as an argparse error
+    (exit 2) instead, so the reading happens in the handler where the exit
+    codes `interface = 1` promises still hold.
+    """
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+                 values: object, option_string: str | None = None) -> None:
+        entries = getattr(namespace, self.dest, None)
+        if entries is None:
+            entries = []
+            setattr(namespace, self.dest, entries)
+        entries.append((bool(self.const), str(values)))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
     groups = parser.add_subparsers(dest="group", required=True)
@@ -2374,11 +2467,23 @@ def build_parser() -> argparse.ArgumentParser:
     made = kept.add_parser("add", help="a new note, rendered from the kind's template")
     made.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
     made.add_argument("title", help="the note's title; becomes <title>.md")
-    made.add_argument("--field", action="append", metavar="NAME=VALUE",
+    made.add_argument("--field", dest="field", action=Pair, const=False,
+                      metavar="NAME=VALUE",
                       help="a declared field's value; repeatable."
                            " `NAME+=VALUE`, repeated, builds a list instead")
-    made.add_argument("--section", action="append", metavar="NAME=TEXT",
+    made.add_argument("--field-file", dest="field", action=Pair, const=True,
+                      metavar="NAME=PATH",
+                      help="the same, with the value read from a file --"
+                           " use this whenever the text carries backticks,"
+                           " which a shell would run. `NAME+=PATH` appends to"
+                           " a list, exactly as `--field` does")
+    made.add_argument("--section", dest="section", action=Pair, const=False,
+                      metavar="NAME=TEXT",
                       help="text for one of the template's `## ` sections; repeatable")
+    made.add_argument("--section-file", dest="section", action=Pair, const=True,
+                      metavar="NAME=PATH",
+                      help="the same, with the text read from a file, and for"
+                           " the same reason")
     made.set_defaults(handler=store_add)
 
     # No `--force`. `human-only` is the whole reason this verb refuses, and a

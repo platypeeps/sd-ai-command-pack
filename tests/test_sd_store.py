@@ -1468,6 +1468,190 @@ class AddListsAndSectionsTests(StoreFixture):
         self.assertIn("its own `## ` heading", done.stderr)
 
 
+class ValueFromFileTests(StoreFixture):
+    """10b-i: the two flags `sdw-tips` cannot move without.
+
+    Step 9 retargeted all six of the vault's `pack.py` invocations and left one
+    caller standing outside it: `sdw-tips`, in the plugin repository, which
+    passes its tip text as `--tip-file` precisely so a backtick in the prose is
+    not run by the shell. `sd store add` had no twin for that flag; these two
+    flags are it.
+
+    The load-bearing case is
+    `test_a_backtick_survives_the_file_and_would_not_survive_the_shell`: the
+    failure being prevented is silent, so a test that only proves the flag
+    works would not distinguish it from the flag that loses the words.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.kind: dict[str, object] = {
+            "fields": ["status", "score", "contexts"],
+            "initial-status": "inbox",
+            "transitions": {"inbox": ["approved", "declined"]},
+            "sections": {"order": ["Tip", "Score"], "template": "tip.md"},
+        }
+
+    def build(self, template: str = "\n## Tip\n\n## Score\n") -> None:
+        root = self.plugin(kinds={"tip": self.kind}, register=False)
+        (root / "tip.md").write_text(template, encoding="utf-8")
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+    def file(self, name: str, text: str) -> str:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_a_backtick_survives_the_file_and_would_not_survive_the_shell(self) -> None:
+        """The whole reason the flag exists, asserted against a real shell.
+
+        The same text is put through `sh -c` on the way to the inline flag and
+        read from a file on the way to this one. The shell run is not a
+        second way of writing the note -- it is the evidence that the words
+        this one keeps are the words the other one drops.
+        """
+
+        self.build()
+        text = "Grant `Bash(sd:*)`, never `Bash(*)`."
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", f"Tip={self.file('tip.txt', text)}").returncode, 0)
+        self.assertIn(text, (self.tips / "T.md").read_text(encoding="utf-8"))
+
+        through_a_shell = subprocess.run(
+            ["/bin/sh", "-c", f'printf %s "{text}"'], capture_output=True, text=True)
+        # The two shells this runs on fail differently and the test may not
+        # pick one. `/bin/sh` is bash on macOS, which runs the substitution and
+        # hands back the text with the words gone; it is dash on the CI
+        # runners, which refuses to parse `Bash(sd:*)` and exits 2 with nothing
+        # on stdout. Asserting the bash shape passed locally and failed both
+        # matrix legs. What is true of every shell is the claim worth making:
+        # none of them hands the text back intact.
+        self.assertNotEqual(through_a_shell.stdout, text)
+        self.assertNotIn("Bash(sd:*)", through_a_shell.stdout)
+
+    def test_a_field_reads_its_value_from_a_file(self) -> None:
+        self.build()
+        score = self.file("score.txt", "9\n")
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field-file", f"score={score}").returncode, 0)
+        self.assertIn("score: 9\n", (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    def test_the_two_spellings_keep_the_order_they_were_typed_in(self) -> None:
+        """A block sequence's order comes from the command line, not from
+        which flag supplied each item. `migrate-golden-corpus` compares whole
+        notes, so a silent reordering reads as drift with no author."""
+
+        self.build()
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--field", "contexts+=Personal",
+            "--field-file", f"contexts+={self.file('c.txt', 'Work')}",
+            "--field", "contexts+=Fleet").returncode, 0)
+        self.assertIn(
+            "contexts:\n  - Personal\n  - Work\n  - Fleet\n",
+            (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    def test_file_text_carrying_the_separators_stays_whole(self) -> None:
+        """The pair is re-spelled rather than split, so the parsers below
+        partition on the first separator and the file's own `=` and `+=`
+        are text."""
+
+        self.build()
+        text = "score=9 and tags+=x"
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", f"Tip={self.file('tip.txt', text)}").returncode, 0)
+        self.assertIn(text, (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    def test_a_smuggled_heading_is_refused_from_a_file_too(self) -> None:
+        """File text goes through the same parser the inline spelling does.
+        A second, laxer path to the same write is the thing to avoid."""
+
+        self.build()
+        tip = self.file("tip.txt", "text\n## Score\nsmuggled")
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", f"Tip={tip}")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("its own `## ` heading", done.stderr)
+        self.assertFalse((self.tips / "T.md").exists())
+
+    def test_a_field_the_kind_does_not_declare_is_refused_from_a_file_too(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T",
+            "--field-file", f"nope={self.file('v.txt', 'x')}")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("declares no field", done.stderr)
+
+    def test_a_missing_file_refuses_rather_than_writing_an_empty_value(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", f"Tip={self.tmp / 'absent.txt'}")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("cannot read", done.stderr)
+        self.assertFalse((self.tips / "T.md").exists())
+
+    def test_an_empty_file_refuses(self) -> None:
+        """`pack.py`'s rule, kept: a note written from an empty file is a note
+        nobody meant to write, and it is written silently."""
+
+        self.build()
+        tip = self.file("tip.txt", "   \n\n")
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", f"Tip={tip}")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("is empty", done.stderr)
+
+    def test_a_file_that_is_not_utf8_refuses(self) -> None:
+        path = self.tmp / "tip.bin"
+        path.write_bytes(b"\xff\xfe\x00")
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", f"Tip={path}")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("cannot read", done.stderr)
+
+    def test_a_pair_with_no_separator_is_a_usage_error(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section-file", str(self.file("tip.txt", "text")))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("is not name=path", done.stderr)
+
+    def test_a_pair_with_a_separator_and_no_path_is_a_usage_error(self) -> None:
+        """`--field-file score=` is a different mistake from `--field-file
+        score`, and says so rather than failing later as an unreadable ''."""
+
+        self.build()
+        done = self.run_sd("store", "add", "pp.tip", "T", "--field-file", "score=")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("no path after the separator", done.stderr)
+
+    def test_both_spellings_of_one_field_is_the_error_a_repeat_already_was(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T",
+            "--field", "score=9",
+            "--field-file", f"score={self.file('score.txt', '8')}")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("given twice", done.stderr)
+
+    def test_the_flags_are_only_on_add(self) -> None:
+        """`set` edits a note by the line and takes its value positionally.
+        The section-editing verbs and whatever they need are 10b's, and a
+        half-present flag reads as a supported one."""
+
+        self.build()
+        done = self.run_sd("store", "set", "pp.tip", "T", "score", "--field-file", "x=y")
+        self.assertEqual(done.returncode, 2, done.stderr)
+
+
 LIST_KIND: dict[str, object] = {
     "fields": ["status", "score", "contexts"],
     "initial-status": "inbox",
