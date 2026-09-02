@@ -97,16 +97,21 @@ class DocCitationTests(unittest.TestCase):
                     f" {target.relative_to(REPO_ROOT)}:{start}")
         self.assertEqual(stale, [], "\n".join(stale))
 
-    def test_the_check_finds_citations_to_check(self) -> None:
-        """The control.
+    def test_the_scan_reaches_the_documents(self) -> None:
+        """The control, and deliberately not a threshold on what it found.
 
         A `PAIR` that matched nothing -- a tightened regex, a moved document
         tree -- would make the test above pass over any number of stale
-        citations without comparing a single one.
+        citations without comparing a single one. But asserting *how many*
+        citations exist makes the control fail whenever the prose is
+        reorganised, while the invariant still holds. So this asserts the tree
+        was reached and at least one citation was compared; that `PAIR` itself
+        works is proved by fixture in the test below rather than by counting.
         """
 
-        found = anchored_citations()
-        self.assertGreater(len(found), 4, f"only {len(found)} anchored citations found")
+        live = [d for d in REPO_ROOT.glob("docs/**/*.md") if "archive" not in d.parts]
+        self.assertNotEqual(live, [], "the document tree was not reached at all")
+        self.assertNotEqual(anchored_citations(), [], "no anchored citation was compared")
 
     def test_prose_between_a_symbol_and_a_citation_breaks_the_anchor(self) -> None:
         """The rule is adjacency, and adjacency has to actually be required.
