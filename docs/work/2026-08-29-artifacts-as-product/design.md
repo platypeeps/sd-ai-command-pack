@@ -2314,7 +2314,7 @@ about.
 all**. Each key reads back as `""` and its items are not in the dictionary at all, so the rebuild
 emits a bare `tags:` and drops what was under it.
 
-*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1253`), which is
+*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1252`), which is
 correct for reading and destructive for writing: **146 of the 244** carry a quoted value whose
 text contains a `:` or opens a `[[wikilink]]`, and re-emitting those bare is not lossy YAML but
 *malformed* YAML — `source-brief: [[2026-08-15 - Daily Intel Brief]]` and a `description:` with a
@@ -2369,7 +2369,7 @@ thing `human-only` is for.
 `initial-status` of every kind and accepts `transitions` and `human-only` from any kind, but never
 checks that the kind declares a `status` **field** for any of them to act on. A kind can therefore
 declare a status graph that governs nothing, and 8-iv would have no place to put the initial status
-it is required to write. `status_filter` (`bin/sd:1351`) already refuses `--status` on a kind with
+it is required to write. `status_filter` (`bin/sd:1350`) already refuses `--status` on a kind with
 no `status` field for exactly this reason, on the read side. 8-iv closes it on the declaration side:
 `initial-status`, `transitions` and `human-only` each require `status` in `fields`, refused at
 registration with the key named. This is a tightening of 8-i's validator, landed in 8-iv because
