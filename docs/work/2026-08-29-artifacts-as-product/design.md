@@ -296,8 +296,8 @@ function bodies plus 26 of argparse wiring inside `main` -- and pack.py lands at
 assumption anyway only reaches 1,863, because the floor was never the verbs: `pieces` is 214 lines
 addressing git files under `content/<year>/<slug>/`, which `store.driver = vault` cannot reach at
 all; `main` is 198 today and 172 once its wiring goes, carrying the whole argparse tree; and 769
-more are imports, constants
-and module-level code. ~1,250 was never available under any deletion this rollout makes.
+more are imports, constants and module-level code. ~1,250 was never available
+under any deletion this rollout makes.
 
 Vault-side callers (intel-brief, intel-weekly, tips-weekly, tips-accept,
 aaif-brief-compile, and `settings.vault.json`) retargeted **before** any deletion (step 9);

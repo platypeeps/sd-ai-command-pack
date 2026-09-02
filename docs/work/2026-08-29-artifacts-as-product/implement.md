@@ -4028,5 +4028,7 @@ missing 26 lines of argparse wiring, and it counted `vault_title_taken` as
 deleted when the surviving `topics_seed` still calls it. The corrected census
 closes the cut set under "a survivor calls it" and adds the wiring, which is
 the shape any later deletion census here should take: a verb is not deletable
-because its name matches a prefix, only because nothing that stays reaches it. The goal 10b set -- get the vault-facing half of `pack.py` onto `sd` -- is
+because its name matches a prefix, only because nothing that stays reaches it.
+
+The goal 10b set -- get the vault-facing half of `pack.py` onto `sd` -- is
 unaffected; only the number attached to it was wrong.
