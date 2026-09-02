@@ -2,13 +2,18 @@
 """The vault's bytes, recorded before a risky write and checked after.
 
 Built for step 11, which was to relocate live note bases. Step 11 moves
-nothing -- see `implement.md`, "Step 11 moves nothing, and the row was wrong
-four ways" -- so the move this guarded will not happen. What survives is the
-mechanism, pointed at step 10b instead.
+nothing -- see the section "Step 11 moves nothing, and the row was wrong four
+ways" in `docs/work/2026-08-29-artifacts-as-product/implement.md` -- so the
+move this guarded will not happen. What survives is the mechanism, pointed at
+step 10b instead.
 
 `capture` hashes every note under the bases listed in
-`tests/fixtures/golden-corpus-bases.txt` and copies each one aside; `verify`
-re-hashes the vault and names every note whose bytes differ.
+`tests/fixtures/golden-corpus-bases.txt` and copies each one aside. `verify`
+re-hashes the vault and reports three classes, not one: `changed`, a recorded
+note whose bytes differ; `missing`, a recorded note that is no longer there;
+and `unrecorded`, a note present now that the baseline never held. It exits
+non-zero on any of the three, and refuses before comparing anything if the
+manifest on disk does not match the root committed here.
 
 **Use it as a bracket, not as a standing baseline.** Capture immediately
 before the operation under test, verify immediately after. The vault is live
@@ -19,9 +24,13 @@ nobody had migrated:
 
     1 changed, 0 missing, 2 unrecorded of 782 recorded notes
 
-A daily brief, an ideate run's new note, and a `TaskNotes` edit. Inside a
-tight bracket that noise is near zero and `changed` is readable; across a day
-only `missing` is.
+A daily brief, an ideate run's new note, and a `TaskNotes` edit -- one of
+each class, and every one of them legitimate. Inside a tight bracket that
+noise is near zero and `changed` is readable; across a day only `missing` is.
+The nightly `vault-cleanup` routine says of itself "this routine deletes
+nothing", so a `missing` row is either a real loss or the old half of a
+rename -- and a rename prints a `missing` and an `unrecorded` together, which
+is how to tell those two apart.
 
 **What it does not check** is writer equivalence. It snapshots one vault; it
 cannot tell you `sd` writes the bytes `pack.py` would have. That needs the
