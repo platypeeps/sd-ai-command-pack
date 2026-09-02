@@ -1607,6 +1607,15 @@ PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
 #: the wider pattern used to refuse section text, not to find headings.
 SMUGGLED_HEADING = re.compile(r"^ {0,3}## ")
 
+#: A fenced code block's delimiter: three or more backticks or tildes, indented
+#: by up to three spaces, with an optional info string. The **run length** is
+#: the part that matters and the part a `startswith` check throws away: a
+#: ```` fence is closed only by four or more backticks, which is exactly how a
+#: tip quotes a ``` block inside one. Treating every run as equivalent closed
+#: the outer fence on the inner one and left `note_heading_lines` reading a
+#: fenced `## Score` as the real heading.
+CODE_FENCE = re.compile(r"^ {0,3}(?P<marker>`{3,}|~{3,})(?P<info>.*)$")
+
 
 def refuse_list_value(text: str, key: str) -> None:
     """A field whose value is a YAML block sequence, refused rather than edited.
@@ -1839,6 +1848,185 @@ def declared_sections(kind: dict[str, object]) -> list[str]:
 
 def body_headings(body: str) -> list[str]:
     return [line[3:].strip() for line in body.splitlines() if line.startswith("## ")]
+
+
+def note_heading_lines(lines: list[str], start: int) -> list[tuple[int, str]]:
+    """Every `## ` heading in a note, by line index, with fenced ones skipped.
+
+    `body_headings` reads a *template*, where a fence holding a `## ` line is
+    not a case that arises: a template is written by the plugin author and
+    checked against `sections.order`. This reads a *note*, whose sections hold
+    whatever anyone put there -- and a tip is prose about commands, so a fenced
+    block is the normal case rather than the exotic one. A splice that mistook
+    a fenced `## ` for a heading would end the section early and write the rest
+    of somebody's code sample into the section after it.
+
+    The corpus carries no such line today (207 notes across the four bases, all
+    clear). That is why this is written now rather than after one appears:
+    nothing stops Obsidian or a hand edit from adding one, and the failure is
+    silent and destroys a note.
+
+    A closing fence must match the marker that opened it, so a ``` block
+    quoting a ~~~ line stays one block.
+
+    `SMUGGLED_HEADING`, not `startswith("## ")`: CommonMark renders a heading
+    indented by up to three spaces, so `   ## Score` reaches Obsidian as a
+    heading. A column-zero scan does not see it, and the two disagreeing is the
+    whole failure -- the reader would miss the section and `set-section` would
+    then *create* a second `## Score` below the one already on screen.
+    `parse_sections` refuses the same wider shape in incoming text for exactly
+    this reason.
+    """
+
+    found: list[tuple[int, str]] = []
+    fence = ""                      # the exact opening run, "" when outside one
+    for index in range(start, len(lines)):
+        line = lines[index]
+        if match := CODE_FENCE.match(line):
+            run, info = match.group("marker"), match.group("info")
+            if not fence:
+                # A backtick fence's info string may not itself hold a
+                # backtick; that line is not an opener at all.
+                if not (run[0] == "`" and "`" in info):
+                    fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not info.strip():
+                fence = ""
+            # A fence line is never a heading, opener, closer or neither.
+            continue
+        if not fence and SMUGGLED_HEADING.match(line):
+            found.append((index, line.lstrip()[3:].strip()))
+    return found
+
+
+def section_span(lines: list[str], headings: list[tuple[int, str]],
+                 name: str) -> tuple[int, int] | None:
+    """`(heading, end)` for one section, ends excluded, or `None` when absent.
+
+    `end` is the next heading's line or the end of the note, so
+    `lines[heading + 1:end]` is the section's body and `lines[heading]` is its
+    `## ` line.
+
+    A name carried by two headings is refused rather than resolved, for the
+    reason `field_lines` refuses a duplicated key: picking the first of two is
+    a silent choice wearing the clothes of a fix, and it would leave the note's
+    reader and the note's writer disagreeing about which one won.
+    """
+
+    hits = [i for i, (_, title) in enumerate(headings) if title == name]
+    if len(hits) > 1:
+        raise Refusal(
+            f"the note carries `## {name}` on {len(hits)} lines"
+            f" ({', '.join(str(headings[i][0] + 1) for i in hits)});"
+            " refusing to guess which one is meant")
+    if not hits:
+        return None
+    at = hits[0]
+    start = headings[at][0]
+    end = headings[at + 1][0] if at + 1 < len(headings) else len(lines)
+    return start, end
+
+
+def insertion_point(lines: list[str], headings: list[tuple[int, str]],
+                    name: str, order: list[str]) -> int:
+    """Where a declared section that the note does not carry should go.
+
+    `pack.py` anchored each new section on a *named* neighbour -- `## Feeds`
+    before `## Provenance`, `## Ground truth` before `## Feeds` -- and died
+    when the anchor was missing (`sd-writing-pack/scripts/pack.py:1082`). The
+    backbone does not need that knowledge and must not hold it: `sections.order`
+    already declares where every section sits, so the position is read from the
+    manifest and a note missing some other section is no longer a failure.
+
+    The first heading the note *does* carry that sorts after `name` wins.
+    Headings the manifest does not declare are not positions -- they cannot be
+    ordered against `name` -- so they are stepped over rather than guessed at.
+    """
+
+    rank = order.index(name)
+    for index, title in headings:
+        if title in order and order.index(title) > rank:
+            return index
+    return len(lines)
+
+
+def line_ending(line: str) -> str:
+    r"""The line's own ending, or a newline when it has none.
+
+    Hardcoding "\n" is how a CRLF note came back carrying both endings in one
+    file. `edit_field` and `fill_sections` each work this rule out inline; a
+    third and fourth copy inside the section editor is where it would drift, so
+    it is named once here.
+    """
+
+    return line[len(line.rstrip("\r\n")):] or "\n"
+
+
+def section_lines(body: str, ending: str) -> list[str]:
+    """A section's text as note lines: a blank line, then the text.
+
+    The blank line is what separates a `## ` heading from its body in every
+    template the kinds ship, so a section written without one would render
+    differently from one `add` filled in.
+    """
+
+    if not body.strip():
+        # An empty section is its heading and one blank line. Adding the usual
+        # trailing blank on top of that leaves two, which reads as a gap the
+        # writer did not ask for.
+        return [ending]
+    return [ending] + [line + ending for line in body.rstrip("\r\n").splitlines()]
+
+
+def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
+    """One `## ` section's body, replacing those lines and nothing else.
+
+    The same discipline `edit_field` follows, for the same reason (R11-D27):
+    the note is spliced by the line and never parsed and written back. The
+    frontmatter is carried through as raw lines and is not read at all here, so
+    a list value, a quoted scalar and a key order that `frontmatter()` cannot
+    round-trip all survive a section edit untouched.
+    """
+
+    lines = text.splitlines(keepends=True)
+    # The body only. A column-zero `## ` cannot occur inside a YAML block
+    # scalar, whose content is indented, but scanning from the closing fence
+    # costs nothing and keeps this from ever depending on that.
+    _, _, close = frontmatter_span(text)
+    headings = note_heading_lines(lines, close + 1)
+
+    span = section_span(lines, headings, name)
+    if span is None:
+        # The heading is being created, so it has no line ending of its own to
+        # copy; the opening fence is the note's own, the same fallback
+        # `edit_field` uses when it inserts a key the note did not carry.
+        ending = line_ending(lines[0])
+        at = insertion_point(lines, headings, name, order)
+        filled = section_lines(body, ending)
+        block = [f"## {name}{ending}"] + filled
+        if at == len(lines):
+            # Appending past the last section. The note may not end in a
+            # newline, and a heading must not land on the tail of somebody's
+            # last sentence.
+            if lines and not lines[-1].endswith(("\n", "\r")):
+                lines[-1] += ending
+            block.insert(0, ending)
+        elif body.strip():
+            block.append(ending)
+        lines[at:at] = block
+    else:
+        start, end = span
+        # The heading's own line ending, never a hardcoded newline --
+        # `edit_field` and `fill_sections` follow the same rule, and a CRLF
+        # note that took LF-terminated text came back with both endings in one
+        # file.
+        ending = line_ending(lines[start])
+        filled = section_lines(body, ending)
+        # A blank line before the next heading, but never a trailing blank at
+        # the end of the note.
+        if end < len(lines) and body.strip():
+            filled.append(ending)
+        lines[start + 1:end] = filled
+    return "".join(lines)
 
 
 def parse_assignments(
@@ -2272,6 +2460,59 @@ def store_set(args: argparse.Namespace) -> int:
     return 0
 
 
+def store_set_section(args: argparse.Namespace) -> int:
+    """One or more `## ` sections of one note, edited by the line.
+
+    Read R11-D27 before changing this to parse the note. It reads as the
+    cleaner implementation and it destroys every note it touches: `frontmatter()`
+    is deliberately lossy, and a note written back through it loses every list
+    value and every quoted scalar it carried.
+
+    Several sections in one call rather than one per call, because the writes
+    are then one atomic replace instead of three. `pack.py topics
+    set-ground-truth` and its neighbours each rewrote the file separately, so
+    an interrupted run left a note with some sections updated and some not.
+
+    There is no `--force` and no way to create a section the manifest does not
+    declare. `sections.order` is what `add` renders the template against, and a
+    section outside it would be a note whose shape its own manifest calls wrong.
+    """
+
+    kind, store, name, _ = resolve_kind(args.kind)
+    base = kind_base(store, name)
+    path = note_path(base, args.title)
+    if not path.is_file():
+        raise Refusal(f"no note titled {args.title!r} in {base}")
+
+    order = declared_sections(kind)
+    if not order:
+        raise Refusal(f"the kind {args.kind!r} declares no sections to edit")
+    filled = parse_sections(
+        resolve_pair_files(args.section or [], "--section-file", sequences=False))
+    if not filled:
+        raise UsageError("give at least one --section NAME=TEXT or --section-file NAME=PATH")
+    for section in filled:
+        if section not in order:
+            raise Refusal(
+                f"the kind declares no section {section!r}"
+                f" (it declares {', '.join(order)})")
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+
+    updated = text
+    for section, body in filled.items():
+        updated = edit_section(updated, section, body, order)
+    if updated == text:
+        print(f"{path} already holds that text")
+        return 0
+    write_atomically(path, updated)
+    print(f"set {', '.join(filled)} in {path}")
+    return 0
+
+
 def store_list(args: argparse.Namespace) -> int:
     """Every note of one kind, read from the vault at the moment of asking.
 
@@ -2344,6 +2585,35 @@ def store_get(args: argparse.Namespace) -> int:
     path = note_path(base, args.title)
     if not path.is_file():
         raise Refusal(f"no note titled {args.title!r} in {base}")
+
+    if args.section:
+        if args.json:
+            # Refused rather than ignored. `--section` prints the text a caller
+            # feeds straight back to `set-section`, and quietly dropping a
+            # `--json` it asked for would hand back something it did not expect
+            # in a shape it could not tell apart from an empty section.
+            raise UsageError("--section prints one section's text; --json has no form for it")
+        # A section the kind declares but the note does not carry reads as
+        # empty and exits 0, rather than refusing. That is what makes
+        # read-edit-write cover creation: `pack.py topics add-feed` carried a
+        # whole second branch to create `## Feeds` on first use, and a caller
+        # that appends a line to what it read here and writes it back gets that
+        # for free, with no case to get wrong.
+        order = declared_sections(kind)
+        if args.section not in order:
+            raise Refusal(
+                f"the kind declares no section {args.section!r}"
+                f" (it declares {', '.join(order) or 'none'})")
+        text = note_text(path)
+        lines = text.splitlines(keepends=True)
+        _, _, close = frontmatter_span(text)
+        span = section_span(lines, note_heading_lines(lines, close + 1), args.section)
+        if span is not None:
+            start, end = span
+            if section_body := "".join(lines[start + 1:end]).strip("\r\n"):
+                print(section_body)
+        return 0
+
     fields, body = read_note(path)
     if args.json:
         json.dump(
@@ -2461,6 +2731,11 @@ def build_parser() -> argparse.ArgumentParser:
     note = kept.add_parser("get", help="one note: its fields and its whole body")
     note.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
     note.add_argument("title", help="the note's title, without the .md")
+    note.add_argument("--section", metavar="NAME",
+                      help="print only this `## ` section's text -- the read"
+                           " half of a read-edit-write that `set-section`"
+                           " writes back. A declared section the note does not"
+                           " carry reads as empty")
     note.add_argument("--json", action="store_true", help="machine-readable")
     note.set_defaults(handler=store_get)
 
@@ -2494,6 +2769,28 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("field", help="a field the kind declares")
     edit.add_argument("value", help="the new value")
     edit.set_defaults(handler=store_set)
+
+    # A sibling verb rather than a `--section` on `set`, whose four positionals
+    # are `kind title field value`: a flag that made two of them meaningless
+    # would be a second verb wearing the first one's clothes.
+    part = kept.add_parser(
+        "set-section", help="one or more `## ` sections of one note, edited by the line")
+    part.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
+    part.add_argument("title", help="the note's title, without the .md")
+    # No `required=True`: argparse checks that per action, not per dest, so a
+    # call giving only `--section-file` would be told `--section` is missing.
+    # The handler refuses an empty set instead.
+    part.add_argument("--section", dest="section", action=Pair, const=False,
+                      metavar="NAME=TEXT",
+                      help="a declared section's new text, replacing what the"
+                           " note holds under that heading; repeatable, and"
+                           " applied in one atomic write")
+    part.add_argument("--section-file", dest="section", action=Pair, const=True,
+                      metavar="NAME=PATH",
+                      help="the same, with the text read from a file -- use"
+                           " this whenever the text carries backticks, which a"
+                           " shell would run")
+    part.set_defaults(handler=store_set_section)
     config = groups.add_parser("config", help="read and write a plugin's declared settings")
     setting_verbs = config.add_subparsers(dest="verb", required=True)
 
