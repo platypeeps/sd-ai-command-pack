@@ -1790,6 +1790,39 @@ class SetSectionTests(StoreFixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("## Score\nstill fenced\n", path.read_text(encoding="utf-8"))
 
+    def test_a_longer_fence_is_not_closed_by_a_shorter_one(self) -> None:
+        """The way a tip quotes a fenced block: a ```` fence around a ``` one.
+
+        Treating every run as equivalent closed the outer fence on the inner
+        one, and the scanner then read the *fenced* `## Score` as the real
+        heading -- so the section ran from inside the code sample to the end of
+        the note, and one `set-section` would have deleted the rest of the
+        sample, the closing fence, the real heading and its text together.
+        CommonMark's rule is that a closing fence matches the character and is
+        at least as long, with nothing but whitespace after it.
+        """
+
+        self.build()
+        path = self.tip(
+            "## Tip\n\n````markdown\n```\n## Score\n````\n\n## Score\n\nreal score\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=written")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        # The whole sample, both fences included, is still intact...
+        self.assertIn("````markdown\n```\n## Score\n````\n", after)
+        # ...and the edit landed on the real section, not the quoted one.
+        self.assertIn("## Score\n\nwritten\n", after)
+        self.assertNotIn("real score", after)
+
+    def test_an_info_string_holding_a_backtick_does_not_open_a_fence(self) -> None:
+        """A backtick fence's info string may not itself carry a backtick."""
+
+        self.build()
+        self.tip("## Tip\n\n```` `x` ````\n\n## Score\n\nreal\n")
+        got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Score")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, "real\n")
+
     # -- indentation, which Obsidian renders and column 0 misses ---------
 
     def test_an_indented_heading_is_the_section_it_looks_like(self) -> None:

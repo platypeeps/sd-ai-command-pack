@@ -1607,6 +1607,15 @@ PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
 #: the wider pattern used to refuse section text, not to find headings.
 SMUGGLED_HEADING = re.compile(r"^ {0,3}## ")
 
+#: A fenced code block's delimiter: three or more backticks or tildes, indented
+#: by up to three spaces, with an optional info string. The **run length** is
+#: the part that matters and the part a `startswith` check throws away: a
+#: ```` fence is closed only by four or more backticks, which is exactly how a
+#: tip quotes a ``` block inside one. Treating every run as equivalent closed
+#: the outer fence on the inner one and left `note_heading_lines` reading a
+#: fenced `## Score` as the real heading.
+CODE_FENCE = re.compile(r"^ {0,3}(?P<marker>`{3,}|~{3,})(?P<info>.*)$")
+
 
 def refuse_list_value(text: str, key: str) -> None:
     """A field whose value is a YAML block sequence, refused rather than edited.
@@ -1870,15 +1879,19 @@ def note_heading_lines(lines: list[str], start: int) -> list[tuple[int, str]]:
     """
 
     found: list[tuple[int, str]] = []
-    fence = ""
+    fence = ""                      # the exact opening run, "" when outside one
     for index in range(start, len(lines)):
         line = lines[index]
-        marker = line.lstrip()[:3]
-        if marker in ("```", "~~~"):
+        if match := CODE_FENCE.match(line):
+            run, info = match.group("marker"), match.group("info")
             if not fence:
-                fence = marker
-            elif marker == fence:
+                # A backtick fence's info string may not itself hold a
+                # backtick; that line is not an opener at all.
+                if not (run[0] == "`" and "`" in info):
+                    fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not info.strip():
                 fence = ""
+            # A fence line is never a heading, opener, closer or neither.
             continue
         if not fence and SMUGGLED_HEADING.match(line):
             found.append((index, line.lstrip()[3:].strip()))
