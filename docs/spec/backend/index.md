@@ -1,4 +1,4 @@
-# Installer CLI Guidelines
+# Backend Spec Index
 
 > [!important]
 > **Stale as of 2026-09-01, and reduced the same day.**
@@ -22,6 +22,13 @@
 > repository as it stands. The triage that reached this verdict is recorded
 > under step 7 in `docs/work/2026-08-29-artifacts-as-product/implement.md`;
 > the pass that executed it is recorded in the same file.
+>
+> The H1 was `Installer CLI Guidelines` until this page stopped carrying
+> guidance. It is renamed rather than left alone because the rule that keeps
+> a stale page's H1 untouched applies to pages whose bodies are unedited --
+> the title is then a record of what the page claimed. This body was
+> rewritten, so a title promising guidance would describe content that is
+> no longer here.
 
 ## Guides
 
