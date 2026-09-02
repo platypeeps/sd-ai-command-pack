@@ -988,9 +988,7 @@ class WriteTests(StoreFixture):
 
         The floor refused 5 and accepted `nan`, which is a bound any value can
         clear by spelling itself strangely. `inf` is included because it is the
-        same class of input even though it passes a floor honestly, and
-        `inf` is included because it is the same class of input even though it
-        clears a floor honestly.
+        same class of input even though it clears a floor honestly.
         """
 
         self.plugin(kinds={"tip": {

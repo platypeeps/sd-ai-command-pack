@@ -1168,10 +1168,10 @@ them. The cap itself is unaffected and was never derived from this table alone
 enforces it by enumerating `git ls-files`, never from a list written here. The
 `sd store|issue|config` row was re-measured at the same time and holds: 167
 lines of config plus 294 of vault driver and store verbs, 461 of 1,400, with
-`sd issue` and the store write verbs still unwritten. *Superseded in part by
-8-iv, which wrote the store write verbs: `bin/sd` is 2,042 lines at this
-commit and `bin/` measures 10,063 against the same 14,000 cap. `sd issue`
-remains unwritten.*)*
+`sd issue` and the store write verbs still unwritten. Superseded in part by
+8-iv, which wrote the store write verbs: `bin/sd` is 2,096 lines at this
+commit and `bin/` measures 10,117 against the same 14,000 cap. `sd issue`
+remains unwritten.)*
 
 Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
 weak instrument and saying so is part of the derivation: at the *smallest* built command, `sd-check`
