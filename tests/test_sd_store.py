@@ -19,9 +19,13 @@ developer's machine config nor the developer's vault is ever touched.
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
+import itertools
 import json
 import os
 import pathlib
+import random
 import shutil
 import stat
 import subprocess
@@ -36,6 +40,27 @@ except ImportError:           # pragma: no cover - depends on the developer's ve
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
+
+_SD_MODULE = None
+
+
+def sd_module():
+    """`bin/sd` imported as a module, for the one case that cannot afford a subprocess.
+
+    Every other case in this file runs the real command, which is the point of
+    them. The brute-force check renders tens of thousands of values, and a
+    subprocess each would make it minutes rather than seconds.
+    """
+
+    global _SD_MODULE
+    if _SD_MODULE is None:
+        loader = importlib.machinery.SourceFileLoader("sd_under_test", str(SD))
+        spec = importlib.util.spec_from_file_location("sd_under_test", str(SD), loader=loader)
+        assert spec is not None
+        _SD_MODULE = importlib.util.module_from_spec(spec)
+        loader.exec_module(_SD_MODULE)
+    return _SD_MODULE
+
 
 TIP_KIND: dict[str, object] = {
     "fields": ["status", "score"],
@@ -840,7 +865,8 @@ class WriteTests(StoreFixture):
 
         self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
         path = self.note("Ship it", extra="note: old\n")
-        for value in ("- item", "? key", ", comma", "]close", "}close"):
+        for value in ("- item", "? key", ", comma", "]close", "}close",
+                      "'quote", "trailing:", "-", "?", "=", "a\tb"):
             self.assertEqual(
                 self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
             self.assertIn(f'note: "{value}"\n', path.read_text(encoding="utf-8"))
@@ -871,11 +897,57 @@ class WriteTests(StoreFixture):
         for value in ["plain", "a: b", "mid # hash", "[x]", "{y}", "#tag", "|pipe", ">fold",
                       "&anchor", "*alias", "!tag", "%directive", "@at", "`tick", "- item",
                       "? key", ", comma", "]close", "}close", "-3", "?x", "a,b", "3-4",
-                      "true", "1", "2026-09-01", "12:30", "0755", "~"]:
+                      "true", "1", "2026-09-01", "12:30", "0755", "~",
+                      "'quote", "trailing:", "-", "?", "=", "a\tb", "'a'"]:
             with self.subTest(value=value):
                 done = self.run_sd("store", "set", "pp.tip", "Ship it", "note", value)
                 self.assertEqual(done.returncode, 0, done.stderr)
                 yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+
+    @unittest.skipUnless(yaml is not None, "PyYAML absent; the concrete cases above still run")
+    def test_no_short_value_over_the_yaml_indicators_breaks_a_real_parser(self) -> None:
+        """The rule `NEEDS_QUOTING` encodes, derived rather than recalled.
+
+        Two hand-written enumerations of the indicator set were each
+        incomplete. The first missed the five values that open `- `, `? `,
+        `,`, `]` and `}`. The second, written *after* that lesson and believed
+        to be the whole class, still missed a leading `'` -- which opens a
+        single-quoted scalar and swallows the rest of the block -- along with a
+        trailing `:` (`note: See also:` is an unterminated mapping key) and an
+        embedded tab, which `render_value` lets past its control-character
+        check on purpose.
+
+        So this does not check a list. It renders every string up to length
+        three over the alphabet of YAML indicators, plus a random sample of
+        longer ones, and requires that a real parser reads back what was
+        written. A future edit to `NEEDS_QUOTING` that reopens any hole fails
+        here without anyone having to have thought of the case.
+
+        `render_value` is called in process rather than through `sd store set`
+        because the subprocess cost is per value and there are tens of
+        thousands of them; the end-to-end path is covered by the two cases
+        above.
+        """
+
+        alphabet = list("-?:,[]{}>|&*!%@`#'\"= \tab1.~")
+        values = ["".join(p) for n in (1, 2, 3) for p in itertools.product(alphabet, repeat=n)]
+        rng = random.Random(11)
+        values += ["".join(rng.choice(alphabet) for _ in range(rng.randint(4, 9)))
+                   for _ in range(4000)]
+        broken = []
+        for value in values:
+            try:
+                rendered = sd_module().render_value(value)
+            except Exception:
+                continue          # refused outright, which is a valid answer
+            try:
+                read_back = yaml.safe_load(f"k: {rendered}\n")["k"]
+            except Exception as error:
+                broken.append((value, rendered, type(error).__name__))
+                continue
+            if isinstance(read_back, str) and read_back != value:
+                broken.append((value, rendered, f"read back as {read_back!r}"))
+        self.assertEqual(broken[:10], [], f"{len(broken)} of {len(values)} values do not survive")
 
     @unittest.skipUnless(yaml is not None, "PyYAML absent")
     def test_the_types_a_real_reader_infers_are_left_to_the_corpus_convention(self) -> None:

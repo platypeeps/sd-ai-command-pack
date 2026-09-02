@@ -3309,3 +3309,34 @@ into an oversight.
 PyYAML is not a dependency of `sd`, and R11-D27's rejection of taking one for
 the write path stands. It is used here as a probe, and the test that uses it
 skips where it is absent, standing beside a concrete case that always runs.
+
+*Superseded the same day, before this branch merged: the enumeration above was
+not one.* Probing 39 hand-picked values found five parse errors and read as
+complete. It was not. A brute force over every string up to length three in the
+indicator alphabet found **3,690 broken values out of 24,439** still getting
+past the rule that paragraph describes. Three whole shapes were missing:
+
+- A leading `'`, which opens a single-quoted scalar and swallows the rest of
+  the block. `"` was refused outright and `'` was never considered beside it.
+- A **trailing** colon. The rule matched `:\s`, a colon before a space, so
+  `note: See also:` -- an ordinary sentence -- emitted bare and turned the
+  value into an unterminated mapping key. This is the likeliest of the three to
+  occur in real use, and both hand enumerations missed it.
+- An embedded tab, which `render_value` lets past its control-character check
+  deliberately and which a plain scalar cannot hold.
+
+`-`, `?` and `=` standing alone were missing too; the rule matched `- ` and
+`? ` with their following space and nothing matched the bare character.
+
+The lesson is the reason the brute force is now the test rather than the
+scaffolding that produced the fix. Two enumerations written by hand were each
+confidently wrong, and the second was written immediately after the first was
+caught -- knowing the failure mode did not prevent repeating it.
+`test_no_short_value_over_the_yaml_indicators_breaks_a_real_parser` renders the
+space and parses each value, so the next hole fails a test without anyone
+having had to think of it. It calls `render_value` in process because 24,439
+subprocesses would cost minutes; the two end-to-end cases beside it run the
+real command.
+
+Corpus collateral was re-measured against the final rule and is still **zero**
+of 7,869 bare values across 1,463 notes.

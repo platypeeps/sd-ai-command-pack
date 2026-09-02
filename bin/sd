@@ -1416,13 +1416,23 @@ FIELD_LINE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
 #: A value needing quotes to survive a YAML reader: one holding a colon-space,
 #: opening a wikilink, a flow collection or a comment, or bounded by spaces.
 #: The corpus quotes exactly these, so writing them bare is what breaks it.
-# Every shape that changes meaning, or stops parsing, when written bare. The
-# `^[-?]\s` half is separate from the character class on purpose: `- ` opens a
-# sequence entry and `? ` a complex key, while `-3` and `?x` are ordinary
-# scalars -- quoting those would turn a number into a string. Verified against
-# PyYAML rather than against the specification from memory; see
-# `test_every_value_this_writer_quotes_parses_as_yaml`.
-NEEDS_QUOTING = re.compile(r':\s|\s#|^[-?]\s|^[,\]}\[{>|&*!%@`#]|^\s|\s$')
+# Every shape that changes meaning, or stops parsing, when written bare.
+#
+# Three halves are deliberately not folded into the character class. `- ` and
+# `? ` need their following space: they open a sequence entry and a complex
+# key, while `-3` and `?x` are ordinary scalars, and quoting a bare leading
+# dash would turn every negative number in the vault into a string. `^[-?=]$`
+# is the same three characters standing alone, which *is* an indicator. `:$` is
+# a trailing colon, which makes the whole value read as a mapping key.
+#
+# This list was not derived by reading the specification. Two hand-written
+# enumerations of it were each incomplete -- the second still missed a leading
+# `'`, a trailing `:`, and an embedded tab -- so it is derived by brute force
+# instead: `test_no_short_value_over_the_yaml_indicators_breaks_a_real_parser`
+# renders every string up to length three over the indicator alphabet, plus a
+# random sample of longer ones, and parses each with PyYAML.
+NEEDS_QUOTING = re.compile(
+    r":\s|:$|\s#|\t|^[-?]\s|^[-?=]$|^[,\]}\[{>|&*!%@`#']|^\s|\s$")
 
 
 def render_value(value: str) -> str:
