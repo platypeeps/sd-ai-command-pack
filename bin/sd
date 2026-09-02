@@ -2146,6 +2146,14 @@ def store_list(args: argparse.Namespace) -> int:
     another tool is visible to the next `sd store list` with no sync step in
     between -- which is the property step 8 exists to establish and the one the
     replaced stack could not offer.
+
+    `--full` adds each note's body, and *only* its body. It deliberately does
+    not widen the fields to every key the note carries, the way `store get`
+    does: `get` names one note, so a surprise field there is the answer to the
+    question asked, while a listing is a table and a row that grows columns
+    stops being one. The routines this exists for read `## Covers`, `## Feeds`
+    and `## Ground truth` off the whole topic set at once, which took an
+    N+1 walk of `get` before this.
     """
 
     kind, store, name, _ = resolve_kind(args.kind)
@@ -2153,15 +2161,29 @@ def store_list(args: argparse.Namespace) -> int:
     fields = store_fields(kind)
     rows = []
     for path in note_paths(kind_base(store, name)):
-        found, _ = read_note(path)
+        found, body = read_note(path)
         if wanted is not None and found.get("status") != wanted:
             continue
-        rows.append({"title": path.stem, **{field: found.get(field, "") for field in fields}})
+        row = {"title": path.stem, **{field: found.get(field, "") for field in fields}}
+        if args.full:
+            row["body"] = body
+        rows.append((path, row))
     if args.json:
-        json.dump(rows, sys.stdout, indent=2, sort_keys=True)
+        json.dump([row for _, row in rows], sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
-    for row in rows:
+    if args.full:
+        for path, row in rows:
+            # The trailing blank line is `pack.py topics list --full`'s, kept
+            # so a routine retargeted at `sd` reads the same shape it did: a
+            # note whose body ends without one would otherwise run straight
+            # into the next `===` header.
+            print(f"=== {row['title']} ===")
+            sys.stdout.write(path.read_text(encoding="utf-8"))
+            print()
+        print(f"# {len(rows)} note(s)", file=sys.stderr)
+        return 0
+    for _, row in rows:
         print("\t".join([*(row[field] or "?" for field in fields), row["title"]]))
     print(f"# {len(rows)} note(s)", file=sys.stderr)
     return 0
@@ -2260,6 +2282,8 @@ def build_parser() -> argparse.ArgumentParser:
     notes = kept.add_parser("list", help="every note of one kind")
     notes.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
     notes.add_argument("--status", help="only notes whose `status` is this")
+    notes.add_argument("--full", action="store_true",
+                       help="each note's whole body as well as its fields")
     notes.add_argument("--json", action="store_true", help="machine-readable")
     notes.set_defaults(handler=store_list)
 

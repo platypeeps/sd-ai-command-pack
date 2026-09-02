@@ -2296,6 +2296,25 @@ keeps its **declared order** through registration instead of being sorted. It is
 alphabetically — and no other key carries that information. `name_list` already refuses
 duplicates, so the order costs nothing and sorting discarded it.
 
+**R11-D28 (2026-09-02) — `sd store list --full` prints bodies, and only bodies.** Step 9
+retargets five vault `SKILL.md` files at `sd`, and three of their four real invocations are
+`pack.py topics list --status active --full`, whose output the research routines read `## Covers`,
+`## Feeds` and `## Ground truth` out of. `sd store list --json` already returned every *declared*
+field, so the gap was never the fields — it was that a listing carried no body at all, and the
+retarget would have become one listing plus one `get` per note: ten calls for nine active topics,
+handed to an unattended run.
+
+`--full` deliberately does **not** also widen the fields to every key a note carries, which is what
+`store get --json` does and says why. `get` names one note, so a field the manifest has not caught
+up with is the answer to the question asked. A listing is a table, and a row that grows a column
+per note stops being one. The trailing blank line between notes is `pack.py`'s and is kept: a note
+whose body ends without one runs straight into the next `===` header. Parity is measured rather
+than asserted — with the `===` headers stripped, `sd store list sdw.topic --status active --full`
+and `pack.py topics list --status active --full` are byte-identical across all nine active topics.
+
+This widens the surface without touching `interface = 1`, whose only promises are the exit codes
+and `store get --json`'s shape.
+
 **Standing rule 1.** *Incident:* 8-iii could not name a directory for a kind and would otherwise
 have grown the vocabulary in a pull request. *Deletion criterion:* the block dies with the last
 plugin that keeps anything outside its own checkout; a plugin whose kinds live in its repository
