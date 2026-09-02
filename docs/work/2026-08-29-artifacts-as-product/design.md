@@ -89,7 +89,9 @@ were both busted on paper, and on 2026-08-29 the record called 8,000 the honest 
 "still <1/11 of today's 95k". *8,000 was busted too. R11-D15 re-derived the ceiling at 14,000
 from built code — roughly a seventh of the 95k rather than an eleventh.*
 Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by its own 1,500
-ceiling until then. dashboard/ ≤ **4,300 total and ≤ 2,300 carrying code** (*R11-D24 re-derived
+ceiling until then. *(2026-09-02: `migrate-trellis` went at step 7 as planned. The schedule's
+other half is spent -- step 11 moves nothing, so `migrate-golden-corpus` is deleted when 10b
+lands instead. It is the only `migrate-*` left, at 360 lines of the 1,500.)* dashboard/ ≤ **4,300 total and ≤ 2,300 carrying code** (*R11-D24 re-derived
 and split it at 6b-7; the 4,000 below is what it replaced.* R11-D17 had re-derived it at 6b-3 from files that exist:
 2,488 measured plus R11-D13's 763-line lift and two estimates. The old 2,500 rested on "credible:
 457 lifted + one JS file", and R11-D13 measured that lift at 763*). Caps are CI tests; a cap is

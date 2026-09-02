@@ -98,6 +98,14 @@ not from `implement.md`'s prose.
   passed, and the box waits on the lane being built or the clause being
   rewritten.
 
+**2026-09-02 — the steps 8–11 clause names a byte-compare that will not run.**
+Step 11 was re-scoped to move nothing, so "vault move last with golden-corpus
+byte-compare green" has no move to bracket and no green to report. The
+baseline tool survives, re-pointed at step 10b as a before/after bracket
+around the retarget, and is deleted when 10b lands. The box stays open on the
+rest of the clause — the plugin interface is built, `sd-writing-pack` is not
+yet migrated — and the byte-compare half is retired rather than passed.
+
 ## References
 
 - Full decision record: `design.md` (rounds r1–r9c + R10/R11, adversarially reviewed).

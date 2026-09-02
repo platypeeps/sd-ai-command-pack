@@ -1,17 +1,41 @@
 #!/usr/bin/env python3
-"""The vault's bytes, recorded before step 11 moves them, and checked after.
+"""The vault's bytes, recorded before a risky write and checked after.
 
-Step 11 relocates live note bases. The failure it has to rule out is not "the
-move errored" -- that is loud -- but "the move rewrote something on the way
-through". A note reformatted by a tool that opened it to move it looks exactly
-like a note that was moved correctly, and the corpus is large enough that
-nobody reads 782 of them afterwards.
+Built for step 11, which was to relocate live note bases. Step 11 moves
+nothing -- see the section "Step 11 moves nothing, and the row was wrong four
+ways" in `docs/work/2026-08-29-artifacts-as-product/implement.md` -- so the
+move this guarded will not happen. What survives is the mechanism, pointed at
+step 10b instead.
 
-So the bytes are recorded first. `capture` hashes every note under the bases
-listed in `tests/fixtures/golden-corpus-bases.txt` and copies each one aside;
-`verify` re-hashes the vault and names every note whose bytes differ. Run
-`capture` before the move and `verify` after, and a silent rewrite has nowhere
-to hide.
+`capture` hashes every note under the bases listed in
+`tests/fixtures/golden-corpus-bases.txt` and copies each one aside. `verify`
+re-hashes the vault and reports three classes, not one: `changed`, a recorded
+note whose bytes differ; `missing`, a recorded note that is no longer there;
+and `unrecorded`, a note present now that the baseline never held. It exits
+non-zero on any of the three, and refuses before comparing anything if the
+manifest on disk does not match the root committed here.
+
+**Use it as a bracket, not as a standing baseline.** Capture immediately
+before the operation under test, verify immediately after. The vault is live
+-- launchd routines write it on schedule -- so a baseline left to age reports
+legitimate activity as drift and teaches its reader to skip the output.
+Measured 2026-09-02, three and a half hours after a capture, against a vault
+nobody had migrated:
+
+    1 changed, 0 missing, 2 unrecorded of 782 recorded notes
+
+A daily brief, an ideate run's new note, and a `TaskNotes` edit -- one of
+each class, and every one of them legitimate. Inside a tight bracket that
+noise is near zero and `changed` is readable; across a day only `missing` is.
+The nightly `vault-cleanup` routine says of itself "this routine deletes
+nothing", so a `missing` row is either a real loss or the old half of a
+rename -- and a rename prints a `missing` and an `unrecorded` together, which
+is how to tell those two apart.
+
+**What it does not check** is writer equivalence. It snapshots one vault; it
+cannot tell you `sd` writes the bytes `pack.py` would have. That needs the
+same note written both ways into a scratch vault and diffed, which is a
+different test entirely.
 
 **What lives where, and why they are not the same place.** The manifest maps a
 hash to a note's path, and a path is a note's title. This repository is
@@ -28,8 +52,9 @@ The bodies are kept because a hash says *that* a note changed and never
 *what*. After a `verify` failure the copy under `bodies/` is the left-hand side
 of the diff that answers it.
 
-Deleted at step 11 with the rest of the migration tooling, which is why this is
-`migrate-` and outside the `bin/` line cap.
+Deleted when step 10b lands, which is why this is `migrate-` and outside the
+`bin/` line cap. Step 7 defined the prefix as tooling deleted at step 7 or 11;
+this one outlived step 11's purpose and dies at 10b instead.
 """
 
 from __future__ import annotations
