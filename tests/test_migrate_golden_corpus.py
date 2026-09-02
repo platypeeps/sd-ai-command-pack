@@ -20,6 +20,7 @@ import importlib.machinery
 import importlib.util
 import io
 import pathlib
+import shutil
 import tempfile
 import unittest
 import unittest.mock
@@ -186,6 +187,49 @@ class GoldenCorpusTests(unittest.TestCase):
 
         self.assertEqual(self.run_tool("verify"), 2)
 
+    # -- the boundaries the tool is supposed to hold --------------------------
+
+    def test_a_baseline_pointed_inside_the_repository_is_refused(self) -> None:
+        """The manifest holds titles and this repository is public.
+
+        Keeping it out of the checkout is the whole reason the baseline is not
+        a committed fixture, and an override that puts it back inside undoes
+        that silently -- `git add -A` afterwards is one keystroke and public
+        history does not give the titles back.
+        """
+
+        inside = REPO_ROOT / "tests" / "fixtures" / "leaked-baseline"
+        # Cleaned up unconditionally. When this case fails it fails *because*
+        # the tool wrote here, so leaving the residue behind would put a
+        # baseline in the checkout that the next `git add -A` commits -- the
+        # exact outcome the case exists to prevent.
+        self.addCleanup(shutil.rmtree, inside, ignore_errors=True)
+        with unittest.mock.patch.dict("os.environ", {"SD_GOLDEN_CORPUS": str(inside)}):
+            self.assertEqual(self.run_tool("capture"), 2)
+        self.assertIn("is inside", self.reported)
+        self.assertFalse(inside.exists(), "the refused baseline was created anyway")
+
+    def test_a_symlinked_note_is_refused_rather_than_hashed_through(self) -> None:
+        """`rglob` follows a symlinked file, so a link out of the vault would be
+        recorded as though its target were a note -- and `verify` would then
+        report "unchanged" after the link was repointed."""
+
+        outside = self.vault.parent / "outside.md"
+        outside.write_text("not a vault note\n", encoding="utf-8")
+        (self.vault / "Notes" / "Linked.md").symlink_to(outside)
+        self.assertEqual(self.run_tool("capture"), 2)
+        self.assertIn("Notes/Linked.md is a symlink", self.reported)
+
+    def test_a_symlinked_directory_is_refused_too(self) -> None:
+        """What `rglob` does with one has changed across the Python versions CI runs."""
+
+        elsewhere = self.vault.parent / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "Hidden.md").write_text("hidden\n", encoding="utf-8")
+        (self.vault / "Notes" / "Linked").symlink_to(elsewhere, target_is_directory=True)
+        self.assertEqual(self.run_tool("capture"), 2)
+        self.assertIn("Notes/Linked is a symlink", self.reported)
+
     # -- the committed side ---------------------------------------------------
 
     def test_the_committed_root_names_no_note(self) -> None:
@@ -224,17 +268,38 @@ class GoldenCorpusTests(unittest.TestCase):
 
 
 class CommittedBaseListTests(unittest.TestCase):
-    """The tracked list, checked as the data it is."""
+    """The tracked list, read through the tool's own parser.
 
-    def test_every_line_is_a_relative_path_and_the_list_has_no_duplicates(self) -> None:
-        text = (REPO_ROOT / "tests" / "fixtures" / "golden-corpus-bases.txt").read_text(
-            encoding="utf-8")
-        bases = [line.strip() for line in text.splitlines()
-                 if line.strip() and not line.startswith("#")]
-        self.assertEqual(len(bases), len(set(bases)), "a base is listed twice")
-        for base in bases:
-            self.assertFalse(base.startswith("/"), f"{base} is absolute")
-            self.assertNotIn("..", pathlib.PurePosixPath(base).parts, f"{base} climbs out")
+    An earlier version of this case parsed the file itself and drifted from
+    `read_bases()` in one character: it tested `line.startswith("#")` before
+    stripping, so an indented comment was a base here and a comment there. A
+    test with its own copy of the code under test is a test of the copy, so the
+    copy is gone -- these cases call the parser the tool calls.
+    """
+
+    def setUp(self) -> None:
+        self.tool = load_tool()
+        self.bases = self.tool.read_bases()
+
+    def test_the_committed_list_parses_and_holds_no_duplicate(self) -> None:
+        self.assertTrue(self.bases)
+        self.assertEqual(len(self.bases), len(set(self.bases)), "a base is listed twice")
+
+    def test_no_base_is_absolute_or_climbs_out_of_the_vault(self) -> None:
+        for base in self.bases:
+            with self.subTest(base=base):
+                self.assertFalse(base.startswith("/"), f"{base} is absolute")
+                self.assertNotIn("..", pathlib.PurePosixPath(base).parts, f"{base} climbs out")
+
+    def test_an_indented_comment_is_a_comment_here_too(self) -> None:
+        """The exact divergence that removed the duplicate parser, pinned."""
+
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        listing = pathlib.Path(holder.name) / "bases.txt"
+        listing.write_text("Real\n  # indented comment\n", encoding="utf-8")
+        self.tool.BASES_FILE = listing
+        self.assertEqual(self.tool.read_bases(), ["Real"])
 
 
 if __name__ == "__main__":

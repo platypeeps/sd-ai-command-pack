@@ -58,9 +58,22 @@ def baseline_dir() -> pathlib.Path:
 
     override = os.environ.get("SD_GOLDEN_CORPUS")
     if override:
-        return pathlib.Path(override).expanduser()
-    state = os.environ.get("XDG_STATE_HOME") or "~/.local/state"
-    return pathlib.Path(state).expanduser() / "sd" / "golden-corpus"
+        chosen = pathlib.Path(override).expanduser()
+    else:
+        state = os.environ.get("XDG_STATE_HOME") or "~/.local/state"
+        chosen = pathlib.Path(state).expanduser() / "sd" / "golden-corpus"
+    # The manifest maps hashes to note titles, and this repository is public.
+    # Keeping it out is the entire reason the baseline is not a fixture, so an
+    # override that points back inside the checkout is refused rather than
+    # honoured -- `git add -A` after that is one keystroke, and the titles do
+    # not come back out of public history.
+    resolved = chosen.resolve() if chosen.exists() else chosen.absolute()
+    if resolved == REPO_ROOT or REPO_ROOT in resolved.parents:
+        raise UsageError(
+            f"SD_GOLDEN_CORPUS is {chosen}, which is inside {REPO_ROOT}."
+            " The manifest holds note titles and this repository is public;"
+            " the baseline belongs outside the checkout")
+    return chosen
 
 
 def vault_root() -> pathlib.Path:
@@ -107,11 +120,28 @@ def scan(vault: pathlib.Path, bases: list[str]) -> list[tuple[str, str]]:
         directory = vault / base
         if not directory.is_dir():
             raise UsageError(f"the base {base!r} is not a directory under {vault}")
-        for note in directory.rglob("*.md"):
-            if not note.is_file():
-                continue
-            digest = hashlib.sha256(note.read_bytes()).hexdigest()
-            rows.append((digest, note.relative_to(vault).as_posix()))
+        for parent, directories, files in os.walk(directory, followlinks=False):
+            here = pathlib.Path(parent)
+            # `os.walk` rather than `rglob`, and symlinks refused rather than
+            # skipped. `rglob` follows a symlinked *file* -- so a link out of
+            # the vault would be hashed as though its target were a note -- and
+            # what it does with a symlinked *directory* has changed across the
+            # Python versions this suite runs on. Refusing is the honest
+            # answer: what a move should do with a link is genuinely ambiguous,
+            # and hashing the target silently reports "unchanged" when the link
+            # is later repointed. There are none under the bases today, so this
+            # rules out a case rather than changing one.
+            for name in sorted(directories) + sorted(files):
+                if (here / name).is_symlink():
+                    raise UsageError(
+                        f"{(here / name).relative_to(vault)} is a symlink;"
+                        " the baseline records bytes in the vault, not through links")
+            for name in files:
+                if not name.endswith(".md"):
+                    continue
+                note = here / name
+                digest = hashlib.sha256(note.read_bytes()).hexdigest()
+                rows.append((digest, note.relative_to(vault).as_posix()))
     rows.sort(key=lambda row: row[1])
     return rows
 
