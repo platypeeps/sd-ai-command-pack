@@ -20,7 +20,10 @@
   of the 3-c wave, so the migration it performed has no remaining input. The
   untracked residue those checkouts still carry is reported by `sd-status`'s
   `RESIDUE` table, which survives and prints the exact removal command.
-  `bin/migrate-vault` is untouched and survives to step 11.
+  `bin/migrate-vault` is untouched and survives to step 11. **[Corrected
+  2026-09-02: `bin/migrate-vault` was never written. This line, and the two
+  step rows that scheduled it, described a file that has never existed in
+  the tree. See *Step 11 moves nothing* in the step-11 work item.]**
 
 - **The backlog is parked, not deleted.** Every work item reading
   `status: planning` with no `branch:` moved to `docs/work/archive/2026-09/`

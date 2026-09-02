@@ -29,7 +29,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **5b** | `sd-skill-adopt` lands; retire skill-proposal-accept + file-trellis-task.py; delete legacy gito/prism skill folders (backend rows stay) | adopt-lint green on all installed skills |
 | **6** | Machine cleanup = M3 (receipt-driven, legacy subdirs by name) | find both spellings = 0; plugin rows = 0; `handoff/` + `intents/` untouched (a packet written before the step is restorable after) |
 | **6b** | Eight PRs, not one — order fixed by R11-D12 and R11-D13, then amended by R11-D21, which made Queues a sixth plugin tab landing after the write path rather than a backbone tab landing before Now: registration slice (`sd plugin add` and `sd plugin list` plus the manifest read, pulled forward from 8) → the plugin loader → the five plugin tabs → backbone tabs → Now → `RUN_ALLOWLIST` + `sd-dashboard install` → swap to :8767 → delete system `dashboard.py` | `lsof -i :8767` one listening process and it is the pack's; rm-test passes; Now emits every rank-0/rank-1 row it emits today; loader PR reports its LOC against the dashboard cap's remaining headroom, and the backbone-render PR re-derives that cap from files that exist (R11-D17: 4,000) |
-| **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (`migrate-vault` survives to step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
+| **7** | Park backlog (D2), triage survivors, delete `migrate-trellis` (~~`migrate-vault` survives to step 11~~ -- it was never written; see step 11), verify protection, tag 1.0.0 | `grep -rli trellis` → archive only; sd-status ≤20 active; `sd-status --parked` lists every swept item |
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers (5 routines + the permission grant, which goes **last**), BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
 | **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC, and the hardcoded vault root at `pack.py:146` goes with them -- the driver takes `OBSIDIAN_VAULT`) | `grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py` = 0; E2E on one piece |
@@ -3565,9 +3565,12 @@ criterion would have been 0 missing plus 0 changed among the moved bases, not
 
 **4. `bin/migrate-vault` was never written.** The row says "then delete
 `migrate-vault`" and makes it the enforcer of "refuses if any reader still
-points at the old path"; step 7's row says it "survives to step 11". It has no
-commit in any branch. Three documents named a tool that never existed, and one
-of them made it responsible for the step's safety.
+points at the old path"; step 7's row says it "survives to step 11". It is not in
+the tree, and `git log --all -- bin/migrate-vault` prints nothing in this
+clone -- which is the verifiable claim, rather than one about every branch
+that has ever existed anywhere. Three documents named it as shipped, and one
+of them made it responsible for the step's safety. All three are corrected in
+this commit: the step 7 row, `design.md`'s CLI inventory, and `CHANGELOG.md`.
 
 **What is left of step 11.** Nothing to move, nothing to build, nothing to
 delete. `bin/migrate-golden-corpus` is the open question rather than a
@@ -3575,5 +3578,5 @@ decision taken here: it carries the `migrate-` prefix, which step 7 defined as
 tooling deleted at step 11, and the baseline it maintains was captured to
 guard a move that will not happen. It does still detect vault drift. That is
 the same "a registry nothing reads is a record" argument this repository
-already rejected once, in `docs/fleet/README.md`, so it should be answered
+already rejected once, at `docs/fleet/README.md:34`, so it should be answered
 deliberately and not by leaving the file in place.

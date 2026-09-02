@@ -116,7 +116,8 @@ R11-D15, being a catalog rather than a command)
 | `sd-handoff [--push] [--park] [--show]` | **Default (R10-D3, Lane A):** write the local session packet for this directory, no git touched; then `/clear` restores it. `--show` prints the pending packet (the load path for Codex/OpenCode sessions, which have no SessionStart hook). `--push` (Lane B): additionally append `handoff:` to `## Log`, commit+push WIP to carrier branch, print restart one-liner; `--park` applies to Lane B only. Guards: settled-green refusal, branch-scoped stash check, open-PR draft+no-re-review (R10-D2). 60-day deletion criteria on both lanes |
 
 CLIs (not skills): `install.py`, `sd-dashboard serve|install|index [--dump]|item set-status|export
---obsidian`, `sd plugin|store|issue|config` verb groups (r5), temporary `migrate-trellis`/`migrate-vault`.
+--obsidian`, `sd plugin|store|issue|config` verb groups (r5), temporary `migrate-trellis`
+(deleted at step 7). `migrate-vault` was listed here until 2026-09-02 and was never written.
 The verb inventory is a CI-tested invariant; any change is a decision record.
 
 **Taxonomy (r6 §1, restated here because it governs every row above).** A surface is a
