@@ -1383,6 +1383,40 @@ class AddListsAndSectionsTests(StoreFixture):
         self.assertNotIn(b"\r", body)
         self.assertIn(b"## Tip\n\none\ntwo\n", body)
 
+    def test_the_template_can_say_the_notes_own_title(self) -> None:
+        """The one thing a template cannot state and every note carries."""
+
+        self.build(template="\n# {{title}}\n\n## Tip\n\n## Score\n")
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "A narrow grant", "--field", "score=9").returncode, 0)
+        self.assertIn(
+            "# A narrow grant\n",
+            (self.tips / "A narrow grant.md").read_text(encoding="utf-8"))
+
+    def test_a_misspelled_placeholder_is_refused_rather_than_shipped(self) -> None:
+        """Left in place it would reach every note written from that template
+        as literal text, and be noticed by a reader rather than an author."""
+
+        self.build(template="\n# {{titel}}\n\n## Tip\n\n## Score\n")
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("{{titel}}", done.stderr)
+        self.assertFalse((self.tips / "T.md").exists())
+
+    def test_a_title_is_not_re_scanned_for_placeholders(self) -> None:
+        """A title holding `{{x}}` is a title, not a template instruction.
+        Refusing it would make the note's name decide whether it can be
+        written; substituting from it would let a title reach the engine."""
+
+        self.build(template="\n# {{title}}\n\n## Tip\n\n## Score\n")
+        done = self.run_sd(
+            "store", "add", "pp.tip", "About {{x}} syntax", "--field", "score=9")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(
+            "# About {{x}} syntax\n",
+            (self.tips / "About {{x}} syntax.md").read_text(encoding="utf-8"))
+
     def test_a_field_with_no_value_is_written_without_a_trailing_space(self) -> None:
         """No note in the corpus carries `key: ` with a trailing space, and
         `pack.py` never wrote one. Writing it would make every note `sd` adds

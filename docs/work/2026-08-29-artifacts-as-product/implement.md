@@ -3492,3 +3492,31 @@ vacuous check with a passing result.
 Each fix sabotaged: removing the comment skip, narrowing the heading pattern
 back to `startswith`, and restoring the hardcoded `"\n"` each fail exactly one
 case. Suite **1039 tests, no skips**; `make lint` clean.
+
+**The template could not say the note's own title (2026-09-02).** Found while
+sizing the tip template, the same way the trailing space was: by rendering
+what `sd` would write and comparing it against what the base holds, rather
+than by reading either.
+
+Every tip carries `# The title` under the frontmatter, written by `pack.py`
+from the same string that names the file. `sections.template` is static, so
+without a placeholder the template must either omit the H1 -- making every
+note `sd` adds differ from the fourteen beside it -- or hardcode one title for
+all of them. `--section` cannot help: an H1 is not one of the `## ` sections.
+
+`{{title}}`, and deliberately nothing else. Every other value a note needs is
+already a `--field` or a `--section`, and a second engine for rendering notes
+is exactly what `sections.template` exists to avoid. A placeholder that is not
+`{{title}}` is refused rather than passed through, because `{{titel}}` left in
+place ships as literal text into every note written from that template and is
+noticed by a reader rather than an author.
+
+**The scan runs before the substitution, and a test caught that it had not.**
+Scanning the filled body put the note's own title through the check, so a tip
+genuinely called `About {{x}} syntax` was refused -- the name of a note
+deciding whether the note could exist. The test was written from the property
+rather than from the implementation, which is why it failed on first run
+instead of passing vacuously.
+
+Sabotaged both ways: removing the substitution fails 2 cases, removing the
+stray-placeholder guard fails 1. Suite **1045 tests, no skips**.
