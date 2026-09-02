@@ -4023,7 +4023,7 @@ imports, constants and module-level code. Measured from the AST rather than
 estimated.
 
 *(Superseded at 10b-iv, and again at 10b-iv-iv. The deletion was made and
-`pack.py` landed at 1,857 rather than the 2,013 predicted here, then at 1,721
+`pack.py` landed at 1,857 rather than the 2,013 predicted here, then at 1,712
 once the `protected-fields` decision freed the last two verbs. `design.md`
 carries whatever the current measurement is; this paragraph is kept as what was
 believed on the way there, not as facts, and makes no new estimate of its own
@@ -4223,7 +4223,7 @@ either pure extreme, is the evidence the open decision needs.
 ### Step 10b-iv-iv: `protected-fields` decided, and the last two verbs moved (2026-09-02)
 
 `sd-writing-pack` #9. `protected-fields` now declares `my-rating` and nothing
-else, `ideas add` and `ideas set-published` are gone, and `pack.py` is 1,721
+else, `ideas add` and `ideas set-published` are gone, and `pack.py` is 1,712
 lines. This is the decision record standing rule 2 asked for -- and the answer
 is that no vocabulary change is needed, which is why it can live here rather
 than as a change to the eight keys.
@@ -4307,3 +4307,26 @@ here closes over both kinds of definition and repeats until it reaches a fixed
 point instead of running once. `remaining orphans: none` is the output that
 ends it, and that is the form the check should take from here on: not a list of
 what to look for, but a loop that stops when it finds nothing.
+
+The fixed-point sweep still missed a whole category, because it enumerated
+*definitions*. Three comment blocks in `pack.py` outlived the code they
+described, and no orphan check can see them: the floor block and the
+`my-rating` naming block had no code under them at all after #7 and #9 --
+they sat between two unrelated constants, describing `SCORE_FLOOR` and a
+creation path that no longer existed -- and the `tips` header block still
+said the floor came from "the same constant", when there is no constant and
+the value is declared per kind in `sd-plugin.json`. Copilot found the first
+one; enumerating the others took grepping the *claims* (`enforced here`,
+`Same constant`, `SCORE_FLOOR`) rather than the symbols.
+
+That is the same third leg again, one level up. Deleting a verb changes what
+the file *does* and what it *says it does*, and a Python orphan sweep is
+blind to the second by construction: a comment references nothing, so
+nothing can be found dangling. The check that catches it is a grep for the
+claim, and the claim has to be written down before the deletion to be
+grepped for after it. Two more of these turned up in the same pass --
+`topics seed`'s docstring and its refusal text both still directed the
+reader to `topics add`, deleted at 10b-iv -- and the corrected comments now
+name where each rule is enforced instead of implying `pack.py` still holds
+it. The final measured floor is **1,712** lines, nine below the figure
+taken before the comments were swept.

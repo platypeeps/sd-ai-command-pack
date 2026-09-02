@@ -287,7 +287,7 @@ r5 wrote these as TOML `[kinds.<name>]` tables and **D-C1 later made every pack-
 JSON**, so they become object keys. The kebab-case spellings are kept exactly as ruled — renaming
 them to snake_case while transcribing would be a vocabulary change wearing the clothes of a
 format change, and standing rule 2 says that is a decision record. Repo-scoped skills ARE the contract (no
-`sd plugin sync` copy machinery). **sd-writing-pack is the first plugin**: pack.py 2,532 → **1,721**
+`sd plugin sync` copy machinery). **sd-writing-pack is the first plugin**: pack.py 2,532 → **1,712**
 LOC (store verbs and `config` deleted; `gh`, `review`, pieces, build-html and the companion ledger
 stay). Estimated at ~1,250, restated to ~2,000 at 10b-iii, measured at 10b-iv. Both estimates were
 wrong in the same direction and for related reasons: ~1,250 counted `gh` and `review adversarial`
@@ -296,7 +296,7 @@ bodies and argparse wiring -- not what the deletion *orphans*, which was nine mo
 two stale catalogue blocks in the module docstring.
 The measured floor was never the verbs: `pieces` is 214 lines addressing git files under
 `content/<year>/<slug>/`, which `store.driver = vault` cannot reach at all; `main` is 97, carrying
-the whole argparse tree; and 601 are imports, constants and module-level code. ~1,250 was never
+the whole argparse tree; and 589 are imports, constants and module-level code. ~1,250 was never
 available under any deletion this rollout makes. `ideas add` and `ideas set-published` were held
 back at 10b-iv pending the `protected-fields` decision and moved at 10b-iv-iv once it was made.
 
