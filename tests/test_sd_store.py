@@ -430,10 +430,6 @@ class ManifestTests(StoreFixture):
         self.assertIn("store: vault at $OBSIDIAN_VAULT", done.stdout)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WriteTests(StoreFixture):
     """8-iv's acceptance criterion, inverted from 8-iii's on purpose.
 
@@ -884,3 +880,7 @@ class DeclarationTests(StoreFixture):
         root = self.plugin(
             kinds={"tip": {"fields": ["score"], "initial-status": "inbox"}}, register=False)
         self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
