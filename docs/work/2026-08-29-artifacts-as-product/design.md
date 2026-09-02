@@ -287,9 +287,19 @@ r5 wrote these as TOML `[kinds.<name>]` tables and **D-C1 later made every pack-
 JSON**, so they become object keys. The kebab-case spellings are kept exactly as ruled — renaming
 them to snake_case while transcribing would be a vocabulary change wearing the clothes of a
 format change, and standing rule 2 says that is a decision record. Repo-scoped skills ARE the contract (no
-`sd plugin sync` copy machinery). **sd-writing-pack is the first plugin**: pack.py 2,532 → ~1,250
-LOC (store verbs/gh/config/help/adversarial deleted → backbone; pieces/build-html/companion ledger
-stay). Vault-side callers (intel-brief, intel-weekly, tips-weekly, tips-accept,
+`sd plugin sync` copy machinery). **sd-writing-pack is the first plugin**: pack.py 2,532 → ~2,000
+LOC (store verbs and `config` deleted; `gh`, `review`, pieces, build-html and the companion ledger
+stay). Restated from ~1,250 at step 10b, where the deletion was measured rather than estimated.
+Two corrections, in order of size. The original figure counted `gh` and `review adversarial` as
+deleted, and both still have live callers, so what 10b-iv can actually remove is 519 lines -- 493 of
+function bodies plus 26 of argparse wiring inside `main` -- and pack.py lands at 2,013. Granting the
+assumption anyway only reaches 1,863, because the floor was never the verbs: `pieces` is 214 lines
+addressing git files under `content/<year>/<slug>/`, which `store.driver = vault` cannot reach at
+all; `main` is 198 today and 172 once its wiring goes, carrying the whole argparse tree; and 769
+more are imports, constants
+and module-level code. ~1,250 was never available under any deletion this rollout makes.
+
+Vault-side callers (intel-brief, intel-weekly, tips-weekly, tips-accept,
 aaif-brief-compile, and `settings.vault.json`) retargeted **before** any deletion (step 9);
 `market-watch` was named here for a year and contains no `pack.py` reference at all. pp-* is the named
 second consumer that validates the interface before any freeze.
