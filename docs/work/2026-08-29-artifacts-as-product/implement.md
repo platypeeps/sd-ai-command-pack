@@ -3218,3 +3218,36 @@ warning;
 `chore: record journal` = 0; share of non-merge commits touching only work/archive/index
 paths < 5% (vs 49% baseline); `git log main --format=%b | grep -c '^wip:'` = 0; no `make check`
 staleness in claude-mem for two weeks; sd-handoff meets its usage criterion or folds back to docs.
+
+### Step 8-iv built, and the criterion above did not cover all of it (2026-09-01)
+
+**8-iv's stated criterion is narrower than what 8-iv ships.** The criterion
+recorded above is the write-through-`sd`, read-bytes-back property and the
+list-survives-byte-identical case. Both are met. But `design.md` also assigns
+the *declaration-side* tightening to this slice -- "8-iv closes it on the
+declaration side ... a tightening of 8-i's validator, landed in 8-iv because
+that is when it became falsifiable" -- and no criterion above mentions it, so
+the slice could have read satisfied with `validate_kind` untouched. What it
+ships: `transitions` and `human-only` are refused at registration on a kind
+declaring no `status` field, pinned by
+`test_transitions_without_a_status_field_refuses_at_registration` and
+`test_human_only_without_a_status_field_refuses_at_registration`.
+`initial-status` is deliberately excluded, for the reason `design.md`'s
+2026-09-01 correction gives, pinned by
+`test_a_statusless_kind_is_still_registerable`. 8-iv also gives `sections.order`
+a consequence for the first time -- `validate_sections` never opened the
+template, so an order naming headings the template does not render registered
+clean; `test_a_template_that_does_not_render_the_declared_order_refuses` closes
+it.
+
+**A code change silently invalidated three citations in `design.md`.** Growing
+`bin/sd` from 1,553 lines to 2,006 moved `frontmatter()` from 1231 to 1248, the reader's
+`.strip('"')` from 1252 to 1276, and `status_filter` from 1350 to 1378. All
+three were correct on `main` and all three were wrong on the branch that
+changed the file, in the same branch that edits `design.md`. They are corrected
+to the post-merge line numbers. The general hazard is unfixed and worth naming:
+a `bin/sd:NNNN` citation is invalidated by any insertion above its target, no
+gate checks them, and this rollout cites that file 4 times across the task
+directory. The cheap enumerating check is the one used to find these -- read
+each cited line and confirm it is the thing the prose says it is -- and it
+belongs in the planning-review sweep rather than in a reviewer's memory.

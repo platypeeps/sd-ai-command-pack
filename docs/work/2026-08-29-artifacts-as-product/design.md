@@ -1168,7 +1168,9 @@ them. The cap itself is unaffected and was never derived from this table alone
 enforces it by enumerating `git ls-files`, never from a list written here. The
 `sd store|issue|config` row was re-measured at the same time and holds: 167
 lines of config plus 294 of vault driver and store verbs, 461 of 1,400, with
-`sd issue` and the store write verbs still unwritten.)*
+`sd issue` and the store write verbs still unwritten. *Superseded in part by
+8-iv, which wrote the store write verbs: `bin/sd` is 2,006 lines and `bin/`
+measures 10,027 against the same 14,000 cap. `sd issue` remains unwritten.*)*
 
 Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
 weak instrument and saying so is part of the derivation: at the *smallest* built command, `sd-check`
@@ -2298,7 +2300,7 @@ enforcement is the easy half. The half that decides whether the step is safe to 
 note gets back to disk.
 
 **The reader this repository already has is lossy, and that is deliberate.** `frontmatter()`
-(`bin/sd:1231`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
+(`bin/sd:1248`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
 step 10 deletes, in the sibling repository of that name, not in this one -- down to what it cannot
 see: a value spanning
 lines comes back as the empty string, because the continuation line does not match the key
@@ -2316,7 +2318,7 @@ about.
 all**. Each key reads back as `""` and its items are not in the dictionary at all, so the rebuild
 emits a bare `tags:` and drops what was under it.
 
-*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1252`), which is
+*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1276`), which is
 correct for reading and destructive for writing: **146 of the 244** carry a quoted value whose
 text contains a `:` or opens a `[[wikilink]]`, and re-emitting those bare is not lossy YAML but
 *malformed* YAML — `source-brief: [[2026-08-15 - Daily Intel Brief]]` and a `description:` with a
@@ -2372,11 +2374,11 @@ thing `human-only` is for.
 `initial-status` of every kind and accepts `transitions` and `human-only` from any kind, but never
 checks that the kind declares a `status` **field** for any of them to act on. A kind can therefore
 declare a status graph that governs nothing, and 8-iv would have no place to put the initial status
-it is required to write. `status_filter` (`bin/sd:1350`) already refuses `--status` on a kind with
+it is required to write. `status_filter` (`bin/sd:1378`) already refuses `--status` on a kind with
 no `status` field for exactly this reason, on the read side. 8-iv closes it on the declaration side:
 `initial-status`, `transitions` and `human-only` each require `status` in `fields`, refused at
-registration with the key named. This is a tightening of 8-i's validator, landed in 8-iv because
-that is when it became falsifiable.
+registration with the key named (*`initial-status` is wrong here — corrected below*). This is a
+tightening of 8-i's validator, landed in 8-iv because that is when it became falsifiable.
 
 **Acceptance criterion, inverted from 8-iii's on purpose.** 8-iii wrote with `write_text` and read
 through `sd`, so that an in-memory store could not pass it. 8-iv writes through `sd store add` and
