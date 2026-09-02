@@ -702,6 +702,27 @@ class WriteTests(StoreFixture):
         allowed = self.run_sd("store", "add", "pp.tip", "Loud one", "--field", "score=7")
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
+    def test_a_closing_fence_with_trailing_spaces_still_ends_the_block(self) -> None:
+        """The last of the three fence sites to disagree with the other two.
+
+        `frontmatter_span` compared with `.rstrip("\\r\\n")` while `frontmatter`
+        and `note_body` used `.rstrip()`, so `---   ` closed the block for the
+        readers and not for the writer. The writer then scanned past it and
+        would insert a key below the block, in the body, leaving the real one
+        above -- the same failure an indented `---` caused, arriving from the
+        opposite direction. No note in the live bases spells a fence that way;
+        the point is that the three agree, not that the corpus needs it.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("---\nstatus: inbox\n---   \n\nThe body.\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            path.read_text(encoding="utf-8"),
+            "---\nstatus: approved\n---   \n\nThe body.\n")
+
     def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
         """`float("nan") < 6` is False, so an unguarded floor lets it through.
 

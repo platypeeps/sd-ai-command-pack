@@ -1473,7 +1473,7 @@ def frontmatter_span(text: str) -> tuple[list[str], int, int]:
         # at the wrong line, and `edit_field` then inserted a new `key: value`
         # into the middle of the note's prose while leaving the real field in
         # place -- a corrupted note carrying a duplicate key.
-        if lines[index].rstrip("\r\n") == "---":
+        if lines[index].rstrip() == "---":
             return lines, 1, index
     raise Refusal("the note's frontmatter block is never closed")
 

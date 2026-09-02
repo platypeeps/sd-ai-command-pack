@@ -66,6 +66,16 @@ def is_symbol(token: str) -> bool:
     return bool(SYMBOL.match(token)) and "/" not in token and not EXTENSION.search(token)
 
 
+def is_inside_repo(target: pathlib.Path) -> bool:
+    """A path this test is willing to open: a real file, inside the checkout."""
+
+    try:
+        resolved = target.resolve()
+    except OSError:
+        return False
+    return resolved.is_file() and resolved.is_relative_to(REPO_ROOT.resolve())
+
+
 def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int]]:
     """Every symbol-anchored citation in a live document, enumerated from disk."""
 
@@ -79,7 +89,13 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
             anchor, path, start = match.group(1), match.group(2), int(match.group(3))
             end = int(match.group(4) or match.group(3))
             target = REPO_ROOT / path
-            if not is_symbol(anchor) or not target.is_file():
+            # A citation is a string in a document, and this test reads the
+            # file it names. `REPO_ROOT / path` yields the absolute path when
+            # `path` is absolute, and follows `..` out of the tree, so an edit
+            # to any document under `docs/` could make CI read a file of its
+            # choosing. Citations that do not land inside the repository are
+            # not citations, and are skipped rather than opened.
+            if not is_symbol(anchor) or not is_inside_repo(target):
                 continue
             found.append((doc, anchor, target, start, end))
     return found
@@ -112,6 +128,19 @@ class DocCitationTests(unittest.TestCase):
         live = [d for d in REPO_ROOT.glob("docs/**/*.md") if "archive" not in d.parts]
         self.assertNotEqual(live, [], "the document tree was not reached at all")
         self.assertNotEqual(anchored_citations(), [], "no anchored citation was compared")
+
+    def test_a_citation_cannot_send_this_test_outside_the_checkout(self) -> None:
+        """A citation is a string in a document, and this test opens what it names.
+
+        `REPO_ROOT / path` returns the absolute path when `path` is absolute
+        and follows `..` out of the tree, so without this an edit to any
+        document under `docs/` could make CI read a file of its choosing.
+        """
+
+        self.assertFalse(is_inside_repo(pathlib.Path("/etc/passwd")))
+        self.assertFalse(is_inside_repo(REPO_ROOT / ".." / ".." / "etc" / "passwd"))
+        self.assertFalse(is_inside_repo(REPO_ROOT / "no-such-file-here.md"))
+        self.assertTrue(is_inside_repo(REPO_ROOT / "bin" / "sd"))
 
     def test_prose_between_a_symbol_and_a_citation_breaks_the_anchor(self) -> None:
         """The rule is adjacency, and adjacency has to actually be required.
