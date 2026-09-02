@@ -70,6 +70,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -1258,10 +1259,17 @@ def frontmatter(text: str) -> dict[str, str]:
 
     fields: dict[str, str] = {}
     lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].rstrip() != "---":
         return fields
     for line in lines[1:]:
-        if line.strip() == "---":
+        # Column zero, not `.strip()`. An indented `---` is content inside a
+        # block scalar and never the fence, and this reader has to agree with
+        # `frontmatter_span` about where the block ends -- 8-iv's `set` checks
+        # a transition against what this returns while editing the line that
+        # one locates, and the two disagreeing means judging a note by a value
+        # that is not in it. Measured against the live corpus when this
+        # changed: 0 of 244 notes parse differently.
+        if line.rstrip() == "---":
             break
         match = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
         if match:
@@ -1399,9 +1407,9 @@ def status_filter(kind: dict[str, object], wanted: str | None) -> str | None:
 FIELD_LINE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
 
 #: A value needing quotes to survive a YAML reader: one holding a colon-space,
-#: opening a wikilink or a flow collection, or already carrying a quote. The
-#: corpus quotes exactly these, so writing them bare is what breaks it.
-NEEDS_QUOTING = re.compile(r':\s|^[\[{>|&*!%@`]|^\s|\s$|"')
+#: opening a wikilink, a flow collection or a comment, or bounded by spaces.
+#: The corpus quotes exactly these, so writing them bare is what breaks it.
+NEEDS_QUOTING = re.compile(r':\s|^[\[{>|&*!%@`#]|^\s|\s$')
 
 
 def render_value(value: str) -> str:
@@ -1410,11 +1418,32 @@ def render_value(value: str) -> str:
     Quoting is not cosmetic here. `source-brief: [[2026-08-15 - Daily Intel
     Brief]]` and a `description:` holding a sentence colon both stop parsing
     when emitted bare, which is the second of the two failures R11-D27 records.
+
+    Two classes are **refused** rather than encoded, because this writer's
+    counterpart is `frontmatter()`, which strips quotes without unescaping
+    anything. A value it could not read back is a value this must not write:
+
+    * A control character -- a newline above all. `edit_field` writes one line,
+      and a value carrying `\n` would make that line two, silently inserting a
+      physical line into the block and breaking the one property this whole
+      design exists to hold.
+    * A double quote. The quoted form would be `\\"`, and the reader's
+      `.strip('"')` hands back the backslash. Refusing beats writing a value
+      the store cannot read back; the corpus quotes plenty of scalars and none
+      of them nest a quote.
     """
 
+    for bad, why in (('"', "a double quote, which the reader strips without unescaping"),):
+        if bad in value:
+            raise Refusal(f"the value holds {why}; it cannot be stored and read back unchanged")
+    control = next((c for c in value if c == "\n" or c == "\r" or (ord(c) < 32 and c != "\t")), None)
+    if control is not None:
+        raise Refusal(
+            f"the value holds {control!r}, a control character;"
+            " a frontmatter scalar is one line and this would make it two")
     if value == "" or not NEEDS_QUOTING.search(value):
         return value
-    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    return '"' + value + '"'
 
 
 def frontmatter_span(text: str) -> tuple[list[str], int, int]:
@@ -1428,10 +1457,17 @@ def frontmatter_span(text: str) -> tuple[list[str], int, int]:
     """
 
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].rstrip("\r\n") != "---":
         raise Refusal("the note has no `---` frontmatter block to edit")
     for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
+        # `rstrip` of the line ending only, never `strip()`. An **indented**
+        # `---` is content inside a block scalar, not the closing fence: YAML
+        # indents a block scalar's body, so a `---` within one is always
+        # indented and a fence never is. Matching `.strip()` closed the block
+        # at the wrong line, and `edit_field` then inserted a new `key: value`
+        # into the middle of the note's prose while leaving the real field in
+        # place -- a corrupted note carrying a duplicate key.
+        if lines[index].rstrip("\r\n") == "---":
             return lines, 1, index
     raise Refusal("the note's frontmatter block is never closed")
 
@@ -1469,7 +1505,10 @@ def edit_field(text: str, key: str, value: str) -> str:
 
     lines, first, close = frontmatter_span(text)
     hits = field_lines(lines, first, close, key)
-    ending = "\n"
+    # A new line takes the block's own ending rather than a hardcoded "\n",
+    # which would mix endings in a CRLF note.
+    opener = lines[0]
+    ending = opener[len(opener.rstrip("\r\n")):] or "\n"
     if hits:
         # Keep whatever line ending the file already uses on that line.
         target = lines[hits[0]]
@@ -1484,12 +1523,19 @@ def edit_field(text: str, key: str, value: str) -> str:
     return "".join(lines)
 
 
-def refuse_protected(kind: dict[str, object], field: str) -> None:
+def refuse_protected(kind: dict[str, object], field: str, verb: str) -> None:
+    """The verb is passed in because both write verbs call this.
+
+    A refusal from `sd store add` that said "not writable through `sd store
+    set`" named a command the caller had not run.
+    """
+
     protected = kind.get("protected-fields") or []
     assert isinstance(protected, list)
     if field in protected:
         raise Refusal(
-            f"`protected-fields` declares {field!r}; it is not writable through `sd store set`")
+            f"`protected-fields` declares {field!r};"
+            f" it is not writable through `sd store {verb}`")
 
 
 def refuse_below_floor(kind: dict[str, object], field: str, value: str) -> None:
@@ -1603,6 +1649,31 @@ def parse_assignments(pairs: list[str], fields: list[str]) -> dict[str, str]:
     return values
 
 
+def write_atomically(path: pathlib.Path, text: str) -> None:
+    """Write via a temporary file in the same directory, then rename.
+
+    `write_text` truncates before it writes, so a failure part way through
+    leaves a half-written note -- and for `add` that half-written file then
+    makes every retry refuse, because the path now exists. `os.replace` is
+    atomic within a filesystem, and the temporary lives beside the target so
+    the rename never crosses one.
+    """
+
+    tmp = None
+    try:
+        handle = tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp",
+            delete=False)
+        tmp = pathlib.Path(handle.name)
+        with handle:
+            handle.write(text)
+        os.replace(tmp, path)
+    except OSError as error:
+        if tmp is not None and tmp.exists():
+            tmp.unlink(missing_ok=True)
+        raise Refusal(f"cannot write {path}: {error}") from None
+
+
 def read_template(root: pathlib.Path, template: str) -> str:
     """The kind's template, read from the plugin checkout.
 
@@ -1635,9 +1706,15 @@ def store_add(args: argparse.Namespace) -> int:
 
     fields = store_fields(kind)
     values = parse_assignments(args.field or [], fields)
-    for field, value in values.items():
-        refuse_protected(kind, field)
-        refuse_below_floor(kind, field, value)
+    for field in values:
+        refuse_protected(kind, field, "add")
+    # Every floored field, not only the ones supplied. Iterating the supplied
+    # values let a floor be skipped by omission: the field then defaulted to
+    # `""` at render time and the note was written under its own floor.
+    floors = kind.get("floor") or {}
+    assert isinstance(floors, dict)
+    for field in floors:
+        refuse_below_floor(kind, str(field), values.get(str(field), ""))
     if "status" in fields:
         initial = str(kind["initial-status"])
         values.setdefault("status", initial)
@@ -1666,9 +1743,9 @@ def store_add(args: argparse.Namespace) -> int:
     block = "".join(f"{field}: {render_value(values.get(field, ''))}\n" for field in fields)
     try:
         base.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\n{block}---\n{body}", encoding="utf-8")
     except OSError as error:
-        raise Refusal(f"cannot write {path}: {error}") from None
+        raise Refusal(f"cannot create {base}: {error}") from None
+    write_atomically(path, f"---\n{block}---\n{body}")
     print(f"wrote {path}")
     return 0
 
@@ -1690,7 +1767,7 @@ def store_set(args: argparse.Namespace) -> int:
     if args.field not in fields:
         raise Refusal(
             f"the kind declares no field {args.field!r} (it declares {', '.join(fields)})")
-    refuse_protected(kind, args.field)
+    refuse_protected(kind, args.field, "set")
     refuse_below_floor(kind, args.field, args.value)
 
     try:
@@ -1718,10 +1795,7 @@ def store_set(args: argparse.Namespace) -> int:
     if updated == text:
         print(f"{path} already holds that value")
         return 0
-    try:
-        path.write_text(updated, encoding="utf-8")
-    except OSError as error:
-        raise Refusal(f"cannot write {path}: {error}") from None
+    write_atomically(path, updated)
     print(f"set {args.field} in {path}")
     return 0
 
