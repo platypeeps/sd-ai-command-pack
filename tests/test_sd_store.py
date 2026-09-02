@@ -1383,6 +1383,18 @@ class AddListsAndSectionsTests(StoreFixture):
         self.assertNotIn(b"\r", body)
         self.assertIn(b"## Tip\n\none\ntwo\n", body)
 
+    def test_a_field_with_no_value_is_written_without_a_trailing_space(self) -> None:
+        """No note in the corpus carries `key: ` with a trailing space, and
+        `pack.py` never wrote one. Writing it would make every note `sd` adds
+        distinguishable from every note beside it, on whitespace alone."""
+
+        self.build()
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9").returncode, 0)
+        block = (self.tips / "T.md").read_text(encoding="utf-8").split("---\n")[1]
+        self.assertIn("contexts:\n", block)
+        self.assertNotIn("contexts: \n", block)
+
     @unittest.skipUnless(yaml is not None, "PyYAML is not installed")
     def test_an_empty_list_renders_bare_and_reads_back_as_none(self) -> None:
         """`key:` and `key: []` are different values, not two spellings of one.
