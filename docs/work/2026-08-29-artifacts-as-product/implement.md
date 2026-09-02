@@ -4086,8 +4086,15 @@ first thing -- Sven's own signal, which no run may write at any time.
 **mixes both categories in one key**: `my-rating` is never machine-writable,
 while `url`, `content-type`, `dateCreated`, `brief-item` and `source-brief` are
 values a creating run is exactly the right writer for and a later run is not.
-`skill-proposal` and `topic` are mixed the same way (`topic` protects `slug`,
-which is the field a topic is looked up by).
+`skill-proposal` is mixed the same way. `topic` is not, and the way it differs
+is the point: it protects `content-type`, `dateCreated` and `slug`, all three
+creation-time, and no `my-rating` at all.
+
+So the four kinds land in three groups, not two -- `tip` protects only the
+never-writable field, `topic` protects only creation-time ones, and `blog-idea`
+and `skill-proposal` protect both through one key. A rule that reads
+`protected-fields` one way serves `tip`; the other way serves `topic`; neither
+serves the two in the middle.
 
 So the decision cannot be a single global reading of `protected-fields`. Either
 the vocabulary grows a way to say which of the two a field is, or the four
@@ -4169,3 +4176,45 @@ Verified: no new ruff finding (rule-code counts identical except `ISC004`
 `pieces list` still returns its ten pieces; each deleted verb exits non-zero;
 and `migrate-golden-corpus verify` still reports `784 notes byte-identical to
 the baseline`.
+
+#### The deletion had a gap, and the check that cleared it could not see it
+
+`sd-writing-pack` #8, immediately after. `vault set-score` moved a note's
+`score` field and its `## Score` body together, and its `RATING_DBS` named
+three databases:
+
+```python
+RATING_DBS = {"blog-ideas": BI_DB, "skill-proposals": SP_DB, "tips": TT_DB}
+```
+
+For `blog-ideas` and `tips` the replacement was already standing when the verb
+was deleted: both kinds declare `sections`, so
+`sd store set --field score=N --section 'Score=...'` is the same work in one
+atomic write. `skill-proposal` declared none -- 10b-iv-ii had added `sections`
+to `blog-idea` and `topic` and stopped there, because those were the two kinds
+the retargeting needed. So for that one database the capability was **deleted
+rather than moved**, and stayed that way until #8 declared `sections` for it.
+
+The verification above is not wrong; it is answering a narrower question than
+it appears to. "Each deleted verb exits non-zero" and "no live caller" are both
+true and neither one asks *whether the thing the verb did is still possible*. A
+deletion is safe when every capability it removes has somewhere to land, and
+call-site enumeration cannot establish that -- a capability with no caller
+today is exactly the case where the grep says yes and the answer is no.
+
+The check that would have caught it is cheap and is worth naming for the
+remaining steps: for each verb being deleted, name the `sd` invocation that
+replaces it and **run that invocation** against the kinds it applied to. Three
+of `set-score`'s databases, three runs, one of which would have refused with
+`the kind 'sdw.skill-proposal' declares no sections to edit`.
+
+Same shape as the census errors above, one level up. Those counted the code
+they could see from the verb; this counted the callers it could see from the
+verb. Neither asked what the verb was for.
+
+#8 also confirmed the `protected-fields` finding on a third kind:
+`sd store add sdw.skill-proposal` writes `content-type:` and `dateCreated:`
+empty. `skill-proposal` protects four fields and only `my-rating` is genuinely
+never-machine-writable, so it joins `blog-idea` as the second of the four kinds
+mixing both meanings in one key -- which, with `tip` and `topic` sitting at
+either pure extreme, is the evidence the open decision needs.
