@@ -3938,3 +3938,97 @@ edit -- "the twin exists, use it" -- would have broken the routine.
 **Still on `pack.py` for tips:** `tips attach`, which appends a section to an
 existing note and has no `sd` equivalent, and the `gh` verbs. 10b-iii and
 10b-iv respectively.
+
+### Step 10b-iii: sections get a writer, and two ways to eat a note (2026-09-02)
+
+`tips attach` was the verb 10b-ii could not move, because `sd store` could
+write frontmatter and a whole body and nothing in between. This lands the
+missing half as two verbs -- `sd store set-section`, which replaces or creates
+one declared H2, and `sd store get --section`, which reads one back. Landed as
+#705. Five `pack.py` writers are now expressible in `sd`; the census that
+sized them found no writer that reads `frontmatter()` on the note it is about
+to edit, which is why a section verb was enough and a parser was not.
+
+**`set-section` is a sibling verb, not a flag on `set`.** `set` takes four
+positionals (`kind title field value`) and a section body is not a field value:
+it is multi-line, it is addressed by heading rather than by key, and it has a
+`--section-file` twin that `set` has no use for. Folding it in would have made
+the positional grammar conditional on a flag.
+
+**R11-D27 extends to sections unchanged: edit by the line, never parse and
+rewrite.** The frontmatter is carried through the splice as raw lines and is
+never handed to `frontmatter()`, which is deliberately lossy -- block sequences
+read back as `""` and quoted scalars lose their quotes. Against the real
+corpus that is not a hypothetical: **14 of 14 tips carry a block sequence and
+10 of 14 carry a quoted scalar**, so a parse-and-rewrite `set-section` would
+have damaged every tip in the vault on first use. The tests assert the
+frontmatter byte-for-byte rather than field-by-field, because a field
+comparison is exactly the check that would pass while the quotes went missing.
+
+**Copilot found two note-corrupting defects, and both were in the same
+function.** `note_heading_lines` scans for headings, and a heading it misses
+becomes a *second* heading with the same name on the next write.
+
+* **Indentation.** The scanner read column 0; CommonMark allows up to three
+  leading spaces and Obsidian renders `   ## Score` as a heading. Proved by
+  running both scanners over one note: `fixed scanner sees: ['Tip', 'Score']`
+  against `old scanner saw: ['Tip']`. The codebase already knew this -- step
+  8-vi taught `parse_sections` to match `^ {0,3}## ` and left a comment saying
+  why. The new scanner did not read its own neighbour.
+* **Fence run length, which is the worse one.** A fenced block is closed only
+  by a run of the same character at least as long as the opener, and the
+  scanner was treating any ``` line as a closer. A tip quoting a ``` block
+  inside a ```` block therefore looked closed at the wrong line: the scanner
+  reported `[(4, 'Tip'), (8, 'Score')]` where line 8 is *inside* the code
+  sample and the real `## Score` is at line 11. A `set-section` against that
+  note deletes the rest of the sample, its closing fence, the real heading and
+  its text in one atomic write. Fixed with a `CODE_FENCE` pattern that keeps
+  the opening run and compares length.
+
+Neither was reachable by the tests as written, which is the useful part: both
+were found by reading, and both are now regression cases. 35 `SetSectionTests`
+cover the pair, including the nested-fence shape above and three indentations.
+
+**A declared-but-absent section reads as empty and exits 0.** That is a
+decision, not an oversight. `pack.py topics_add_feed` is two branches -- one
+`re.sub` when `## Feeds` exists, a different `re.sub` against a named anchor
+when it does not -- and reading absent-as-empty collapses both into one
+read-edit-write. It also removes the anchor: `topics_add_feed` dies outright on
+a note with no `## Provenance`, because the anchor is how it decides where to
+insert. `insertion_point` takes the position from the manifest's
+`sections.order` instead, so a note missing the anchor is written correctly
+rather than refused, and headings the manifest does not declare are stepped
+over rather than treated as the boundary.
+
+**The census also found a live `pack.py` bug, which is not this rollout's to
+fix.** `topics_add_feed`'s existing-section branch matches
+`^(## Feeds\n(?:.*\n)*?)(\n## )` -- it requires a *following* heading and has no
+end-of-file fallback. `## Feeds` is currently never last, so the bug is
+unreachable today; if it ever were, the `re.sub` no-ops silently and stderr
+still prints the success line. Recorded here because 10b-iv deletes the caller
+and the defect goes with it, so filing it separately would be filing a ticket
+against code that is scheduled to disappear.
+
+**10b-iv's target is restated to ~2,000 lines, from ~1,250.** `design.md`
+carried the lower figure and it was never reachable. Two things were wrong with
+it. It counted `gh` and `review adversarial` as deleted, and both still have
+live callers, so the deletion 10b-iv can actually make is 519 lines -- 493 of
+function bodies plus 26 of argparse wiring -- and `pack.py` lands at 2,013.
+Granting that assumption anyway reaches only 1,863, because the floor is not
+the verbs: `pieces` is 214 lines addressing git files under
+`content/<year>/<slug>/`, which `store.driver = vault` cannot address at all;
+`main` is 198 today and 172 once its wiring goes, holding the entire argparse
+tree; and 769 beyond that are
+imports, constants and module-level code. Measured from the AST rather than
+estimated, and `design.md` now says so.
+
+**The first census of that deletion was wrong twice, both in the same
+direction as wanting the number to be small.** It counted function bodies only,
+missing 26 lines of argparse wiring, and it counted `vault_title_taken` as
+deleted when the surviving `topics_seed` still calls it. The corrected census
+closes the cut set under "a survivor calls it" and adds the wiring, which is
+the shape any later deletion census here should take: a verb is not deletable
+because its name matches a prefix, only because nothing that stays reaches it.
+
+The goal 10b set -- get the vault-facing half of `pack.py` onto `sd` -- is
+unaffected; only the number attached to it was wrong.
