@@ -1865,7 +1865,12 @@ def render_field(field: str, value: str | list[str]) -> str:
     """
 
     if not isinstance(value, list):
-        return f"{field}: {render_value(value)}\n"
+        rendered = render_value(value)
+        # `key:`, not `key: `, when there is no value. Both read back as None,
+        # but no note in the corpus carries the trailing space and the tool
+        # this replaces never wrote one -- so writing it would make every note
+        # `sd` adds distinguishable from every note beside it, on whitespace.
+        return f"{field}: {rendered}\n" if rendered else f"{field}:\n"
     return f"{field}:\n" + "".join(f"  - {render_value(item)}\n" for item in value)
 
 
