@@ -1484,19 +1484,6 @@ def edit_field(text: str, key: str, value: str) -> str:
     return "".join(lines)
 
 
-def kind_statuses(kind: dict[str, object]) -> set[str] | None:
-    """Every status the kind's `transitions` mention, or None when it declares none."""
-
-    transitions = kind.get("transitions")
-    if transitions is None:
-        return None
-    assert isinstance(transitions, dict)  # validate_transitions built it
-    seen = set(transitions)
-    for targets in transitions.values():
-        seen.update(targets)
-    return seen
-
-
 def refuse_protected(kind: dict[str, object], field: str) -> None:
     protected = kind.get("protected-fields") or []
     assert isinstance(protected, list)

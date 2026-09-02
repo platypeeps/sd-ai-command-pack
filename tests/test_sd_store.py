@@ -560,8 +560,17 @@ class WriteTests(StoreFixture):
         self.plugin()
         path = self.tips / "Ship it.md"
         path.write_text(self.LOSSY, encoding="utf-8")
-        self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+
+        # Without these two lines the case is vacuous: every survivor string is
+        # already in the file before the write, so a `set` that refused and
+        # changed nothing would pass every assertion below. Proven by
+        # sabotaging `store_set` to raise -- this test still passed, and the
+        # byte-identical sibling above correctly failed.
+        self.assertEqual(done.returncode, 0, done.stderr)
         after = path.read_text(encoding="utf-8")
+        self.assertIn("status: approved", after)
+
         for survivor in (
                 "aliases:", '  - "A tip: with a colon"', "contexts:", "  - Personal",
                 'source-brief: "[[2026-08-15 - Daily Intel Brief]]"',
@@ -654,6 +663,103 @@ class WriteTests(StoreFixture):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn("declares no field", done.stderr)
 
+
+    # -- the positive controls, without which a refusal proves nothing ------
+
+    def test_a_value_at_or_above_the_floor_is_written(self) -> None:
+        """The control for the floor case.
+
+        Without it, a `refuse_below_floor` that refused every write to a
+        floored field -- never comparing anything -- would pass the whole
+        suite. The boundary is included because `<` and `<=` are the usual
+        place this goes wrong.
+        """
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        path = self.note("Ship it")
+        for value in ("6", "9"):
+            done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", value)
+            self.assertEqual(done.returncode, 0, f"{value} is not under the floor: {done.stderr}")
+            self.assertIn(f"score: {value}", path.read_text(encoding="utf-8"))
+
+    def test_a_floored_field_given_something_that_is_not_a_number(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "high")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("must be a number", done.stderr)
+
+    def test_setting_a_unique_field_to_its_own_current_value_is_not_a_collision(self) -> None:
+        """`skip=path`: a note must not collide with itself."""
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "unique-fields": ["score"]}})
+        self.note("Ship it", score="7")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "7")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_setting_a_unique_field_to_a_value_another_note_holds_refuses(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "unique-fields": ["score"]}})
+        self.note("Ship it", score="7")
+        self.note("Taken", score="9")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "9")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("unique-fields", done.stderr)
+
+    def test_add_enforces_the_same_keys_set_does(self) -> None:
+        """`add`'s enforcement calls were reachable only through `set` before this."""
+
+        root = self.plugin(kinds={"tip": self.kind_with_template(**{
+            "protected-fields": ["score"], "floor": {"score": 6}})}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+
+        protected = self.run_sd("store", "add", "pp.tip", "A", "--field", "score=9")
+        self.assertEqual(protected.returncode, 1, protected.stdout)
+        self.assertIn("protected-fields", protected.stderr)
+        self.assertFalse((self.tips / "A.md").exists())
+
+    def test_add_refuses_a_status_no_transition_reaches(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        done = self.run_sd("store", "add", "pp.tip", "A", "--field", "status=published")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("transitions", done.stderr)
+        self.assertFalse((self.tips / "A.md").exists())
+
+    def test_setting_a_field_to_the_value_it_already_holds_writes_nothing(self) -> None:
+        self.plugin()
+        path = self.note("Ship it")
+        before = path.read_text(encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "7")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("already holds", done.stdout)
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_an_unterminated_frontmatter_block_refuses(self) -> None:
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("---\nstatus: inbox\nscore: 7\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("never closed", done.stderr)
+
+    def test_a_value_holding_a_quote_or_a_backslash_round_trips(self) -> None:
+        """`render_value`'s escaping, which nothing exercised."""
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        self.run_sd("store", "set", "pp.tip", "Ship it", "note", 'a "quote" and a \\ slash: yes')
+        line = [
+            row for row in path.read_text(encoding="utf-8").splitlines()
+            if row.startswith("note:")]
+        self.assertEqual(line, ['note: "a \\"quote\\" and a \\\\ slash: yes"'])
 
 class DeclarationTests(StoreFixture):
     """The 8-i gap 8-iv closes: a key that governs nothing registers clean."""
