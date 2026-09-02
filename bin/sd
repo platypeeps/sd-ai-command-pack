@@ -65,6 +65,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -1280,11 +1281,16 @@ def frontmatter(text: str) -> dict[str, str]:
 def note_body(text: str) -> str:
     """Everything after the frontmatter, or the whole note when it has none."""
 
+    # Column zero, for the reason `frontmatter` gives. This is the third site
+    # that has to agree, and `read_note` is what reaches it, so `sd store get`
+    # is where the disagreement shows: an indented `---` inside a block scalar
+    # ended the block here but not in `frontmatter`, and the note came back
+    # with its fields read past the point its body had been cut from.
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].rstrip() != "---":
         return text
     for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
+        if line.rstrip() == "---":
             return "".join(lines[index + 1:])
     # An unterminated block is not frontmatter at all. Returning the tail would
     # silently drop the top of a note whose first line happened to be `---`.
@@ -1555,6 +1561,14 @@ def refuse_below_floor(kind: dict[str, object], field: str, value: str) -> None:
     except ValueError:
         raise Refusal(
             f"`floor` bounds {field!r}, so its value must be a number, not {value!r}") from None
+    # `float` accepts `nan`, `inf` and `-inf`, and `nan` compares False against
+    # everything -- so a floor of 6 lets `nan` through while refusing 5. A
+    # bound that any value can step over by spelling itself strangely is the
+    # vacuous shape this rollout keeps finding, so the non-finite values are
+    # refused by name rather than compared.
+    if not math.isfinite(number):
+        raise Refusal(
+            f"`floor` bounds {field!r}, so its value must be a finite number, not {value!r}")
     if number < floors[field]:
         raise Refusal(f"`floor` puts {field!r} at {floors[field]} or above; {value!r} is under it")
 
@@ -1617,9 +1631,33 @@ def refuse_duplicate_unique(
 
 
 def note_path(base: pathlib.Path, title: str) -> pathlib.Path:
-    if "/" in title or title in {"", ".", ".."}:
+    """A title becomes a filename in `base`, and cannot become anywhere else.
+
+    Containment is the whole check, and deliberately not a list of forbidden
+    characters. A blacklist encodes a fact about *this platform* -- `/`
+    separates here and `\` is an ordinary filename character -- into a rule
+    about titles, so it refuses a legal title on one system while missing a
+    traversal on another. Resolving the built path and requiring it to sit
+    directly in `base` is the same check everywhere, and it is what the tests
+    exercise: with it removed, `a/b` and `../escaped` are both accepted.
+
+    The *parent* is resolved and the note itself is not. Resolving the whole
+    path follows a symlinked note out to wherever it points and refuses it,
+    which `note_paths` deliberately allows -- a vault whose owner and whose
+    manifest author are the same person may link a note in.
+
+    The three degenerate names are refused before that only because they make a
+    contained but useless path (`..` becomes `...md`) and deserve the clearer
+    message. `sd store get` calls this too, rather than repeating a weaker
+    copy of it as it did.
+    """
+
+    if title in {"", ".", ".."}:
         raise UsageError(f"{title!r} is not a note title")
-    return base / f"{title}.md"
+    path = base / f"{title}.md"
+    if path.parent.resolve() != base.resolve():
+        raise UsageError(f"{title!r} is not a note title")
+    return path
 
 
 def declared_sections(kind: dict[str, object]) -> list[str]:
@@ -1841,9 +1879,7 @@ def store_get(args: argparse.Namespace) -> int:
 
     kind, store, name, _ = resolve_kind(args.kind)
     base = kind_base(store, name)
-    if "/" in args.title or args.title in {"", ".", ".."}:
-        raise UsageError(f"{args.title!r} is not a note title")
-    path = base / f"{args.title}.md"
+    path = note_path(base, args.title)
     if not path.is_file():
         raise Refusal(f"no note titled {args.title!r} in {base}")
     fields, body = read_note(path)

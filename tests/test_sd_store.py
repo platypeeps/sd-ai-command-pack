@@ -702,6 +702,73 @@ class WriteTests(StoreFixture):
         allowed = self.run_sd("store", "add", "pp.tip", "Loud one", "--field", "score=7")
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
+    def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
+        """`float("nan") < 6` is False, so an unguarded floor lets it through.
+
+        The floor refused 5 and accepted `nan`, which is a bound any value can
+        clear by spelling itself strangely. `inf` is included because it is the
+        same class of input even though it passes a floor honestly, and
+        `inf` is included because it is the same class of input even though it
+        clears a floor honestly.
+        """
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        path = self.note("Ship it", score="7")
+        for value in ("nan", "NaN", "inf", "Infinity"):
+            done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", value)
+            self.assertEqual(done.returncode, 1, f"{value} was accepted: {done.stdout}")
+            self.assertIn("finite", done.stderr)
+
+        # `-inf` never reaches the floor: argparse reads a leading dash as an
+        # option and rejects it first. Asserted as refused rather than as
+        # refused *here*, because pinning the exit code would pin argparse's
+        # behaviour rather than this check's.
+        minus = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "-inf")
+        self.assertNotEqual(minus.returncode, 0, "-inf was accepted")
+
+        self.assertIn("score: 7", path.read_text(encoding="utf-8"))
+
+    def test_a_title_cannot_walk_out_of_the_kind_directory(self) -> None:
+        """Both verbs, because `store get` kept its own weaker copy of this.
+
+        Containment does the work rather than a forbidden-character list: with
+        the resolve check removed, `a/b` and `../escaped` are both accepted.
+        A backslash is *not* asserted here -- it is an ordinary filename
+        character on this platform, and refusing it would be a rule about
+        Windows enforced against a legal title.
+        """
+
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+        for title in ("../escaped", "..", ".", "", "a/b", "sub/../../out"):
+            for verb in (("store", "set", "pp.tip", title, "status", "inbox"),
+                         ("store", "get", "pp.tip", title)):
+                done = self.run_sd(*verb)
+                self.assertEqual(
+                    done.returncode, 2, f"{title!r} accepted by {verb[1]}: {done.stdout}")
+
+    def test_an_indented_rule_does_not_move_where_the_body_starts(self) -> None:
+        """The third fence site, which the other two fixes left behind.
+
+        `note_body` kept `.strip()` after `frontmatter` and `frontmatter_span`
+        moved to column zero, so the three disagreed about where the block
+        ends. `read_note` reaches it, which makes `sd store get --json` the
+        place it shows: the fields are read to the real fence and the body is
+        cut at the indented one, so the note comes back reporting a body that
+        starts in the middle of its own frontmatter.
+        """
+
+        self.plugin()
+        (self.tips / "Ship it.md").write_text(
+            "---\nstatus: inbox\nnote: |\n  one\n  ---\n  two\n---\n\n## Why\n",
+            encoding="utf-8")
+        done = self.run_sd("store", "get", "pp.tip", "Ship it", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        body = json.loads(done.stdout)["body"]
+        self.assertEqual(body, "\n## Why\n", f"body was cut at the indented rule: {body!r}")
+
     def test_a_floored_field_given_something_that_is_not_a_number(self) -> None:
         self.plugin(kinds={"tip": {
             "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})

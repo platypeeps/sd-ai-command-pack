@@ -3241,8 +3241,8 @@ clean; `test_a_template_that_does_not_render_the_declared_order_refuses` closes
 it.
 
 **A code change silently invalidated three citations in `design.md`.** Growing
-`bin/sd` from 1,553 lines to 2,006 moved `frontmatter()` from 1231 to 1248, the reader's
-`.strip('"')` from 1252 to 1276, and `status_filter` from 1350 to 1378. All
+`bin/sd` from 1,553 lines past 2,000 moved `frontmatter()` off 1231, the reader's
+`.strip('"')` off 1252, and `status_filter` off 1350. All
 three were correct on `main` and all three were wrong on the branch that
 changed the file, in the same branch that edits `design.md`. They are corrected
 to the post-merge line numbers. The general hazard is unfixed and worth naming:
