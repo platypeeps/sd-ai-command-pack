@@ -3799,6 +3799,23 @@ but `make -s lint-mypy-paths` lists eighteen paths under `bin/` and
 The one linter whose scope includes the test suite is the one that reads
 `requires-python`.
 
+**And it happened a second time, one push later, in the same test.** The
+backtick case runs its text through a real `/bin/sh` to show what the inline
+spelling loses, and asserted the shell exits 0 with the words gone. That is
+bash's behaviour, and `/bin/sh` is bash on macOS. On the CI runners it is
+dash, which does not run `Bash(sd:*)` as a substitution at all -- it refuses to
+parse it: `/bin/sh: 1: Syntax error: word unexpected (expecting ")")`, exit 2,
+empty stdout. Both matrix legs failed on the assertion, not on the code under
+test.
+
+The fix is not a second branch for dash. **Asserting the shape of one shell's
+failure was the error; the portable claim is that no shell hands the text
+back intact**, so the case now asserts that stdout is neither the text nor
+contains the backticked words, which both shells satisfy for their own
+reasons. Recorded next to the f-string finding because they are one lesson
+twice: this developer's machine is a single point in a matrix, and an
+assertion pinned to what it happens to do there is a test of the machine.
+
 **Criterion, and the result.** The check named before the work was
 `python3 -m pytest tests/test_sd_store.py` with the new cases passing and no
 existing case failing, plus `ruff` and `mypy` as CI runs them. Full suite:

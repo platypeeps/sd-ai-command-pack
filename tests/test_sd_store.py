@@ -1519,7 +1519,14 @@ class ValueFromFileTests(StoreFixture):
 
         through_a_shell = subprocess.run(
             ["/bin/sh", "-c", f'printf %s "{text}"'], capture_output=True, text=True)
-        self.assertEqual(through_a_shell.returncode, 0, through_a_shell.stderr)
+        # The two shells this runs on fail differently and the test may not
+        # pick one. `/bin/sh` is bash on macOS, which runs the substitution and
+        # hands back the text with the words gone; it is dash on the CI
+        # runners, which refuses to parse `Bash(sd:*)` and exits 2 with nothing
+        # on stdout. Asserting the bash shape passed locally and failed both
+        # matrix legs. What is true of every shell is the claim worth making:
+        # none of them hands the text back intact.
+        self.assertNotEqual(through_a_shell.stdout, text)
         self.assertNotIn("Bash(sd:*)", through_a_shell.stdout)
 
     def test_a_field_reads_its_value_from_a_file(self) -> None:
