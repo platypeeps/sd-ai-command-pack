@@ -2404,11 +2404,45 @@ def store_add(args: argparse.Namespace) -> int:
 
 
 def store_set(args: argparse.Namespace) -> int:
-    """One field of one note, edited by the line.
+    """Fields and `## ` sections of one note, edited by the line.
 
     Read R11-D27 before changing this to parse the note. It reads as the
     cleaner implementation and it destroys every note it touches.
+
+    Several fields in one call rather than one per call, and sections
+    alongside them, because the writes are then one atomic replace instead of
+    three. The verbs this replaces moved keys together: `pack.py tips
+    set-published` wrote `status`, `url` and `used-by` in a single write, and
+    `pack.py vault set-score` wrote the `score` field and the `## Score` body
+    in another. Three `sd store set` calls in a row can stop after the first,
+    leaving a note published with no URL -- a state `pack.py` could not reach,
+    so migrating to it would have been a regression wearing a refactor's
+    clothes.
+
+    `set-section` still exists and is not deprecated by this. It is the verb
+    for a note whose sections change and whose frontmatter does not, and its
+    two positionals say that where `set`'s four cannot.
+
+    Every refusal below runs against every supplied field before anything is
+    edited. A per-field loop that validated and wrote as it went would be the
+    same partial-write hazard this verb exists to close.
     """
+
+    # The shape of the invocation first, before the manifest is resolved or the
+    # vault is touched. Whether the two spellings were mixed is a property of
+    # the command line alone, and answering it with "no note titled 'T'" tells
+    # the caller about the wrong thing -- and with exit 1 where the mistake is
+    # an exit 2.
+    #
+    # The positional shorthand becomes one more pair, so a single code path
+    # validates and writes both spellings. Mixing them is refused rather than
+    # merged: `set k t status published --field status=draft` has no reading
+    # that is obviously right, and picking one silently is how a note ends up
+    # holding the value its author did not type.
+    if args.field is not None and args.fields:
+        raise UsageError("give either the positional `FIELD VALUE` or --field, not both")
+    if args.field is not None and args.value is None:
+        raise UsageError("the positional form is `set KIND TITLE FIELD VALUE`")
 
     kind, store, name, _ = resolve_kind(args.kind)
     base = kind_base(store, name)
@@ -2416,12 +2450,40 @@ def store_set(args: argparse.Namespace) -> int:
     if not path.is_file():
         raise Refusal(f"no note titled {args.title!r} in {base}")
 
-    fields = store_fields(kind)
-    if args.field not in fields:
-        raise Refusal(
-            f"the kind declares no field {args.field!r} (it declares {', '.join(fields)})")
-    refuse_protected(kind, args.field, "set")
-    refuse_below_floor(kind, args.field, args.value)
+    declared = store_fields(kind)
+    if args.field is not None:
+        pairs = [f"{args.field}={args.value}"]
+    else:
+        pairs = resolve_pair_files(args.fields or [], "--field-file", sequences=False)
+
+    values = parse_assignments(pairs, declared)
+    scalars: dict[str, str] = {}
+    for field, value in values.items():
+        if isinstance(value, list):
+            # `add` can build a block sequence because it renders the whole
+            # block; `set` edits one line in place and a sequence is several.
+            raise Refusal(
+                f"{field!r} was given with `+=`, which builds a block sequence;"
+                " `set` edits a note by the line and cannot write one")
+        scalars[field] = value
+
+    order = declared_sections(kind)
+    filled = parse_sections(
+        resolve_pair_files(args.section or [], "--section-file", sequences=False))
+    if filled and not order:
+        raise Refusal(f"the kind {args.kind!r} declares no sections to edit")
+    for section in filled:
+        if section not in order:
+            raise Refusal(
+                f"the kind declares no section {section!r}"
+                f" (it declares {', '.join(order)})")
+    if not scalars and not filled:
+        raise UsageError(
+            "give `FIELD VALUE`, or --field NAME=VALUE, or --section NAME=TEXT")
+
+    for field, value in scalars.items():
+        refuse_protected(kind, field, "set")
+        refuse_below_floor(kind, field, value)
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -2436,27 +2498,36 @@ def store_set(args: argparse.Namespace) -> int:
     # refuse these anyway, but only after a semantic check had already reported
     # a different complaint about a note it could not read properly.
     lines, first, close = frontmatter_span(text)
-    field_lines(lines, first, close, args.field)
+    for field in scalars:
+        field_lines(lines, first, close, field)
 
     # `frontmatter(text)`, not `read_note(path)`: the note is already in hand,
     # and a second read would let the transition below be judged against a
     # version of the file that is not the one `edit_field` goes on to edit.
     found = frontmatter(text)
-    if args.field == "status":
-        refuse_human_only(kind, args.value)
-        refuse_bad_transition(kind, found.get("status", ""), args.value)
-    refuse_duplicate_unique(kind, base, {args.field: args.value}, skip=path)
+    if "status" in scalars:
+        refuse_human_only(kind, scalars["status"])
+        refuse_bad_transition(kind, found.get("status", ""), scalars["status"])
+    # One call with every field, not one per field: `unique-fields` may name
+    # more than one key, and a note is a duplicate on the set it would end up
+    # holding rather than on each key considered alone.
+    refuse_duplicate_unique(kind, base, scalars, skip=path)
     # Last of the refusals, and the only one that reads the note's shape rather
     # than the manifest: a field holding a block sequence cannot be edited by
     # the line without orphaning its items.
-    refuse_list_value(text, args.field)
+    for field in scalars:
+        refuse_list_value(text, field)
 
-    updated = edit_field(text, args.field, args.value)
+    updated = text
+    for field, value in scalars.items():
+        updated = edit_field(updated, field, value)
+    for section, body in filled.items():
+        updated = edit_section(updated, section, body, order)
     if updated == text:
-        print(f"{path} already holds that value")
+        print(f"{path} already holds that")
         return 0
     write_atomically(path, updated)
-    print(f"set {args.field} in {path}")
+    print(f"set {', '.join([*scalars, *filled])} in {path}")
     return 0
 
 
@@ -2763,16 +2834,42 @@ def build_parser() -> argparse.ArgumentParser:
 
     # No `--force`. `human-only` is the whole reason this verb refuses, and a
     # flag that lifts the refusal would make the key decorative (R11-D27).
-    edit = kept.add_parser("set", help="one field of one note, edited by the line")
+    edit = kept.add_parser(
+        "set", help="fields and `## ` sections of one note, edited by the line")
     edit.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
     edit.add_argument("title", help="the note's title, without the .md")
-    edit.add_argument("field", help="a field the kind declares")
-    edit.add_argument("value", help="the new value")
+    # Optional, because `--field` is the spelling that repeats. Kept as the
+    # one-field shorthand rather than dropped: it is what every existing caller
+    # types, and a flag-only form would have made the common case the verbose
+    # one. The handler refuses a lone `FIELD` with no `VALUE`, which argparse
+    # cannot state as a constraint across two `nargs="?"` positionals.
+    edit.add_argument("field", nargs="?", help="a field the kind declares")
+    edit.add_argument("value", nargs="?", help="the new value")
+    # `dest="fields"`, not `"field"`: the positional above already holds that
+    # name, and letting them share one would make the shorthand and the flag
+    # overwrite each other instead of being refused as a mix.
+    edit.add_argument("--field", dest="fields", action=Pair, const=False,
+                      metavar="NAME=VALUE",
+                      help="a declared field's new value; repeatable, and"
+                           " applied with every --section in one atomic write")
+    edit.add_argument("--field-file", dest="fields", action=Pair, const=True,
+                      metavar="NAME=PATH",
+                      help="the same, with the value read from a file -- use"
+                           " this whenever the text carries backticks, which a"
+                           " shell would run")
+    edit.add_argument("--section", dest="section", action=Pair, const=False,
+                      metavar="NAME=TEXT",
+                      help="a declared section's new text, written in the same"
+                           " atomic write as the fields above; repeatable")
+    edit.add_argument("--section-file", dest="section", action=Pair, const=True,
+                      metavar="NAME=PATH",
+                      help="the same, with the text read from a file")
     edit.set_defaults(handler=store_set)
 
-    # A sibling verb rather than a `--section` on `set`, whose four positionals
-    # are `kind title field value`: a flag that made two of them meaningless
-    # would be a second verb wearing the first one's clothes.
+    # Still a sibling verb, though `set` now takes `--section` too. The two
+    # positionals are the point: a note whose sections change and whose
+    # frontmatter does not has no `FIELD VALUE` to give, and `set`'s optional
+    # pair would sit there as two arguments this call never has a use for.
     part = kept.add_parser(
         "set-section", help="one or more `## ` sections of one note, edited by the line")
     part.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")

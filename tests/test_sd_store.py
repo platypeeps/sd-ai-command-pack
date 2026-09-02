@@ -1642,14 +1642,22 @@ class ValueFromFileTests(StoreFixture):
         self.assertEqual(done.returncode, 2, done.stderr)
         self.assertIn("given twice", done.stderr)
 
-    def test_the_flags_are_only_on_add(self) -> None:
-        """`set` edits a note by the line and takes its value positionally.
-        The file spellings belong to `add` and to `set-section`, which take
-        their pairs as flags; a half-present flag reads as a supported one."""
+    def test_set_refuses_the_positional_and_the_flag_together(self) -> None:
+        """10b-iv gave `set` the file spellings; mixing them is still wrong.
+
+        `--field-file` is on `set` now, because the `pack.py` verbs it replaces
+        moved several keys in one write. What is refused is no longer the flag
+        but the *mix*: `set k t score --field-file x=y` has one field named
+        positionally and another named by flag, and no reading of that is
+        obviously right. Exit 2 rather than 1, and it is checked before the
+        path is opened -- a wrong invocation should be told so, not told that
+        the file it should not have named is missing.
+        """
 
         self.build()
         done = self.run_sd("store", "set", "pp.tip", "T", "score", "--field-file", "x=y")
         self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("not both", done.stderr)
 
 
 class SetSectionTests(StoreFixture):
@@ -2139,6 +2147,231 @@ class SetSectionTests(StoreFixture):
         self.assertNotIn("\n", created.replace("\r\n", ""))
         self.assertIn("## Score\r\n\r\ns\r\n", created)
 
+
+
+class MultiFieldSetTests(StoreFixture):
+    """10b-iv: several fields, and sections beside them, in one atomic write.
+
+    Three `pack.py` verbs move more than one frontmatter key per run -- `tips
+    set-published` writes `status`, `url` and `used-by`, `ideas set-published`
+    writes `status` and `url`, and `vault set-score` writes `score` alongside
+    the `## Score` body. Each does it with one `open(w)`, so a note is never
+    seen holding half of the change.
+
+    A migration that spelled those as a sequence of `sd store set` calls would
+    have introduced a state `pack.py` could not produce: `status: published`
+    on a note with no `url`, because the second call refused or the process
+    stopped between the two. That is a regression, not a refactor, which is
+    why `set` takes the fields together rather than the callers taking turns.
+
+    The property under test is therefore not "several fields can be given" --
+    that much is visible from `--help`. It is that **nothing reaches the disk
+    unless every field passes every refusal**, which is what the second case
+    below actually measures.
+    """
+
+    ORDER = ["Tip", "Score", "Provenance"]
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.kind: dict[str, object] = {
+            "fields": ["status", "score", "url", "used-by"],
+            "initial-status": "inbox",
+            "transitions": {"inbox": ["approved", "published"]},
+            "floor": {"score": 6},
+            "sections": {"order": list(self.ORDER), "template": "tip.md"},
+        }
+
+    def build(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind}, register=False)
+        (root / "tip.md").write_text(
+            "\n## Tip\n\n## Score\n\n## Provenance\n", encoding="utf-8")
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+    def tip(self) -> pathlib.Path:
+        """A note carrying both shapes `frontmatter()` cannot round-trip."""
+
+        path = self.tips / "T.md"
+        path.write_text(
+            "---\n"
+            "status: inbox\n"
+            "score: 7\n"
+            'description: "quoted, and the reader strips it"\n'
+            "contexts:\n  - Personal\n  - Work\n"
+            "---\n\n## Tip\n\nThe tip.\n\n## Score\n\nold breakdown\n\n## Provenance\n\nx\n",
+            encoding="utf-8")
+        return path
+
+    # -- what the three deleted verbs needed ----------------------------
+
+    def test_three_fields_land_in_one_call(self) -> None:
+        """`pack.py tips set-published`, spelled on the backbone.
+
+        `url` and `used-by` are absent from the note, so this also covers the
+        insert path twice in a row: the second insert has to re-find the
+        closing fence the first one moved.
+        """
+
+        self.build()
+        path = self.tip()
+        done = self.run_sd(
+            "store", "set", "pp.tip", "T",
+            "--field", "status=published",
+            "--field", "url=https://example.com/p",
+            "--field", "used-by=2026/slug")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("status: published\n", text)
+        self.assertIn("url: https://example.com/p\n", text)
+        self.assertIn("used-by: 2026/slug\n", text)
+        # R11-D27 still holds across a multi-field write: the two shapes
+        # `frontmatter()` cannot round-trip are untouched.
+        self.assertIn('description: "quoted, and the reader strips it"\n', text)
+        self.assertIn("contexts:\n  - Personal\n  - Work\n", text)
+
+    def test_a_refusal_on_the_second_field_leaves_the_note_untouched(self) -> None:
+        """The whole reason the fields travel together.
+
+        `url` is valid and `score` is under the kind's floor. A handler that
+        validated and wrote field by field would have written `url` before
+        reaching the refusal, leaving the note in a state no single `pack.py`
+        run could produce. The note is compared byte-for-byte, not key by key,
+        because a partial write is exactly the thing a key-by-key comparison
+        would be at risk of stepping over.
+        """
+
+        self.build()
+        path = self.tip()
+        before = path.read_bytes()
+        done = self.run_sd(
+            "store", "set", "pp.tip", "T",
+            "--field", "url=https://example.com/p",
+            "--field", "score=3")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_refusal_on_a_section_leaves_the_fields_unwritten(self) -> None:
+        """The same property across the two kinds of edit.
+
+        Sections are validated before any field is applied, so an undeclared
+        section name stops a call whose fields were all fine.
+        """
+
+        self.build()
+        path = self.tip()
+        before = path.read_bytes()
+        done = self.run_sd(
+            "store", "set", "pp.tip", "T",
+            "--field", "status=published",
+            "--section", "Nope=text")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("no section 'Nope'", done.stderr)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_field_and_a_section_are_written_together(self) -> None:
+        """`pack.py vault set-score`, which moved `score` and `## Score` at once."""
+
+        self.build()
+        path = self.tip()
+        done = self.run_sd(
+            "store", "set", "pp.tip", "T",
+            "--field", "score=9",
+            "--section", "Score=8 for reach, 9 for novelty")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("score: 9\n", text)
+        self.assertIn("## Score\n\n8 for reach, 9 for novelty\n", text)
+        self.assertNotIn("old breakdown", text)
+
+    def test_a_value_from_a_file_reaches_the_same_refusals(self) -> None:
+        """`--field-file` is the spelling for text a shell would mangle.
+
+        It goes through `resolve_pair_files` into the same parser the inline
+        form uses, so a file-supplied value under the floor is refused for the
+        floor rather than accepted down a second path.
+        """
+
+        self.build()
+        path = self.tip()
+        before = path.read_bytes()
+        low = self.tmp / "score.txt"
+        low.write_text("3", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "T", "--field-file", f"score={low}")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(path.read_bytes(), before)
+
+    # -- the shorthand, kept ---------------------------------------------
+
+    def test_the_positional_form_still_writes_one_field(self) -> None:
+        """Every caller written before 10b-iv types this, and it is unchanged."""
+
+        self.build()
+        path = self.tip()
+        done = self.run_sd("store", "set", "pp.tip", "T", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("status: approved\n", path.read_text(encoding="utf-8"))
+
+    def test_a_positional_field_with_no_value_is_a_usage_error(self) -> None:
+        """Two `nargs="?"` positionals cannot express "both or neither"."""
+
+        self.build()
+        self.tip()
+        done = self.run_sd("store", "set", "pp.tip", "T", "status")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("FIELD VALUE", done.stderr)
+
+    # -- refusals ---------------------------------------------------------
+
+    def test_neither_a_field_nor_a_section_is_a_usage_error(self) -> None:
+        self.build()
+        self.tip()
+        done = self.run_sd("store", "set", "pp.tip", "T")
+        self.assertEqual(done.returncode, 2, done.stderr)
+
+    def test_the_same_field_twice_is_refused(self) -> None:
+        """`parse_assignments` already calls a repeated `=` a typo, and it is."""
+
+        self.build()
+        self.tip()
+        done = self.run_sd(
+            "store", "set", "pp.tip", "T", "--field", "score=7", "--field", "score=8")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("given twice", done.stderr)
+
+    def test_append_cannot_build_a_list_on_set(self) -> None:
+        """`add` renders the whole block and can write a sequence; `set` edits
+        one line, and one line is not a sequence."""
+
+        self.build()
+        path = self.tip()
+        before = path.read_bytes()
+        done = self.run_sd("store", "set", "pp.tip", "T", "--field", "used-by+=a")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("block sequence", done.stderr)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_an_undeclared_field_is_refused_with_the_declared_ones(self) -> None:
+        self.build()
+        self.tip()
+        done = self.run_sd("store", "set", "pp.tip", "T", "--field", "nope=1")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("declares no field 'nope'", done.stderr)
+
+    def test_a_bad_transition_is_judged_against_the_note_on_disk(self) -> None:
+        """Not against a value supplied in the same call.
+
+        `status` is read from the note before any edit is applied, so the
+        transition is checked against what the note actually holds.
+        """
+
+        self.build()
+        path = self.tip()
+        before = path.read_bytes()
+        done = self.run_sd(
+            "store", "set", "pp.tip", "T",
+            "--field", "status=declined", "--field", "url=https://x")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(path.read_bytes(), before)
 
 
 LIST_KIND: dict[str, object] = {
