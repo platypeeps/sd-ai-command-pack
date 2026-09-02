@@ -1283,6 +1283,28 @@ class AddListsAndSectionsTests(StoreFixture):
             "--field", "contexts=a+=b").returncode, 0)
         self.assertIn("contexts: a+=b", (self.tips / "T.md").read_text(encoding="utf-8"))
 
+    def test_the_value_starts_immediately_after_the_first_separator(self) -> None:
+        """`contexts+==x` is a list holding `=x`, and `contexts==x` is the
+        scalar `=x`. Both take everything after the separator verbatim, which
+        is the same rule, and a value may legitimately begin with `=`.
+
+        Pinned rather than argued: rejecting `+==` as a typo would special-case
+        one spelling while `==` -- which has always been accepted and gives the
+        analogous scalar -- kept working, and would refuse a real `=x`.
+        """
+
+        self.build()
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "L", "--field", "score=9",
+            "--field", "contexts+==Personal").returncode, 0)
+        self.assertIn("contexts:\n  - =Personal\n",
+                      (self.tips / "L.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "S", "--field", "score=9",
+            "--field", "contexts==Personal").returncode, 0)
+        self.assertIn("contexts: =Personal",
+                      (self.tips / "S.md").read_text(encoding="utf-8"))
+
     def test_a_list_is_refused_on_a_field_something_compares_as_one_value(self) -> None:
         """`status`, `floor` and `unique-fields` all read a field as a scalar.
         Without this the list reached them where a string was expected."""
