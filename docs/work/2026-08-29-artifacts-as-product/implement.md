@@ -3340,3 +3340,62 @@ real command.
 
 Corpus collateral was re-measured against the final rule and is still **zero**
 of 7,869 bare values across 1,463 notes.
+
+### Step 8-v: the baseline is recorded, and it is deliberately not in this repo (2026-09-02)
+
+`bin/migrate-golden-corpus capture` has run. **782 notes across 14 bases**,
+root `d3758e14`, recorded 2026-09-02 -- before any vault move, which is the
+whole condition step 11's row places on it. `verify` reports all 782
+byte-identical.
+
+**The layout changed after approval, on a fact that was not on the table when
+it was given.** The accepted design committed the manifest to
+`tests/fixtures/golden-corpus.sha256` as `sha256  relative/path`, sold on
+"hashes are reviewable in CI, note bodies never leave the machine". Both
+halves were true and both missed the point: **this repository is public, and a
+note's path is its title.** Committing that file would have published 782
+titles -- `Market Watch/` company names, `TaskNotes/Tasks/` personal task
+titles -- permanently, into the history of a public repo.
+
+The second fact is that **CI can never run this check at all.** GitHub Actions
+has no access to the vault, so the reviewability the layout was chosen for does
+not exist. What committing actually buys is tamper-evidence: proof a baseline
+was taken when it says it was and has not been quietly re-captured after a
+botched move to make `verify` pass. That needs a hash, not the titles.
+
+So the manifest and the note bodies live at `~/.local/state/sd/golden-corpus/`
+(`$SD_GOLDEN_CORPUS` overrides), and what is committed is
+`tests/fixtures/golden-corpus.root` -- four lines: capture date, note count,
+base count, and one sha256 over the sorted manifest. `verify` authenticates the
+local manifest against that root *before* it compares any row, because a
+manifest edited to agree with a damaged vault would otherwise make every
+comparison pass.
+
+**Checked by enumeration, not by inspection.** Every one of the 782 titles was
+taken from the local manifest and searched for across the whole repository
+working tree, tracked and untracked. Seven matched, all coincidental generic
+words that are also ordinary English in these documents (`Learning`,
+`Observability`, `Traversal`, `Baseten`). Exactly one full relative path
+appears, at line 2722 of this file, and it predates this step by a month. It
+is deliberately not repeated here: naming it again would add a second copy of
+the one string this whole layout exists to keep out, and a line number points
+at it just as well. 8-v introduces no note title to the repository.
+
+**Two things the base list records that the step-11 row gets wrong.** "Tips" is
+`System/Databases/Tips and Tricks`; there is no `Tips`. And `System/Databases/`
+holds three bases the per-base list never names -- `Companies`, `Tool Stack`,
+`space` -- all three empty today and all three listed anyway, because a move
+relocates an empty directory too and its disappearance should be loud. Two
+pairs read as duplicates and are not: `Learning` and
+`System/Databases/Learning` are different directories, and the second is the
+one holding 56 notes under `Books/`, `Courses/` and `YouTube/`.
+
+An earlier count in this session said 446 notes across 10 bases. That was
+wrong: it used a top-level glob where the scan is recursive, and it missed
+`TaskNotes/` 280 notes in `Archive/`, `Tasks/` and `Views/` along with the 56
+under `System/Databases/Learning`. 782 is the measured figure.
+
+The tool is `migrate-`-prefixed and outside the `bin/` line cap because it is
+deleted at step 11 with the rest of the migration tooling. All four sabotages
+of it are caught: disabling the root check, making the scan non-recursive,
+removing the re-capture guard, and skipping a base that stopped existing.
