@@ -2296,7 +2296,7 @@ keeps its **declared order** through registration instead of being sorted. It is
 alphabetically — and no other key carries that information. `name_list` already refuses
 duplicates, so the order costs nothing and sorting discarded it.
 
-**R11-D28 (2026-09-02) — `sd store list --full` prints bodies, and only bodies.** Step 9
+**R11-D28 (2026-09-02) — `sd store list --full` adds the body, and adds nothing to the fields.** Step 9
 retargets five vault `SKILL.md` files at `sd`, and three of their four real invocations are
 `pack.py topics list --status active --full`, whose output the research routines read `## Covers`,
 `## Feeds` and `## Ground truth` out of. `sd store list --json` already returned every *declared*
@@ -2304,8 +2304,12 @@ field, so the gap was never the fields — it was that a listing carried no body
 retarget would have become one listing plus one `get` per note: ten calls for nine active topics,
 handed to an unattended run.
 
-`--full` deliberately does **not** also widen the fields to every key a note carries, which is what
-`store get --json` does and says why. `get` names one note, so a field the manifest has not caught
+Under `--json` each row gains a `body` key; as plain text each note prints whole, frontmatter
+included, the way `store get` prints one and the way `pack.py topics list --full` did — that shape
+*is* the parity being bought, so plain text was never going to be body-only.
+
+What `--full` deliberately does **not** do is widen the fields to every key a note carries, which is
+what `store get --json` does and says why. `get` names one note, so a field the manifest has not caught
 up with is the answer to the question asked. A listing is a table, and a row that grows a column
 per note stops being one. The trailing blank line between notes is `pack.py`'s and is kept: a note
 whose body ends without one runs straight into the next `===` header. Parity is measured rather
