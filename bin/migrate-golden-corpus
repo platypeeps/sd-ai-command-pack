@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""The vault's bytes, recorded before step 11 moves them, and checked after.
+
+Step 11 relocates live note bases. The failure it has to rule out is not "the
+move errored" -- that is loud -- but "the move rewrote something on the way
+through". A note reformatted by a tool that opened it to move it looks exactly
+like a note that was moved correctly, and the corpus is large enough that
+nobody reads 782 of them afterwards.
+
+So the bytes are recorded first. `capture` hashes every note under the bases
+listed in `tests/fixtures/golden-corpus-bases.txt` and copies each one aside;
+`verify` re-hashes the vault and names every note whose bytes differ. Run
+`capture` before the move and `verify` after, and a silent rewrite has nowhere
+to hide.
+
+**What lives where, and why they are not the same place.** The manifest maps a
+hash to a note's path, and a path is a note's title. This repository is
+public, so the manifest stays out of it, next to the bodies under
+`~/.local/state/sd/golden-corpus/` (`$SD_GOLDEN_CORPUS` overrides it). What is
+committed is `tests/fixtures/golden-corpus.root`: the note count, the capture
+date, and one hash over the whole sorted manifest. That is enough to prove a
+baseline was taken when it says it was and has not been edited since, which is
+the one property a local file cannot establish about itself -- a baseline
+quietly re-captured after a botched move would make `verify` pass, and the
+committed root is what makes that visible instead.
+
+The bodies are kept because a hash says *that* a note changed and never
+*what*. After a `verify` failure the copy under `bodies/` is the left-hand side
+of the diff that answers it.
+
+Deleted at step 11 with the rest of the migration tooling, which is why this is
+`migrate-` and outside the `bin/` line cap.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import os
+import pathlib
+import shutil
+import sys
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+BASES_FILE = REPO_ROOT / "tests" / "fixtures" / "golden-corpus-bases.txt"
+ROOT_FILE = REPO_ROOT / "tests" / "fixtures" / "golden-corpus.root"
+MANIFEST_NAME = "manifest.sha256"
+BODIES_NAME = "bodies"
+
+
+class UsageError(Exception):
+    """Something the operator can fix, reported without a traceback."""
+
+
+def baseline_dir() -> pathlib.Path:
+    """Where the bodies and the manifest live. Never inside the repository."""
+
+    override = os.environ.get("SD_GOLDEN_CORPUS")
+    if override:
+        return pathlib.Path(override).expanduser()
+    state = os.environ.get("XDG_STATE_HOME") or "~/.local/state"
+    return pathlib.Path(state).expanduser() / "sd" / "golden-corpus"
+
+
+def vault_root() -> pathlib.Path:
+    root = os.environ.get("OBSIDIAN_VAULT")
+    if not root:
+        raise UsageError("OBSIDIAN_VAULT is unset; it must name the vault to record")
+    path = pathlib.Path(root).expanduser()
+    if not path.is_dir():
+        raise UsageError(f"OBSIDIAN_VAULT is {root!r}, which is not a directory")
+    return path
+
+
+def read_bases() -> list[str]:
+    """The bases to record, from the committed list.
+
+    A list rather than a walk of the whole vault: step 11 moves named bases,
+    and hashing 1,463 notes to watch 782 of them would report every unrelated
+    edit the operator made in between as a failure.
+    """
+
+    if not BASES_FILE.is_file():
+        raise UsageError(f"no base list at {BASES_FILE}")
+    bases = [line.strip() for line in BASES_FILE.read_text(encoding="utf-8").splitlines()]
+    bases = [b for b in bases if b and not b.startswith("#")]
+    if not bases:
+        raise UsageError(f"{BASES_FILE} lists no bases")
+    return bases
+
+
+def scan(vault: pathlib.Path, bases: list[str]) -> list[tuple[str, str]]:
+    """`(sha256, path-relative-to-vault)` for every note under the bases, sorted.
+
+    Sorted by path so the manifest -- and therefore the root hash over it -- is
+    a function of the corpus and not of the order the filesystem happened to
+    hand the entries back.
+
+    A base that does not exist is an error rather than an empty result. The
+    whole point is to notice a base that stopped being there, and step 11 moves
+    exactly these directories.
+    """
+
+    rows: list[tuple[str, str]] = []
+    for base in bases:
+        directory = vault / base
+        if not directory.is_dir():
+            raise UsageError(f"the base {base!r} is not a directory under {vault}")
+        for note in directory.rglob("*.md"):
+            if not note.is_file():
+                continue
+            digest = hashlib.sha256(note.read_bytes()).hexdigest()
+            rows.append((digest, note.relative_to(vault).as_posix()))
+    rows.sort(key=lambda row: row[1])
+    return rows
+
+
+def render_manifest(rows: list[tuple[str, str]]) -> str:
+    return "".join(f"{digest}  {path}\n" for digest, path in rows)
+
+
+def parse_manifest(text: str) -> dict[str, str]:
+    """`path -> sha256`. Split on the two-space separator, once, from the left.
+
+    A note title can hold anything but a newline, two spaces included, so the
+    hash is the fixed-width half and the split is anchored to it.
+    """
+
+    found: dict[str, str] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line:
+            continue
+        digest, separator, path = line.partition("  ")
+        if not separator or len(digest) != 64:
+            raise UsageError(f"{MANIFEST_NAME} line {number} is not `<sha256>  <path>`")
+        found[path] = digest
+    return found
+
+
+def root_hash(manifest: str) -> str:
+    return hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+
+
+def render_root(rows: list[tuple[str, str]], bases: list[str], manifest: str) -> str:
+    today = datetime.date.today().isoformat()
+    return (f"captured  {today}\n"
+            f"notes     {len(rows)}\n"
+            f"bases     {len(bases)}\n"
+            f"root      {root_hash(manifest)}\n")
+
+
+def read_root_field(name: str) -> str:
+    if not ROOT_FILE.is_file():
+        raise UsageError(f"no committed root at {ROOT_FILE}; capture has not run")
+    for line in ROOT_FILE.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition("  ")
+        if key.strip() == name:
+            return value.strip()
+    raise UsageError(f"{ROOT_FILE} declares no {name!r}")
+
+
+def _display(path: pathlib.Path) -> str:
+    """Repo-relative when it is in the repo, absolute when it is not.
+
+    `relative_to` raises rather than falling back, and the tests redirect
+    `ROOT_FILE` out of the checkout so they never write the tracked file. A
+    progress line is not worth an exception either way.
+    """
+
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def capture(args: argparse.Namespace) -> int:
+    vault, bases = vault_root(), read_bases()
+    baseline = baseline_dir()
+    manifest_path = baseline / MANIFEST_NAME
+    if manifest_path.exists() and not args.recapture:
+        raise UsageError(
+            f"a baseline is already recorded at {baseline}."
+            " Re-capturing replaces the evidence a later verify is checked against,"
+            " so it is not the default: pass --recapture to say that is what you mean")
+
+    rows = scan(vault, bases)
+    bodies = baseline / BODIES_NAME
+    if bodies.exists():
+        shutil.rmtree(bodies)
+    for _, path in rows:
+        target = bodies / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(vault / path, target)
+
+    manifest = render_manifest(rows)
+    baseline.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(manifest, encoding="utf-8")
+    ROOT_FILE.write_text(render_root(rows, bases, manifest), encoding="utf-8")
+    print(f"recorded {len(rows)} notes from {len(bases)} bases")
+    print(f"  bodies and manifest  {baseline}")
+    print(f"  committed root       {_display(ROOT_FILE)}")
+    return 0
+
+
+def verify(args: argparse.Namespace) -> int:
+    vault, bases = vault_root(), read_bases()
+    baseline = baseline_dir()
+    manifest_path = baseline / MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise UsageError(f"no baseline at {manifest_path}; run `capture` before the move")
+
+    recorded_text = manifest_path.read_text(encoding="utf-8")
+    # The committed root first. A manifest edited to match a damaged vault
+    # would make every comparison below pass, so the evidence is authenticated
+    # before it is consulted.
+    committed = read_root_field("root")
+    actual = root_hash(recorded_text)
+    if actual != committed:
+        print(f"{manifest_path} does not match the committed root", file=sys.stderr)
+        print(f"  committed  {committed}", file=sys.stderr)
+        print(f"  on disk    {actual}", file=sys.stderr)
+        return 1
+
+    recorded = parse_manifest(recorded_text)
+    current = {path: digest for digest, path in scan(vault, bases)}
+    changed = sorted(p for p in recorded.keys() & current.keys() if recorded[p] != current[p])
+    gone = sorted(recorded.keys() - current.keys())
+    added = sorted(current.keys() - recorded.keys())
+    for label, paths in (("changed", changed), ("missing", gone), ("unrecorded", added)):
+        for path in paths:
+            print(f"{label}: {path}", file=sys.stderr)
+    if changed or gone or added:
+        print(f"{len(changed)} changed, {len(gone)} missing, {len(added)} unrecorded"
+              f" of {len(recorded)} recorded notes", file=sys.stderr)
+        if changed:
+            print(f"the bytes as recorded are under {baseline / BODIES_NAME}", file=sys.stderr)
+        return 1
+    print(f"{len(recorded)} notes byte-identical to the baseline")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="migrate-golden-corpus", description=__doc__.splitlines()[0])
+    verbs = parser.add_subparsers(dest="verb", required=True)
+    recorder = verbs.add_parser("capture", help="record the vault's bytes before the move")
+    recorder.add_argument("--recapture", action="store_true",
+                          help="replace an existing baseline (it is the evidence; say so)")
+    recorder.set_defaults(run=capture)
+    checker = verbs.add_parser("verify", help="compare the vault against the baseline")
+    checker.set_defaults(run=verify)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return int(args.run(args))
+    except UsageError as error:
+        print(f"migrate-golden-corpus: error: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

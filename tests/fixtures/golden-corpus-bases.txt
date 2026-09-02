@@ -1,0 +1,30 @@
+# The note bases step 11 relocates, and therefore the ones whose bytes are
+# recorded before it runs. Directory names only -- never note titles, which is
+# why this file can be committed to a public repository and the manifest it
+# produces cannot. See bin/migrate-golden-corpus.
+#
+# Each line is a path relative to $OBSIDIAN_VAULT, and every one of them must
+# exist: a base that has stopped being a directory is the failure this is
+# looking for, not a line to skip. Three of these hold no notes today
+# (Companies, Tool Stack, space) and are listed anyway, because a move
+# relocates an empty directory too and its disappearance should be loud.
+#
+# Two pairs read as duplicates and are not. `Learning` and
+# `System/Databases/Learning` are different directories holding different
+# notes, and the second is the one with Books/, Courses/ and YouTube/ beneath
+# it. The scan is recursive, so those subdirectories need no line of their own.
+
+Followups
+Learning
+System/AI Generated/Briefs
+System/Databases/Blog Ideas
+System/Databases/Companies
+System/Databases/Learning
+System/Databases/Market Watch
+System/Databases/Prompts
+System/Databases/Skill Proposals
+System/Databases/Tips and Tricks
+System/Databases/Tool Stack
+System/Databases/Topics
+System/Databases/space
+TaskNotes
