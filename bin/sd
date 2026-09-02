@@ -1416,7 +1416,13 @@ FIELD_LINE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
 #: A value needing quotes to survive a YAML reader: one holding a colon-space,
 #: opening a wikilink, a flow collection or a comment, or bounded by spaces.
 #: The corpus quotes exactly these, so writing them bare is what breaks it.
-NEEDS_QUOTING = re.compile(r':\s|\s#|^[\[{>|&*!%@`#]|^\s|\s$')
+# Every shape that changes meaning, or stops parsing, when written bare. The
+# `^[-?]\s` half is separate from the character class on purpose: `- ` opens a
+# sequence entry and `? ` a complex key, while `-3` and `?x` are ordinary
+# scalars -- quoting those would turn a number into a string. Verified against
+# PyYAML rather than against the specification from memory; see
+# `test_every_value_this_writer_quotes_parses_as_yaml`.
+NEEDS_QUOTING = re.compile(r':\s|\s#|^[-?]\s|^[,\]}\[{>|&*!%@`#]|^\s|\s$')
 
 
 def render_value(value: str) -> str:

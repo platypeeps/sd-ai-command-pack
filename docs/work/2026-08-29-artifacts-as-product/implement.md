@@ -3278,3 +3278,34 @@ sentence before it. Taking the nearest backticked symbol within 90 characters
 reported it as stale. A gate whose failures need interpreting teaches people to
 interpret failures away, so the rule was narrowed until its false-positive
 count was zero rather than left wide with an exception list.
+
+**Eight review rounds each found one more value the writer let through, so the
+class was enumerated instead of waited on.** Every round of review on this
+branch surfaced a different scalar that round-trips through `frontmatter()` and
+is read differently -- or not at all -- by a real YAML parser, which matters
+because the vault is read by Obsidian too. Rather than converge one round at a
+time, 39 values were rendered and handed to PyYAML: 21 did not survive. Five
+were hard parse errors -- values opening `- `, `? `, `,`, `]` or `}` produced a
+note nothing could read -- and `NEEDS_QUOTING` now quotes those five. `- ` and
+`? ` are matched with their following space, separately from the character
+class, because `-3` and `?x` are ordinary scalars and quoting a leading dash
+outright would turn every negative number in the vault into a string. Across
+1,463 vault notes and 7,869 bare values, **zero** change classification under
+the new rule: it catches only what was already broken.
+
+The other 16 are type coercions -- `true` reads back as a boolean, `0755` as
+493, `12:30` as 750 -- and those are **deliberately left alone**. `sd store
+set` takes its value from `argv`, so every value arrives as a string and the
+writer has no declared type to consult; quoting would mean guessing. The cost
+of guessing is concrete, because a hand-written note in the vault holds bare
+`true`, and a quoted `"true"` from `sd` would read as a different type than the
+note beside it. Numbers, the case `floor` depends on, are unaffected either
+way. `0755` and `12:30` are YAML 1.1 warts and are the two entries worth
+revisiting, but Obsidian applies the same warts to a hand-written note.
+`test_the_types_a_real_reader_infers_are_left_to_the_corpus_convention` pins
+the inventory so that leaving it alone stays a decision rather than decaying
+into an oversight.
+
+PyYAML is not a dependency of `sd`, and R11-D27's rejection of taking one for
+the write path stands. It is used here as a probe, and the test that uses it
+skips where it is absent, standing beside a concrete case that always runs.

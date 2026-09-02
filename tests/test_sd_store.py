@@ -29,6 +29,11 @@ import sys
 import tempfile
 import unittest
 
+try:                          # a probe, not a dependency; see the test that uses it
+    import yaml
+except ImportError:           # pragma: no cover - depends on the developer's venv
+    yaml = None               # type: ignore[assignment]
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
 
@@ -817,6 +822,94 @@ class WriteTests(StoreFixture):
         self.assertEqual(
             self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved").returncode, 0)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+    def test_a_value_opening_with_a_yaml_indicator_is_quoted(self) -> None:
+        """Five shapes that made the note unparseable, found by enumeration.
+
+        Eight review rounds each surfaced one more value this reader accepted
+        and a real parser did not, so the class was enumerated instead of
+        waited on: every value in the case list below was rendered and handed
+        to PyYAML. `- item`, `? key`, `, comma`, `]close` and `}close` were
+        hard parse errors -- a note `sd store set` writes and nothing can
+        read.
+
+        `-3` and `?x` stay bare deliberately. Only `- ` and `? ` are
+        indicators; quoting a leading dash outright would turn every negative
+        number in the vault into a string.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        for value in ("- item", "? key", ", comma", "]close", "}close"):
+            self.assertEqual(
+                self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+            self.assertIn(f'note: "{value}"\n', path.read_text(encoding="utf-8"))
+        for value in ("-3", "?x", "3-4", "a,b"):
+            self.assertEqual(
+                self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+            self.assertIn(f"note: {value}\n", path.read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(yaml is not None, "PyYAML absent; the concrete case above still runs")
+    def test_a_real_yaml_reader_can_parse_every_note_this_writer_leaves(self) -> None:
+        """The general form, against a parser that is not this repository's.
+
+        PyYAML is deliberately not a dependency of `sd` -- R11-D27 rejected
+        taking one for the write path -- so this reinforces the case above
+        where it is installed rather than replacing it. What it pins is the
+        property that case can only sample: the note `sd store set` leaves on
+        disk is readable by Obsidian, and by anything else pointed at the
+        vault, not only by `frontmatter()`.
+
+        Eight review rounds each found one more value that got past this
+        writer and not past a real parser. The list below is the enumeration
+        that ended that: every value is written through the real command and
+        read back through a real parser.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        for value in ["plain", "a: b", "mid # hash", "[x]", "{y}", "#tag", "|pipe", ">fold",
+                      "&anchor", "*alias", "!tag", "%directive", "@at", "`tick", "- item",
+                      "? key", ", comma", "]close", "}close", "-3", "?x", "a,b", "3-4",
+                      "true", "1", "2026-09-01", "12:30", "0755", "~"]:
+            with self.subTest(value=value):
+                done = self.run_sd("store", "set", "pp.tip", "Ship it", "note", value)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+
+    @unittest.skipUnless(yaml is not None, "PyYAML absent")
+    def test_the_types_a_real_reader_infers_are_left_to_the_corpus_convention(self) -> None:
+        """An inventory of what this writer deliberately does *not* quote.
+
+        Every value below is written bare and a real parser gives it a type
+        other than string. That is left alone, and this test exists so that
+        leaving it alone stays a decision rather than becoming an oversight.
+
+        Quoting them was considered and rejected. `sd store set` takes its
+        value from `argv`, so every value arrives as a string and the writer
+        has no declared type to consult -- quoting would mean guessing. The
+        cost of guessing is concrete: a hand-written note in the vault holds
+        bare `true`, so a quoted `"true"` from `sd` would read as a different
+        type than the note beside it. Numbers are the case that matters most
+        and they are unaffected either way (`1` and `-3` both survive), so
+        `floor` keeps comparing numbers whatever is decided here.
+
+        `0755` reading back as 493 and `12:30` as 750 are YAML 1.1 warts, and
+        they are the two entries here worth revisiting -- but Obsidian applies
+        the same warts to a note written by hand, and `sd` diverging from that
+        would be its own defect.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        for value, expected in [("true", True), ("no", False), ("on", True),
+                                ("~", None), ("0755", 493), ("12:30", 750)]:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+                self.assertIn(f"note: {value}\n", path.read_text(encoding="utf-8"))
+                loaded = yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+                self.assertEqual(loaded["note"], expected)
 
     def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
         """`float("nan") < 6` is False, so an unguarded floor lets it through.
