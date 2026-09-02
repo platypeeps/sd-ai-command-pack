@@ -464,6 +464,18 @@ def validate_kind(name: str, kind: object, root: pathlib.Path) -> dict[str, obje
     checked: dict[str, object] = {"fields": declared}
 
     if "transitions" in kind:
+        # A status graph on a kind with no `status` field governs nothing: no
+        # note can hold the value the graph is about, and 8-iv would have
+        # nowhere to write a transition it just allowed. `status_filter`
+        # already refuses `--status` on such a kind from the read side; this is
+        # the same gap closed on the declaration side. `initial-status` is
+        # deliberately NOT included: it is required of every kind, so requiring
+        # a `status` field for it would make a statusless kind unregisterable
+        # and `status_filter`'s refusal unreachable.
+        if "status" not in fields:
+            raise Refusal(
+                f"{what}.transitions needs a `status` field to act on,"
+                f" and the kind declares {', '.join(declared)}")
         statuses = validate_transitions(kind["transitions"], f"{what}.transitions")
         checked["transitions"] = kind["transitions"]
     else:
@@ -482,6 +494,10 @@ def validate_kind(name: str, kind: object, root: pathlib.Path) -> dict[str, obje
             checked[key] = name_list(kind[key], f"{what}.{key}", within=fields)
 
     if "human-only" in kind:
+        if "status" not in fields:
+            raise Refusal(
+                f"{what}.human-only reserves statuses, but the kind declares no `status` field"
+                f" (it declares {', '.join(declared)})")
         actions = kind["human-only"]
         if not isinstance(actions, dict) or not actions:
             raise Refusal(f"{what}.human-only is not a non-empty object")
@@ -1275,8 +1291,12 @@ def read_note(path: pathlib.Path) -> tuple[dict[str, str], str]:
     return frontmatter(text), note_body(text)
 
 
-def resolve_kind(reference: object) -> tuple[dict[str, object], dict[str, object], str]:
-    """`<prefix>.<kind>` -> that kind, its plugin's store block, and the kind name.
+def resolve_kind(
+        reference: object) -> tuple[dict[str, object], dict[str, object], str, pathlib.Path]:
+    """`<prefix>.<kind>` -> that kind, its store block, the kind name, its checkout.
+
+    The checkout comes back because `sections.template` is a path relative to
+    it and 8-iv has to open that file; every other caller ignores it.
 
     Read from the manifest on disk at every invocation, never from the machine
     config: the registry holds a path and the manifest holds the truth, which
@@ -1305,7 +1325,7 @@ def resolve_kind(reference: object) -> tuple[dict[str, object], dict[str, object
             raise Refusal(f"plugin {prefix!r} declares no `store`, so {reference} is not kept")
         kind = kinds[name]
         assert isinstance(kind, dict)  # validate_kind builds it; narrows for the type checker
-        return kind, store, name
+        return kind, store, name, manifest_path.parent
     raise Refusal(f"no registered plugin has prefix {prefix!r}")
 
 
@@ -1363,6 +1383,362 @@ def status_filter(kind: dict[str, object], wanted: str | None) -> str | None:
     return wanted
 
 
+# --- 8-iv: the write path -------------------------------------------------
+#
+# Everything below edits a note **by the line**. Nothing here parses a
+# frontmatter block into a dictionary and writes the dictionary back, and that
+# is the whole design rather than a style preference: `frontmatter()` above is
+# deliberately lossy, and a round trip through it drops every list value and
+# strips the quotes off every quoted scalar. Measured on the corpus this has to
+# write to, that is 244 of 244 notes losing 1,166 list items, and 146 of them
+# additionally emitting malformed YAML. R11-D27 carries the numbers.
+
+
+#: A frontmatter key at the start of its line. The same character class the
+#: reader accepts, so a key this can edit is a key that one can see.
+FIELD_LINE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
+
+#: A value needing quotes to survive a YAML reader: one holding a colon-space,
+#: opening a wikilink or a flow collection, or already carrying a quote. The
+#: corpus quotes exactly these, so writing them bare is what breaks it.
+NEEDS_QUOTING = re.compile(r':\s|^[\[{>|&*!%@`]|^\s|\s$|"')
+
+
+def render_value(value: str) -> str:
+    """A scalar as the vault's own notes spell it.
+
+    Quoting is not cosmetic here. `source-brief: [[2026-08-15 - Daily Intel
+    Brief]]` and a `description:` holding a sentence colon both stop parsing
+    when emitted bare, which is the second of the two failures R11-D27 records.
+    """
+
+    if value == "" or not NEEDS_QUOTING.search(value):
+        return value
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def frontmatter_span(text: str) -> tuple[list[str], int, int]:
+    """`(lines, first, close)` -- the block's line indices, ends excluded.
+
+    `first` is the index after the opening `---` and `close` the index of the
+    closing one, so `lines[first:close]` is the block and `lines[close]` is the
+    fence. Refuses rather than guesses: a note with no block is a note `add`
+    should have written, and inventing a block on `set` would turn an edit into
+    a creation.
+    """
+
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise Refusal("the note has no `---` frontmatter block to edit")
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return lines, 1, index
+    raise Refusal("the note's frontmatter block is never closed")
+
+
+def field_lines(lines: list[str], first: int, close: int, key: str) -> list[int]:
+    """Every line in the block that declares `key`. Refuses when there is more than one.
+
+    Frontmatter with a duplicate key is malformed. `count=1` picking the first
+    of two is a silent choice wearing the clothes of a fix, and it would leave
+    the note's reader and the note's writer disagreeing about which line won.
+    """
+
+    hits = [
+        i for i in range(first, close)
+        if (m := FIELD_LINE.match(lines[i])) and m.group(1) == key]
+    if len(hits) > 1:
+        raise Refusal(
+            f"the note carries {key!r} on {len(hits)} lines"
+            f" ({', '.join(str(i + 1) for i in hits)}); refusing to guess which one is meant")
+    return hits
+
+
+def edit_field(text: str, key: str, value: str) -> str:
+    """`key: value` in the frontmatter, replacing one line and nothing else.
+
+    The file comes back byte-for-byte identical apart from the single line this
+    writes -- list values, quoting, key order, blank lines and the body are all
+    untouched, because none of them are ever read in.
+
+    A key carried twice is refused rather than edited. Frontmatter with a
+    duplicate key is malformed, `count=1` picking the first of two is a silent
+    choice wearing the clothes of a fix, and the note's reader would disagree
+    with the note's writer about which one won.
+    """
+
+    lines, first, close = frontmatter_span(text)
+    hits = field_lines(lines, first, close, key)
+    ending = "\n"
+    if hits:
+        # Keep whatever line ending the file already uses on that line.
+        target = lines[hits[0]]
+        ending = target[len(target.rstrip("\r\n")):] or "\n"
+        lines[hits[0]] = f"{key}: {render_value(value)}{ending}"
+    else:
+        # A key the note does not carry goes immediately before the closing
+        # fence. That is the only position the backbone can choose without
+        # knowing what the keys mean; `pack.py` inserted after a named anchor
+        # per field, and that knowledge is what the backbone must not hold.
+        lines.insert(close, f"{key}: {render_value(value)}{ending}")
+    return "".join(lines)
+
+
+def kind_statuses(kind: dict[str, object]) -> set[str] | None:
+    """Every status the kind's `transitions` mention, or None when it declares none."""
+
+    transitions = kind.get("transitions")
+    if transitions is None:
+        return None
+    assert isinstance(transitions, dict)  # validate_transitions built it
+    seen = set(transitions)
+    for targets in transitions.values():
+        seen.update(targets)
+    return seen
+
+
+def refuse_protected(kind: dict[str, object], field: str) -> None:
+    protected = kind.get("protected-fields") or []
+    assert isinstance(protected, list)
+    if field in protected:
+        raise Refusal(
+            f"`protected-fields` declares {field!r}; it is not writable through `sd store set`")
+
+
+def refuse_below_floor(kind: dict[str, object], field: str, value: str) -> None:
+    """`floor`, checked on the write and never on the read.
+
+    A floor enforced at read time would leave the under-floor note on disk and
+    call the store clean, which is the shape of a filter pretending to be a
+    gate.
+    """
+
+    floors = kind.get("floor") or {}
+    assert isinstance(floors, dict)
+    if field not in floors:
+        return
+    try:
+        number = float(value)
+    except ValueError:
+        raise Refusal(
+            f"`floor` bounds {field!r}, so its value must be a number, not {value!r}") from None
+    if number < floors[field]:
+        raise Refusal(f"`floor` puts {field!r} at {floors[field]} or above; {value!r} is under it")
+
+
+def refuse_human_only(kind: dict[str, object], status: str) -> None:
+    """A status the manifest reserves for a person.
+
+    There is deliberately no flag that lifts this. A `--force` would make the
+    key decorative and read in every review as though it protected something;
+    the escape hatch is a human editing the note in the vault, which the 8-iii
+    freshness test proves is visible to the next query with no sync step.
+    """
+
+    actions = kind.get("human-only") or {}
+    assert isinstance(actions, dict)
+    for action, reserved in actions.items():
+        if reserved == status:
+            raise Refusal(
+                f"`human-only` reserves {action!r} (status {status!r}) for a person;"
+                " edit the note in the vault instead")
+
+
+def refuse_bad_transition(kind: dict[str, object], current: str, wanted: str) -> None:
+    transitions = kind.get("transitions")
+    if transitions is None:
+        return
+    assert isinstance(transitions, dict)
+    if current == wanted:
+        return
+    allowed = transitions.get(current, [])
+    if wanted not in allowed:
+        raise Refusal(
+            f"`transitions` allows {current!r} -> {', '.join(sorted(allowed)) or 'nothing'};"
+            f" {wanted!r} is not among them")
+
+
+def refuse_duplicate_unique(
+        kind: dict[str, object], base: pathlib.Path, values: dict[str, str],
+        skip: pathlib.Path | None = None) -> None:
+    """`unique-fields`, checked against the notes on disk rather than an index.
+
+    The vault is the system-of-record, so the only honest answer to "is this
+    value taken" is the one every other note gives right now.
+    """
+
+    unique = kind.get("unique-fields") or []
+    assert isinstance(unique, list)
+    wanted = {field: values[field] for field in unique if values.get(field)}
+    if not wanted:
+        return
+    for path in note_paths(base):
+        if skip is not None and path == skip:
+            continue
+        found, _ = read_note(path)
+        for field, value in wanted.items():
+            if found.get(field) == value:
+                raise Refusal(
+                    f"`unique-fields` declares {field!r} unique and {path.stem!r}"
+                    f" already holds {value!r}")
+
+
+def note_path(base: pathlib.Path, title: str) -> pathlib.Path:
+    if "/" in title or title in {"", ".", ".."}:
+        raise UsageError(f"{title!r} is not a note title")
+    return base / f"{title}.md"
+
+
+def declared_sections(kind: dict[str, object]) -> list[str]:
+    sections = kind.get("sections") or {}
+    assert isinstance(sections, dict)
+    order = sections.get("order") or []
+    assert isinstance(order, list)
+    return [str(title) for title in order]
+
+
+def body_headings(body: str) -> list[str]:
+    return [line[3:].strip() for line in body.splitlines() if line.startswith("## ")]
+
+
+def parse_assignments(pairs: list[str], fields: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise UsageError(f"{pair!r} is not field=value")
+        field, value = pair.split("=", 1)
+        if field not in fields:
+            raise Refusal(
+                f"the kind declares no field {field!r} (it declares {', '.join(fields)})")
+        if field in values:
+            raise UsageError(f"{field!r} is given twice")
+        values[field] = value
+    return values
+
+
+def read_template(root: pathlib.Path, template: str) -> str:
+    """The kind's template, read from the plugin checkout.
+
+    Read at every `add` rather than cached at registration, for the reason
+    `resolve_kind` re-reads the manifest: the registry holds a path and the
+    checkout holds the truth, so editing a template takes effect on the next
+    write with no re-registration.
+    """
+
+    path = root / template
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read the template {path}: {error}") from None
+
+
+def store_add(args: argparse.Namespace) -> int:
+    """A new note, rendered through the kind's `sections.template`.
+
+    `add` is the safe verb: a note that does not exist yet has nothing to
+    preserve, so this is the one place a block is written whole rather than
+    edited by the line.
+    """
+
+    kind, store, name, root = resolve_kind(args.kind)
+    base = kind_base(store, name)
+    path = note_path(base, args.title)
+    if path.exists():
+        raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
+
+    fields = store_fields(kind)
+    values = parse_assignments(args.field or [], fields)
+    for field, value in values.items():
+        refuse_protected(kind, field)
+        refuse_below_floor(kind, field, value)
+    if "status" in fields:
+        initial = str(kind["initial-status"])
+        values.setdefault("status", initial)
+        if values["status"] != initial:
+            refuse_bad_transition(kind, initial, values["status"])
+        refuse_human_only(kind, values["status"])
+    refuse_duplicate_unique(kind, base, values)
+
+    sections = kind.get("sections") or {}
+    assert isinstance(sections, dict)
+    template = sections.get("template")
+    if template is None:
+        raise Refusal("the kind declares no `sections.template`, so there is nothing to render")
+    body = read_template(root, str(template))
+
+    order = declared_sections(kind)
+    rendered = body_headings(body)
+    if order and rendered != order:
+        # The first thing in this rollout that gives `sections.order` a
+        # consequence. `validate_sections` never opens the template, so until
+        # now an order naming headings the template does not produce registered
+        # clean and stayed wrong silently.
+        raise Refusal(
+            f"`sections.order` declares {order} but the template renders {rendered}")
+
+    block = "".join(f"{field}: {render_value(values.get(field, ''))}\n" for field in fields)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\n{block}---\n{body}", encoding="utf-8")
+    except OSError as error:
+        raise Refusal(f"cannot write {path}: {error}") from None
+    print(f"wrote {path}")
+    return 0
+
+
+def store_set(args: argparse.Namespace) -> int:
+    """One field of one note, edited by the line.
+
+    Read R11-D27 before changing this to parse the note. It reads as the
+    cleaner implementation and it destroys every note it touches.
+    """
+
+    kind, store, name, _ = resolve_kind(args.kind)
+    base = kind_base(store, name)
+    path = note_path(base, args.title)
+    if not path.is_file():
+        raise Refusal(f"no note titled {args.title!r} in {base}")
+
+    fields = store_fields(kind)
+    if args.field not in fields:
+        raise Refusal(
+            f"the kind declares no field {args.field!r} (it declares {', '.join(fields)})")
+    refuse_protected(kind, args.field)
+    refuse_below_floor(kind, args.field, args.value)
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+
+    # Structure before semantics, and the order is load-bearing. Every check
+    # below this point reads a field value, and a note with no block or with
+    # the same key on two lines has no unambiguous value to read -- judging a
+    # transition against whichever line the reader happened to keep would
+    # refuse or allow for a reason that is not in the file. `edit_field` would
+    # refuse these anyway, but only after a semantic check had already reported
+    # a different complaint about a note it could not read properly.
+    lines, first, close = frontmatter_span(text)
+    field_lines(lines, first, close, args.field)
+
+    found, _ = read_note(path)
+    if args.field == "status":
+        refuse_human_only(kind, args.value)
+        refuse_bad_transition(kind, found.get("status", ""), args.value)
+    refuse_duplicate_unique(kind, base, {args.field: args.value}, skip=path)
+
+    updated = edit_field(text, args.field, args.value)
+    if updated == text:
+        print(f"{path} already holds that value")
+        return 0
+    try:
+        path.write_text(updated, encoding="utf-8")
+    except OSError as error:
+        raise Refusal(f"cannot write {path}: {error}") from None
+    print(f"set {args.field} in {path}")
+    return 0
+
+
 def store_list(args: argparse.Namespace) -> int:
     """Every note of one kind, read from the vault at the moment of asking.
 
@@ -1373,7 +1749,7 @@ def store_list(args: argparse.Namespace) -> int:
     replaced stack could not offer.
     """
 
-    kind, store, name = resolve_kind(args.kind)
+    kind, store, name, _ = resolve_kind(args.kind)
     wanted = status_filter(kind, args.status)
     fields = store_fields(kind)
     rows = []
@@ -1402,7 +1778,7 @@ def store_get(args: argparse.Namespace) -> int:
     the declared list would hide it while looking complete.
     """
 
-    kind, store, name = resolve_kind(args.kind)
+    kind, store, name, _ = resolve_kind(args.kind)
     base = kind_base(store, name)
     if "/" in args.title or args.title in {"", ".", ".."}:
         raise UsageError(f"{args.title!r} is not a note title")
@@ -1481,7 +1857,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="refuse if the checkout has drifted from its lock; write nothing")
     locker.set_defaults(handler=plugin_lock)
 
-    store = groups.add_parser("store", help="read the notes a plugin's kinds hold")
+    store = groups.add_parser("store", help="read and write the notes a plugin's kinds hold")
     kept = store.add_subparsers(dest="verb", required=True)
 
     notes = kept.add_parser("list", help="every note of one kind")
@@ -1495,6 +1871,22 @@ def build_parser() -> argparse.ArgumentParser:
     note.add_argument("title", help="the note's title, without the .md")
     note.add_argument("--json", action="store_true", help="machine-readable")
     note.set_defaults(handler=store_get)
+
+    made = kept.add_parser("add", help="a new note, rendered from the kind's template")
+    made.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
+    made.add_argument("title", help="the note's title; becomes <title>.md")
+    made.add_argument("--field", action="append", metavar="NAME=VALUE",
+                      help="a declared field's value; repeatable")
+    made.set_defaults(handler=store_add)
+
+    # No `--force`. `human-only` is the whole reason this verb refuses, and a
+    # flag that lifts the refusal would make the key decorative (R11-D27).
+    edit = kept.add_parser("set", help="one field of one note, edited by the line")
+    edit.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")
+    edit.add_argument("title", help="the note's title, without the .md")
+    edit.add_argument("field", help="a field the kind declares")
+    edit.add_argument("value", help="the new value")
+    edit.set_defaults(handler=store_set)
     config = groups.add_parser("config", help="read and write a plugin's declared settings")
     setting_verbs = config.add_subparsers(dest="verb", required=True)
 

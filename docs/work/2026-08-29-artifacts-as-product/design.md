@@ -2399,6 +2399,17 @@ any parser, strict or lossy, reformats what it did not change. *Rejected: enforc
 time.* A floor that filters what `list` shows leaves the under-floor note on disk and calls the
 store clean.
 
+**Correction, 2026-09-01, found by building it.** The paragraph above says `initial-status`,
+`transitions` and `human-only` "each require `status` in `fields`". Two of the three do. The third is
+wrong: `initial-status` is required of **every** kind by `KIND_REQUIRED`, so requiring a `status`
+field for it would make a statusless kind unregisterable — which would in turn make
+`status_filter`'s refusal unreachable code and
+`test_status_on_a_kind_without_one_refuses_instead_of_matching_nothing` unconstructable, a shipped
+test whose whole subject is a kind with no `status` field. The tightening lands on `transitions` and
+`human-only` only, which genuinely govern nothing without a field to act on. Corrected here rather
+than edited above, per this rollout's habit; `test_a_statusless_kind_is_still_registerable` pins the
+third case so the overreach cannot come back.
+
 **Standing rule 1.** *Incident:* `pack.py` preserved list-valued frontmatter by construction rather
 than by decision, so nothing recorded that it mattered; the backbone that replaces it reads those
 values through a parser that cannot see them. *Deletion criterion:* this record dies when no

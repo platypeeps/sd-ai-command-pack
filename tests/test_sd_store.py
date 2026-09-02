@@ -432,3 +432,260 @@ class ManifestTests(StoreFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WriteTests(StoreFixture):
+    """8-iv's acceptance criterion, inverted from 8-iii's on purpose.
+
+    8-iii writes with `write_text` and reads through `sd`, so a store that
+    cached could not pass. These write through `sd` and read the **bytes** back
+    with `read_text`, so a store that answered from memory could not pass
+    either. The load-bearing case is
+    `test_a_set_leaves_every_line_it_did_not_edit_byte_identical`: a
+    write-through-`sd`, read-through-`sd` test cannot see the failure R11-D27
+    exists to prevent, because `sd`'s own reader is the thing that is blind.
+    """
+
+    #: A note in the shape the real corpus is in: list values under `tags` and
+    #: `contexts`, and a quoted scalar holding a colon and a wikilink. Every
+    #: one of these is invisible to `frontmatter()` and destroyed by a
+    #: parse-and-rewrite.
+    LOSSY = (
+        "---\n"
+        "status: inbox\n"
+        "score: 7\n"
+        "aliases:\n"
+        '  - "A tip: with a colon"\n'
+        "contexts:\n"
+        "  - Personal\n"
+        'source-brief: "[[2026-08-15 - Daily Intel Brief]]"\n'
+        "tags:\n"
+        "  - tip\n"
+        "  - ai-generated\n"
+        "---\n"
+        "\n"
+        "The body, which also stays.\n"
+    )
+
+    def template(self, root: pathlib.Path, text: str = "\n## Why\n\n## What\n") -> None:
+        (root / "tip.md").write_text(text, encoding="utf-8")
+
+    def kind_with_template(self, **over: object) -> dict[str, object]:
+        kind: dict[str, object] = dict(TIP_KIND)
+        kind["sections"] = {"order": ["Why", "What"], "template": "tip.md"}
+        kind.update(over)
+        return kind
+
+    # -- add ---------------------------------------------------------------
+
+    def test_add_writes_a_note_the_filesystem_can_read_without_sd(self) -> None:
+        """Written through `sd`, asserted as bytes on disk. Never read back through `sd`."""
+
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+        done = self.run_sd("store", "add", "pp.tip", "Ship it", "--field", "score=9")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+        text = (self.tips / "Ship it.md").read_text(encoding="utf-8")
+        self.assertEqual(text, "---\nstatus: inbox\nscore: 9\n---\n\n## Why\n\n## What\n")
+
+    def test_add_supplies_the_initial_status_without_being_asked(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        self.run_sd("store", "add", "pp.tip", "Ship it")
+        self.assertIn("status: inbox", (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+
+    def test_add_refuses_to_overwrite_an_existing_note(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        kept = self.note("Ship it", body="Do not lose me.\n")
+        done = self.run_sd("store", "add", "pp.tip", "Ship it")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("already exists", done.stderr)
+        self.assertIn("Do not lose me.", kept.read_text(encoding="utf-8"))
+
+    def test_a_template_that_does_not_render_the_declared_order_refuses(self) -> None:
+        """`sections.order` gets a consequence for the first time.
+
+        `validate_sections` never opens the template, so before 8-iv an order
+        naming headings the template does not produce registered clean.
+        """
+
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root, "\n## What\n\n## Why\n")   # declared order is Why, What
+        self.run_sd("plugin", "add", str(root))
+        done = self.run_sd("store", "add", "pp.tip", "Ship it")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("sections.order", done.stderr)
+        self.assertFalse((self.tips / "Ship it.md").exists())
+
+    def test_add_refuses_a_duplicate_unique_field(self) -> None:
+        root = self.plugin(
+            kinds={"tip": self.kind_with_template(**{"unique-fields": ["score"]})},
+            register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        self.note("Taken", score="9")
+        done = self.run_sd("store", "add", "pp.tip", "Ship it", "--field", "score=9")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("unique-fields", done.stderr)
+
+    # -- set, and the thing it must never do -------------------------------
+
+    def test_a_set_leaves_every_line_it_did_not_edit_byte_identical(self) -> None:
+        """The whole reason 8-iv is a line edit (R11-D27).
+
+        A parse-and-rewrite passes a write-through-`sd`, read-through-`sd`
+        test and fails this one, because `sd`'s own reader cannot see the
+        lines it destroyed.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text(self.LOSSY, encoding="utf-8")
+
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+        after = path.read_text(encoding="utf-8")
+        self.assertEqual(after, self.LOSSY.replace("status: inbox", "status: approved"))
+
+    def test_a_set_preserves_every_list_item_and_quoted_scalar(self) -> None:
+        """Stated as its own case so a failure names what was lost."""
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text(self.LOSSY, encoding="utf-8")
+        self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        after = path.read_text(encoding="utf-8")
+        for survivor in (
+                "aliases:", '  - "A tip: with a colon"', "contexts:", "  - Personal",
+                'source-brief: "[[2026-08-15 - Daily Intel Brief]]"',
+                "tags:", "  - tip", "  - ai-generated", "The body, which also stays."):
+            self.assertIn(survivor, after, f"a set destroyed {survivor!r}")
+
+    def test_a_field_the_note_does_not_carry_is_added_before_the_fence(self) -> None:
+        self.plugin(kinds={"tip": {"fields": ["status", "score"], "initial-status": "inbox"}})
+        path = self.tips / "Ship it.md"
+        path.write_text("---\nstatus: inbox\n---\n\nBody.\n", encoding="utf-8")
+        self.run_sd("store", "set", "pp.tip", "Ship it", "score", "9")
+        self.assertEqual(
+            path.read_text(encoding="utf-8"), "---\nstatus: inbox\nscore: 9\n---\n\nBody.\n")
+
+    def test_a_duplicate_key_is_refused_rather_than_half_edited(self) -> None:
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        original = "---\nstatus: inbox\nscore: 7\nstatus: approved\n---\n\nBody.\n"
+        path.write_text(original, encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "declined")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("2 lines", done.stderr)
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_a_note_with_no_frontmatter_block_refuses(self) -> None:
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("Just a body.\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("frontmatter", done.stderr)
+
+    def test_a_value_needing_quotes_gets_them(self) -> None:
+        """A bare `[[wikilink]]` or sentence colon is malformed YAML, not lossy YAML."""
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        self.note("Ship it", extra="note: old\n")
+        self.run_sd("store", "set", "pp.tip", "Ship it", "note", "[[A link]] and a: colon")
+        self.assertIn(
+            'note: "[[A link]] and a: colon"',
+            (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+
+    # -- the six keys, refusing -------------------------------------------
+
+    def test_a_protected_field_refuses(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "protected-fields": ["score"]}})
+        path = self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "9")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("protected-fields", done.stderr)
+        self.assertIn("score: 7", path.read_text(encoding="utf-8"))
+
+    def test_a_transition_no_edge_allows_refuses(self) -> None:
+        self.plugin()
+        self.note("Ship it", status="approved")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "inbox")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("transitions", done.stderr)
+
+    def test_a_value_under_the_floor_refuses(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "3")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("floor", done.stderr)
+
+    def test_a_human_only_status_refuses_and_offers_no_force(self) -> None:
+        """There is deliberately no flag that lifts this (R11-D27)."""
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "transitions": {"inbox": ["published"]},
+            "human-only": {"publish": "published"}}})
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "published")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("human-only", done.stderr)
+
+        forced = self.run_sd(
+            "store", "set", "pp.tip", "Ship it", "status", "published", "--force")
+        self.assertEqual(forced.returncode, 2, "--force must not be a flag this verb accepts")
+
+    def test_a_field_the_kind_never_declared_refuses(self) -> None:
+        self.plugin()
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "invented", "x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no field", done.stderr)
+
+
+class DeclarationTests(StoreFixture):
+    """The 8-i gap 8-iv closes: a key that governs nothing registers clean."""
+
+    def test_transitions_without_a_status_field_refuses_at_registration(self) -> None:
+        root = self.plugin(
+            kinds={"tip": {"fields": ["score"], "initial-status": "inbox",
+                           "transitions": {"inbox": ["approved"]}}},
+            register=False)
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("transitions", done.stderr)
+
+    def test_human_only_without_a_status_field_refuses_at_registration(self) -> None:
+        root = self.plugin(
+            kinds={"tip": {"fields": ["score"], "initial-status": "inbox",
+                           "human-only": {"publish": "published"}}},
+            register=False)
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("human-only", done.stderr)
+
+    def test_a_statusless_kind_is_still_registerable(self) -> None:
+        """`initial-status` is deliberately not part of the tightening.
+
+        It is required of every kind, so requiring a `status` field for it
+        would make a statusless kind unregisterable and `status_filter`'s
+        refusal unreachable -- the case
+        `test_status_on_a_kind_without_one_refuses_instead_of_matching_nothing`
+        exists to cover.
+        """
+
+        root = self.plugin(
+            kinds={"tip": {"fields": ["score"], "initial-status": "inbox"}}, register=False)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
