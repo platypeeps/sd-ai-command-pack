@@ -1725,6 +1725,35 @@ class VaultWideTitleTests(StoreFixture):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn("already exists", done.stderr)
 
+    def test_a_directory_it_cannot_read_refuses_rather_than_passing(self) -> None:
+        """The one way this guard could be worse than not having it.
+
+        `os.walk` swallows per-directory errors by default, so an unreadable
+        directory hiding a colliding title would come back as "free" and the
+        note would be written. macOS answers an ungranted `~/Documents` read
+        the same way -- empty rather than failing -- which would make every
+        collision check pass vacuously on a vault behind a missing TCC grant.
+        """
+
+        held = self.elsewhere("Locked", "Shared name")
+        locked = held.parent
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o755)
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("cannot scan", done.stderr)
+        self.assertFalse((self.tips / "Shared name.md").exists())
+
+    def test_a_vault_root_that_is_not_there_refuses(self) -> None:
+        """Refused by the driver before the scan runs, which is why the scan
+        does not repeat the check: an unreachable guard is one no test reaches."""
+
+        done = self.run_sd(
+            "store", "add", "pp.tip", "Anything", "--field", "score=7",
+            vault=str(self.tmp / "no-such-vault"))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("vault path does not exist", done.stderr)
+
     def test_the_existing_note_is_left_alone(self) -> None:
         """A refused `add` must not have written anything on its way to refusing."""
 

@@ -2405,7 +2405,7 @@ thing `human-only` is for.
 `initial-status` of every kind and accepts `transitions` and `human-only` from any kind, but never
 checks that the kind declares a `status` **field** for any of them to act on. A kind can therefore
 declare a status graph that governs nothing, and 8-iv would have no place to put the initial status
-it is required to write. `status_filter` (`bin/sd:1384`) already refuses `--status` on a kind with
+it is required to write. `status_filter` (`bin/sd:1402`) already refuses `--status` on a kind with
 no `status` field for exactly this reason, on the read side. 8-iv closes it on the declaration side:
 `initial-status`, `transitions` and `human-only` each require `status` in `fields`, refused at
 registration with the key named (*`initial-status` is wrong here — corrected below*). This is a

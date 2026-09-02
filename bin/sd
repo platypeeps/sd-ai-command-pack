@@ -1298,6 +1298,23 @@ def note_body(text: str) -> str:
     return text
 
 
+def note_text(path: pathlib.Path) -> str:
+    """The note's bytes, refused the way `read_note` refuses.
+
+    `store get` and `store list --full` print the file itself rather than the
+    parsed body, so they read it a second time. `read_note` has already
+    refused an unreadable note by then in both callers, which leaves only the
+    narrow window where a note becomes unreadable between the two reads -- a
+    bare `read_text` answers that with a traceback where the rest of this file
+    answers with a refusal.
+    """
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+
+
 def read_note(path: pathlib.Path) -> tuple[dict[str, str], str]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -1716,8 +1733,20 @@ def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
     existing note does not get a second, worse-worded refusal for the same one.
     """
 
+    # A scan that cannot read the vault must refuse, not come back empty. macOS
+    # answers an ungranted `~/Documents` read by returning nothing rather than
+    # by failing, and `os.walk` swallows per-directory errors by default, so
+    # without both of these an unreadable vault reports every title as free and
+    # the collision check passes vacuously -- the one way this guard could be
+    # worse than not having it. A vault root that is not there is already
+    # refused by the driver before this runs.
+    def unreadable(error: OSError) -> None:
+        raise Refusal(
+            f"cannot scan {error.filename} for title collisions: {error}."
+            " Refusing rather than treating the title as free") from None
+
     want = path.name
-    for parent, dirs, files in os.walk(root):
+    for parent, dirs, files in os.walk(root, onerror=unreadable):
         dirs[:] = [name for name in dirs if not name.startswith(".")]
         if want in files:
             found = pathlib.Path(parent) / want
@@ -2216,7 +2245,7 @@ def store_list(args: argparse.Namespace) -> int:
             # otherwise the `print()` below only terminates its last line and
             # the next `===` header follows with no separator at all.
             print(f"=== {row['title']} ===")
-            text = path.read_text(encoding="utf-8")
+            text = note_text(path)
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
             print()
         print(f"# {len(rows)} note(s)", file=sys.stderr)
@@ -2251,7 +2280,7 @@ def store_get(args: argparse.Namespace) -> int:
         sys.stdout.write("\n")
         return 0
     print(f"=== {args.title} ===")
-    sys.stdout.write(path.read_text(encoding="utf-8"))
+    sys.stdout.write(note_text(path))
     return 0
 
 
