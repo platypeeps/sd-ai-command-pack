@@ -3690,7 +3690,8 @@ through `pack.py tips add`". Retargeting one half made that false. The blocker
 is real rather than clerical: `sdw-tips` passes the tip text as `--tip-file`
 precisely to escape the backtick problem above, and **`sd store add` has no
 `--section-file` twin** -- `grep -n 'section-file\|field-file' bin/sd` returns
-nothing. Moving it inline would reintroduce the loss that flag exists to
+nothing. *(Superseded the same day by* Step 10b-i, *below: the grep now returns
+the two flags, and the split it describes now waits only on the retarget.)* Moving it inline would reintroduce the loss that flag exists to
 prevent. So the paragraph now states the split, names the one-key difference in
 the output, and points at 10b. **Step 10b needs `--section-file` / `--field-file`
 before `sdw-tips` can move**, on top of the section-editing verbs already
@@ -3723,3 +3724,105 @@ grant string in the sentence explaining what replaced it. That line is worth
 more than a clean grep, so it stays and the gap is named here instead of being
 edited away.
 
+
+### Step 10b-i: the two flags `sdw-tips` cannot move without (2026-09-02)
+
+Step 9 moved all six of the vault's `pack.py` invocations and left one caller
+standing outside it: `sdw-tips`, which lives in the plugin repository rather
+than in the vault. The blocker it named was one missing flag -- `sdw-tips`
+passes its tip text as `--tip-file` so a backtick in the prose is not run by
+the shell, and `sd store add` had no twin for it. This adds the twin -- `--field-file
+NAME=PATH` and `--section-file NAME=PATH` -- and nothing else.
+
+**Why it is a slice on its own.** The rest of 10b writes to the live vault and
+to the sibling plugin, which is what the `migrate-golden-corpus` bracket exists
+for. This touches neither: 107 added lines in `bin/sd` (111 changed) and 167
+of tests, no note changes bytes, and no bracket is needed to say so. Landing it first also
+means the flags are proven before the retarget depends on them, rather than
+during it.
+
+**One list, in the order it was typed.** `--field` and `--field-file`
+accumulate into the same destination through one `argparse.Action`, rather than
+into two `append` lists merged afterwards. With two lists, `--field tags+=a
+--field-file tags+=b --field tags+=c` writes a, c, b -- the order of a block
+sequence would depend on which spelling supplied each item rather than on where
+it was typed. A note's tag order is visible in its frontmatter and
+`migrate-golden-corpus` compares whole notes, so that reordering would surface
+during the 10b bracket as drift with no author, which is precisely the reading
+the bracket is meant to make possible.
+
+**The pair is re-spelled, not split.** A `--field-file score=PATH` becomes
+`score=<the file's text>` and goes through `parse_assignments`; a
+`--section-file` pair goes through `parse_sections` the same way. So a
+file-supplied value meets the refusals the inline spelling meets -- a smuggled
+`## ` heading, a field the kind does not declare, a `+=` on a field something
+compares as a scalar -- instead of reaching the write down a second, laxer
+path. It is safe because a field or section name holds neither `=` nor `+` and
+both parsers partition on the *first* separator: a file whose text is literally
+`score=9 and tags+=x` lands whole, and there is a test that says so.
+
+**The file is not opened inside the argparse action, and that is an exit
+code.** `Refusal` is 1 and a usage error is 2; anything raised inside an action
+reaches the user as an argparse error, so reading there would have made a
+missing file exit 2. The action records which spelling matched and the handler
+does the reading, which keeps `interface = 1`'s promise about exit codes intact
+-- a missing or unreadable file is 1, a pair with no separator in it is 2.
+
+**`.strip()` and the empty refusal are the incumbent's**
+(`resolve_text_pairs`, `sd-writing-pack/scripts/pack.py:2226`), kept rather than
+reconsidered. Both writers are live until 10b lands and the notes they write
+have to stay identical while that is true; a difference in trailing-newline
+handling would show up as exactly the whole-note drift the bracket reports.
+
+**No decision record.** These are CLI spellings, not a ninth `kinds.*` key, and
+`parse_assignments` already recorded that reasoning when `+=` was added.
+Standing rule 2 stays where it is.
+
+**What deliberately did not move.** `sd store set` takes its value
+positionally and gets no file twin here -- the section-editing verbs and
+whatever they need are 10b's, and a half-present flag reads in review as a
+supported one, so there is a test asserting the flags are on `add` only. And
+`sdw-tips` itself has not moved: that is a plugin and vault change, and it is
+bracketed.
+
+**The test suite passed and would have failed CI.** Three of the new cases
+spelled a backslash inside an f-string expression, which is Python 3.12
+syntax; the local interpreter is 3.14, so `pytest` was green while the 3.10 leg
+of the matrix (`.github/workflows/tests.yml`) could not have imported the
+module at all. `ruff` caught it -- `invalid-syntax: Cannot use an escape
+sequence (backslash) in f-strings on Python 3.10`. Worth recording because the
+green suite was not evidence of anything here: **a test run on one interpreter
+says nothing about the floor of the matrix**. And `ruff` was the only check
+that could have caught it: `mypy` pins 3.10 explicitly in `pyproject.toml`,
+but `make -s lint-mypy-paths` lists eighteen paths under `bin/` and
+`dashboard/` and no `tests`, where `make -s lint-ruff-paths` ends in `tests`.
+The one linter whose scope includes the test suite is the one that reads
+`requires-python`.
+
+**Criterion, and the result.** The check named before the work was
+`python3 -m pytest tests/test_sd_store.py` with the new cases passing and no
+existing case failing, plus `ruff` and `mypy` as CI runs them. Full suite:
+`1067 passed, 5 skipped, 848 subtests passed`. `ruff check` on the two changed
+files: `All checks passed!`. `mypy` over `make -s lint-mypy-paths`:
+`Success: no issues found in 30 source files`.
+
+**No figure in `design.md` is edited, and that is the disposition rather than
+an omission.** `bin/sd` is 2,550 lines at this commit and `bin/` measures
+10,571 against the 14,000 cap. The `sd store|issue|config` slice grew by that
+same 111, and this deliberately does not turn that into a total: the sub-cap
+paragraph's 461 was measured on 2026-09-01, before 8-iv and two later steps
+added to the same slice, so 461 + 111 would be a figure with a superseded
+baseline inside it -- the exact shape the sweep that found it is for. Nothing
+in the tree enforces that sub-cap in any case. The cap
+paragraph there already carries three dated measurements, each bound to its own
+commit, and `tests/test_loc_caps.py` enforces the cap from `git ls-files`
+rather than from any of them. A fourth append would grow the very list that
+paragraph exists to say is not the authority.
+
+**One claim this makes false, named rather than fixed early.**
+`System/Scheduled Tasks/tips-weekly/SKILL.md:17` says `sd store add` "has no
+`--section-file` twin yet". The vault calls this checkout by absolute path, so
+that sentence is true until this merges and false afterwards -- correcting it
+before the merge would simply be wrong in the other direction. It is corrected
+immediately after, in the same session, and the split it describes still
+stands until `sdw-tips` moves.
