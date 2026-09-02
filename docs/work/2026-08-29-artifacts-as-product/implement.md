@@ -4026,8 +4026,8 @@ estimated.
 `pack.py` landed at 1,857 rather than the 2,013 predicted here, then at 1,721
 once the `protected-fields` decision freed the last two verbs. `design.md`
 carries whatever the current measurement is; this paragraph is kept as what was
-believed on the way there, not as facts, and deliberately cites no number of
-its own beyond the ones it got wrong.)*
+believed on the way there, not as facts, and makes no new estimate of its own
+-- the figures above are the measured outcomes that replaced the prediction.)*
 
 **The first census of that deletion was wrong twice, both in the same
 direction as wanting the number to be small.** It counted function bodies only,
