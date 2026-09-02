@@ -1570,6 +1570,11 @@ LIST_ITEM = re.compile(r"^\s+-\s")
 #: the sequence it precedes.
 YAML_COMMENT = re.compile(r"^\s*#")
 
+#: A `{{name}}` placeholder in a template. Matched greedily enough to catch a
+#: misspelling, because the failure this prevents is a typo shipping literal
+#: `{{titel}}` into every note a plugin ever adds.
+PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
+
 #: A Markdown H2 as a *renderer* sees it: CommonMark permits up to three
 #: leading spaces. `body_headings` deliberately reads column 0 only, so this is
 #: the wider pattern used to refuse section text, not to find headings.
@@ -1908,6 +1913,37 @@ def parse_sections(pairs: list[str]) -> dict[str, str]:
     return filled
 
 
+def fill_placeholders(body: str, title: str) -> str:
+    """`{{title}}`, and nothing else.
+
+    A note's own title is the one thing a template cannot state and every note
+    in the corpus carries -- `# The title` under the frontmatter, written by
+    `pack.py` from the same string that names the file. Without this the
+    template either omits the H1, making every note `sd` adds differ from the
+    ones beside it, or hardcodes one title for all of them.
+
+    Deliberately one name rather than a templating language. Every other value
+    a note needs is already a `--field` or a `--section`, and a second engine
+    for rendering notes is what `sections.template` exists to avoid.
+
+    A placeholder that is not `{{title}}` is refused rather than left in place.
+    Leaving it would ship `{{titel}}` as literal text into every note written
+    from that template, and the first person to notice would be reading the
+    note, not the template.
+    """
+
+    # The template is scanned *before* the substitution, never after. Scanning
+    # the result would put the note's own title through the check: a tip
+    # actually called "About {{x}} syntax" would be refused, and the name of a
+    # note would decide whether it could be written at all.
+    for stray in PLACEHOLDER.finditer(body):
+        if stray.group(1) != "title":
+            raise Refusal(
+                f"the template carries {stray.group(0)!r}, and `{{{{title}}}}`"
+                " is the only placeholder there is")
+    return body.replace("{{title}}", title)
+
+
 def fill_sections(body: str, filled: dict[str, str]) -> str:
     """Section text placed under the headings the template already renders.
 
@@ -2022,7 +2058,8 @@ def store_add(args: argparse.Namespace) -> int:
     if template is None:
         raise Refusal("the kind declares no `sections.template`, so there is nothing to render")
     body = fill_sections(
-        read_template(root, str(template)), parse_sections(args.section or []))
+        fill_placeholders(read_template(root, str(template)), args.title),
+        parse_sections(args.section or []))
 
     order = declared_sections(kind)
     rendered = body_headings(body)
