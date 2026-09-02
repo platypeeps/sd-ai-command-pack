@@ -744,23 +744,20 @@ class WriteTests(StoreFixture):
             path.read_text(encoding="utf-8"),
             "---   \nstatus: approved\n---\n\nThe body.\n")
 
-    def test_a_missing_kind_directory_is_reported_as_itself(self) -> None:
-        """Not as a uniqueness failure, which is how it surfaced.
+    def test_the_first_add_into_a_new_kind_creates_its_directory(self) -> None:
+        """`unique-fields` used to stop this, and the message named the vault.
 
-        `refuse_duplicate_unique` scans the kind directory, so a kind carrying
-        `unique-fields` reported a missing base through a check about
-        duplicate values. A kind without them reached the write and got an
-        `OSError`. Both now refuse on the directory, before either.
-
-        The directory is deliberately not created: `bases` comes from the
-        manifest, so a missing one is far more likely a typo there than a
-        vault waiting to be filled.
+        `refuse_duplicate_unique` scans the kind directory and `note_paths`
+        refuses a missing one, so the first `add` into a kind whose directory
+        did not exist yet failed a *uniqueness* check -- while `store_add`
+        creates that directory a few lines further down. Nothing collides with
+        notes that are not there.
         """
 
         self.check_missing_base(["score"])
 
-    def test_a_missing_kind_directory_refuses_without_unique_fields_too(self) -> None:
-        """The other half: without `unique-fields` this reached the write."""
+    def test_the_first_add_works_without_unique_fields_too(self) -> None:
+        """The control: this path never went through the uniqueness scan."""
 
         self.check_missing_base([])
 
@@ -775,14 +772,16 @@ class WriteTests(StoreFixture):
         shutil.rmtree(self.tips)
 
         done = self.run_sd("store", "add", "pp.tip", "First", "--field", "score=7")
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn(str(self.tips), done.stderr)
-        self.assertNotIn("unique", done.stderr)
-        self.assertFalse(self.tips.exists(), "the vault must not gain a directory")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.tips / "First.md").is_file(), "the note was not written")
 
-        self.tips.mkdir(parents=True)
-        again = self.run_sd("store", "add", "pp.tip", "First", "--field", "score=7")
-        self.assertEqual(again.returncode, 0, again.stderr)
+        # And the scan it skipped still works once there is something to scan.
+        clash = self.run_sd("store", "add", "pp.tip", "Second", "--field", "score=7")
+        if unique:
+            self.assertEqual(clash.returncode, 1, clash.stdout)
+            self.assertIn("unique", clash.stderr)
+        else:
+            self.assertEqual(clash.returncode, 0, clash.stderr)
 
     def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
         """`float("nan") < 6` is False, so an unguarded floor lets it through.
@@ -952,16 +951,35 @@ class WriteTests(StoreFixture):
         self.assertIn("control character", done.stderr)
         self.assertEqual(path.read_text(encoding="utf-8"), before)
 
-    def test_a_value_holding_a_backslash_survives_the_round_trip(self) -> None:
-        """Written, then read back through `sd get --json`. An actual round trip."""
+    def test_a_backslash_is_written_bare_and_refused_where_it_would_be_quoted(self) -> None:
+        """This test used to assert the opposite, and was wrong to.
+
+        It wrote `a \\ slash: yes`, which needs quoting for the colon, and
+        asserted the value came back through `sd store get`. It did -- because
+        this reader ends `.strip('"')` and unescapes nothing. A real YAML
+        parser reads `"a \\ slash: yes"` as an invalid escape and fails, so the
+        note round-tripped here while being unreadable to Obsidian and to
+        every other tool pointed at the same vault. That is the malformed-YAML
+        failure R11-D27 exists to prevent, written by the code meant to
+        prevent it.
+
+        A plain scalar takes a backslash literally, so an unquoted value keeps
+        one. A value that needs quoting for some other reason is refused.
+        """
 
         self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
         self.note("Ship it", extra="note: old\n")
-        value = "a \\ slash: yes"
+
+        bare = "a \\ slash"
         self.assertEqual(
-            self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+            self.run_sd("store", "set", "pp.tip", "Ship it", "note", bare).returncode, 0)
+        self.assertIn("note: a \\ slash\n", (self.tips / "Ship it.md").read_text(encoding="utf-8"))
         done = self.run_sd("store", "get", "pp.tip", "Ship it", "--json")
-        self.assertEqual(json.loads(done.stdout)["fields"]["note"], value)
+        self.assertEqual(json.loads(done.stdout)["fields"]["note"], bare)
+
+        quoted = self.run_sd("store", "set", "pp.tip", "Ship it", "note", "a \\ slash: yes")
+        self.assertEqual(quoted.returncode, 1, quoted.stdout)
+        self.assertIn("backslash", quoted.stderr)
 
     def test_an_indented_rule_inside_a_value_is_not_the_closing_fence(self) -> None:
         """A block scalar holding its own `---` line.

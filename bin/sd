@@ -1448,7 +1448,19 @@ def render_value(value: str) -> str:
             f"the value holds {control!r}, a control character;"
             " a frontmatter scalar is one line and this would make it two")
     if value == "" or not NEEDS_QUOTING.search(value):
+        # A plain scalar takes a backslash literally, so an unquoted value may
+        # carry one and does.
         return value
+    if "\\" in value:
+        # Inside double quotes YAML processes escapes, so `"a \\ b"` reaches a
+        # real parser as an invalid escape and `"a \\b"` as a backspace. This
+        # writer's own reader would hand the value back unchanged, which is
+        # what made the case look safe -- but the vault is read by Obsidian and
+        # by every other tool pointed at it, and emitting YAML only this reader
+        # can parse is the failure R11-D27 exists to prevent.
+        raise Refusal(
+            "the value needs quoting and holds a backslash; inside quotes YAML reads"
+            " that as an escape, so the note would not parse for anything but this reader")
     return '"' + value + '"'
 
 
@@ -1619,6 +1631,14 @@ def refuse_duplicate_unique(
     wanted = {field: values[field] for field in unique if values.get(field)}
     if not wanted:
         return
+    # A kind directory that does not exist yet holds no notes, so nothing can
+    # collide. `note_paths` refuses a missing base, which is right for the read
+    # verbs -- asking to list a kind the vault does not have is a mistake worth
+    # reporting -- and wrong here, where `store_add` creates the directory a few
+    # lines later. Before this, the first `add` into a new kind failed, and the
+    # failure came out of a uniqueness check and named the vault.
+    if not base.is_dir():
+        return
     for path in note_paths(base):
         if skip is not None and path == skip:
             continue
@@ -1743,19 +1763,6 @@ def store_add(args: argparse.Namespace) -> int:
 
     kind, store, name, root = resolve_kind(args.kind)
     base = kind_base(store, name)
-    # Before anything reads the directory. `refuse_duplicate_unique` scans it,
-    # so a kind with `unique-fields` reported a missing base as a *uniqueness*
-    # failure -- "the vault does not hold this kind", raised by a check about
-    # duplicate values -- while a kind without them got an `OSError` from the
-    # write instead. The directory is not created here: `bases` comes from the
-    # manifest, and the overwhelmingly likely cause of a missing one is a typo
-    # in that manifest rather than a vault waiting to be populated. Making a
-    # directory in someone's vault on the strength of a typo is the silent
-    # side effect this store exists to avoid.
-    if not base.is_dir():
-        raise Refusal(
-            f"{base} does not exist; `store.bases` maps {name!r} there and the vault"
-            " does not have it. Create it, or fix the mapping in the manifest")
     path = note_path(base, args.title)
     if path.exists():
         raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
