@@ -1663,5 +1663,139 @@ class FullListingTests(StoreFixture):
         self.assertEqual(sorted(rows["Extra"]), ["body", "score", "status", "title"])
 
 
+class VaultWideTitleTests(StoreFixture):
+    """`pack.py`'s `vault_title_taken`, which the retarget would have dropped.
+
+    A vault's titles share one namespace -- an Obsidian wikilink resolves on
+    the filename alone -- so `pack.py` refuses a title held anywhere, not just
+    in the kind's own base. Step 9 retargets the routine that relied on it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        kind: dict[str, object] = {
+            "fields": ["status", "score"],
+            "initial-status": "inbox",
+            "transitions": {"inbox": ["approved", "declined"]},
+            "sections": {"order": ["Tip"], "template": "tip.md"},
+        }
+        root = self.plugin(kinds={"tip": kind}, register=False)
+        (root / "tip.md").write_text("\n## Tip\n", encoding="utf-8")
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+    def elsewhere(self, relative: str, name: str) -> pathlib.Path:
+        where = self.vault / relative
+        where.mkdir(parents=True, exist_ok=True)
+        path = where / f"{name}.md"
+        path.write_text("---\nstatus: inbox\n---\n\nSomewhere else.\n", encoding="utf-8")
+        return path
+
+    def add(self, title: str) -> subprocess.CompletedProcess[str]:
+        return self.run_sd("store", "add", "pp.tip", title, "--field", "score=7")
+
+    def test_a_title_held_in_another_directory_is_refused(self) -> None:
+        self.elsewhere("Learning", "Shared name")
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("title collision", done.stderr)
+        self.assertIn("Learning/Shared name.md", done.stderr)
+        self.assertFalse((self.tips / "Shared name.md").exists())
+
+    def test_a_free_title_is_written(self) -> None:
+        self.elsewhere("Learning", "Something else")
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.tips / "Shared name.md").exists())
+
+    def test_a_copy_in_a_dot_directory_does_not_count(self) -> None:
+        """Obsidian's `.trash` holds deleted notes; nothing links to them.
+
+        `pack.py` names seven dot-directories and skips all of them, so the
+        rule here is the generalisation rather than the list.
+        """
+
+        self.elsewhere(".trash", "Shared name")
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.tips / "Shared name.md").exists())
+
+    def test_the_kinds_own_base_is_still_refused(self) -> None:
+        self.assertEqual(self.add("Twice").returncode, 0)
+        done = self.add("Twice")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("already exists", done.stderr)
+
+    def test_a_directory_it_cannot_read_refuses_rather_than_passing(self) -> None:
+        """The one way this guard could be worse than not having it.
+
+        `os.walk` swallows per-directory errors by default, so an unreadable
+        directory hiding a colliding title would come back as "free" and the
+        note would be written. macOS answers an ungranted `~/Documents` read
+        the same way -- empty rather than failing -- which would make every
+        collision check pass vacuously on a vault behind a missing TCC grant.
+        """
+
+        held = self.elsewhere("Locked", "Shared name")
+        locked = held.parent
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o755)
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("cannot scan", done.stderr)
+        self.assertFalse((self.tips / "Shared name.md").exists())
+
+    def test_a_vault_root_that_is_not_there_refuses(self) -> None:
+        """Refused by the driver before the scan runs, which is why the scan
+        does not repeat the check: an unreachable guard is one no test reaches."""
+
+        done = self.run_sd(
+            "store", "add", "pp.tip", "Anything", "--field", "score=7",
+            vault=str(self.tmp / "no-such-vault"))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("vault path does not exist", done.stderr)
+
+    def test_the_existing_note_is_left_alone(self) -> None:
+        """A refused `add` must not have written anything on its way to refusing."""
+
+        held = self.elsewhere("Learning", "Shared name")
+        before = held.read_text(encoding="utf-8")
+        self.assertEqual(self.add("Shared name").returncode, 1)
+        self.assertEqual(held.read_text(encoding="utf-8"), before)
+
+    def test_add_probes_the_vault_once_and_not_once_per_use_of_the_root(self) -> None:
+        """`store add` needs the vault root twice; it may only probe for it once.
+
+        `store_root` ends in `vault_reason`, which lists the vault in a bounded
+        child process. That is not a cheap call: it spawns an interpreter, and
+        against an ungranted vault it is fifteen seconds of waiting. `add`
+        resolves the root for the kind's base and again for the vault-wide
+        title scan, and resolving it twice paid for the probe twice. This runs
+        `add` in-process so the calls can be counted; every other case in this
+        class runs the real command.
+        """
+
+        self.elsewhere("Learning", "Neighbour")
+        sd = sd_module()
+        calls: list[pathlib.Path] = []
+        real = sd.vault_reason
+
+        def counted(root: pathlib.Path) -> str:
+            calls.append(root)
+            return real(root)
+
+        sd.vault_reason = counted
+        self.addCleanup(setattr, sd, "vault_reason", real)
+        before = {name: os.environ.get(name) for name in ("XDG_CONFIG_HOME", "OBSIDIAN_VAULT")}
+        self.addCleanup(lambda: [os.environ.__setitem__(name, value) if value is not None
+                                 else os.environ.pop(name, None)
+                                 for name, value in before.items()])
+        os.environ["XDG_CONFIG_HOME"] = str(self.config_home)
+        os.environ["OBSIDIAN_VAULT"] = str(self.vault)
+
+        self.assertEqual(sd.main(["store", "add", "pp.tip", "Fresh", "--field", "score=7"]), 0)
+        self.assertEqual(len(calls), 1, f"probed the vault {len(calls)} times")
+        self.assertTrue((self.tips / "Fresh.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

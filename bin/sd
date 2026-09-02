@@ -1298,6 +1298,23 @@ def note_body(text: str) -> str:
     return text
 
 
+def note_text(path: pathlib.Path) -> str:
+    """The note's bytes, refused the way `read_note` refuses.
+
+    `store get` and `store list --full` print the file itself rather than the
+    parsed body, so they read it a second time. `read_note` has already
+    refused an unreadable note by then in both callers, which leaves only the
+    narrow window where a note becomes unreadable between the two reads -- a
+    bare `read_text` answers that with a traceback where the rest of this file
+    answers with a refusal.
+    """
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refusal(f"cannot read {path}: {error}") from None
+
+
 def read_note(path: pathlib.Path) -> tuple[dict[str, str], str]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -1344,10 +1361,20 @@ def resolve_kind(
     raise Refusal(f"no registered plugin has prefix {prefix!r}")
 
 
-def kind_base(store: dict[str, object], name: str) -> pathlib.Path:
+def kind_base(store: dict[str, object], name: str,
+              root: pathlib.Path | None = None) -> pathlib.Path:
+    """The kind's directory under the vault root.
+
+    `root` is there for the one caller that needs the vault root itself as
+    well: `store_root` probes the vault in a bounded child process on every
+    call (see `vault_reason`), so a verb that resolves the root twice pays two
+    interpreter spawns and, on an ungranted vault, two chances to hit the
+    fifteen-second timeout. Pass the root you already have and this reuses it.
+    """
+
     bases = store["bases"]
     assert isinstance(bases, dict)  # validate_store builds it; narrows for the type checker
-    return store_root(store) / str(bases[name])
+    return (store_root(store) if root is None else root) / str(bases[name])
 
 
 def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
@@ -1696,6 +1723,49 @@ def refuse_bad_transition(kind: dict[str, object], current: str, wanted: str) ->
             f" {wanted!r} is not among them")
 
 
+def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
+    """A note's title is taken if *any* note in the vault already has it.
+
+    Not just the kind's own base. A vault's titles share one namespace: an
+    Obsidian wikilink resolves on the filename alone, so a tip called the same
+    thing as a note in `Learning/` makes every existing link to that name
+    ambiguous, and the note that loses is the one nobody was editing. This is
+    `pack.py`'s `vault_title_taken`, which refuses in four places and which the
+    retarget would otherwise have dropped on the floor.
+
+    Dot-directories are skipped. `pack.py` names seven of them and every one
+    starts with a dot (`.obsidian`, `.trash`, `.git`, `.smart-env`, `.space`,
+    `.makemd`, `.trellis`), so the rule is the generalisation rather than the
+    list: a copy Obsidian keeps in `.trash` is not a note anybody links to, and
+    a new plugin's cache directory should not need a code change here.
+
+    `path` itself never counts, so a caller that has already refused an
+    existing note does not get a second, worse-worded refusal for the same one.
+    """
+
+    # A scan that cannot read the vault must refuse, not come back empty. macOS
+    # answers an ungranted `~/Documents` read by returning nothing rather than
+    # by failing, and `os.walk` swallows per-directory errors by default, so
+    # without both of these an unreadable vault reports every title as free and
+    # the collision check passes vacuously -- the one way this guard could be
+    # worse than not having it. A vault root that is not there is already
+    # refused by the driver before this runs.
+    def unreadable(error: OSError) -> None:
+        raise Refusal(
+            f"cannot scan {error.filename} for title collisions: {error}."
+            " Refusing rather than treating the title as free") from None
+
+    want = path.name
+    for parent, dirs, files in os.walk(root, onerror=unreadable):
+        dirs[:] = [name for name in dirs if not name.startswith(".")]
+        if want in files:
+            found = pathlib.Path(parent) / want
+            if found != path:
+                raise Refusal(
+                    f"title collision: {want!r} already exists at "
+                    f"{found.relative_to(root)}; titles share one namespace across the vault")
+
+
 def refuse_duplicate_unique(
         kind: dict[str, object], base: pathlib.Path, values: dict[str, str],
         skip: pathlib.Path | None = None) -> None:
@@ -2007,10 +2077,12 @@ def store_add(args: argparse.Namespace) -> int:
     """
 
     kind, store, name, root = resolve_kind(args.kind)
-    base = kind_base(store, name)
+    vault = store_root(store)
+    base = kind_base(store, name, vault)
     path = note_path(base, args.title)
     if path.exists():
         raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
+    refuse_title_taken(vault, path)
 
     fields = store_fields(kind)
     values = parse_assignments(args.field or [], fields)
@@ -2184,7 +2256,7 @@ def store_list(args: argparse.Namespace) -> int:
             # otherwise the `print()` below only terminates its last line and
             # the next `===` header follows with no separator at all.
             print(f"=== {row['title']} ===")
-            text = path.read_text(encoding="utf-8")
+            text = note_text(path)
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
             print()
         print(f"# {len(rows)} note(s)", file=sys.stderr)
@@ -2219,7 +2291,7 @@ def store_get(args: argparse.Namespace) -> int:
         sys.stdout.write("\n")
         return 0
     print(f"=== {args.title} ===")
-    sys.stdout.write(path.read_text(encoding="utf-8"))
+    sys.stdout.write(note_text(path))
     return 0
 
 
