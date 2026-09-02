@@ -1663,5 +1663,76 @@ class FullListingTests(StoreFixture):
         self.assertEqual(sorted(rows["Extra"]), ["body", "score", "status", "title"])
 
 
+class VaultWideTitleTests(StoreFixture):
+    """`pack.py`'s `vault_title_taken`, which the retarget would have dropped.
+
+    A vault's titles share one namespace -- an Obsidian wikilink resolves on
+    the filename alone -- so `pack.py` refuses a title held anywhere, not just
+    in the kind's own base. Step 9 retargets the routine that relied on it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        kind: dict[str, object] = {
+            "fields": ["status", "score"],
+            "initial-status": "inbox",
+            "transitions": {"inbox": ["approved", "declined"]},
+            "sections": {"order": ["Tip"], "template": "tip.md"},
+        }
+        root = self.plugin(kinds={"tip": kind}, register=False)
+        (root / "tip.md").write_text("\n## Tip\n", encoding="utf-8")
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+    def elsewhere(self, relative: str, name: str) -> pathlib.Path:
+        where = self.vault / relative
+        where.mkdir(parents=True, exist_ok=True)
+        path = where / f"{name}.md"
+        path.write_text("---\nstatus: inbox\n---\n\nSomewhere else.\n", encoding="utf-8")
+        return path
+
+    def add(self, title: str) -> subprocess.CompletedProcess[str]:
+        return self.run_sd("store", "add", "pp.tip", title, "--field", "score=7")
+
+    def test_a_title_held_in_another_directory_is_refused(self) -> None:
+        self.elsewhere("Learning", "Shared name")
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("title collision", done.stderr)
+        self.assertIn("Learning/Shared name.md", done.stderr)
+        self.assertFalse((self.tips / "Shared name.md").exists())
+
+    def test_a_free_title_is_written(self) -> None:
+        self.elsewhere("Learning", "Something else")
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.tips / "Shared name.md").exists())
+
+    def test_a_copy_in_a_dot_directory_does_not_count(self) -> None:
+        """Obsidian's `.trash` holds deleted notes; nothing links to them.
+
+        `pack.py` names seven dot-directories and skips all of them, so the
+        rule here is the generalisation rather than the list.
+        """
+
+        self.elsewhere(".trash", "Shared name")
+        done = self.add("Shared name")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.tips / "Shared name.md").exists())
+
+    def test_the_kinds_own_base_is_still_refused(self) -> None:
+        self.assertEqual(self.add("Twice").returncode, 0)
+        done = self.add("Twice")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("already exists", done.stderr)
+
+    def test_the_existing_note_is_left_alone(self) -> None:
+        """A refused `add` must not have written anything on its way to refusing."""
+
+        held = self.elsewhere("Learning", "Shared name")
+        before = held.read_text(encoding="utf-8")
+        self.assertEqual(self.add("Shared name").returncode, 1)
+        self.assertEqual(held.read_text(encoding="utf-8"), before)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1696,6 +1696,37 @@ def refuse_bad_transition(kind: dict[str, object], current: str, wanted: str) ->
             f" {wanted!r} is not among them")
 
 
+def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
+    """A note's title is taken if *any* note in the vault already has it.
+
+    Not just the kind's own base. A vault's titles share one namespace: an
+    Obsidian wikilink resolves on the filename alone, so a tip called the same
+    thing as a note in `Learning/` makes every existing link to that name
+    ambiguous, and the note that loses is the one nobody was editing. This is
+    `pack.py`'s `vault_title_taken`, which refuses in four places and which the
+    retarget would otherwise have dropped on the floor.
+
+    Dot-directories are skipped. `pack.py` names seven of them and every one
+    starts with a dot (`.obsidian`, `.trash`, `.git`, `.smart-env`, `.space`,
+    `.makemd`, `.trellis`), so the rule is the generalisation rather than the
+    list: a copy Obsidian keeps in `.trash` is not a note anybody links to, and
+    a new plugin's cache directory should not need a code change here.
+
+    `path` itself never counts, so a caller that has already refused an
+    existing note does not get a second, worse-worded refusal for the same one.
+    """
+
+    want = path.name
+    for parent, dirs, files in os.walk(root):
+        dirs[:] = [name for name in dirs if not name.startswith(".")]
+        if want in files:
+            found = pathlib.Path(parent) / want
+            if found != path:
+                raise Refusal(
+                    f"title collision: {want!r} already exists at "
+                    f"{found.relative_to(root)}; titles share one namespace across the vault")
+
+
 def refuse_duplicate_unique(
         kind: dict[str, object], base: pathlib.Path, values: dict[str, str],
         skip: pathlib.Path | None = None) -> None:
@@ -2011,6 +2042,7 @@ def store_add(args: argparse.Namespace) -> int:
     path = note_path(base, args.title)
     if path.exists():
         raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
+    refuse_title_taken(store_root(store), path)
 
     fields = store_fields(kind)
     values = parse_assignments(args.field or [], fields)
