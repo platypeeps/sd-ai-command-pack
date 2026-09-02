@@ -3601,7 +3601,7 @@ edit. All three legitimate. That is the noise floor of a live vault, and it
 rises with the age of the baseline.
 
 **Why "drift detector" was the wrong frame for it.** Two of the three classes
-are noise against a vault launchd routines write on schedule; only `missing`
+are noise against a vault that launchd routines write to on schedule; only `missing`
 still means something a day later. Kept as a standing baseline the tool
 reports normal activity as drift, and a check whose output its reader learns
 to skip is worse than no check -- the same argument this repository already
