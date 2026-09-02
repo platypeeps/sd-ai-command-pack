@@ -3579,4 +3579,59 @@ tooling deleted at step 11, and the baseline it maintains was captured to
 guard a move that will not happen. It does still detect vault drift. That is
 the same "a registry nothing reads is a record" argument this repository
 already rejected once, at `docs/fleet/README.md:34`, so it should be answered
-deliberately and not by leaving the file in place.
+deliberately and not by leaving the file in place. *(Answered 2026-09-02:
+kept through 10b as a bracket, deleted when 10b lands. See "`migrate-golden-corpus`
+answered" at the end of this file.)*
+
+### `migrate-golden-corpus` answered, 2026-09-02
+
+Step 11's record left this open and said it "should be answered deliberately
+and not by leaving the file in place". Answered here: **kept through step 10b,
+used as a bracket, deleted when 10b lands.**
+
+**What it detects.** Whole-note sha256 across 782 notes in 14 bases, reported
+in three classes -- `changed`, `missing`, `unrecorded`. Re-run 2026-09-02
+07:56 against a baseline captured 04:27, three and a half hours earlier, with
+nothing migrated in between:
+
+    1 changed, 0 missing, 2 unrecorded of 782 recorded notes
+
+The overnight daily brief, an ideate run's new blog idea, and a `TaskNotes`
+edit. All three legitimate. That is the noise floor of a live vault, and it
+rises with the age of the baseline.
+
+**Why "drift detector" was the wrong frame for it.** Two of the three classes
+are noise against a vault launchd routines write on schedule; only `missing`
+still means something a day later. Kept as a standing baseline the tool
+reports normal activity as drift, and a check whose output its reader learns
+to skip is worse than no check -- the same argument this repository already
+used to reject keeping a registry, at `docs/fleet/README.md:34`.
+
+**Why it is not deleted now.** Step 10b retargets the vault-facing half of
+`pack.py` at `sd`, which puts a **second writer** on those notes for the first
+time. A retargeted verb that resolves the wrong base path, or a `sd store set`
+line edit that orphans a list continuation, changes bytes nothing should have
+touched -- and R11-D27's whole lesson is that such a note still parses, so
+nothing else downstream complains. Captured immediately before a retarget and
+verified immediately after, the noise window is minutes rather than a day, so
+`changed` becomes as readable as `missing`. That is the bracket, and it is the
+only use the tool has left.
+
+**What it does not do**, and no document should claim it does: it is not a
+check that `sd` writes what `pack.py` wrote. It snapshots one vault; it does
+not compare two writers. That comparison is the same note written both ways
+into a scratch vault and diffed, which is what 8-vi did by hand three times.
+
+**Cost of keeping it.** 6.3 MB of bodies and manifest under
+`~/.local/state/sd/golden-corpus/`, outside the repository; 360 lines in
+`bin/` plus `tests/test_migrate_golden_corpus.py`; both outside the `bin/` cap
+under the `migrate-*` allowance, which is now 360 of 1,500 with
+`migrate-trellis` gone.
+
+**What this corrects.** Step 7 defined the `migrate-` prefix as tooling
+deleted at step 7 or 11, and three documents still scheduled this file by that
+rule after step 11 collapsed. The tool's own module docstring was the worst of
+them -- written entirely around step 11 relocating live bases, and the first
+thing a 10b run would read. All three are corrected in this commit: the
+docstring, `design.md`'s cap paragraph, and `prd.md`'s steps 8-11 acceptance
+clause.
