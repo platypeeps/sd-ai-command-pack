@@ -1969,6 +1969,11 @@ def section_lines(body: str, ending: str) -> list[str]:
     differently from one `add` filled in.
     """
 
+    if not body.strip():
+        # An empty section is its heading and one blank line. Adding the usual
+        # trailing blank on top of that leaves two, which reads as a gap the
+        # writer did not ask for.
+        return [ending]
     return [ending] + [line + ending for line in body.rstrip("\r\n").splitlines()]
 
 
@@ -1996,7 +2001,8 @@ def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
         # `edit_field` uses when it inserts a key the note did not carry.
         ending = line_ending(lines[0])
         at = insertion_point(lines, headings, name, order)
-        block = [f"## {name}{ending}"] + section_lines(body, ending)
+        filled = section_lines(body, ending)
+        block = [f"## {name}{ending}"] + filled
         if at == len(lines):
             # Appending past the last section. The note may not end in a
             # newline, and a heading must not land on the tail of somebody's
@@ -2004,7 +2010,7 @@ def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
             if lines and not lines[-1].endswith(("\n", "\r")):
                 lines[-1] += ending
             block.insert(0, ending)
-        else:
+        elif body.strip():
             block.append(ending)
         lines[at:at] = block
     else:
@@ -2017,7 +2023,7 @@ def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
         filled = section_lines(body, ending)
         # A blank line before the next heading, but never a trailing blank at
         # the end of the note.
-        if end < len(lines):
+        if end < len(lines) and body.strip():
             filled.append(ending)
         lines[start + 1:end] = filled
     return "".join(lines)

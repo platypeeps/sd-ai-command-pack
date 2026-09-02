@@ -1867,7 +1867,7 @@ class SetSectionTests(StoreFixture):
         self.build()
         self.tip("## Tip\n\nt\n")
         got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Tip", "--json")
-        self.assertEqual(got.returncode, 2, got.stdout)
+        self.assertEqual(got.returncode, 2, got.stderr)
         self.assertIn("--json", got.stderr)
 
     # -- creation, without pack.py's anchor ------------------------------
@@ -1920,6 +1920,27 @@ class SetSectionTests(StoreFixture):
         done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=8")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.headings(path), ["Tip", "Notes", "Score", "Provenance"])
+
+    def test_an_emptied_section_is_a_heading_and_one_blank_line(self) -> None:
+        """Not two. The blank after a heading and the blank before the next one
+        are the same line when there is nothing between them."""
+
+        self.build()
+        path = self.tip("## Tip\n\ngone\n\n## Score\n\ns\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Tip=")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("## Tip\n\n## Score\n", after)
+        self.assertNotIn("\n\n\n", after)
+
+    def test_a_created_empty_section_is_the_same_shape(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\nt\n\n## Provenance\n\np\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("## Score\n\n## Provenance\n", after)
+        self.assertNotIn("\n\n\n", after)
 
     # -- the read half ---------------------------------------------------
 
