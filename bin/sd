@@ -2440,7 +2440,9 @@ def store_set(args: argparse.Namespace) -> int:
     # that is obviously right, and picking one silently is how a note ends up
     # holding the value its author did not type.
     if args.field is not None and args.fields:
-        raise UsageError("give either the positional `FIELD VALUE` or --field, not both")
+        raise UsageError(
+            "give either the positional `FIELD VALUE` or"
+            " --field/--field-file, not both")
     if args.field is not None and args.value is None:
         raise UsageError("the positional form is `set KIND TITLE FIELD VALUE`")
 
