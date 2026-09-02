@@ -4257,11 +4257,12 @@ ones as `""`, so a protected field could neither be supplied nor omitted
 correctly. The only field still protected is the one whose empty value is
 *meaningful*, so absent now means the right thing rather than the wrong one.
 
-`floor` had already found and fixed this exact bug inside the same function:
-`refuse_protected`'s call site is `bin/sd:2339` and the floor's comment saying
-so is sixteen lines below it at `bin/sd:2355` -- iterate the declared set, not
-the supplied one. Two loops over the same values, one corrected and one not,
-close enough to read in a single screen. The same lesson reached `protected-fields` by removing the fields
+`floor` had already found and fixed this exact bug inside the same function.
+`refuse_protected` (`bin/sd:2339`) is called over the fields the caller
+supplied; `refuse_below_floor` (`bin/sd:2361`) is called over the fields the
+*kind declares*, twenty-two lines below it, under a comment saying in as many
+words why the first shape is wrong. Two loops over the same values, one
+corrected and one not, close enough to read in a single screen. The same lesson reached `protected-fields` by removing the fields
 that made it necessary rather than by adding a second loop.
 
 One meaning also means the key reads the same on `add` and `set`, so no
