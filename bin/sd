@@ -1463,7 +1463,7 @@ def frontmatter_span(text: str) -> tuple[list[str], int, int]:
     """
 
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
+    if not lines or lines[0].rstrip() != "---":
         raise Refusal("the note has no `---` frontmatter block to edit")
     for index in range(1, len(lines)):
         # `rstrip` of the line ending only, never `strip()`. An **indented**
@@ -1699,9 +1699,14 @@ def write_atomically(path: pathlib.Path, text: str) -> None:
 
     tmp = None
     try:
+        # `newline=""` disables translation on write. The default rewrites
+        # every `\n` to `os.linesep`, which on Windows turns an LF note into a
+        # CRLF one -- every line changed by a function whose whole purpose is
+        # to change one. The edited line already carries whatever ending it
+        # had; nothing here may add to that.
         handle = tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp",
-            delete=False)
+            "w", encoding="utf-8", newline="", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False)
         tmp = pathlib.Path(handle.name)
         with handle:
             handle.write(text)

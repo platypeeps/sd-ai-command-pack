@@ -723,6 +723,26 @@ class WriteTests(StoreFixture):
             path.read_text(encoding="utf-8"),
             "---\nstatus: approved\n---   \n\nThe body.\n")
 
+    def test_an_opening_fence_with_trailing_spaces_is_still_frontmatter(self) -> None:
+        """The fourth fence site, and the one the previous round left behind.
+
+        Fixing `frontmatter_span`'s *closing* comparison last round did not
+        touch its *opening* one, which still used `.rstrip("\\r\\n")`. So a note
+        whose first line is `---   ` had frontmatter according to both readers
+        and none according to the writer, which refuses a note it cannot find
+        a block in -- a `set` failing on a note whose fields `sd store get`
+        will happily print.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("---   \nstatus: inbox\n---\n\nThe body.\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            path.read_text(encoding="utf-8"),
+            "---   \nstatus: approved\n---\n\nThe body.\n")
+
     def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
         """`float("nan") < 6` is False, so an unguarded floor lets it through.
 

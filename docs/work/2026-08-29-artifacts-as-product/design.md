@@ -1875,7 +1875,8 @@ and `detail` as text and never touches `row.href`. The key is validated, carried
 loader, and dropped. (*`showAlerts` was deleted at `56f16c7b`, 6b-5b. The line number is dropped
 rather than corrected because there is nothing to correct it to -- a pointer that cannot resolve
 is not a citation -- and the observation is kept as the dated one it was. The load-bearing claim,
-that nothing reads `row.href`, was **not** re-verified against the renderer that replaced it.*) That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
+that nothing reads `row.href`, was **not** re-verified against the renderer that replaced it.*)
+That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
 
 **So the backbone resolves the destination instead.** The loader already stamps `source` on every
 row it accepts (`dashboard/plugins.py`, in `validate_rows`), and the tab that emitted a row is the
