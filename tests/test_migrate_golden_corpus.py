@@ -187,6 +187,18 @@ class GoldenCorpusTests(unittest.TestCase):
 
         self.assertEqual(self.run_tool("verify"), 2)
 
+    def test_scan_refuses_a_duplicate_even_when_handed_overlapping_bases(self) -> None:
+        """`read_bases` is not the only way in, so the guard is tested where it lives.
+
+        `scan` takes its bases as an argument. With the overlap refused at the
+        list, nothing in normal operation reaches this -- which is exactly how
+        a defence-in-depth check goes untested and then does not work on the
+        day something calls it.
+        """
+
+        with self.assertRaises(self.tool.UsageError):
+            self.tool.scan(self.vault, ["Notes", "."])
+
     # -- the boundaries the tool is supposed to hold --------------------------
 
     def test_a_baseline_pointed_inside_the_repository_is_refused(self) -> None:
@@ -307,6 +319,45 @@ class CommittedBaseListTests(unittest.TestCase):
                 self.tool.BASES_FILE = listing
                 with self.assertRaises(self.tool.UsageError):
                     self.tool.read_bases()
+
+    def test_a_base_nested_inside_another_base_is_refused(self) -> None:
+        """The scan is recursive, so an overlap records the same note twice.
+
+        The manifest gains a duplicate row, the root hash covers it, and every
+        comparison reads the manifest into a mapping keyed by path and keeps
+        one -- so the recorded count disagrees with the rows and nothing says
+        why.
+        """
+
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        listing = pathlib.Path(holder.name) / "bases.txt"
+        listing.write_text("System\nSystem/Databases/Topics\n", encoding="utf-8")
+        self.tool.BASES_FILE = listing
+        with self.assertRaises(self.tool.UsageError):
+            self.tool.read_bases()
+
+    def test_two_bases_that_only_share_a_name_prefix_are_both_kept(self) -> None:
+        """The negative control. `Tool Stack` is not inside `Tool`.
+
+        Without it the check above passes just as well when written as a string
+        prefix, which would refuse two unrelated sibling directories.
+        """
+
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        listing = pathlib.Path(holder.name) / "bases.txt"
+        listing.write_text("System/Databases/Tool\nSystem/Databases/Tool Stack\n", encoding="utf-8")
+        self.tool.BASES_FILE = listing
+        self.assertEqual(self.tool.read_bases(),
+                         ["System/Databases/Tool", "System/Databases/Tool Stack"])
+
+    def test_a_manifest_listing_one_note_twice_is_refused(self) -> None:
+        """Read into a mapping, the second row wins and the first disappears."""
+
+        digest = "0" * 64
+        with self.assertRaises(self.tool.UsageError):
+            self.tool.parse_manifest(f"{digest}  Notes/One.md\n{digest}  Notes/One.md\n")
 
     def test_an_indented_comment_is_a_comment_here_too(self) -> None:
         """The exact divergence that removed the duplicate parser, pinned."""
