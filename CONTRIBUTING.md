@@ -243,7 +243,8 @@ of `sd-ship`. Rule 4 tolerates an index that links a page which is gone, so
 deleting a page is safe — but a directory has to leave with its index, not
 before it.
 
-**The recommendation was executed on 2026-09-02, and the two paragraphs above
+**The recommendation was executed on 2026-09-01, hours after the triage that
+produced it, and the two paragraphs above
 stand as written.** The maintainer took the delete column. Eighteen files and
 9,324 lines went: `docs/spec/frontend/` and `docs/spec/tooling/` left whole,
 index included; three of `docs/spec/backend/`'s seven pages went while three
@@ -254,7 +255,7 @@ files in two directories.
 Two files were rewritten rather than deleted, and each for a stated reason.
 `docs/spec/backend/index.md` had to survive because rule 4 requires an index
 wherever pages remain, so it was cut down to an index of the three survivors
-plus a record of what left. `docs/fleet/README.md` was written the day before
+plus a record of what left. `docs/fleet/README.md` was written earlier the same day
 to carry a notice for two JSON files that could not hold one; with both files
 gone it is a tombstone instead, kept at its path so links into `docs/fleet/`
 from this file, from `CHANGELOG.md`, and from archived work items still answer

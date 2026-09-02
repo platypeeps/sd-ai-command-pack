@@ -1,7 +1,7 @@
 # Installer CLI Guidelines
 
 > [!important]
-> **Stale as of 2026-09-01, and reduced on 2026-09-02.**
+> **Stale as of 2026-09-01, and reduced the same day.**
 > Every subject the original Scope and Pre-Development Checklist named is gone.
 > `install.py`, the `installer/` package, `manifest.json`, `templates/` and
 > `tests/install_test_support.py` were deleted on 2026-08-30 by step 3e of the
@@ -33,7 +33,7 @@
 
 ## What was deleted from this directory
 
-Three pages went on 2026-09-02, each a `delete` verdict from the 2026-09-01
+Three pages went on 2026-09-01, each a `delete` verdict from the same day's
 triage: `directory-structure.md` (the `install.py` + `installer/` + `templates/`
 + `scripts/` layout), `fleet-consumer-conversion.md` (running
 `install.py <consumer>` across a fleet that no longer exists), and

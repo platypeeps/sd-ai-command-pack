@@ -3092,12 +3092,12 @@ one command and does not depend on remembering where `.claude` roots.
 
 - [ ] 8 / 9 / 10 / 11
 
-### The delete column, executed (2026-09-02)
+### The delete column, executed (2026-09-01)
 
 The 2026-09-01 triage produced a per-file disposition -- keep 0, stale-notice
 6, delete 19 -- and stopped there, because 7,839 lines of specification is a
 content decision for the maintainer rather than a triage's call. The maintainer
-took the delete column on 2026-09-02. This entry records what that cost and the
+took the delete column the same day. This entry records what that cost and the
 two places it could not be a straight deletion.
 
 **Eighteen files, 9,324 lines.** Not nineteen. `docs/spec/backend/index.md`
@@ -3115,13 +3115,13 @@ index included, exactly as the triage said they could.
 **`docs/fleet/README.md` changed job rather than leaving.** It was written on
 2026-09-01 to carry a stale notice for two JSON files that cannot hold one.
 With both files deleted a notice about them is a tombstone, so it was rewritten
-as one: what each file was, why annotate-then-delete happened a day apart, and
+as one: what each file was, why annotate-then-delete happened hours apart, and
 where the fuller record lives. It stays at its path because `CONTRIBUTING.md`,
 `CHANGELOG.md` and archived work items link into `docs/fleet/`, and a link that
 404s teaches nothing.
 
-**The reasoning that lasted one day, named rather than buried.** On 2026-09-01
-the two JSONs were annotated instead of deleted, on the argument that "a
+**The reasoning that lasted a few hours, named rather than buried.** Earlier the
+same day the two JSONs were annotated instead of deleted, on the argument that "a
 registry nothing reads is a record, and correcting a record in place is how a
 repository loses the ability to say what it once believed." That argument was
 right about correcting in place and wrong about the cost of keeping: the same
@@ -3135,7 +3135,7 @@ bodies. The triage decided against rewriting them down to their true parts --
 that is a content rewrite wearing a triage's clothes, and it destroys the record
 of what the machinery was, which is the only thing they are still good for.
 `docs/spec/backend/manifest-and-filesystem.md` gained one dated line saying
-three of its citations became absent rather than stale on 2026-09-02, and its
+three of its citations became absent rather than stale the same day, and its
 302/377 figure was **left as measured** rather than re-run: a figure in prose is
 a measurement with no owner, and re-measuring only moves the date it goes stale.
 Its two open questions -- the vestigial `SD-AI-COMMAND-PACK` gitignore markers

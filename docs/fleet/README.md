@@ -1,7 +1,7 @@
 # Fleet registry
 
 > [!important]
-> **Both files this directory held were deleted on 2026-09-02.** Nothing is
+> **Both files this directory held were deleted on 2026-09-01.** Nothing is
 > left here but this page. It stays at this path so that a link into
 > `docs/fleet/` still answers what was here, rather than 404-ing on a reader who
 > found the path in `CONTRIBUTING.md`, in `CHANGELOG.md`, or in an archived work
@@ -31,7 +31,7 @@ repositories that R10-D6 forbids the pack from writing at all.
 ## Why they were deleted rather than kept
 
 On 2026-09-01 both files were annotated rather than removed, on the reasoning
-that "a registry nothing reads is a record." That held for one day. The triage
+that "a registry nothing reads is a record." It held for a few hours. The triage
 that annotated them had already returned a `delete` verdict for both, and
 keeping an unread 4,859-line registry to preserve a record it shares with the
 triage table is paying storage for a second copy. What they were is recorded

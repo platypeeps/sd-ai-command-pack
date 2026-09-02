@@ -29,7 +29,7 @@
 > `CONTRIBUTING.md` says they are left in place because this section still
 > specifies them. Whatever happens to this page has to settle that too.
 >
-> **Three more of its citations went on 2026-09-02, and the count above is not
+> **Three more of its citations went later the same day, and the count above is not
 > re-run.** `docs/FLEET_ROLLOUT.md`, `docs/fleet/consumers.json` and
 > `docs/fleet/surface-partition.json` were deleted when the triage's delete
 > column was executed, so this page now cites them as absent rather than stale.
