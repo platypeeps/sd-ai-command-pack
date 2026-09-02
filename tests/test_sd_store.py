@@ -1384,7 +1384,8 @@ class AddListsAndSectionsTests(StoreFixture):
         self.assertIn(b"## Tip\n\none\ntwo\n", body)
 
     def test_the_template_can_say_the_notes_own_title(self) -> None:
-        """The one thing a template cannot state and every note carries."""
+        """The one thing a static template cannot state on its own, and that
+        every note in the corpus carries."""
 
         self.build(template="\n# {{title}}\n\n## Tip\n\n## Score\n")
         self.assertEqual(self.run_sd(
