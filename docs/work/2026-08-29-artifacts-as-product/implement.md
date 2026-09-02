@@ -3399,3 +3399,65 @@ The tool is `migrate-`-prefixed and outside the `bin/` line cap because it is
 deleted at step 11 with the rest of the migration tooling. All four sabotages
 of it are caught: disabling the root check, making the scan non-recursive,
 removing the re-capture guard, and skipping a base that stopped existing.
+
+### Step 8-vi, which the plan did not have: `add` could not write a tip (2026-09-02)
+
+Step 9's row asks for `grep -rln pack.py 'System/Scheduled Tasks/'` = **0**.
+Step 8 was declared complete on 2026-09-02 and step 10a's manifest merged the
+same day. Neither of those was wrong on its own terms, and together they were
+not enough: **the `sd store add` step 8 shipped cannot write a tip note**, so
+`tips-weekly` could not stop calling `pack.py` and step 9's criterion was
+unreachable.
+
+`pack.py tips add` writes two list-valued frontmatter keys (`contexts:` and
+`tags:`, each a `  - ` block sequence) and three sections of generated prose
+(`## Tip`, `## Score`, `## Provenance`). `sd store add` wrote frontmatter as
+flat `field: value` -- `render_value` refuses a newline -- and a body copied
+from a static template, with no way to put text in it. The gap was found while
+enumerating step 9's call sites, not while reading the plan, which is the
+order that keeps finding things in this rollout.
+
+Put to Sven as three options: extend `sd`, add template interpolation, or
+relax step 9's criterion so `pack.py` keeps the creator role its own
+`tips-weekly/SKILL.md:15` already documents. **He chose extending `sd`**, which
+keeps both criteria as written and keeps one writer.
+
+**Standing rule 2 is not touched, and that is the substantive decision here.**
+The obvious shape for this was a ninth `kinds.*` key -- `list-fields` -- naming
+the fields that hold sequences, and the vocabulary's own comment invites it by
+saying a ninth is a decision record. It is not needed, and a worse fit than it
+looks:
+
+- On the **write** side the distinction `add` needs is per-invocation, not per
+  kind. `--field NAME=VALUE` stays a scalar and a repeat stays the mistake it
+  usually is; `--field NAME+=VALUE`, repeated, builds a sequence. Folding every
+  duplicate `=` into a list instead would have made `--field score=7 --field
+  score=8` a two-item list rather than a typo, and no manifest key can tell
+  those apart.
+- On the **edit** side a declaration would have protected the wrong set. The
+  hazard is `edit_field` replacing `contexts:` and orphaning the `  - ` items
+  under it, and the notes at risk are the **244 in the corpus carrying
+  `contexts:` and `tags:` today**, which no manifest declares at all. So
+  `refuse_list_value` reads the note's own bytes: a key with no inline value
+  followed by an indented `- ` is refused, whatever the manifest says.
+
+That second one is R11-D27 reached from the other side. D27 is why the write
+path is a line edit rather than a parse-and-rewrite; this is the one case a
+line edit gets wrong by itself, and it was reachable before this commit for any
+field a manifest declared. Step 10a omitted `contexts` and `tags` from every
+`fields` list precisely to stay away from it. With the guard in place they can
+be declared.
+
+**Verified by sabotage, three times.** Deleting the `refuse_list_value` call
+fails 2 of its 4 cases and leaves the two that pin it as *not* over-broad --
+an inline value still edits, and a following key is not read as a
+continuation. Forcing `render_field` down its scalar branch fails 2. Making
+`fill_sections` return the body unchanged fails 3. Full suite **1035 tests, no
+skips**; `make lint` clean including mypy, which caught the one place the
+runtime guard was real but the type was not.
+
+One shape is refused that a reader might expect to work: section text carrying
+its own `## ` heading. `store_add` compares the template's headings against
+`sections.order` *after* the fill, so a smuggled heading would either fail that
+comparison with a message blaming the template, or match it and write a note
+with the heading twice.

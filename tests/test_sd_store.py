@@ -1211,6 +1211,198 @@ class WriteTests(StoreFixture):
         self.assertIn("  ---\n  more prose\n", after)
         self.assertIn("status: approved\n", after)
 
+class AddListsAndSectionsTests(StoreFixture):
+    """8-vi: what `add` needs before a routine can stop calling `pack.py`.
+
+    A tip note carries two list-valued frontmatter keys and three sections of
+    generated prose. Until this, `add` wrote flat `field: value` and a static
+    template, so `sd store add` could not produce one.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.kind: dict[str, object] = {
+            "fields": ["status", "score", "contexts"],
+            "initial-status": "inbox",
+            "transitions": {"inbox": ["approved", "declined"]},
+            "sections": {"order": ["Tip", "Score"], "template": "tip.md"},
+        }
+
+    def build(self, template: str = "\n## Tip\n\n## Score\n") -> None:
+        root = self.plugin(kinds={"tip": self.kind}, register=False)
+        (root / "tip.md").write_text(template, encoding="utf-8")
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+    def test_a_repeated_field_builds_a_block_sequence(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--field", "contexts+=Personal", "--field", "contexts+=Work")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(
+            "contexts:\n  - Personal\n  - Work\n",
+            (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(yaml is not None, "PyYAML is not installed")
+    def test_a_real_yaml_reader_sees_the_sequence_as_a_list(self) -> None:
+        """The corpus rule, applied to the shape this adds. A block sequence
+        that a real reader folds into a string would be worse than no list."""
+
+        self.build()
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--field", "contexts+=Personal", "--field", "contexts+=Work").returncode, 0)
+        text = (self.tips / "T.md").read_text(encoding="utf-8")
+        block = text.split("---\n")[1]
+        assert yaml is not None
+        self.assertEqual(yaml.safe_load(block)["contexts"], ["Personal", "Work"])
+
+    def test_a_field_given_twice_with_plain_equals_is_still_a_mistake(self) -> None:
+        """`+=` exists so this stays an error. Folding every duplicate into a
+        list would make `--field score=7 --field score=8` a two-item list."""
+
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=7", "--field", "score=8")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("given twice", done.stderr)
+        self.assertFalse((self.tips / "T.md").exists())
+
+    def test_mixing_the_two_spellings_on_one_field_is_refused(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "contexts=Personal",
+            "--field", "contexts+=Work")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("given twice", done.stderr)
+
+    def test_a_value_holding_the_separator_is_not_split_on_it(self) -> None:
+        self.build()
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--field", "contexts=a+=b").returncode, 0)
+        self.assertIn("contexts: a+=b", (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    def test_a_list_is_refused_on_a_field_something_compares_as_one_value(self) -> None:
+        """`status`, `floor` and `unique-fields` all read a field as a scalar.
+        Without this the list reached them where a string was expected."""
+
+        self.kind["floor"] = {"score": 6}
+        self.build()
+        for field in ("status", "score"):
+            with self.subTest(field=field):
+                # `score` is given once, as a list. Adding a scalar `score=9`
+                # alongside would trip the duplicate guard first and the case
+                # would pass without ever reaching what it is about.
+                extra = [] if field == "score" else ["--field", "score=9"]
+                done = self.run_sd(
+                    "store", "add", "pp.tip", f"T-{field}",
+                    *extra, "--field", f"{field}+=x")
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn("single value", done.stderr)
+
+    def test_section_text_lands_under_its_heading(self) -> None:
+        self.build()
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section", "Tip=Use a narrow grant.",
+            "--section", "Score=Rated 9 for blast radius.").returncode, 0)
+        body = (self.tips / "T.md").read_text(encoding="utf-8").split("---\n")[2]
+        self.assertEqual(
+            body, "\n## Tip\n\nUse a narrow grant.\n\n## Score\n\nRated 9 for blast radius.\n")
+
+    def test_the_templates_own_content_survives_the_fill(self) -> None:
+        """Text goes under the heading, above the boilerplate. Replacing the
+        section would make `--section` a silent template override."""
+
+        self.build(template="\n## Tip\n\nboilerplate\n\n## Score\n")
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section", "Tip=Real text.").returncode, 0)
+        body = (self.tips / "T.md").read_text(encoding="utf-8")
+        self.assertIn("## Tip\n\nReal text.\n\nboilerplate\n", body)
+
+    def test_a_section_the_template_does_not_render_is_refused(self) -> None:
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section", "Provenance=Nowhere to go.")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("renders no `## Provenance`", done.stderr)
+        self.assertFalse((self.tips / "T.md").exists())
+
+    def test_section_text_carrying_its_own_heading_is_refused(self) -> None:
+        """Otherwise the note is written with a heading outside
+        `sections.order`, which the order check has just approved."""
+
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section", "Tip=text\n## Score\nsmuggled")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("its own `## ` heading", done.stderr)
+
+
+LIST_KIND: dict[str, object] = {
+    "fields": ["status", "score", "contexts"],
+    "initial-status": "inbox",
+    "transitions": {"inbox": ["approved", "declined"]},
+}
+
+
+class ListValuedFieldTests(StoreFixture):
+    """R11-D27's hazard reached from the write side.
+
+    `edit_field` replaces the one line that declares a key. For `contexts:`
+    with `  - Personal` under it, that line is only the header, and replacing
+    it leaves the items behind as orphans that the next reader attaches to
+    whatever key follows. The note still parses, which is what makes it worth
+    a test rather than a comment.
+    """
+
+    def test_a_field_holding_a_list_is_refused_rather_than_edited(self) -> None:
+        self.plugin(kinds={"tip": dict(LIST_KIND)})
+        path = self.note("T", extra="contexts:\n  - Personal\n  - Work\n")
+        before = path.read_bytes()
+        done = self.run_sd("store", "set", "pp.tip", "T", "contexts", "Shared")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("holds a list", done.stderr)
+        # The refusal has to leave the file alone, not merely report. A guard
+        # that refuses after writing is the failure it exists to prevent.
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_blank_line_between_the_key_and_its_items_does_not_hide_them(self) -> None:
+        """The scan skips blanks. Stopping at the first one would step over
+        the continuation and hand the note back to `edit_field`."""
+
+        self.plugin(kinds={"tip": dict(LIST_KIND)})
+        path = self.note("T", extra="contexts:\n\n  - Personal\n")
+        before = path.read_bytes()
+        done = self.run_sd("store", "set", "pp.tip", "T", "contexts", "Shared")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_an_inline_value_is_still_edited(self) -> None:
+        """The other half. A guard that refused every field would pass the
+        test above while breaking `set` entirely."""
+
+        self.plugin(kinds={"tip": dict(LIST_KIND)})
+        path = self.note("T", extra="contexts: Personal\n")
+        done = self.run_sd("store", "set", "pp.tip", "T", "contexts", "Shared")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("contexts: Shared", path.read_text(encoding="utf-8"))
+
+    def test_a_following_key_is_not_read_as_a_continuation(self) -> None:
+        """`score: 7` after an empty `contexts:` is a sibling key, not an item.
+        Matching any indented line, or any line at all, would refuse it."""
+
+        self.plugin(kinds={"tip": dict(LIST_KIND)})
+        path = self.note("T", extra="contexts:\n")
+        done = self.run_sd("store", "set", "pp.tip", "T", "contexts", "Shared")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("contexts: Shared", path.read_text(encoding="utf-8"))
+
+
 class DeclarationTests(StoreFixture):
     """The 8-i gap 8-iv closes: a key that governs nothing registers clean."""
 
