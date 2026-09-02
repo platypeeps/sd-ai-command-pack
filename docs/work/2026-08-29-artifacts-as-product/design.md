@@ -1168,7 +1168,10 @@ them. The cap itself is unaffected and was never derived from this table alone
 enforces it by enumerating `git ls-files`, never from a list written here. The
 `sd store|issue|config` row was re-measured at the same time and holds: 167
 lines of config plus 294 of vault driver and store verbs, 461 of 1,400, with
-`sd issue` and the store write verbs still unwritten.)*
+`sd issue` and the store write verbs still unwritten. Superseded in part by
+8-iv, which wrote the store write verbs: `bin/sd` is 2,096 lines at this
+commit and `bin/` measures 10,117 against the same 14,000 cap. `sd issue`
+remains unwritten.)*
 
 Bounds rather than a point estimate, because a mean over five samples spanning 279 to 1,368 is a
 weak instrument and saying so is part of the derivation: at the *smallest* built command, `sd-check`
@@ -1854,7 +1857,7 @@ operator anywhere". Both halves are implemented and neither is wrong. What neith
 is whether the anchor has anything to land on.
 
 **It does not, in either direction.** A plugin cannot name a backbone id: `panelId`
-(`dashboard/app.js:255`) composes the DOM id from the plugin's own prefix and tab name, lowercased
+(`dashboard/app.js:450`) composes the DOM id from the plugin's own prefix and tab name, lowercased
 with non-alphanumerics collapsed, and the panel is `panel-plugin-<that>`. So the system plugin's
 Toolbox tab is `panel-plugin-sys-toolbox`, and none of that composition is published anywhere a
 plugin author reads. A plugin cannot name an id inside its own tile either: `id` is absent from
@@ -1867,9 +1870,13 @@ anchor and well-formed is all `ANCHOR` can check. The one line a plugin author c
 silent breakage that passes validation — the same shape as a rule that is enforced on spelling
 rather than on what reached the operator.
 
-**And nothing reads it.** `showAlerts` (`dashboard/app.js:265`) renders `source`, `what` and
-`detail` as text and never touches `row.href`. The key is validated, carried across the loader,
-and dropped. That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
+**And nothing reads it.** `showAlerts`, then at `dashboard/app.js:265`, renders `source`, `what`
+and `detail` as text and never touches `row.href`. The key is validated, carried across the
+loader, and dropped. (*`showAlerts` was deleted at `56f16c7b`, 6b-5b. The line number is dropped
+rather than corrected because there is nothing to correct it to -- a pointer that cannot resolve
+is not a citation -- and the observation is kept as the dated one it was. The load-bearing claim,
+that nothing reads `row.href`, was **not** re-verified against the renderer that replaced it.*)
+That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
 
 **So the backbone resolves the destination instead.** The loader already stamps `source` on every
 row it accepts (`dashboard/plugins.py`, in `validate_rows`), and the tab that emitted a row is the
@@ -2298,7 +2305,7 @@ enforcement is the easy half. The half that decides whether the step is safe to 
 note gets back to disk.
 
 **The reader this repository already has is lossy, and that is deliberate.** `frontmatter()`
-(`bin/sd:1231`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
+(`bin/sd:1249`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
 step 10 deletes, in the sibling repository of that name, not in this one -- down to what it cannot
 see: a value spanning
 lines comes back as the empty string, because the continuation line does not match the key
@@ -2316,7 +2323,7 @@ about.
 all**. Each key reads back as `""` and its items are not in the dictionary at all, so the rebuild
 emits a bare `tags:` and drops what was under it.
 
-*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1252`), which is
+*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1277`), which is
 correct for reading and destructive for writing: **146 of the 244** carry a quoted value whose
 text contains a `:` or opens a `[[wikilink]]`, and re-emitting those bare is not lossy YAML but
 *malformed* YAML — `source-brief: [[2026-08-15 - Daily Intel Brief]]` and a `description:` with a
@@ -2372,11 +2379,11 @@ thing `human-only` is for.
 `initial-status` of every kind and accepts `transitions` and `human-only` from any kind, but never
 checks that the kind declares a `status` **field** for any of them to act on. A kind can therefore
 declare a status graph that governs nothing, and 8-iv would have no place to put the initial status
-it is required to write. `status_filter` (`bin/sd:1350`) already refuses `--status` on a kind with
+it is required to write. `status_filter` (`bin/sd:1384`) already refuses `--status` on a kind with
 no `status` field for exactly this reason, on the read side. 8-iv closes it on the declaration side:
 `initial-status`, `transitions` and `human-only` each require `status` in `fields`, refused at
-registration with the key named. This is a tightening of 8-i's validator, landed in 8-iv because
-that is when it became falsifiable.
+registration with the key named (*`initial-status` is wrong here — corrected below*). This is a
+tightening of 8-i's validator, landed in 8-iv because that is when it became falsifiable.
 
 **Acceptance criterion, inverted from 8-iii's on purpose.** 8-iii wrote with `write_text` and read
 through `sd`, so that an in-memory store could not pass it. 8-iv writes through `sd store add` and
@@ -2398,6 +2405,17 @@ would also be taken on to solve a problem the line edit does not have — a roun
 any parser, strict or lossy, reformats what it did not change. *Rejected: enforcing `floor` at read
 time.* A floor that filters what `list` shows leaves the under-floor note on disk and calls the
 store clean.
+
+**Correction, 2026-09-01, found by building it.** The paragraph above says `initial-status`,
+`transitions` and `human-only` "each require `status` in `fields`". Two of the three do. The third is
+wrong: `initial-status` is required of **every** kind by `KIND_REQUIRED`, so requiring a `status`
+field for it would make a statusless kind unregisterable — which would in turn make
+`status_filter`'s refusal unreachable code and
+`test_status_on_a_kind_without_one_refuses_instead_of_matching_nothing` unconstructable, a shipped
+test whose whole subject is a kind with no `status` field. The tightening lands on `transitions` and
+`human-only` only, which genuinely govern nothing without a field to act on. Corrected here rather
+than edited above, per this rollout's habit; `test_a_statusless_kind_is_still_registerable` pins the
+third case so the overreach cannot come back.
 
 **Standing rule 1.** *Incident:* `pack.py` preserved list-valued frontmatter by construction rather
 than by decision, so nothing recorded that it mattered; the backbone that replaces it reads those

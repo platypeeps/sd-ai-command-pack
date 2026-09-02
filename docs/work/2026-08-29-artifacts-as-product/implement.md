@@ -3218,3 +3218,125 @@ warning;
 `chore: record journal` = 0; share of non-merge commits touching only work/archive/index
 paths < 5% (vs 49% baseline); `git log main --format=%b | grep -c '^wip:'` = 0; no `make check`
 staleness in claude-mem for two weeks; sd-handoff meets its usage criterion or folds back to docs.
+
+### Step 8-iv built, and the criterion above did not cover all of it (2026-09-01)
+
+**8-iv's stated criterion is narrower than what 8-iv ships.** The criterion
+recorded above is the write-through-`sd`, read-bytes-back property and the
+list-survives-byte-identical case. Both are met. But `design.md` also assigns
+the *declaration-side* tightening to this slice -- "8-iv closes it on the
+declaration side ... a tightening of 8-i's validator, landed in 8-iv because
+that is when it became falsifiable" -- and no criterion above mentions it, so
+the slice could have read satisfied with `validate_kind` untouched. What it
+ships: `transitions` and `human-only` are refused at registration on a kind
+declaring no `status` field, pinned by
+`test_transitions_without_a_status_field_refuses_at_registration` and
+`test_human_only_without_a_status_field_refuses_at_registration`.
+`initial-status` is deliberately excluded, for the reason `design.md`'s
+2026-09-01 correction gives, pinned by
+`test_a_statusless_kind_is_still_registerable`. 8-iv also gives `sections.order`
+a consequence for the first time -- `validate_sections` never opened the
+template, so an order naming headings the template does not render registered
+clean; `test_a_template_that_does_not_render_the_declared_order_refuses` closes
+it.
+
+**A code change silently invalidated three citations in `design.md`.** Growing
+`bin/sd` from 1,553 lines past 2,000 moved `frontmatter()` off 1231, the reader's
+`.strip('"')` off 1252, and `status_filter` off 1350. All
+three were correct on `main` and all three were wrong on the branch that
+changed the file, in the same branch that edits `design.md`. They are corrected
+to the post-merge line numbers. The general hazard is unfixed and worth naming:
+a `bin/sd:NNNN` citation is invalidated by any insertion above its target, no
+gate checks them, and this rollout cites that file 4 times across the task
+directory. The cheap enumerating check is the one used to find these -- read
+each cited line and confirm it is the thing the prose says it is -- and it
+belongs in the planning-review sweep rather than in a reviewer's memory.
+
+*Superseded the same day: `tests/test_doc_citations.py` now runs that check on
+every change rather than at planning boundaries only, which is where the hole
+was -- a pure code change edits none of the three planning artifacts, so no
+sweep fires, and 8-iv was swept only because it happened to edit `design.md`
+too.* The rule is adjacency: a citation directly following a backticked symbol
+is a claim about that symbol and must find it at the cited line; anything with
+prose in between is skipped rather than guessed at. Archived documents and
+citations to files that no longer exist are skipped for the same reason -- an
+archive is supposed to cite the code as it stood.
+
+**Two more stale citations, in prose this branch never touched.** The gate
+found them on its first run. `panelId` was cited at `dashboard/app.js:255` and
+is at 450, corrected. `showAlerts` was cited at `dashboard/app.js:265` and no
+longer exists at all -- deleted at `56f16c7b`, 6b-5b -- so the line number is
+dropped rather than corrected, on the ground that a pointer with nothing to
+point at is not a citation. The observation stays as the dated one it was, and
+its load-bearing claim, that nothing reads `row.href`, is explicitly marked as
+not re-verified against the renderer that replaced `showAlerts`.
+
+One citation the gate deliberately does **not** check is worth recording,
+because an earlier draft did check it and was wrong: `bin/sd-status:501-506`
+is an accurate pointer to a docstring that does not repeat the key name in the
+sentence before it. Taking the nearest backticked symbol within 90 characters
+reported it as stale. A gate whose failures need interpreting teaches people to
+interpret failures away, so the rule was narrowed until its false-positive
+count was zero rather than left wide with an exception list.
+
+**Eight review rounds each found one more value the writer let through, so the
+class was enumerated instead of waited on.** Every round of review on this
+branch surfaced a different scalar that round-trips through `frontmatter()` and
+is read differently -- or not at all -- by a real YAML parser, which matters
+because the vault is read by Obsidian too. Rather than converge one round at a
+time, 39 values were rendered and handed to PyYAML: 21 did not survive. Five
+were hard parse errors -- values opening `- `, `? `, `,`, `]` or `}` produced a
+note nothing could read -- and `NEEDS_QUOTING` now quotes those five. `- ` and
+`? ` are matched with their following space, separately from the character
+class, because `-3` and `?x` are ordinary scalars and quoting a leading dash
+outright would turn every negative number in the vault into a string. Across
+1,463 vault notes and 7,869 bare values, **zero** change classification under
+the new rule: it catches only what was already broken.
+
+The other 16 are type coercions -- `true` reads back as a boolean, `0755` as
+493, `12:30` as 750 -- and those are **deliberately left alone**. `sd store
+set` takes its value from `argv`, so every value arrives as a string and the
+writer has no declared type to consult; quoting would mean guessing. The cost
+of guessing is concrete, because a hand-written note in the vault holds bare
+`true`, and a quoted `"true"` from `sd` would read as a different type than the
+note beside it. Numbers, the case `floor` depends on, are unaffected either
+way. `0755` and `12:30` are YAML 1.1 warts and are the two entries worth
+revisiting, but Obsidian applies the same warts to a hand-written note.
+`test_the_types_a_real_reader_infers_are_left_to_the_corpus_convention` pins
+the inventory so that leaving it alone stays a decision rather than decaying
+into an oversight.
+
+PyYAML is not a dependency of `sd`, and R11-D27's rejection of taking one for
+the write path stands. It is used here as a probe, and the test that uses it
+skips where it is absent, standing beside a concrete case that always runs.
+
+*Superseded the same day, before this branch merged: the enumeration above was
+not one.* Probing 39 hand-picked values found five parse errors and read as
+complete. It was not. A brute force over every string up to length three in the
+indicator alphabet found **3,690 broken values out of 24,439** still getting
+past the rule that paragraph describes. Three whole shapes were missing:
+
+- A leading `'`, which opens a single-quoted scalar and swallows the rest of
+  the block. `"` was refused outright and `'` was never considered beside it.
+- A **trailing** colon. The rule matched `:\s`, a colon before a space, so
+  `note: See also:` -- an ordinary sentence -- emitted bare and turned the
+  value into an unterminated mapping key. This is the likeliest of the three to
+  occur in real use, and both hand enumerations missed it.
+- An embedded tab, which `render_value` lets past its control-character check
+  deliberately and which a plain scalar cannot hold.
+
+`-`, `?` and `=` standing alone were missing too; the rule matched `- ` and
+`? ` with their following space and nothing matched the bare character.
+
+The lesson is the reason the brute force is now the test rather than the
+scaffolding that produced the fix. Two enumerations written by hand were each
+confidently wrong, and the second was written immediately after the first was
+caught -- knowing the failure mode did not prevent repeating it.
+`test_no_short_value_over_the_yaml_indicators_breaks_a_real_parser` renders the
+space and parses each value, so the next hole fails a test without anyone
+having had to think of it. It calls `render_value` in process because 24,439
+subprocesses would cost minutes; the two end-to-end cases beside it run the
+real command.
+
+Corpus collateral was re-measured against the final rule and is still **zero**
+of 7,869 bare values across 1,463 notes.

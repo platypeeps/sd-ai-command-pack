@@ -19,16 +19,48 @@ developer's machine config nor the developer's vault is ever touched.
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
+import itertools
 import json
 import os
 import pathlib
+import random
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 
+try:                          # a probe, not a dependency; see the test that uses it
+    import yaml
+except ImportError:           # pragma: no cover - depends on the developer's venv
+    yaml = None               # type: ignore[assignment]
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
+
+_SD_MODULE = None
+
+
+def sd_module():
+    """`bin/sd` imported as a module, for the one case that cannot afford a subprocess.
+
+    Every other case in this file runs the real command, which is the point of
+    them. The brute-force check renders tens of thousands of values, and a
+    subprocess each would make it minutes rather than seconds.
+    """
+
+    global _SD_MODULE
+    if _SD_MODULE is None:
+        loader = importlib.machinery.SourceFileLoader("sd_under_test", str(SD))
+        spec = importlib.util.spec_from_file_location("sd_under_test", str(SD), loader=loader)
+        assert spec is not None
+        _SD_MODULE = importlib.util.module_from_spec(spec)
+        loader.exec_module(_SD_MODULE)
+    return _SD_MODULE
+
 
 TIP_KIND: dict[str, object] = {
     "fields": ["status", "score"],
@@ -428,6 +460,791 @@ class ManifestTests(StoreFixture):
         done = self.run_sd("plugin", "list")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("store: vault at $OBSIDIAN_VAULT", done.stdout)
+
+
+class WriteTests(StoreFixture):
+    """8-iv's acceptance criterion, inverted from 8-iii's on purpose.
+
+    8-iii writes with `write_text` and reads through `sd`, so a store that
+    cached could not pass. These write through `sd` and read the **bytes** back
+    with `read_text`, so a store that answered from memory could not pass
+    either. The load-bearing case is
+    `test_a_set_leaves_every_line_it_did_not_edit_byte_identical`: a
+    write-through-`sd`, read-through-`sd` test cannot see the failure R11-D27
+    exists to prevent, because `sd`'s own reader is the thing that is blind.
+    """
+
+    #: A note in the shape the real corpus is in: list values under `tags` and
+    #: `contexts`, and a quoted scalar holding a colon and a wikilink. Every
+    #: one of these is invisible to `frontmatter()` and destroyed by a
+    #: parse-and-rewrite.
+    LOSSY = (
+        "---\n"
+        "status: inbox\n"
+        "score: 7\n"
+        "aliases:\n"
+        '  - "A tip: with a colon"\n'
+        "contexts:\n"
+        "  - Personal\n"
+        'source-brief: "[[2026-08-15 - Daily Intel Brief]]"\n'
+        "tags:\n"
+        "  - tip\n"
+        "  - ai-generated\n"
+        "---\n"
+        "\n"
+        "The body, which also stays.\n"
+    )
+
+    def template(self, root: pathlib.Path, text: str = "\n## Why\n\n## What\n") -> None:
+        (root / "tip.md").write_text(text, encoding="utf-8")
+
+    def kind_with_template(self, **over: object) -> dict[str, object]:
+        kind: dict[str, object] = dict(TIP_KIND)
+        kind["sections"] = {"order": ["Why", "What"], "template": "tip.md"}
+        kind.update(over)
+        return kind
+
+    # -- add ---------------------------------------------------------------
+
+    def test_add_writes_a_note_the_filesystem_can_read_without_sd(self) -> None:
+        """Written through `sd`, asserted as bytes on disk. Never read back through `sd`."""
+
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+        done = self.run_sd("store", "add", "pp.tip", "Ship it", "--field", "score=9")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+        text = (self.tips / "Ship it.md").read_text(encoding="utf-8")
+        self.assertEqual(text, "---\nstatus: inbox\nscore: 9\n---\n\n## Why\n\n## What\n")
+
+    def test_add_supplies_the_initial_status_without_being_asked(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        self.run_sd("store", "add", "pp.tip", "Ship it")
+        self.assertIn("status: inbox", (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+
+    def test_add_refuses_to_overwrite_an_existing_note(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        kept = self.note("Ship it", body="Do not lose me.\n")
+        done = self.run_sd("store", "add", "pp.tip", "Ship it")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("already exists", done.stderr)
+        self.assertIn("Do not lose me.", kept.read_text(encoding="utf-8"))
+
+    def test_a_template_that_does_not_render_the_declared_order_refuses(self) -> None:
+        """`sections.order` gets a consequence for the first time.
+
+        `validate_sections` never opens the template, so before 8-iv an order
+        naming headings the template does not produce registered clean.
+        """
+
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root, "\n## What\n\n## Why\n")   # declared order is Why, What
+        self.run_sd("plugin", "add", str(root))
+        done = self.run_sd("store", "add", "pp.tip", "Ship it")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("sections.order", done.stderr)
+        self.assertFalse((self.tips / "Ship it.md").exists())
+
+    def test_add_refuses_a_duplicate_unique_field(self) -> None:
+        root = self.plugin(
+            kinds={"tip": self.kind_with_template(**{"unique-fields": ["score"]})},
+            register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        self.note("Taken", score="9")
+        done = self.run_sd("store", "add", "pp.tip", "Ship it", "--field", "score=9")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("unique-fields", done.stderr)
+
+    # -- set, and the thing it must never do -------------------------------
+
+    def test_a_set_leaves_every_line_it_did_not_edit_byte_identical(self) -> None:
+        """The whole reason 8-iv is a line edit (R11-D27).
+
+        A parse-and-rewrite passes a write-through-`sd`, read-through-`sd`
+        test and fails this one, because `sd`'s own reader cannot see the
+        lines it destroyed.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text(self.LOSSY, encoding="utf-8")
+
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+        after = path.read_text(encoding="utf-8")
+        self.assertEqual(after, self.LOSSY.replace("status: inbox", "status: approved"))
+
+    def test_a_set_preserves_every_list_item_and_quoted_scalar(self) -> None:
+        """Stated as its own case so a failure names what was lost."""
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text(self.LOSSY, encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+
+        # Without these two lines the case is vacuous: every survivor string is
+        # already in the file before the write, so a `set` that refused and
+        # changed nothing would pass every assertion below. Proven by
+        # sabotaging `store_set` to raise -- this test still passed, and the
+        # byte-identical sibling above correctly failed.
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("status: approved", after)
+
+        for survivor in (
+                "aliases:", '  - "A tip: with a colon"', "contexts:", "  - Personal",
+                'source-brief: "[[2026-08-15 - Daily Intel Brief]]"',
+                "tags:", "  - tip", "  - ai-generated", "The body, which also stays."):
+            self.assertIn(survivor, after, f"a set destroyed {survivor!r}")
+
+    def test_a_field_the_note_does_not_carry_is_added_before_the_fence(self) -> None:
+        self.plugin(kinds={"tip": {"fields": ["status", "score"], "initial-status": "inbox"}})
+        path = self.tips / "Ship it.md"
+        path.write_text("---\nstatus: inbox\n---\n\nBody.\n", encoding="utf-8")
+        self.run_sd("store", "set", "pp.tip", "Ship it", "score", "9")
+        self.assertEqual(
+            path.read_text(encoding="utf-8"), "---\nstatus: inbox\nscore: 9\n---\n\nBody.\n")
+
+    def test_a_duplicate_key_is_refused_rather_than_half_edited(self) -> None:
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        original = "---\nstatus: inbox\nscore: 7\nstatus: approved\n---\n\nBody.\n"
+        path.write_text(original, encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "declined")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("2 lines", done.stderr)
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_a_note_with_no_frontmatter_block_refuses(self) -> None:
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("Just a body.\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("frontmatter", done.stderr)
+
+    def test_a_value_needing_quotes_gets_them(self) -> None:
+        """A bare `[[wikilink]]` or sentence colon is malformed YAML, not lossy YAML."""
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        self.note("Ship it", extra="note: old\n")
+        self.run_sd("store", "set", "pp.tip", "Ship it", "note", "[[A link]] and a: colon")
+        self.assertIn(
+            'note: "[[A link]] and a: colon"',
+            (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+
+    # -- the six keys, refusing -------------------------------------------
+
+    def test_a_protected_field_refuses(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "protected-fields": ["score"]}})
+        path = self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "9")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("protected-fields", done.stderr)
+        self.assertIn("score: 7", path.read_text(encoding="utf-8"))
+
+    def test_a_transition_no_edge_allows_refuses(self) -> None:
+        self.plugin()
+        self.note("Ship it", status="approved")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "inbox")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("transitions", done.stderr)
+
+    def test_a_value_under_the_floor_refuses(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "3")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("floor", done.stderr)
+
+    def test_a_human_only_status_refuses_and_offers_no_force(self) -> None:
+        """There is deliberately no flag that lifts this (R11-D27)."""
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "transitions": {"inbox": ["published"]},
+            "human-only": {"publish": "published"}}})
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "published")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("human-only", done.stderr)
+
+        forced = self.run_sd(
+            "store", "set", "pp.tip", "Ship it", "status", "published", "--force")
+        self.assertEqual(forced.returncode, 2, "--force must not be a flag this verb accepts")
+
+    def test_a_field_the_kind_never_declared_refuses(self) -> None:
+        self.plugin()
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "invented", "x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no field", done.stderr)
+
+
+    # -- the positive controls, without which a refusal proves nothing ------
+
+    def test_a_value_at_or_above_the_floor_is_written(self) -> None:
+        """The control for the floor case.
+
+        Without it, a `refuse_below_floor` that refused every write to a
+        floored field -- never comparing anything -- would pass the whole
+        suite. The boundary is included because `<` and `<=` are the usual
+        place this goes wrong.
+        """
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        path = self.note("Ship it")
+        for value in ("6", "9"):
+            done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", value)
+            self.assertEqual(done.returncode, 0, f"{value} is not under the floor: {done.stderr}")
+            self.assertIn(f"score: {value}", path.read_text(encoding="utf-8"))
+
+    def test_add_cannot_slip_under_a_floor_by_omitting_the_field(self) -> None:
+        """The floor is a property of the note, not of the arguments.
+
+        `store_add` used to iterate the fields it was *given*, so leaving the
+        floored field off the command line created a note the floor would have
+        refused had it been named. The check iterates the kind's floored
+        fields instead, so silence is not a way past it.
+        """
+
+        root = self.plugin(
+            kinds={"tip": self.kind_with_template(floor={"score": 6})}, register=False)
+        self.template(root)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+        done = self.run_sd("store", "add", "pp.tip", "Quiet one")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("floor", done.stderr)
+        self.assertFalse(
+            list(self.vault.rglob("Quiet one.md")), "the refused note must not be on disk")
+
+        allowed = self.run_sd("store", "add", "pp.tip", "Loud one", "--field", "score=7")
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+    def test_a_closing_fence_with_trailing_spaces_still_ends_the_block(self) -> None:
+        """The last of the three fence sites to disagree with the other two.
+
+        `frontmatter_span` compared with `.rstrip("\\r\\n")` while `frontmatter`
+        and `note_body` used `.rstrip()`, so `---   ` closed the block for the
+        readers and not for the writer. The writer then scanned past it and
+        would insert a key below the block, in the body, leaving the real one
+        above -- the same failure an indented `---` caused, arriving from the
+        opposite direction. No note in the live bases spells a fence that way;
+        the point is that the three agree, not that the corpus needs it.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("---\nstatus: inbox\n---   \n\nThe body.\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            path.read_text(encoding="utf-8"),
+            "---\nstatus: approved\n---   \n\nThe body.\n")
+
+    def test_an_opening_fence_with_trailing_spaces_is_still_frontmatter(self) -> None:
+        """The fourth fence site, and the one the previous round left behind.
+
+        Fixing `frontmatter_span`'s *closing* comparison last round did not
+        touch its *opening* one, which still used `.rstrip("\\r\\n")`. So a note
+        whose first line is `---   ` had frontmatter according to both readers
+        and none according to the writer, which refuses a note it cannot find
+        a block in -- a `set` failing on a note whose fields `sd store get`
+        will happily print.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("---   \nstatus: inbox\n---\n\nThe body.\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            path.read_text(encoding="utf-8"),
+            "---   \nstatus: approved\n---\n\nThe body.\n")
+
+    def test_the_first_add_into_a_new_kind_creates_its_directory(self) -> None:
+        """`unique-fields` used to stop this, and the message named the vault.
+
+        `refuse_duplicate_unique` scans the kind directory and `note_paths`
+        refuses a missing one, so the first `add` into a kind whose directory
+        did not exist yet failed a *uniqueness* check -- while `store_add`
+        creates that directory a few lines further down. Nothing collides with
+        notes that are not there.
+        """
+
+        self.check_missing_base(["score"])
+
+    def test_the_first_add_works_without_unique_fields_too(self) -> None:
+        """The control: this path never went through the uniqueness scan."""
+
+        self.check_missing_base([])
+
+    def check_missing_base(self, unique: list[str]) -> None:
+        kind = self.kind_with_template()
+        if unique:
+            kind["unique-fields"] = unique
+        root = self.plugin(kinds={"tip": kind}, register=False)
+        self.template(root)
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        shutil.rmtree(self.tips)
+
+        done = self.run_sd("store", "add", "pp.tip", "First", "--field", "score=7")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.tips / "First.md").is_file(), "the note was not written")
+
+        # And the scan it skipped still works once there is something to scan.
+        clash = self.run_sd("store", "add", "pp.tip", "Second", "--field", "score=7")
+        if unique:
+            self.assertEqual(clash.returncode, 1, clash.stdout)
+            self.assertIn("unique", clash.stderr)
+        else:
+            self.assertEqual(clash.returncode, 0, clash.stderr)
+
+    def test_a_hash_anywhere_in_a_value_gets_quoted_not_only_at_the_start(self) -> None:
+        """YAML starts a comment at ` #`, not only at the first column.
+
+        `NEEDS_QUOTING` tested `#` in the first-character class, so
+        `released in v2 # not really` was emitted bare and a real parser read
+        it as `released in v2`. Same shape as the backslash case: this
+        repository's reader takes the whole line and never sees the loss, so
+        the note is wrong only for everything else that opens the vault.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        self.note("Ship it", extra="note: old\n")
+        value = "released in v2 # not really"
+        self.assertEqual(
+            self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+        self.assertIn(
+            f'note: "{value}"\n', (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+
+    def test_an_edit_does_not_change_who_may_read_the_note(self) -> None:
+        """`os.replace` carries the temporary file's mode onto the target.
+
+        `NamedTemporaryFile` creates at 0600, so editing one field of a
+        world-readable note silently made it owner-only -- a permission change
+        nobody asked for, from a command whose contract is that it changes one
+        line.
+        """
+
+        self.plugin()
+        path = self.note("Ship it")
+        path.chmod(0o644)
+        self.assertEqual(
+            self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved").returncode, 0)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+    def test_a_value_opening_with_a_yaml_indicator_is_quoted(self) -> None:
+        """Five shapes that made the note unparseable, found by enumeration.
+
+        Eight review rounds each surfaced one more value this reader accepted
+        and a real parser did not, so the class was enumerated instead of
+        waited on: every value in the case list below was rendered and handed
+        to PyYAML. `- item`, `? key`, `, comma`, `]close` and `}close` were
+        hard parse errors -- a note `sd store set` writes and nothing can
+        read.
+
+        `-3` and `?x` stay bare deliberately. Only `- ` and `? ` are
+        indicators; quoting a leading dash outright would turn every negative
+        number in the vault into a string.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        for value in ("- item", "? key", ", comma", "]close", "}close",
+                      "'quote", "trailing:", "-", "?", "=", "a\tb"):
+            self.assertEqual(
+                self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+            self.assertIn(f'note: "{value}"\n', path.read_text(encoding="utf-8"))
+        for value in ("-3", "?x", "3-4", "a,b"):
+            self.assertEqual(
+                self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+            self.assertIn(f"note: {value}\n", path.read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(yaml is not None, "PyYAML absent; the concrete case above still runs")
+    def test_a_real_yaml_reader_can_parse_every_note_this_writer_leaves(self) -> None:
+        """The general form, against a parser that is not this repository's.
+
+        PyYAML is deliberately not a dependency of `sd` -- R11-D27 rejected
+        taking one for the write path -- so this reinforces the case above
+        where it is installed rather than replacing it. What it pins is the
+        property that case can only sample: the note `sd store set` leaves on
+        disk is readable by Obsidian, and by anything else pointed at the
+        vault, not only by `frontmatter()`.
+
+        Eight review rounds each found one more value that got past this
+        writer and not past a real parser. The list below is the enumeration
+        that ended that: every value is written through the real command and
+        read back through a real parser.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        for value in ["plain", "a: b", "mid # hash", "[x]", "{y}", "#tag", "|pipe", ">fold",
+                      "&anchor", "*alias", "!tag", "%directive", "@at", "`tick", "- item",
+                      "? key", ", comma", "]close", "}close", "-3", "?x", "a,b", "3-4",
+                      "true", "1", "2026-09-01", "12:30", "0755", "~",
+                      "'quote", "trailing:", "-", "?", "=", "a\tb", "'a'"]:
+            with self.subTest(value=value):
+                done = self.run_sd("store", "set", "pp.tip", "Ship it", "note", value)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+
+    @unittest.skipUnless(yaml is not None, "PyYAML absent; the concrete cases above still run")
+    def test_no_short_value_over_the_yaml_indicators_breaks_a_real_parser(self) -> None:
+        """The rule `NEEDS_QUOTING` encodes, derived rather than recalled.
+
+        Two hand-written enumerations of the indicator set were each
+        incomplete. The first missed the five values that open `- `, `? `,
+        `,`, `]` and `}`. The second, written *after* that lesson and believed
+        to be the whole class, still missed a leading `'` -- which opens a
+        single-quoted scalar and swallows the rest of the block -- along with a
+        trailing `:` (`note: See also:` is an unterminated mapping key) and an
+        embedded tab, which `render_value` lets past its control-character
+        check on purpose.
+
+        So this does not check a list. It renders every string up to length
+        three over the alphabet of YAML indicators, plus a random sample of
+        longer ones, and requires that a real parser reads back what was
+        written. A future edit to `NEEDS_QUOTING` that reopens any hole fails
+        here without anyone having to have thought of the case.
+
+        `render_value` is called in process rather than through `sd store set`
+        because the subprocess cost is per value and there are tens of
+        thousands of them; the end-to-end path is covered by the two cases
+        above.
+        """
+
+        alphabet = list("-?:,[]{}>|&*!%@`#'\"= \tab1.~")
+        values = ["".join(p) for n in (1, 2, 3) for p in itertools.product(alphabet, repeat=n)]
+        rng = random.Random(11)
+        values += ["".join(rng.choice(alphabet) for _ in range(rng.randint(4, 9)))
+                   for _ in range(4000)]
+        broken = []
+        for value in values:
+            try:
+                rendered = sd_module().render_value(value)
+            except Exception:
+                continue          # refused outright, which is a valid answer
+            try:
+                read_back = yaml.safe_load(f"k: {rendered}\n")["k"]
+            except Exception as error:
+                broken.append((value, rendered, type(error).__name__))
+                continue
+            if isinstance(read_back, str) and read_back != value:
+                broken.append((value, rendered, f"read back as {read_back!r}"))
+        self.assertEqual(broken[:10], [], f"{len(broken)} of {len(values)} values do not survive")
+
+    @unittest.skipUnless(yaml is not None, "PyYAML absent")
+    def test_the_types_a_real_reader_infers_are_left_to_the_corpus_convention(self) -> None:
+        """An inventory of what this writer deliberately does *not* quote.
+
+        Every value below is written bare and a real parser gives it a type
+        other than string. That is left alone, and this test exists so that
+        leaving it alone stays a decision rather than becoming an oversight.
+
+        Quoting them was considered and rejected. `sd store set` takes its
+        value from `argv`, so every value arrives as a string and the writer
+        has no declared type to consult -- quoting would mean guessing. The
+        cost of guessing is concrete: a hand-written note in the vault holds
+        bare `true`, so a quoted `"true"` from `sd` would read as a different
+        type than the note beside it. Numbers are the case that matters most
+        and they are unaffected either way (`1` and `-3` both survive), so
+        `floor` keeps comparing numbers whatever is decided here.
+
+        `0755` reading back as 493 and `12:30` as 750 are YAML 1.1 warts, and
+        they are the two entries here worth revisiting -- but Obsidian applies
+        the same warts to a note written by hand, and `sd` diverging from that
+        would be its own defect.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        for value, expected in [("true", True), ("no", False), ("on", True),
+                                ("~", None), ("0755", 493), ("12:30", 750)]:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.run_sd("store", "set", "pp.tip", "Ship it", "note", value).returncode, 0)
+                self.assertIn(f"note: {value}\n", path.read_text(encoding="utf-8"))
+                loaded = yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+                self.assertEqual(loaded["note"], expected)
+
+    def test_a_floor_is_not_stepped_over_by_spelling_a_value_nan(self) -> None:
+        """`float("nan") < 6` is False, so an unguarded floor lets it through.
+
+        The floor refused 5 and accepted `nan`, which is a bound any value can
+        clear by spelling itself strangely. `inf` is included because it is the
+        same class of input even though it clears a floor honestly.
+        """
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        path = self.note("Ship it", score="7")
+        for value in ("nan", "NaN", "inf", "Infinity"):
+            done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", value)
+            self.assertEqual(done.returncode, 1, f"{value} was accepted: {done.stdout}")
+            self.assertIn("finite", done.stderr)
+
+        # `-inf` never reaches the floor: argparse reads a leading dash as an
+        # option and rejects it first. Asserted as refused rather than as
+        # refused *here*, because pinning the exit code would pin argparse's
+        # behaviour rather than this check's.
+        minus = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "-inf")
+        self.assertNotEqual(minus.returncode, 0, "-inf was accepted")
+
+        self.assertIn("score: 7", path.read_text(encoding="utf-8"))
+
+    def test_a_title_cannot_walk_out_of_the_kind_directory(self) -> None:
+        """Both verbs, because `store get` kept its own weaker copy of this.
+
+        Containment does the work rather than a forbidden-character list: with
+        the resolve check removed, `a/b` and `../escaped` are both accepted.
+        A backslash is *not* asserted here -- it is an ordinary filename
+        character on this platform, and refusing it would be a rule about
+        Windows enforced against a legal title.
+        """
+
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+        for title in ("../escaped", "..", ".", "", "a/b", "sub/../../out"):
+            for verb in (("store", "set", "pp.tip", title, "status", "inbox"),
+                         ("store", "get", "pp.tip", title)):
+                done = self.run_sd(*verb)
+                self.assertEqual(
+                    done.returncode, 2, f"{title!r} accepted by {verb[1]}: {done.stdout}")
+
+    def test_an_indented_rule_does_not_move_where_the_body_starts(self) -> None:
+        """The third fence site, which the other two fixes left behind.
+
+        `note_body` kept `.strip()` after `frontmatter` and `frontmatter_span`
+        moved to column zero, so the three disagreed about where the block
+        ends. `read_note` reaches it, which makes `sd store get --json` the
+        place it shows: the fields are read to the real fence and the body is
+        cut at the indented one, so the note comes back reporting a body that
+        starts in the middle of its own frontmatter.
+        """
+
+        self.plugin()
+        (self.tips / "Ship it.md").write_text(
+            "---\nstatus: inbox\nnote: |\n  one\n  ---\n  two\n---\n\n## Why\n",
+            encoding="utf-8")
+        done = self.run_sd("store", "get", "pp.tip", "Ship it", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        body = json.loads(done.stdout)["body"]
+        self.assertEqual(body, "\n## Why\n", f"body was cut at the indented rule: {body!r}")
+
+    def test_a_floored_field_given_something_that_is_not_a_number(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox", "floor": {"score": 6}}})
+        self.note("Ship it")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "high")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("must be a number", done.stderr)
+
+    def test_setting_a_unique_field_to_its_own_current_value_is_not_a_collision(self) -> None:
+        """`skip=path`: a note must not collide with itself."""
+
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "unique-fields": ["score"]}})
+        self.note("Ship it", score="7")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "7")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_setting_a_unique_field_to_a_value_another_note_holds_refuses(self) -> None:
+        self.plugin(kinds={"tip": {
+            "fields": ["status", "score"], "initial-status": "inbox",
+            "unique-fields": ["score"]}})
+        self.note("Ship it", score="7")
+        self.note("Taken", score="9")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "9")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("unique-fields", done.stderr)
+
+    def test_add_enforces_the_same_keys_set_does(self) -> None:
+        """`add`'s enforcement calls were reachable only through `set` before this."""
+
+        root = self.plugin(kinds={"tip": self.kind_with_template(**{
+            "protected-fields": ["score"], "floor": {"score": 6}})}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+
+        protected = self.run_sd("store", "add", "pp.tip", "A", "--field", "score=9")
+        self.assertEqual(protected.returncode, 1, protected.stdout)
+        self.assertIn("protected-fields", protected.stderr)
+        self.assertFalse((self.tips / "A.md").exists())
+
+    def test_add_refuses_a_status_no_transition_reaches(self) -> None:
+        root = self.plugin(kinds={"tip": self.kind_with_template()}, register=False)
+        self.template(root)
+        self.run_sd("plugin", "add", str(root))
+        done = self.run_sd("store", "add", "pp.tip", "A", "--field", "status=published")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("transitions", done.stderr)
+        self.assertFalse((self.tips / "A.md").exists())
+
+    def test_setting_a_field_to_the_value_it_already_holds_writes_nothing(self) -> None:
+        self.plugin()
+        path = self.note("Ship it")
+        before = path.read_text(encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "score", "7")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("already holds", done.stdout)
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_an_unterminated_frontmatter_block_refuses(self) -> None:
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text("---\nstatus: inbox\nscore: 7\n", encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("never closed", done.stderr)
+
+    def test_a_value_the_reader_could_not_read_back_is_refused(self) -> None:
+        """A double quote, refused rather than encoded.
+
+        The quoted form is `\\"` and `frontmatter()` strips quotes without
+        unescaping anything, so the value would come back carrying a
+        backslash. Writing something the store cannot read back is worse than
+        refusing it, and the corpus quotes plenty of scalars without nesting a
+        quote inside one.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "note", 'a "quote"')
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("read back unchanged", done.stderr)
+        self.assertIn("note: old", path.read_text(encoding="utf-8"))
+
+    def test_a_value_holding_a_newline_is_refused_not_split_across_lines(self) -> None:
+        """The one-line invariant, defended at the value.
+
+        Without this, `edit_field` writes the newline straight through and the
+        single line it replaced becomes two -- a physical line silently
+        inserted into the block, which is the property this design exists to
+        hold.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        path = self.note("Ship it", extra="note: old\n")
+        before = path.read_text(encoding="utf-8")
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "note", "line1\nline2")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("control character", done.stderr)
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_a_backslash_is_written_bare_and_refused_where_it_would_be_quoted(self) -> None:
+        """This test used to assert the opposite, and was wrong to.
+
+        It wrote `a \\ slash: yes`, which needs quoting for the colon, and
+        asserted the value came back through `sd store get`. It did -- because
+        this reader ends `.strip('"')` and unescapes nothing. A real YAML
+        parser reads `"a \\ slash: yes"` as an invalid escape and fails, so the
+        note round-tripped here while being unreadable to Obsidian and to
+        every other tool pointed at the same vault. That is the malformed-YAML
+        failure R11-D27 exists to prevent, written by the code meant to
+        prevent it.
+
+        A plain scalar takes a backslash literally, so an unquoted value keeps
+        one. A value that needs quoting for some other reason is refused.
+        """
+
+        self.plugin(kinds={"tip": {"fields": ["status", "note"], "initial-status": "inbox"}})
+        self.note("Ship it", extra="note: old\n")
+
+        bare = "a \\ slash"
+        self.assertEqual(
+            self.run_sd("store", "set", "pp.tip", "Ship it", "note", bare).returncode, 0)
+        self.assertIn("note: a \\ slash\n", (self.tips / "Ship it.md").read_text(encoding="utf-8"))
+        done = self.run_sd("store", "get", "pp.tip", "Ship it", "--json")
+        self.assertEqual(json.loads(done.stdout)["fields"]["note"], bare)
+
+        quoted = self.run_sd("store", "set", "pp.tip", "Ship it", "note", "a \\ slash: yes")
+        self.assertEqual(quoted.returncode, 1, quoted.stdout)
+        self.assertIn("backslash", quoted.stderr)
+
+    def test_an_indented_rule_inside_a_value_is_not_the_closing_fence(self) -> None:
+        """A block scalar holding its own `---` line.
+
+        `frontmatter_span` matched on `.strip()`, so an **indented** `---`
+        inside a value closed the block at the wrong line. `set` then reported
+        the real field as absent and inserted a fresh `key: value` into the
+        middle of the note's prose, leaving the original in place -- a
+        corrupted note carrying a duplicate key. YAML always indents a block
+        scalar's body, so the fence is the one at column zero.
+        """
+
+        self.plugin()
+        path = self.tips / "Ship it.md"
+        path.write_text(
+            "---\n"
+            "description: |\n"
+            "  some prose\n"
+            "  ---\n"
+            "  more prose\n"
+            "status: inbox\n"
+            "score: 7\n"
+            "---\n"
+            "\nBody\n", encoding="utf-8")
+
+        done = self.run_sd("store", "set", "pp.tip", "Ship it", "status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+        after = path.read_text(encoding="utf-8")
+        self.assertEqual(after.count("status:"), 1, f"a duplicate key was inserted:\n{after}")
+        self.assertIn("  ---\n  more prose\n", after)
+        self.assertIn("status: approved\n", after)
+
+class DeclarationTests(StoreFixture):
+    """The 8-i gap 8-iv closes: a key that governs nothing registers clean."""
+
+    def test_transitions_without_a_status_field_refuses_at_registration(self) -> None:
+        root = self.plugin(
+            kinds={"tip": {"fields": ["score"], "initial-status": "inbox",
+                           "transitions": {"inbox": ["approved"]}}},
+            register=False)
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("transitions", done.stderr)
+
+    def test_human_only_without_a_status_field_refuses_at_registration(self) -> None:
+        root = self.plugin(
+            kinds={"tip": {"fields": ["score"], "initial-status": "inbox",
+                           "human-only": {"publish": "published"}}},
+            register=False)
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("human-only", done.stderr)
+
+    def test_a_statusless_kind_is_still_registerable(self) -> None:
+        """`initial-status` is deliberately not part of the tightening.
+
+        It is required of every kind, so requiring a `status` field for it
+        would make a statusless kind unregisterable and `status_filter`'s
+        refusal unreachable -- the case
+        `test_status_on_a_kind_without_one_refuses_instead_of_matching_nothing`
+        exists to cover.
+        """
+
+        root = self.plugin(
+            kinds={"tip": {"fields": ["score"], "initial-status": "inbox"}}, register=False)
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
 
 
 if __name__ == "__main__":

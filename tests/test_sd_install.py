@@ -651,8 +651,6 @@ class CommandLineTests(InstallerHarness):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class GitContextTests(InstallerHarness):
@@ -1482,3 +1480,7 @@ class RemainingBranchTests(InstallerHarness):
             rc = sd_install.main(["--pull", "--home", str(self.home)], out=out)
         self.assertEqual(rc, 1)
         self.assertIn("not main", out.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
