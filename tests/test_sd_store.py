@@ -1644,12 +1644,400 @@ class ValueFromFileTests(StoreFixture):
 
     def test_the_flags_are_only_on_add(self) -> None:
         """`set` edits a note by the line and takes its value positionally.
-        The section-editing verbs and whatever they need are 10b's, and a
-        half-present flag reads as a supported one."""
+        The file spellings belong to `add` and to `set-section`, which take
+        their pairs as flags; a half-present flag reads as a supported one."""
 
         self.build()
         done = self.run_sd("store", "set", "pp.tip", "T", "score", "--field-file", "x=y")
         self.assertEqual(done.returncode, 2, done.stderr)
+
+
+class SetSectionTests(StoreFixture):
+    """10b-iii: a `## ` section edited by the line, so `pack.py` can stop.
+
+    Five `pack.py` verbs write a section of a vault note -- `topics
+    set-ground-truth`, `topics add-feed`, `topics rm-feed`, `ideas
+    set-drive-docs` and `vault set-score` -- and every one of them does it with
+    its own `re.sub` over the whole file. Two properties of those are what this
+    verb has to keep and what it gets to drop.
+
+    **Kept: the note is never parsed and written back.** R11-D27 is not a
+    stylistic preference here. `frontmatter()` reads a block sequence as `""`
+    and strips the quotes off a quoted scalar, and all 14 tips in the real
+    corpus carry a block sequence while 10 carry a quoted scalar -- so a
+    `set-section` that round-tripped the note would destroy every one of them.
+
+    **Dropped: the named anchor.** `topics add-feed` created `## Feeds` by
+    substituting ahead of `## Provenance` and died outright when that heading
+    was missing (`sd-writing-pack/scripts/pack.py:1082`). The backbone has
+    `sections.order`, which already declares where each section sits, so
+    position is read from the manifest and a note missing some other section is
+    no longer a failure. That is what lets the absent-section read below return
+    empty instead of refusing, which in turn collapses `add-feed`'s two
+    branches into one read-edit-write.
+    """
+
+    ORDER = ["Tip", "Score", "Provenance"]
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.kind: dict[str, object] = {
+            "fields": ["status", "score", "contexts"],
+            "initial-status": "inbox",
+            "transitions": {"inbox": ["approved", "declined"]},
+            "sections": {"order": list(self.ORDER), "template": "tip.md"},
+        }
+
+    def build(self, kind: object = None) -> None:
+        root = self.plugin(kinds={"tip": kind or self.kind}, register=False)
+        (root / "tip.md").write_text(
+            "\n## Tip\n\n## Score\n\n## Provenance\n", encoding="utf-8")
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+
+    def tip(self, body: str) -> pathlib.Path:
+        """A note carrying both shapes `frontmatter()` cannot round-trip."""
+
+        path = self.tips / "T.md"
+        path.write_text(
+            "---\n"
+            "status: inbox\n"
+            "score: 7\n"
+            'description: "quoted, and the reader strips it"\n'
+            "contexts:\n  - Personal\n  - Work\n"
+            "---\n\n" + body, encoding="utf-8")
+        return path
+
+    def headings(self, path: pathlib.Path) -> list[str]:
+        return [line[3:].strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("## ")]
+
+    def file(self, name: str, text: str) -> str:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    # -- the R11-D27 property -------------------------------------------
+
+    def test_the_frontmatter_comes_back_byte_for_byte(self) -> None:
+        """The reason this is a line splice and not a parse.
+
+        Proved against the real corpus as well, before this verb was written:
+        all 14 tips in `System/Databases/Tips and Tricks` were edited through
+        it and not one byte outside the target section changed.
+        """
+
+        self.build()
+        path = self.tip("## Tip\n\nold tip\n\n## Score\n\nold score\n")
+        before = path.read_text(encoding="utf-8").split("\n---\n")[0]
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=new")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertEqual(after.split("\n---\n")[0], before)
+        self.assertIn("contexts:\n  - Personal\n  - Work\n", after)
+        self.assertIn('description: "quoted, and the reader strips it"\n', after)
+        self.assertIn("## Score\n\nnew\n", after)
+        self.assertIn("old tip", after)
+
+    def test_the_body_outside_the_edited_section_is_untouched(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\nkeep me\n\n## Score\n\ngone\n\n## Provenance\n\nkeep me too\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=x")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("## Tip\n\nkeep me\n", after)
+        self.assertIn("## Provenance\n\nkeep me too\n", after)
+        self.assertNotIn("gone", after)
+
+    # -- fenced code, which a tip is full of ----------------------------
+
+    def test_a_fenced_heading_does_not_end_the_section_it_sits_in(self) -> None:
+        """A tip is prose about commands, so a fenced block is the normal case.
+
+        `body_headings` reads column 0 and would take the `## Score` inside
+        this fence for a real heading, ending `## Tip` early and leaving the
+        rest of somebody's code sample stranded in the section after it.
+        """
+
+        self.build()
+        path = self.tip(
+            "## Tip\n\nRun it:\n\n```markdown\n## Score\nnot a heading\n```\n\n"
+            "## Score\n\nreal score\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Tip=replaced")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        # The fenced sample belonged to `## Tip` and went with it...
+        self.assertNotIn("not a heading", after)
+        # ...and the real `## Score` and its text are still there, once.
+        self.assertIn("## Score\n\nreal score\n", after)
+        self.assertEqual(after.count("## Score"), 1)
+
+    def test_a_fenced_heading_is_not_the_section_that_gets_edited(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\n```markdown\n## Score\nfenced\n```\n\n## Score\n\nreal\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=written")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("```markdown\n## Score\nfenced\n```", after)
+        self.assertIn("## Score\n\nwritten\n", after)
+
+    def test_a_tilde_fence_does_not_close_a_backtick_fence(self) -> None:
+        """A closing fence has to match the marker that opened it."""
+
+        self.build()
+        path = self.tip("## Tip\n\n```\n~~~\n## Score\nstill fenced\n```\n\n## Score\n\nreal\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=written")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("## Score\nstill fenced\n", path.read_text(encoding="utf-8"))
+
+    # -- creation, without pack.py's anchor ------------------------------
+
+    def test_a_declared_section_the_note_lacks_is_created_in_declared_order(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\ntip text\n\n## Provenance\n\nwhere from\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=8/10")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.headings(path), ["Tip", "Score", "Provenance"])
+        self.assertIn("## Score\n\n8/10\n", path.read_text(encoding="utf-8"))
+
+    def test_a_section_with_no_later_neighbour_is_appended(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\ntip text\n")
+        done = self.run_sd(
+            "store", "set-section", "pp.tip", "T", "--section", "Provenance=a link")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertEqual(self.headings(path), ["Tip", "Provenance"])
+        self.assertTrue(after.endswith("## Provenance\n\na link\n"), repr(after[-60:]))
+
+    def test_a_section_is_created_with_no_anchor_heading_present_at_all(self) -> None:
+        """The case `pack.py` died on rather than handled."""
+
+        self.build()
+        path = self.tip("Just prose, and not one heading.\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("## Score\n\n8\n", after)
+        self.assertIn("Just prose, and not one heading.\n", after)
+
+    def test_an_appended_section_does_not_land_on_an_unterminated_last_line(self) -> None:
+        self.build()
+        path = self.tips / "T.md"
+        path.write_text("---\nstatus: inbox\nscore: 7\n---\n\n## Tip\n\nno trailing newline",
+                        encoding="utf-8")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("no trailing newline\n", path.read_text(encoding="utf-8"))
+        self.assertEqual(self.headings(path), ["Tip", "Score"])
+
+    def test_a_heading_the_manifest_does_not_declare_is_not_a_position(self) -> None:
+        """An undeclared heading cannot be ordered against a declared one, so
+        it is stepped over rather than guessed at."""
+
+        self.build()
+        path = self.tip("## Tip\n\nt\n\n## Notes\n\nhand-written\n\n## Provenance\n\np\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.headings(path), ["Tip", "Notes", "Score", "Provenance"])
+
+    # -- the read half ---------------------------------------------------
+
+    def test_get_prints_only_the_named_section(self) -> None:
+        self.build()
+        self.tip("## Tip\n\nthe tip\n\n## Score\n\nthe score\n")
+        got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Tip")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, "the tip\n")
+
+    def test_get_of_a_declared_but_absent_section_is_empty_and_exits_zero(self) -> None:
+        """What makes read-edit-write cover creation."""
+
+        self.build()
+        self.tip("## Tip\n\nthe tip\n")
+        got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Score")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, "")
+
+    def test_get_of_a_section_the_kind_does_not_declare_is_refused(self) -> None:
+        self.build()
+        self.tip("## Tip\n\nthe tip\n")
+        got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Nope")
+        self.assertEqual(got.returncode, 1, got.stdout)
+        self.assertIn("declares no section", got.stderr)
+
+    def test_read_edit_write_appends_and_creates_the_section_on_first_use(self) -> None:
+        """`pack.py topics add-feed`, with its second branch gone.
+
+        That verb had one path to append a line to `## Feeds` and another to
+        create the section when it was absent, anchored on a heading that might
+        not be there. Here the absent section reads as empty, so appending to
+        what came back does both -- and the second pass proves the append is
+        an append and not a replace.
+        """
+
+        self.build()
+        path = self.tip("## Tip\n\ntip text\n\n## Provenance\n\nsrc\n")
+        for url in ("https://a.example/feed", "https://b.example/feed"):
+            got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Score")
+            self.assertEqual(got.returncode, 0, got.stderr)
+            kept = [line for line in got.stdout.splitlines() if line.strip()]
+            kept.append(f"- {url}")
+            done = self.run_sd("store", "set-section", "pp.tip", "T",
+                               "--section", "Score=" + "\n".join(kept))
+            self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.headings(path), ["Tip", "Score", "Provenance"])
+        self.assertIn(
+            "## Score\n\n- https://a.example/feed\n- https://b.example/feed\n",
+            path.read_text(encoding="utf-8"))
+
+    # -- refusals --------------------------------------------------------
+
+    def test_a_section_the_kind_does_not_declare_is_refused(self) -> None:
+        self.build()
+        self.tip("## Tip\n\nt\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Nope=x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no section", done.stderr)
+
+    def test_a_kind_that_declares_no_sections_refuses_the_verb(self) -> None:
+        self.build(kind=dict(TIP_KIND))
+        self.tip("## Tip\n\nt\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Tip=x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("declares no sections", done.stderr)
+
+    def test_a_heading_carried_twice_is_refused_rather_than_guessed(self) -> None:
+        """The rule `field_lines` applies to a duplicated key, applied to a
+        duplicated heading: picking the first of two is a silent choice
+        wearing the clothes of a fix."""
+
+        self.build()
+        self.tip("## Score\n\nfirst\n\n## Score\n\nsecond\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("refusing to guess which one is meant", done.stderr)
+
+    def test_a_note_with_no_frontmatter_block_is_refused(self) -> None:
+        self.build()
+        (self.tips / "T.md").write_text("## Tip\n\nno block\n", encoding="utf-8")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Tip=x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("frontmatter", done.stderr)
+
+    def test_a_missing_note_is_refused(self) -> None:
+        self.build()
+        done = self.run_sd("store", "set-section", "pp.tip", "Ghost", "--section", "Tip=x")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("no note titled", done.stderr)
+
+    def test_giving_no_section_at_all_is_a_usage_error(self) -> None:
+        """Exit 2, not 1: nothing about the vault is wrong."""
+
+        self.build()
+        self.tip("## Tip\n\nt\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T")
+        self.assertEqual(done.returncode, 2, done.stdout)
+
+    def test_only_the_file_spelling_still_takes_the_section_flag(self) -> None:
+        """`--section-file` alone has to be enough. `required=True` on
+        `--section` would have made this the error argparse reports."""
+
+        self.build()
+        self.tip("## Tip\n\nt\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T",
+                           "--section-file", "Tip=" + self.file("t.txt", "from a file\n"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("## Tip\n\nfrom a file\n", (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    # -- the rest --------------------------------------------------------
+
+    def test_several_sections_are_written_in_one_pass(self) -> None:
+        """`pack.py` rewrote the file once per section, so an interrupted run
+        left a note with some sections updated and some not."""
+
+        self.build()
+        path = self.tip("## Tip\n\na\n\n## Score\n\nb\n\n## Provenance\n\nc\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T",
+                           "--section", "Tip=one", "--section", "Provenance=three")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("## Tip\n\none\n", after)
+        self.assertIn("## Score\n\nb\n", after)
+        self.assertIn("## Provenance\n\nthree\n", after)
+
+    def test_a_backtick_survives_the_file_form_and_not_the_shell(self) -> None:
+        """The same trap `--section-file` was added to `add` for: a backtick
+        inside a double-quoted shell argument is a command substitution."""
+
+        self.build()
+        self.tip("## Tip\n\nold\n")
+        text = "Use `sd store set-section` when the text carries a backtick.\n"
+        done = self.run_sd("store", "set-section", "pp.tip", "T",
+                           "--section-file", "Tip=" + self.file("tip.txt", text))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(text, (self.tips / "T.md").read_text(encoding="utf-8"))
+
+    def test_section_text_carrying_its_own_heading_is_refused(self) -> None:
+        self.build()
+        self.tip("## Tip\n\nt\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T",
+                           "--section", "Tip=fine\n## Smuggled\nnot fine")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("carries its own `## ` heading", done.stderr)
+
+    def test_writing_the_text_the_note_already_holds_changes_nothing(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\nthe same\n\n## Score\n\ns\n")
+        before = path.read_bytes()
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Tip=the same")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("already holds that text", done.stdout)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_crlf_note_comes_back_all_lf_rather_than_mixed(self) -> None:
+        """Where the CRLF actually goes, which is not where it looks.
+
+        `store_set_section` opens the note in text mode, so universal newlines
+        turn `\\r\\n` into `\\n` before `edit_section` sees it -- the same thing
+        `read_template` does to a template. The note is therefore rewritten
+        all-LF rather than mixed, and this pins that; `edit_section`'s own
+        ending handling is checked directly below, because no input the CLI can
+        produce reaches it with a `\\r` still attached.
+        """
+
+        path = self.tips / "T.md"
+        self.build()
+        path.write_text(
+            "---\r\nstatus: inbox\r\nscore: 7\r\n---\r\n\r\n## Tip\r\n\r\nold\r\n",
+            encoding="utf-8", newline="")
+        done = self.run_sd("store", "set-section", "pp.tip", "T",
+                           "--section", "Score=first\nsecond")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        raw = path.read_bytes()
+        self.assertIn(b"## Score\n\nfirst\nsecond\n", raw)
+        self.assertNotIn(b"\r", raw)
+
+    def test_edit_section_takes_the_headings_own_line_ending(self) -> None:
+        """Called directly, because the CLI normalises the only input it has.
+
+        Hardcoding a newline here is what put two endings in one file when
+        `fill_sections` did it, and `edit_field` carries the same rule. This is
+        the third site, which is why `line_ending` is a named helper rather
+        than a fourth copy of the expression.
+        """
+
+        edit_section = sd_module().edit_section
+        note = "---\r\nstatus: inbox\r\n---\r\n\r\n## Tip\r\n\r\nold\r\n"
+        replaced = edit_section(note, "Tip", "one\ntwo", ["Tip", "Score"])
+        self.assertEqual(
+            replaced, "---\r\nstatus: inbox\r\n---\r\n\r\n## Tip\r\n\r\none\r\ntwo\r\n")
+        self.assertNotIn("\n", replaced.replace("\r\n", ""))
+
+        created = edit_section(note, "Score", "s", ["Tip", "Score"])
+        self.assertNotIn("\n", created.replace("\r\n", ""))
+        self.assertIn("## Score\r\n\r\ns\r\n", created)
+
 
 
 LIST_KIND: dict[str, object] = {
