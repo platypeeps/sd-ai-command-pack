@@ -3104,7 +3104,7 @@ relative link from the directory the link lives in, not from the one you happen
 to be standing in. `ls "$(dirname RULE)/../sd-ai-command-pack/"` answers it in
 one command and does not depend on remembering where `.claude` roots.
 
-- [ ] 8 / 9 / 10 / 11
+- [x] 8 (slices i-vi, 2026-09-01/02) / [x] 9 (2026-09-02, below) / [ ] 10 / [x] 11 (collapsed -- see *Step 11 moves nothing, and the row was wrong four ways*)
 
 ### The delete column, executed (2026-09-01)
 
@@ -3635,3 +3635,91 @@ them -- written entirely around step 11 relocating live bases, and the first
 thing a 10b run would read. All three are corrected in this commit: the
 docstring, `design.md`'s cap paragraph, and `prd.md`'s steps 8-11 acceptance
 clause.
+
+### Step 9: the vault's routines call `sd`, and the `pack.py` grant is gone (2026-09-02)
+
+Step 9 was "retarget the vault's scheduled routines off `pack.py`". Seventeen
+lines across six files named `pack.py`; **six of them were commands a routine
+issues** and one was the Bash grant that let them run. The rest was prose about
+who writes what, which is the part that goes stale silently.
+
+**The six commands, and what replaced each.** Two sit in fenced blocks; the
+other four are inline in a sentence, which is why a scope built from "the code
+blocks" would have found a third of the work.
+
+| Where | Was | Is |
+| --- | --- | --- |
+| `intel-brief/SKILL.md:23` (fenced) | `pack.py topics list --status active --full` | `sd store list sdw.topic --status active --full` |
+| `intel-weekly/SKILL.md:162` | same | same |
+| `tips-weekly/SKILL.md:34` | same | same |
+| `tips-weekly/SKILL.md:38` | `pack.py tips list` | `sd store list sdw.tip` |
+| `tips-weekly/SKILL.md:57` (fenced) | `pack.py tips add` (8 flags) | `sd store add sdw.tip` (14) |
+| `aaif-brief-compile/SKILL.md:82` | `pack.py config get google_account` | `sd config get sdw.google_account` |
+
+Three further mentions in `tips-accept/SKILL.md` (:161, :221, :225) name the
+writer rather than issue a command, and were retargeted with it. Two more there
+named `pack.py tips attach`, which **does** exist -- `scripts/pack.py:520`, with
+its parser at `:2376`, contrary to a mid-session note that called it
+prose-only. It has no `sd` equivalent, so those two now name the *action* and
+not the tool: "attachment takes the `## Tip` section and ships it verbatim" is
+true whichever binary performs it, and survives 10b's port unchanged.
+
+Each read verb was run against the live vault before its SKILL.md was touched:
+`config get` returns the account, `store list sdw.tip` reports 14 notes,
+`store list sdw.topic --status active --full` reports 9. `store add` was proved
+in a scratch vault rather than the real one, against the real
+`sd-writing-pack/sd-plugin.json`, and its output diffed against a
+`pack.py`-written tip: identical structure, **offset by exactly one line**, the
+empty `acted-on:` key that `sd` writes because the kind declares it and
+`pack.py` does not.
+
+**The block grew from eight flags to fourteen, and that is the honest cost.**
+`pack.py tips add` filled in `contexts`, `area`, `content-type`, `dateCreated`
+and four `tags` from inside the function. `sd store add` writes what it is
+given and nothing else, so those defaults are now typed in the skill. Two
+things had to be said in prose that the function used to enforce: the date must
+be a literal `YYYY-MM-DD`, because `$(date +%F)` is a command substitution and
+a prefix grant does not match one -- a Sunday 07:00 run that stops for a
+permission prompt produced nothing; and a backtick in the tip text is a
+substitution too, which silently deletes the words inside it from a note that
+ships verbatim under Sven's name.
+
+**`sdw-tips` did not move, and saying so was the point.** `tips-weekly`'s
+opening paragraph claimed both paths "write identical notes because both go
+through `pack.py tips add`". Retargeting one half made that false. The blocker
+is real rather than clerical: `sdw-tips` passes the tip text as `--tip-file`
+precisely to escape the backtick problem above, and **`sd store add` has no
+`--section-file` twin** -- `grep -n 'section-file\|field-file' bin/sd` returns
+nothing. Moving it inline would reintroduce the loss that flag exists to
+prevent. So the paragraph now states the split, names the one-key difference in
+the output, and points at 10b. **Step 10b needs `--section-file` / `--field-file`
+before `sdw-tips` can move**, on top of the section-editing verbs already
+recorded there.
+
+**Five reference documents asserted things step 9 made false**, and none of
+them is a caller: `System/Schema.md` twice (that `pack.py topics list` "is what
+a routine calls at the start of a run", and that the non-drifting parts "live
+in `pack.py tips add`"), `CLAUDE.md`'s repo table, `TAGS.md`'s two-path
+paragraph, and `VAULT-STRUCTURE.md`'s grant paragraph. Each is corrected with a
+dated note rather than a rewrite. Finding them took a vault-wide `grep -rIl`,
+not a look at the directory being edited -- the six files step 9 scoped were
+the six with *invocations*, and the inventory of files with *claims* is a
+different and larger set.
+
+**The grant, removed last.** `Bash(python3 .../pack.py *)` came out of
+`.claude/settings.json` only after every caller had moved, and
+`System/Scheduled Tasks/settings.vault.json` was refreshed in the same pass so
+the mirror does not sit a day stale waiting for `vault-cleanup`. Four grants
+before, four after; `Bash(/Users/sven/repos/platypeeps/sd-ai-command-pack/bin/sd:*)`
+replaced it rather than joining it. The new grant matches on an absolute path
+because **`sd` is not on `PATH`** -- `which sd` finds nothing -- which is why
+every retargeted call, including the ones inside prose sentences, spells the
+path out in full.
+
+**Criterion, and where it does not read zero.** The step's check was
+`grep -rln pack.py "System/Scheduled Tasks/"` = 0. Invocations are 0 and grants
+are 0, both verified. The grep is 1: `tips-weekly/SKILL.md` still names the old
+grant string in the sentence explaining what replaced it. That line is worth
+more than a clean grep, so it stays and the gap is named here instead of being
+edited away.
+
