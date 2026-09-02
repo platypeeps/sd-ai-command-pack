@@ -1383,6 +1383,22 @@ class AddListsAndSectionsTests(StoreFixture):
         self.assertNotIn(b"\r", body)
         self.assertIn(b"## Tip\n\none\ntwo\n", body)
 
+    @unittest.skipUnless(yaml is not None, "PyYAML is not installed")
+    def test_an_empty_list_renders_bare_and_reads_back_as_none(self) -> None:
+        """`key:` and `key: []` are different values, not two spellings of one.
+
+        Called directly: `parse_assignments` appends a value for every `+=`, so
+        no CLI input builds an empty list. This pins `render_field`'s contract,
+        and the reason the bare form is written anyway -- it is what the corpus
+        carries for an unfilled list, as `used-by:` and `my-rating:` show.
+        """
+
+        rendered = sd_module().render_field("used-by", [])
+        self.assertEqual(rendered, "used-by:\n")
+        assert yaml is not None
+        self.assertIsNone(yaml.safe_load(rendered)["used-by"])
+        self.assertEqual(yaml.safe_load("used-by: []")["used-by"], [])
+
     def test_fill_sections_takes_the_headings_own_line_ending(self) -> None:
         """Called directly, because `read_template` normalises the only input
         the CLI has. Hardcoding "\\n" here put two endings in one file, and

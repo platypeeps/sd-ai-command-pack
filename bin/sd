@@ -1852,10 +1852,16 @@ def write_atomically(path: pathlib.Path, text: str) -> None:
 def render_field(field: str, value: str | list[str]) -> str:
     """One frontmatter line, or a key and the block sequence under it.
 
-    The empty list renders as a bare `key:` rather than `key: []`. Both parse
-    to the same thing, and the bare form is what every note in the corpus
-    already carries for a list nobody has filled in yet, so `add` writes the
-    shape the vault is written in rather than the shape JSON would suggest.
+    The empty list renders as a bare `key:`, which a YAML reader gives back as
+    `None` and **not** as `[]` -- those are different values, and an earlier
+    version of this comment claimed they were the same. The bare form is still
+    the right one to write: it is what every note in the corpus carries for a
+    list nobody has filled in yet, and `used-by:` and `my-rating:` are written
+    exactly that way by the tool this replaces.
+
+    No CLI input reaches here with an empty list -- `parse_assignments` appends
+    a value for every `+=`, so a list it builds holds at least one item. This
+    branch is `render_field`'s contract rather than a shape `add` produces.
     """
 
     if not isinstance(value, list):
