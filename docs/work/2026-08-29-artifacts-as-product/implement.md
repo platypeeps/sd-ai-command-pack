@@ -3816,6 +3816,19 @@ reasons. Recorded next to the f-string finding because they are one lesson
 twice: this developer's machine is a single point in a matrix, and an
 assertion pinned to what it happens to do there is a test of the machine.
 
+**Copilot's review: one finding valid, one not found.** It flagged two things
+in its summary and left no inline comment on either. *Valid:* `--field-file`'s
+help said "the same, with the value read from a file" and never mentioned that
+`NAME+=PATH` appends to a list, which it does and which a test exercises -- so
+`--field` documented the `+=` spelling and its file twin hid it. Corrected, and
+`--section-file`'s help now names its reason rather than pointing at the flag
+above it. *Not found:* "a truncated refusal message". Every message this adds
+renders whole -- checked by reading all three and running the two that a
+fixture can reach. The nearest thing to the claim is that `--field-file score=`
+refused with "names no file", which is terse rather than truncated; it now says
+"no path after the separator" and has a case of its own, because the branch had
+none. A finding taken as far as the evidence supports, and no further.
+
 **Criterion, and the result.** The check named before the work was
 `python3 -m pytest tests/test_sd_store.py` with the new cases passing and no
 existing case failing, plus `ruff` and `mypy` as CI runs them. Full suite:

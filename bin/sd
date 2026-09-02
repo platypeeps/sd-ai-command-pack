@@ -1900,7 +1900,7 @@ def read_pair_file(flag: str, name: str, path: str) -> str:
     """
 
     if not path:
-        raise UsageError(f"{flag} {name}: names no file")
+        raise UsageError(f"{flag} {name}: no path after the separator")
     try:
         text = pathlib.Path(path).read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as error:
@@ -2475,13 +2475,15 @@ def build_parser() -> argparse.ArgumentParser:
                       metavar="NAME=PATH",
                       help="the same, with the value read from a file --"
                            " use this whenever the text carries backticks,"
-                           " which a shell would run")
+                           " which a shell would run. `NAME+=PATH` appends to"
+                           " a list, exactly as `--field` does")
     made.add_argument("--section", dest="section", action=Pair, const=False,
                       metavar="NAME=TEXT",
                       help="text for one of the template's `## ` sections; repeatable")
     made.add_argument("--section-file", dest="section", action=Pair, const=True,
                       metavar="NAME=PATH",
-                      help="the same, with the text read from a file")
+                      help="the same, with the text read from a file, and for"
+                           " the same reason")
     made.set_defaults(handler=store_add)
 
     # No `--force`. `human-only` is the whole reason this verb refuses, and a

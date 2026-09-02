@@ -1623,6 +1623,15 @@ class ValueFromFileTests(StoreFixture):
         self.assertEqual(done.returncode, 2, done.stderr)
         self.assertIn("is not name=path", done.stderr)
 
+    def test_a_pair_with_a_separator_and_no_path_is_a_usage_error(self) -> None:
+        """`--field-file score=` is a different mistake from `--field-file
+        score`, and says so rather than failing later as an unreadable ''."""
+
+        self.build()
+        done = self.run_sd("store", "add", "pp.tip", "T", "--field-file", "score=")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("no path after the separator", done.stderr)
+
     def test_both_spellings_of_one_field_is_the_error_a_repeat_already_was(self) -> None:
         self.build()
         done = self.run_sd(
