@@ -4115,7 +4115,8 @@ Two of the seven retargets are not one-for-one.
 `ideas set-drive-docs` merged a partial set of URLs into whatever the section
 already held, and both call sites depend on that merge -- each supplies only
 the URLs it has. There is no `sd` verb for "merge into a section", so it became
-an explicit read-edit-write: `sd store get`, edit, `sd store set-section-file`.
+an explicit read-edit-write: `sd store get --section`, edit, `sd store set
+--section-file`.
 That is more lines at the call site and the merge is now the skill's
 responsibility rather than the tool's. It is the honest shape of what was
 always happening.
