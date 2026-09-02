@@ -1471,10 +1471,11 @@ class AddListsAndSectionsTests(StoreFixture):
 class ValueFromFileTests(StoreFixture):
     """10b-i: the two flags `sdw-tips` cannot move without.
 
-    Step 9 retargeted five of the vault's six `pack.py` invocations and left
-    `sdw-tips` where it was, because it passes its tip text as `--tip-file`
-    precisely so a backtick in the prose is not run by the shell, and
-    `sd store add` had no twin for that flag. These are the twin.
+    Step 9 retargeted all six of the vault's `pack.py` invocations and left one
+    caller standing outside it: `sdw-tips`, in the plugin repository, which
+    passes its tip text as `--tip-file` precisely so a backtick in the prose is
+    not run by the shell. `sd store add` had no twin for that flag; these two
+    flags are it.
 
     The load-bearing case is
     `test_a_backtick_survives_the_file_and_would_not_survive_the_shell`: the

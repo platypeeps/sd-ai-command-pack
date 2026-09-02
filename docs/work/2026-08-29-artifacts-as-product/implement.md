@@ -3829,6 +3829,25 @@ refused with "names no file", which is terse rather than truncated; it now says
 "no path after the separator" and has a case of its own, because the branch had
 none. A finding taken as far as the evidence supports, and no further.
 
+**The second review found the same nit twice over, and one of them was mine.**
+Its headline repeated "a user-facing refusal message that is visibly
+truncated/incomplete" with, again, no located instance; its one concrete
+comment was a grammar note on a test docstring. The truncation claim is
+rebutted with the rendering rather than with a reading this time -- all five
+messages the change adds, put through `resolve_pair_files` directly:
+`--field-file score: no path after the separator` · `--field-file score:
+cannot read /nope/x: [Errno 2] No such file or directory: '/nope/x'` ·
+`--field-file score: /tmp/_sd_empty.txt is empty; a note written from it would
+be too` · `'score' is not name=path or name+=path` · `'Tip' is not name=path`.
+Every one is a whole sentence. **The grammar note, though, sat on top of a real
+defect it did not mention:** the same docstring said step 9 retargeted "five of
+the vault's six" invocations and left `sdw-tips`, which is the error this
+entry's own opening paragraph was corrected for two commits earlier --
+`sdw-tips` is not one of the vault's six, it is in the plugin repository. Fixed
+in one artifact and left standing in its copy, which is precisely the shape the
+cross-artifact sweep predicts and the reason it is run by searching for the
+value rather than by rereading the file that was edited.
+
 **Criterion, and the result.** The check named before the work was
 `python3 -m pytest tests/test_sd_store.py` with the new cases passing and no
 existing case failing, plus `ruff` and `mypy` as CI runs them. Full suite:
