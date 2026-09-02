@@ -377,6 +377,19 @@ class CommittedBaseListTests(unittest.TestCase):
         self.assertEqual(self.tool.read_bases(),
                          ["System/Databases/Tool", "System/Databases/Tool Stack"])
 
+    def test_a_path_is_not_inside_itself(self) -> None:
+        """What lets the overlap loop compare every base against every base.
+
+        The loop has no self-comparison guard, because the one it had was
+        written as `is not` -- correct only by identity accident -- and
+        deleting it outright failed nothing. This is the property that makes
+        deleting it safe, so it is pinned here rather than assumed.
+        """
+
+        for path in ("Notes", "System/Databases/Topics", "a/b/c"):
+            with self.subTest(path=path):
+                self.assertFalse(self.tool._is_within(path, path))
+
     def test_a_manifest_listing_one_note_twice_is_refused(self) -> None:
         """Read into a mapping, the second row wins and the first disappears."""
 

@@ -131,7 +131,14 @@ def read_bases() -> list[str]:
     # reporting why.
     for base in bases:
         for other in bases:
-            if base is not other and _is_within(base, other):
+            # No self-comparison guard. There was one, written as `is not`,
+            # which answered the question by identity accident: it skipped a
+            # line compared with itself only because it was the same object.
+            # Replacing it with `!=` was no better -- removing it entirely
+            # failed no test, because `_is_within` already returns False for
+            # two equal paths. Rather than keep a branch nothing exercises, the
+            # property is pinned on `_is_within` itself, where it lives.
+            if _is_within(base, other):
                 raise UsageError(
                     f"the base {base!r} is inside {other!r}; the scan is recursive,"
                     " so every note under it would be recorded twice")
