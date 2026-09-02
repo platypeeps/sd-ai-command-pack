@@ -3251,3 +3251,30 @@ gate checks them, and this rollout cites that file 4 times across the task
 directory. The cheap enumerating check is the one used to find these -- read
 each cited line and confirm it is the thing the prose says it is -- and it
 belongs in the planning-review sweep rather than in a reviewer's memory.
+
+*Superseded the same day: `tests/test_doc_citations.py` now runs that check on
+every change rather than at planning boundaries only, which is where the hole
+was -- a pure code change edits none of the three planning artifacts, so no
+sweep fires, and 8-iv was swept only because it happened to edit `design.md`
+too.* The rule is adjacency: a citation directly following a backticked symbol
+is a claim about that symbol and must find it at the cited line; anything with
+prose in between is skipped rather than guessed at. Archived documents and
+citations to files that no longer exist are skipped for the same reason -- an
+archive is supposed to cite the code as it stood.
+
+**Two more stale citations, in prose this branch never touched.** The gate
+found them on its first run. `panelId` was cited at `dashboard/app.js:255` and
+is at 450, corrected. `showAlerts` was cited at `dashboard/app.js:265` and no
+longer exists at all -- deleted at `56f16c7b`, 6b-5b -- so the line number is
+dropped rather than corrected, on the ground that a pointer with nothing to
+point at is not a citation. The observation stays as the dated one it was, and
+its load-bearing claim, that nothing reads `row.href`, is explicitly marked as
+not re-verified against the renderer that replaced `showAlerts`.
+
+One citation the gate deliberately does **not** check is worth recording,
+because an earlier draft did check it and was wrong: `bin/sd-status:501-506`
+is an accurate pointer to a docstring that does not repeat the key name in the
+sentence before it. Taking the nearest backticked symbol within 90 characters
+reported it as stale. A gate whose failures need interpreting teaches people to
+interpret failures away, so the rule was narrowed until its false-positive
+count was zero rather than left wide with an exception list.

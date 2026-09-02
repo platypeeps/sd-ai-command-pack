@@ -1856,7 +1856,7 @@ operator anywhere". Both halves are implemented and neither is wrong. What neith
 is whether the anchor has anything to land on.
 
 **It does not, in either direction.** A plugin cannot name a backbone id: `panelId`
-(`dashboard/app.js:255`) composes the DOM id from the plugin's own prefix and tab name, lowercased
+(`dashboard/app.js:450`) composes the DOM id from the plugin's own prefix and tab name, lowercased
 with non-alphanumerics collapsed, and the panel is `panel-plugin-<that>`. So the system plugin's
 Toolbox tab is `panel-plugin-sys-toolbox`, and none of that composition is published anywhere a
 plugin author reads. A plugin cannot name an id inside its own tile either: `id` is absent from
@@ -1869,9 +1869,12 @@ anchor and well-formed is all `ANCHOR` can check. The one line a plugin author c
 silent breakage that passes validation — the same shape as a rule that is enforced on spelling
 rather than on what reached the operator.
 
-**And nothing reads it.** `showAlerts` (`dashboard/app.js:265`) renders `source`, `what` and
-`detail` as text and never touches `row.href`. The key is validated, carried across the loader,
-and dropped. That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
+**And nothing reads it.** `showAlerts`, then at `dashboard/app.js:265`, renders `source`, `what`
+and `detail` as text and never touches `row.href`. The key is validated, carried across the
+loader, and dropped. (*`showAlerts` was deleted at `56f16c7b`, 6b-5b. The line number is dropped
+rather than corrected because there is nothing to correct it to -- a pointer that cannot resolve
+is not a citation -- and the observation is kept as the dated one it was. The load-bearing claim,
+that nothing reads `row.href`, was **not** re-verified against the renderer that replaced it.*) That is not a gap to fill at 6b-5b; it is the absence of anything to fill it with.
 
 **So the backbone resolves the destination instead.** The loader already stamps `source` on every
 row it accepts (`dashboard/plugins.py`, in `validate_rows`), and the tab that emitted a row is the
