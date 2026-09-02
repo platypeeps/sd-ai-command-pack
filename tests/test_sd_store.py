@@ -1331,6 +1331,46 @@ class AddListsAndSectionsTests(StoreFixture):
         self.assertIn("renders no `## Provenance`", done.stderr)
         self.assertFalse((self.tips / "T.md").exists())
 
+    def test_an_indented_heading_is_refused_too(self) -> None:
+        """CommonMark renders a heading indented by up to three spaces, so
+        `   ## Score` reaches Obsidian as one while `body_headings`, which reads
+        column 0, does not see it."""
+
+        self.build()
+        done = self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section", "Tip=text\n   ## Score\nsmuggled")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("its own `## ` heading", done.stderr)
+
+    def test_a_crlf_template_is_normalised_before_it_is_filled(self) -> None:
+        """Where the CRLF actually goes, which is not where it looks.
+
+        `read_template` opens the file in text mode, so universal newlines
+        turn `\\r\\n` into `\\n` before `fill_sections` is called at all. The
+        note is therefore all-LF rather than mixed, and this pins that -- the
+        function's own ending handling is checked directly below, because no
+        input the CLI can produce reaches it with a `\\r` still attached.
+        """
+
+        self.build(template="\r\n## Tip\r\n\r\n## Score\r\n")
+        self.assertEqual(self.run_sd(
+            "store", "add", "pp.tip", "T", "--field", "score=9",
+            "--section", "Tip=one\ntwo").returncode, 0)
+        body = (self.tips / "T.md").read_bytes().split(b"---\n")[2]
+        self.assertNotIn(b"\r", body)
+        self.assertIn(b"## Tip\n\none\ntwo\n", body)
+
+    def test_fill_sections_takes_the_headings_own_line_ending(self) -> None:
+        """Called directly, because `read_template` normalises the only input
+        the CLI has. Hardcoding "\\n" here put two endings in one file, and
+        would do so again the day a template is read with `newline=""`."""
+
+        filled = sd_module().fill_sections(
+            "\r\n## Tip\r\n\r\n## Score\r\n", {"Tip": "one\ntwo"})
+        self.assertEqual(filled, "\r\n## Tip\r\n\r\none\r\ntwo\r\n\r\n## Score\r\n")
+        self.assertNotIn("\n", filled.replace("\r\n", ""))
+
     def test_section_text_carrying_its_own_heading_is_refused(self) -> None:
         """Otherwise the note is written with a heading outside
         `sections.order`, which the order check has just approved."""
@@ -1380,6 +1420,18 @@ class ListValuedFieldTests(StoreFixture):
         before = path.read_bytes()
         done = self.run_sd("store", "set", "pp.tip", "T", "contexts", "Shared")
         self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_comment_between_the_key_and_its_items_does_not_hide_them(self) -> None:
+        """A YAML comment is not a value, and returning on one stepped over the
+        sequence it precedes -- the guard allowed the edit that orphans it."""
+
+        self.plugin(kinds={"tip": dict(LIST_KIND)})
+        path = self.note("T", extra="contexts:\n# where these came from\n  - Personal\n")
+        before = path.read_bytes()
+        done = self.run_sd("store", "set", "pp.tip", "T", "contexts", "Shared")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("holds a list", done.stderr)
         self.assertEqual(path.read_bytes(), before)
 
     def test_an_inline_value_is_still_edited(self) -> None:

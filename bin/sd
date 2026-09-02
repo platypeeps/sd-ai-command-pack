@@ -1565,6 +1565,16 @@ def edit_field(text: str, key: str, value: str) -> str:
 #: would orphan, so it is matched on the raw line rather than parsed.
 LIST_ITEM = re.compile(r"^\s+-\s")
 
+#: A YAML comment line. Skipped between a key and its items for the same
+#: reason a blank line is: neither is a value, and stopping at one steps over
+#: the sequence it precedes.
+YAML_COMMENT = re.compile(r"^\s*#")
+
+#: A Markdown H2 as a *renderer* sees it: CommonMark permits up to three
+#: leading spaces. `body_headings` deliberately reads column 0 only, so this is
+#: the wider pattern used to refuse section text, not to find headings.
+SMUGGLED_HEADING = re.compile(r"^ {0,3}## ")
+
 
 def refuse_list_value(text: str, key: str) -> None:
     """A field whose value is a YAML block sequence, refused rather than edited.
@@ -1592,7 +1602,10 @@ def refuse_list_value(text: str, key: str) -> None:
     if header.group(2).strip():
         return                  # an inline value; the line is the whole value
     for line in lines[hits[0] + 1:close]:
-        if not line.strip():
+        # Blanks and comments are both skipped rather than treated as the end
+        # of the block. Returning on a comment let `contexts:\n# note\n  - x`
+        # through the guard and straight into the orphaning edit.
+        if not line.strip() or YAML_COMMENT.match(line):
             continue
         if LIST_ITEM.match(line):
             raise Refusal(
@@ -1871,7 +1884,12 @@ def parse_sections(pairs: list[str]) -> dict[str, str]:
         if name in filled:
             raise UsageError(f"section {name!r} is given twice")
         for line in text.splitlines():
-            if line.startswith("## "):
+            # `^ {0,3}## `, not `startswith`. CommonMark renders a heading
+            # indented by up to three spaces, so `   ## Score` reaches Obsidian
+            # as a heading while `body_headings` -- which reads column 0 -- does
+            # not see it. Refusing the wider shape keeps the two from
+            # disagreeing about what the note contains.
+            if SMUGGLED_HEADING.match(line):
                 raise Refusal(
                     f"section {name!r} carries its own `## ` heading;"
                     " section text is the body under a heading, not more headings")
@@ -1904,10 +1922,16 @@ def fill_sections(body: str, filled: dict[str, str]) -> str:
     out: list[str] = []
     for line in body.splitlines(keepends=True):
         out.append(line)
-        if line.startswith("## "):
-            text = filled.get(line[3:].strip())
-            if text is not None:
-                out.append(f"\n{text.rstrip(chr(10))}\n")
+        if not line.startswith("## "):
+            continue
+        text = filled.get(line[3:].strip())
+        if text is None:
+            continue
+        # The heading's own line ending, never a hardcoded "\n" -- the same
+        # rule `edit_field` follows. A CRLF template took LF-terminated text
+        # and came back with both endings in one file.
+        ending = line[len(line.rstrip("\r\n")):] or "\n"
+        out.append(ending + ending.join(text.rstrip("\r\n").splitlines()) + ending)
     return "".join(out)
 
 

@@ -3461,3 +3461,34 @@ its own `## ` heading. `store_add` compares the template's headings against
 `sections.order` *after* the fill, so a smuggled heading would either fail that
 comparison with a message blaming the template, or match it and write a note
 with the heading twice.
+
+**Three edge cases Copilot found, all real (2026-09-02).** The review carried
+zero inline comments and named three shapes in its summary line; each was
+probed against the code rather than taken on trust, and each reproduced.
+
+A **YAML comment between a key and its items** bypassed the list guard
+entirely. `contexts:` / `# where these came from` / `  - Personal` returned at
+the comment, which is not a value, and handed the note to the orphaning edit
+the guard exists to prevent. Comments are now skipped exactly as blanks are.
+
+An **indented `   ## Score`** slipped past the smuggled-heading refusal.
+CommonMark renders a heading indented by up to three spaces, so it reaches
+Obsidian as a heading while `body_headings` -- which reads column 0 by design
+-- does not see it. The refusal now matches `^ {0,3}## `; the *finder* still
+reads column 0, because widening it would change how existing templates are
+compared against `sections.order`.
+
+The **CRLF** case is real in `fill_sections` and **not reachable through the
+CLI**, which is worth writing down rather than quietly fixing. `read_template`
+opens the template in text mode, so universal newlines have already turned
+`\r\n` into `\n` before the fill runs: a CRLF template yields an all-LF note,
+not a mixed one. The hardcoded `"\n"` was still wrong -- `edit_field` takes
+each line's own ending and this did not -- so it is fixed, and pinned by two
+tests that say which is which: one through the CLI asserting the
+normalisation, one calling `fill_sections` directly with a `\r` still
+attached. Claiming a CLI test had proved the ending logic would have been a
+vacuous check with a passing result.
+
+Each fix sabotaged: removing the comment skip, narrowing the heading pattern
+back to `startswith`, and restoring the hardcoded `"\n"` each fail exactly one
+case. Suite **1039 tests, no skips**; `make lint` clean.
