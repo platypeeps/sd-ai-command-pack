@@ -1790,6 +1790,53 @@ class SetSectionTests(StoreFixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("## Score\nstill fenced\n", path.read_text(encoding="utf-8"))
 
+    # -- indentation, which Obsidian renders and column 0 misses ---------
+
+    def test_an_indented_heading_is_the_section_it_looks_like(self) -> None:
+        """CommonMark renders a heading indented by up to three spaces.
+
+        A column-zero scan does not see `   ## Score`, so it would report the
+        section absent and *create* a second one below the heading already on
+        screen -- two `## Score` blocks in a note whose reader shows one.
+        `parse_sections` already refuses this wider shape on the way in.
+        """
+
+        self.build()
+        path = self.tip("## Tip\n\nt\n\n   ## Score\n\nindented\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Score=written")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertEqual(after.count("## Score"), 1, f"a second heading was created:\n{after}")
+        self.assertNotIn("indented", after)
+        self.assertIn("written", after)
+
+    def test_an_indented_heading_ends_the_section_above_it(self) -> None:
+        self.build()
+        path = self.tip("## Tip\n\nmine\n\n  ## Provenance\n\nnot mine\n")
+        done = self.run_sd("store", "set-section", "pp.tip", "T", "--section", "Tip=replaced")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertIn("not mine", after)
+        self.assertNotIn("mine\n\n  ## Provenance", after.replace("not mine", ""))
+
+    def test_an_indented_heading_is_found_by_the_reader_too(self) -> None:
+        self.build()
+        self.tip("## Tip\n\nt\n\n   ## Score\n\nindented text\n")
+        got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Score")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, "indented text\n")
+
+    def test_json_alongside_section_is_refused_rather_than_ignored(self) -> None:
+        """A caller feeds `--section` output straight back to `set-section`.
+        Quietly dropping a `--json` it asked for would hand back something it
+        could not tell apart from an empty section."""
+
+        self.build()
+        self.tip("## Tip\n\nt\n")
+        got = self.run_sd("store", "get", "pp.tip", "T", "--section", "Tip", "--json")
+        self.assertEqual(got.returncode, 2, got.stdout)
+        self.assertIn("--json", got.stderr)
+
     # -- creation, without pack.py's anchor ------------------------------
 
     def test_a_declared_section_the_note_lacks_is_created_in_declared_order(self) -> None:

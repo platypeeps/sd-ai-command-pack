@@ -1859,6 +1859,14 @@ def note_heading_lines(lines: list[str], start: int) -> list[tuple[int, str]]:
 
     A closing fence must match the marker that opened it, so a ``` block
     quoting a ~~~ line stays one block.
+
+    `SMUGGLED_HEADING`, not `startswith("## ")`: CommonMark renders a heading
+    indented by up to three spaces, so `   ## Score` reaches Obsidian as a
+    heading. A column-zero scan does not see it, and the two disagreeing is the
+    whole failure -- the reader would miss the section and `set-section` would
+    then *create* a second `## Score` below the one already on screen.
+    `parse_sections` refuses the same wider shape in incoming text for exactly
+    this reason.
     """
 
     found: list[tuple[int, str]] = []
@@ -1872,8 +1880,8 @@ def note_heading_lines(lines: list[str], start: int) -> list[tuple[int, str]]:
             elif marker == fence:
                 fence = ""
             continue
-        if not fence and line.startswith("## "):
-            found.append((index, line[3:].strip()))
+        if not fence and SMUGGLED_HEADING.match(line):
+            found.append((index, line.lstrip()[3:].strip()))
     return found
 
 
@@ -2560,6 +2568,12 @@ def store_get(args: argparse.Namespace) -> int:
         raise Refusal(f"no note titled {args.title!r} in {base}")
 
     if args.section:
+        if args.json:
+            # Refused rather than ignored. `--section` prints the text a caller
+            # feeds straight back to `set-section`, and quietly dropping a
+            # `--json` it asked for would hand back something it did not expect
+            # in a shape it could not tell apart from an empty section.
+            raise UsageError("--section prints one section's text; --json has no form for it")
         # A section the kind declares but the note does not carry reads as
         # empty and exits 0, rather than refusing. That is what makes
         # read-edit-write cover creation: `pack.py topics add-feed` carried a
