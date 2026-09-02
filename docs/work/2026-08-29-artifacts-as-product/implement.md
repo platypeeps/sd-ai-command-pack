@@ -33,7 +33,7 @@ Dogfood from step 0: this redesign lives at `docs/work/2026-08-29-artifacts-as-p
 | **8** | Plugin interface in backbone **less the registration slice, which moved to 6b** (R11-D13): `sd store`/`sd config`, `sd plugin lock`, vault driver, golden-corpus byte-compare | direct-write-then-query freshness test green |
 | **9** | Vault-side retarget of 6 pack.py callers (5 routines + the permission grant, which goes **last**), BEFORE deletion | `grep -rln pack.py 'System/Scheduled Tasks/'` = 0 |
 | **10** | sd-writing-pack migration PR (manifest, store clients, delete ~1,280 LOC, and the hardcoded vault root at `pack.py:146` goes with them -- the driver takes `OBSIDIAN_VAULT`) | `grep -c -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT pack.py` = 0; E2E on one piece |
-| **11** | Vault move, **last** — per the r2 D12 per-base list (Skill Proposals → files store; Tips / Blog Ideas / Topics / Market Watch / Briefs / Prompts / TaskNotes / Learning → keep; empty Followups → retire — each confirmed by the user first), enumerated coordinated list in the PR; then delete `migrate-vault` | golden-corpus byte-compare (baseline captured at step 8, **before** any move) green; `migrate-vault` refuses if any reader still points at the old path; every vault routine's next run green |
+| **11** | Vault move, **last** — **superseded 2026-09-02: nothing moves.** The per-base list was put to the user and both live dispositions were reversed; the row's other three claims were each false. See *Step 11 moves nothing* below | **no longer applicable.** Closing evidence is the enumerated per-base list and the four corrections, not a byte-compare of a move that does not happen |
 
 ## Step checklist
 
@@ -3520,3 +3520,60 @@ instead of passing vacuously.
 
 Sabotaged both ways: removing the substitution fails 2 cases, removing the
 stray-placeholder guard fails 1. Suite **1045 tests, no skips**.
+
+### Step 11 moves nothing, and the row was wrong four ways (2026-09-02)
+
+The per-base list the row asks for was enumerated from the filesystem and put
+to Sven. **Both of its live dispositions came back reversed**, which leaves
+step 11 with nothing to do. The enumeration also found that three of the row's
+remaining claims were false. Recording all four, because the row read as a
+checked plan and was not one.
+
+**Fourteen bases, 784 notes** at enumeration -- two above the 782 the step 8-v
+baseline recorded, both written by routines the same morning.
+
+**1. `Followups` is not empty, and retiring it would have been the largest
+change in the step.** The row calls it "empty Followups → retire". It holds a
+MOC note, six Obsidian `.base` view files, and a `space/def.json`. **283 notes
+reference `Followup - `**, among them `Vault.md`, `VAULT-STRUCTURE.md`,
+`WIKILINKS.md` and the vault's own `CLAUDE.md`. The MOC states the design
+outright: a follow-up note lives anywhere in the vault and joins a queue by
+pointing `related` at one of those views. Retiring the folder deletes six live
+queries that 283 notes depend on. *Decision: keep, untouched.*
+
+**2. `Skill Proposals → files store` names a driver that does not exist.**
+`DRIVERS = frozenset({"vault"})` -- `vault` is the only one. The underlying
+R2-D12 line reads "Skill Proposals → files, rest keep", meaning out of the
+vault into plain files, with no destination or format ever specified. The
+queue is also dead: 10 notes, **8 `declined` and 2 `filed`**, nothing creates
+them and no routine sets their status. *Decision: leave them in the vault.*
+Moving ten dead notes buys nothing and spends the only irreversible action the
+step had.
+
+**3. The acceptance criterion cannot be met by any vault that is in use.** It
+asks for the golden-corpus byte-compare "green". Run on the day it was
+written, against a vault nobody had migrated:
+
+    1 changed, 0 missing, 2 unrecorded of 782 recorded notes
+
+-- today's intel brief, a new blog idea, and a `TaskNotes` edit, all written
+by routines, and `verify` exits 0 regardless. "Green" was never going to mean
+782 identical. The signal a bad move actually produces is **`missing`**: a
+note that was recorded and is now gone. Had step 11 moved anything, the
+criterion would have been 0 missing plus 0 changed among the moved bases, not
+0 changed overall.
+
+**4. `bin/migrate-vault` was never written.** The row says "then delete
+`migrate-vault`" and makes it the enforcer of "refuses if any reader still
+points at the old path"; step 7's row says it "survives to step 11". It has no
+commit in any branch. Three documents named a tool that never existed, and one
+of them made it responsible for the step's safety.
+
+**What is left of step 11.** Nothing to move, nothing to build, nothing to
+delete. `bin/migrate-golden-corpus` is the open question rather than a
+decision taken here: it carries the `migrate-` prefix, which step 7 defined as
+tooling deleted at step 11, and the baseline it maintains was captured to
+guard a move that will not happen. It does still detect vault drift. That is
+the same "a registry nothing reads is a record" argument this repository
+already rejected once, in `docs/fleet/README.md`, so it should be answered
+deliberately and not by leaving the file in place.
