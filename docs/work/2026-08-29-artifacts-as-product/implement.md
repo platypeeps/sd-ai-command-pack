@@ -3639,19 +3639,30 @@ clause.
 ### Step 9: the vault's routines call `sd`, and the `pack.py` grant is gone (2026-09-02)
 
 Step 9 was "retarget the vault's scheduled routines off `pack.py`". Seventeen
-lines across six files named `pack.py`; **four of them were invocations** and
-one was the Bash grant that let them run. The rest was prose about who writes
-what, which is the part that goes stale silently.
+lines across six files named `pack.py`; **six of them were commands a routine
+issues** and one was the Bash grant that let them run. The rest was prose about
+who writes what, which is the part that goes stale silently.
 
-**The four invocations, and what replaced each.**
+**The six commands, and what replaced each.** Two sit in fenced blocks; the
+other four are inline in a sentence, which is why a scope built from "the code
+blocks" would have found a third of the work.
 
 | Where | Was | Is |
 | --- | --- | --- |
-| `intel-brief/SKILL.md:23` | `pack.py topics list --status active --full` | `sd store list sdw.topic --status active --full` |
-| `tips-weekly/SKILL.md` §2 | same | same |
-| `tips-weekly/SKILL.md` §2 | `pack.py tips list` | `sd store list sdw.tip` |
-| `tips-weekly/SKILL.md` §3 | `pack.py tips add` (8 flags) | `sd store add sdw.tip` (14) |
+| `intel-brief/SKILL.md:23` (fenced) | `pack.py topics list --status active --full` | `sd store list sdw.topic --status active --full` |
+| `intel-weekly/SKILL.md:162` | same | same |
+| `tips-weekly/SKILL.md:34` | same | same |
+| `tips-weekly/SKILL.md:38` | `pack.py tips list` | `sd store list sdw.tip` |
+| `tips-weekly/SKILL.md:57` (fenced) | `pack.py tips add` (8 flags) | `sd store add sdw.tip` (14) |
 | `aaif-brief-compile/SKILL.md:82` | `pack.py config get google_account` | `sd config get sdw.google_account` |
+
+Three further mentions in `tips-accept/SKILL.md` (:161, :221, :225) name the
+writer rather than issue a command, and were retargeted with it. Two more there
+named `pack.py tips attach`, which **does** exist -- `scripts/pack.py:520`, with
+its parser at `:2376`, contrary to a mid-session note that called it
+prose-only. It has no `sd` equivalent, so those two now name the *action* and
+not the tool: "attachment takes the `## Tip` section and ships it verbatim" is
+true whichever binary performs it, and survives 10b's port unchanged.
 
 Each read verb was run against the live vault before its SKILL.md was touched:
 `config get` returns the account, `store list sdw.tip` reports 14 notes,
