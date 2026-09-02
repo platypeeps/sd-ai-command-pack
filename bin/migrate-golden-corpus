@@ -67,7 +67,16 @@ def baseline_dir() -> pathlib.Path:
     # override that points back inside the checkout is refused rather than
     # honoured -- `git add -A` after that is one keystroke, and the titles do
     # not come back out of public history.
-    resolved = chosen.resolve() if chosen.exists() else chosen.absolute()
+    # `resolve()` unconditionally, never `absolute()`. `absolute()` only
+    # prepends the working directory and leaves symlinks in place, so a
+    # baseline named through a link to the checkout -- `/tmp/link/fixtures/x`
+    # where `/tmp/link` points here -- read as outside and was written inside.
+    # The earlier conditional guarded against `resolve()` raising on a path
+    # that does not exist yet; it does not. Non-strict by default, it resolves
+    # the ancestors that do exist and appends the rest, which is exactly the
+    # case that matters: the baseline directory is normally absent when
+    # `capture` first runs.
+    resolved = chosen.resolve()
     if resolved == REPO_ROOT or REPO_ROOT in resolved.parents:
         raise UsageError(
             f"SD_GOLDEN_CORPUS is {chosen}, which is inside {REPO_ROOT}."

@@ -221,6 +221,31 @@ class GoldenCorpusTests(unittest.TestCase):
         self.assertIn("is inside", self.reported)
         self.assertFalse(inside.exists(), "the refused baseline was created anyway")
 
+    def test_a_baseline_reaching_the_repository_through_a_symlink_is_refused(self) -> None:
+        """The guard has to resolve, not just absolutise.
+
+        `absolute()` prepends the working directory and leaves links alone, so
+        a path through a symlink to the checkout reads as outside and is
+        written inside. The link target does not exist yet when `capture`
+        runs, which is what made the earlier `exists()` conditional look
+        harmless -- it took the non-resolving branch in precisely the case
+        that mattered.
+        """
+
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        link = pathlib.Path(holder.name) / "link"
+        link.symlink_to(REPO_ROOT, target_is_directory=True)
+        through = link / "tests" / "fixtures" / "sneaky-baseline"
+        self.addCleanup(shutil.rmtree, REPO_ROOT / "tests" / "fixtures" / "sneaky-baseline",
+                        ignore_errors=True)
+        self.assertFalse(through.exists(), "the case needs the target to be absent")
+        with unittest.mock.patch.dict("os.environ", {"SD_GOLDEN_CORPUS": str(through)}):
+            self.assertEqual(self.run_tool("capture"), 2)
+        self.assertIn("is inside", self.reported)
+        self.assertFalse((REPO_ROOT / "tests" / "fixtures" / "sneaky-baseline").exists(),
+                         "the refused baseline was created through the link anyway")
+
     def test_a_symlinked_note_is_refused_rather_than_hashed_through(self) -> None:
         """`rglob` follows a symlinked file, so a link out of the vault would be
         recorded as though its target were a note -- and `verify` would then
