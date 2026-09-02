@@ -1495,7 +1495,9 @@ def frontmatter_span(text: str) -> tuple[list[str], int, int]:
     if not lines or lines[0].rstrip() != "---":
         raise Refusal("the note has no `---` frontmatter block to edit")
     for index in range(1, len(lines)):
-        # `rstrip` of the line ending only, never `strip()`. An **indented**
+        # `rstrip()` of all trailing whitespace, never `strip()`. Trailing
+        # space is tolerated deliberately, and a test pins it: what makes a
+        # fence a fence is where it starts, not what follows it. An **indented**
         # `---` is content inside a block scalar, not the closing fence: YAML
         # indents a block scalar's body, so a `---` within one is always
         # indented and a fence never is. Matching `.strip()` closed the block
@@ -1877,7 +1879,10 @@ def store_set(args: argparse.Namespace) -> int:
     lines, first, close = frontmatter_span(text)
     field_lines(lines, first, close, args.field)
 
-    found, _ = read_note(path)
+    # `frontmatter(text)`, not `read_note(path)`: the note is already in hand,
+    # and a second read would let the transition below be judged against a
+    # version of the file that is not the one `edit_field` goes on to edit.
+    found = frontmatter(text)
     if args.field == "status":
         refuse_human_only(kind, args.value)
         refuse_bad_transition(kind, found.get("status", ""), args.value)
