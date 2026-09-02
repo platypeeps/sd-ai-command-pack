@@ -1576,5 +1576,92 @@ class DeclarationTests(StoreFixture):
         self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
 
 
+
+class FullListingTests(StoreFixture):
+    """`--full`: the whole note set in one call, which step 9 needs.
+
+    `pack.py topics list --status active --full` printed every active topic's
+    body, and the research routines read `## Covers`, `## Feeds` and
+    `## Ground truth` out of it. Without this, retargeting them at `sd` turned
+    one call into a listing plus one `get` per topic -- ten calls for nine
+    topics, handed to an unattended run.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.plugin()
+        self.note("Kept", status="approved", body="## Covers\n\nWhat it covers.\n")
+        self.note("Dropped", status="declined", body="## Covers\n\nNot this one.\n")
+
+    def test_full_prints_each_body(self) -> None:
+        done = self.run_sd("store", "list", "pp.tip", "--full")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("What it covers.", done.stdout)
+        self.assertIn("Not this one.", done.stdout)
+
+    def test_without_full_no_body_is_printed(self) -> None:
+        """The default stays a table. `--full` is opt-in, not a widening."""
+
+        done = self.run_sd("store", "list", "pp.tip")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("What it covers.", done.stdout)
+
+    def test_full_json_carries_a_body_per_row(self) -> None:
+        done = self.run_sd("store", "list", "pp.tip", "--full", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = {row["title"]: row for row in json.loads(done.stdout)}
+        self.assertIn("What it covers.", rows["Kept"]["body"])
+        self.assertIn("Not this one.", rows["Dropped"]["body"])
+
+    def test_json_without_full_has_no_body_key(self) -> None:
+        done = self.run_sd("store", "list", "pp.tip", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for row in json.loads(done.stdout):
+            self.assertNotIn("body", row)
+
+    def test_each_note_is_followed_by_a_blank_line(self) -> None:
+        """`pack.py`'s shape, kept deliberately.
+
+        The routines step 9 retargets read this output as prose. A note whose
+        body ends without a trailing newline would run straight into the next
+        `===` header, so the separator is part of the format rather than
+        incidental spacing.
+        """
+
+        # A note whose file does not end in a newline is the case that breaks
+        # this: `print()` then only terminates its last line, and the next
+        # header follows with no separator at all.
+        (self.tips / "Ragged.md").write_text(
+            "---\nstatus: approved\nscore: 7\n---\n\nNo trailing newline.",
+            encoding="utf-8")
+        done = self.run_sd("store", "list", "pp.tip", "--full")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("No trailing newline.\n\n", done.stdout)
+        for chunk in done.stdout.split("=== ")[1:]:
+            self.assertTrue(chunk.endswith("\n\n"), repr(chunk[-20:]))
+
+    def test_full_still_honours_the_status_filter(self) -> None:
+        done = self.run_sd("store", "list", "pp.tip", "--full", "--status", "approved")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("What it covers.", done.stdout)
+        self.assertNotIn("Not this one.", done.stdout)
+
+    def test_full_does_not_widen_the_fields_to_undeclared_keys(self) -> None:
+        """The deliberate difference from `store get`, which reports every key.
+
+        `get` names one note, so a field the manifest has not caught up with is
+        the answer to the question asked. A listing is a table, and a row that
+        grows a column per note stops being one -- so `--full` adds the body
+        and nothing else.
+        """
+
+        self.note("Extra", status="approved", extra="undeclared: surprise\n")
+        done = self.run_sd("store", "list", "pp.tip", "--full", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = {row["title"]: row for row in json.loads(done.stdout)}
+        self.assertNotIn("undeclared", rows["Extra"])
+        self.assertEqual(sorted(rows["Extra"]), ["body", "score", "status", "title"])
+
+
 if __name__ == "__main__":
     unittest.main()
