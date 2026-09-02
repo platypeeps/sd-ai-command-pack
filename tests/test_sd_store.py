@@ -1762,6 +1762,40 @@ class VaultWideTitleTests(StoreFixture):
         self.assertEqual(self.add("Shared name").returncode, 1)
         self.assertEqual(held.read_text(encoding="utf-8"), before)
 
+    def test_add_probes_the_vault_once_and_not_once_per_use_of_the_root(self) -> None:
+        """`store add` needs the vault root twice; it may only probe for it once.
+
+        `store_root` ends in `vault_reason`, which lists the vault in a bounded
+        child process. That is not a cheap call: it spawns an interpreter, and
+        against an ungranted vault it is fifteen seconds of waiting. `add`
+        resolves the root for the kind's base and again for the vault-wide
+        title scan, and resolving it twice paid for the probe twice. This runs
+        `add` in-process so the calls can be counted; every other case in this
+        class runs the real command.
+        """
+
+        self.elsewhere("Learning", "Neighbour")
+        sd = sd_module()
+        calls: list[pathlib.Path] = []
+        real = sd.vault_reason
+
+        def counted(root: pathlib.Path) -> str:
+            calls.append(root)
+            return real(root)
+
+        sd.vault_reason = counted
+        self.addCleanup(setattr, sd, "vault_reason", real)
+        before = {name: os.environ.get(name) for name in ("XDG_CONFIG_HOME", "OBSIDIAN_VAULT")}
+        self.addCleanup(lambda: [os.environ.__setitem__(name, value) if value is not None
+                                 else os.environ.pop(name, None)
+                                 for name, value in before.items()])
+        os.environ["XDG_CONFIG_HOME"] = str(self.config_home)
+        os.environ["OBSIDIAN_VAULT"] = str(self.vault)
+
+        self.assertEqual(sd.main(["store", "add", "pp.tip", "Fresh", "--field", "score=7"]), 0)
+        self.assertEqual(len(calls), 1, f"probed the vault {len(calls)} times")
+        self.assertTrue((self.tips / "Fresh.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

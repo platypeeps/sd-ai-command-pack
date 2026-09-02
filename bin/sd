@@ -1361,10 +1361,20 @@ def resolve_kind(
     raise Refusal(f"no registered plugin has prefix {prefix!r}")
 
 
-def kind_base(store: dict[str, object], name: str) -> pathlib.Path:
+def kind_base(store: dict[str, object], name: str,
+              root: pathlib.Path | None = None) -> pathlib.Path:
+    """The kind's directory under the vault root.
+
+    `root` is there for the one caller that needs the vault root itself as
+    well: `store_root` probes the vault in a bounded child process on every
+    call (see `vault_reason`), so a verb that resolves the root twice pays two
+    interpreter spawns and, on an ungranted vault, two chances to hit the
+    fifteen-second timeout. Pass the root you already have and this reuses it.
+    """
+
     bases = store["bases"]
     assert isinstance(bases, dict)  # validate_store builds it; narrows for the type checker
-    return store_root(store) / str(bases[name])
+    return (store_root(store) if root is None else root) / str(bases[name])
 
 
 def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
@@ -2067,11 +2077,12 @@ def store_add(args: argparse.Namespace) -> int:
     """
 
     kind, store, name, root = resolve_kind(args.kind)
-    base = kind_base(store, name)
+    vault = store_root(store)
+    base = kind_base(store, name, vault)
     path = note_path(base, args.title)
     if path.exists():
         raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
-    refuse_title_taken(store_root(store), path)
+    refuse_title_taken(vault, path)
 
     fields = store_fields(kind)
     values = parse_assignments(args.field or [], fields)
