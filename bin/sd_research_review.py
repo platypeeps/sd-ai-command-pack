@@ -160,7 +160,9 @@ The half no script can do — work it before publishing, per document:
 
   The second reader
     9. Run the independent pass through the Codex plugin, from the repo, with
-       the document in the working tree or the branch diff:
+       the document in the working tree or the branch diff. The framing is
+       shared, not retyped -- `adversarial-gate render --lens research-brief`
+       prints it, from local-adversarial-gate in platypeeps/system:
 
          /codex:adversarial-review --scope working-tree "markdown research
            brief, not code — attack the argument: unsupported load-bearing

@@ -164,9 +164,17 @@ Reviewing your own work is the weak form; it is the one that ships most often, s
 it is the one to be disciplined about. Where the document carries a decision
 someone will act on, get a second reader who was not involved in writing it.
 
-**The second reader is Codex.** Where the Codex plugin (`codex@openai-codex`,
-"Codex for Claude") is installed, the independent pass runs through it rather
-than being skipped for want of a human:
+**The second reader is Codex**, and its framing is not written here any more.
+The stance, the four-part finding format and the confidence tags live in
+`local-adversarial-gate/core.md` in `platypeeps/system`, shared with
+`sd-writing-pack`, which built the same gate separately and kept its own copy of
+the same caveats. `adversarial-gate render --lens research-brief` prints the
+focus text for the command below; `adversarial-gate run` does the whole pass for
+a caller that wants the scripted path instead of the plugin.
+
+Where the Codex plugin (`codex@openai-codex`, "Codex for Claude") is installed,
+the independent pass runs through it rather than being skipped for want of a
+human:
 
 ```
 /codex:setup                              # once per machine: ready, CLI present, logged in
