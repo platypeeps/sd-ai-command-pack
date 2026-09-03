@@ -264,12 +264,14 @@ PAGE = """<!doctype html>
 </section>
 <section id="panel-prs" role="tabpanel" aria-labelledby="tab-prs" hidden>
 <p class="sub" id="pr-sub"></p>
+<h2>waiting on you</h2>
 <table><thead><tr>
  <th>where</th><th>what</th><th>why</th><th>updated</th>
 </tr></thead><tbody id="pr-needs"></tbody></table>
 </section>
 <section id="panel-issues" role="tabpanel" aria-labelledby="tab-issues" hidden>
 <p class="sub" id="issue-sub"></p>
+<h2>needs you</h2>
 <table><thead><tr>
  <th>where</th><th>what</th><th>why</th><th>updated</th>
 </tr></thead><tbody id="needs"></tbody></table>

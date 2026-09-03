@@ -260,9 +260,15 @@ class PageAndClientAgree(unittest.TestCase):
         pass on the version this replaces, which is what makes this one worth
         having: the count and the two links still name the withheld group, so
         only its use as a row source is barred.
+
+        Matched to the closing `);` rather than the first `)`, because
+        stopping at the first one reads `fillIssues(into, pick(a),
+        payload.other)` as `into, pick(a` and finds nothing to complain
+        about -- the argument that decides the filter is exactly the one a
+        nested call would hide.
         """
         from dashboard import server
-        calls = re.findall(r"fillIssues\(([^)]*)\)", server.script_source())
+        calls = re.findall(r"fillIssues\((.*?)\);", server.script_source(), re.S)
         self.assertNotEqual(calls, [], "fillIssues call sites not parsed")
         drawn = [call for call in calls if "other" in call]
         self.assertEqual(drawn, [], f"a table is filled from `other`: {drawn}")
