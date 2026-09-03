@@ -79,28 +79,34 @@ The product — read what the reader gets, not what you meant:
 8. After mirroring, check Notion against the source, and that handling restrictions survived
    the mirror.
 
-The second reader is Codex. Where the `codex@openai-codex` plugin ("Codex for Claude") is
-installed, the independent pass runs through it instead of being skipped:
+The second reader is Codex, **run through the CLI, not a plugin**. The `codex@openai-codex`
+plugin is not a dependency of this kit and may not be installed, so `/codex:*` slash commands
+must not be reached for. `codex` itself is the supported path:
 
-```
-/codex:setup                              # once per machine: ready, CLI present, logged in
-/codex:adversarial-review --scope working-tree \
-  "This is a markdown research brief, not code. Attack the argument, not the syntax: which
-   load-bearing claims does the cited source not actually support; which numbers are missing
-   a unit, a date or a denominator; what does the conclusion depend on that the document
-   never states?"
+```bash
+codex exec -s read-only "This is a markdown research repository, not code. Review the
+  uncommitted working-tree changes (git status, git diff, plus untracked new files) as an
+  adversarial reader. Attack the argument, not the syntax: which load-bearing claims does the
+  cited source not actually support; which numbers are missing a unit, a date or a
+  denominator; what does the conclusion depend on that the document never states; where does
+  a document assert something as verified that the repo shows was not checked. Cite file and
+  line. Do not modify any files."
 ```
 
-It reviews a **git diff**, so the document has to be in the working tree or the branch diff
-(`--base main`) — already committed on `main`, it is invisible to the command. Its default
-framing is a code review, hence the focus text. Anything past a page runs in background:
-`/codex:status`, then `/codex:result`. It sees the repo, not the sources, so step 2 —
+`-s read-only` is not optional — it is what keeps an adversarial reader from editing the work
+it is reviewing. Name the documents in the prompt when the diff is large. Run it in the
+background for anything past a page; it buffers, so an empty output file means still running,
+not hung.
+
+It reads the **working tree**, so the document has to be uncommitted or on a branch diff
+against `main` — already merged to `main`, there is nothing for it to look at. Its default
+framing is a code review, hence the focus text. It sees the repo, not the sources, so step 2 —
 reopening the citation — stays yours.
 
 Record the outcome in the Status section: what was verified and how, what was not, what was
 cut, and the Codex pass — date, what it raised, what changed, what was rejected and why. A
-review that found nothing says what it checked. If the plugin or CLI is unavailable
-(`/codex:setup` reports it), say that in Status: "no independent pass" is a stated gap.
+review that found nothing says what it checked. If `codex` is missing or not logged in
+(`codex doctor` reports it), say that in Status: "no independent pass" is a stated gap.
 
 ## Publishing — Notion, not artifacts
 
