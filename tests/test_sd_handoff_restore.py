@@ -479,6 +479,20 @@ class LoadLogTests(RestoreFixture):
         self.assertIsInstance(entry["age_seconds"], int)
         self.assertGreaterEqual(entry["age_seconds"], 0)
         self.assertLess(entry["age_seconds"], 300)
+        # One restore is one instant. The log's `consumed`, the packet's
+        # `consumed`, and the age must all agree, or the criterion's median is
+        # computed from numbers that disagree with the timestamps beside them.
+        # The signature is what actually guarantees this -- `record_load` takes
+        # `consumed` and never reads a clock, so there is no second reading to
+        # diverge. These assertions document the invariant and would catch a
+        # regression that reintroduced one, but only when the two readings
+        # happened to straddle a second, so they are not the guarantee.
+        self.assertEqual(entry["consumed"], self.packet()["consumed"])
+        recomputed = (
+            dt.datetime.fromisoformat(entry["consumed"])
+            - dt.datetime.fromisoformat(entry["created"])
+        )
+        self.assertEqual(entry["age_seconds"], int(recomputed.total_seconds()))
 
     def test_the_count_survives_the_packet_being_overwritten(self) -> None:
         """The whole reason the log exists, stated as a fixture.

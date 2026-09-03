@@ -144,7 +144,7 @@ def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
-def record_load(directory: Path, packet: dict) -> None:
+def record_load(directory: Path, packet: dict, consumed: str) -> None:
     """Append one line per restore to a log the deletion criterion can count.
 
     R10-D3's criterion is "if after 60 days fewer than 5 packets have been
@@ -168,10 +168,16 @@ def record_load(directory: Path, packet: dict) -> None:
     path it is measured against -- logging both would answer a question nobody
     asked with a number that looks like the answer to this one.
     """
+    # `consumed` is passed in rather than read again here. One restore is one
+    # instant, and two `now_iso()` calls a few statements apart can land on
+    # different seconds -- which would put a different `consumed` in the log
+    # than in the packet, for the same event, and make an age computed from
+    # either one arguably wrong. The caller takes the reading; everything below
+    # is derived from it.
     line = json.dumps({
-        "consumed": now_iso(),
+        "consumed": consumed,
         "created": packet.get("created"),
-        "age_seconds": load_age_seconds(packet.get("created")),
+        "age_seconds": load_age_seconds(packet.get("created"), consumed),
         "directory": hashlib.sha256(
             str((packet.get("repo") or {}).get("root") or "").encode("utf-8")
         ).hexdigest()[:16],
@@ -185,15 +191,23 @@ def record_load(directory: Path, packet: dict) -> None:
         pass
 
 
-def load_age_seconds(created_raw: object) -> int | None:
-    """Seconds between a packet being written and being restored, or None."""
+def load_age_seconds(created_raw: object, consumed_raw: str) -> int | None:
+    """Seconds between a packet being written and being restored, or None.
+
+    Both ends are parsed from the strings that go into the log, so the age and
+    the two timestamps beside it can never disagree -- an age read back from
+    `consumed - created` and the one recorded here are the same number.
+    """
     try:
         created = dt.datetime.fromisoformat(str(created_raw))
+        consumed = dt.datetime.fromisoformat(consumed_raw)
     except (TypeError, ValueError):
         return None
     if created.tzinfo is None:
         created = created.replace(tzinfo=dt.timezone.utc)
-    return int((dt.datetime.now(dt.timezone.utc) - created).total_seconds())
+    if consumed.tzinfo is None:
+        consumed = consumed.replace(tzinfo=dt.timezone.utc)
+    return int((consumed - created).total_seconds())
 
 
 def claim(path: Path, packet: dict) -> bool:
@@ -207,13 +221,16 @@ def claim(path: Path, packet: dict) -> bool:
         os.rename(path, claimed)
     except OSError:
         return False
+    # One reading of the clock for one restore: the log and the packet carry
+    # the same `consumed`, and the logged age is derived from it.
+    consumed = now_iso()
     # After the rename, not before: only the session that won the race has
     # restored anything, and a log the losers also wrote to would count races
     # rather than loads. Argued rather than pinned -- a fixture cannot force a
     # second hook to reach this line and lose, so `LoadLogTests` asserts the
     # count two hooks produce and says so.
-    record_load(path.parent, packet)
-    packet["consumed"] = now_iso()
+    record_load(path.parent, packet, consumed)
+    packet["consumed"] = consumed
     body = (json.dumps(packet, indent=2) + "\n").encode("utf-8")
     try:
         handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".sd-handoff.")
