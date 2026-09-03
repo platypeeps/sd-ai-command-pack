@@ -10,6 +10,7 @@ repository, with HOME redirected away from the operator's `~/.local/state`.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -18,6 +19,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -635,6 +637,34 @@ class LoadLogTests(RestoreFixture):
         entries = self.entries()
         self.assertEqual(len(entries), 1, entries)
         self.assertEqual(entries[0]["age_seconds"], 0, entries)
+
+    def test_a_held_lock_costs_the_measurement_and_not_the_session(self) -> None:
+        """The hook must never wait on a lock. It is a wait on session startup.
+
+        Holding the log's lock from this process is the whole of the fixture:
+        a blocking `LOCK_EX` would sit here until the test released it, which
+        in a SessionStart hook means every session that starts in this
+        directory sits there too. The hook gives up on the measurement, emits
+        the context anyway, and writes nothing -- an unlocked write would be
+        exactly the interleaving the lock exists to prevent.
+        """
+
+        self.write_packet("--summary", "the session comes first")
+        log = self.log_path()
+        descriptor = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, descriptor)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+        started = time.monotonic()
+        result = self.restore()
+        elapsed = time.monotonic() - started
+
+        self.assertIn("the session comes first", self.context(result))
+        self.assertEqual(self.entries(), [])
+        # Generous: the restore itself shells out to git several times. The
+        # point is that it returned at all while the lock was held, not the
+        # exact cost of the ten retries.
+        self.assertLess(elapsed, 20, f"took {elapsed:.1f}s with the lock held")
 
     def test_an_unwritable_log_does_not_cost_the_session_its_context(self) -> None:
         """Measuring the restore must never be able to prevent one.

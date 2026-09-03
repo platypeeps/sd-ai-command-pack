@@ -52,9 +52,18 @@ import os
 import subprocess  # nosec B404 - fixed argv git reads, never a shell
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HOOK_EVENT = "SessionStart"
+
+# Bounds on how long recording a restore may cost the session that is starting.
+# Ten tries at 10ms is a tenth of a second in the worst case, and the case it
+# covers is two hooks landing on the same millisecond. A contended lock held
+# longer than that is a writer in trouble, and the answer there is to lose one
+# measurement rather than delay a session for it.
+LOCK_ATTEMPTS = 10
+LOCK_WAIT = 0.01
 
 
 # ---------------------------------------------------------------- git helpers
@@ -221,7 +230,25 @@ def record_load(directory: Path, packet: dict, consumed: str) -> None:
         # its context whether or not the measurement of that fact lands.
         return
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        # `LOCK_NB`, and give up rather than wait. A blocking `LOCK_EX` here
+        # would put an unbounded wait inside a SessionStart hook, which is a
+        # wait on every session that starts in this directory -- measuring a
+        # restore must never be able to delay one, the same rule the OSError
+        # guards above follow. The retries cover the ordinary case, two hooks
+        # landing on the same millisecond; anything longer than that is a
+        # writer in trouble, and the right answer is to lose one measurement.
+        #
+        # Giving up means writing nothing at all. An unlocked write would be
+        # the interleaving this lock exists to prevent, so a line skipped is
+        # strictly better than a line torn.
+        for attempt in range(LOCK_ATTEMPTS):
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if attempt == LOCK_ATTEMPTS - 1:
+                    return
+                time.sleep(LOCK_WAIT)
         written = 0
         while written < len(payload):
             # A zero-length write is not supposed to happen for a non-empty
