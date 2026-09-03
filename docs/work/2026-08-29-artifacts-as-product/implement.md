@@ -3104,7 +3104,7 @@ relative link from the directory the link lives in, not from the one you happen
 to be standing in. `ls "$(dirname RULE)/../sd-ai-command-pack/"` answers it in
 one command and does not depend on remembering where `.claude` roots.
 
-- [x] 8 (slices i-vi, 2026-09-01/02) / [x] 9 (2026-09-02, below) / [ ] 10 / [x] 11 (collapsed -- see *Step 11 moves nothing, and the row was wrong four ways*)
+- [x] 8 (slices i-vi, 2026-09-01/02) / [x] 9 (2026-09-02, below) / [x] 10 (2026-09-02, in slices b-i through b-iv-iv and then the closing slice below) / [x] 11 (collapsed -- see *Step 11 moves nothing, and the row was wrong four ways*)
 
 ### The delete column, executed (2026-09-01)
 
@@ -4328,5 +4328,109 @@ grepped for after it. Two more of these turned up in the same pass --
 `topics seed`'s docstring and its refusal text both still directed the
 reader to `topics add`, deleted at 10b-iv -- and the corrected comments now
 name where each rule is enforced instead of implying `pack.py` still holds
-it. The final measured floor is **1,712** lines, nine below the figure
-taken before the comments were swept.
+it. The floor measured at 10b-iv-iv is **1,712** lines, nine below the figure
+taken before the comments were swept. Step 10 moved it again, to 1,590.
+
+### Step 10 closes: the last two vault reads, and a bug the check found (2026-09-02)
+
+`sd-writing-pack` #10. The step's row asks for `grep -c -e BI_DB -e SP_DB -e
+TT_DB -e TP_DB -e VAULT pack.py` to reach 0, and three things stood between
+10b-iv-iv and that number. It reaches 0 as `grep -cw`; the unanchored form the
+row was written in reaches 1, for the reason two sections down.
+
+`tips attach` and `tips render` opened a tip note by path. They read one
+through `sd store get --json` now, which returns frontmatter and body in a
+single call -- so the status gate and the `## Tip` section come from one read
+of one version of the note rather than two reads that could disagree. That was
+not the reason for the change, but it is the reason the shape is a single
+`sd_note()` rather than two calls.
+
+`topics seed` was deleted. It refused to run against a database holding
+anything at all, and Topics has held eleven notes for weeks, so it had been
+unreachable from the moment it ran. 10b-iv's lesson -- *"no caller today" is
+not "no capability needed"* -- is the check that applies, and it passes for a
+different reason than usual: the capability is not needed *because it is
+spent*, not because something replaced it. Nothing writes `active` now, which
+is what the vault's `Schema.md` already described as correct.
+
+The vault root went with them. It had been an absolute path to one machine's
+home; `sd-plugin.json`'s `store.root` holds it as `$OBSIDIAN_VAULT`.
+
+#### The check the step wrote returns 1, and the honest answer is to say so
+
+`grep -c ... -e VAULT` is a substring match, and the file now carries
+`$OBSIDIAN_VAULT` in a comment explaining where the root went. The literal
+form of the step's own check therefore reports 1 rather than 0. Rewording that
+comment to make the number come out right would be choosing the check after
+the fact -- so the record carries all three readings: literal 1, `grep -cw` 0,
+and 0 again with comments and strings stripped before counting. The one hit is
+the replacement, not a residue.
+
+#### `tips render` had been broken on seven of ten pieces
+
+The step's second check is "E2E on one piece", and the first piece failed. Not
+because of anything this slice changed: `frontmatter()` never stripped trailing
+YAML comments, and the piece template writes
+
+```
+tip: null            # vault Tips and Tricks note title; set by sdw-publish
+```
+
+so the value read back as that whole string. It is not `null`, so `tips
+render` sailed past its own "no tip attached" guard and went looking for a
+note by that name. Seven of the ten pieces in `content/` carry that default.
+The only supported way to build `publish/mezmo.md` -- a function whose own
+docstring says the hand-rolled pipeline it replaced left this repo with a
+paste target 83 lines behind its draft for a day -- failed on all seven.
+
+Reproduced on the unmodified file before touching it, which is the step that
+separates "my change broke this" from "my check found this".
+
+Two more shapes of the same bug came out of review, and the pattern in how
+they were found is the point. Round one fixed `\s+#`. Round two found that a
+mapping header (`published_urls:      # filled by ...`) has no whitespace left
+before the `#` after `key:\s*` consumes it, so both `_urls` keys read back as
+their own comments. Round three found that single-quoted scalars need `''`
+unescaped. The first two checks tested the shapes I had thought of. The check
+that actually closed it ran `frontmatter()` over all ten pieces and printed
+every key's distinct values, then asserted none still contains a `#` --
+enumerated from the files rather than from my own list, which is the
+difference the verification doctrine names.
+
+#### A fourth orphaned comment block, found the same way as the first three
+
+`# ---- topics ----` and the paragraph under it survived the deletion of
+`topics seed`, leaving a section header above `pieces_set_published_url`
+claiming "every consumer reads them from here" about code that is no longer
+there. Same class as the three in #711, found the same way: by review, not by
+a sweep. An orphan sweep enumerates definitions and a comment defines nothing,
+so this will keep happening until the sweep greps claims as well as symbols.
+Nothing was lost with it -- the history it carried is in the vault's
+`Schema.md`, in a fuller form.
+
+#### Ten review rounds, and one position reversed
+
+The review loop ran to ten rounds, most of them hardening the new `sd`
+subprocess call against failures the file already handled next door in
+`_meter_json` and `_meter_bin`: `X_OK` rather than `isfile`, a timeout, a
+guarded `json.loads`, `(stderr or stdout)`, explicit UTF-8, and `realpath`
+rather than `abspath` -- the last because the comment claimed `abspath`
+resolves symlinks and it does not.
+
+One finding was rebutted and then taken, which is worth recording as a shape.
+"Validate the types of `fields` and `body`" was declined: a wrong type there
+raises immediately and names the value. It came back as "validate that the
+JSON root is an object", and that one went in, because a JSON array makes `k
+not in note` test *membership in a list* and `sorted(note)` report elements as
+keys -- a wrong answer rather than a noisy one. The distinction the first
+rebuttal turned on is exactly what the second finding cleared. Asking twice is
+not an argument; having a better argument is.
+
+`pack.py` is **1,590** lines, from 1,712. It was 1,557 before those ten rounds
+added the hardening back.
+
+**Not fixed here, and named so it is not rediscovered:**
+`content/2026/effort-dial-cost-attribution/publish/mezmo.md` is nineteen lines
+behind its draft in git -- the exact drift `tips render` exists to prevent,
+surfaced by running the E2E. Regenerating it is a content change and Sven's
+call, so the render output was reverted rather than committed.
