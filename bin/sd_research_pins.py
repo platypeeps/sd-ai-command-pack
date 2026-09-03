@@ -11,9 +11,10 @@ so a source added to a brief shows up here without anyone remembering to registe
 Checkouts are matched by git remote URL rather than by directory name, because a vendored
 clone is routinely named for its subject and not for its repository.
 
-    research-kit pins [repo_dir ...]
+    sd-research-kit pins        # from inside the research repo
 
-Exit 0 always. This reports; it does not gate.
+`pins` takes no argument: it reads the repository you are standing in
+(R10-D6). Exit 0 always. This reports; it does not gate.
 """
 
 import os

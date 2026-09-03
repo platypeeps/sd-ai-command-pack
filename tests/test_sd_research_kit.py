@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -136,6 +138,79 @@ class CacheVenvTests(unittest.TestCase):
             self.assertEqual(
                 kit.cache_venv(), Path("/tmp/xdg-probe/sd-research-kit/venv")
             )
+
+
+class WorkItemCoverageTests(unittest.TestCase):
+    """`review` used to pass a repository whose work items were failing.
+
+    The research conventions govern the documents in `research.conf.py`;
+    `sd-plan` governs the items under `docs/work/`. A repository can follow both
+    at once, and until the two linters were connected this one printed
+    "Mechanical checks pass" while `sd-docs-lint` returned 1 in the same
+    directory -- true about this tool's scope, false about the repository.
+    """
+
+    def make_repo(self, tmp: Path, *, work: bool) -> Path:
+        (tmp / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        if work:
+            item = tmp / "docs" / "work" / "2026-01-01-probe"
+            item.mkdir(parents=True)
+            (item / "prd.md").write_text(
+                "---\ntitle: probe\nstatus: draft\ncreated: 2026-01-01\n---\n# Probe\n"
+            )
+        return tmp
+
+    def test_a_failing_work_item_fails_the_review(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), work=True)
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("2026-01-01-probe", result.stdout)
+        self.assertIn("status 'draft' is not one of", result.stdout)
+
+    def test_the_paths_are_reported_repo_relative(self) -> None:
+        """The lint resolves its root through git, which returns the real path.
+
+        On macOS a temporary directory is `/var/...` to the caller and
+        `/private/var/...` to git, so a prefix strip against the caller's cwd
+        alone shortens nothing and the review prints absolute paths beside
+        repo-relative document names.
+        """
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), work=True)
+            result = run("review", cwd=repo)
+        self.assertIn("FAIL docs/work/2026-01-01-probe/prd.md", result.stdout)
+
+    def test_a_missing_linter_is_a_failure_not_a_pass(self) -> None:
+        """A gate that cannot run has not been passed.
+
+        Warning and returning 0 would reproduce this function's own bug one
+        level down -- a clean review precisely when the checking is absent.
+        """
+
+        module = load_kit().load("sd_research_review")
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "docs" / "work").mkdir(parents=True)
+            real = os.path.exists
+            with unittest.mock.patch.object(
+                module.os.path,
+                "exists",
+                lambda p: False if str(p).endswith("sd-docs-lint") else real(p),
+            ):
+                self.assertEqual(module.work_items(str(repo)), 1)
+
+    def test_a_repository_with_no_work_directory_is_untouched(self) -> None:
+        """The cost is paid only by repositories that keep work items."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), work=False)
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Mechanical checks pass", result.stdout)
+        self.assertNotIn("docs/work", result.stdout)
 
 
 if __name__ == "__main__":
