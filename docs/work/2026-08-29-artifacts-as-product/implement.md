@@ -4333,9 +4333,10 @@ taken before the comments were swept. Step 10 moved it again, to 1,590.
 
 ### Step 10 closes: the last two vault reads, and a bug the check found (2026-09-02)
 
-`sd-writing-pack` #10. The step's own check is `grep -c -e BI_DB -e SP_DB -e
-TT_DB -e TP_DB -e VAULT pack.py` = 0, and three things stood between 10b-iv-iv
-and that number.
+`sd-writing-pack` #10. The step's row asks for `grep -c -e BI_DB -e SP_DB -e
+TT_DB -e TP_DB -e VAULT pack.py` to reach 0, and three things stood between
+10b-iv-iv and that number. It reaches 0 as `grep -cw`; the unanchored form the
+row was written in reaches 1, for the reason two sections down.
 
 `tips attach` and `tips render` opened a tip note by path. They read one
 through `sd store get --json` now, which returns frontmatter and body in a
