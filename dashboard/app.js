@@ -132,6 +132,12 @@ function fillIssues(tbody, list, emphasise) {
 // feed. The index still collects those buckets and `/api/{issues,prs}` still
 // returns them; the count below says how many are being withheld, because a
 // view that quietly drops rows is worse than one that lists too many.
+//
+// That count names the two buckets rather than calling them settled. A first
+// draft read "not yours to answer", which is true of `author:@me` and a guess
+// about `mentions:@me` -- somebody can ask for a decision by naming you, and
+// no label here should decide they did not. What the withheld group actually
+// has in common is how it was found, so that is what the line says.
 async function drawTracker(route, into, subLine, noun) {
   let payload;
   try {
@@ -147,8 +153,8 @@ async function drawTracker(route, into, subLine, noun) {
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
   subLine.textContent =
-    `${payload.needsYou.length} ${noun} waiting on you \u00b7 ` +
-    `${payload.other.length} open but not yours to answer${stamp}`;
+    `${payload.needsYou.length} ${noun} assigned to you or awaiting your review \u00b7 ` +
+    `${payload.other.length} more you authored or were mentioned in, not shown${stamp}`;
   fillIssues(into, payload.needsYou, true);
 }
 

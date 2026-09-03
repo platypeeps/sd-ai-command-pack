@@ -79,10 +79,10 @@ from an absent one, and an unbound address from an unwanted one.
 
 | Fact | Number | Source |
 |---|---|---|
-| `dashboard/` total lines | **4,128 against a 4,300 cap — 172 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
-| `dashboard/` code lines | **2,190 against a 2,300 cap — 110 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
+| `dashboard/` total lines | **4,127 against a 4,300 cap — 173 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
+| `dashboard/` code lines | **2,184 against a 2,300 cap — 116 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
-| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:433-479` |
+| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:433-469` |
 | `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
 | 6b swap closed | 2026-09-01 (6b-9) | `docs/work/2026-08-29-artifacts-as-product/implement.md:1504` |
 | R11-D10 evaluation date, read literally | **2026-10-31**, against a count of zero | `docs/work/2026-08-29-artifacts-as-product/design.md:1529` + the above |

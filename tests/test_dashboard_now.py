@@ -8,6 +8,7 @@ move under the operator between polls.
 from __future__ import annotations
 
 import random
+import re
 import unittest
 
 from dashboard import now
@@ -206,6 +207,47 @@ class Merge(unittest.TestCase):
         to discover that something got past it."""
         got = now.merge([], [{"id": "x", "source": "p"}, {"rank": 2, "id": "y"}])
         self.assertEqual([row["id"] for row in got], ["y", "x"])
+
+
+class PageAndClientAgree(unittest.TestCase):
+    """Every element the client reaches for is one the page declares.
+
+    There is no JavaScript harness here and adding one to cover a two-line
+    render change would cost more than the change. This is the part of that
+    coverage a Python test can actually hold, and it is the part that broke:
+    the tables and their `getElementById` handles live in two files, so
+    deleting a `<tbody>` and leaving the lookup -- or the reverse -- produces
+    a page that loads, draws most of itself, and silently stops filling one
+    table. `document.getElementById` returns null rather than raising, which
+    is why nothing else would have said so.
+
+    Ids the page mints at run time are excluded by construction: this reads
+    the literal `id="..."` attributes `PAGE` ships with, so a plugin table
+    built in JavaScript is out of scope, as it should be -- those are exactly
+    the ids `sanitise` strips (`test_an_id_is_dropped_so_a_plugin_cannot_
+    claim_a_backbone_element`).
+    """
+
+    def handles(self) -> set[str]:
+        from dashboard import server
+        return set(re.findall(r"""getElementById\(["']([^"']+)["']\)""",
+                              server.script_source()))
+
+    def declared(self) -> set[str]:
+        from dashboard import server
+        return set(re.findall(r"""\bid=["']([^"']+)["']""", server.PAGE))
+
+    def test_the_client_reaches_for_nothing_the_page_does_not_declare(self) -> None:
+        orphans = sorted(self.handles() - self.declared())
+        self.assertEqual(orphans, [], f"app.js looks up ids PAGE never emits: {orphans}")
+
+    def test_the_check_can_fail(self) -> None:
+        """The control. Both sides are regexes over prose-sized documents,
+        and a regex that stops matching would make the assertion above pass
+        over an empty set forever."""
+        self.assertIn("pr-needs", self.handles())
+        self.assertIn("pr-needs", self.declared())
+        self.assertNotIn("pr-other", self.declared())
 
 
 if __name__ == "__main__":
