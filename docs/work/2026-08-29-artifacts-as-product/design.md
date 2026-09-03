@@ -435,7 +435,11 @@ user-reported 2026-08-29. Criterion: if after 60 days fewer than 5 packets have 
 or the median packet age at load exceeds 7 days (meaning it is not serving live restarts), delete
 the hook; `sd-handoff --show` stays as the manual load path (no 13th verb). *(2026-09-02: both
 numbers come from `~/.local/state/sd-ai-command-pack/handoff/loads.jsonl`, one line per restore,
-written by the hook and by nothing else. It was added that day, so the 60 days run from then --
+written by the hook and by nothing else. The count is `wc -l`; the median is
+`jq -r 'select(.age_seconds != null) | .age_seconds' loads.jsonl | sort -n`, and the `!= null` is
+required — `age_seconds` is null for a packet whose `created` will not parse, and jq sorts null
+below every number, so an unfiltered median reads low and a low median is the reading that keeps
+the hook. It was added that day, so the 60 days run from then --
 the criterion had no data source at all until it existed, which is the gap the work item's close
 records.)*
 

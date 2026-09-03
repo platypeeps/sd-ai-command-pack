@@ -192,9 +192,16 @@ reasons, and waiting until October would not change either.**
   one line per restore to `handoff/loads.jsonl` — `consumed`, `created`,
   `age_seconds`, and a 16-character digest of the directory rather than its
   path — so the count survives the packet being overwritten. The criterion
-  becomes `wc -l` and a median over `age_seconds`, answerable on 2026-11-01 --
-  sixty days from the counter, not from the item, which is a different date
-  from the 2026-10-28 above and the reason both are written out. Only
+  becomes two commands over that file: `wc -l` for the count, and for the
+  median `jq -r 'select(.age_seconds != null) | .age_seconds' loads.jsonl |
+  sort -n`. The filter is load-bearing. `age_seconds` is null when a packet's
+  `created` cannot be parsed, and `jq -r '.age_seconds' | sort -n` sorts those
+  nulls below every number — which drags the median down, and a low median is
+  the reading that says the hook is serving live restarts. A median that
+  swallows nulls therefore keeps a hook the criterion would have deleted.
+  Answerable on 2026-11-01 -- sixty days from the counter, not from the item,
+  which is a different date from the 2026-10-28 above and the reason both are
+  written out. Only
   the hook writes it: `sd-handoff --show` claims a packet too, but the criterion
   counts packets *auto-loaded* and `--show` is the manual path it is measured
   against. The write is guarded, and a fixture proves the guard earns its place

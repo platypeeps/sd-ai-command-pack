@@ -688,6 +688,38 @@ class LoadLogTests(RestoreFixture):
         self.assertIn("context survives an unwritable log", self.context(result))
         self.assertEqual(self.entries(), [])
 
+    def test_a_packet_with_an_unreadable_created_counts_but_reports_no_age(self) -> None:
+        """`age_seconds` is `int | null`, and the null is the point.
+
+        `created` is written by `sd-handoff`, so an unparseable one means a
+        hand-edited or corrupted packet rather than an ordinary restore. The
+        restore still happens -- expiry reads `expires`, not `created` -- so it
+        is a load, and the count must include it. The age cannot be computed,
+        and every number that could stand in for it is a lie the median would
+        swallow: 0 claims the packet was restored the instant it was written,
+        and -1 is a sentinel that sorts as a measurement. Both pull the median
+        down, and a low median is the reading that says the hook is serving
+        live restarts -- so a stand-in number keeps a hook the criterion would
+        have deleted, which is the failure standing rule 1 exists to catch.
+
+        The cost of the null is that the median must filter it, and a filter
+        nobody knows about is the same bug: `jq -r '.age_seconds' | sort -n`
+        sorts nulls below every number. prd.md and design.md carry the command
+        that skips them; this fixture pins the value that command filters on.
+        """
+        self.write_packet("--summary", "unreadable birth time")
+        self.rewrite({"created": "not a timestamp"})
+        self.context(self.restore())
+        entries = self.entries()
+        # One load, counted -- `wc -l` is the criterion's first number and it
+        # does not care that the second one is unavailable for this line.
+        self.assertEqual(len(entries), 1, entries)
+        self.assertIsNone(entries[0]["age_seconds"])
+        # Present and null, not absent. Both read as None through `.get`, but
+        # only one keeps every line the same shape, and `jq`'s `!= null` test
+        # is what the documented median filters on.
+        self.assertIn("age_seconds", entries[0])
+
 
 class ShapeTests(RestoreFixture):
     def test_the_hook_is_executable_and_self_contained(self) -> None:
