@@ -17,6 +17,8 @@
       "Bash(python3:*)",
       "Bash(git ls-remote:*)",
       "Bash(awk:*)",
+      "mcp__github__list_issues",
+      "mcp__github__search_issues",
       "mcp__github__create_pull_request",
       "mcp__github__pull_request_read",
       "mcp__github__list_pull_requests"
