@@ -165,6 +165,12 @@ async function drawTracker(route, into, more, subLine, noun) {
   }
   if (!payload.available) {
     subLine.textContent = payload.reason;
+    // The summary too, not just the tables. These redraw on a 30s timer, so
+    // leaving the label alone shows last poll's "17 more ..." above an empty
+    // disclosure while the line beside it says the index cannot be read --
+    // a count with nothing behind it, which is the failure this whole change
+    // is about.
+    more.summary.textContent = `other open ${noun.many}`;
     fillIssues(into, [], true);
     fillIssues(more.tbody, [], false);
     return;
@@ -175,7 +181,7 @@ async function drawTracker(route, into, more, subLine, noun) {
     `${n} ${n === 1 ? noun.one : noun.many} assigned to you or awaiting ` +
     `your review${stamp}`;
   more.summary.textContent =
-    `${payload.other.length} more you filed, authored, watch or were ` +
+    `${payload.other.length} more you filed, authored, are watching, or were ` +
     `mentioned in`;
   fillIssues(into, payload.needsYou, true);
   fillIssues(more.tbody, payload.other, false);
