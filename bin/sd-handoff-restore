@@ -182,13 +182,38 @@ def record_load(directory: Path, packet: dict, consumed: str) -> None:
             str((packet.get("repo") or {}).get("root") or "").encode("utf-8")
         ).hexdigest()[:16],
     }, sort_keys=True)
+    # Two sessions starting at once in *different* directories both reach this
+    # line -- the packet race only serialises writers within one directory --
+    # and this file is the criterion's only data source, so a torn line loses
+    # the measurement it was added to take.
+    #
+    # One `os.write` on an `O_APPEND` descriptor, not buffered text I/O:
+    # `O_APPEND` makes the seek-to-end and the write a single atomic operation,
+    # so concurrent appenders cannot overwrite each other, and issuing exactly
+    # one syscall for the whole line means there is no buffer that could flush
+    # half of it. `open(..., "a")` would almost always behave the same way here,
+    # because the line is ~150 bytes and closes immediately; "almost always" is
+    # not a property worth relying on for the file the deletion decision reads.
+    payload = (line + "\n").encode("utf-8")
     try:
-        with (directory / "loads.jsonl").open("a", encoding="utf-8") as stream:
-            stream.write(line + "\n")
+        descriptor = os.open(
+            str(directory / "loads.jsonl"),
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            0o644,
+        )
     except OSError:
         # Same reasoning as the write-back below: a session starting up gets
         # its context whether or not the measurement of that fact lands.
+        return
+    try:
+        os.write(descriptor, payload)
+    except OSError:
         pass
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
 
 
 def load_age_seconds(created_raw: object, consumed_raw: str) -> int | None:

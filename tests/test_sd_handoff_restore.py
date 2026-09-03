@@ -556,6 +556,55 @@ class LoadLogTests(RestoreFixture):
         self.assertEqual(shown.returncode, 0, shown.stderr)
         self.assertEqual(self.entries(), [])
 
+    def test_concurrent_restores_in_different_directories_all_land_intact(self) -> None:
+        """The packet race serialises one directory. Nothing serialises many.
+
+        Two sessions starting at once in different repositories both reach the
+        append, and this file is the criterion's only data source -- a torn or
+        interleaved line loses the measurement it exists to take. Six writers,
+        six intact JSON objects, six distinct directory digests.
+        """
+
+        repos = []
+        for index in range(6):
+            repo = self.base / f"repo{index}"
+            repo.mkdir()
+            git(repo, "init", "-q", "-b", "main", ".")
+            (repo / "a.txt").write_text(f"{index}\n", encoding="utf-8")
+            git(repo, "add", "a.txt")
+            git(repo, "commit", "-qm", "first")
+            self.write_packet("--summary", f"packet {index}", cwd=repo)
+            repos.append(repo)
+
+        processes = [
+            subprocess.Popen(
+                [str(RESTORE)],
+                cwd=str(repo),
+                env=self.env(repo),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for repo in repos
+        ]
+        outputs = [
+            process.communicate(json.dumps({"cwd": str(repo), "source": "clear"}))
+            for process, repo in zip(processes, repos)
+        ]
+        for (stdout, stderr), repo in zip(outputs, repos):
+            self.assertTrue(stdout.strip(), f"{repo} restored nothing: {stderr}")
+
+        # Parsed, not counted: a byte-level interleave usually yields the right
+        # number of newlines and unparseable content between them.
+        entries = self.entries()
+        self.assertEqual(len(entries), 6, entries)
+        self.assertEqual(len({entry["directory"] for entry in entries}), 6, entries)
+        for entry in entries:
+            self.assertEqual(
+                sorted(entry), ["age_seconds", "consumed", "created", "directory"]
+            )
+
     def test_an_unwritable_log_does_not_cost_the_session_its_context(self) -> None:
         """Measuring the restore must never be able to prevent one.
 
