@@ -3636,6 +3636,21 @@ thing a 10b run would read. All three are corrected in this commit: the
 docstring, `design.md`'s cap paragraph, and `prd.md`'s steps 8-11 acceptance
 clause.
 
+**Spent and deleted, 2026-09-02.** The bracket's last reading, taken after
+step 10 closed and against a baseline recaptured before step 9's first
+scheduled run, was `784 notes byte-identical to the baseline` -- across
+everything 10b did, including two writers on those notes for the first time.
+That is the whole of what the tool was kept for, so it went with the answer
+it gave: `bin/migrate-golden-corpus`, `tests/test_migrate_golden_corpus.py`
+and the two fixtures. `bin/migrate-*` is now empty.
+
+The one non-historical reference outside those files was a docstring in
+`tests/test_sd_store.py` explaining *why* a block sequence's order is pinned
+-- it cited the tool as the thing that would notice a silent reordering. The
+test stays, because the invariant is real and outlives its witness; the
+docstring now names R11-D27's lesson directly instead, that such a note still
+parses so nothing downstream complains.
+
 ### Step 9: the vault's routines call `sd`, and the `pack.py` grant is gone (2026-09-02)
 
 Step 9 was "retarget the vault's scheduled routines off `pack.py`". Seventeen
