@@ -434,15 +434,20 @@ only if the manual flow measurably fails.
 user-reported 2026-08-29. Criterion: if after 60 days fewer than 5 packets have been auto-loaded,
 or the median packet age at load exceeds 7 days (meaning it is not serving live restarts), delete
 the hook; `sd-handoff --show` stays as the manual load path (no 13th verb). *(2026-09-02: both
-numbers come from `~/.local/state/sd-ai-command-pack/handoff/loads.jsonl`, one line per restore,
-written by the hook and by nothing else. The count is `wc -l < loads.jsonl`; the
-median is a single `jq -s` that filters the nulls, sorts, and takes the middle value (or the mean
-of the two middles) — written out in full in prd.md's R10-D3 close. Both halves matter: sorting
-is not a median, and the `select(.age_seconds != null)` is required because `age_seconds` is null
-for a packet whose `created` will not parse and jq sorts null below every number, so an unfiltered
-middle value reads low — and a low median is the reading that keeps the hook. It was added that day, so the 60 days run from then --
-the criterion had no data source at all until it existed, which is the gap the work item's close
-records.)*
+numbers come from `loads.jsonl` in the handoff directory, written by the hook and by nothing else,
+one line per restore. The directory is `$XDG_STATE_HOME/sd-ai-command-pack/handoff/` when that
+variable holds an absolute path and `~/.local/state/sd-ai-command-pack/handoff/` otherwise -- the
+lane's own `state_home`, not the spec's `resolve_state_root` ladder. Both halves of the lane resolve
+the same way and neither reads `SD_AI_COMMAND_PACK_STATE_HOME`, so the log always lands beside the
+packets it counts; an operator who moved their state root with the pack-wide variable will not find
+it under there. The count is `wc -l < loads.jsonl`; the median is a single `jq -s` that filters the
+nulls, sorts, and takes the middle value (or the mean of the two middles) -- written out in full in
+prd.md's R10-D3 close. Both halves of that matter: sorting is not a median, and the
+`select(.age_seconds != null)` is required because `age_seconds` is null for a packet whose
+`created` will not parse and jq sorts null below every number, so an unfiltered middle value reads
+low -- and a low median is the reading that keeps the hook. The log was added 2026-09-02, so the 60
+days run from then -- the criterion had no data source at all until it existed, which is the gap the
+work item's close records.)*
 
 **Lane B — git carrier branch (`sd-handoff --push`, opt-in).** The r7 design, retained for the
 cross-machine and cross-tool cases and no longer the default. The work item is the artifact:

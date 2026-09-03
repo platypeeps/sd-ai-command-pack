@@ -723,6 +723,48 @@ class LoadLogTests(RestoreFixture):
         self.assertIn("age_seconds", entries[0])
 
 
+    def test_the_log_follows_xdg_state_home_the_way_the_packets_do(self) -> None:
+        """design.md tells an operator which directory to run `wc -l` in.
+
+        It names `$XDG_STATE_HOME/sd-ai-command-pack/handoff/` before the
+        `~/.local/state` default, so the sentence is a claim about behaviour
+        and not decoration. What the criterion actually needs is weaker and
+        more important: wherever the packets go, the log goes too. A log that
+        resolved its root differently from the packets would count restores
+        from one state root while the packets lived in another.
+        """
+        state = self.base / "custom-state"
+        self.write_packet("--summary", "moved state root", XDG_STATE_HOME=str(state))
+        self.context(self.restore(XDG_STATE_HOME=str(state)))
+        moved = state / "sd-ai-command-pack" / "handoff" / "loads.jsonl"
+        self.assertTrue(moved.is_file(), sorted(map(str, state.rglob("*"))))
+        self.assertEqual(len(moved.read_text(encoding="utf-8").splitlines()), 1)
+        # And nothing under the default root -- one log, where the packets are.
+        self.assertFalse(self.log_path().exists())
+
+    def test_the_pack_wide_state_variable_does_not_move_the_log(self) -> None:
+        """The lane resolves its own root, and does not read the pack's.
+
+        `resolve_state_root` in the shipped helper reads
+        `SD_AI_COMMAND_PACK_STATE_HOME` first; this lane's `state_home` does
+        not read it at all. Both halves of the lane agree with each other, so
+        the count is never split -- but an operator who moved their state root
+        with the pack-wide variable will not find the log under it, which is
+        why design.md writes the resolution out rather than citing the spec's
+        ladder. Pinned so the doc is not describing a lane that quietly grew
+        the variable later.
+        """
+        elsewhere = self.base / "pack-wide"
+        self.write_packet(
+            "--summary", "pack-wide root", SD_AI_COMMAND_PACK_STATE_HOME=str(elsewhere)
+        )
+        self.context(
+            self.restore(SD_AI_COMMAND_PACK_STATE_HOME=str(elsewhere))
+        )
+        self.assertFalse(elsewhere.exists(), sorted(map(str, self.base.iterdir())))
+        self.assertEqual(len(self.entries()), 1)
+
+
 class TornRecordTests(unittest.TestCase):
     """A record that cannot finish must leave nothing, not half of itself.
 
