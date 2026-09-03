@@ -45,6 +45,7 @@ once, then inert.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -187,13 +188,22 @@ def record_load(directory: Path, packet: dict, consumed: str) -> None:
     # and this file is the criterion's only data source, so a torn line loses
     # the measurement it was added to take.
     #
-    # One `os.write` on an `O_APPEND` descriptor, not buffered text I/O:
-    # `O_APPEND` makes the seek-to-end and the write a single atomic operation,
-    # so concurrent appenders cannot overwrite each other, and issuing exactly
-    # one syscall for the whole line means there is no buffer that could flush
-    # half of it. `open(..., "a")` would almost always behave the same way here,
-    # because the line is ~150 bytes and closes immediately; "almost always" is
-    # not a property worth relying on for the file the deletion decision reads.
+    # `O_APPEND` and an exclusive `flock`, not buffered text I/O, and not a bare
+    # `os.write` either. Each piece answers a different way the line can tear:
+    #
+    # * `O_APPEND` puts every write at the current end of file, so a writer that
+    #   somehow skipped the lock still cannot land on top of another record.
+    # * The lock covers the whole record. `os.write` may return short -- rare on
+    #   a regular file, but ENOSPC and a signal can both do it -- and finishing a
+    #   short write with a second syscall is exactly where a concurrent appender
+    #   would wedge its own line into the middle of this one. Holding the lock
+    #   across the loop is what makes completing a partial record safe.
+    # * The loop itself, because a record half-written and abandoned is an
+    #   unparseable line in the file the deletion decision reads.
+    #
+    # `open(..., "a")` plus a buffered write would almost always be fine: the
+    # line is ~150 bytes and the handle closes immediately. "Almost always" is
+    # not a property worth resting a deletion decision on.
     payload = (line + "\n").encode("utf-8")
     try:
         descriptor = os.open(
@@ -206,12 +216,22 @@ def record_load(directory: Path, packet: dict, consumed: str) -> None:
         # its context whether or not the measurement of that fact lands.
         return
     try:
-        os.write(descriptor, payload)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        written = 0
+        while written < len(payload):
+            # A zero-length write is not supposed to happen for a non-empty
+            # buffer on a regular file, and an unbounded loop in a SessionStart
+            # hook would hang every session that starts. Give up on a torn line
+            # rather than on the session.
+            progress = os.write(descriptor, payload[written:])
+            if progress <= 0:
+                break
+            written += progress
     except OSError:
         pass
     finally:
         try:
-            os.close(descriptor)
+            os.close(descriptor)  # releases the lock
         except OSError:
             pass
 
