@@ -147,9 +147,12 @@ returns nothing), so `status: in_progress` — which this directory's README say
 frontmatter drops `branch:` with the status change rather than pointing at a
 deleted ref.
 
-Two boxes are ticked here and three are left open. The 2026-09-01 rule holds:
-a clause whose subject was deleted is not a clause that passed, and an item
-closes with its open boxes visible rather than tidied.
+Two boxes are ticked here and three are left open **as of this close**. The
+2026-09-01 rule holds: a clause whose subject was deleted is not a clause that
+passed, and an item closes with its open boxes visible rather than tidied.
+*(The retirement pass above ran later the same day and struck the subjects of
+two of those three. After that pass — and so in every version of this file from
+`5b680341` forward — the count a reader will find is one open box, R10-D3's.)*
 
 *Steps 8–11 — ticked.* This box was open on one thing: "`sd-writing-pack` is not
 yet migrated." It is. `sd plugin list` reports the `sdw` plugin registered with
@@ -266,3 +269,9 @@ reasons, and waiting until October would not change either.**
 - 2026-08-29 created; M0 tombstone PR opened from this branch.
 - 2026-09-02 closed: every step ticked and merged; two acceptance boxes ticked with
   evidence, three left open with the reason each cannot be ticked.
+- 2026-09-02, later the same day: three clauses retired in strikethrough, each
+  because the thing it was about was deleted by this item or deliberately never
+  built — one of the three (`Pack version update check`) was deleted by step 3-c;
+  the other two (`intents/`, R10-D1's backlog lane) never existed to delete. The
+  open-box count goes from three to one. What remains is R10-D3's 60-day
+  criterion, answerable 2026-11-01.
