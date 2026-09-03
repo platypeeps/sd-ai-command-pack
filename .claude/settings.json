@@ -5,22 +5,17 @@
   "enabledPlugins": {},
   "permissions": {
     "allow": [
-      "Bash(make setup)",
-      "Bash(make test)",
-      "Bash(make lint)",
+      "Bash(bin/sd-status:*)",
       "Bash(make audit)",
       "Bash(make check)",
-      "Bash(python3 bin/sd_install.py --user)",
-      "Bash(python3 bin/sd_install.py --status)",
-      "Bash(python3 bin/sd_install.py --pull)",
-      "Bash(bin/sd-status:*)",
+      "Bash(make lint)",
+      "Bash(make setup)",
+      "Bash(make test)",
       "Bash(python3 bin/sd-status:*)",
-      "Bash(git ls-remote:*)",
-      "mcp__github__list_issues",
-      "mcp__github__search_issues",
-      "mcp__github__create_pull_request",
-      "mcp__github__pull_request_read",
-      "mcp__github__list_pull_requests"
+      "Bash(python3 bin/sd_install.py --pull)",
+      "Bash(python3 bin/sd_install.py --status)",
+      "Bash(python3 bin/sd_install.py --user)",
+      "mcp__github__list_issues"
     ]
   }
 }

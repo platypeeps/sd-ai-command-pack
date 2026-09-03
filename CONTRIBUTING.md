@@ -208,40 +208,41 @@ macOS leg is restored.
   specific `make` targets and path-scope `python3`. Where the capability is
   genuinely needed, reach for the harness tool that already covers it -- Read,
   Glob, Grep, Edit, Write -- rather than widening a Bash rule to reach it.
-- The `:*` is not decoration; it is the difference between a prefix rule and an
-  exact one. `Bash(git ls-remote:*)` matches that command and whatever follows
-  it; `Bash(make test)` matches that string and nothing else. Prefer the
-  wildcard where the trailing arguments are inert, and take the exact form where
-  they are not. `make` is what earns the exception: `make test:*` would also
-  permit `make test -f /somewhere/else/Makefile`, which runs a recipe this
-  repository never wrote -- the escape hatch the bullet above exists to keep
-  out. So the `make` rules are written bare and pay for it, covering the bare
-  invocation and not a decorated one; `make test` inside a pipeline still
-  prompts. That is the intended trade. Widen these by naming another target,
-  never by adding a wildcard to one of them. `bin/sd_install.py` is the same
-  case for the same reason -- `--repo PATH` writes `PATH/CLAUDE.local.md` and
-  `--home DIR` moves the install root -- so it is allowed as three named modes
-  rather than one wildcard, `python3 bin/sd_install.py` plus `--user`,
-  `--status` or `--pull`, one per rule. Path-scoping the *script* is not the
-  test; what the script does with a path *argument* is.
-- Check the form you actually type before deciding a rule covers it.
-  `bin/sd-status` is executable and carries a `python3` shebang, so
-  `bin/sd-status --json` and `python3 bin/sd-status --json` are both real
-  invocations and a rule matching one does not match the other; it gets a rule
-  each way. `./bin/sd-status` matches neither and will prompt. `sd_install.py`
-  has no shebang and is not executable, so it has one form and needs one. A
-  rule that names a form nobody types is the same dead grant as a rule naming a
-  directory that does not exist.
-- A wildcard over a command with subcommands grants every subcommand, including
-  the ones nobody was thinking about. `sd-status` takes flags only -- `--json`,
-  `--parked`, `--limit N` -- so `bin/sd-status:*` grants a read. `sd-dashboard`
-  takes a *verb*, and one of the three is `install`, which writes a plist into
-  `~/Library/LaunchAgents` and runs `launchctl bootstrap`; a wildcard there
-  registers a system service on anyone's laptop. It is absent from the list
-  rather than verb-scoped, because nothing in this repository's documented
-  workflow runs it by hand -- it runs from launchd -- and a grant for a command
-  nobody types is surface without a caller. Count the subcommands before
-  reaching for `:*`, and leave out what the workflow does not repeat.
+- **The tracked allowlist is derived, not typed.** `tests/test_permission_allowlist.py`
+  builds it at run time from three inventories this repository already
+  maintains -- the Makefile's public `.PHONY` targets, README's
+  `bin/sd_install.py` table, and the `mcp__github__*` tools a shipped skill
+  names -- and fails if `.claude/settings.json` says anything else, in either
+  direction. To grant something, change the inventory: add the `make` target,
+  add the README row, have the skill name the tool. Editing the JSON by hand
+  fails the test, which is the point.
+
+  Two filters run over what the inventories yield, both reading the documents
+  rather than a list somebody remembered. A mode whose name carries a
+  placeholder takes a path, and a path argument is what turns a repo-scoped
+  grant into an arbitrary-path write -- `--repo PATH` writes
+  `PATH/CLAUDE.local.md`, `--home DIR` moves the install root. A row whose
+  described effect begins with *Remove* or *Delete* is not something a second
+  contributor should inherit. Path-scoping the *script* is not the test; what
+  the script does with a path *argument* is.
+
+  Only a surface README marks `Read-only:` gets a wildcard, because only there
+  is the whole flag space safe behind one. Everything else is exact-match, and
+  pays for it: `Bash(make test)` matches that string and nothing else, so
+  `make test` inside a pipeline still prompts. That is the intended trade --
+  `make test:*` would also permit `make test -f /somewhere/else/Makefile`, and
+  a wildcard over a command with *verbs* grants the verbs nobody was thinking
+  about, which is why `sd-dashboard`, whose `install` writes a plist into
+  `~/Library/LaunchAgents`, is absent rather than verb-scoped.
+
+  Two invariants hold whatever the derivation does, and each is a defect that
+  actually shipped. Every path a rule names must exist -- `python3 scripts/:*`
+  once pointed at no directory, and a rule pointing at nothing reads as
+  coverage, so the prompt keeps arriving and the next person widens something
+  real to stop it. And a `bin/` target that is executable with a `python3`
+  shebang must carry both spellings, because `bin/sd-status --json` and
+  `python3 bin/sd-status --json` are both real and a rule matching one does not
+  match the other. `./bin/sd-status` matches neither and will prompt.
 - Do not allow generic file readers. `cat`, `tail`, `cut` and their siblings
   take any path, so allowing one grants unscoped read of the whole machine --
   and it reads *around* the `Read(**/...)` deny rules a machine-scope config
