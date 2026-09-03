@@ -33,10 +33,14 @@ written so it can fail on the defect it cites -- the first draft of the second
 one could not, walking `bin/...` rules to ask after their `python3` twin when
 what shipped was the `python3` rule alone.
 
-`skills/` names six `bin/` commands that do not exist (`sd-ship`, `sd-plan`,
-`sd-map`, `sd-help`, `sd-deps`, `sd-suggest`, whose own SKILL.md says "There is
-no `bin/sd-suggest` yet"). That is why every derivation here filters on the
-filesystem rather than trusting a name it read in a document.
+`skills/` names seven `bin/` commands that do not exist -- `sd-ship`,
+`sd-plan`, `sd-map`, `sd-help`, `sd-deps`, `sd-spec` and `sd-suggest`, each
+saying so in its own SKILL.md ("There is no `bin/sd-suggest` yet"). This
+docstring said six and listed six, omitting `sd-spec`, which is the ordinary
+fate of a count kept by hand next to a list kept by hand;
+`tests/test_skill_frontmatter.py` now derives the same fact at run time. That
+is also why every derivation here filters on the filesystem rather than
+trusting a name it read in a document.
 """
 
 from __future__ import annotations
@@ -70,7 +74,21 @@ DESTRUCTIVE = ("Remove", "Delete", "Uninstall", "Drop")
 # surface is the only kind whose whole flag space is safe behind one wildcard,
 # so that adjective -- maintained for readers, not for this test -- is what
 # decides which `bin/` commands appear at all.
-READ_ONLY_SURFACE = re.compile(r"^\|\s*`(sd-[a-z-]+)`\s*\|\s*Read-only:", re.M)
+#
+# The columns between the name and the purpose are skipped rather than counted.
+# Adding a "Runs as" column to that table silently emptied this match and took
+# both `sd-status` rules out of the derived set with it -- a table maintained
+# for readers is going to grow columns, and a derivation that breaks when it
+# does is a derivation that will be quietly wrong instead of loudly.
+#
+# `[^|\n]`, not `[^|]`. The first draft of the widening used `[^|]`, which
+# matches newlines, so it ran from the `sd-plan` row down through four more
+# rows to the first `Read-only:` in the table and reported that `sd-plan` was
+# the read-only surface. A pattern that skips columns must not also skip rows:
+# that failure grants a wildcard to the wrong command, which is worse than
+# granting none.
+READ_ONLY_SURFACE = re.compile(
+    r"^\|\s*`(sd-[a-z-]+)`\s*\|(?:[^|\n]*\|)*?\s*Read-only:", re.M)
 
 MCP_TOOL = re.compile(r"mcp__github__[a-z_]+")
 
@@ -232,6 +250,25 @@ class PermissionAllowlistTests(unittest.TestCase):
         self.assertNotEqual(readme_install_modes(), [], "README install table not parsed")
         self.assertNotEqual(read_only_surfaces(), [], "README surface table not parsed")
         self.assertNotEqual(skill_mcp_tools(), set(), "no skill named an mcp__github__ tool")
+
+    def test_the_read_only_adjective_is_on_the_row_it_is_credited_to(self) -> None:
+        """The control above only asks that *something* matched.
+
+        It passes just as happily when the pattern skips rows instead of
+        columns, which is what the first draft of the column-tolerant version
+        did: `[^|]` matches newlines, so it ran from `sd-plan` down to the
+        first `Read-only:` five rows below and credited the adjective to a
+        command that does not carry it -- handing a whole-flag-space wildcard
+        to the wrong entrypoint. Non-circular because it re-reads README to
+        ask where the word actually is, rather than comparing the derivation
+        to itself.
+        """
+        lines = (REPO_ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+        for name in read_only_surfaces():
+            row = [line for line in lines if line.startswith(f"| `{name}` |")]
+            self.assertEqual(len(row), 1, f"{name} does not name exactly one row")
+            self.assertIn("Read-only:", row[0],
+                          f"{name} was credited with an adjective from another row")
 
     def test_a_destructive_or_path_taking_mode_is_never_granted(self) -> None:
         """Both filters, against the README rows they read.
