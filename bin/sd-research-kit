@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Render and check a research repo against the standard it follows.
+
+The standard itself is `skills/sd-research-repo/references/conventions.md`; this
+is the half of it a script can decide. Moved here from
+`~/repos/system/local-research-kit` on 2026-09-03, so that the written standard
+and the tooling that enforces it are versioned in one repository rather than
+two.
+
+Every verb operates on the repository the caller is standing in, and takes no
+path argument. The kit took `render [repo_dir]` and `checklinks [repo_dir ...]`
+before the move; R10-D6 says an sd-* command resolves its repository from the
+current working directory and nowhere else, because a command that can be
+pointed at another checkout is a command that can act on one. The six research
+repos already invoked it as `research-kit render .` from inside the repo, so the
+positional form was carrying no traffic.
+
+`render` needs python-markdown, which does not install into a system python.
+It is resolved in this order, and none of the three writes anything next to this
+script -- `bin/` is enumerated from git for the lint target, so a `.venv`
+appearing in it would be linted:
+
+1. already importable  -> run in this interpreter;
+2. `uv` on PATH        -> re-exec through `uv run --with markdown`, which
+                          resolves into uv's own cache;
+3. neither             -> bootstrap `$XDG_CACHE_HOME/sd-research-kit/venv`
+                          (default `~/.cache/...`) and re-exec with it.
+
+`checklinks`, `review` and `pins` need nothing but the standard library.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+HERE = Path(__file__).resolve().parent
+CHECKOUT = HERE.parent
+CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
+
+USAGE = """usage: sd-research-kit render|checklinks|review|pins|conventions
+
+  render        render research.conf.py in this repo into build/
+  checklinks    verify every relative markdown link and backticked in-repo path
+                resolves; exit 1 if anything is broken
+  review        the mechanical half of the pre-publication adversarial review:
+                provenance block, Status section separating verified from not,
+                build freshness. Then prints the checklist for the half no
+                script can do. Exit 1 if a check fails
+  pins          for every `source` @ `sha` the markdown asserts, say whether
+                upstream has moved past it. The list is read out of the
+                documents each run, never maintained
+  conventions   print the path of the standard every research repo follows
+
+Every verb acts on the current working directory. There is no repo argument.
+"""
+
+
+def load(module: str) -> Any:
+    """Load a sibling `bin/` module by path.
+
+    `bin/` is not a package and is not on `sys.path`, and adding it would put
+    every tool in this directory one name collision away from importing the
+    wrong thing. Loading the one file wanted, by the path it is known to be at,
+    is narrower than mutating the import system for the whole process.
+    """
+
+    spec = importlib.util.spec_from_file_location(module, HERE / f"{module}.py")
+    if spec is None or spec.loader is None:  # pragma: no cover - unreachable in tree
+        sys.exit(f"sd-research-kit: cannot load {module}.py")
+    loaded = importlib.util.module_from_spec(spec)
+    sys.modules[module] = loaded
+    spec.loader.exec_module(loaded)
+    return loaded
+
+
+def cache_venv() -> Path:
+    root = os.environ.get("XDG_CACHE_HOME") or os.path.join(Path.home(), ".cache")
+    return Path(root) / "sd-research-kit" / "venv"
+
+
+def reexec_with_markdown(argv: list[str]) -> None:
+    """Re-run this script under an interpreter that has python-markdown.
+
+    Never returns: it either replaces the process or exits with the child's
+    status. Called only when `import markdown` has already failed here.
+    """
+
+    if shutil.which("uv"):
+        command = ["uv", "run", "--quiet", "--with", "markdown", "python", __file__]
+        raise SystemExit(subprocess.call(command + argv))
+
+    venv = cache_venv()
+    python = venv / "bin" / "python"
+    if not python.is_file():
+        print(f"bootstrapping {venv}", file=sys.stderr)
+        venv.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call([sys.executable, "-m", "venv", str(venv)])
+        subprocess.check_call(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--quiet",
+                "--disable-pip-version-check",
+                "markdown",
+            ]
+        )
+    raise SystemExit(subprocess.call([str(python), __file__] + argv))
+
+
+def run_render(argv: list[str]) -> int:
+    if importlib.util.find_spec("markdown") is None:
+        reexec_with_markdown(["render"] + argv)
+    load("sd_research_render").main()
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    verb = argv[1] if len(argv) > 1 else ""
+    rest = argv[2:]
+
+    if verb in ("-h", "--help", "help"):
+        print(USAGE, end="")
+        return 0
+    if rest:
+        print(f"sd-research-kit: {verb} takes no arguments\n", file=sys.stderr)
+        print(USAGE, end="", file=sys.stderr)
+        return 1
+
+    if verb == "render":
+        return run_render(rest)
+    if verb in ("checklinks", "review", "pins"):
+        # Each module's own `main()` owns its exit status and everything it
+        # prints around the check -- `review` in particular prints the
+        # unmechanisable half of the checklist after the mechanical half runs,
+        # which calling `check()` from here would silently drop.
+        return int(load(f"sd_research_{verb}").main())
+    if verb == "conventions":
+        print(CONVENTIONS)
+        return 0
+
+    print(USAGE, end="", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
