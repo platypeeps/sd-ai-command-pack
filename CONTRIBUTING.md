@@ -220,10 +220,19 @@ macOS leg is restored.
   prompts. That is the intended trade. Widen these by naming another target,
   never by adding a wildcard to one of them. `bin/sd_install.py` is the same
   case for the same reason -- `--repo PATH` writes `PATH/CLAUDE.local.md` and
-  `--home DIR` moves the install root, so its modes are named one at a time
-  while `bin/sd-dashboard` and `bin/sd-status`, whose only flags take a port,
-  a count or nothing, keep the wildcard. Path-scoping the *script* is not the
+  `--home DIR` moves the install root -- so it is allowed as three named modes
+  rather than one wildcard, `python3 bin/sd_install.py` plus `--user`,
+  `--status` or `--pull`, one per rule. Path-scoping the *script* is not the
   test; what the script does with a path *argument* is.
+- Check the form you actually type before deciding a rule covers it. `sd-status`
+  and `sd-dashboard` take a port, a count or nothing, so they keep the wildcard
+  -- but they are executable and carry a `python3` shebang, so `bin/sd-status
+  --json` and `python3 bin/sd-status --json` are both real invocations and a
+  rule matching one does not match the other. They get a rule each way.
+  `./bin/sd-status` matches neither and will prompt. `sd_install.py` has no
+  shebang and is not executable, so it has one form and needs one. A rule that
+  names a form nobody types is the same dead grant as a rule naming a directory
+  that does not exist.
 - Do not allow generic file readers. `cat`, `tail`, `cut` and their siblings
   take any path, so allowing one grants unscoped read of the whole machine --
   and it reads *around* the `Read(**/...)` deny rules a machine-scope config
