@@ -5,8 +5,10 @@ A backticked bare filename is prose, not a link: docs legitimately name files th
 live in another repo or do not exist yet. Only backticked paths carrying a
 `NN-dir/` segment are treated as claims about this repo.
 
-Usage:  research-kit checklinks [repo_dir ...]
-Exit 1 if anything is broken. Skips build/, vendor/, and .git/.
+Usage:  sd-research-kit checklinks        # from inside the research repo
+
+`checklinks` takes no argument: it walks the repository you are standing in
+(R10-D6). Exit 1 if anything is broken. Skips build/, vendor/, and .git/.
 """
 import os
 import re
