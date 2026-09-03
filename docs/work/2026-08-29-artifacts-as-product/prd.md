@@ -1,8 +1,8 @@
 ---
 title: sd-ai-command-pack v1.0 — artifacts as product
-status: in_progress
-branch: task/08-29-artifacts-as-product-m0
+status: done
 created: 2026-08-29
+closed: 2026-09-02
 ---
 
 # PRD — artifacts as product
@@ -66,9 +66,9 @@ one engineer plus agents.
 - [x] Steps 1–3: one copy of every shipped file; `.trellis` gone from the pack; new installer + 12 skills land; scratch-repo `sd-plan` → `sd-ship` E2E merges a PR with only `<work>/**` tracked.
 - [x] Step 3-c: one removal PR per consumer (9); zero trellis/router greps per repo; CI green.
 - [ ] Steps 4–7: routers retired, se-* folded as sd-*, machine cleanup leaves `handoff/`+`intents/` intact, backlog parked, 1.0.0 tagged.
-- [ ] Steps 8–11: plugin interface, sd-writing-pack migrated, vault move last with golden-corpus byte-compare green.
+- [x] Steps 8–11: plugin interface, sd-writing-pack migrated, vault move last with golden-corpus byte-compare green. *(Ticked 2026-09-02 — three clauses pass, the fourth was retired on the record rather than rounded up; see below.)*
 - [ ] 60-day criteria evaluated for R10-D1 (backlog lane) and R10-D3 (handoff hook).
-- [ ] `chore: record journal` commits = 0; bookkeeping share of non-merge commits < 5%.
+- [x] `chore: record journal` commits = 0; bookkeeping share of non-merge commits < 5%. *(Ticked 2026-09-02 — 123 non-merge commits since the last one, none of them bookkeeping; see below.)*
 
 **2026-09-01 — two of the unticked boxes above are half-true, and are left
 unticked rather than rounded up.** Checked from the repository and the remote,
@@ -106,6 +106,84 @@ around the retarget, and is deleted when 10b lands. The box stays open on the
 rest of the clause — the plugin interface is built, `sd-writing-pack` is not
 yet migrated — and the byte-compare half is retired rather than passed.
 
+**2026-09-02 — the item closes, and here is what each remaining box is
+resting on.** Every step in `implement.md`'s checklist is ticked, all execution
+PRs are merged, and `task/08-29-artifacts-as-product-m0` no longer exists on the
+remote (`git ls-remote --heads origin task/08-29-artifacts-as-product-m0`
+returns nothing), so `status: in_progress` — which this directory's README says
+*requires* a `branch:` — had become unsupportable on its own terms. The
+frontmatter drops `branch:` with the status change rather than pointing at a
+deleted ref.
+
+Two boxes are ticked here and three are left open. The 2026-09-01 rule holds:
+a clause whose subject was deleted is not a clause that passed, and an item
+closes with its open boxes visible rather than tidied.
+
+*Steps 8–11 — ticked.* This box was open on one thing: "`sd-writing-pack` is not
+yet migrated." It is. `sd plugin list` reports the `sdw` plugin registered with
+four kinds and `store: vault at $OBSIDIAN_VAULT`; `scripts/pack.py`'s five
+surviving verb groups (`tips pieces gh review meter`) hold **zero** vault-path
+constants, measured with `grep -cw -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT`.
+The byte-compare half stays retired, as the 2026-09-02 note above said it would
+be — but it is retired having *run*: the bracket was re-pointed at the step 10b
+retarget and read `784 notes byte-identical to the baseline` across the first
+change with two writers on those notes. The clause asked for evidence that the
+migration did not corrupt a note. That evidence exists; it brackets a different
+change than the clause named, and this sentence is the substitution written down
+rather than assumed.
+
+*Journal and bookkeeping — ticked.* The last `chore: record journal` commit on
+`main` is `21eed68c`, 2026-08-29T01:38:37-06:00. **123** non-merge commits have
+landed since it, and `git log --no-merges --grep='^chore: record journal'
+21eed68c..HEAD` returns **0**. No subject matching `journal|ledger|bookkeep`
+appears among them either, so the bookkeeping share over the window is 0%
+against a `< 5%` bar. Counting all of history instead gives 391 and 15.07%,
+which measures the practice this item deleted rather than whether it stayed
+deleted — the wrong window, recorded here so nobody re-derives it and reaches
+the opposite conclusion.
+
+*M0 tombstone — still open, unchanged.* The 2026-09-01 finding stands: the tag
+exists, the consumer that was to name it does not.
+
+*Steps 4–7 — still open, unchanged.* Four of five clauses verify today
+(`~/.local/state/sd-ai-command-pack/` is exactly `handoff/` and
+`installed.json`; `skills/` holds 76 `sd-*` and zero `se-*`; both tags resolve
+on the remote). "Leaves `intents/` intact" is still vacuous, because the lane
+that creates `intents/` was deliberately not built.
+
+*60-day criteria — still open, and not for the reason the box implies.* Sixty
+days from 2026-08-29 is 2026-10-28, so the obvious answer is "not due." That is
+not the honest answer. **Neither criterion is evaluable, for two different
+reasons, and waiting until October would not change either.**
+
+- **R10-D1 (backlog lane).** The criterion is "if 60 days after *it lands*
+  fewer than 5 items have reached a merged PR through `--agent codex`, delete
+  the flag." It has not landed. There is no `bin/sd-ship`, and
+  `skills/sd-ship/SKILL.md` says so in its own words: "`--backlog`/`--agent
+  codex` is not implemented; do not simulate it with ad-hoc worktree
+  scripting." The clock never started. This is the M0 shape again — a criterion
+  whose subject does not exist.
+- **R10-D3 (handoff hook).** This one *did* land: `sd-handoff-restore` is wired
+  into `~/.claude/settings.json` on the `startup` and `clear` matchers, which is
+  what the two-lane design asks for. But the criterion is "if after 60 days
+  fewer than 5 packets have been auto-loaded, or the median packet age at load
+  exceeds 7 days," and **nothing records a load**. `sd-handoff-restore` claims a
+  packet by renaming it, emits it, and unlinks it; the packet directory is empty
+  and consumed-once with a 14-day expiry, so an empty directory is equally
+  consistent with zero loads and with fifty. Neither number in the criterion has
+  a source.
+
+  That is precisely the failure standing rule 1 exists to prevent, and this
+  item has already named it once, at `implement.md:2069-2076`, about R11-D10:
+  "a deletion criterion nobody can evaluate is the failure mode standing rule 1
+  is for." It happened twice. The rule catches a mechanism arriving without a
+  criterion; it does not catch a criterion arriving without a counter. **The
+  cheap fix is one line in `sd-handoff-restore` appending a timestamp and the
+  packet's age to a load log**, at which point the criterion becomes evaluable
+  in October instead of unanswerable. Recorded here as the open item rather
+  than filed as a new work item, because the deciding is Sven's and the whole
+  point of this rollout was to stop generating bookkeeping.
+
 ## References
 
 - Full decision record: `design.md` (rounds r1–r9c + R10/R11, adversarially reviewed).
@@ -114,3 +192,5 @@ yet migrated — and the byte-compare half is retired rather than passed.
 ## Log
 
 - 2026-08-29 created; M0 tombstone PR opened from this branch.
+- 2026-09-02 closed: every step ticked and merged; two acceptance boxes ticked with
+  evidence, three left open with the reason each cannot be ticked.
