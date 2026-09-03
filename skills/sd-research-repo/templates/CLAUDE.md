@@ -115,14 +115,14 @@ review that found nothing says what it checked. If `codex` is missing or not log
 **Do not publish research as a Claude artifact.** Notion is the publishing surface.
 
 Every overview, map, brief, report, and survey in this repo has a Notion page under
-the repo's folder in https://app.notion.com/p/3c9f52b1578281a7a466fb0e2df4d928, kept in sync when the source
+the repo's own Notion folder — put its URL here when the repo is set up — kept in sync when the source
 document changes. The markdown file is the source of truth; Notion is the readable,
 shareable mirror. `90-scratch/` is not mirrored.
 
 Mirror shape — full content minus the H1, opening with a pointer back to the file:
 
 ```markdown
-*Source: **`/Users/sven/repos/...`** — edit there, then update this page.*
+*Source: **`<absolute path to this document in the checkout>`** — edit there, then update this page.*
 
 <the document's provenance line>
 
