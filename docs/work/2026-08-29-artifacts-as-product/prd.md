@@ -169,22 +169,60 @@ reasons, and waiting until October would not change either.**
   into `~/.claude/settings.json` on the `startup` and `clear` matchers, which is
   what the two-lane design asks for. But the criterion is "if after 60 days
   fewer than 5 packets have been auto-loaded, or the median packet age at load
-  exceeds 7 days," and **nothing records a load**. `sd-handoff-restore` claims a
-  packet by renaming it, emits it, and unlinks it; the packet directory is empty
-  and consumed-once with a 14-day expiry, so an empty directory is equally
-  consistent with zero loads and with fifty. Neither number in the criterion has
-  a source.
+  exceeds 7 days," and **nothing recorded a load**.
+
+  *Corrected 2026-09-02, having read the code instead of the summary.* The
+  mechanism is not what the first draft of this bullet said. `claim()` renames
+  the packet away to take exclusive ownership and then **writes it back** with
+  `consumed` stamped beside the `created` it already carried; the unlink is of
+  the temporary claim name, not of the packet. So a restored packet does keep
+  both of the criterion's numbers. What it does not keep is *history*: there is
+  one packet per directory, and the next `sd-handoff` overwrites it. The highest
+  count the packets can ever report is the number of directories, and a busy
+  directory is indistinguishable from an idle one. The criterion was
+  unevaluable, but for a subtler reason than "nothing is written down."
 
   That is precisely the failure standing rule 1 exists to prevent, and this
   item has already named it once, at `implement.md:2069-2076`, about R11-D10:
   "a deletion criterion nobody can evaluate is the failure mode standing rule 1
   is for." It happened twice. The rule catches a mechanism arriving without a
-  criterion; it does not catch a criterion arriving without a counter. **The
-  cheap fix is one line in `sd-handoff-restore` appending a timestamp and the
-  packet's age to a load log**, at which point the criterion becomes evaluable
-  in October instead of unanswerable. Recorded here as the open item rather
-  than filed as a new work item, because the deciding is Sven's and the whole
-  point of this rollout was to stop generating bookkeeping.
+  criterion; it does not catch a criterion arriving without a counter.
+
+  **Closed 2026-09-02 at Sven's direction.** `sd-handoff-restore` now appends
+  one line per restore to `handoff/loads.jsonl` — `consumed`, `created`,
+  `age_seconds`, and a 16-character digest of the directory rather than its
+  path — so the count survives the packet being overwritten. The criterion
+  becomes two commands over that file. The count is `wc -l < loads.jsonl`.
+  The median is one `jq` — sorting alone is not a median, so it takes the
+  middle value, or the mean of the two middles on an even count:
+
+  ```sh
+  jq -s 'map(select(.age_seconds != null) | .age_seconds) | sort
+         | if length == 0 then null
+           elif length % 2 == 1 then .[(length / 2) | floor]
+           else (.[length / 2 - 1] + .[length / 2]) / 2 end' loads.jsonl
+  ```
+
+  The `select` is load-bearing. `age_seconds` is null when a packet's
+  `created` cannot be parsed, and jq sorts null below every number — which
+  drags the middle value down, and a low median is the reading that says the
+  hook is serving live restarts. A median that swallows nulls therefore keeps
+  a hook the criterion would have deleted. Two null lines beside one 10-day
+  load: unfiltered, the middle value is `null`; filtered, it is 900000
+  against a 604800 threshold.
+  Answerable on 2026-11-01 -- sixty days from the counter, not from the item,
+  which is a different date from the 2026-10-28 above and the reason both are
+  written out. Only
+  the hook writes it: `sd-handoff --show` claims a packet too, but the criterion
+  counts packets *auto-loaded* and `--show` is the manual path it is measured
+  against. The write is guarded, and a fixture proves the guard earns its place
+  — with it removed, an unwritable log takes the whole restore down and the
+  session starts with no context at all.
+
+  **The box stays open, because the clock starts now.** Sixty days of data did
+  not exist before today and one line of code does not create them; the earliest
+  honest evaluation is 2026-11-01. Ticking this on the strength of the counter
+  existing would be the rounding-up this document has refused twice.
 
 ## References
 

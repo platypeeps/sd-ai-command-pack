@@ -10,13 +10,18 @@ repository, with HOME redirected away from the operator's `~/.local/state`.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import tempfile
+import time
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -436,6 +441,430 @@ class RaceTests(RestoreFixture):
         )
         self.assertEqual(shown.returncode, 0, shown.stderr)
         self.assert_silent(self.restore())
+
+
+class LoadLogTests(RestoreFixture):
+    """R10-D3's deletion criterion needs a count and a median, from somewhere.
+
+    "Fewer than 5 packets auto-loaded, or median packet age at load over 7
+    days" reads as though the packets themselves answer it -- each one keeps
+    `created` and, after a restore, `consumed`. They do not: there is one
+    packet per directory and the next `sd-handoff` overwrites it, so the
+    highest count the packets can report is the number of directories. These
+    fixtures pin the log that makes the criterion answerable, and pin the two
+    ways an unpinned log would quietly report the wrong number -- counting
+    races instead of loads, and taking session startup down with it.
+    """
+
+    def log_path(self) -> pathlib.Path:
+        return (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "handoff"
+            / "loads.jsonl"
+        )
+
+    def entries(self) -> list[dict]:
+        path = self.log_path()
+        if not path.is_file():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def test_a_restore_appends_one_entry_carrying_the_age_at_load(self) -> None:
+        self.write_packet("--summary", "counted once")
+        self.context(self.restore())
+        entries = self.entries()
+        self.assertEqual(len(entries), 1, entries)
+        entry = entries[0]
+        self.assertEqual(sorted(entry), ["age_seconds", "consumed", "created", "directory"])
+        # The age is the criterion's second number; a packet written moments
+        # ago must read as ~0 rather than as None or a negative.
+        self.assertIsInstance(entry["age_seconds"], int)
+        self.assertGreaterEqual(entry["age_seconds"], 0)
+        self.assertLess(entry["age_seconds"], 300)
+        # One restore is one instant. The log's `consumed`, the packet's
+        # `consumed`, and the age must all agree, or the criterion's median is
+        # computed from numbers that disagree with the timestamps beside them.
+        # The signature is what actually guarantees this -- `record_load` takes
+        # `consumed` and never reads a clock, so there is no second reading to
+        # diverge. These assertions document the invariant and would catch a
+        # regression that reintroduced one, but only when the two readings
+        # happened to straddle a second, so they are not the guarantee.
+        self.assertEqual(entry["consumed"], self.packet()["consumed"])
+        recomputed = (
+            dt.datetime.fromisoformat(entry["consumed"])
+            - dt.datetime.fromisoformat(entry["created"])
+        )
+        self.assertEqual(entry["age_seconds"], int(recomputed.total_seconds()))
+
+    def test_the_count_survives_the_packet_being_overwritten(self) -> None:
+        """The whole reason the log exists, stated as a fixture.
+
+        Two handoffs and two restores in one directory are two loads. The
+        packet file can only ever report the last of them, so a criterion read
+        off the packets would say 1 where the truth is 2 -- and would say 1 no
+        matter how many restores happened.
+        """
+
+        for note in ("first", "second"):
+            self.write_packet("--summary", f"{note} handoff")
+            self.context(self.restore())
+        self.assertEqual(len(self.entries()), 2, self.entries())
+        self.assertEqual(json.loads(
+            self.packet_path(self.repo).read_text(encoding="utf-8")
+        )["summary"], "second handoff")
+
+    def test_the_loser_of_a_race_logs_nothing(self) -> None:
+        """One packet restored once is one load, however many hooks tried.
+
+        What this observes is the outcome, not the ordering that produces it.
+        Whether the second hook returns early on a `consumed` packet or reaches
+        `claim` and loses the rename depends on how the two processes interleave,
+        so moving `record_load` above the rename does not reliably fail this --
+        the placement is argued in the source and not pinned here. What is
+        pinned is the number that matters: two hooks, one restore, one entry.
+        """
+
+        self.write_packet("--summary", "exactly one session gets this")
+        payload = json.dumps({"cwd": str(self.repo), "source": "clear"})
+        processes = [
+            subprocess.Popen(
+                [str(RESTORE)],
+                cwd=str(self.repo),
+                env=self.env(self.repo),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(2)
+        ]
+        outputs = [process.communicate(payload) for process in processes]
+        for process in processes:
+            self.assertEqual(process.returncode, 0, outputs)
+        self.assertEqual(len([o for o, _ in outputs if o.strip()]), 1, outputs)
+        self.assertEqual(len(self.entries()), 1, self.entries())
+
+    def test_show_is_the_manual_path_and_is_not_counted(self) -> None:
+        """The criterion measures auto-loads against the manual read path."""
+
+        self.write_packet("--summary", "read by hand")
+        shown = subprocess.run(
+            [str(HANDOFF), "--show"],
+            cwd=str(self.repo),
+            env=self.env(self.repo),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(self.entries(), [])
+
+    def test_concurrent_restores_in_different_directories_all_land_intact(self) -> None:
+        """The packet race serialises one directory. Nothing serialises many.
+
+        Two sessions starting at once in different repositories both reach the
+        append, and this file is the criterion's only data source -- a torn or
+        interleaved line loses the measurement it exists to take. Six writers,
+        six intact JSON objects, six distinct directory digests.
+        """
+
+        repos = []
+        for index in range(6):
+            repo = self.base / f"repo{index}"
+            repo.mkdir()
+            git(repo, "init", "-q", "-b", "main", ".")
+            (repo / "a.txt").write_text(f"{index}\n", encoding="utf-8")
+            git(repo, "add", "a.txt")
+            git(repo, "commit", "-qm", "first")
+            self.write_packet("--summary", f"packet {index}", cwd=repo)
+            repos.append(repo)
+
+        processes = [
+            subprocess.Popen(
+                [str(RESTORE)],
+                cwd=str(repo),
+                env=self.env(repo),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for repo in repos
+        ]
+        outputs = [
+            process.communicate(json.dumps({"cwd": str(repo), "source": "clear"}))
+            for process, repo in zip(processes, repos, strict=True)
+        ]
+        for process, (stdout, stderr), repo in zip(
+            processes, outputs, repos, strict=True
+        ):
+            self.assertEqual(process.returncode, 0, f"{repo}: {stderr}")
+            self.assertTrue(stdout.strip(), f"{repo} restored nothing: {stderr}")
+
+        # Parsed, not counted: a byte-level interleave usually yields the right
+        # number of newlines and unparseable content between them.
+        entries = self.entries()
+        self.assertEqual(len(entries), 6, entries)
+        self.assertEqual(len({entry["directory"] for entry in entries}), 6, entries)
+        for entry in entries:
+            self.assertEqual(
+                sorted(entry), ["age_seconds", "consumed", "created", "directory"]
+            )
+
+    def test_the_log_is_no_more_readable_than_the_packets_beside_it(self) -> None:
+        """It records when this machine's sessions started. 0600, like a packet."""
+
+        self.write_packet("--summary", "private by default")
+        self.context(self.restore())
+        mode = stat.S_IMODE(self.log_path().stat().st_mode)
+        self.assertEqual(mode, 0o600, oct(mode))
+
+    def test_a_packet_from_the_future_does_not_log_a_negative_age(self) -> None:
+        """A skewed clock is a real way `created` lands after `consumed`.
+
+        The criterion takes a median over these values, and a negative age is
+        not a small error in a median -- it is a reading the criterion has no
+        interpretation for. Clamped to zero, the way `age_line` clamps the same
+        subtraction.
+        """
+
+        self.write_packet("--summary", "written by a clock that runs fast")
+        ahead = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=6)
+        self.rewrite({"created": ahead.replace(microsecond=0).isoformat()})
+        self.context(self.restore())
+        entries = self.entries()
+        self.assertEqual(len(entries), 1, entries)
+        self.assertEqual(entries[0]["age_seconds"], 0, entries)
+
+    def test_a_held_lock_costs_the_measurement_and_not_the_session(self) -> None:
+        """The hook must never wait on a lock. It is a wait on session startup.
+
+        Holding the log's lock from this process is the whole of the fixture:
+        a blocking `LOCK_EX` would sit here until the test released it, which
+        in a SessionStart hook means every session that starts in this
+        directory sits there too. The hook gives up on the measurement, emits
+        the context anyway, and writes nothing -- an unlocked write would be
+        exactly the interleaving the lock exists to prevent.
+        """
+
+        self.write_packet("--summary", "the session comes first")
+        log = self.log_path()
+        descriptor = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        self.addCleanup(os.close, descriptor)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+        started = time.monotonic()
+        result = self.restore()
+        elapsed = time.monotonic() - started
+
+        self.assertIn("the session comes first", self.context(result))
+        self.assertEqual(self.entries(), [])
+        # Generous: the restore itself shells out to git several times. The
+        # point is that it returned at all while the lock was held, not the
+        # exact cost of the ten retries.
+        self.assertLess(elapsed, 20, f"took {elapsed:.1f}s with the lock held")
+
+    def test_an_unwritable_log_does_not_cost_the_session_its_context(self) -> None:
+        """Measuring the restore must never be able to prevent one.
+
+        A read-only state directory is the realistic way this breaks -- a
+        restored backup, a permissions sweep -- and a session losing its
+        handoff because the counter could not be incremented would be a worse
+        bug than the one the counter exists to fix.
+        """
+
+        self.write_packet("--summary", "context survives an unwritable log")
+        # chmod the file and restore *that* file: an earlier draft saved the
+        # directory's mode and handed it back instead, which left the log
+        # read-only after the test and restored nothing that had changed.
+        log = self.log_path()
+        log.write_text("", encoding="utf-8")
+        mode = log.stat().st_mode
+        self.addCleanup(os.chmod, log, mode)
+        os.chmod(log, 0o444)
+        result = self.restore()
+        self.assertIn("context survives an unwritable log", self.context(result))
+        self.assertEqual(self.entries(), [])
+
+    def test_a_packet_with_an_unreadable_created_counts_but_reports_no_age(self) -> None:
+        """`age_seconds` is `int | null`, and the null is the point.
+
+        `created` is written by `sd-handoff`, so an unparseable one means a
+        hand-edited or corrupted packet rather than an ordinary restore. The
+        restore still happens -- expiry reads `expires`, not `created` -- so it
+        is a load, and the count must include it. The age cannot be computed,
+        and every number that could stand in for it is a lie the median would
+        swallow: 0 claims the packet was restored the instant it was written,
+        and -1 is a sentinel that sorts as a measurement. Both pull the median
+        down, and a low median is the reading that says the hook is serving
+        live restarts -- so a stand-in number keeps a hook the criterion would
+        have deleted, which is the failure standing rule 1 exists to catch.
+
+        The cost of the null is that the median must filter it, and a filter
+        nobody knows about is the same bug: `jq -r '.age_seconds' | sort -n`
+        sorts nulls below every number. prd.md and design.md carry the command
+        that skips them; this fixture pins the value that command filters on.
+        """
+        self.write_packet("--summary", "unreadable birth time")
+        self.rewrite({"created": "not a timestamp"})
+        self.context(self.restore())
+        entries = self.entries()
+        # One load, counted -- `wc -l` is the criterion's first number and it
+        # does not care that the second one is unavailable for this line.
+        self.assertEqual(len(entries), 1, entries)
+        self.assertIsNone(entries[0]["age_seconds"])
+        # Present and null, not absent. Both read as None through `.get`, but
+        # only one keeps every line the same shape, and `jq`'s `!= null` test
+        # is what the documented median filters on.
+        self.assertIn("age_seconds", entries[0])
+
+
+    def test_the_log_follows_xdg_state_home_the_way_the_packets_do(self) -> None:
+        """design.md tells an operator which directory to run `wc -l` in.
+
+        It names `$XDG_STATE_HOME/sd-ai-command-pack/handoff/` before the
+        `~/.local/state` default, so the sentence is a claim about behaviour
+        and not decoration. What the criterion actually needs is weaker and
+        more important: wherever the packets go, the log goes too. A log that
+        resolved its root differently from the packets would count restores
+        from one state root while the packets lived in another.
+        """
+        state = self.base / "custom-state"
+        self.write_packet("--summary", "moved state root", XDG_STATE_HOME=str(state))
+        self.context(self.restore(XDG_STATE_HOME=str(state)))
+        moved = state / "sd-ai-command-pack" / "handoff" / "loads.jsonl"
+        self.assertTrue(moved.is_file(), sorted(map(str, state.rglob("*"))))
+        self.assertEqual(len(moved.read_text(encoding="utf-8").splitlines()), 1)
+        # And nothing under the default root -- one log, where the packets are.
+        self.assertFalse(self.log_path().exists())
+
+    def test_the_pack_wide_state_variable_does_not_move_the_log(self) -> None:
+        """The lane resolves its own root, and does not read the pack's.
+
+        `resolve_state_root` in the shipped helper reads
+        `SD_AI_COMMAND_PACK_STATE_HOME` first; this lane's `state_home` does
+        not read it at all. Both halves of the lane agree with each other, so
+        the count is never split -- but an operator who moved their state root
+        with the pack-wide variable will not find the log under it, which is
+        why design.md writes the resolution out rather than citing the spec's
+        ladder. Pinned so the doc is not describing a lane that quietly grew
+        the variable later.
+        """
+        elsewhere = self.base / "pack-wide"
+        self.write_packet(
+            "--summary", "pack-wide root", SD_AI_COMMAND_PACK_STATE_HOME=str(elsewhere)
+        )
+        self.context(
+            self.restore(SD_AI_COMMAND_PACK_STATE_HOME=str(elsewhere))
+        )
+        self.assertFalse(elsewhere.exists(), sorted(map(str, self.base.iterdir())))
+        self.assertEqual(len(self.entries()), 1)
+
+
+class TornRecordTests(unittest.TestCase):
+    """A record that cannot finish must leave nothing, not half of itself.
+
+    Every other fixture here drives the real executable. This one imports it,
+    because the failure it pins -- `os.write` returning short and then making
+    no further progress -- cannot be provoked from outside the process. The
+    loop is already correct about not hanging on a stalled write; what it did
+    not do was clean up after giving up, and half a JSON line is worse than no
+    line at all: `json.loads` raises on it rather than skipping it, so one torn
+    record makes the entire log unreadable to whatever evaluates the deletion
+    criterion.
+    """
+
+    def setUp(self) -> None:
+        loader = importlib.machinery.SourceFileLoader(
+            "sd_handoff_restore", str(RESTORE)
+        )
+        spec = importlib.util.spec_from_file_location(
+            "sd_handoff_restore", str(RESTORE), loader=loader
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.module = module
+        self.directory = pathlib.Path(
+            tempfile.mkdtemp(prefix="handoff-torn-")
+        ).resolve()
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+        self.log = self.directory / "loads.jsonl"
+
+    def record(self) -> None:
+        self.module.record_load(
+            self.directory,
+            {"created": "2026-09-01T00:00:00+00:00", "repo": {"root": "/x"}},
+            "2026-09-02T00:00:00+00:00",
+        )
+
+    def test_a_record_that_stalls_mid_write_leaves_no_partial_line(self) -> None:
+        real_write = os.write
+        state: dict[str, int | None] = {"fd": None}
+
+        def stalling_write(descriptor: int, data: bytes) -> int:
+            if data.startswith(b'{"age_seconds"'):
+                # Half the record lands, and then the write stops making
+                # progress -- the shape of ENOSPC arriving mid-record.
+                state["fd"] = descriptor
+                half = len(data) // 2
+                self.assertGreater(half, 0)
+                real_write(descriptor, data[:half])
+                return half
+            if descriptor == state["fd"]:
+                return 0
+            return real_write(descriptor, data)
+
+        os.write = stalling_write
+        try:
+            self.record()
+        finally:
+            os.write = real_write
+
+        # Not "the line is malformed" -- the file is back to empty. A reader
+        # that splits on newlines and calls `json.loads` on each finds nothing
+        # to choke on, which is the property the criterion depends on.
+        self.assertEqual(self.log.read_bytes(), b"")
+
+    def test_a_stalled_record_does_not_take_the_records_before_it_with_it(self) -> None:
+        self.record()
+        intact = self.log.read_bytes()
+        self.assertTrue(intact.endswith(b"\n"), intact)
+
+        real_write = os.write
+        state: dict[str, int | None] = {"fd": None}
+
+        def stalling_write(descriptor: int, data: bytes) -> int:
+            if data.startswith(b'{"age_seconds"'):
+                state["fd"] = descriptor
+                half = len(data) // 2
+                real_write(descriptor, data[:half])
+                return half
+            if descriptor == state["fd"]:
+                return 0
+            return real_write(descriptor, data)
+
+        os.write = stalling_write
+        try:
+            self.record()
+        finally:
+            os.write = real_write
+
+        # The rollback truncates to where the file stood when this record took
+        # the lock, not to zero. Getting that wrong would erase every earlier
+        # measurement to protect the one that failed.
+        self.assertEqual(self.log.read_bytes(), intact)
+
+    def test_a_whole_record_is_left_alone(self) -> None:
+        self.record()
+        self.record()
+        lines = self.log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertEqual(json.loads(line)["age_seconds"], 86400)
 
 
 class ShapeTests(RestoreFixture):

@@ -45,15 +45,25 @@ once, then inert.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
 import subprocess  # nosec B404 - fixed argv git reads, never a shell
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HOOK_EVENT = "SessionStart"
+
+# Bounds on how long recording a restore may cost the session that is starting.
+# Ten tries at 10ms is a tenth of a second in the worst case, and the case it
+# covers is two hooks landing on the same millisecond. A contended lock held
+# longer than that is a writer in trouble, and the answer there is to lose one
+# measurement rather than delay a session for it.
+LOCK_ATTEMPTS = 10
+LOCK_WAIT = 0.01
 
 
 # ---------------------------------------------------------------- git helpers
@@ -144,6 +154,163 @@ def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
+def record_load(directory: Path, packet: dict, consumed: str) -> None:
+    """Append one line per restore to a log the deletion criterion can count.
+
+    R10-D3's criterion is "if after 60 days fewer than 5 packets have been
+    auto-loaded, or the median packet age at load exceeds 7 days, delete the
+    hook." Both numbers survive a single restore already -- `claim` writes the
+    packet back with `consumed` set beside its `created` -- but neither
+    survives the *next* one: there is one packet per directory and a fresh
+    `sd-handoff` overwrites it. So the counts were bounded by the number of
+    directories, not by the number of loads, and a busy directory looked
+    exactly like an idle one. That made the criterion unevaluable in the way
+    standing rule 1 exists to prevent, which the closing pass on
+    2026-09-02 found and this closes.
+
+    Append-only, one JSON object per line, and deliberately not a packet: the
+    digest names the directory without recording the path, an age in seconds is
+    the whole of what the criterion needs, and nothing here is read back by any
+    command. Evaluate it with `wc -l` and a median over `age_seconds`.
+
+    Only this file writes to it. `sd-handoff --show` claims a packet too, but
+    the criterion counts packets *auto-loaded*, and `--show` is the manual read
+    path it is measured against -- logging both would answer a question nobody
+    asked with a number that looks like the answer to this one.
+    """
+    # `consumed` is passed in rather than read again here. One restore is one
+    # instant, and two `now_iso()` calls a few statements apart can land on
+    # different seconds -- which would put a different `consumed` in the log
+    # than in the packet, for the same event, and make an age computed from
+    # either one arguably wrong. The caller takes the reading; everything below
+    # is derived from it.
+    line = json.dumps({
+        "consumed": consumed,
+        "created": packet.get("created"),
+        "age_seconds": load_age_seconds(packet.get("created"), consumed),
+        "directory": hashlib.sha256(
+            str((packet.get("repo") or {}).get("root") or "").encode("utf-8")
+        ).hexdigest()[:16],
+    }, sort_keys=True)
+    # Two sessions starting at once in *different* directories both reach this
+    # line -- the packet race only serialises writers within one directory --
+    # and this file is the criterion's only data source, so a torn line loses
+    # the measurement it was added to take.
+    #
+    # `O_APPEND` and an exclusive `flock`, not buffered text I/O, and not a bare
+    # `os.write` either. Each piece answers a different way the line can tear:
+    #
+    # * `O_APPEND` puts every write at the current end of file, so a writer that
+    #   somehow skipped the lock still cannot land on top of another record.
+    # * The lock covers the whole record. `os.write` may return short -- rare on
+    #   a regular file, but ENOSPC and a signal can both do it -- and finishing a
+    #   short write with a second syscall is exactly where a concurrent appender
+    #   would wedge its own line into the middle of this one. Holding the lock
+    #   across the loop is what makes completing a partial record safe.
+    # * The loop itself, because a record half-written and abandoned is an
+    #   unparseable line in the file the deletion decision reads.
+    #
+    # `open(..., "a")` plus a buffered write would almost always be fine: the
+    # line is ~150 bytes and the handle closes immediately. "Almost always" is
+    # not a property worth resting a deletion decision on.
+    payload = (line + "\n").encode("utf-8")
+    try:
+        descriptor = os.open(
+            str(directory / "loads.jsonl"),
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            # 0o600, matching the packets beside it. `tempfile.mkstemp` gives
+            # them 0600 and this file sits in the same directory; 0644 would
+            # have made the odd one out world-readable, and it records when this
+            # machine's sessions started even though the directory itself is
+            # only a digest.
+            0o600,
+        )
+    except OSError:
+        # Same reasoning as the write-back below: a session starting up gets
+        # its context whether or not the measurement of that fact lands.
+        return
+    try:
+        # `LOCK_NB`, and give up rather than wait. A blocking `LOCK_EX` here
+        # would put an unbounded wait inside a SessionStart hook, which is a
+        # wait on every session that starts in this directory -- measuring a
+        # restore must never be able to delay one, the same rule the OSError
+        # guards above follow. The retries cover the ordinary case, two hooks
+        # landing on the same millisecond; anything longer than that is a
+        # writer in trouble, and the right answer is to lose one measurement.
+        #
+        # Giving up means writing nothing at all. An unlocked write would be
+        # the interleaving this lock exists to prevent, so a line skipped is
+        # strictly better than a line torn.
+        for attempt in range(LOCK_ATTEMPTS):
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if attempt == LOCK_ATTEMPTS - 1:
+                    return
+                time.sleep(LOCK_WAIT)
+        # Where the file ends right now, read under the lock so no other
+        # writer can move it. If this record does not finish, this is where
+        # the file has to go back to.
+        start = os.lseek(descriptor, 0, os.SEEK_END)
+        written = 0
+        try:
+            while written < len(payload):
+                # A zero-length write is not supposed to happen for a non-empty
+                # buffer on a regular file, and an unbounded loop in a
+                # SessionStart hook would hang every session that starts. Give
+                # up on the record rather than on the session.
+                progress = os.write(descriptor, payload[written:])
+                if progress <= 0:
+                    break
+                written += progress
+        finally:
+            # Giving up mid-record would leave a half-line, and half a line is
+            # worse than no line: `json.loads` raises on it rather than
+            # skipping it, so one torn record makes the whole log unreadable to
+            # whatever evaluates the criterion. Roll back instead. Losing the
+            # measurement is the cost this function already accepts on every
+            # other failure, and under the lock with `O_APPEND` nothing else
+            # has written past `start`, so the truncation can only remove this
+            # record's own bytes.
+            if written != len(payload):
+                try:
+                    os.ftruncate(descriptor, start)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(descriptor)  # releases the lock
+        except OSError:
+            pass
+
+
+def load_age_seconds(created_raw: object, consumed_raw: str) -> int | None:
+    """Seconds between a packet being written and being restored, or None.
+
+    Both ends are parsed from the strings that go into the log, so the age and
+    the two timestamps beside it can never disagree -- an age read back from
+    `consumed - created` and the one recorded here are the same number.
+    """
+    try:
+        created = dt.datetime.fromisoformat(str(created_raw))
+        consumed = dt.datetime.fromisoformat(consumed_raw)
+    except (TypeError, ValueError):
+        return None
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=dt.timezone.utc)
+    if consumed.tzinfo is None:
+        consumed = consumed.replace(tzinfo=dt.timezone.utc)
+    # Clamped, the way `age_line` clamps the same subtraction. A packet written
+    # under a skewed clock can carry a `created` in the future, and a negative
+    # age is not a small error in a median -- it is a value the criterion has no
+    # reading for. Zero says "restored as soon as it was written", which is the
+    # nearest true thing.
+    return max(int((consumed - created).total_seconds()), 0)
+
+
 def claim(path: Path, packet: dict) -> bool:
     """Take exclusive ownership by renaming the packet away, then write it back.
 
@@ -155,7 +322,16 @@ def claim(path: Path, packet: dict) -> bool:
         os.rename(path, claimed)
     except OSError:
         return False
-    packet["consumed"] = now_iso()
+    # One reading of the clock for one restore: the log and the packet carry
+    # the same `consumed`, and the logged age is derived from it.
+    consumed = now_iso()
+    # After the rename, not before: only the session that won the race has
+    # restored anything, and a log the losers also wrote to would count races
+    # rather than loads. Argued rather than pinned -- a fixture cannot force a
+    # second hook to reach this line and lose, so `LoadLogTests` asserts the
+    # count two hooks produce and says so.
+    record_load(path.parent, packet, consumed)
+    packet["consumed"] = consumed
     body = (json.dumps(packet, indent=2) + "\n").encode("utf-8")
     try:
         handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".sd-handoff.")
