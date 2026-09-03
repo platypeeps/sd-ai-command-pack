@@ -593,9 +593,11 @@ class LoadLogTests(RestoreFixture):
         ]
         outputs = [
             process.communicate(json.dumps({"cwd": str(repo), "source": "clear"}))
-            for process, repo in zip(processes, repos)
+            for process, repo in zip(processes, repos, strict=True)
         ]
-        for process, (stdout, stderr), repo in zip(processes, outputs, repos):
+        for process, (stdout, stderr), repo in zip(
+            processes, outputs, repos, strict=True
+        ):
             self.assertEqual(process.returncode, 0, f"{repo}: {stderr}")
             self.assertTrue(stdout.strip(), f"{repo} restored nothing: {stderr}")
 
