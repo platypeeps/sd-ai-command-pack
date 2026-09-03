@@ -208,6 +208,17 @@ macOS leg is restored.
   specific `make` targets and path-scope `python3`. Where the capability is
   genuinely needed, reach for the harness tool that already covers it -- Read,
   Glob, Grep, Edit, Write -- rather than widening a Bash rule to reach it.
+- The `:*` is not decoration; it is the difference between a prefix rule and an
+  exact one. `Bash(git ls-remote:*)` matches that command and whatever follows
+  it; `Bash(make test)` matches that string and nothing else. Prefer the
+  wildcard where the trailing arguments are inert, and take the exact form where
+  they are not. `make` is what earns the exception: `make test:*` would also
+  permit `make test -f /somewhere/else/Makefile`, which runs a recipe this
+  repository never wrote -- the escape hatch the bullet above exists to keep
+  out. So the `make` rules are written bare and pay for it, covering the bare
+  invocation and not a decorated one; `make test` inside a pipeline still
+  prompts. That is the intended trade. Widen these by naming another target,
+  never by adding a wildcard to one of them.
 - Do not allow generic file readers. `cat`, `tail`, `cut` and their siblings
   take any path, so allowing one grants unscoped read of the whole machine --
   and it reads *around* the `Read(**/...)` deny rules a machine-scope config
