@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -537,6 +538,8 @@ class LoadLogTests(RestoreFixture):
             for _ in range(2)
         ]
         outputs = [process.communicate(payload) for process in processes]
+        for process in processes:
+            self.assertEqual(process.returncode, 0, outputs)
         self.assertEqual(len([o for o, _ in outputs if o.strip()]), 1, outputs)
         self.assertEqual(len(self.entries()), 1, self.entries())
 
@@ -592,7 +595,8 @@ class LoadLogTests(RestoreFixture):
             process.communicate(json.dumps({"cwd": str(repo), "source": "clear"}))
             for process, repo in zip(processes, repos)
         ]
-        for (stdout, stderr), repo in zip(outputs, repos):
+        for process, (stdout, stderr), repo in zip(processes, outputs, repos):
+            self.assertEqual(process.returncode, 0, f"{repo}: {stderr}")
             self.assertTrue(stdout.strip(), f"{repo} restored nothing: {stderr}")
 
         # Parsed, not counted: a byte-level interleave usually yields the right
@@ -604,6 +608,31 @@ class LoadLogTests(RestoreFixture):
             self.assertEqual(
                 sorted(entry), ["age_seconds", "consumed", "created", "directory"]
             )
+
+    def test_the_log_is_no_more_readable_than_the_packets_beside_it(self) -> None:
+        """It records when this machine's sessions started. 0600, like a packet."""
+
+        self.write_packet("--summary", "private by default")
+        self.context(self.restore())
+        mode = stat.S_IMODE(self.log_path().stat().st_mode)
+        self.assertEqual(mode, 0o600, oct(mode))
+
+    def test_a_packet_from_the_future_does_not_log_a_negative_age(self) -> None:
+        """A skewed clock is a real way `created` lands after `consumed`.
+
+        The criterion takes a median over these values, and a negative age is
+        not a small error in a median -- it is a reading the criterion has no
+        interpretation for. Clamped to zero, the way `age_line` clamps the same
+        subtraction.
+        """
+
+        self.write_packet("--summary", "written by a clock that runs fast")
+        ahead = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=6)
+        self.rewrite({"created": ahead.replace(microsecond=0).isoformat()})
+        self.context(self.restore())
+        entries = self.entries()
+        self.assertEqual(len(entries), 1, entries)
+        self.assertEqual(entries[0]["age_seconds"], 0, entries)
 
     def test_an_unwritable_log_does_not_cost_the_session_its_context(self) -> None:
         """Measuring the restore must never be able to prevent one.

@@ -209,7 +209,12 @@ def record_load(directory: Path, packet: dict, consumed: str) -> None:
         descriptor = os.open(
             str(directory / "loads.jsonl"),
             os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-            0o644,
+            # 0o600, matching the packets beside it. `tempfile.mkstemp` gives
+            # them 0600 and this file sits in the same directory; 0644 would
+            # have made the odd one out world-readable, and it records when this
+            # machine's sessions started even though the directory itself is
+            # only a digest.
+            0o600,
         )
     except OSError:
         # Same reasoning as the write-back below: a session starting up gets
@@ -252,7 +257,12 @@ def load_age_seconds(created_raw: object, consumed_raw: str) -> int | None:
         created = created.replace(tzinfo=dt.timezone.utc)
     if consumed.tzinfo is None:
         consumed = consumed.replace(tzinfo=dt.timezone.utc)
-    return int((consumed - created).total_seconds())
+    # Clamped, the way `age_line` clamps the same subtraction. A packet written
+    # under a skewed clock can carry a `created` in the future, and a negative
+    # age is not a small error in a median -- it is a value the criterion has no
+    # reading for. Zero says "restored as soon as it was written", which is the
+    # nearest true thing.
+    return max(int((consumed - created).total_seconds()), 0)
 
 
 def claim(path: Path, packet: dict) -> bool:
