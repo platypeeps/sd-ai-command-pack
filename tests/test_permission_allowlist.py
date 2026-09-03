@@ -16,7 +16,7 @@ runs, in three places that are maintained for other reasons:
 * the Makefile's public `.PHONY` targets,
 * README's `bin/sd_install.py` table, one row per mode, with the mode's effect
   written in the row,
-* the `mcp__github__*` tools a shipped skill names.
+* the `mcp__github__*` tools a shipped skill's `SKILL.md` names.
 
 So the list is derived from those at run time and compared against the file. A
 rule with no source fails; a source with no rule fails. Adding a `make` target
@@ -117,10 +117,22 @@ def read_only_surfaces() -> list[str]:
 
 
 def skill_mcp_tools() -> set[str]:
-    """The GitHub tools a shipped skill tells a reader to call."""
+    """The GitHub tools a shipped skill tells a reader to call.
+
+    `SKILL.md` only, never `skills/**/*.md`. A skill directory also holds
+    templates and shared reference material, and a tool named in a *reference*
+    is being described rather than invoked -- scanning those would grant a
+    capability because some prose mentioned it. The entrypoint is the shipped
+    instruction; everything beside it is documentation.
+
+    Unlike the `bin/` derivation, this does not require the skill's own binary
+    to exist: `sd-suggest` names `mcp__github__list_issues` and has no
+    `bin/sd-suggest`, but the tool is how the skill reaches the tracker, which
+    is a separate thing from the runner it does not yet have.
+    """
 
     found: set[str] = set()
-    for skill in REPO_ROOT.glob("skills/**/*.md"):
+    for skill in REPO_ROOT.glob("skills/**/SKILL.md"):
         found.update(MCP_TOOL.findall(skill.read_text(encoding="utf-8")))
     return found
 
@@ -187,13 +199,15 @@ class PermissionAllowlistTests(unittest.TestCase):
         never use. Found in review after the rule had already shipped once.
         """
 
+        allow = settings_allow()
+        granted = set(allow)
         gaps = []
-        for rule in settings_allow():
+        for rule in allow:
             match = BASH_RULE.match(rule)
             if not match or not match.group(1).startswith("bin/"):
                 continue
             name = match.group(1).removesuffix(":*").split("/")[-1].split()[0]
-            if runs_under_python3(name) and f"Bash(python3 {match.group(1)})" not in settings_allow():
+            if runs_under_python3(name) and f"Bash(python3 {match.group(1)})" not in granted:
                 gaps.append(f"{rule} has no `python3 bin/{name}` counterpart")
         self.assertEqual(gaps, [], "\n".join(gaps))
 
