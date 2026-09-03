@@ -120,8 +120,16 @@ def work_items(repo):
         return 0
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sd-docs-lint")
     if not os.path.exists(lint):
-        print("  WARN docs/work/ exists, but sd-docs-lint is not beside this script")
-        return 0
+        # A gate that cannot run is not a gate that passed. Reporting this as a
+        # warning and returning 0 would reproduce the exact defect this function
+        # exists to fix, one level down: the repository would print a clean
+        # review because the linter was missing, which is the least trustworthy
+        # moment to claim cleanliness. Partial installs are the likely cause, so
+        # the message names the remedy rather than only the symptom.
+        print("  FAIL docs/work/ exists, but sd-docs-lint is not beside this "
+              f"script ({os.path.dirname(lint)}) — install it alongside "
+              "sd-research-kit, or the work items go unchecked")
+        return 1
     done = subprocess.run(
         [sys.executable, lint], cwd=repo, capture_output=True, text=True
     )
@@ -139,10 +147,20 @@ def work_items(repo):
         line[len("FAIL "):] for line in done.stderr.splitlines()
         if line.startswith("FAIL ")
     ]
+    # sd-docs-lint reports absolute paths; this output is read next to
+    # repo-relative document names, so make the two agree. The lint resolves its
+    # root through git, which returns the real path, while `repo` came from the
+    # caller's cwd -- on macOS those differ for anything under /tmp (/var vs
+    # /private/var) and they differ for any symlinked checkout, so a plain prefix
+    # strip silently does nothing. Try the resolved prefix as well; failing to
+    # shorten a path is cosmetic, so an unrecognised one is printed whole.
+    prefixes = {repo + os.sep, os.path.realpath(repo) + os.sep}
     for failure in failures:
-        # sd-docs-lint reports absolute paths; this output is read next to
-        # repo-relative document names, so make the two agree.
-        print("  FAIL " + failure.replace(repo + os.sep, ""))
+        for prefix in prefixes:
+            if failure.startswith(prefix):
+                failure = failure[len(prefix):]
+                break
+        print("  FAIL " + failure)
     return len(failures) or 1
 
 
