@@ -1539,8 +1539,10 @@ class ValueFromFileTests(StoreFixture):
 
     def test_the_two_spellings_keep_the_order_they_were_typed_in(self) -> None:
         """A block sequence's order comes from the command line, not from
-        which flag supplied each item. `migrate-golden-corpus` compares whole
-        notes, so a silent reordering reads as drift with no author."""
+        which flag supplied each item. A silent reordering rewrites bytes
+        nobody asked to change, and the note still parses, so nothing
+        downstream complains -- R11-D27's lesson, and the reason this is
+        pinned by a test rather than left to the writer."""
 
         self.build()
         self.assertEqual(self.run_sd(
