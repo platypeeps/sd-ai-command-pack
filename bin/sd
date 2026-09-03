@@ -2744,9 +2744,11 @@ class Pair(argparse.Action):
     the order of a block sequence depend on which spelling supplied each item
     rather than on where it was typed: `--field tags+=a --field-file tags+=b
     --field tags+=c` would write a, c, b. A note's tag order is visible in its
-    frontmatter and compared byte-for-byte by `migrate-golden-corpus`, so a
-    reordering here is a diff nobody asked for and nothing downstream would
-    call wrong.
+    frontmatter, and a reordering here is a diff nobody asked for that nothing
+    downstream would call wrong -- R11-D27's lesson: the note still parses, so
+    the silence is not evidence. `migrate-golden-corpus` used to be the witness
+    that would have caught it; the bracket was spent and deleted on 2026-09-02,
+    which is why this is pinned by a test rather than left to the writer.
 
     `const` carries which spelling matched, not `option_string`: argparse
     accepts an unambiguous prefix of a long option, and deciding what a value
