@@ -3625,8 +3625,9 @@ into a scratch vault and diffed, which is what 8-vi did by hand three times.
 **Cost of keeping it.** 6.3 MB of bodies and manifest under
 `~/.local/state/sd/golden-corpus/`, outside the repository; 360 lines in
 `bin/` plus `tests/test_migrate_golden_corpus.py`; both outside the `bin/` cap
-under the `migrate-*` allowance, which is now 360 of 1,500 with
-`migrate-trellis` gone.
+under the `migrate-*` allowance, which stood at 360 of 1,500 with
+`migrate-trellis` gone. *(That was the cost while the bracket was alive. It
+was spent later the same day -- see below -- and `bin/migrate-*` is empty.)*
 
 **What this corrects.** Step 7 defined the `migrate-` prefix as tooling
 deleted at step 7 or 11, and three documents still scheduled this file by that
@@ -3644,12 +3645,29 @@ That is the whole of what the tool was kept for, so it went with the answer
 it gave: `bin/migrate-golden-corpus`, `tests/test_migrate_golden_corpus.py`
 and the two fixtures. `bin/migrate-*` is now empty.
 
-The one non-historical reference outside those files was a docstring in
-`tests/test_sd_store.py` explaining *why* a block sequence's order is pinned
--- it cited the tool as the thing that would notice a silent reordering. The
-test stays, because the invariant is real and outlives its witness; the
-docstring now names R11-D27's lesson directly instead, that such a note still
-parses so nothing downstream complains.
+**Two non-historical references survived outside those files, and the first
+pass found one of them.** Both are docstrings explaining *why* a block
+sequence's order is pinned, and both cited the tool as the thing that would
+notice a silent reordering: one in `tests/test_sd_store.py`, one in `bin/sd`'s
+`Pair` argparse action. The test and the action both stay, because the
+invariant is real and outlives its witness; both docstrings now name R11-D27's
+lesson directly instead -- such a note still parses, so nothing downstream
+complains, and silence is not evidence.
+
+The miss is the fourth of its shape this rollout, and the shape is worth
+stating plainly rather than logging again. **An orphan sweep is blind to
+comments by construction**: it enumerates definitions and asks what dangles,
+and a docstring defines nothing, so nothing dangles. The deletion's own check
+was `grep -rn migrate-golden-corpus`, which *does* reach a docstring -- and the
+claim written from it ("the one non-historical reference") was narrower than
+what the grep returned, because a hit inside a 25-line argparse docstring in a
+2,700-line file reads as prose about the past rather than as a live claim. The
+check was right; the reading of it was not. Copilot's review caught it.
+
+That is the correction with teeth: for a deletion, the passing form is not
+"grep, then judge each hit," it is **grep, then require every hit to be either
+deleted or edited**. A hit deliberately left alone is a decision that has to be
+written down, which is a step you cannot skip by skimming.
 
 ### Step 9: the vault's routines call `sd`, and the `pack.py` grant is gone (2026-09-02)
 
