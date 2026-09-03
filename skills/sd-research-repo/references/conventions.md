@@ -166,40 +166,49 @@ someone will act on, get a second reader who was not involved in writing it.
 
 **The second reader is Codex**, and its framing is not written here any more.
 The stance, the four-part finding format and the confidence tags live in
-`local-adversarial-gate/core.md` in `platypeeps/system`, shared with
+`local-adversarial-gate/core.md` in the `system` repo, shared with
 `sd-writing-pack`, which built the same gate separately and kept its own copy of
 the same caveats. `adversarial-gate render --lens research-brief` prints the
 focus text for the command below; `adversarial-gate run` does the whole pass for
-a caller that wants the scripted path instead of the plugin.
+a caller that wants the scripted path.
 
-Where the Codex plugin (`codex@openai-codex`, "Codex for Claude") is installed,
-the independent pass runs through it rather than being skipped for want of a
-human:
+**The second reader is the `codex` CLI, not a Claude plugin.** This is the same
+position `docs/planning-adversarial-review-codex.md` takes for the pack's own
+review lane, and it holds here for the same reason: the `codex@openai-codex`
+plugin is not a dependency of this kit, it may not be installed, and a research
+repo that tells its reader to run `/codex:adversarial-review` sends them to a
+command that does not exist. Do not reach for the `/codex:*` slash commands.
 
 ```
-/codex:setup                              # once per machine: ready, CLI present, logged in
-/codex:adversarial-review --scope working-tree "<focus>"
+codex doctor                              # is it installed, is it logged in
+codex exec -s read-only "<focus>"         # the pass itself
 ```
 
-Two things to get right, both of which follow from what the command actually is:
+Three things to get right:
 
-- **It reviews a git diff, not a file path and not a URL.** The document has to
-  be *in* the working tree or the branch diff — review before committing, or
-  point it at the branch with `--base main`. A document already committed on
-  `main` is invisible to it.
+- **`-s read-only` is not optional.** It is what keeps an adversarial reader
+  from editing the work it is reviewing. There is no reason to run this pass
+  without it.
+- **It reads the working tree, not a file path and not a URL.** The document has
+  to be *in* the working tree or a branch diff against `main` — review before
+  committing, or on a branch. A document already merged to `main` gives it
+  nothing to look at. Name the documents in the prompt when the diff is large.
 - **Its default framing is a code review** — auth boundaries, races, migrations,
   rollback. Prose needs the focus text to redirect it:
 
   ```
-  /codex:adversarial-review --scope working-tree \
-    "This is a markdown research brief, not code. Attack the argument, not the syntax:
-     which load-bearing claims does the cited source not actually support; which numbers
-     are missing a unit, a date or a denominator; what does the conclusion depend on that
-     the document never states; does the conclusion follow from what is on the page alone?"
+  codex exec -s read-only "This is a markdown research repository, not code.
+    Review the uncommitted working-tree changes (git status, git diff, plus
+    untracked new files) as an adversarial reader. Attack the argument, not the
+    syntax: which load-bearing claims does the cited source not actually
+    support; which numbers are missing a unit, a date or a denominator; what
+    does the conclusion depend on that the document never states; where does a
+    document assert something as verified that the repo shows was not checked.
+    Cite file and line. Do not modify any files."
   ```
 
-  Anything bigger than a page will be recommended for background —
-  `/codex:status` for progress, `/codex:result` for the findings.
+  Run it in the background for anything past a page. It buffers its output, so
+  an empty output file means still running, not hung.
 
 **What it cannot do.** Codex sees the repository, not the sources. It cannot
 discharge step 2 — opening the citation and reading it is yours, and no second
@@ -208,8 +217,8 @@ behind it, the rate without its base, the assumption doing load-bearing work off
 the page, and the conclusion that only follows if you already know the material.
 
 Record the pass in Status like any other check: reviewed by Codex on `<date>`,
-what it raised, what was changed and what was rejected with the reason. If the
-plugin or the CLI is not available — `/codex:setup` reports it — say *that* in
+what it raised, what was changed and what was rejected with the reason. If
+`codex` is missing or not logged in — `codex doctor` reports it — say *that* in
 Status. "No independent pass" is a stated gap; self-review that quietly presents
 itself as review is the defect this section exists to prevent.
 

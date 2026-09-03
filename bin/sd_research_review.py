@@ -162,19 +162,26 @@ The half no script can do — work it before publishing, per document:
        handling restrictions survived the mirror.
 
   The second reader
-    9. Run the independent pass through the Codex plugin, from the repo, with
+    9. Run the independent pass through the `codex` CLI, from the repo, with
        the document in the working tree or the branch diff. The framing is
        shared, not retyped -- `adversarial-gate render --lens research-brief`
-       prints it, from local-adversarial-gate in platypeeps/system:
+       prints it, from local-adversarial-gate in the `system` repo:
 
-         /codex:adversarial-review --scope working-tree "markdown research
-           brief, not code — attack the argument: unsupported load-bearing
-           claims, numbers missing a unit/date/denominator, the assumption the
-           document never states"
+         codex exec -s read-only "This is a markdown research brief, not code.
+           Review the uncommitted working-tree changes as an adversarial reader.
+           Attack the argument, not the syntax: unsupported load-bearing claims,
+           numbers missing a unit/date/denominator, the assumption the document
+           never states. Cite file and line. Do not modify any files."
 
-       `/codex:setup` says whether it is available. It sees the repo, not the
-       sources, so it does not discharge step 2. Unavailable is a Status line,
-       not a silent skip.
+       `-s read-only` is not optional -- it is what stops an adversarial reader
+       editing the work it reviews. Run it in the background for anything past
+       a page; it buffers, so no output until it exits.
+
+       Not the `/codex:*` slash commands. The `codex@openai-codex` plugin is
+       not a dependency of this kit and may not be installed; the CLI is the
+       supported path. `codex doctor` says whether it is available and logged
+       in. It sees the repo, not the sources, so it does not discharge step 2.
+       Unavailable is a Status line, not a silent skip.
 
   Then record the outcome in the Status section: what was verified and how,
   what was not, what was cut, and the Codex pass — what it raised, what
