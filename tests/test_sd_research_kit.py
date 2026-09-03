@@ -19,6 +19,7 @@ import importlib.machinery
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -136,6 +137,46 @@ class CacheVenvTests(unittest.TestCase):
             self.assertEqual(
                 kit.cache_venv(), Path("/tmp/xdg-probe/sd-research-kit/venv")
             )
+
+
+class WorkItemCoverageTests(unittest.TestCase):
+    """`review` used to pass a repository whose work items were failing.
+
+    The research conventions govern the documents in `research.conf.py`;
+    `sd-plan` governs the items under `docs/work/`. A repository can follow both
+    at once, and until the two linters were connected this one printed
+    "Mechanical checks pass" while `sd-docs-lint` returned 1 in the same
+    directory -- true about this tool's scope, false about the repository.
+    """
+
+    def make_repo(self, tmp: Path, *, work: bool) -> Path:
+        (tmp / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        if work:
+            item = tmp / "docs" / "work" / "2026-01-01-probe"
+            item.mkdir(parents=True)
+            (item / "prd.md").write_text(
+                "---\ntitle: probe\nstatus: draft\ncreated: 2026-01-01\n---\n# Probe\n"
+            )
+        return tmp
+
+    def test_a_failing_work_item_fails_the_review(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), work=True)
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("2026-01-01-probe", result.stdout)
+        self.assertIn("status 'draft' is not one of", result.stdout)
+
+    def test_a_repository_with_no_work_directory_is_untouched(self) -> None:
+        """The cost is paid only by repositories that keep work items."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), work=False)
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Mechanical checks pass", result.stdout)
+        self.assertNotIn("docs/work", result.stdout)
 
 
 if __name__ == "__main__":

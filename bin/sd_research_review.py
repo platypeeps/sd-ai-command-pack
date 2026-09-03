@@ -14,12 +14,19 @@ conventions ask for. "Cites as evidence" and "names as superseded" are not
 mechanically separable, and a check that fires on correct behaviour teaches
 people to ignore the output.
 
+Checked here but owned elsewhere: work items under `docs/work/`. They follow
+`sd-plan`, not the research conventions, and `sd-docs-lint` is their linter —
+but a repository following both standards used to get "Mechanical checks pass"
+from this tool while the other one was failing, so the lint is run when the
+directory exists.
+
 Usage:  research-kit review [repo_dir ...]
 Exit 1 if any check fails.
 """
 import datetime
 import os
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -94,6 +101,51 @@ def status_section(text):
     return False, "no Status section"
 
 
+def work_items(repo):
+    """Work items belong to `sd-docs-lint`; saying nothing about them is the bug.
+
+    A repository can follow both standards at once: `sd-research-repo` governs
+    the documents named in `research.conf.py`, `sd-plan` governs the items under
+    `docs/work/`. Nothing connected the two linters, so `review` could print
+    "Mechanical checks pass" in a repository whose work items were failing
+    `sd-docs-lint` — a sentence true about this tool's own scope and false about
+    the repository the reader is standing in. That is the shape of failure this
+    file exists to prevent, so it should not ship one.
+
+    The lint is run rather than merely advertised, because a gate nobody invokes
+    is not a gate. A repository with no `docs/work/` never pays for it.
+    """
+    work = os.path.join(repo, "docs", "work")
+    if not os.path.isdir(work):
+        return 0
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sd-docs-lint")
+    if not os.path.exists(lint):
+        print("  WARN docs/work/ exists, but sd-docs-lint is not beside this script")
+        return 0
+    done = subprocess.run(
+        [sys.executable, lint], cwd=repo, capture_output=True, text=True
+    )
+    if done.returncode == 0:
+        print("  ok   docs/work/: sd-docs-lint clean")
+        return 0
+    # Exit 2 is "not a git repository", which is the caller's situation rather
+    # than a defect in the documents — report it, do not count it as a failure.
+    if done.returncode != 1:
+        detail = (done.stderr or done.stdout).strip().splitlines()
+        print(f"  WARN docs/work/: sd-docs-lint exited {done.returncode}"
+              f"{': ' + detail[-1] if detail else ''}")
+        return 0
+    failures = [
+        line[len("FAIL "):] for line in done.stderr.splitlines()
+        if line.startswith("FAIL ")
+    ]
+    for failure in failures:
+        # sd-docs-lint reports absolute paths; this output is read next to
+        # repo-relative document names, so make the two agree.
+        print("  FAIL " + failure.replace(repo + os.sep, ""))
+    return len(failures) or 1
+
+
 def check(repo):
     repo = os.path.abspath(repo)
     name = os.path.basename(repo)
@@ -132,7 +184,7 @@ def check(repo):
 
     if not bad:
         print(f"  ok   {len(docs)} document(s): provenance, Status, build freshness")
-    return bad
+    return bad + work_items(repo)
 
 
 CHECKLIST = """
