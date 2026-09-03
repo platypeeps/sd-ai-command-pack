@@ -121,9 +121,11 @@ closes with its open boxes visible rather than tidied.
 
 *Steps 8–11 — ticked.* This box was open on one thing: "`sd-writing-pack` is not
 yet migrated." It is. `sd plugin list` reports the `sdw` plugin registered with
-four kinds and `store: vault at $OBSIDIAN_VAULT`; `scripts/pack.py`'s five
-surviving verb groups (`tips pieces gh review meter`) hold **zero** vault-path
-constants, measured with `grep -cw -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT`.
+four kinds and `store: vault at $OBSIDIAN_VAULT`; the sibling repository's
+`sd-writing-pack/scripts/pack.py` -- outside this checkout, which is why the
+path is written in full -- has five surviving verb groups (`tips pieces gh
+review meter`) holding **zero** vault-path constants, measured there with
+`grep -cw -e BI_DB -e SP_DB -e TT_DB -e TP_DB -e VAULT scripts/pack.py`.
 The byte-compare half stays retired, as the 2026-09-02 note above said it would
 be — but it is retired having *run*: the bracket was re-pointed at the step 10b
 retarget and read `784 notes byte-identical to the baseline` across the first
