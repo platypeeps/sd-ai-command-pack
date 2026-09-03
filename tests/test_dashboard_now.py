@@ -237,9 +237,28 @@ class PageAndClientAgree(unittest.TestCase):
         from dashboard import server
         return set(re.findall(r"""\bid=["']([^"']+)["']""", server.PAGE))
 
+    def bodies(self) -> set[str]:
+        """The `<tbody>` ids, which exist for no reason but to be filled."""
+        from dashboard import server
+        return set(re.findall(r"""<tbody id=["']([^"']+)["']""", server.PAGE))
+
     def test_the_client_reaches_for_nothing_the_page_does_not_declare(self) -> None:
         orphans = sorted(self.handles() - self.declared())
         self.assertEqual(orphans, [], f"app.js looks up ids PAGE never emits: {orphans}")
+
+    def test_no_table_the_page_ships_is_left_unfilled(self) -> None:
+        """The other direction, which fails silently where the first is loud.
+
+        Deleting a lookup and leaving its element behind satisfies the check
+        above forever -- `handles` only shrinks -- and ships a table that
+        renders its header and never a row. Asserted over `<tbody>` ids alone
+        rather than every id in `PAGE`, because a tbody is the one kind of
+        element here that has no purpose except being filled: panels, tabs and
+        headings are addressed by the markup, not by the client.
+        """
+        unfilled = sorted(self.bodies() - self.handles())
+        self.assertEqual(unfilled, [],
+                         f"PAGE ships tables app.js never fills: {unfilled}")
 
     def test_the_check_can_fail(self) -> None:
         """The control. Both sides are regexes over prose-sized documents,
