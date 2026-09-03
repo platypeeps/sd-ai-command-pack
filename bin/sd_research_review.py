@@ -30,7 +30,10 @@ def load_docs(repo):
     if not os.path.exists(conf):
         return None
     ns: dict[str, Any] = {}
-    exec(compile(open(conf).read(), conf, "exec"), ns)
+    # nosec B102 - research.conf.py is a file in the repo being rendered, at the
+    # same trust level as this script, and the format needs execution: at least
+    # one live config builds its DOCS list with a loop.
+    exec(compile(open(conf).read(), conf, "exec"), ns)  # nosec B102
     return ns.get("DOCS") or []
 
 

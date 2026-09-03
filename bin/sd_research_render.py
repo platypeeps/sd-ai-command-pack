@@ -200,7 +200,10 @@ def main():
     if not os.path.exists(conf):
         sys.exit("no research.conf.py in %s" % repo)
     ns: dict[str, Any] = {}
-    exec(compile(open(conf).read(), conf, "exec"), ns)
+    # nosec B102 - research.conf.py is a file in the repo being rendered, at the
+    # same trust level as this script, and the format needs execution: at least
+    # one live config builds its DOCS list with a loop.
+    exec(compile(open(conf).read(), conf, "exec"), ns)  # nosec B102
     project = ns.get("PROJECT", os.path.basename(repo).split("-")[0].upper())
     print("%s  ->  build/" % os.path.basename(repo))
     for cfg in ns["DOCS"]:
