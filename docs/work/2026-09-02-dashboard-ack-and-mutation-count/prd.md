@@ -19,11 +19,11 @@ rather than to itself. Both are still open, both were verified against the worki
 ack key** (R11-D20), so it identifies one alert and not one row" — and nothing stores an ack.
 `RUN_ALLOWLIST` in `dashboard/actions.py:52-58` holds exactly one entry, `index`. There is no ack
 producer and no ack consumer, so Now re-renders every row it ranked on the previous poll. The
-prior item recorded this at `implement.md:2062-2068` as "a tab-scoped version of the
+prior item recorded this at `../2026-08-29-artifacts-as-product/implement.md:2062-2068` as "a tab-scoped version of the
 dead-destination failure R11-D19 was written about," and assigned it to "whichever step builds
 the ack store." No step did.
 
-**2. R11-D10's deletion criterion has no counter.** The criterion (`design.md:1528-1532`) is:
+**2. R11-D10's deletion criterion has no counter.** The criterion (`../2026-08-29-artifacts-as-product/design.md:1528-1532`) is:
 sixty days after the 6b swap, if the index shows fewer than ten mutating requests from a tailnet
 Host, the write path and its three guards are deleted and the dashboard returns to GET-only.
 `do_POST` (`server.py:443-479`) writes no record of having run — it validates, dispatches to
@@ -34,7 +34,7 @@ read as one.
 This is the second time the same failure has been found in this codebase. R10-D3's 60-day
 criterion had the identical shape and was fixed on 2026-09-02 by making `sd-handoff-restore`
 append one line per restore to `handoff/loads.jsonl`; its evaluation is now answerable on
-2026-11-01. `implement.md:2069-2076` names the repeat in as many words: "a deletion criterion
+2026-11-01. `../2026-08-29-artifacts-as-product/implement.md:2069-2076` names the repeat in as many words: "a deletion criterion
 nobody can evaluate is the failure mode standing rule 1 exists to prevent... It happened twice.
 The rule catches a mechanism arriving without a criterion; it does not catch a criterion arriving
 without a counter."
@@ -48,8 +48,8 @@ without a counter."
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
 | Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:443-479` |
 | `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
-| 6b swap closed | 2026-09-01 (6b-9) | `implement.md:1504` |
-| R11-D10 evaluation date, read literally | **2026-10-31**, against a count of zero | `design.md:1529` + the above |
+| 6b swap closed | 2026-09-01 (6b-9) | `../2026-08-29-artifacts-as-product/implement.md:1504` |
+| R11-D10 evaluation date, read literally | **2026-10-31**, against a count of zero | `../2026-08-29-artifacts-as-product/design.md:1529` + the above |
 | Closest precedent's cost | `record_load` + `load_age_seconds` = **59 code lines** | the tokeniser, over `bin/sd-handoff-restore:157-313` |
 
 `DASHBOARD_CODE_CAP` moves **downward only** (`tests/test_loc_caps.py:20`), so 110 lines is a
@@ -58,7 +58,7 @@ constraint on everything below, and any solution that does not fit inside it is 
 
 ## The clock is already running, and that is the urgent half
 
-6b-9 closed on 2026-09-01 (`implement.md:1504`), so a literal reading of R11-D10 makes its
+6b-9 closed on 2026-09-01 (`../2026-08-29-artifacts-as-product/implement.md:1504`), so a literal reading of R11-D10 makes its
 criterion answerable on **2026-10-31** — against a count of zero, because nothing counts. "Fewer
 than ten mutating requests" would be satisfied, and the rule would delete a write path the phone
 uses daily, on the strength of evidence that was never collected. A criterion that cannot be
@@ -77,7 +77,7 @@ move the date by silence.
 ## The tension this item exists to resolve
 
 An ack names one alert. Naming a thing is a parameter, and **R11-D25 decided against parameters**
-(`design.md:2255-2280`): an action is a command and not a form, it takes no arguments from the
+(`../2026-08-29-artifacts-as-product/design.md:2255-2280`): an action is a command and not a form, it takes no arguments from the
 page, and the write path's load-bearing property is that "nothing a caller sends is interpolated."
 R11-D25 rejected ~100 lines of parameter validator against the 159 lines then remaining, for one
 tab, before a second caller existed to say what the shape should be.
@@ -138,7 +138,7 @@ mostly about. Specific to this item:
       records rather than discovers.
 - [ ] `grep` over `dashboard/` shows no caller-supplied value reaching an argv.
 - [ ] `dashboard/` stays under both caps, with the PR reporting its own line count against the
-      110-line code headroom (R11-D24's convention at `design.md:1330`).
+      110-line code headroom (R11-D24's convention at `../2026-08-29-artifacts-as-product/design.md:1330`).
 - [ ] Each new mechanism carries an incident and an evaluable deletion criterion, with the
       evaluating command written down at the time the mechanism lands.
 
@@ -172,7 +172,7 @@ above was checked against the working tree or the prior item's artifacts, not ag
 - **C-1 — the criterion's clock was left implicit. Blocking. `addressed`.** The draft said the
   criterion "has no counter" without saying when it comes due. 6b-9 closed 2026-09-01, so the
   literal date is 2026-10-31 and the literal answer is a zero that deletes a live write path.
-  Evidence: `implement.md:1504`, `design.md:1529`. Owning artifact: this file, new section *The
+  Evidence: `../2026-08-29-artifacts-as-product/implement.md:1504`, `../2026-08-29-artifacts-as-product/design.md:1529`. Owning artifact: this file, new section *The
   clock is already running*.
 - **C-2 — the 110-line budget was asserted, never sized. Material. `addressed`.** Evidence:
   the closest precedent is 59 code lines by the same tokeniser
