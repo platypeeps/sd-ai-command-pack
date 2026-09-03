@@ -196,7 +196,7 @@ macOS leg is restored.
 - Claude permissions split by what they describe. A rule about *this machine* —
   a path only you have, a tool only you installed — goes in the ignored
   `.claude/settings.local.json`. A rule about *this repository's workflow* —
-  `make`, the file-reading commands, the GitHub tools a shipped skill tells you
+  a named `make` target, a repository entrypoint, the GitHub tools a shipped skill tells you
   to call — goes in tracked `.claude/settings.json`, so a second contributor
   gets the same quiet loop without copying anything, and the rules stop
   applying the moment they work elsewhere. When in doubt, ask whether the rule
