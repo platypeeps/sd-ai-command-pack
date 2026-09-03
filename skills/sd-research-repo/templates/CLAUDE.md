@@ -122,7 +122,7 @@ shareable mirror. `90-scratch/` is not mirrored.
 Mirror shape — full content minus the H1, opening with a pointer back to the file:
 
 ```markdown
-*Source: **`<absolute path to this document in the checkout>`** — edit there, then update this page.*
+*Source: **`file:///<absolute path to this document in the checkout>`** — edit there, then update this page.*
 
 <the document's provenance line>
 
