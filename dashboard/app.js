@@ -179,17 +179,29 @@ async function drawTracker(route, into, more, subLine, noun) {
   const n = payload.needsYou.length;
   const m = payload.other.length;
   subLine.textContent =
-    `${n} ${n === 1 ? noun.one : noun.many} assigned to you or awaiting ` +
-    `your review${stamp}`;
+    `${n} ${n === 1 ? noun.one : noun.many} ${noun.needs}${stamp}`;
   more.summary.textContent =
-    `${m} other ${m === 1 ? noun.one : noun.many} involving you: filed, ` +
-    `authored, watching or mentioned`;
+    `${m} other ${m === 1 ? noun.one : noun.many} involving you: ${WHY}`;
   fillIssues(into, payload.needsYou, true);
   fillIssues(more.tbody, payload.other, false);
 }
 
-const ISSUE = { one: "issue", many: "issues" };
-const PULL = { one: "pull request", many: "pull requests" };
+// Both strings come from here rather than from the renderer, because the two
+// tabs do not mean the same thing by "needs you". `store.NEEDS_YOU` is
+// `assigned` and `review-requested`, and only a pull request can be
+// review-requested -- an Issues tab reading "awaiting your review" is
+// describing a state its rows cannot be in.
+const ISSUE = { one: "issue", many: "issues", needs: "assigned to you" };
+const PULL = {
+  one: "pull request",
+  many: "pull requests",
+  needs: "assigned to you or awaiting your review",
+};
+// Every `why` a collector can file into `other`: `github.py` writes the first
+// two, `jira.py` the last three (`filed`, `watching`, and `matched` for a row
+// its JQL selected for some reason it cannot name). Listing four of five reads
+// as an enumeration and is a claim about what is behind the disclosure.
+const WHY = "authored, mentioned, filed, watching or matched";
 const drawIssues = () =>
   drawTracker("/api/issues", needs, issueMore, issueSub, ISSUE);
 const drawPrs = () => drawTracker("/api/prs", prNeeds, prMore, prSub, PULL);

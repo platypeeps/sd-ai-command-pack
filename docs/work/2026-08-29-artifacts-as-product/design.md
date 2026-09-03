@@ -1889,7 +1889,7 @@ operator anywhere". Both halves are implemented and neither is wrong. What neith
 is whether the anchor has anything to land on.
 
 **It does not, in either direction.** A plugin cannot name a backbone id: `panelId`
-(`dashboard/app.js:489`) composes the DOM id from the plugin's own prefix and tab name, lowercased
+(`dashboard/app.js:502`) composes the DOM id from the plugin's own prefix and tab name, lowercased
 with non-alphanumerics collapsed, and the panel is `panel-plugin-<that>`. So the system plugin's
 Toolbox tab is `panel-plugin-sys-toolbox`, and none of that composition is published anywhere a
 plugin author reads. A plugin cannot name an id inside its own tile either: `id` is absent from
