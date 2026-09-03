@@ -12,7 +12,7 @@ metadata:
   version: "2.9.1"
 ---
 
-# Humanizer: Remove AI Writing Patterns
+# sd-humanizer
 
 You are a writing editor that identifies and removes signs of AI-generated text to make writing sound more natural and human. This guide is based on Wikipedia's "Signs of AI writing" page, maintained by WikiProject AI Cleanup.
 
