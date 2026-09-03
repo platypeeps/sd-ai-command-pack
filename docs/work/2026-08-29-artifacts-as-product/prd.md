@@ -61,14 +61,46 @@ one engineer plus agents.
 
 ## Acceptance criteria
 
-- [ ] M0 tombstone release 0.72.0 tagged; `Pack version update check` on any consumer names it.
+- [x] M0 tombstone release 0.72.0 tagged; ~~`Pack version update check` on any consumer names it~~. *(Tag verified 2026-09-01. The consumer half is **retired 2026-09-02**: the check it names was deleted by this item's own step 3-c, so it has no subject left to pass. See the retirement note below.)*
 - [x] Step 0: release/gate jobs deleted; every remaining CI job green.
 - [x] Steps 1–3: one copy of every shipped file; `.trellis` gone from the pack; new installer + 12 skills land; scratch-repo `sd-plan` → `sd-ship` E2E merges a PR with only `<work>/**` tracked.
 - [x] Step 3-c: one removal PR per consumer (9); zero trellis/router greps per repo; CI green.
-- [ ] Steps 4–7: routers retired, se-* folded as sd-*, machine cleanup leaves `handoff/`+`intents/` intact, backlog parked, 1.0.0 tagged.
+- [x] Steps 4–7: routers retired, se-* folded as sd-*, machine cleanup leaves `handoff/`~~+`intents/`~~ intact, backlog parked, 1.0.0 tagged. *(Four clauses verified 2026-09-01 and re-verified 2026-09-02. The `intents/` half is **retired 2026-09-02**: the `item set-status` lane that would create it was deliberately not built, so the clause was vacuous rather than failing. See the retirement note below.)*
 - [x] Steps 8–11: plugin interface, sd-writing-pack migrated, vault move last with golden-corpus byte-compare green. *(Ticked 2026-09-02 — three clauses pass, the fourth was retired on the record rather than rounded up; see below.)*
-- [ ] 60-day criteria evaluated for R10-D1 (backlog lane) and R10-D3 (handoff hook).
+- [ ] 60-day criteria evaluated for ~~R10-D1 (backlog lane)~~ and R10-D3 (handoff hook). *(R10-D1's half is **retired 2026-09-02** — its clock is conditioned on a lane that was never built. R10-D3's stays open and is now answerable: earliest evaluation **2026-11-01**.)*
 - [x] `chore: record journal` commits = 0; bookkeeping share of non-merge commits < 5%. *(Ticked 2026-09-02 — 123 non-merge commits since the last one, none of them bookkeeping; see below.)*
+
+**2026-09-02 — three clauses are retired, in strikethrough, with the date.**
+This needs saying carefully, because rewriting an acceptance criterion after the
+fact is the exact move this document has spent two dated notes refusing. The
+distinction is not subtle and it is the only thing that makes the edit
+legitimate: **a check is never swapped for one that passes.** A clause is struck
+only when *this item deliberately deleted the thing the clause was about*, and
+the strikethrough leaves the original words on the page so the deletion is
+readable rather than tidied away.
+
+Three qualify, and each was verified from the filesystem rather than from prose:
+
+- *`Pack version update check` on any consumer.* Step 3-c's nine removal PRs
+  deleted it. `grep -rl 'Pack version update check'` over the repository returns
+  `CHANGELOG.md` and this file — a historical entry and the clause itself, and
+  no consumer anywhere.
+- *Machine cleanup leaves `intents/` intact.* `intents/` has never existed. The
+  `item set-status` lane that creates it was deliberately not built, which
+  `bin/sd-dashboard`'s own module docstring states in its first paragraph:
+  "Three verbs now, not the five the design lists." A clause about preserving
+  something that was never created cannot fail and cannot pass.
+- *R10-D1's 60-day criterion.* Conditioned on the backlog lane landing, and
+  `skills/sd-ship/SKILL.md` says "`--backlog`/`--agent codex` is not
+  implemented." The clock never started.
+
+What is **not** retired: R10-D3's 60-day criterion, which has a mechanism, now
+has a counter, and needs sixty days. It stays open with a date on it.
+
+The rule this establishes, for whoever closes the next item: an acceptance
+clause that survives its own subject is not evidence of anything, and leaving
+it unticked forever is not honesty — it is a box nobody can ever act on. Strike
+it, date it, say what deleted the subject, and leave the words visible.
 
 **2026-09-01 — two of the unticked boxes above are half-true, and are left
 unticked rather than rounded up.** Checked from the repository and the remote,
