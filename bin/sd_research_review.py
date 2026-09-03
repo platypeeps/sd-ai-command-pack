@@ -163,7 +163,10 @@ The half no script can do — work it before publishing, per document:
 
   The second reader
     9. Run the independent pass through the `codex` CLI, from the repo, with
-       the document in the working tree or the branch diff. The framing is
+       the document still UNCOMMITTED -- the prompt below points it at
+       working-tree changes, so committed work shows it an empty diff without
+       saying so. Already committed on a branch: name the comparison in the
+       prompt instead ("review `git diff main...HEAD`"). The framing is
        shared, not retyped -- `adversarial-gate render --lens research-brief`
        prints it, from local-adversarial-gate in the `system` repo:
 

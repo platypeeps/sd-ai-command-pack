@@ -95,13 +95,15 @@ codex exec -s read-only "This is a markdown research repository, not code. Revie
 
 `-s read-only` is not optional — it is what keeps an adversarial reader from editing the work
 it is reviewing. Name the documents in the prompt when the diff is large. Run it in the
-background for anything past a page; it buffers, so an empty output file means still running,
-not hung.
+background for anything past a page; it buffers stdout and prints nothing until it exits, so
+silence is normal rather than a hang.
 
-It reads the **working tree**, so the document has to be uncommitted or on a branch diff
-against `main` — already merged to `main`, there is nothing for it to look at. Its default
-framing is a code review, hence the focus text. It sees the repo, not the sources, so step 2 —
-reopening the citation — stays yours.
+The focus text points it at **uncommitted** working-tree changes, so the ordinary case is:
+review before committing. Once the work is committed — on a branch or merged to `main` —
+`git status` and `git diff` show it nothing and the pass reviews an empty diff without saying
+so. For committed work on a branch, name the comparison in the prompt: *"review
+`git diff main...HEAD`"*. Its default framing is a code review, hence the focus text. It sees
+the repo, not the sources, so step 2 — reopening the citation — stays yours.
 
 Record the outcome in the Status section: what was verified and how, what was not, what was
 cut, and the Codex pass — date, what it raised, what changed, what was rejected and why. A
