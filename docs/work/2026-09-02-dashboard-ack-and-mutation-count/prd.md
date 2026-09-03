@@ -28,7 +28,7 @@ the ack store." No step did.
 **2. R11-D10's deletion criterion has no counter.** The criterion (`docs/work/2026-08-29-artifacts-as-product/design.md:1528-1532`) is:
 sixty days after the 6b swap, if the index shows fewer than ten mutating requests from a tailnet
 Host, the write path and its three guards are deleted and the dashboard returns to GET-only.
-`do_POST` (`dashboard/server.py:443`) writes no record of having run — it validates, dispatches to
+`do_POST` (`dashboard/server.py:433`) writes no record of having run — it validates, dispatches to
 `actions.run`, and returns a body. The index has no table for it. The criterion therefore
 evaluates to "no evidence" rather than to a number, which is not the same answer and cannot be
 read as one.
@@ -41,7 +41,7 @@ the server would bind an address it then answers 403 on. The cost was never writ
 the reason — the *first* answer is also the *only* answer. `tailnet_addrs`
 (`dashboard/server.py:89`) returns an empty list for three different failures (no `tailscale` on
 `PATH`, a non-zero exit, output that does not parse as an address), and `serve`
-(`dashboard/server.py:530`) treats an empty list as an ordinary start, because loopback bound and
+(`dashboard/server.py:520`) treats an empty list as an ordinary start, because loopback bound and
 its only fatal case is nothing binding at all. `KeepAlive` (`bin/sd-dashboard:58`) restarts on
 exit, and nothing exits. So a probe that comes up empty at startup — launchd racing `tailscaled` at
 boot is the ordinary way — leaves the dashboard reachable only from the machine it runs on, for as
@@ -82,7 +82,7 @@ from an absent one, and an unbound address from an unwanted one.
 | `dashboard/` total lines | **4,128 against a 4,300 cap — 172 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
 | `dashboard/` code lines | **2,190 against a 2,300 cap — 110 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
-| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:443-479` |
+| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:433-479` |
 | `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
 | 6b swap closed | 2026-09-01 (6b-9) | `docs/work/2026-08-29-artifacts-as-product/implement.md:1504` |
 | R11-D10 evaluation date, read literally | **2026-10-31**, against a count of zero | `docs/work/2026-08-29-artifacts-as-product/design.md:1529` + the above |
@@ -286,7 +286,7 @@ routes — nothing counts, *and* nothing could have been counted.
   wording.** No timestamps means the boot-order race is a hypothesis about that start, not an
   observation of it. The claim the PRD actually makes is narrower and is provable from the code:
   `tailnet_addrs` (`dashboard/server.py:89`) collapses three distinct failures into one empty list,
-  `bound_addrs` (`dashboard/server.py:125`) latches it, and `serve` (`dashboard/server.py:530`)
+  `bound_addrs` (`dashboard/server.py:125`) latches it, and `serve` (`dashboard/server.py:520`)
   reports success. Which of the three fired on that start does not change the defect or the fix.
 - **C-8 — gap 3 could be its own item. Material. `rebutted`.** The usual reason to split is budget
   contention, and it does not apply: gap 3's fix can charge `bin/`, which gaps 1 and 2 cannot. The

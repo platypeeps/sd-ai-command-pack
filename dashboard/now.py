@@ -102,17 +102,25 @@ def stale_days(updated: str, today: str) -> int | None:
 
 
 def pr_rows(payload: dict, today: str = "") -> list[dict]:
-    """Open pull requests, loudest when they have gone quiet.
+    """Open pull requests that are waiting on you, loudest when quiet.
 
     Keyed without the age, so acking a PR does not un-ack itself tomorrow --
     the row identifies the pull request, and how long it has been sitting is
     a property of it rather than a different alert.
+
+    `needsYou` only. This read both groups until the view was used in anger:
+    the index also collects `author:@me` and `mentions:@me`, and on a fleet
+    this size those two are most of what the tracker returns, so Now filled up
+    with pull requests nobody was waiting on the operator for and the rows
+    that did want an answer sank underneath them. Something being *yours* is
+    not the same question as something *needing you*, and Now only ever asked
+    the second one.
     """
     if not payload.get("available"):
         return []
     today = today or datetime.now(timezone.utc).date().isoformat()
     out = []
-    for pr in [*payload.get("needsYou", []), *payload.get("other", [])]:
+    for pr in payload.get("needsYou", []):
         days = stale_days(pr.get("updated_at") or "", today)
         quiet = days is not None and days >= STALE_DAYS
         out.append({

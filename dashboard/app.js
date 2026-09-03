@@ -4,10 +4,8 @@
 const rows = document.getElementById("rows");
 const sub = document.getElementById("sub");
 const needs = document.getElementById("needs");
-const other = document.getElementById("other");
 const issueSub = document.getElementById("issue-sub");
 const prNeeds = document.getElementById("pr-needs");
-const prOther = document.getElementById("pr-other");
 const prSub = document.getElementById("pr-sub");
 const skillRows = document.getElementById("skill-rows");
 const skillSub = document.getElementById("skill-sub");
@@ -127,6 +125,13 @@ function fillIssues(tbody, list, emphasise) {
 // Issues and PRs are one renderer because they are one table: the search that
 // fills the index does not separate them, and the only thing that differs
 // between the two tabs is which `kind` the route asked for.
+//
+// One table, not two. The second one listed `author:@me` and `mentions:@me`
+// -- everything the account touches rather than everything it owes anybody --
+// and it was the longer of the two by a wide margin, so the tab read as a
+// feed. The index still collects those buckets and `/api/{issues,prs}` still
+// returns them; the count below says how many are being withheld, because a
+// view that quietly drops rows is worse than one that lists too many.
 async function drawTracker(route, into, subLine, noun) {
   let payload;
   try {
@@ -137,22 +142,18 @@ async function drawTracker(route, into, subLine, noun) {
   }
   if (!payload.available) {
     subLine.textContent = payload.reason;
-    fillIssues(into[0], [], true);
-    fillIssues(into[1], [], false);
+    fillIssues(into, [], true);
     return;
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
   subLine.textContent =
-    `${payload.needsYou.length} waiting on you, ` +
-    `${payload.other.length} other open ${noun}${stamp}`;
-  fillIssues(into[0], payload.needsYou, true);
-  fillIssues(into[1], payload.other, false);
+    `${payload.needsYou.length} ${noun} waiting on you \u00b7 ` +
+    `${payload.other.length} open but not yours to answer${stamp}`;
+  fillIssues(into, payload.needsYou, true);
 }
 
-const drawIssues = () =>
-  drawTracker("/api/issues", [needs, other], issueSub, "issues");
-const drawPrs = () =>
-  drawTracker("/api/prs", [prNeeds, prOther], prSub, "pull requests");
+const drawIssues = () => drawTracker("/api/issues", needs, issueSub, "issues");
+const drawPrs = () => drawTracker("/api/prs", prNeeds, prSub, "pull requests");
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:

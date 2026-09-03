@@ -72,7 +72,7 @@ class BackboneRows(unittest.TestCase):
 
 class PullRequestRows(unittest.TestCase):
     def payload(self, *prs: dict) -> dict:
-        return {"available": True, "needsYou": [], "other": list(prs)}
+        return {"available": True, "needsYou": list(prs), "other": []}
 
     def pr(self, number: int, updated: str) -> dict:
         return {"repo": "o/r", "number": number, "title": "t",
@@ -118,13 +118,22 @@ class PullRequestRows(unittest.TestCase):
         must not be the view that goes blank because of it."""
         self.assertEqual(now.pr_rows({"available": False}), [])
 
-    def test_both_groups_contribute(self) -> None:
-        """The split is a rendering concern for the PRs tab; Now wants all of
-        them, and dropping `needsYou` would hide the ones assigned to you."""
+    def test_only_the_group_that_needs_you_contributes(self) -> None:
+        """Reverses `test_both_groups_contribute`, which asserted the opposite.
+
+        That test was right about the split being a rendering concern and
+        wrong about which way Now should resolve it. `other` is
+        `author:@me` and `mentions:@me` -- on this account the larger of the
+        two groups -- so Now was ranking pull requests the operator had merely
+        opened against the ones somebody was blocked on, and the second kind
+        went below the fold. A row here is a claim that something wants an
+        answer, which is what `needs_you` already decides.
+        """
         payload = {"available": True,
                    "needsYou": [self.pr(1, "2026-08-31")],
                    "other": [self.pr(2, "2026-08-31")]}
-        self.assertEqual(len(now.pr_rows(payload, "2026-08-31")), 2)
+        rows = now.pr_rows(payload, "2026-08-31")
+        self.assertEqual([row["id"] for row in rows], ["pr:o/r#1"])
 
 
 def gone(count: int, live: int = 0) -> list[dict]:
