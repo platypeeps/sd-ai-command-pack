@@ -144,6 +144,58 @@ def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
+def record_load(directory: Path, packet: dict) -> None:
+    """Append one line per restore to a log the deletion criterion can count.
+
+    R10-D3's criterion is "if after 60 days fewer than 5 packets have been
+    auto-loaded, or the median packet age at load exceeds 7 days, delete the
+    hook." Both numbers survive a single restore already -- `claim` writes the
+    packet back with `consumed` set beside its `created` -- but neither
+    survives the *next* one: there is one packet per directory and a fresh
+    `sd-handoff` overwrites it. So the counts were bounded by the number of
+    directories, not by the number of loads, and a busy directory looked
+    exactly like an idle one. That made the criterion unevaluable in the way
+    standing rule 1 exists to prevent, which the closing pass on
+    2026-09-02 found and this closes.
+
+    Append-only, one JSON object per line, and deliberately not a packet: the
+    digest names the directory without recording the path, an age in seconds is
+    the whole of what the criterion needs, and nothing here is read back by any
+    command. Evaluate it with `wc -l` and a median over `age_seconds`.
+
+    Only this file writes to it. `sd-handoff --show` claims a packet too, but
+    the criterion counts packets *auto-loaded*, and `--show` is the manual read
+    path it is measured against -- logging both would answer a question nobody
+    asked with a number that looks like the answer to this one.
+    """
+    line = json.dumps({
+        "consumed": now_iso(),
+        "created": packet.get("created"),
+        "age_seconds": load_age_seconds(packet.get("created")),
+        "directory": hashlib.sha256(
+            str((packet.get("repo") or {}).get("root") or "").encode("utf-8")
+        ).hexdigest()[:16],
+    }, sort_keys=True)
+    try:
+        with (directory / "loads.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+    except OSError:
+        # Same reasoning as the write-back below: a session starting up gets
+        # its context whether or not the measurement of that fact lands.
+        pass
+
+
+def load_age_seconds(created_raw: object) -> int | None:
+    """Seconds between a packet being written and being restored, or None."""
+    try:
+        created = dt.datetime.fromisoformat(str(created_raw))
+    except (TypeError, ValueError):
+        return None
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=dt.timezone.utc)
+    return int((dt.datetime.now(dt.timezone.utc) - created).total_seconds())
+
+
 def claim(path: Path, packet: dict) -> bool:
     """Take exclusive ownership by renaming the packet away, then write it back.
 
@@ -155,6 +207,12 @@ def claim(path: Path, packet: dict) -> bool:
         os.rename(path, claimed)
     except OSError:
         return False
+    # After the rename, not before: only the session that won the race has
+    # restored anything, and a log the losers also wrote to would count races
+    # rather than loads. Argued rather than pinned -- a fixture cannot force a
+    # second hook to reach this line and lose, so `LoadLogTests` asserts the
+    # count two hooks produce and says so.
+    record_load(path.parent, packet)
     packet["consumed"] = now_iso()
     body = (json.dumps(packet, indent=2) + "\n").encode("utf-8")
     try:

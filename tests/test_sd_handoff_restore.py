@@ -438,6 +438,130 @@ class RaceTests(RestoreFixture):
         self.assert_silent(self.restore())
 
 
+class LoadLogTests(RestoreFixture):
+    """R10-D3's deletion criterion needs a count and a median, from somewhere.
+
+    "Fewer than 5 packets auto-loaded, or median packet age at load over 7
+    days" reads as though the packets themselves answer it -- each one keeps
+    `created` and, after a restore, `consumed`. They do not: there is one
+    packet per directory and the next `sd-handoff` overwrites it, so the
+    highest count the packets can report is the number of directories. These
+    fixtures pin the log that makes the criterion answerable, and pin the two
+    ways an unpinned log would quietly report the wrong number -- counting
+    races instead of loads, and taking session startup down with it.
+    """
+
+    def log_path(self) -> pathlib.Path:
+        return (
+            self.home / ".local" / "state" / "sd-ai-command-pack" / "handoff"
+            / "loads.jsonl"
+        )
+
+    def entries(self) -> list[dict]:
+        path = self.log_path()
+        if not path.is_file():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def test_a_restore_appends_one_entry_carrying_the_age_at_load(self) -> None:
+        self.write_packet("--summary", "counted once")
+        self.context(self.restore())
+        entries = self.entries()
+        self.assertEqual(len(entries), 1, entries)
+        entry = entries[0]
+        self.assertEqual(sorted(entry), ["age_seconds", "consumed", "created", "directory"])
+        # The age is the criterion's second number; a packet written moments
+        # ago must read as ~0 rather than as None or a negative.
+        self.assertIsInstance(entry["age_seconds"], int)
+        self.assertGreaterEqual(entry["age_seconds"], 0)
+        self.assertLess(entry["age_seconds"], 300)
+
+    def test_the_count_survives_the_packet_being_overwritten(self) -> None:
+        """The whole reason the log exists, stated as a fixture.
+
+        Two handoffs and two restores in one directory are two loads. The
+        packet file can only ever report the last of them, so a criterion read
+        off the packets would say 1 where the truth is 2 -- and would say 1 no
+        matter how many restores happened.
+        """
+
+        for note in ("first", "second"):
+            self.write_packet("--summary", f"{note} handoff")
+            self.context(self.restore())
+        self.assertEqual(len(self.entries()), 2, self.entries())
+        self.assertEqual(json.loads(
+            self.packet_path(self.repo).read_text(encoding="utf-8")
+        )["summary"], "second handoff")
+
+    def test_the_loser_of_a_race_logs_nothing(self) -> None:
+        """One packet restored once is one load, however many hooks tried.
+
+        What this observes is the outcome, not the ordering that produces it.
+        Whether the second hook returns early on a `consumed` packet or reaches
+        `claim` and loses the rename depends on how the two processes interleave,
+        so moving `record_load` above the rename does not reliably fail this --
+        the placement is argued in the source and not pinned here. What is
+        pinned is the number that matters: two hooks, one restore, one entry.
+        """
+
+        self.write_packet("--summary", "exactly one session gets this")
+        payload = json.dumps({"cwd": str(self.repo), "source": "clear"})
+        processes = [
+            subprocess.Popen(
+                [str(RESTORE)],
+                cwd=str(self.repo),
+                env=self.env(self.repo),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(2)
+        ]
+        outputs = [process.communicate(payload) for process in processes]
+        self.assertEqual(len([o for o, _ in outputs if o.strip()]), 1, outputs)
+        self.assertEqual(len(self.entries()), 1, self.entries())
+
+    def test_show_is_the_manual_path_and_is_not_counted(self) -> None:
+        """The criterion measures auto-loads against the manual read path."""
+
+        self.write_packet("--summary", "read by hand")
+        shown = subprocess.run(
+            [str(HANDOFF), "--show"],
+            cwd=str(self.repo),
+            env=self.env(self.repo),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(self.entries(), [])
+
+    def test_an_unwritable_log_does_not_cost_the_session_its_context(self) -> None:
+        """Measuring the restore must never be able to prevent one.
+
+        A read-only state directory is the realistic way this breaks -- a
+        restored backup, a permissions sweep -- and a session losing its
+        handoff because the counter could not be incremented would be a worse
+        bug than the one the counter exists to fix.
+        """
+
+        self.write_packet("--summary", "context survives an unwritable log")
+        directory = self.log_path().parent
+        self.log_path().write_text("", encoding="utf-8")
+        mode = directory.stat().st_mode
+        os.chmod(self.log_path(), 0o444)
+        self.addCleanup(os.chmod, directory, mode)
+        result = self.restore()
+        self.assertIn("context survives an unwritable log", self.context(result))
+        self.assertEqual(self.entries(), [])
+
+
 class ShapeTests(RestoreFixture):
     def test_the_hook_is_executable_and_self_contained(self) -> None:
         self.assertTrue(os.access(RESTORE, os.X_OK))

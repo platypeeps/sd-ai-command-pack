@@ -433,7 +433,11 @@ only if the manual flow measurably fails.
 *Deletion criterion (standing rule 1).* Incident: context-compromised sessions requiring restart,
 user-reported 2026-08-29. Criterion: if after 60 days fewer than 5 packets have been auto-loaded,
 or the median packet age at load exceeds 7 days (meaning it is not serving live restarts), delete
-the hook; `sd-handoff --show` stays as the manual load path (no 13th verb).
+the hook; `sd-handoff --show` stays as the manual load path (no 13th verb). *(2026-09-02: both
+numbers come from `~/.local/state/sd-ai-command-pack/handoff/loads.jsonl`, one line per restore,
+written by the hook and by nothing else. It was added that day, so the 60 days run from then --
+the criterion had no data source at all until it existed, which is the gap the work item's close
+records.)*
 
 **Lane B — git carrier branch (`sd-handoff --push`, opt-in).** The r7 design, retained for the
 cross-machine and cross-tool cases and no longer the default. The work item is the artifact:
