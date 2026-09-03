@@ -46,3 +46,12 @@ mypy_path = ".github/scripts"
 # of them `__main__` and refuses the second as a duplicate module, so the
 # second extensionless tool added to the lint target would be unlintable.
 scripts_are_modules = true
+
+# `markdown` is the research renderer's one third-party import, and it ships no
+# stubs. Declared here rather than as an inline `# type: ignore`, because
+# `warn_unused_ignores` above turns an inline one into a failure the day
+# types-Markdown appears in the dev requirements -- a correction that would then
+# be made in whichever pull request happened to add the stubs.
+[[tool.mypy.overrides]]
+module = ["markdown"]
+ignore_missing_imports = true
