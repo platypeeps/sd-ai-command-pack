@@ -224,15 +224,24 @@ macOS leg is restored.
   rather than one wildcard, `python3 bin/sd_install.py` plus `--user`,
   `--status` or `--pull`, one per rule. Path-scoping the *script* is not the
   test; what the script does with a path *argument* is.
-- Check the form you actually type before deciding a rule covers it. `sd-status`
-  and `sd-dashboard` take a port, a count or nothing, so they keep the wildcard
-  -- but they are executable and carry a `python3` shebang, so `bin/sd-status
-  --json` and `python3 bin/sd-status --json` are both real invocations and a
-  rule matching one does not match the other. They get a rule each way.
-  `./bin/sd-status` matches neither and will prompt. `sd_install.py` has no
-  shebang and is not executable, so it has one form and needs one. A rule that
-  names a form nobody types is the same dead grant as a rule naming a directory
-  that does not exist.
+- Check the form you actually type before deciding a rule covers it.
+  `bin/sd-status` is executable and carries a `python3` shebang, so
+  `bin/sd-status --json` and `python3 bin/sd-status --json` are both real
+  invocations and a rule matching one does not match the other; it gets a rule
+  each way. `./bin/sd-status` matches neither and will prompt. `sd_install.py`
+  has no shebang and is not executable, so it has one form and needs one. A
+  rule that names a form nobody types is the same dead grant as a rule naming a
+  directory that does not exist.
+- A wildcard over a command with subcommands grants every subcommand, including
+  the ones nobody was thinking about. `sd-status` takes flags only -- `--json`,
+  `--parked`, `--limit N` -- so `bin/sd-status:*` grants a read. `sd-dashboard`
+  takes a *verb*, and one of the three is `install`, which writes a plist into
+  `~/Library/LaunchAgents` and runs `launchctl bootstrap`; a wildcard there
+  registers a system service on anyone's laptop. It is absent from the list
+  rather than verb-scoped, because nothing in this repository's documented
+  workflow runs it by hand -- it runs from launchd -- and a grant for a command
+  nobody types is surface without a caller. Count the subcommands before
+  reaching for `:*`, and leave out what the workflow does not repeat.
 - Do not allow generic file readers. `cat`, `tail`, `cut` and their siblings
   take any path, so allowing one grants unscoped read of the whole machine --
   and it reads *around* the `Read(**/...)` deny rules a machine-scope config
