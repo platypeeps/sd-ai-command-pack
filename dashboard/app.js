@@ -4,11 +4,17 @@
 const rows = document.getElementById("rows");
 const sub = document.getElementById("sub");
 const needs = document.getElementById("needs");
-const other = document.getElementById("other");
 const issueSub = document.getElementById("issue-sub");
 const prNeeds = document.getElementById("pr-needs");
-const prOther = document.getElementById("pr-other");
 const prSub = document.getElementById("pr-sub");
+const issueMore = {
+  summary: document.getElementById("issue-more-count"),
+  tbody: document.getElementById("issue-more"),
+};
+const prMore = {
+  summary: document.getElementById("pr-more-count"),
+  tbody: document.getElementById("pr-more"),
+};
 const skillRows = document.getElementById("skill-rows");
 const skillSub = document.getElementById("skill-sub");
 const sessionTrees = document.getElementById("session-trees");
@@ -127,7 +133,29 @@ function fillIssues(tbody, list, emphasise) {
 // Issues and PRs are one renderer because they are one table: the search that
 // fills the index does not separate them, and the only thing that differs
 // between the two tabs is which `kind` the route asked for.
-async function drawTracker(route, into, subLine, noun) {
+//
+// One table, not two. The second one listed `author:@me` and `mentions:@me`
+// -- everything the account touches rather than everything it owes anybody --
+// and it was the longer of the two by a wide margin, so the tab read as a
+// feed. The index still collects those buckets and `/api/{issues,prs}` still
+// returns them; the count below says how many are being withheld, because a
+// view that quietly drops rows is worse than one that lists too many.
+//
+// That count names the two buckets rather than calling them settled. A first
+// draft read "not yours to answer", which is true of `author:@me` and a guess
+// about `mentions:@me` -- somebody can ask for a decision by naming you, and
+// no label here should decide they did not.
+//
+// Suppressing a bucket from a queue is a ranking decision; making it
+// unreachable is a different and worse one, so the withheld rows keep a
+// closed `<details>` of their own. A draft in between pointed the count at
+// `github.com/{issues,pulls}/{created,mentioned}` instead, which is wrong
+// here for a reason worth recording: `other` is not a GitHub group. `jira.py`
+// files rows into it as `filed`, `watching` and `matched`, and a GitHub link
+// is not a destination for those. The rows already carry their own `url`,
+// whichever tracker produced them, so the disclosure needs no link scheme at
+// all -- which is also why it is a disclosure and not a link.
+async function drawTracker(route, into, more, subLine, noun) {
   let payload;
   try {
     payload = await (await fetch(route)).json();
@@ -137,22 +165,46 @@ async function drawTracker(route, into, subLine, noun) {
   }
   if (!payload.available) {
     subLine.textContent = payload.reason;
-    fillIssues(into[0], [], true);
-    fillIssues(into[1], [], false);
+    // The summary too, not just the tables. These redraw on a 30s timer, so
+    // leaving the label alone shows last poll's "17 more ..." above an empty
+    // disclosure while the line beside it says the index cannot be read --
+    // a count with nothing behind it, which is the failure this whole change
+    // is about.
+    more.summary.textContent = `other open ${noun.many}`;
+    fillIssues(into, [], true);
+    fillIssues(more.tbody, [], false);
     return;
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
+  const n = payload.needsYou.length;
+  const m = payload.other.length;
   subLine.textContent =
-    `${payload.needsYou.length} waiting on you, ` +
-    `${payload.other.length} other open ${noun}${stamp}`;
-  fillIssues(into[0], payload.needsYou, true);
-  fillIssues(into[1], payload.other, false);
+    `${n} ${n === 1 ? noun.one : noun.many} ${noun.needs}${stamp}`;
+  more.summary.textContent =
+    `${m} other ${m === 1 ? noun.one : noun.many} involving you: ${WHY}`;
+  fillIssues(into, payload.needsYou, true);
+  fillIssues(more.tbody, payload.other, false);
 }
 
+// Both strings come from here rather than from the renderer, because the two
+// tabs do not mean the same thing by "needs you". `store.NEEDS_YOU` is
+// `assigned` and `review-requested`, and only a pull request can be
+// review-requested -- an Issues tab reading "awaiting your review" is
+// describing a state its rows cannot be in.
+const ISSUE = { one: "issue", many: "issues", needs: "assigned to you" };
+const PULL = {
+  one: "pull request",
+  many: "pull requests",
+  needs: "assigned to you or awaiting your review",
+};
+// Every `why` a collector can file into `other`: `github.py` writes the first
+// two, `jira.py` the last three (`filed`, `watching`, and `matched` for a row
+// its JQL selected for some reason it cannot name). Listing four of five reads
+// as an enumeration and is a claim about what is behind the disclosure.
+const WHY = "authored, mentioned, filed, watching or matched";
 const drawIssues = () =>
-  drawTracker("/api/issues", [needs, other], issueSub, "issues");
-const drawPrs = () =>
-  drawTracker("/api/prs", [prNeeds, prOther], prSub, "pull requests");
+  drawTracker("/api/issues", needs, issueMore, issueSub, ISSUE);
+const drawPrs = () => drawTracker("/api/prs", prNeeds, prMore, prSub, PULL);
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:

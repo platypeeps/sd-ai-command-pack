@@ -8,6 +8,7 @@ move under the operator between polls.
 from __future__ import annotations
 
 import random
+import re
 import unittest
 
 from dashboard import now
@@ -72,7 +73,7 @@ class BackboneRows(unittest.TestCase):
 
 class PullRequestRows(unittest.TestCase):
     def payload(self, *prs: dict) -> dict:
-        return {"available": True, "needsYou": [], "other": list(prs)}
+        return {"available": True, "needsYou": list(prs), "other": []}
 
     def pr(self, number: int, updated: str) -> dict:
         return {"repo": "o/r", "number": number, "title": "t",
@@ -118,13 +119,22 @@ class PullRequestRows(unittest.TestCase):
         must not be the view that goes blank because of it."""
         self.assertEqual(now.pr_rows({"available": False}), [])
 
-    def test_both_groups_contribute(self) -> None:
-        """The split is a rendering concern for the PRs tab; Now wants all of
-        them, and dropping `needsYou` would hide the ones assigned to you."""
+    def test_only_the_group_that_needs_you_contributes(self) -> None:
+        """Reverses `test_both_groups_contribute`, which asserted the opposite.
+
+        That test was right about the split being a rendering concern and
+        wrong about which way Now should resolve it. `other` is
+        `author:@me` and `mentions:@me` -- on this account the larger of the
+        two groups -- so Now was ranking pull requests the operator had merely
+        opened against the ones somebody was blocked on, and the second kind
+        went below the fold. A row here is a claim that something wants an
+        answer, which is what `needs_you` already decides.
+        """
         payload = {"available": True,
                    "needsYou": [self.pr(1, "2026-08-31")],
                    "other": [self.pr(2, "2026-08-31")]}
-        self.assertEqual(len(now.pr_rows(payload, "2026-08-31")), 2)
+        rows = now.pr_rows(payload, "2026-08-31")
+        self.assertEqual([row["id"] for row in rows], ["pr:o/r#1"])
 
 
 def gone(count: int, live: int = 0) -> list[dict]:
@@ -197,6 +207,114 @@ class Merge(unittest.TestCase):
         to discover that something got past it."""
         got = now.merge([], [{"id": "x", "source": "p"}, {"rank": 2, "id": "y"}])
         self.assertEqual([row["id"] for row in got], ["y", "x"])
+
+
+class PageAndClientAgree(unittest.TestCase):
+    """Every element the client reaches for is one the page declares.
+
+    There is no JavaScript harness here and adding one to cover a two-line
+    render change would cost more than the change. This is the part of that
+    coverage a Python test can actually hold, and it is the part that broke:
+    the tables and their `getElementById` handles live in two files, so
+    deleting a `<tbody>` and leaving the lookup -- or the reverse -- produces
+    a page that loads, draws most of itself, and silently stops filling one
+    table. `document.getElementById` returns null rather than raising, which
+    is why nothing else would have said so.
+
+    Ids the page mints at run time are excluded by construction: this reads
+    the literal `id="..."` attributes `PAGE` ships with, so a plugin table
+    built in JavaScript is out of scope, as it should be -- those are exactly
+    the ids `sanitise` strips (`test_an_id_is_dropped_so_a_plugin_cannot_
+    claim_a_backbone_element`).
+    """
+
+    def handles(self) -> set[str]:
+        from dashboard import server
+        return set(re.findall(r"""getElementById\(["']([^"']+)["']\)""",
+                              server.script_source()))
+
+    def declared(self) -> set[str]:
+        from dashboard import server
+        return set(re.findall(r"""\bid=["']([^"']+)["']""", server.PAGE))
+
+    def bodies(self) -> set[str]:
+        """The `<tbody>` ids, which exist for no reason but to be filled."""
+        from dashboard import server
+        return set(re.findall(r"""<tbody id=["']([^"']+)["']""", server.PAGE))
+
+    def test_the_client_reaches_for_nothing_the_page_does_not_declare(self) -> None:
+        orphans = sorted(self.handles() - self.declared())
+        self.assertEqual(orphans, [], f"app.js looks up ids PAGE never emits: {orphans}")
+
+    def test_no_table_the_page_ships_is_left_unfilled(self) -> None:
+        """The other direction, which fails silently where the first is loud.
+
+        Deleting a lookup and leaving its element behind satisfies the check
+        above forever -- `handles` only shrinks -- and ships a table that
+        renders its header and never a row. Asserted over `<tbody>` ids alone
+        rather than every id in `PAGE`, because a tbody is the one kind of
+        element here that has no purpose except being filled: panels, tabs and
+        headings are addressed by the markup, not by the client.
+        """
+        unfilled = sorted(self.bodies() - self.handles())
+        self.assertEqual(unfilled, [],
+                         f"PAGE ships tables app.js never fills: {unfilled}")
+
+    def test_the_check_can_fail(self) -> None:
+        """The control. Both sides are regexes over prose-sized documents,
+        and a regex that stops matching would make the assertion above pass
+        over an empty set forever."""
+        self.assertIn("pr-needs", self.handles())
+        self.assertIn("pr-needs", self.declared())
+        self.assertIn("pr-more", self.declared())
+        self.assertNotIn("pr-other", self.declared())
+
+    def calls(self) -> list[str]:
+        """`fillIssues` call sites, arguments only.
+
+        Matched to the closing `);` rather than the first `)`, because
+        stopping at the first one reads `fillIssues(into, pick(a),
+        payload.other)` as `into, pick(a` and finds nothing to complain
+        about -- the argument that decides the filter is exactly the one a
+        nested call would hide. `(?<!function )` keeps the declaration out:
+        it has no `);` of its own, so it would otherwise swallow its way into
+        the body and match on whatever came first.
+        """
+        from dashboard import server
+        return re.findall(r"(?<!function )fillIssues\((.*?)\);",
+                          server.script_source(), re.S)
+
+    def test_the_main_table_is_never_drawn_from_the_withheld_group(self) -> None:
+        """`other` fills the disclosure and never the table above it.
+
+        A source-level assertion, and worth saying why rather than pretending
+        it is more: `fillIssues` is the only thing that puts rows in a tracker
+        table, so which group each call site is handed *is* the filter, and
+        there is no JavaScript runtime here to observe it any other way.
+
+        Only the calls that fill `into` are constrained. `other` reaching
+        `more.tbody` is the point of the disclosure -- suppressing a bucket
+        from the queue is a ranking decision, but making it unreachable is a
+        different and worse one, and `other` carries Jira's `filed`,
+        `watching` and `matched` as well as GitHub's two.
+        """
+        calls = self.calls()
+        self.assertNotEqual(calls, [], "fillIssues call sites not parsed")
+        main = [call for call in calls if call.lstrip().startswith("into")]
+        self.assertNotEqual(main, [], "no call fills the main table")
+        drawn = [call for call in main if "other" in call]
+        self.assertEqual(drawn, [], f"the main table is filled from `other`: {drawn}")
+
+    def test_the_withheld_group_is_drawn_somewhere(self) -> None:
+        """The other half of the same rule, and the one that fails silently.
+
+        A change that simply stopped passing `other` anywhere would satisfy
+        the assertion above forever while quietly restoring the defect the
+        disclosure exists to prevent: indexed work reduced to a count.
+        """
+        self.assertNotEqual(
+            [call for call in self.calls() if "other" in call], [],
+            "no call site draws the withheld rows; they are unreachable again")
 
 
 if __name__ == "__main__":

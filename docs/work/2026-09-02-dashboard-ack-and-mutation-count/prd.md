@@ -28,7 +28,7 @@ the ack store." No step did.
 **2. R11-D10's deletion criterion has no counter.** The criterion (`docs/work/2026-08-29-artifacts-as-product/design.md:1528-1532`) is:
 sixty days after the 6b swap, if the index shows fewer than ten mutating requests from a tailnet
 Host, the write path and its three guards are deleted and the dashboard returns to GET-only.
-`do_POST` (`dashboard/server.py:443`) writes no record of having run — it validates, dispatches to
+`do_POST` (`dashboard/server.py:445`) writes no record of having run — it validates, dispatches to
 `actions.run`, and returns a body. The index has no table for it. The criterion therefore
 evaluates to "no evidence" rather than to a number, which is not the same answer and cannot be
 read as one.
@@ -41,7 +41,7 @@ the server would bind an address it then answers 403 on. The cost was never writ
 the reason — the *first* answer is also the *only* answer. `tailnet_addrs`
 (`dashboard/server.py:89`) returns an empty list for three different failures (no `tailscale` on
 `PATH`, a non-zero exit, output that does not parse as an address), and `serve`
-(`dashboard/server.py:530`) treats an empty list as an ordinary start, because loopback bound and
+(`dashboard/server.py:532`) treats an empty list as an ordinary start, because loopback bound and
 its only fatal case is nothing binding at all. `KeepAlive` (`bin/sd-dashboard:58`) restarts on
 exit, and nothing exits. So a probe that comes up empty at startup — launchd racing `tailscaled` at
 boot is the ordinary way — leaves the dashboard reachable only from the machine it runs on, for as
@@ -79,10 +79,10 @@ from an absent one, and an unbound address from an unwanted one.
 
 | Fact | Number | Source |
 |---|---|---|
-| `dashboard/` total lines | **4,128 against a 4,300 cap — 172 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
-| `dashboard/` code lines | **2,190 against a 2,300 cap — 110 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
+| `dashboard/` total lines | **4,190 against a 4,300 cap — 110 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
+| `dashboard/` code lines | **2,206 against a 2,300 cap — 94 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
-| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:443-479` |
+| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:445-481` |
 | `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
 | 6b swap closed | 2026-09-01 (6b-9) | `docs/work/2026-08-29-artifacts-as-product/implement.md:1504` |
 | R11-D10 evaluation date, read literally | **2026-10-31**, against a count of zero | `docs/work/2026-08-29-artifacts-as-product/design.md:1529` + the above |
@@ -91,7 +91,7 @@ from an absent one, and an unbound address from an unwanted one.
 | Tailnet address across those starts | changed, `100.82.165.108` → `100.73.1.43` | the same log, lines 6 and 10 |
 | `bin/` lines | 11,147 against a 14,000 cap — **2,853 headroom** | the same tokeniser, over `tracked("bin")` |
 
-`DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:66`) moves **downward only**, so 110 lines is a
+`DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:66`) moves **downward only**, so 94 lines is a
 budget this item cannot raise by writing prose or by re-deriving the cap. It is the binding
 constraint on gaps 1 and 2, which have to live under `dashboard/`, and any solution for them that
 does not fit inside it is not a solution. Gap 3 has an exit the other two do not: `bin/sd-dashboard`
@@ -167,15 +167,19 @@ item is mostly about. Specific to this item:
 7. A tailnet address that changes while the server runs is either picked up or reported. The server
    must not go on publishing an address it no longer holds while refusing the one it does, which is
    what a cached `_ADDRS` produces today.
-8. Everything that must live under `dashboard/` fits in its 110 lines of code, or the item
+8. Everything that must live under `dashboard/` fits in its 94 lines of code, or the item
    explicitly proposes what to delete to make room. Raising `DASHBOARD_CODE_CAP` is not available.
+
+   It was 110 when this item opened. The assigned-only change to the tracker views spent sixteen of
+   them — a net spend, after deleting one table and its heading and adding a closed disclosure — and
+   the number is restated here rather than left at the figure the budget below was first divided against.
 
    The yardstick for whether 110 is enough, rather than a guess: `record_load`
    (`bin/sd-handoff-restore:157`) and `load_age_seconds` (`bin/sd-handoff-restore:290`)
    are **59 code lines** by the same
    tokeniser — one durable append-only counter, hardened over eight review rounds for concurrent
    writers, torn records and an unparseable timestamp. That is the honest cost of the *first* of
-   this item's first mechanism, leaving ~51 for an ack store and its control. `dashboard/app.js`
+   this item's first mechanism, leaving ~35 for an ack store and its control. `dashboard/app.js`
    charges the same cap, so the dismiss control is inside that number, not beside it. This is
    feasible and it is thin; `design.md` should treat "what do we delete" as a live branch rather
    than a fallback, and the counter may be cheaper here than it was there — a POST handler has no
@@ -286,7 +290,7 @@ routes — nothing counts, *and* nothing could have been counted.
   wording.** No timestamps means the boot-order race is a hypothesis about that start, not an
   observation of it. The claim the PRD actually makes is narrower and is provable from the code:
   `tailnet_addrs` (`dashboard/server.py:89`) collapses three distinct failures into one empty list,
-  `bound_addrs` (`dashboard/server.py:125`) latches it, and `serve` (`dashboard/server.py:530`)
+  `bound_addrs` (`dashboard/server.py:125`) latches it, and `serve` (`dashboard/server.py:532`)
   reports success. Which of the three fired on that start does not change the defect or the fix.
 - **C-8 — gap 3 could be its own item. Material. `rebutted`.** The usual reason to split is budget
   contention, and it does not apply: gap 3's fix can charge `bin/`, which gaps 1 and 2 cannot. The
