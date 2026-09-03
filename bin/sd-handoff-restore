@@ -249,16 +249,35 @@ def record_load(directory: Path, packet: dict, consumed: str) -> None:
                 if attempt == LOCK_ATTEMPTS - 1:
                     return
                 time.sleep(LOCK_WAIT)
+        # Where the file ends right now, read under the lock so no other
+        # writer can move it. If this record does not finish, this is where
+        # the file has to go back to.
+        start = os.lseek(descriptor, 0, os.SEEK_END)
         written = 0
-        while written < len(payload):
-            # A zero-length write is not supposed to happen for a non-empty
-            # buffer on a regular file, and an unbounded loop in a SessionStart
-            # hook would hang every session that starts. Give up on a torn line
-            # rather than on the session.
-            progress = os.write(descriptor, payload[written:])
-            if progress <= 0:
-                break
-            written += progress
+        try:
+            while written < len(payload):
+                # A zero-length write is not supposed to happen for a non-empty
+                # buffer on a regular file, and an unbounded loop in a
+                # SessionStart hook would hang every session that starts. Give
+                # up on the record rather than on the session.
+                progress = os.write(descriptor, payload[written:])
+                if progress <= 0:
+                    break
+                written += progress
+        finally:
+            # Giving up mid-record would leave a half-line, and half a line is
+            # worse than no line: `json.loads` raises on it rather than
+            # skipping it, so one torn record makes the whole log unreadable to
+            # whatever evaluates the criterion. Roll back instead. Losing the
+            # measurement is the cost this function already accepts on every
+            # other failure, and under the lock with `O_APPEND` nothing else
+            # has written past `start`, so the truncation can only remove this
+            # record's own bytes.
+            if written != len(payload):
+                try:
+                    os.ftruncate(descriptor, start)
+                except OSError:
+                    pass
     except OSError:
         pass
     finally:

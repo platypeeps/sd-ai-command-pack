@@ -12,6 +12,8 @@ from __future__ import annotations
 import datetime as dt
 import fcntl
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import pathlib
@@ -719,6 +721,108 @@ class LoadLogTests(RestoreFixture):
         # only one keeps every line the same shape, and `jq`'s `!= null` test
         # is what the documented median filters on.
         self.assertIn("age_seconds", entries[0])
+
+
+class TornRecordTests(unittest.TestCase):
+    """A record that cannot finish must leave nothing, not half of itself.
+
+    Every other fixture here drives the real executable. This one imports it,
+    because the failure it pins -- `os.write` returning short and then making
+    no further progress -- cannot be provoked from outside the process. The
+    loop is already correct about not hanging on a stalled write; what it did
+    not do was clean up after giving up, and half a JSON line is worse than no
+    line at all: `json.loads` raises on it rather than skipping it, so one torn
+    record makes the entire log unreadable to whatever evaluates the deletion
+    criterion.
+    """
+
+    def setUp(self) -> None:
+        loader = importlib.machinery.SourceFileLoader(
+            "sd_handoff_restore", str(RESTORE)
+        )
+        spec = importlib.util.spec_from_file_location(
+            "sd_handoff_restore", str(RESTORE), loader=loader
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.module = module
+        self.directory = pathlib.Path(
+            tempfile.mkdtemp(prefix="handoff-torn-")
+        ).resolve()
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+        self.log = self.directory / "loads.jsonl"
+
+    def record(self) -> None:
+        self.module.record_load(
+            self.directory,
+            {"created": "2026-09-01T00:00:00+00:00", "repo": {"root": "/x"}},
+            "2026-09-02T00:00:00+00:00",
+        )
+
+    def test_a_record_that_stalls_mid_write_leaves_no_partial_line(self) -> None:
+        real_write = os.write
+        state: dict[str, int | None] = {"fd": None}
+
+        def stalling_write(descriptor: int, data: bytes) -> int:
+            if data.startswith(b'{"age_seconds"'):
+                # Half the record lands, and then the write stops making
+                # progress -- the shape of ENOSPC arriving mid-record.
+                state["fd"] = descriptor
+                half = len(data) // 2
+                self.assertGreater(half, 0)
+                real_write(descriptor, data[:half])
+                return half
+            if descriptor == state["fd"]:
+                return 0
+            return real_write(descriptor, data)
+
+        os.write = stalling_write
+        try:
+            self.record()
+        finally:
+            os.write = real_write
+
+        # Not "the line is malformed" -- the file is back to empty. A reader
+        # that splits on newlines and calls `json.loads` on each finds nothing
+        # to choke on, which is the property the criterion depends on.
+        self.assertEqual(self.log.read_bytes(), b"")
+
+    def test_a_stalled_record_does_not_take_the_records_before_it_with_it(self) -> None:
+        self.record()
+        intact = self.log.read_bytes()
+        self.assertTrue(intact.endswith(b"\n"), intact)
+
+        real_write = os.write
+        state: dict[str, int | None] = {"fd": None}
+
+        def stalling_write(descriptor: int, data: bytes) -> int:
+            if data.startswith(b'{"age_seconds"'):
+                state["fd"] = descriptor
+                half = len(data) // 2
+                real_write(descriptor, data[:half])
+                return half
+            if descriptor == state["fd"]:
+                return 0
+            return real_write(descriptor, data)
+
+        os.write = stalling_write
+        try:
+            self.record()
+        finally:
+            os.write = real_write
+
+        # The rollback truncates to where the file stood when this record took
+        # the lock, not to zero. Getting that wrong would erase every earlier
+        # measurement to protect the one that failed.
+        self.assertEqual(self.log.read_bytes(), intact)
+
+    def test_a_whole_record_is_left_alone(self) -> None:
+        self.record()
+        self.record()
+        lines = self.log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertEqual(json.loads(line)["age_seconds"], 86400)
 
 
 class ShapeTests(RestoreFixture):

@@ -192,13 +192,24 @@ reasons, and waiting until October would not change either.**
   one line per restore to `handoff/loads.jsonl` — `consumed`, `created`,
   `age_seconds`, and a 16-character digest of the directory rather than its
   path — so the count survives the packet being overwritten. The criterion
-  becomes two commands over that file: `wc -l` for the count, and for the
-  median `jq -r 'select(.age_seconds != null) | .age_seconds' loads.jsonl |
-  sort -n`. The filter is load-bearing. `age_seconds` is null when a packet's
-  `created` cannot be parsed, and `jq -r '.age_seconds' | sort -n` sorts those
-  nulls below every number — which drags the median down, and a low median is
-  the reading that says the hook is serving live restarts. A median that
-  swallows nulls therefore keeps a hook the criterion would have deleted.
+  becomes two commands over that file. The count is `wc -l < loads.jsonl`.
+  The median is one `jq` — sorting alone is not a median, so it takes the
+  middle value, or the mean of the two middles on an even count:
+
+  ```sh
+  jq -s 'map(select(.age_seconds != null) | .age_seconds) | sort
+         | if length == 0 then null
+           elif length % 2 == 1 then .[(length / 2) | floor]
+           else (.[length / 2 - 1] + .[length / 2]) / 2 end' loads.jsonl
+  ```
+
+  The `select` is load-bearing. `age_seconds` is null when a packet's
+  `created` cannot be parsed, and jq sorts null below every number — which
+  drags the middle value down, and a low median is the reading that says the
+  hook is serving live restarts. A median that swallows nulls therefore keeps
+  a hook the criterion would have deleted. Two null lines beside one 10-day
+  load: unfiltered, the middle value is `null`; filtered, it is 900000
+  against a 604800 threshold.
   Answerable on 2026-11-01 -- sixty days from the counter, not from the item,
   which is a different date from the 2026-10-28 above and the reason both are
   written out. Only
