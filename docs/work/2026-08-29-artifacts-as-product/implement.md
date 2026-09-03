@@ -4328,8 +4328,8 @@ grepped for after it. Two more of these turned up in the same pass --
 `topics seed`'s docstring and its refusal text both still directed the
 reader to `topics add`, deleted at 10b-iv -- and the corrected comments now
 name where each rule is enforced instead of implying `pack.py` still holds
-it. The final measured floor is **1,712** lines, nine below the figure
-taken before the comments were swept.
+it. The floor measured at 10b-iv-iv is **1,712** lines, nine below the figure
+taken before the comments were swept. Step 10 moved it again, to 1,590.
 
 ### Step 10 closes: the last two vault reads, and a bug the check found (2026-09-02)
 
