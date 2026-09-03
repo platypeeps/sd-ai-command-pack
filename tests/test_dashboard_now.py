@@ -249,6 +249,24 @@ class PageAndClientAgree(unittest.TestCase):
         self.assertIn("pr-needs", self.declared())
         self.assertNotIn("pr-other", self.declared())
 
+    def test_no_row_is_drawn_from_the_withheld_group(self) -> None:
+        """`other` reaches the subtitle and never the table.
+
+        A source-level assertion, and it is worth saying why rather than
+        pretending it is more: `fillIssues` is the only thing that puts rows
+        in a tracker table, so what group it is handed *is* the filter, and
+        there is no JavaScript runtime here to observe it any other way. The
+        looser check -- that the string `other` appears somewhere -- would
+        pass on the version this replaces, which is what makes this one worth
+        having: the count and the two links still name the withheld group, so
+        only its use as a row source is barred.
+        """
+        from dashboard import server
+        calls = re.findall(r"fillIssues\(([^)]*)\)", server.script_source())
+        self.assertNotEqual(calls, [], "fillIssues call sites not parsed")
+        drawn = [call for call in calls if "other" in call]
+        self.assertEqual(drawn, [], f"a table is filled from `other`: {drawn}")
+
 
 if __name__ == "__main__":
     unittest.main()

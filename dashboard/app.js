@@ -138,7 +138,23 @@ function fillIssues(tbody, list, emphasise) {
 // about `mentions:@me` -- somebody can ask for a decision by naming you, and
 // no label here should decide they did not. What the withheld group actually
 // has in common is how it was found, so that is what the line says.
-async function drawTracker(route, into, subLine, noun) {
+//
+// And it says it in links. Suppressing a bucket from a queue is a ranking
+// decision; making it unreachable is a different and worse one, because a
+// mention is how some people hand work over, and a dashboard that answers
+// "seventeen" and nothing else has hidden them rather than deprioritised
+// them. GitHub already keeps exactly these two lists, so the counts point at
+// them and the tab does not have to grow a second table to stay honest.
+function subLink(href, text) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noreferrer";
+  a.textContent = text;
+  return a;
+}
+
+async function drawTracker(route, into, subLine, noun, hub) {
   let payload;
   try {
     payload = await (await fetch(route)).json();
@@ -152,14 +168,22 @@ async function drawTracker(route, into, subLine, noun) {
     return;
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
-  subLine.textContent =
-    `${payload.needsYou.length} ${noun} assigned to you or awaiting your review \u00b7 ` +
-    `${payload.other.length} more you authored or were mentioned in, not shown${stamp}`;
+  subLine.replaceChildren(
+    document.createTextNode(
+      `${payload.needsYou.length} ${noun} assigned to you or awaiting your ` +
+      `review \u00b7 ${payload.other.length} more, not shown: `),
+    subLink(`https://github.com/${hub}/created`, "authored"),
+    document.createTextNode(" or "),
+    subLink(`https://github.com/${hub}/mentioned`, "mentioning you"),
+    document.createTextNode(stamp),
+  );
   fillIssues(into, payload.needsYou, true);
 }
 
-const drawIssues = () => drawTracker("/api/issues", needs, issueSub, "issues");
-const drawPrs = () => drawTracker("/api/prs", prNeeds, prSub, "pull requests");
+const drawIssues = () =>
+  drawTracker("/api/issues", needs, issueSub, "issues", "issues");
+const drawPrs = () =>
+  drawTracker("/api/prs", prNeeds, prSub, "pull requests", "pulls");
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:
