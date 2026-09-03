@@ -218,7 +218,12 @@ macOS leg is restored.
   out. So the `make` rules are written bare and pay for it, covering the bare
   invocation and not a decorated one; `make test` inside a pipeline still
   prompts. That is the intended trade. Widen these by naming another target,
-  never by adding a wildcard to one of them.
+  never by adding a wildcard to one of them. `bin/sd_install.py` is the same
+  case for the same reason -- `--repo PATH` writes `PATH/CLAUDE.local.md` and
+  `--home DIR` moves the install root, so its modes are named one at a time
+  while `bin/sd-dashboard` and `bin/sd-status`, whose only flags take a port,
+  a count or nothing, keep the wildcard. Path-scoping the *script* is not the
+  test; what the script does with a path *argument* is.
 - Do not allow generic file readers. `cat`, `tail`, `cut` and their siblings
   take any path, so allowing one grants unscoped read of the whole machine --
   and it reads *around* the `Read(**/...)` deny rules a machine-scope config
