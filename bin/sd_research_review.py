@@ -171,7 +171,8 @@ The half no script can do — work it before publishing, per document:
        prints it, from local-adversarial-gate in the `system` repo:
 
          codex exec -s read-only "This is a markdown research brief, not code.
-           Review the uncommitted working-tree changes as an adversarial reader.
+           Review the uncommitted working-tree changes (git status, git diff,
+           plus untracked new files) as an adversarial reader.
            Attack the argument, not the syntax: unsupported load-bearing claims,
            numbers missing a unit/date/denominator, the assumption the document
            never states. Cite file and line. Do not modify any files."
