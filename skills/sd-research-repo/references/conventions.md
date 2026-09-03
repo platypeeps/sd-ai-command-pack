@@ -189,10 +189,13 @@ Three things to get right:
 - **`-s read-only` is not optional.** It is what keeps an adversarial reader
   from editing the work it is reviewing. There is no reason to run this pass
   without it.
-- **It reads the working tree, not a file path and not a URL.** The document has
-  to be *in* the working tree or a branch diff against `main` — review before
-  committing, or on a branch. A document already merged to `main` gives it
-  nothing to look at. Name the documents in the prompt when the diff is large.
+- **It reads the repository, not a file path and not a URL**, and the focus text
+  below points it at **uncommitted** working-tree changes. So the ordinary case
+  is: review before committing. Already committed — on a branch, or merged to
+  `main` — `git status` and `git diff` show it nothing, and the pass silently
+  reviews an empty diff. For work already committed on a branch, say so in the
+  prompt and name the comparison: *"review `git diff main...HEAD`"*. Name the
+  documents too when the diff is large.
 - **Its default framing is a code review** — auth boundaries, races, migrations,
   rollback. Prose needs the focus text to redirect it:
 
@@ -207,8 +210,10 @@ Three things to get right:
     Cite file and line. Do not modify any files."
   ```
 
-  Run it in the background for anything past a page. It buffers its output, so
-  an empty output file means still running, not hung.
+  Run it in the background for anything past a page. It buffers stdout, so it
+  prints nothing at all until it exits — silence is normal, not a hang. If you
+  background it with `codex exec ... > pass.txt 2>&1 &`, the same applies to the
+  file: empty means still running.
 
 **What it cannot do.** Codex sees the repository, not the sources. It cannot
 discharge step 2 — opening the citation and reading it is yours, and no second
