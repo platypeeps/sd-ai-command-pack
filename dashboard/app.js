@@ -7,6 +7,14 @@ const needs = document.getElementById("needs");
 const issueSub = document.getElementById("issue-sub");
 const prNeeds = document.getElementById("pr-needs");
 const prSub = document.getElementById("pr-sub");
+const issueMore = {
+  summary: document.getElementById("issue-more-count"),
+  tbody: document.getElementById("issue-more"),
+};
+const prMore = {
+  summary: document.getElementById("pr-more-count"),
+  tbody: document.getElementById("pr-more"),
+};
 const skillRows = document.getElementById("skill-rows");
 const skillSub = document.getElementById("skill-sub");
 const sessionTrees = document.getElementById("session-trees");
@@ -136,25 +144,18 @@ function fillIssues(tbody, list, emphasise) {
 // That count names the two buckets rather than calling them settled. A first
 // draft read "not yours to answer", which is true of `author:@me` and a guess
 // about `mentions:@me` -- somebody can ask for a decision by naming you, and
-// no label here should decide they did not. What the withheld group actually
-// has in common is how it was found, so that is what the line says.
+// no label here should decide they did not.
 //
-// And it says it in links. Suppressing a bucket from a queue is a ranking
-// decision; making it unreachable is a different and worse one, because a
-// mention is how some people hand work over, and a dashboard that answers
-// "seventeen" and nothing else has hidden them rather than deprioritised
-// them. GitHub already keeps exactly these two lists, so the counts point at
-// them and the tab does not have to grow a second table to stay honest.
-function subLink(href, text) {
-  const a = document.createElement("a");
-  a.href = href;
-  a.target = "_blank";
-  a.rel = "noreferrer";
-  a.textContent = text;
-  return a;
-}
-
-async function drawTracker(route, into, subLine, noun, hub) {
+// Suppressing a bucket from a queue is a ranking decision; making it
+// unreachable is a different and worse one, so the withheld rows keep a
+// closed `<details>` of their own. A draft in between pointed the count at
+// `github.com/{issues,pulls}/{created,mentioned}` instead, which is wrong
+// here for a reason worth recording: `other` is not a GitHub group. `jira.py`
+// files rows into it as `filed`, `watching` and `matched`, and a GitHub link
+// is not a destination for those. The rows already carry their own `url`,
+// whichever tracker produced them, so the disclosure needs no link scheme at
+// all -- which is also why it is a disclosure and not a link.
+async function drawTracker(route, into, more, subLine, noun) {
   let payload;
   try {
     payload = await (await fetch(route)).json();
@@ -165,25 +166,26 @@ async function drawTracker(route, into, subLine, noun, hub) {
   if (!payload.available) {
     subLine.textContent = payload.reason;
     fillIssues(into, [], true);
+    fillIssues(more.tbody, [], false);
     return;
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
-  subLine.replaceChildren(
-    document.createTextNode(
-      `${payload.needsYou.length} ${noun} assigned to you or awaiting your ` +
-      `review \u00b7 ${payload.other.length} more, not shown: `),
-    subLink(`https://github.com/${hub}/created`, "authored"),
-    document.createTextNode(" or "),
-    subLink(`https://github.com/${hub}/mentioned`, "mentioning you"),
-    document.createTextNode(stamp),
-  );
+  const n = payload.needsYou.length;
+  subLine.textContent =
+    `${n} ${n === 1 ? noun.one : noun.many} assigned to you or awaiting ` +
+    `your review${stamp}`;
+  more.summary.textContent =
+    `${payload.other.length} more you filed, authored, watch or were ` +
+    `mentioned in`;
   fillIssues(into, payload.needsYou, true);
+  fillIssues(more.tbody, payload.other, false);
 }
 
+const ISSUE = { one: "issue", many: "issues" };
+const PULL = { one: "pull request", many: "pull requests" };
 const drawIssues = () =>
-  drawTracker("/api/issues", needs, issueSub, "issues", "issues");
-const drawPrs = () =>
-  drawTracker("/api/prs", prNeeds, prSub, "pull requests", "pulls");
+  drawTracker("/api/issues", needs, issueMore, issueSub, ISSUE);
+const drawPrs = () => drawTracker("/api/prs", prNeeds, prMore, prSub, PULL);
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:

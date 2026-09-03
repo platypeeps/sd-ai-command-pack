@@ -247,31 +247,55 @@ class PageAndClientAgree(unittest.TestCase):
         over an empty set forever."""
         self.assertIn("pr-needs", self.handles())
         self.assertIn("pr-needs", self.declared())
+        self.assertIn("pr-more", self.declared())
         self.assertNotIn("pr-other", self.declared())
 
-    def test_no_row_is_drawn_from_the_withheld_group(self) -> None:
-        """`other` reaches the subtitle and never the table.
-
-        A source-level assertion, and it is worth saying why rather than
-        pretending it is more: `fillIssues` is the only thing that puts rows
-        in a tracker table, so what group it is handed *is* the filter, and
-        there is no JavaScript runtime here to observe it any other way. The
-        looser check -- that the string `other` appears somewhere -- would
-        pass on the version this replaces, which is what makes this one worth
-        having: the count and the two links still name the withheld group, so
-        only its use as a row source is barred.
+    def calls(self) -> list[str]:
+        """`fillIssues` call sites, arguments only.
 
         Matched to the closing `);` rather than the first `)`, because
         stopping at the first one reads `fillIssues(into, pick(a),
         payload.other)` as `into, pick(a` and finds nothing to complain
         about -- the argument that decides the filter is exactly the one a
-        nested call would hide.
+        nested call would hide. `(?<!function )` keeps the declaration out:
+        it has no `);` of its own, so it would otherwise swallow its way into
+        the body and match on whatever came first.
         """
         from dashboard import server
-        calls = re.findall(r"fillIssues\((.*?)\);", server.script_source(), re.S)
+        return re.findall(r"(?<!function )fillIssues\((.*?)\);",
+                          server.script_source(), re.S)
+
+    def test_the_main_table_is_never_drawn_from_the_withheld_group(self) -> None:
+        """`other` fills the disclosure and never the table above it.
+
+        A source-level assertion, and worth saying why rather than pretending
+        it is more: `fillIssues` is the only thing that puts rows in a tracker
+        table, so which group each call site is handed *is* the filter, and
+        there is no JavaScript runtime here to observe it any other way.
+
+        Only the calls that fill `into` are constrained. `other` reaching
+        `more.tbody` is the point of the disclosure -- suppressing a bucket
+        from the queue is a ranking decision, but making it unreachable is a
+        different and worse one, and `other` carries Jira's `filed`,
+        `watching` and `matched` as well as GitHub's two.
+        """
+        calls = self.calls()
         self.assertNotEqual(calls, [], "fillIssues call sites not parsed")
-        drawn = [call for call in calls if "other" in call]
-        self.assertEqual(drawn, [], f"a table is filled from `other`: {drawn}")
+        main = [call for call in calls if call.lstrip().startswith("into")]
+        self.assertNotEqual(main, [], "no call fills the main table")
+        drawn = [call for call in main if "other" in call]
+        self.assertEqual(drawn, [], f"the main table is filled from `other`: {drawn}")
+
+    def test_the_withheld_group_is_drawn_somewhere(self) -> None:
+        """The other half of the same rule, and the one that fails silently.
+
+        A change that simply stopped passing `other` anywhere would satisfy
+        the assertion above forever while quietly restoring the defect the
+        disclosure exists to prevent: indexed work reduced to a count.
+        """
+        self.assertNotEqual(
+            [call for call in self.calls() if "other" in call], [],
+            "no call site draws the withheld rows; they are unreachable again")
 
 
 if __name__ == "__main__":

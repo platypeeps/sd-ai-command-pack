@@ -268,6 +268,11 @@ PAGE = """<!doctype html>
 <table><thead><tr>
  <th>where</th><th>what</th><th>why</th><th>updated</th>
 </tr></thead><tbody id="pr-needs"></tbody></table>
+<details><summary id="pr-more-count"></summary>
+<table><thead><tr>
+ <th>where</th><th>what</th><th>why</th><th>updated</th>
+</tr></thead><tbody id="pr-more"></tbody></table>
+</details>
 </section>
 <section id="panel-issues" role="tabpanel" aria-labelledby="tab-issues" hidden>
 <p class="sub" id="issue-sub"></p>
@@ -275,6 +280,11 @@ PAGE = """<!doctype html>
 <table><thead><tr>
  <th>where</th><th>what</th><th>why</th><th>updated</th>
 </tr></thead><tbody id="needs"></tbody></table>
+<details><summary id="issue-more-count"></summary>
+<table><thead><tr>
+ <th>where</th><th>what</th><th>why</th><th>updated</th>
+</tr></thead><tbody id="issue-more"></tbody></table>
+</details>
 </section>
 <section id="panel-work" role="tabpanel" aria-labelledby="tab-work" hidden>
 <p class="sub" id="work-sub"></p>
