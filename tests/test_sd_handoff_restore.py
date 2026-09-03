@@ -552,11 +552,14 @@ class LoadLogTests(RestoreFixture):
         """
 
         self.write_packet("--summary", "context survives an unwritable log")
-        directory = self.log_path().parent
-        self.log_path().write_text("", encoding="utf-8")
-        mode = directory.stat().st_mode
-        os.chmod(self.log_path(), 0o444)
-        self.addCleanup(os.chmod, directory, mode)
+        # chmod the file and restore *that* file: an earlier draft saved the
+        # directory's mode and handed it back instead, which left the log
+        # read-only after the test and restored nothing that had changed.
+        log = self.log_path()
+        log.write_text("", encoding="utf-8")
+        mode = log.stat().st_mode
+        self.addCleanup(os.chmod, log, mode)
+        os.chmod(log, 0o444)
         result = self.restore()
         self.assertIn("context survives an unwritable log", self.context(result))
         self.assertEqual(self.entries(), [])

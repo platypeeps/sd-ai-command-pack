@@ -192,7 +192,9 @@ reasons, and waiting until October would not change either.**
   one line per restore to `handoff/loads.jsonl` — `consumed`, `created`,
   `age_seconds`, and a 16-character digest of the directory rather than its
   path — so the count survives the packet being overwritten. The criterion
-  becomes `wc -l` and a median over `age_seconds`, answerable in October. Only
+  becomes `wc -l` and a median over `age_seconds`, answerable on 2026-11-01 --
+  sixty days from the counter, not from the item, which is a different date
+  from the 2026-10-28 above and the reason both are written out. Only
   the hook writes it: `sd-handoff --show` claims a packet too, but the criterion
   counts packets *auto-loaded* and `--show` is the manual path it is measured
   against. The write is guarded, and a fixture proves the guard earns its place
