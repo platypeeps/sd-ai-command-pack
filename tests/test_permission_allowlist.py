@@ -27,9 +27,11 @@ works around six months later.
 filters below, and it cannot audit its own judgment: writing the file from this
 derivation makes the two agree by construction. Its job is to keep them
 agreeing as the inventories move. The two checks that are *not* circular are
-the ones after it -- every path a rule names must exist, and a target that is
-executable with a shebang must carry both invocation forms -- and those two are
-what would have failed on each of the three defects above.
+the ones after it: every path a rule names must exist, and a target that is
+executable with a shebang must carry both invocation forms. Each has to be
+written so it can fail on the defect it cites -- the first draft of the second
+one could not, walking `bin/...` rules to ask after their `python3` twin when
+what shipped was the `python3` rule alone.
 
 `skills/` names six `bin/` commands that do not exist (`sd-ship`, `sd-plan`,
 `sd-map`, `sd-help`, `sd-deps`, `sd-suggest`, whose own SKILL.md says "There is
@@ -194,22 +196,33 @@ class PermissionAllowlistTests(unittest.TestCase):
     def test_an_executable_target_carries_both_invocation_forms(self) -> None:
         """`bin/sd-status --json` and `python3 bin/sd-status --json` both happen.
 
-        A rule matching one does not match the other, so granting only the
-        `python3` spelling covers the form this repository's own documents
-        never use. Found in review after the rule had already shipped once.
+        A rule matching one does not match the other, so granting one spelling
+        leaves the other prompting. This has to be checked in **both**
+        directions, and an earlier draft only checked one: it walked the
+        `bin/...` rules asking whether the `python3` form existed, which is
+        precisely the direction the shipped defect was not in. What shipped was
+        `python3 bin/sd-status:*` *alone* -- the `python3` form present, the
+        bare form missing, and no rule to walk from. A check that cannot fail
+        on the defect it cites is decoration.
         """
 
         allow = settings_allow()
         granted = set(allow)
-        gaps = []
+        gaps = set()
         for rule in allow:
             match = BASH_RULE.match(rule)
-            if not match or not match.group(1).startswith("bin/"):
+            if not match:
                 continue
-            name = match.group(1).removesuffix(":*").split("/")[-1].split()[0]
-            if runs_under_python3(name) and f"Bash(python3 {match.group(1)})" not in granted:
-                gaps.append(f"{rule} has no `python3 bin/{name}` counterpart")
-        self.assertEqual(gaps, [], "\n".join(gaps))
+            bare = match.group(1).removeprefix("python3 ")
+            if not bare.startswith("bin/"):
+                continue
+            name = bare.removesuffix(":*").split("/")[-1].split()[0]
+            if not runs_under_python3(name):
+                continue
+            for form in (f"Bash({bare})", f"Bash(python3 {bare})"):
+                if form not in granted:
+                    gaps.add(f"{rule} is granted, but {form} is not")
+        self.assertEqual(sorted(gaps), [], "\n".join(sorted(gaps)))
 
     def test_the_inventories_were_actually_read(self) -> None:
         """The control. A regex that silently stops matching would empty the
