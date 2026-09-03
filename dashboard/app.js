@@ -177,12 +177,13 @@ async function drawTracker(route, into, more, subLine, noun) {
   }
   const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
   const n = payload.needsYou.length;
+  const m = payload.other.length;
   subLine.textContent =
     `${n} ${n === 1 ? noun.one : noun.many} assigned to you or awaiting ` +
     `your review${stamp}`;
   more.summary.textContent =
-    `${payload.other.length} more you filed, authored, are watching, or were ` +
-    `mentioned in`;
+    `${m} other ${m === 1 ? noun.one : noun.many} involving you: filed, ` +
+    `authored, watching or mentioned`;
   fillIssues(into, payload.needsYou, true);
   fillIssues(more.tbody, payload.other, false);
 }

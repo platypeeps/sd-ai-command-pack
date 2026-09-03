@@ -79,8 +79,8 @@ from an absent one, and an unbound address from an unwanted one.
 
 | Fact | Number | Source |
 |---|---|---|
-| `dashboard/` total lines | **4,177 against a 4,300 cap — 123 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
-| `dashboard/` code lines | **2,202 against a 2,300 cap — 98 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
+| `dashboard/` total lines | **4,178 against a 4,300 cap — 122 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
+| `dashboard/` code lines | **2,203 against a 2,300 cap — 97 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
 | Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:445-481` |
 | `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
@@ -91,7 +91,7 @@ from an absent one, and an unbound address from an unwanted one.
 | Tailnet address across those starts | changed, `100.82.165.108` → `100.73.1.43` | the same log, lines 6 and 10 |
 | `bin/` lines | 11,147 against a 14,000 cap — **2,853 headroom** | the same tokeniser, over `tracked("bin")` |
 
-`DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:66`) moves **downward only**, so 98 lines is a
+`DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:66`) moves **downward only**, so 97 lines is a
 budget this item cannot raise by writing prose or by re-deriving the cap. It is the binding
 constraint on gaps 1 and 2, which have to live under `dashboard/`, and any solution for them that
 does not fit inside it is not a solution. Gap 3 has an exit the other two do not: `bin/sd-dashboard`
@@ -167,10 +167,10 @@ item is mostly about. Specific to this item:
 7. A tailnet address that changes while the server runs is either picked up or reported. The server
    must not go on publishing an address it no longer holds while refusing the one it does, which is
    what a cached `_ADDRS` produces today.
-8. Everything that must live under `dashboard/` fits in its 98 lines of code, or the item
+8. Everything that must live under `dashboard/` fits in its 97 lines of code, or the item
    explicitly proposes what to delete to make room. Raising `DASHBOARD_CODE_CAP` is not available.
 
-   It was 110 when this item opened. The assigned-only change to the tracker views spent twelve of
+   It was 110 when this item opened. The assigned-only change to the tracker views spent thirteen of
    them — a net spend, after deleting one table and its heading and adding a closed disclosure — and
    the number is restated here rather than left at the figure the budget below was first divided against.
 
@@ -179,7 +179,7 @@ item is mostly about. Specific to this item:
    are **59 code lines** by the same
    tokeniser — one durable append-only counter, hardened over eight review rounds for concurrent
    writers, torn records and an unparseable timestamp. That is the honest cost of the *first* of
-   this item's first mechanism, leaving ~39 for an ack store and its control. `dashboard/app.js`
+   this item's first mechanism, leaving ~38 for an ack store and its control. `dashboard/app.js`
    charges the same cap, so the dismiss control is inside that number, not beside it. This is
    feasible and it is thin; `design.md` should treat "what do we delete" as a live branch rather
    than a fallback, and the counter may be cheaper here than it was there — a POST handler has no
