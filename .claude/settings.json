@@ -10,7 +10,6 @@
       "Bash(make lint)",
       "Bash(make audit)",
       "Bash(make check)",
-      "Bash(python3 scripts/:*)",
       "Bash(python3 bin/:*)",
       "Bash(cat:*)",
       "Bash(cut:*)",
