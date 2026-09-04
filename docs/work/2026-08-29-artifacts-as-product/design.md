@@ -64,8 +64,9 @@ sd-ai-command-pack/
                         sd-pr-state, sd-review(+-local), sd-status, sd-spec, sd-map, sd-handoff,
                         sd-trackers, sd-handoff-restore (hook), sd CLI (plugin|store|issue|config groups),
                         migrate-* (temp)
-  dashboard/            stdlib HTTP server + one JS file (≤4,300 total and ≤2,300 carrying
-                        code -- R11-D24 split the ceiling in two). The `sd-dashboard` CLI in
+  dashboard/            stdlib HTTP server + one JS file (≤4,350 total and ≤2,300 carrying
+                        code -- R11-D24 split the ceiling in two, R11-D29 re-derived the
+                        total). The `sd-dashboard` CLI in
                         front of it is listed under bin/ and charges there, so the two caps
                         do not overlap
   actions/              docs-lint + review-route composite actions (SHA/tag-pinned, opt-in only)
@@ -92,8 +93,9 @@ Temporary `migrate-*` is **outside** the cap (deleted at steps 7/11), tracked by
 ceiling until then. *(2026-09-02: `migrate-trellis` went at step 7 as planned, and
 `migrate-golden-corpus` went when 10b landed -- step 11 moves nothing, so the schedule's other
 half was spent as a bracket instead. `bin/migrate-*` is now empty and the 1,500-line allowance
-holds nothing.)* dashboard/ ≤ **4,300 total and ≤ 2,300 carrying code** (*R11-D24 re-derived
-and split it at 6b-7; the 4,000 below is what it replaced.* R11-D17 had re-derived it at 6b-3 from files that exist:
+holds nothing.)* dashboard/ ≤ **4,350 total and ≤ 2,300 carrying code** (*R11-D29 re-derived the
+total at 4,350 on 2026-09-03, itemised below; R11-D24 re-derived and split it at 4,300 at 6b-7, and
+the 4,000 below is what **that** replaced.* R11-D17 had re-derived it at 6b-3 from files that exist:
 2,488 measured plus R11-D13's 763-line lift and two estimates. The old 2,500 rested on "credible:
 457 lifted + one JS file", and R11-D13 measured that lift at 763*). Caps are CI tests; a cap is
 never raised in the PR that busts it — 4,000 was set in its own record by a change that fit under
@@ -2477,6 +2479,109 @@ than by decision, so nothing recorded that it mattered; the backbone that replac
 values through a parser that cannot see them. *Deletion criterion:* this record dies when no
 declared kind is kept in a Markdown-with-frontmatter store — when the last `store.driver` is
 something with a schema, the line-edit discipline has nothing left to protect.
+
+**R11-D29 (2026-09-03) — the dashboard total is re-derived at 4,350, itemised.** R11-D24 spent the
+re-derivation clause once and left it standing for the total; this is the second use, and the clause
+asks for an itemisation rather than a number, so here is the itemisation.
+
+Measured with `line_count(tracked("dashboard"))` — the tokeniser
+`tests/test_loc_caps.py` itself uses, not a `wc -l` over a glob — at `f0e1173c`,
+the tip of `main`, and at `work/dashboard-three-gaps`, the branch in review.
+
+| Claim on the ceiling | Lines | Where |
+|---|---|---|
+| `dashboard/`, measured | 4,190 | `f0e1173c` |
+| `docs/work/2026-09-02-dashboard-ack-and-mutation-count`, **measured** — the ack endpoint, the mutation and bind records, the bounded re-probe, the dismiss control, and two rounds of review remediation the branch already carries | 158 | `work/dashboard-three-gaps` |
+| | **4,348** | measured total |
+| Unclaimed | 2 | |
+| **Ceiling** | **4,350** | |
+
+The second row is the one to read carefully, because the name collides.
+`f0e1173c` is *"close the three gaps #730 left behind"* (#731), a **different**
+item, already inside the 4,190 and claimed nowhere here. The item claiming 158
+lines is the dashboard ack-and-mutation-count work.
+
+**Why the reservation is a measurement and not a projection.** The first two
+drafts of this record reserved 104 lines for built work plus 45 for remediation
+that was still unwritten, and set the ceiling 61 and then 261 lines above the
+sum. Review objected twice, correctly and from two providers: a reservation that
+exists only in prose is not a reservation, because the test exposes every line
+of new capacity to whatever change arrives first, and a projected size is a
+promise that the branch will not grow. Neither objection survives measuring
+instead: the remediation is written, the branch measures 4,348, and the ceiling
+sits 2 lines above a number that came off the tokeniser rather than out of an
+estimate.
+
+That number moved once while this record was open, from 4,336 to 4,348, when a
+second review round found three defects in the first round's fixes. It is
+recorded rather than quietly updated because review's objection predicted
+exactly this — a reservation sized against a branch assumes the branch stops
+changing — and the answer is not that the prediction was wrong. It is that the
+ceiling is re-derived from the branch each time the branch moves, until it
+lands. Two unclaimed lines is what remains, and the next change under
+`dashboard/` writes its own record rather than spending them.
+
+The window narrowed with it, from 14 lines to 2, for the same reason and in the
+same direction: every line the branch added was a line the ceiling had already
+reserved, so remediation spent the unclaimed capacity rather than requiring
+more. The paragraphs below were written against 14 and now read 2. That is the
+number moving under a record that was open, which is what re-deriving from the
+branch each time it moves looks like from the inside.
+
+What review asked for beyond that — keep 4,300 until the work is finalised,
+then set a measured bound — is the one thing the clause forbids, and the reason
+is worth restating rather than assuming. A cap re-derived alongside the change
+that needs it is re-derived by whoever is trying to land that change, under the
+pressure of a red check, which is the negotiation the bound exists to refuse.
+The cost of refusing it is exactly this: a window in which capacity exists that
+no landed change has claimed. That window is the price, it is **2 lines wide**
+at this record's tip, and it closes when the branch lands.
+
+*The window is named, not closed, and one round of review went into learning
+why.* Review pressed across three rounds and two providers: a reservation that
+lives in prose is not a reservation, because nothing stops an unrelated change
+from spending it and nothing restores the ceiling if the reserved work is
+abandoned. The answer attempted here was to make `DASHBOARD_CAP` conditional —
+4,350 while the reserved item's `implement.md` sits in `docs/work/`, 4,300 when
+it does not — which coupled the capacity to the work, made *this* change
+measured against 4,300, and reverted by itself on abandonment.
+
+It is a bad mechanism and the next round said so. `sd-plan`'s first commit
+sweeps merged items to `docs/work/archive/YYYY-MM/`. The archive commit for this
+very item would have moved the file it keyed on, dropped the ceiling to 4,300
+underneath a directory holding 4,348 lines in total, and failed CI on a
+commit that changes no code at all. A ceiling that depends on where a document
+currently lives is not a ceiling, and file presence was never evidence of
+implementation identity anyway — an unrelated `implement.md` would have raised
+it just as well.
+
+So `DASHBOARD_CAP` is 4,350, flat. The window review objected to is real, it is
+**2 lines wide**, it exists only until the reserved branch lands, and it is the
+price of the clause's actual subject: a cap re-derived alongside the change that
+needs it is re-derived by whoever is trying to land that change, under a red
+check. That is the negotiation the bound exists to refuse, and 2 unclaimed
+lines is a smaller cost than either the negotiation or the mechanism that tried
+to avoid it. Recorded rather than argued away, so the next re-derivation starts
+from what this one learned instead of re-attempting the coupling.
+
+A fourth round asked for the window to be closed by *sequencing* instead —
+land the measured cap immediately before the dependent feature, stacked, so no
+speculative capacity is ever exposed. That is what is happening: this change and
+the branch it reserves for are one merge sequence, this one first because the
+clause requires it and the other immediately after, rebased. The 2 lines are
+exposed for the interval between two merges in the same sitting, which is the
+narrowest form the clause permits. Four rounds is where this stops; the two
+things review changed — a projection replaced by a measurement, and a coupling
+withdrawn before it could break the archive commit — are both in the record
+above, and the residue is a disagreement with the clause rather than with this
+application of it.
+
+*Standing rule 1.* *Incident:* the three-gaps item measured its budget in code lines, found 94 free,
+and busted the **total** cap at 4,353 before three of its seven steps existed — the split ceiling
+made a code-line estimate stop answering the question the caps ask, and nothing recorded that.
+*Deletion criterion:* this record dies when `dashboard/` no longer has two ceilings — when
+`grep -n DASHBOARD_CODE_CAP tests/test_loc_caps.py` returns nothing, a single total is back and
+the itemisation clause has one number to govern again.
 
 **ID glossary (referenced above, defined in round artifacts):** R5-D4 = sdw meter retirement
 (r5/06) · D-R4-8 = serving-root discipline (r4/05) · V4 = key-enumeration verification (r8b/03) ·
