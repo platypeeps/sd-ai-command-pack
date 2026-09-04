@@ -1,6 +1,6 @@
 ---
 title: the dashboard's three open gaps — an ack that sticks, a mutation the index can count, and a bind that admits it failed
-status: ready
+status: done
 created: 2026-09-02
 ---
 
