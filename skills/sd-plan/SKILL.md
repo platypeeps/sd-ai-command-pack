@@ -24,7 +24,11 @@ revert, not to retro-document work already merged.
    problem stated in terms an outsider would recognise; requirements each
    testable by someone who did not write them; acceptance criteria that name a
    check *and its result* ("`pytest tests/auth` passes with 0 failures"), never
-   an intention ("tests pass").
+   an intention ("tests pass"). `sd-grill` is that interrogation written down —
+   one question per turn, a closed set of answer classes, and a ledger that
+   keeps what the user stated apart from what you supplied. Use it when the
+   intention is vague enough that filling the headings would mean guessing;
+   whether you use it or not, nothing here writes before those headings hold.
 2. **Write from the templates** in `skills/sd-plan/templates/` (`prd.md`,
    `design.md`, `implement.md`, `decision.md`, `work-README.md`). Create
    `<work>/README.md` from the template if the directory is new. Add
