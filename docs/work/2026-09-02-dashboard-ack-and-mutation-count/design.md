@@ -443,14 +443,40 @@ at C-10.
   reads "not one row"; the file says "not one **source**". The argument built on
   it is unaffected. Recorded in Corrections rather than edited into the PRD's
   converged text.
-- **C-18 — `sd-review --scope planning` never asks a provider. `parked`.**
-  `docs_skip` is `["docs/**", "*.md"]` and `never_skip` is `["docs/spec/**"]`, so
-  every work item routes to tier `skip`. This is *consistent* with the contract —
-  the pack ships no second lane, so the host lane is the whole review — but a
-  scope that exists to review planning documents and is configured never to
-  review them is at best confusing. Not this item's to fix: it changes review
-  policy for every repository consuming the pack. Trigger to unpark: a decision
-  about whether the pack should ship a second planning lane at all. Owner: Sven.
+- **C-18 — `sd-review --scope planning` never asks a provider. `rebutted`
+  2026-09-04, by the concern's own author.** The premise is false and the
+  conclusion with it.
+
+  The routing half was right: `docs_skip` is `["docs/**", "*.md"]`, `never_skip`
+  is `["docs/spec/**"]`, and every work item does route to tier `skip`. The
+  concern then treated the tier as the whole answer. It is not.
+  `plan_providers` prepends the providers a *scope* names ahead of the tier
+  chain, and says so in its own docstring — *"a challenge run is an extra stance,
+  not a substitute for the review"*. This repository sets
+  `"planning_providers": ["codex"]` in `.github/sd-review.json`. Executed against
+  the live policy:
+
+  ```
+  work item PRD -> tier=skip   tier chain=()
+     scope=worktree  challenge=False -> ()
+     scope=planning  challenge=False -> ('codex',)
+  ```
+
+  `skip` means the tier contributes nothing. The scope contributes codex anyway.
+  The lane asks a provider, the name `--scope planning` describes what it does,
+  and there is no decision for anyone to make. The owner field is cleared and the
+  parking trigger withdrawn.
+
+  **Why it was wrong is the useful part.** The concern read the router, found the
+  tier, and stopped one function short of the thing that consumes the tier. It
+  was written during a review round whose whole subject was claims made about
+  behaviour nobody executed — C-22, C-25, C-30 and C-33 in this same file — and
+  it is that error again, committed while cataloguing it. Nothing in the
+  repository disagreed with it, because nothing pins the interaction between a
+  `skip` tier and a scope's provider list; a test asserting that
+  `scope=planning` yields a non-empty chain at tier `skip` would have refuted
+  this in the round it was written. That test does not exist and is worth having
+  — it is the only part of C-18 that survives.
 - **C-19 — cross-artifact sweep. `addressed`.** Two artifacts now, so the sweep
   is real rather than internal. Every figure appearing in both was enumerated by
   `grep` rather than by reading in sequence: 94 and 110 (agree, re-derived from
@@ -473,7 +499,8 @@ exist yet.
   a chosen number and its reasoning.
 - 2026-09-03 host adversarial review run. C-11, C-15 and C-16 were blocking and
   changed this file; C-12 changed both artifacts; C-13 and C-14 tightened claims
-  to what was measured; C-18 parked with a named trigger.
+  to what was measured; C-18 parked with a named trigger (and rebutted on
+  2026-09-04 — the premise did not survive being run).
 
 ## Planning adversarial review, second round — 2026-09-03
 
