@@ -1,6 +1,6 @@
 ---
 title: the dashboard's three open gaps — an ack that sticks, a mutation the index can count, and a bind that admits it failed
-status: planning
+status: ready
 created: 2026-09-02
 ---
 
@@ -28,32 +28,32 @@ the ack store." No step did.
 **2. R11-D10's deletion criterion has no counter.** The criterion (`docs/work/2026-08-29-artifacts-as-product/design.md:1528-1532`) is:
 sixty days after the 6b swap, if the index shows fewer than ten mutating requests from a tailnet
 Host, the write path and its three guards are deleted and the dashboard returns to GET-only.
-`do_POST` (`dashboard/server.py:445`) writes no record of having run — it validates, dispatches to
+`do_POST` (`dashboard/server.py:479`) writes no record of having run — it validates, dispatches to
 `actions.run`, and returns a body. The index has no table for it. The criterion therefore
 evaluates to "no evidence" rather than to a number, which is not the same answer and cannot be
 read as one.
 
 **3. The tailnet bind fails silently, and the failure latches.** `bound_addrs`
-(`dashboard/server.py:125`) probes `tailscale ip` once and caches the answer in `_ADDRS`
+(`dashboard/server.py:129`) probes `tailscale ip` once and caches the answer in `_ADDRS`
 (`dashboard/server.py:122`) for the life of the process. The cache has a good reason, written in
 its own docstring: asked twice, the tailnet could come up between the allow-list and the bind, and
 the server would bind an address it then answers 403 on. The cost was never written down beside
 the reason — the *first* answer is also the *only* answer. `tailnet_addrs`
 (`dashboard/server.py:89`) returns an empty list for three different failures (no `tailscale` on
 `PATH`, a non-zero exit, output that does not parse as an address), and `serve`
-(`dashboard/server.py:532`) treats an empty list as an ordinary start, because loopback bound and
-its only fatal case is nothing binding at all. `KeepAlive` (`bin/sd-dashboard:58`) restarts on
+(`dashboard/server.py:588`) treats an empty list as an ordinary start, because loopback bound and
+its only fatal case is nothing binding at all. `KeepAlive` (`bin/sd-dashboard:69`) restarts on
 exit, and nothing exits. So a probe that comes up empty at startup — launchd racing `tailscaled` at
 boot is the ordinary way — leaves the dashboard reachable only from the machine it runs on, for as
 long as it runs, with no crash, no error line, and a startup message that reads as success.
 
 The install is what makes this a broken promise rather than a preference: `TAILNET_BIND`
-(`bin/sd-dashboard:125`) turns the bind **on** for the installed service and leaves it off for a
+(`bin/sd-dashboard:136`) turns the bind **on** for the installed service and leaves it off for a
 hand-run `serve`, on the stated grounds that "installing is asking for the service the system
 dashboard provided." The service can then decline to provide it without saying so.
 
 The prior item found this failure *class* and fixed one instance of it. The plist's `PATH` comment
-at `bin/sd-dashboard:77-80` says launchd's own `PATH` holds no `tailscale`, so "the tailnet bind
+at `bin/sd-dashboard:88-91` says launchd's own `PATH` holds no `tailscale`, so "the tailnet bind
 silently does nothing, both of them looking like a quiet dashboard rather than a broken one" — and
 sets `PATH` to remove that cause. The empty-probe cause has the identical symptom and was left.
 
@@ -82,14 +82,14 @@ from an absent one, and an unbound address from an unwanted one.
 | `dashboard/` total lines | **4,190 against the 4,300 cap in force when this was measured; R11-D29 re-derived it at 4,350** | the tokeniser `line_count` (`tests/test_loc_caps.py:163-171`), over `tracked("dashboard")` |
 | `dashboard/` code lines | **2,206 against a 2,300 cap — 94 headroom** | the tokeniser `code_line_count` (`tests/test_loc_caps.py:117-160`) |
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
-| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:445-481` |
-| `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
+| Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:479-481` |
+| `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:218-227` |
 | 6b swap closed | 2026-09-01 (6b-9) | `docs/work/2026-08-29-artifacts-as-product/implement.md:1504` |
 | R11-D10 evaluation date, read literally | **2026-10-31**, against a count of zero | `docs/work/2026-08-29-artifacts-as-product/design.md:1529` + the above |
 | Closest precedent's cost | `record_load` + `load_age_seconds` = **59 code lines** | the tokeniser, over `bin/sd-handoff-restore:157-313` |
 | Recorded dashboard starts that published loopback alone | **1 of 5** | `~/Library/Logs/com.sven.sd-dashboard.log`, lines 2-10 |
 | Tailnet address across those starts | changed, `100.82.165.108` → `100.73.1.43` | the same log, lines 6 and 10 |
-| `bin/` lines | 11,147 against a 14,000 cap — **2,853 headroom** | the same tokeniser, over `tracked("bin")` |
+| `bin/` lines | **12,217 against a 14,000 cap — 1,783 headroom** (was 11,147 / 2,853 on 2026-09-02; re-derived 2026-09-03) | the same tokeniser, over `tracked("bin")` |
 
 `DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:91`) moves **downward only**, so 94 lines is a
 budget this item cannot raise by writing prose or by re-deriving the cap. It is the binding
@@ -97,8 +97,9 @@ constraint on gaps 1 and 2, which have to live under `dashboard/`, and any solut
 does not fit inside it is not a solution. Gap 3 has an exit the other two do not: `bin/sd-dashboard`
 is the CLI in front of the server and charges the `bin/` cap instead —
 `test_the_dashboard_stays_under_its_ceiling` (`tests/test_loc_caps.py:215-226`) —
-where 2,853 lines are free, so where its fix lands is a budget
-decision, not only a design one.
+where 1,783 lines were free on 2026-09-03 before this item, so where its fix
+lands is a budget decision, not only a design one. It landed there:
+`bin/sd_ledger.py`.
 
 The log rows are machine-local evidence from this Mac, not something CI can reproduce. They are
 cited for what they establish — that the failure has happened, and more than the address changed —
@@ -187,7 +188,8 @@ item is mostly about. Specific to this item:
    second writer racing it the way a SessionStart hook does.
 
    Gap 3 is deliberately outside that 51: its fix must either be small enough to fit what remains
-   after the ack, or live in `bin/sd-dashboard`, which charges `bin/` and its 2,853 free lines. A
+   after the ack, or live in `bin/`, which charges the `bin/` cap and its 1,783 lines free as of
+   2026-09-03 (1,646 after this item). A
    `bound_addrs` re-probe charges the 110; a plist change does not. `design.md` should say which
    cap it is spending before it says what the code does.
 
@@ -239,7 +241,7 @@ item is mostly about. Specific to this item:
 3. Where does an ack live so that a `dashboard/` line budget of 110 is enough for the mechanisms
    that have to live there?
 4. How many failed probes before the server accepts loopback and says so? A retry that never gives
-   up is the crashloop `ThrottleInterval` (`bin/sd-dashboard:69`) was added to bound; giving up on
+   up is the crashloop `ThrottleInterval` (`bin/sd-dashboard:80`) was added to bound; giving up on
    the first probe is today's behaviour and is the defect. The answer is a number and a place to
    put it, not a principle.
 5. Which of the four shapes, and against which cap: re-probe inside `bound_addrs` on a miss; have
@@ -291,7 +293,7 @@ routes — nothing counts, *and* nothing could have been counted.
   wording.** No timestamps means the boot-order race is a hypothesis about that start, not an
   observation of it. The claim the PRD actually makes is narrower and is provable from the code:
   `tailnet_addrs` (`dashboard/server.py:89`) collapses three distinct failures into one empty list,
-  `bound_addrs` (`dashboard/server.py:125`) latches it, and `serve` (`dashboard/server.py:532`)
+  `bound_addrs` (`dashboard/server.py:129`) latches it, and `serve` (`dashboard/server.py:588`)
   reports success. Which of the three fired on that start does not change the defect or the fix.
 - **C-8 — gap 3 could be its own item. Material. `rebutted`.** The usual reason to split is budget
   contention, and it does not apply: gap 3's fix can charge `bin/`, which gaps 1 and 2 cannot. The
@@ -305,7 +307,7 @@ routes — nothing counts, *and* nothing could have been counted.
   "first mechanism" since 59 lines buys one of three, not one of two; open question 3's "both
   mechanisms" narrowed to the ones that must live under `dashboard/`; C-2's pointer followed
   requirement 6 to requirement 8. Every citation added this pass was opened and read, including the
-  two that are prose rather than symbol anchors (`bin/sd-dashboard:77-80`, the log lines).
+  two that are prose rather than symbol anchors (`bin/sd-dashboard:88-91`, the log lines).
 
 Implementation is **not** unblocked, and deliberately so: this is a PRD with five open questions
 that `design.md` owns. No blocking concern is unresolved.

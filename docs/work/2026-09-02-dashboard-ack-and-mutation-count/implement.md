@@ -1,0 +1,131 @@
+# Implement — the dashboard's three open gaps
+
+Seven steps. The order is chosen so that the budget's answer arrives early: the
+ledger is step 1 because it is the largest single estimate, and if 30 lines
+turns out to be 45 the item finds out before four other steps have been built on
+top of it.
+
+Every step is independently landable and independently green. Steps 2, 3 and 4
+each add one write site to the ledger from step 1 and are independent of each
+other; steps 5 and 6 are the ack pair and 6 depends on 5.
+
+## Step checklist
+
+- [x] **1 — `bin/sd_ledger.py`.** `path()` and `append(kind, **fields)`.
+      Exclusive `flock` over `O_APPEND`, one JSON object per line, `at` stamped
+      by the writer. Every exception swallowed (D-6): this function cannot raise
+      into a caller, and its own test asserts that against an unwritable path.
+      Green when: `tests/test_sd_ledger.py` passes, including a
+      concurrent-writer case that asserts no torn lines.
+
+      **Landed in `bin/`, not `dashboard/`, and that changed D-1.** Written
+      first into `dashboard/ledger.py`, it measured **64 code lines against a
+      30-line estimate** and pushed `dashboard/` to 4,353 total against a 4,300
+      cap — over, before three of the seven steps existed. The design's named
+      fallback turned out to be unusable (see Budget), so the mechanism moved to
+      `bin/`, where the PRD had already said gap 3's fix could go: "where its fix
+      lands is a budget decision, not only a design one". The dependency already
+      runs one way, `bin/sd-dashboard` imports `dashboard`, so the writer is
+      passed *down* as a callable and `dashboard/` gains a parameter rather than
+      an import.
+- [x] **2 — the `mutation` record.** One `ledger.append` in `do_POST`
+      (`dashboard/server.py:479`), after `actions.run` returns, carrying `at`,
+      `action`, and `tailnet_host` (the `Host` matched a tailnet address rather
+      than loopback). Green when: a request through each of the four paths —
+      host refused, token refused, unknown action, success — leaves exactly one
+      record for the success and none for the other three.
+- [x] **3 — the `bind` record.** One `ledger.append` in `serve`
+      (`dashboard/server.py:588`) after the bind loop, carrying `requested` and
+      `bound` as counts. Green when: a fixture with a stubbed `tailscale` that
+      exits non-zero records `requested: 1, bound: 1` (loopback only) and one
+      with two addresses records `3` and `3`.
+- [x] **4 — the bounded re-probe.** `bound_addrs` (`dashboard/server.py:129`)
+      probes up to 3 times, 2 seconds apart, latching after the last attempt
+      rather than the first (D-4). The sleep is injectable so the test does not
+      spend 4 seconds. Green when: a stub returning empty twice then an address
+      yields that address, and a stub always empty is called exactly 3 times and
+      returns `[]`.
+- [x] **5 — `POST /api/ack`.** Beside `/api/run`, behind the same three guards
+      in the same order. The body carries an id; the id is written to the ledger
+      as `kind: "ack"` and never reaches `actions.run` or an argv. `now` reads
+      the ack ids once per render and drops matching rows. Green when: an acked
+      id is absent from the next render and still absent after a simulated
+      restart; and `grep` for interpolation (acceptance criterion 7) is clean.
+- [x] **6 — the dismiss control in `app.js`.** One button per Now row, posting
+      the row's id to `/api/ack`, removing the row optimistically. Green when:
+      the existing `app.js` tests pass and the new control's handler is covered.
+- [x] **7 — D-3: `pr:` ids gain the rank band.** `dashboard/now.py:129` becomes
+      `pr:{repo}#{number}:{rank}`. Green when: `tests/test_dashboard_now.py`
+      passes with a case asserting a PR moving `FRESH → STALE` mints a new id.
+
+## Budget
+
+The design estimated ~91 code lines against 94 of `dashboard/` headroom. Both
+halves of that were wrong, and the measured outcome is here rather than the
+estimate:
+
+| | `dashboard/` total | `dashboard/` code | `bin/` total |
+|---|---|---|---|
+| before | 4,190 / 4,300 | 2,206 / 2,300 | 12,217 / 14,000 |
+| ledger in `dashboard/` (abandoned) | **4,353 — over by 53** | 2,285 | — |
+| shipped, ledger in `bin/` | **4,294 / 4,300** | **2,257 / 2,300** | **12,354 / 14,000** |
+| headroom left | **6** | 43 | 1,646 |
+
+Two errors the estimate made, recorded because the next item will make them
+again otherwise:
+
+1. **It sized the code cap and ignored the total cap.** The total busted first,
+   at 4,353 against 4,300, while the code cap still had 15 lines free. This
+   repository documents heavily and prose counts toward the total, so an
+   estimate in code lines alone cannot answer whether something fits.
+2. **The named fallback was not deletable.** The design nominated
+   `dashboard/plugins.py:678-713` for being fixture-covered. It is `alert_rows`,
+   which turns plugin failures into Now rows and carries per-complaint ids
+   precisely so dismissing one cannot hide its siblings. Deleting it would make
+   plugin losses silent — the exact failure class this item exists to fix.
+   Coverage is not deletability, and the function should have been opened before
+   it was named.
+
+A third error, caught last and worth the most: **the "shipped" row was measured
+before the last step was written.** The 4,266 this table carried until the final
+audit was taken after step 5, and step 6 added the dismiss control to `app.js`.
+Six lines of headroom, not thirty-four. A budget measured before the work is
+finished is an estimate wearing a measurement's clothes, and the only defence is
+to re-run the tokeniser after the last commit rather than after the last one you
+remember.
+
+Raising `DASHBOARD_CODE_CAP` was never available (`tests/test_loc_caps.py:20`,
+downward-only). `DASHBOARD_CAP` **is** raisable and is now the binding
+constraint at six lines, but it is not raised here: `test_loc_caps.py`'s
+docstring says a cap "is never raised in the PR that busts it" and that each
+re-derivation landed "in its own decision record by a change that fit under the
+ceiling it replaced". This change fits. The re-derivation is therefore due as
+its own change, with the itemisation R11-D24 requires, and is filed as the
+next item rather than folded into this one.
+
+## Verification
+
+Named before the work, per the repository's own standard:
+
+- **The budget.** `python3 -m pytest tests/test_loc_caps.py` passes.
+  Failure means `dashboard/` code exceeded 2,300 and the named cut is due. This
+  is the check most likely to fail, which is why it is first.
+- **Each step's own gate**, as listed above. A step is not done because its code
+  exists; it is done when its named test passes.
+- **The whole suite.** `make check` passes with no new failures against the
+  1,140 tests and 875 subtests currently green.
+- **No caller-supplied value reaches an argv** (acceptance criterion 7):
+  `grep -rn 'argv' dashboard/` reviewed by eye against every `RUN_ALLOWLIST`
+  entry, and the ack path asserted to contain no `subprocess` call at all.
+- **Mutation-tested, not merely covered.** For steps 2, 3 and 4, the test is
+  run against a deliberately broken implementation before the real one: a
+  `do_POST` that records on refusal, a `serve` that records only on success, a
+  `bound_addrs` that latches on the first probe. Each must fail. A gate that
+  has never failed has not been shown to work.
+
+**Cannot be verified here, stated rather than faked:** the acceptance criterion
+that asks for *"pressing the real button on the real machine"* needs the
+installed service and a phone on the tailnet. The fixtures cover the four guard
+paths and both bind failures; they do not cover the launchd boot race that
+produced the original observation, because reproducing it means rebooting a Mac
+with a stopwatch. That gap is the PRD's C-6 and C-7, already recorded there.

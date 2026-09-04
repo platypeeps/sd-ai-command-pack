@@ -586,8 +586,36 @@ function paintNow(all) {
     const tr = document.createElement("tr");
     if (how === "broken") tr.className = "you";
     tr.append(rank, cell(row.what), cell(row.detail || ""), whereCell(row));
+    if (row.id) tr.append(dismissCell(row.id, tr));
     nowRows.append(tr);
   }
+}
+
+// The row goes as soon as it is clicked, before the server answers. An ack is
+// the operator saying "I have seen this", and the one thing it must not do is
+// leave the row sitting there through a round trip -- that reads as a control
+// that did not work and gets clicked twice. If the POST fails the next poll
+// brings the row back, which is the honest outcome: the ack did not land.
+function dismissCell(id, tr) {
+  const button = document.createElement("button");
+  button.className = "ghost";
+  button.textContent = "dismiss";
+  button.title = "acknowledge this alert";
+  button.addEventListener("click", async () => {
+    tr.remove();
+    try {
+      await fetch("/api/ack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Dashboard-Token": RUN_TOKEN },
+        body: JSON.stringify({ id }),
+      });
+    } catch (err) {
+      nowSub.textContent = `dismiss did not reach the server (${err})`;
+    }
+  });
+  const td = document.createElement("td");
+  td.append(button);
+  return td;
 }
 
 // null until the first fetch answers, and the distinction is the point: the

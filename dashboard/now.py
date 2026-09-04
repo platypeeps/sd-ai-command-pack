@@ -126,7 +126,14 @@ def pr_rows(payload: dict, today: str = "") -> list[dict]:
         out.append({
             "rank": STALE if quiet else FRESH,
             "kind": "pr",
-            "id": f"pr:{pr.get('repo')}#{pr.get('number')}",
+            # The rank is in the id deliberately (D-3). Every other id here
+            # keys on the fact that changed -- `ahead:{name}:{ahead}` -- so an
+            # ack covers the fact and a recurrence mints a new id. A PR id
+            # without its band would encode identity but not condition, so an
+            # ack taken while it was FRESH would permanently hide the same PR
+            # once it went STALE, which is the state the view exists to raise.
+            "id": f"pr:{pr.get('repo')}#{pr.get('number')}:"
+                  f"{STALE if quiet else FRESH}",
             "what": f"{pr.get('repo')}#{pr.get('number')} open"
                     + (f", quiet {days}d" if quiet else ""),
             "detail": pr.get("title") or "",
