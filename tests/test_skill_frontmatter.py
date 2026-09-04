@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -373,6 +374,178 @@ class UnbuiltSurfaceTests(unittest.TestCase):
                     f"{path.parent.name} documents a tool that does not exist in "
                     f"bin/ without saying so anywhere in the skill",
                 )
+
+
+class RunsAsColumn(unittest.TestCase):
+    """README's **Runs as** column is derived from `bin/`, not maintained.
+
+    The column exists so a reader can tell a shipped entrypoint from a prose
+    sequence without opening twelve files. It was added by hand, against a
+    filesystem that changes, in the same commit whose own docstring calls a
+    count kept by hand next to a list kept by hand the ordinary way a fact
+    rots. Leaving it ungated would have been that commit doing the thing it
+    objects to.
+
+    `bin/` is the authority. A row saying `bin/` for a command with no
+    entrypoint promises something that cannot be run; a row saying prose for a
+    command that has one hides a tool from the person looking for it. Both
+    directions fail here.
+    """
+
+    ROW = re.compile(r"^\|\s*`(sd-[a-z0-9-]+)`\s*\|\s*(`bin/`|prose)\s*\|", re.M)
+
+    def rows(self) -> list[tuple[str, str]]:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        return [(m.group(1), m.group(2)) for m in self.ROW.finditer(readme)]
+
+    WORDS = {"Five": 5, "Six": 6, "Seven": 7, "Eight": 8, "Nine": 9,
+             "Ten": 10, "Eleven": 11, "Twelve": 12}
+    SENTENCE = re.compile(
+        r"\b([A-Z][a-z]+) of the ([a-z]+) are\s+\n?prose", re.M)
+
+    def sentence_counts(self) -> tuple[int, int]:
+        """The two numbers README states in prose: prose count, and total."""
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        m = self.SENTENCE.search(readme)
+        self.assertIsNotNone(m, "README no longer states an X-of-Y prose count")
+        # Assert before indexing. `WORDS[...]` on an unlisted spelling raises a
+        # KeyError, which CI reports as an error with a traceback into this
+        # helper -- true, and useless to whoever changed the README sentence.
+        for word in (m.group(1), m.group(2).capitalize()):
+            self.assertIn(
+                word, self.WORDS,
+                f"README's prose-count sentence spells a number this test "
+                f"cannot read: {word!r}. Add it to WORDS.",
+            )
+        return self.WORDS[m.group(1)], self.WORDS[m.group(2).capitalize()]
+
+    def test_the_table_is_found_at_all(self) -> None:
+        """Guards the derivation, not the data.
+
+        Every other test here passes vacuously on zero rows, so a table that
+        grows a column and silently stops matching would read as a clean run.
+        """
+        _, total = self.sentence_counts()
+        self.assertEqual(
+            len(self.rows()), total,
+            "README's command table did not parse into the number of rows its "
+            "own sentence claims -- if a column moved, fix this pattern rather "
+            "than letting the checks below pass on nothing",
+        )
+
+    # The inventory itself. There is no rule in the tree that derives it:
+    # `skills/` holds seventy-odd surfaces, only eleven carry
+    # `disable-model-invocation: true`, and the table lists twelve -- `sd-help`
+    # is in the table without the marker. So this list is data, not a
+    # derivation, and it is the one place that is honest about it. Adding a
+    # command means editing this line on purpose, which is the point: without
+    # it, swapping `sd-map` for any other real skill passes every other check
+    # here, because each one asks whether a row is *plausible* rather than
+    # whether the set is *right*.
+    EXPECTED = frozenset({
+        "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
+        "sd-deps", "sd-help", "sd-suggest", "sd-skill-adopt", "sd-map",
+        "sd-handoff",
+    })
+
+    def test_the_table_lists_exactly_the_commands(self) -> None:
+        """Identity of the set, not the shape of it."""
+        names = {name for name, _ in self.rows()}
+        self.assertEqual(
+            names, set(self.EXPECTED),
+            f"missing from README's table: {sorted(self.EXPECTED - names)}; "
+            f"unexpected: {sorted(names - self.EXPECTED)}",
+        )
+
+    def test_each_command_appears_once_and_is_a_real_skill(self) -> None:
+        """Row count alone is satisfied by a duplicate covering an omission.
+
+        Counting rows and checking each against `bin/` both pass when one
+        command is listed twice and another is missing entirely: the count is
+        right and every row present is accurate. Identity is what that misses,
+        so it is checked separately, against the skills directory rather than
+        against a list kept here.
+        """
+        names = [name for name, _ in self.rows()]
+        self.assertEqual(
+            sorted(names), sorted(set(names)),
+            f"a command is listed twice in README's table: "
+            f"{sorted(n for n in set(names) if names.count(n) > 1)}",
+        )
+        for name in names:
+            with self.subTest(command=name):
+                self.assertTrue(
+                    (SKILLS / name / "SKILL.md").is_file(),
+                    f"README's table names `{name}`, which is not a skill",
+                )
+
+    def test_every_row_matches_the_filesystem(self) -> None:
+        for name, label in self.rows():
+            shipped = (REPO_ROOT / "bin" / name).is_file()
+            with self.subTest(command=name):
+                self.assertEqual(
+                    label == "`bin/`", shipped,
+                    f"README calls `{name}` {label}, but bin/{name} "
+                    f"{'exists' if shipped else 'does not exist'}",
+                )
+
+    def test_the_prose_count_in_the_sentence_above_is_derived(self) -> None:
+        """The sentence naming a number is the part that rots first."""
+        stated, _ = self.sentence_counts()
+        actual = sum(1 for _, label in self.rows() if label == "prose")
+        self.assertEqual(
+            stated, actual,
+            f"{actual} rows say prose; README's sentence says {stated}",
+        )
+
+
+class BinaryClaims(unittest.TestCase):
+    """A skill that names a `bin/` command either has it or says it does not.
+
+    Seven of the twelve surfaces ship as prose an agent follows rather than as
+    a runner: `sd-deps`, `sd-help`, `sd-map`, `sd-plan`, `sd-ship`, `sd-spec`
+    and `sd-suggest` have no binary. That is a deliberate state and each one
+    currently says so in its own "State of the tooling" section -- which is the
+    difference between a documented gap and drift, and it is a difference
+    nothing checked.
+
+    The failure this prevents is the quiet direction: a surface that gains a
+    `bin/` mention and no sentence admitting the runner does not exist reads,
+    to anyone who has not tried it, as a command they can run. It also catches
+    the reverse over time -- a skill that finally gets its binary and keeps the
+    sentence saying it has none.
+    """
+
+    ABSENT = re.compile(r"There is no `(bin/[a-z0-9-]+)` yet")
+    MENTION = re.compile(r"`(bin/sd-[a-z0-9-]+)`")
+
+    def test_every_named_binary_exists_or_is_declared_missing(self) -> None:
+        undeclared = []
+        for path in surfaces():
+            text = path.read_text(encoding="utf-8")
+            declared = set(self.ABSENT.findall(text))
+            for named in set(self.MENTION.findall(text)):
+                if (REPO_ROOT / named).is_file() or named in declared:
+                    continue
+                undeclared.append(f"{path.parent.name} names {named}, "
+                                  "which does not exist and is not declared missing")
+        self.assertEqual(sorted(undeclared), [], "\n".join(sorted(undeclared)))
+
+    def test_nothing_is_declared_missing_that_is_present(self) -> None:
+        """The other direction, which arrives by building the thing."""
+        stale = []
+        for path in surfaces():
+            for named in set(self.ABSENT.findall(path.read_text(encoding="utf-8"))):
+                if (REPO_ROOT / named).is_file():
+                    stale.append(f"{path.parent.name} says {named} does not exist, but it does")
+        self.assertEqual(sorted(stale), [], "\n".join(sorted(stale)))
+
+    def test_the_patterns_still_match_something(self) -> None:
+        """The control. Both sides are regexes over prose, and one that stopped
+        matching would empty both sets and assert over nothing."""
+        joined = "".join(path.read_text(encoding="utf-8") for path in surfaces())
+        self.assertNotEqual(self.ABSENT.findall(joined), [], "no absence declaration parsed")
+        self.assertNotEqual(self.MENTION.findall(joined), [], "no bin/ mention parsed")
 
 
 if __name__ == "__main__":

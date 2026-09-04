@@ -112,20 +112,28 @@ difference is in the frontmatter, and it is what the taxonomy means: each of
 the eleven commands sets `disable-model-invocation`, so invoking it is a
 deliberate act; every other surface, `sd-help` included, does not.
 
-| Command | Purpose |
-|---|---|
-| `sd-plan` | Interview into a work item under `docs/work/`, review it, open its branch |
-| `sd-check` | Deterministic runner over the repo's own entrypoints |
-| `sd-review` | Local review on the exact diff; findings dispositioned locally, never posted |
-| `sd-ship` | Verify, commit enumerated paths, push, open the PR, settle, squash-merge |
-| `sd-spec` | Update `docs/spec/**` on the PR branch |
-| `sd-status` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
-| `sd-deps` | Batch-triage dependabot and renovate PRs |
-| `sd-help` | Runtime catalog of installed `sd-*` surfaces |
-| `sd-suggest` | File framework improvements to the configured tracker |
-| `sd-skill-adopt` | Safety pre-screen, lint, and canonical transform for an incoming skill |
-| `sd-map` | Supporting artifacts into an out-of-tree cache; never a gate, never scheduled |
-| `sd-handoff` | Write the local session packet for this directory; `/clear` restores it |
+**Runs as** says whether there is something to execute. `bin/` is a shipped
+entrypoint you can run; **prose** is a sequence an agent follows, with no
+runner behind it — the skill is the implementation. Seven of the twelve are
+prose today, each saying so in its own "State of the tooling" section, and
+`tests/test_skill_frontmatter.py` fails if one of them ever names a `bin/`
+command without that sentence, or keeps the sentence after the command
+arrives.
+
+| Command | Runs as | Purpose |
+|---|---|---|
+| `sd-plan` | prose | Interview into a work item under `docs/work/`, review it, open its branch |
+| `sd-check` | `bin/` | Deterministic runner over the repo's own entrypoints |
+| `sd-review` | `bin/` | Local review on the exact diff; findings dispositioned locally, never posted |
+| `sd-ship` | prose | Verify, commit enumerated paths, push, open the PR, settle, squash-merge |
+| `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
+| `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
+| `sd-deps` | prose | Batch-triage dependabot and renovate PRs |
+| `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
+| `sd-suggest` | prose | File framework improvements to the configured tracker |
+| `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
+| `sd-map` | prose | Supporting artifacts into an out-of-tree cache; never a gate, never scheduled |
+| `sd-handoff` | `bin/` | Write the local session packet for this directory; `/clear` restores it |
 
 ## Maintaining
 
