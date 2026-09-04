@@ -1,0 +1,42 @@
+# TEMPORARY SPIKE -- delete with the branch. Answers one question: can the
+# Actions GITHUB_TOKEN request `copilot-pull-request-reviewer[bot]` as a
+# reviewer? Every Copilot review this repo has ever had came from a personal
+# access token acting as a human. If a workflow can make the request, the
+# review lane can own it once per pull request instead of the push hook asking
+# on every push.
+name: spike copilot request
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  ask:
+    name: spike
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Copilot as a reviewer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          gh api --method POST \
+            "repos/$REPO/pulls/$PR/requested_reviewers" \
+            -f 'reviewers[]=copilot-pull-request-reviewer[bot]' \
+            > /tmp/body.json 2> /tmp/err.txt
+          rc=$?
+          echo "SPIKE_RC=$rc"
+          echo "----- stdout -----"
+          head -c 1500 /tmp/body.json
+          echo
+          echo "----- stderr -----"
+          head -c 1500 /tmp/err.txt
+          echo
+          echo "----- requested_reviewers after -----"
+          gh api "repos/$REPO/pulls/$PR/requested_reviewers" || true
+          exit 0
