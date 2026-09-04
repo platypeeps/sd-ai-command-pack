@@ -19,7 +19,9 @@ other feedback must be understood together and converted into a decision-ready
 response plan.
 
 Do not use to reply to reviewers, resolve threads, edit the reviewed artifact,
-or treat a requested solution as a validated diagnosis. Editorial review of a
+or treat a requested solution as a validated diagnosis. Disposing of review
+findings on the user's own work — one evidenced disposition per finding, rather
+than themes across many — belongs to `sd-receive-review`. Editorial review of a
 technical draft belongs to `sd-technical-editor`; claim verification belongs to
 `sd-fact-check`; artifact changes require a separate authorized workflow. If a
 named sibling is unavailable, say so.

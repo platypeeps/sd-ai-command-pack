@@ -78,9 +78,30 @@ itself the signal to take the heavier.
 2. Read what already exists before asking about it. A question whose answer is
    in a supplied source spends the user's attention on something the assistant
    could have read.
-3. Ask exactly one answerable question per turn. Do not stack two demands in one
-   question, do not supply the expected answer inside the question, and do not
-   answer it yourself while waiting.
+3. Ask exactly one answerable question per turn. Do not stack two demands in
+   one question, do not answer it yourself while waiting, and do not steer
+   toward the answer you expect — by wording, by example, or by an option set
+   built so that one choice is plainly the intended one. Whether candidate
+   answers may be offered *at all* is settled by the form rule immediately
+   below, which governs; read no blanket ban into this sentence.
+
+   Questions take two forms, told apart by who wrote the candidate answers, not
+   by whether an answer was expected — authorship is observable at the moment
+   the question is written and expectation is not:
+
+   - **open** — the user's answer supplies its own content. Ask this first,
+     always.
+   - **closed** — the user selects from candidates. Where the candidates came
+     from decides what the answer is worth. Read off something that exists — the
+     files in a directory, the states a schema allows, the options a tool
+     exposes — they were transcribed, the ledger records what was read, and the
+     answer is an ordinary one. But when **the assistant supplies the
+     candidates**, the words are the assistant's and the user's role was to
+     pick among them, so step 7 applies however decisively they picked.
+
+   An assistant-authored closed question is permitted only after an open one was
+   asked and did not land, or when the user asked to be given options. It is
+   never the form a question takes first.
 4. Classify each answer with exactly one primary class:
    - **grounded** — names a file, a measurement, a check, an observation, or a
      source that can be gone back to;
@@ -113,6 +134,20 @@ itself the signal to take the heavier.
    recorded as its own answer with its own class and reported next to the
    contaminated one rather than replacing it. Never fill a silence with a
    plausible requirement.
+
+   An answer selected from an assistant-authored option set is **contaminated by
+   construction** and recorded so without exception. How certain the user was
+   does not change where the words came from, and a user who chose decisively
+   among three assistant-written options has ratified a framing rather than
+   stated one. This is the case the rule above is most often read past, because
+   choosing feels like stating.
+
+   The narrow exception, and it is the only one: candidates *transcribed* from
+   something that exists — the files in a directory, the states a schema allows
+   — were reported, not authored, so selecting one is an ordinary answer and
+   this rule does not reach it. The ledger records what was read, so the claim
+   is checkable. If the assistant chose which subset of a real set to show, it
+   authored the set and the exception does not apply.
 8. Stop on user request, at the agreed bound, when the classification's
    questions are exhausted, or when no remaining question would change the
    proposal. Stop early and say which sibling skill owns it when the subject
@@ -123,6 +158,14 @@ itself the signal to take the heavier.
      Present the closing statement (problem, requirements, acceptance criteria,
      open questions, what was assumed) and stop. The user's approval of that
      statement is the end of this skill's work.
+
+     When every load-bearing answer in the session was contaminated, the closing
+     statement leads with that fact — **before the requirements it asks the user
+     to approve**, not in a disclosure they reach afterwards. A session may
+     legitimately run entirely on assistant-authored options and still close
+     `completed`; what it may not do is present the result as the user's stated
+     intent and record the origin further down, where it is read after the
+     requirements have already been read as theirs.
    - **handed off** — the subject turned out to belong to a sibling skill, per
      step 8. Name the sibling and why, report what was established before the
      handoff, and stop. This is not a completed interrogation and its partial
@@ -158,6 +201,7 @@ interrogation that ended early.
 | "The criterion is a bit vague but the intent is clear" | Clear to whom. A criterion nobody else can evaluate is not a criterion. |
 | "It grew, but we're nearly done" | The ratchet is one-way. Say which answer upgraded it and continue heavier. |
 | "The statement is obviously right, I'll start while they read it" | The gate is the approval, not the statement's length. |
+| "They picked one of my three options, so they decided" | They ratified a framing you wrote. Contaminated by construction, and the closing statement says so first. |
 
 ## Safety rules
 
@@ -194,9 +238,10 @@ interrogation that ended early.
 - **Unresolved contradictions** — both sides quoted, with what the user said
   when asked which holds;
 - **Assistant-supplied content** — every contaminated answer with its origin,
-  and beside it any later independent answer to a question that did not carry
-  the assistant's version. A contaminated entry is never removed, cleared, or
-  reclassified as stated intent;
+  including whether it came from an assistant-authored option set, and beside it
+  any later independent answer to a question that did not carry the assistant's
+  version. A contaminated entry is never removed, cleared, or reclassified as
+  stated intent;
 - **Not asked** — coverage the bound, a defect, or a stop cut short; and
 - **Handoffs** — proposed `sd-plan`, `sd-decide`, `sd-premortem`,
   `sd-red-team`, or `sd-socratic-review` work, each `not run` or `unavailable`,
@@ -211,3 +256,23 @@ scale with simplicity are adapted from the `brainstorming` skill in
 one question per turn, response classes, contamination tracking, and an evidence
 ledger that reports what it did not cover — is this pack's, from
 `sd-socratic-review`.
+
+On question form **the sources pull in different directions**, and this skill
+said too little to settle it until its first real session ran entirely on
+assistant-authored multiple choice and every load-bearing answer came back
+contaminated. `sd-socratic-review` tells its user to avoid answer choices that
+contain the expected answer — not choices as such, and not without exception,
+since a learner may ask for help. `brainstorming` prefers multiple choice
+outright, because it is helping someone find a space they have no words for
+yet. Neither is wrong about its own job, and neither was ever adopted here as
+question-form policy: what this skill took from `brainstorming` was the
+classification, the ratchet and the gate.
+
+**So the defect was this skill's own ambiguity, not an inherited contradiction.**
+Step 3 forbade supplying the expected answer and said nothing about supplying
+candidates, which left a reader free to decide that picking one of three was
+stating rather than adopting. Settled in step 3 by splitting on authorship
+rather than on expectation, because authorship is observable when the question
+is written and expectation is not: candidates transcribed from something that
+exists are ordinary, candidates the assistant wrote are contaminated by
+construction and permitted only as a second move.

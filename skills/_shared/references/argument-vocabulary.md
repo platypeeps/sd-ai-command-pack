@@ -51,6 +51,9 @@ not repurpose it for another, and do not coin a synonym.
 - `mode=` — a skill's operating mode.
 - `scope=` — the extent of work the skill covers.
 - `audience=` — who the output is written for.
+- `bounds=` — the stopping condition for the work: a question or experiment
+  count, a time budget, or an explicit halt condition. Distinct from `scope=`,
+  which is the extent covered rather than when to stop.
 
 Skill-owned argument names outside this list keep their own per-skill meaning;
 this reference governs the shared vocabulary, not every private argument.
