@@ -255,9 +255,13 @@ The Codex lane declined to run full `make check` because its runner writes
 it ran a focused 26-test subset instead, and the host lane ran the full gate at
 every round.
 
-**Implementation is blocked on C-11.** Every other concern is addressed,
-rebutted, or parked, and no parked concern blocks. C-11 needs a decision from
-the user, not another round.
+**Promotion is blocked on C-11.** The implementation exists — it is in the same
+change set as this item, written before the item was opened — so what C-11
+blocks is not writing the skill but approving it: the item may not move to
+`ready` or `in_progress`, and the change may not be merged as reviewed-clean,
+until the disagreement is settled. Every other concern is addressed, rebutted,
+or parked, and no parked concern blocks. C-11 needs a decision from the user,
+not another round.
 
 ## Log
 

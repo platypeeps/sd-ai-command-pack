@@ -198,9 +198,10 @@ interrogation that ended early.
   the assistant's version. A contaminated entry is never removed, cleared, or
   reclassified as stated intent;
 - **Not asked** — coverage the bound, a defect, or a stop cut short; and
-- **Handoffs** — proposed `sd-plan`, `sd-decide`, `sd-premortem`, or
-  `sd-red-team` work, each `not run` or `unavailable`, plus the statement that
-  nothing was written, branched, or implemented.
+- **Handoffs** — proposed `sd-plan`, `sd-decide`, `sd-premortem`,
+  `sd-red-team`, or `sd-socratic-review` work, each `not run` or `unavailable`,
+  plus the statement that nothing was written, branched, or implemented. A
+  `handed off` closing state names its sibling here.
 
 ## Lineage
 
