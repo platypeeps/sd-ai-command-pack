@@ -137,6 +137,28 @@ merged into it — the cap value has to be the one already on `main` when CI
 measures PR 2, or PR 2's cap check is passing against a ceiling that does not
 exist yet.
 
+## Closing the item
+
+When PR 2 merges, `prd.md` goes to `status: done` **and drops its `branch:`
+field in the same edit.** Not tidiness — the field is load-bearing.
+`bin/sd_sweep.py:91` skips an item when `item.status != "planning" or
+item.branch`, and its own comment says a `branch:` field *"claims a branch
+exists for the item"*. Claims: nothing resolves it. A field left behind after
+its branch is deleted goes on excluding the item from the staleness sweep,
+which is a gate silenced by exactly the stale metadata it exists to notice.
+
+This item demonstrated the failure rather than theorising it. The field named
+`cap/r11-d30-dashboard-ceiling` from the moment the item started; #737 merged
+and deleted that branch; the field went on naming it until PR 2 repointed it by
+hand. Nothing warned, because nothing checks.
+
+The narrow fix — teaching `sd_sweep` to resolve the branch instead of trusting
+its presence — is deliberately not here. `sd_sweep.sweep()` takes *multiple*
+roots (`bin/sd:2730` drives it from the project allowlist), so resolution has to
+run per-root with `git -C <root>`, and "git cannot answer" has to stay distinct
+from "branch absent" or an unreadable root turns every item inside it into a
+sweep candidate. That is its own item, opened separately.
+
 ## What closes the criteria
 
 | Criterion | Closed by |
@@ -145,4 +167,4 @@ exist yet.
 | 2 — mutation-tested, not covered | PR 2, verification step 3 |
 | 3 — unparsed header returned, never `""` | PR 2, the `else ""` mutation |
 | 4 — unbracketed path examined and stated | `design.md` open question 4; the branch comment in PR 2 |
-| 5 — cap re-derived in its own change, ahead of the fix | PR 1 |
+| 5 — cap re-derived in its own change, ahead of the fix | PR 1 (R11-D30, #737) |

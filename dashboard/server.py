@@ -195,13 +195,31 @@ def host_name(header: str | None) -> str:
     `split(":")[0]` yields `[` -- which is not a loopback name, so the IPv6
     loopback the server explicitly supports was recorded as tailnet demand.
     One parser, two callers, no second chance to disagree.
+
+    A header this cannot parse is returned unparsed rather than repaired. The
+    bracketed branch used to end `+ "]"`, and `partition` yields the whole
+    string when the separator is absent, so `[::1` came back as `[::1]` -- a
+    closing bracket the header never carried. `[::1]evil.com` came back the
+    same way, and so did every other `[::1]<anything>`: an unbounded family
+    admitted as the loopback, not a list of cases. No allow-list holds an
+    unparsed header, so `host_ok` refuses it and `tailnet_host` records what
+    arrived; returning `""` would land in `LOOPBACK_NAMES` instead and file a
+    malformed header as local.
     """
     if not header:
         return ""
     name = header.strip().lower()
     if name.startswith("["):
-        return name.partition("]")[0] + "]"
+        # `[addr]` or `[addr]:digits`, or it is not parsed at all. A colon
+        # alone does not bound this -- it admits `[::1]:<anything>`, the same
+        # unbounded family wearing a port.
+        address, bracket, port = name.partition("]")
+        return address + bracket if bracket and (
+            not port or (port[0] == ":" and port[1:].isdigit())) else name
     if name.count(":") == 1:
+        # Unbracketed repairs nothing to begin with: one colon is a port and
+        # is dropped, anything else returns whole. `localhost:evil` yields
+        # `localhost`, which is the host that was actually asked for.
         return name.rsplit(":", 1)[0]
     return name
 
