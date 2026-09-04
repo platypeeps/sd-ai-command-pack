@@ -80,7 +80,25 @@ MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at s
 # reserved branch lands -- 14 when this was first written, narrowed by the
 # branch's own remediation. That is the price of the clause, and it is smaller
 # than the cost of the mechanism that tried to remove it.
-DASHBOARD_CAP = 4_350
+#
+# R11-D30, re-derived 2026-09-04 for the host-parsing item, which cannot start
+# without it: 4,348 measured on `main`, +18 measured for the fix, 9 unclaimed.
+# The 18 is not an estimate. The host-parsing item's `implement.md` pins the
+# exact replacement body for `host_name`, and the figure is
+# `line_count(tracked("dashboard"))` over a tree carrying that text rather than
+# a description of it -- 17 lines becoming 35, of which 2 are code and 16 are the
+# paragraph explaining why a security boundary now refuses input it used to
+# repair. `DASHBOARD_CODE_CAP` is untouched: +2 against 31 lines of headroom,
+# and it is downward-only under R11-D24 besides.
+#
+# The 9 unclaimed lines are the honest part. 4,375 was picked as a round number
+# and 9 is what the subtraction left, not a margin computed from anything. It
+# is kept because the predecessor item moved its own cap in four separate
+# shipped changes -- each round of review added rationale, and rationale is
+# what this cap is mostly made of. If this item's review rounds cost more than
+# 9 lines, that busts a ceiling visibly rather than quietly, which is the
+# behaviour this constant exists to produce.
+DASHBOARD_CAP = 4_375
 
 
 # The half that cannot be paid for with prose. R11-D24 split the dashboard
