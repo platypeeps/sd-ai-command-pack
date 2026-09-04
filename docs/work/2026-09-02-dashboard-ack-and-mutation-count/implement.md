@@ -29,13 +29,13 @@ other; steps 5 and 6 are the ack pair and 6 depends on 5.
       passed *down* as a callable and `dashboard/` gains a parameter rather than
       an import.
 - [x] **2 — the `mutation` record.** One `ledger.append` in `do_POST`
-      (`dashboard/server.py:479`), after `actions.run` returns, carrying `at`,
+      (`dashboard/server.py:492`), after `actions.run` returns, carrying `at`,
       `action`, and `tailnet_host` (the `Host` matched a tailnet address rather
       than loopback). Green when: a request through each of the four paths —
       host refused, token refused, unknown action, success — leaves exactly one
       record for the success and none for the other three.
 - [x] **3 — the `bind` record.** One `ledger.append` in `serve`
-      (`dashboard/server.py:588`) after the bind loop, carrying `requested` and
+      (`dashboard/server.py:609`) after the bind loop, carrying `requested` and
       `bound` as counts. Green when: a fixture with a stubbed `tailscale` that
       exits non-zero records `requested: 1, bound: 1` (loopback only) and one
       with two addresses records `3` and `3`.
@@ -51,6 +51,13 @@ other; steps 5 and 6 are the ack pair and 6 depends on 5.
       the ack ids once per render and drops matching rows. Green when: an acked
       id is absent from the next render and still absent after a simulated
       restart; and `grep` for interpolation (acceptance criterion 7) is clean.
+
+      **The second half of that gate no longer holds, deliberately.** Branch
+      review overturned D-2 (see `design.md`, C-27): an ack survives a restart
+      but not the day it was taken, because count-keyed ids recur and a
+      permanent ack hides the recurrence. The gate is now that an acked id is
+      absent from the next render, absent after a restart on the same day, and
+      **present again the next day**.
 - [x] **6 — the dismiss control in `app.js`.** One button per Now row, posting
       the row's id to `/api/ack`, removing the row optimistically. Green when:
       the existing `app.js` tests pass and the new control's handler is covered.
@@ -68,8 +75,9 @@ estimate:
 |---|---|---|---|
 | before | 4,190 / 4,300 | 2,206 / 2,300 | 12,217 / 14,000 |
 | ledger in `dashboard/` (abandoned) | **4,353 — over by 53** | 2,285 | — |
-| shipped, ledger in `bin/` | **4,294 / 4,300** | **2,257 / 2,300** | **12,354 / 14,000** |
-| headroom left | **6** | 43 | 1,646 |
+| shipped, before review remediation | 4,294 / 4,300 | 2,257 / 2,300 | 12,354 / 14,000 |
+| **shipped, after the branch review** | **4,336 / 4,350** | **2,267 / 2,300** | **12,393 / 14,000** |
+| headroom left | 14 | 33 | 1,607 |
 
 Two errors the estimate made, recorded because the next item will make them
 again otherwise:
@@ -87,21 +95,43 @@ again otherwise:
    it was named.
 
 A third error, caught last and worth the most: **the "shipped" row was measured
-before the last step was written.** The 4,266 this table carried until the final
-audit was taken after step 5, and step 6 added the dismiss control to `app.js`.
-Six lines of headroom, not thirty-four. A budget measured before the work is
-finished is an estimate wearing a measurement's clothes, and the only defence is
-to re-run the tokeniser after the last commit rather than after the last one you
-remember.
+twice before the work was finished.** The table read 4,266 from an audit taken
+after step 5, when step 6 had yet to add the dismiss control; corrected to 4,294,
+it was then overtaken by the branch review's remediation. A budget measured
+before the work is finished is an estimate wearing a measurement's clothes, and
+the only defence is to re-run the tokeniser after the last commit rather than
+after the last one you remember. The row above is measured at this branch's tip.
 
-Raising `DASHBOARD_CODE_CAP` was never available (`tests/test_loc_caps.py:20`,
-downward-only). `DASHBOARD_CAP` **is** raisable and is now the binding
-constraint at six lines, but it is not raised here: `test_loc_caps.py`'s
-docstring says a cap "is never raised in the PR that busts it" and that each
-re-derivation landed "in its own decision record by a change that fit under the
-ceiling it replaced". This change fits. The re-derivation is therefore due as
-its own change, with the itemisation R11-D24 requires, and is filed as the
-next item rather than folded into this one.
+**The cap.** Raising `DASHBOARD_CODE_CAP` was never available
+(`tests/test_loc_caps.py:20`, downward-only), and it is not needed: 2,267 of
+2,300. `DASHBOARD_CAP` **is** raisable, was the binding constraint at six lines
+before remediation and would have been red after it, and is not raised here.
+`test_loc_caps.py`'s docstring says a cap "is never raised in the PR that busts
+it" and that each re-derivation landed "in its own decision record by a change
+that fit under the ceiling it replaced". So it moved in R11-D29, in a change
+touching nothing under `dashboard/`, merged immediately before this one. This
+branch is rebased on it and measures 4,336 against 4,350.
+
+## What the branch review changed
+
+The lane (`sd-review --scope branch --challenge`, codex and prism) ran after all
+seven steps were green and returned eleven findings against work that had
+already passed its own gates. Seven were real, and they are worth listing
+because five of the seven are the same mistake: a claim the design made about
+behaviour that nothing exercised.
+
+| Finding | What it was |
+|---|---|
+| Permanent acks hide a returning count | D-2's justification, disproved. Acks now hold for a day |
+| A refused or failed action recorded a mutation | Step 2's own gate claimed otherwise and never tested it |
+| `[::1]:8767` classified as tailnet demand | `split(":")[0]` yields `[`; `host_ok` had the right parser 200 lines up. One parser now, two callers |
+| A total bind failure recorded nothing | `SystemExit` came before the row, so the worst start looked like no start |
+| An empty tailnet probe reported a clean bind | `requested` was `[host]`, so the counts agreed and nothing warned |
+| A damaged ledger 500'd the page | `UnicodeDecodeError` is a `ValueError`, and the guard caught `OSError` |
+| Mutation tests exercised stand-ins | They asserted properties of hand-written look-alikes, not of `do_POST` |
+
+Two test defects went with them: a monkeypatched `tailnet_addrs` with no
+restore, and a dismiss control that treated a 403 as success.
 
 ## Verification
 
@@ -122,6 +152,12 @@ Named before the work, per the repository's own standard:
   `do_POST` that records on refusal, a `serve` that records only on success, a
   `bound_addrs` that latches on the first probe. Each must fail. A gate that
   has never failed has not been shown to work.
+
+  *Half-done, and review said so.* The first version asserted those properties
+  of stand-ins written beside the handler rather than of the handler, which
+  proves the stand-ins correct and nothing else. The gates now read the guard
+  out of `server.py` itself, so deleting `if 200 <= status < 300:` from
+  `do_POST` fails a test instead of silently widening what gets counted.
 
 **Cannot be verified here, stated rather than faked:** the acceptance criterion
 that asks for *"pressing the real button on the real machine"* needs the

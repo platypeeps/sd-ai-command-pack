@@ -184,6 +184,28 @@ class ServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
+LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "[::1]", "::1", ""})
+
+
+def host_name(header: str | None) -> str:
+    """The host out of a `Host` header, port removed, lowercased.
+
+    Split out of `host_ok` when a second caller appeared and got it wrong.
+    `[::1]:8767` has three colons and only the one after `]` is the port, so
+    `split(":")[0]` yields `[` -- which is not a loopback name, so the IPv6
+    loopback the server explicitly supports was recorded as tailnet demand.
+    One parser, two callers, no second chance to disagree.
+    """
+    if not header:
+        return ""
+    name = header.strip().lower()
+    if name.startswith("["):
+        return name.partition("]")[0] + "]"
+    if name.count(":") == 1:
+        return name.rsplit(":", 1)[0]
+    return name
+
+
 def host_ok(header: str | None) -> bool:
     """Whether a request's `Host` is one this server serves.
 
@@ -192,16 +214,7 @@ def host_ok(header: str | None) -> bool:
     cannot tell it from the operator's own. The `Host` is what differs, so it
     is what is checked -- on reads too, because the reads are the fleet.
     """
-    if not header:
-        return False
-    name = header.strip().lower()
-    # `[::1]:8767` splits at the bracket; everything else at the last colon,
-    # and only when there is exactly one to split at.
-    if name.startswith("["):
-        name = name.partition("]")[0] + "]"
-    elif name.count(":") == 1:
-        name = name.rsplit(":", 1)[0]
-    return name in allowed_hosts()
+    return bool(header) and host_name(header) in allowed_hosts()
 
 
 PAGE = """<!doctype html>
@@ -523,17 +536,25 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 sent.get("action") if isinstance(sent, dict) else None,
                 plugins.catalog()[0],
             )
-            # After the guards and after the action, so a refused request
-            # leaves nothing and a served one leaves exactly one row. The
-            # `Host` is carried as a boolean rather than as itself: R11-D10
-            # counts requests *from a tailnet Host*, and the name adds nothing
-            # the criterion asks for while making the ledger a log of where
-            # the operator was. Never before `send_body` and never able to
-            # affect it -- `record` cannot raise (D-6).
-            record("mutation",
-                   action=sent.get("action") if isinstance(sent, dict) else None,
-                   tailnet_host=self.headers.get("Host", "").split(":")[0]
-                   not in ("localhost", "127.0.0.1", "::1"))
+            # After the guards and after the action, and only when the action
+            # was *served*: an unknown verb or a failed run comes back 4xx/5xx
+            # and mutated nothing, so counting it would inflate the one number
+            # R11-D10 turns into a deletion decision. Found in review, where
+            # this recorded every outcome and the step's own gate claimed
+            # otherwise without testing it.
+            #
+            # The `Host` is carried as a boolean rather than as itself:
+            # R11-D10 counts requests *from a tailnet Host*, and the name adds
+            # nothing the criterion asks for while making the ledger a log of
+            # where the operator was. It is classified by `host_name`, not by
+            # `split(":")` -- `[::1]:8767` splits at the wrong colon and turns
+            # the supported IPv6 loopback into recorded tailnet demand.
+            # Never before `send_body` and never able to affect it (D-6).
+            if 200 <= status < 300:
+                record("mutation",
+                       action=sent.get("action") if isinstance(sent, dict) else None,
+                       tailnet_host=host_name(self.headers.get("Host"))
+                       not in LOOPBACK_NAMES)
             self.send_body(json.dumps(body).encode(), "application/json", status)
 
     return Handler
@@ -601,7 +622,13 @@ def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST,
     allowed_hosts()
     handler = make_handler(Cache(root), script_source(), record, acked)
     bound = []
-    requested = [host] + bound_addrs()
+    # Kept apart from `requested` because they fail differently and requirement
+    # 6 cares about both. A probe that finds nothing makes `requested` exactly
+    # `[host]`, so `requested == bound` and the counts alone report a clean
+    # start -- which is the silent loopback-only bind this item exists to end,
+    # reported as a success. Found in review.
+    tailnet = bound_addrs()
+    requested = [host] + tailnet
     for addr in requested:
         server = ServerV6 if ":" in addr else ThreadingHTTPServer
         try:
@@ -611,14 +638,24 @@ def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST,
             continue
         bound.append(f"[{addr}]" if ":" in addr else addr)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    if not bound:
-        raise SystemExit(f"nothing bound on port {port}")
     # D-5. Written on every start, achieved or not, because it is what makes
     # R11-D10's count readable: a ledger with `bind` rows and no `mutation`
     # rows is genuine zero demand, while a ledger with neither is a server
     # that never ran and is "no evidence" rather than a zero. It is also the
     # only durable trace that a start went loopback-only.
-    record("bind", requested=len(requested), bound=len(bound))
+    #
+    # Before the `SystemExit`, not after. Review found the worst start of all
+    # -- nothing bound at all -- leaving no row, so the total failure and the
+    # server that never ran were the same evidence. `tailnet` is recorded
+    # beside the counts because a probe that returned nothing cannot be seen
+    # in them.
+    record("bind", requested=len(requested), bound=len(bound), tailnet=len(tailnet))
+    if not bound:
+        raise SystemExit(f"nothing bound on port {port}")
+    if not tailnet:
+        print("WARNING: no tailnet address found after "
+              f"{PROBES} probes; serving on {host} only. A phone on the "
+              "tailnet cannot reach this.", flush=True)
     if len(bound) < len(requested):
         # Requirement 6: a start that publishes fewer addresses than were asked
         # for is not a successful start, and saying nothing is not available.

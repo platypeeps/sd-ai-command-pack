@@ -91,6 +91,21 @@ should not silently cover '9 unpushed' tomorrow."* The backbone ids honour that
 mints a new id and reappears without the ack store knowing anything about
 recurrence.
 
+*Reversed 2026-09-03 at implement time, C-27. An ack holds for the day it was
+taken.* The reasoning above is true of a count that **changes** and false of one
+that **returns**. `dirty:{name}:{dirty}` keys on the count, so dismissing
+`dirty:repo:1` and then having the repo go clean and pick up a different single
+dirty file mints the *identical* id — and the permanent ack hides it, silently,
+for as long as the ledger lives. The branch review found it; the sentence
+"a recurrence mints a new id" is what it disproved, not the id scheme.
+
+The day bound closes the whole class without the ledger having to know which ids
+are count-keyed and which are not, which is the property that makes it cheap:
+`acked` compares the record's own `at` against today and returns nothing older.
+An ack with no stamp is not honoured, rather than honoured forever. D-3 survives
+unchanged and is still worth having — a PR going quiet inside one day should
+still resurface, and the rank band is what makes it.
+
 **D-3 — `pr:{repo}#{number}` gains the rank band, making the one non-fact-keyed
 id fact-keyed like the rest.** Decided 2026-09-03. `dashboard/now.py:129` is the
 exception to D-2: a PR id encodes identity but not condition, so an ack taken
@@ -252,12 +267,13 @@ measured table; the two corrections that belong to *this* file are:
    loudly*, not what a deletion would *cost*.
 
 What was done instead is D-1's amendment: the module moved to `bin/`, spending
-137 of `bin/`'s 1,783 lines and leaving `dashboard/` at **4,294 / 4,300** total
-and **2,257 / 2,300** code — six lines of total headroom, measured after the last
-step rather than after the last remembered one. Raising `DASHBOARD_CAP` —
-permitted, unlike the code cap — is now genuinely due, and deliberately not done
-here: `tests/test_loc_caps.py`'s own rule is that a cap is re-derived in its own
-record by a change that fits under the ceiling it replaces, which this one does.
+176 of `bin/`'s 1,783 lines and leaving `dashboard/` at **4,336** total and
+**2,267 / 2,300** code once the branch review's remediation is counted. Against
+4,300 that is red, which is why `DASHBOARD_CAP` was re-derived at 4,350 in
+R11-D29 — a separate change, touching nothing under `dashboard/`, because
+`tests/test_loc_caps.py`'s own rule is that a cap moves in its own record by a
+change that fits under the ceiling it replaces. This branch is rebased on it and
+measures 4,336 / 4,350.
 
 ## Evaluating R11-D10
 
@@ -472,7 +488,7 @@ round §4 permits. C-11 through C-21 stand.
   corrected figure leaving a citation behind. It found two live drifts the
   amendment above had not touched, both now fixed: the PRD asserted `bin/`'s
   **1,783** free lines in the present tense in two places outside its dated
-  measured-state row (`prd.md:99,189`, now date-qualified and carrying the 1,652
+  measured-state row (`prd.md:99,189`, now date-qualified and carrying the 1,607
   the item leaves), and this file's Risks said the ack store makes `dashboard/`
   the owner of a durable fact, which the move to `bin/` falsified in its
   particulars while leaving the risk itself intact. `grep -rn 'ledger\.py'`
@@ -487,22 +503,60 @@ round §4 permits. C-11 through C-21 stand.
   Found by the C-24 sweep's own re-run rather than by reading: the figures C-22
   had just installed as "measured" (4,266 total, 2,235 code) were taken after
   step 5, and step 6 had since added the dismiss control. The true final state
-  is **4,294 / 4,300** — six lines, not thirty-four. This is C-22 committed a
+  was **4,294 / 4,300** — six lines, not thirty-four, and 4,336 / 4,350 once the
+  branch review's remediation landed. This is C-22 committed a
   second time inside the fix for C-22, which is the failure the contract's
   third round exists to catch: a correction is a new claim and inherits none of
   the original's verification. The standing form: re-run the tokeniser after the
   last commit, never after the last one you remember. Owning artifacts: this
   file (The budget), `implement.md` (Budget), `prd.md` (the two `bin/` figures).
-- **C-26 — the cap raise. `parked`, owner Sven.** Six lines of `dashboard/`
-  total headroom means the next paragraph anyone writes under that directory is
-  a red check. `DASHBOARD_CAP` may be re-derived, unlike the code cap, and this
-  item deliberately does not do it: `tests/test_loc_caps.py`'s rule is that a
-  cap moves in its own record, by a change that fits under the ceiling it
-  replaces. This change fits, so the re-derivation is the next item's job and
-  needs the itemisation R11-D24 asks for. Unparked by: that item being written,
-  or by a decision not to raise, which would mean the next `dashboard/` change
-  opens by cutting.
+- **C-26 — the cap raise. `addressed`, by R11-D29.** Six lines of `dashboard/`
+  headroom meant the next paragraph written under that directory was a red
+  check — and the branch review's own remediation then needed 42 of them.
+  `DASHBOARD_CAP` may be re-derived, unlike the code cap, and this item
+  deliberately did not do it: `tests/test_loc_caps.py`'s rule is that a cap
+  moves in its own record, by a change that fits under the ceiling it replaces.
+  It moved to 4,350 in R11-D29, itemised, in a change touching nothing under
+  `dashboard/`, merged immediately before this branch, which is rebased on it.
 
 Implementation **unblocked**; C-26 is a scheduling decision, not a blocker on
 this change. Three of three automatic rounds have run; a fourth would need the
 contract's escalation, and no concern is open against the code that ships here.
+
+## Planning adversarial review, fourth round — 2026-09-03
+
+Not automatic. §4 permits three, and three ran. This round exists because the
+branch review lane (`sd-review --scope branch --challenge`, codex and prism)
+returned a finding against a **design decision** rather than against code, which
+is the contract's escalation case: a planning artifact cannot be left asserting
+something the implementation has disproved.
+
+- **C-27 — D-2's justification was false for a returning count. Blocking.
+  `addressed`.** Recorded above, in D-2. What makes it worth a round of its own
+  rather than a line in a fix commit is where the error was: not in the code
+  implementing D-2, which did exactly what D-2 said, but in D-2's one-sentence
+  argument for why permanence was safe. Three planning rounds read that sentence
+  and none of them tested it against a count that returns to a previous value.
+  The lane that caught it was reading the *code*, which is the only reason the
+  case came up concretely. Owning artifact: this file, D-2.
+- **C-28 — the named fallback, again, differently. `addressed`.** The branch
+  review also found that the mutation record counted refused and failed actions,
+  that `[::1]:8767` was classified as tailnet demand by a `split(":")` the file
+  already had a correct parser for two hundred lines up, that a total bind
+  failure exited before recording anything, and that an empty tailnet probe
+  reported a clean start. All four are D-6 and requirement 6 defects — the
+  ledger telling the operator something false rather than nothing — and all four
+  are fixed. They are recorded here rather than only in the commit because C-23
+  said the design's fallback was never checked before it was named, and this is
+  the same shape: four claims about behaviour that the design asserted and
+  nobody exercised until a reviewer did.
+- **C-29 — a fix that made things worse, caught by its own test. `addressed`.**
+  The first remediation of the lock replaced a blocking `flock` with three
+  non-blocking tries a tenth of a second apart, and its own concurrency test
+  dropped eight of forty records. That trades a stall the dashboard has never
+  had for a wrong count, which is the single thing the ledger exists to produce.
+  Now a two-second budget in fiftieths. Recorded because the review finding was
+  legitimate and the first answer to it was worse than the defect.
+
+Implementation **unblocked**. C-26 (the cap) is in flight as its own change, per
+`tests/test_loc_caps.py`'s rule that a cap moves in its own record.

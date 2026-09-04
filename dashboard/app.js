@@ -604,11 +604,16 @@ function dismissCell(id, tr) {
   button.addEventListener("click", async () => {
     tr.remove();
     try {
-      await fetch("/api/ack", {
+      // A 403 from the token guard is a rejection, not a network failure, and
+      // `fetch` resolves for it. Unchecked, the row vanished and stayed gone
+      // until the next poll with nothing said, which is the one outcome worse
+      // than a control that looks broken: one that looks like it worked.
+      const reply = await fetch("/api/ack", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Dashboard-Token": RUN_TOKEN },
         body: JSON.stringify({ id }),
       });
+      if (!reply.ok) nowSub.textContent = `dismiss refused (${reply.status})`;
     } catch (err) {
       nowSub.textContent = `dismiss did not reach the server (${err})`;
     }

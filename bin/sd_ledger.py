@@ -29,8 +29,18 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# A two-second budget, taken in fiftieths. The first draft of this bound was
+# three tries a tenth apart and it lost eight of forty concurrent writes in its
+# own test -- which trades a stall the dashboard has never had for a wrong
+# count, the one thing the ledger exists to produce. Long enough that real
+# contention (one operator, occasional POSTs) never loses a row; short enough
+# that a lock held by something dead costs a row rather than the request.
+LOCK_TRIES = 50
+LOCK_WAIT = 0.04
 
 
 def path(environ: dict[str, str] | None = None) -> Path:
@@ -68,7 +78,20 @@ def append(kind: str, target: Path | None = None, **fields: object) -> None:
     except OSError:
         return
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        # Bounded, not blocking. `LOCK_EX` alone parks the calling thread for
+        # as long as whoever holds the lock wants it, and this runs inside an
+        # HTTP handler: a stale lock from a crashed writer would stall the
+        # request rather than cost it a row. D-6 says a write can only cost a
+        # row, so a lock that will not come is a dropped record. Found in
+        # review.
+        for attempt in range(LOCK_TRIES):
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if attempt == LOCK_TRIES - 1:
+                    return
+                time.sleep(LOCK_WAIT)
         start = os.lseek(descriptor, 0, os.SEEK_END)
         written = 0
         try:
@@ -98,7 +121,7 @@ def append(kind: str, target: Path | None = None, **fields: object) -> None:
 
 
 def acked(target: Path | None = None) -> frozenset[str]:
-    """Every id acked so far, for `now` to drop from its rows.
+    """Every id acked *today*, for `now` to drop from its rows.
 
     Frozen because it is handed to a renderer. An unreadable or absent ledger
     is an empty set and not an error -- the dashboard renders without acks
@@ -111,16 +134,32 @@ def acked(target: Path | None = None) -> frozenset[str]:
     source = path() if target is None else target
     ids: set[str] = set()
     try:
-        text = source.read_text(encoding="utf-8")
+        # `errors="replace"` and not a bare `read_text`: a damaged byte raises
+        # `UnicodeDecodeError`, which is a `ValueError` and not an `OSError`,
+        # so it escaped the guard below and 500'd the page this function
+        # exists to keep renderable. Found in review. A mangled line then
+        # fails `json.loads` and is skipped like any other damaged line.
+        text = source.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return frozenset()
+    today = datetime.now(timezone.utc).date().isoformat()
     for line in text.splitlines():
         try:
             record = json.loads(line)
         except ValueError:
             continue
-        if isinstance(record, dict) and record.get("kind") == "ack":
-            identifier = record.get("id")
-            if isinstance(identifier, str):
-                ids.add(identifier)
+        if not isinstance(record, dict) or record.get("kind") != "ack":
+            continue
+        identifier = record.get("id")
+        # An ack holds for the day it was taken and no longer. D-2 said
+        # permanent, on the reasoning that a changing count mints a new id so
+        # a recurrence cannot hide under an old ack. That is true when a count
+        # *changes* and false when it *returns*: dismiss `dirty:repo:1`, and
+        # the next unrelated single dirty file in that repo is suppressed
+        # forever. Review found it; the day bound closes the whole class
+        # without needing to know which ids are count-keyed.
+        stamp = record.get("at")
+        if isinstance(identifier, str) and isinstance(stamp, str) \
+                and stamp[:10] == today:
+            ids.add(identifier)
     return frozenset(ids)

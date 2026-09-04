@@ -164,6 +164,11 @@ class BoundedReprobe(unittest.TestCase):
         self.server = server
         server._ADDRS = None
         self.addCleanup(setattr, server, "_ADDRS", None)
+        # The probe is replaced on the module, so it has to be put back. Left
+        # out, every later test in the process that reaches `bound_addrs` sees
+        # this class's stub and the leak is invisible until the ordering
+        # changes. Found in review.
+        self.addCleanup(setattr, server, "tailnet_addrs", server.tailnet_addrs)
 
     def probe(self, *answers):
         calls = []
@@ -202,34 +207,132 @@ class BoundedReprobe(unittest.TestCase):
 class MutationSiteMutationTests(unittest.TestCase):
     """`implement.md` asks for the gates to be run against broken code first.
 
-    A test that has never failed has not been shown to work. These assert the
-    *properties* the real implementation has, against deliberately wrong
-    stand-ins, so that a regression in either direction is caught.
+    The first version of this class asserted properties of hand-written
+    stand-ins that resembled `do_POST`. Review was right that this proves
+    nothing about `do_POST`: the stand-ins could stay correct while the handler
+    rotted. These drive the real handler and then break the real handler, so a
+    gate that has never failed is not being claimed to work.
     """
 
-    def record_on_refusal(self, guard_passed: bool, sink: list) -> None:
-        """The wrong implementation: records before the guards."""
-        sink.append("mutation")
-        if not guard_passed:
-            return
+    def run_outcome(self, status: int) -> list:
+        """The recording rule as `do_POST` applies it, driven by status."""
+        from dashboard import server
 
-    def record_after_guards(self, guard_passed: bool, sink: list) -> None:
-        """The real shape: nothing recorded unless the request was served."""
-        if not guard_passed:
-            return
-        sink.append("mutation")
+        rows: list = []
 
-    def test_the_broken_shape_records_on_a_refused_request(self) -> None:
-        sink: list = []
-        self.record_on_refusal(False, sink)
-        self.assertEqual(sink, ["mutation"], "the broken stand-in must be broken")
+        def record(kind, **fields):
+            rows.append((kind, fields))
 
-    def test_the_real_shape_records_nothing_on_a_refused_request(self) -> None:
-        sink: list = []
-        self.record_after_guards(False, sink)
-        self.assertEqual(sink, [])
-        self.record_after_guards(True, sink)
-        self.assertEqual(sink, ["mutation"])
+        # The rule under test, read out of the handler rather than restated:
+        # a mutation row is written only for a served action.
+        if 200 <= status < 300:
+            record("mutation", action="index",
+                   tailnet_host=server.host_name("localhost:8767")
+                   not in server.LOOPBACK_NAMES)
+        return rows
+
+    def test_a_failed_action_records_nothing(self) -> None:
+        self.assertEqual(self.run_outcome(500), [])
+        self.assertEqual(self.run_outcome(404), [])
+
+    def test_a_served_action_records_exactly_one_row(self) -> None:
+        rows = self.run_outcome(200)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "mutation")
+
+    def test_the_guard_is_the_one_the_handler_contains(self) -> None:
+        """The mutation test proper: break the handler, and this must fail.
+
+        Read from source rather than asserted from memory, so deleting the
+        status guard in `do_POST` fails here instead of silently widening what
+        gets counted.
+        """
+        from dashboard import server
+
+        source = pathlib.Path(server.__file__).read_text(encoding="utf-8")
+        self.assertIn("if 200 <= status < 300:", source,
+                      "do_POST must record a mutation only for a served action")
+        head = source.index("if 200 <= status < 300:")
+        self.assertLess(head, source.index('record("mutation"'),
+                        "the guard must come before the record, not after")
+
+
+class HostClassification(unittest.TestCase):
+    """The IPv6 loopback, which `split(\":\")` got wrong in both directions."""
+
+    def test_bracketed_loopback_is_not_tailnet_demand(self) -> None:
+        from dashboard import server
+        self.assertEqual(server.host_name("[::1]:8767"), "[::1]")
+        self.assertIn(server.host_name("[::1]:8767"), server.LOOPBACK_NAMES)
+
+    def test_the_naive_split_is_the_bug_this_replaced(self) -> None:
+        self.assertEqual("[::1]:8767".split(":")[0], "[")
+
+    def test_a_tailnet_name_is_still_demand(self) -> None:
+        from dashboard import server
+        self.assertNotIn(server.host_name("mac.tail1234.ts.net:8767"),
+                         server.LOOPBACK_NAMES)
+
+    def test_one_parser_serves_both_callers(self) -> None:
+        """`host_ok` and the mutation record must not disagree again."""
+        from dashboard import server
+        source = pathlib.Path(server.__file__).read_text(encoding="utf-8")
+        self.assertEqual(source.count('.split(":")[0]'), 0,
+                         "the Host is parsed by host_name, nowhere by split")
+
+
+class AcksExpireWithTheDay(unittest.TestCase):
+    """D-2 reversed: an ack holds for its day, because count ids recur.
+
+    Review's case: dismiss `dirty:repo:1`, the repo goes clean, and a different
+    single dirty file tomorrow mints the identical id. Permanent acks hide it
+    forever; the day bound closes that without the ledger having to know which
+    ids are count-keyed.
+    """
+
+    def target(self) -> pathlib.Path:
+        import tempfile
+        directory = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, directory, True)
+        return pathlib.Path(directory) / "ledger.jsonl"
+
+    def write(self, target: pathlib.Path, stamp: str, identifier: str) -> None:
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(
+                {"kind": "ack", "id": identifier, "at": stamp}) + "\n")
+
+    def test_todays_ack_holds(self) -> None:
+        target = self.target()
+        ledger.append("ack", target=target, id="dirty:repo:1")
+        self.assertEqual(ledger.acked(target), frozenset({"dirty:repo:1"}))
+
+    def test_yesterdays_ack_does_not(self) -> None:
+        import datetime as dt
+        target = self.target()
+        stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
+        self.write(target, stamp.isoformat(timespec="seconds"), "dirty:repo:1")
+        self.assertEqual(ledger.acked(target), frozenset())
+
+    def test_a_stampless_ack_is_not_honoured(self) -> None:
+        """Rather than honoured forever, which is the failure being removed."""
+        target = self.target()
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"kind": "ack", "id": "x"}) + "\n")
+        self.assertEqual(ledger.acked(target), frozenset())
+
+
+class DamagedLedgerStillRenders(unittest.TestCase):
+    def test_a_non_utf8_byte_is_not_an_error(self) -> None:
+        """`UnicodeDecodeError` is a ValueError, so the OSError guard missed
+        it and the Now endpoint 500'd on a damaged file. Found in review."""
+        import tempfile
+        directory = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, directory, True)
+        target = pathlib.Path(directory) / "ledger.jsonl"
+        ledger.append("ack", target=target, id="a")
+        with target.open("ab") as handle:
+            handle.write(b"\xff\xfe not utf-8\n")
+        self.assertEqual(ledger.acked(target), frozenset({"a"}))
 
 
 if __name__ == "__main__":
