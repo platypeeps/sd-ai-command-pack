@@ -185,9 +185,15 @@ emphasis; the ambiguity was `sd-grill`'s own.
       exactly this; the first prints the two names and nothing else, the second
       prints nothing:
       ```
-      git diff --name-status origin/main...HEAD -- skills/ | awk '$1=="A"{print $2}'
-      git diff --name-status origin/main...HEAD -- skills/ tests/ | awk '$1=="D"'
+      git diff --no-renames --name-status origin/main...HEAD -- skills/ \
+        | awk '$1=="A"{print $2}'
+      git diff --no-renames --name-status origin/main...HEAD -- skills/ tests/ \
+        | awk '$1=="D"'
       ```
+      `--no-renames` is load-bearing: without it git reports a sufficiently
+      similar delete/add pair as `R`, which neither `A` nor `D` matches, so an
+      existing skill could be renamed away while both commands still printed
+      their expected output.
       Expected additions, exactly: `skills/sd-debug/SKILL.md` and
       `skills/sd-receive-review/SKILL.md`
 - [ ] `python3 -m unittest tests.test_skill_companions tests.test_doc_citations`
@@ -378,10 +384,114 @@ addressed. Recorded rather than folded silently into C-3 and C-7, because the
 contract's warning that a remediation round finds defects its own fixes
 introduced is the thing this entry is evidence for.
 
+**C-16 — a transcribed option set could launder assistant authorship.** The
+step-7 exception cleared any set "transcribed from something that exists". An
+assistant that wrote an option list into an artifact one turn, then transcribed
+the *complete* list the next, satisfied the exception while the words stayed the
+assistant's; the subset clause only caught partial reads. Addressed: the
+exception now requires a set that exists **independently of the assistant**, and
+names the laundering path explicitly — a set the assistant itself wrote earlier
+carries its contamination through the artifact rather than being cleared by it.
+The test given is whether the set would exist had the assistant never written
+anything.
+
+**C-17 — "the user asked for options" and "never first" could not both hold.**
+Step 3 permitted an assistant-authored closed question when the user asked to be
+given options, then said such a question is never the form a question takes
+first, leaving a request for options before question one with two valid
+readings. Found independently by the Codex lane and by the pull request's
+automated reviewer, which is the strongest evidence in this ledger that it was a
+real ambiguity rather than a lane's preference. Addressed: the rule now bans it
+as the *assistant's own* opening move and states the two places it is permitted,
+noting that when the user asked, the user's request is the move that preceded
+it — so it may be the assistant's first question.
+
+**C-18 — `sd-debug` defined the mechanism of the bug, not of the fix.**
+Requirement 5 wants a fix whose mechanism is stated, but step 10 asked only for
+"a causal chain from cause to symptom", which explains why the bug happened and
+says nothing about why the edit stops it. The pinned phrase grep passed over
+exactly this gap. Addressed: the mechanism is now two links — cause to symptom,
+*and* where in that chain the edit cuts — with the skill saying plainly that the
+second is the one that gets skipped, and `fixed` requiring both.
+
+**C-19 — a bound-triggered stop had two incompatible closing states.** The
+safety rule sent every bound-triggered stop to `stalled` while the workflow
+defined `stalled` as no reproduction or no surviving hypothesis, so a bound that
+landed after the cause was established forced a report that discarded it. Raised
+by the automated reviewer on the pull request and, from the other direction, by
+the Codex lane's reading of the `sd-retro` seam. Addressed: a bound now closes
+the session at whatever was actually established and never above it —
+`diagnosed` with a cause, `stalled` without, never `fixed`, because `fixed`
+needs the reproduction rerun the bound stopped short of.
+
+**C-20 — the `sd-retro` seam excluded the sessions most worth retrospecting.**
+"When to use" said this skill stops when the cause is found, which hands
+`sd-retro` only the successful sessions and leaves a `stalled` one with no
+onward path. Addressed: the seam is now stated on session closure — this skill
+hands over when the investigation closes in **any** of its three states,
+`stalled` included.
+
+**C-21 — the `sd-review` seam put two different meanings on one field name.**
+`bin/sd-review` already writes `disposition` with the values
+`blocking|advisory`, a severity gate on the merge; `sd-receive-review` requires
+exactly one of four dispositions, a response to the claim. The seam named no
+normalization, so consuming that output would either overwrite the merge gate or
+leave two fields called the same thing. Addressed: the seam paragraph now states
+that the two are different fields, that the lane's value is carried through
+unchanged under its own name, and that collapsing them loses the merge gate.
+
+**C-22 — `depth=brief` and the final-report contract disagreed about the
+steelman.** `brief` was defined as reporting the ledger "without the steelman
+text" while the workflow forbids `rebutted` without one and the final report
+requires it for every rebutted finding, with no precedence rule. Addressed:
+`brief` now shortens the report and not the work — the steelman is constructed
+for every finding and printed for every `rebutted` one, and what `brief` drops
+is the steelman text for findings disposed some other way.
+
+**C-23 — the path-identity criterion was blind to renames.** It filtered `A` and
+`D` only, and git reports a sufficiently similar delete/add pair as `R`, so an
+existing skill or test could be renamed away while both commands printed exactly
+what the criterion expected and the count still read 81. Addressed with
+`--no-renames` on both commands and a sentence saying why it is load-bearing.
+This is the second defect in this one criterion — C-6 added it because
+cardinality does not preserve identity, and C-23 is the discovery that the
+identity check had its own blind spot.
+
+**C-24 — `implement.md` never converged with the round-1 remediations.** Every
+one of the five: it still called the source relationship a "parents'
+disagreement" after C-7 removed that framing, omitted `sd-retro`, `sd-review`
+and `sd-ship` from the seam list after C-8 added them, omitted the
+shared-vocabulary edit entirely after C-13 made it a deliverable, used the
+pre-C-4 budget pathspec, and still scoped the conduct gap to requirements 5
+through 8 after C-3 and C-15 widened it to include 10. C-5 and C-15 both claim
+`addressed` for parts of this and both were wrong about it — the PRD and
+`design.md` were swept, `implement.md` was not. Addressed by rewriting the
+affected passages, and recorded as its own entry rather than folded into C-5,
+because "the sweep missed an artifact" is a different failure from "an artifact
+drifted".
+
+**C-25 — the `bounds=` reservation had no owned implementation step.**
+`references/argument-vocabulary.md` is fanned into every citing skill by
+`bin/sd_install.py`, so reserving a name there rewrites the companion shipped
+with 56 skills across two directory layouts, and `implement.md` listed no step
+that owned the change or audited its consumers. `tests.test_skill_companions`
+proves the copy happened, not that the new definition fits what the citers mean.
+Addressed: `implement.md` gains Step 4 naming the source edit, the fan-out, and
+the consumer audit. The audit's result is unchanged — all four literal `bounds=`
+uses match the reserved definition — but it is now a step that was run rather
+than a fact asserted.
+
 ### Conclusion
 
-Fourteen concerns addressed, one rebutted with evidence, none parked, none
-unresolved. No blocking concern remains open, so implementation is unblocked.
+Twenty-four concerns addressed, one rebutted with evidence, none parked, none
+unresolved. No blocking concern remains open.
+
+Ten of those twenty-four came from the second Codex round and the pull request's
+automated reviewer, after the first conclusion in this section declared the item
+unblocked. That conclusion was wrong when written: it was recorded before the
+round it claimed to have cleared had returned. Two of the ten — the
+options-first contradiction and the bound-triggered closing state — were found
+by both lanes independently.
 
 The item ships with one gap declared rather than closed, and it is the same gap
 as before: nothing here tests conduct. That is C-11 on the `sd-grill` item, and

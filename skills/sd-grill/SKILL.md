@@ -92,16 +92,20 @@ itself the signal to take the heavier.
    - **open** — the user's answer supplies its own content. Ask this first,
      always.
    - **closed** — the user selects from candidates. Where the candidates came
-     from decides what the answer is worth. Read off something that exists — the
-     files in a directory, the states a schema allows, the options a tool
-     exposes — they were transcribed, the ledger records what was read, and the
-     answer is an ordinary one. But when **the assistant supplies the
-     candidates**, the words are the assistant's and the user's role was to
-     pick among them, so step 7 applies however decisively they picked.
+     from decides what the answer is worth. Read off something that exists
+     independently of this conversation — the files in a directory, the states a
+     schema allows, the options a tool exposes — they were transcribed, the
+     ledger records what was read, and the answer is an ordinary one. But when
+     **the assistant supplies the candidates**, the words are the assistant's
+     and the user's role was to pick among them, so step 7 applies however
+     decisively they picked.
 
-   An assistant-authored closed question is permitted only after an open one was
-   asked and did not land, or when the user asked to be given options. It is
-   never the form a question takes first.
+   An assistant-authored closed question is never the assistant's own opening
+   move. It is permitted in exactly two places, and there is no third: after an
+   open question was asked and did not land, and when the user asked to be given
+   options — in which case the user's request is the move that preceded it, and
+   it may be the first question the assistant asks. Absent one of those two, ask
+   open.
 4. Classify each answer with exactly one primary class:
    - **grounded** — names a file, a measurement, a check, an observation, or a
      source that can be gone back to;
@@ -143,11 +147,18 @@ itself the signal to take the heavier.
    choosing feels like stating.
 
    The narrow exception, and it is the only one: candidates *transcribed* from
-   something that exists — the files in a directory, the states a schema allows
-   — were reported, not authored, so selecting one is an ordinary answer and
-   this rule does not reach it. The ledger records what was read, so the claim
-   is checkable. If the assistant chose which subset of a real set to show, it
-   authored the set and the exception does not apply.
+   something that exists **independently of the assistant** — the files in a
+   directory, the states a schema allows — were reported, not authored, so
+   selecting one is an ordinary answer and this rule does not reach it. The
+   ledger records what was read, so the claim is checkable. Two ways the
+   exception is lost, and both are ways it gets claimed wrongly: if the
+   assistant chose which subset of a real set to show, it authored the set; and
+   if the set being read off is one the assistant itself wrote earlier — a list
+   in a draft, an option set from a previous turn, a file this session created —
+   then transcription is laundering, the origin is the assistant, and
+   contamination carries through the artifact rather than being cleared by it.
+   The test is whether the set would exist had the assistant never written
+   anything.
 8. Stop on user request, at the agreed bound, when the classification's
    questions are exhausted, or when no remaining question would change the
    proposal. Stop early and say which sibling skill owns it when the subject

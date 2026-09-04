@@ -35,7 +35,12 @@ Two seams are close enough to state precisely. `sd-review` **produces** findings
 on the current diff and disposes of them locally; this skill is what happens
 when findings arrive from somewhere you did not control, and it is the right
 surface for `sd-review`'s output only once that output is being answered rather
-than generated. `sd-ship` owns the live pull-request lifecycle — pushing,
+than generated. When it is that output, the word `disposition` names two
+different fields and neither overwrites the other: `sd-review` writes
+`blocking|advisory`, which is a severity gate on the merge, while this skill
+writes one of the four below, which is a response to the claim. Carry the
+lane's value through unchanged under its own name and record this skill's
+alongside it; collapsing them loses the merge gate. `sd-ship` owns the live pull-request lifecycle — pushing,
 watching checks, responding to a review, merging — and calls for this skill's
 discipline at the point where a reviewer's comments must be answered; the
 division is that `sd-ship` decides what happens to the pull request and this
@@ -55,9 +60,11 @@ argument names are an error — stop and report them before disposing of anythin
 - `sources=` — the change under review, plus the code, tests, specs or history a
   finding refers to;
 - `scope=` — which findings are in bounds, when some belong to another change;
-- `depth=standard|brief` — default `standard`; `brief` reports the ledger
-  without the steelman text, and never without a disposition or its evidence;
-  and
+- `depth=standard|brief` — default `standard`; `brief` shortens the *report*,
+  not the work: the steelman is still constructed for every finding and is still
+  printed for every `rebutted` one, because that is the disposition it licenses.
+  What `brief` drops is the steelman text for findings disposed some other way.
+  Never a disposition, never its evidence; and
 - `bounds=` — a finding count or time budget, after which remaining findings are
   reported untouched rather than disposed of quickly.
 
@@ -90,7 +97,9 @@ uses. No finding carries two, and no finding carries none:
    version of the point a reviewer would recognise as their own, made stronger
    than they wrote it if you can. Only then dispose of it. A finding may not be
    `rebutted` until this exists, because without it `rebutted` becomes the
-   disposition for findings that were inconvenient.
+   disposition for findings that were inconvenient. `depth=brief` shortens what
+   is printed and never what is done, and it never elides the steelman of a
+   `rebutted` finding.
 4. **Check the claim against the repository**, not against memory or intent. A
    finding says something is true of the code; the code is available. Run the
    test, read the file, check the history.

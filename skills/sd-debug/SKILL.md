@@ -26,9 +26,10 @@ obvious. An obvious cause is a hypothesis with a head start, not a conclusion.
 Do not use it to analyse an incident that is already over and needs an
 organisational account (`sd-postmortem`), to draw lessons from a debugging
 effort that has already finished (`sd-retro`, which accepts a completed
-software-delivery stream — the seam is that this skill runs while the cause is
-still unknown and stops when it is found, and `sd-retro` starts from a stream
-that is already over), to run this repository's own checks (`sd-check`), to
+software-delivery stream — the seam is that this skill runs while the
+investigation is open and hands over when it closes in any of its three states,
+`stalled` included, while `sd-retro` starts from a stream that is already
+over), to run this repository's own checks (`sd-check`), to
 review a diff for defects that have not manifested (`sd-review`), to attack an
 artifact's assumptions adversarially (`sd-red-team`), or to plan the work the
 fix turns into (`sd-plan`). Rust
@@ -116,9 +117,11 @@ fix.
    unvalidated input, the assumption two layers up. Under `depth=deep` the
    condition is pursued; otherwise it is recorded as an open question, never
    silently dropped.
-10. **State the mechanism before claiming a fix**, in one sentence, as a causal
-    chain from cause to symptom. A fix whose mechanism cannot be stated is a
-    coincidence that happened to coincide with a green run.
+10. **State the mechanism before claiming a fix**, in two links, not one: the
+    causal chain from cause to symptom, *and* where in that chain the edit cuts.
+    The first link explains the bug; only the second explains the fix, and it is
+    the one that gets skipped. A fix whose mechanism cannot be stated in both
+    links is a coincidence that happened to coincide with a green run.
 11. **Verify against the reproduction**, not against a fresh run: the exact
     command from step 3, run the number of times its rate requires, plus the
     surrounding suite to catch what the fix broke. An intermittent failure needs
@@ -126,7 +129,8 @@ fix.
     that number.
 12. Close in one of exactly three ways, and name which one:
     - **fixed** — the reproduction was rerun and no longer reproduces, *and*
-      the mechanism is stated. Both, or this is not the word.
+      the mechanism is stated in both of its links. Both, or this is not the
+      word.
     - **diagnosed** — the cause is established with evidence but no fix is
       applied, or a fix was applied whose mechanism cannot yet be stated.
       Report the cause, the evidence, and what remains.
@@ -165,8 +169,10 @@ fix.
   an eliminated hypothesis as one that was never considered.
 - Never blame, grade, or characterise whoever wrote the code. The failure is
   the subject.
-- Honor stop and scope limits immediately. A bound that cuts the session short
-  closes it `stalled`, not `diagnosed`.
+- Honor stop and scope limits immediately. A bound closes the session at
+  whatever was actually established, never above it: `diagnosed` if a cause is
+  established on evidence, `stalled` otherwise. A bound never yields `fixed`,
+  because `fixed` requires a reproduction rerun that a bound stopped short of.
 
 ## Final report
 
