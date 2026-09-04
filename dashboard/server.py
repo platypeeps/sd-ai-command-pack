@@ -122,17 +122,40 @@ _HOSTS: frozenset[str] | None = None
 _ADDRS: list[str] | None = None
 
 
-def bound_addrs() -> list[str]:
-    """The tailnet addresses, probed once and answered the same way after.
+PROBES = 3
+PROBE_WAIT = 2.0
+
+
+def bound_addrs(sleep=time.sleep) -> list[str]:
+    """The tailnet addresses, probed a bounded number of times, then latched.
 
     One answer feeds both the allow-list and the binding. Asked twice, the
     tailnet could come up between them, and the server would bind an address
     the cached allow-list had never heard of -- 403 on exactly the path the
     bind exists to serve. Found in review.
+
+    The cache is right and its *timing* was the defect (D-4). Latched on the
+    first answer, a probe that came up empty because `tailscaled` had not
+    finished starting left the dashboard loopback-only for the life of the
+    process -- no crash, no error line, and nothing exiting for `KeepAlive` to
+    restart. Retry first, then latch.
+
+    Three probes two seconds apart, chosen not derived. Every way
+    `tailnet_addrs` returns empty is immediate, so an ordinary failing start
+    pays the 4 seconds of delay and nothing more; `tailscale` present but
+    hanging costs its 10-second timeout three times, which exceeds
+    `ThrottleInterval` and is accepted rather than argued away.
     """
     global _ADDRS
     if _ADDRS is None:
-        _ADDRS = tailnet_addrs()
+        for attempt in range(PROBES):
+            found = tailnet_addrs()
+            if found:
+                _ADDRS = found
+                return _ADDRS
+            if attempt < PROBES - 1:
+                sleep(PROBE_WAIT)
+        _ADDRS = []
     return _ADDRS
 
 
@@ -161,6 +184,28 @@ class ServerV6(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
+LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "[::1]", "::1", ""})
+
+
+def host_name(header: str | None) -> str:
+    """The host out of a `Host` header, port removed, lowercased.
+
+    Split out of `host_ok` when a second caller appeared and got it wrong.
+    `[::1]:8767` has three colons and only the one after `]` is the port, so
+    `split(":")[0]` yields `[` -- which is not a loopback name, so the IPv6
+    loopback the server explicitly supports was recorded as tailnet demand.
+    One parser, two callers, no second chance to disagree.
+    """
+    if not header:
+        return ""
+    name = header.strip().lower()
+    if name.startswith("["):
+        return name.partition("]")[0] + "]"
+    if name.count(":") == 1:
+        return name.rsplit(":", 1)[0]
+    return name
+
+
 def host_ok(header: str | None) -> bool:
     """Whether a request's `Host` is one this server serves.
 
@@ -169,16 +214,7 @@ def host_ok(header: str | None) -> bool:
     cannot tell it from the operator's own. The `Host` is what differs, so it
     is what is checked -- on reads too, because the reads are the fleet.
     """
-    if not header:
-        return False
-    name = header.strip().lower()
-    # `[::1]:8767` splits at the bracket; everything else at the last colon,
-    # and only when there is exactly one to split at.
-    if name.startswith("["):
-        name = name.partition("]")[0] + "]"
-    elif name.count(":") == 1:
-        name = name.rsplit(":", 1)[0]
-    return name in allowed_hosts()
+    return bool(header) and host_name(header) in allowed_hosts()
 
 
 PAGE = """<!doctype html>
@@ -347,7 +383,23 @@ class Cache:
             return dict(self._state or {}, cachedFor=round(self.seconds))
 
 
-def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
+def _drop(kind: str, **fields: object) -> bool:
+    """The default record sink: a server nobody handed a ledger to.
+
+    Not `None` and a branch at each call site. Every write here is a byproduct
+    (D-6), so the shape that cannot fail is the one where the sink is always
+    callable and the *caller* decides whether records go anywhere.
+
+    Returns True: a server with no ledger stored the ack as well as it was ever
+    going to, and 503-ing the dismiss button because nobody wired one up would
+    break the page for the plain `serve()` case.
+    """
+
+    return True
+
+
+def make_handler(cache: Cache, script: str, record=_drop,
+                 acked=frozenset) -> type[BaseHTTPRequestHandler]:
     # Substituted rather than formatted: `PAGE` is full of CSS braces, and
     # `.format` would have to escape every one of them to reach one slot.
     page = PAGE.replace(TOKEN_SLOT, TOKEN)
@@ -394,13 +446,14 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 # ranking and the row text somewhere no test can reach. Both
                 # sources are already cached -- the fleet for twenty seconds,
                 # the loader for five -- so this adds a merge, not a collect.
+                dismissed = acked()
                 body = json.dumps({
-                    "rows": now.merge(
+                    "rows": [row for row in now.merge(
                         now.backbone_rows(cache.state()["repos"])
                         + now.pr_rows(tracker_payload("pull"))
                         + now.session_rows(sessions.fleet_worktrees(cache.root)),
                         plugins.cached_load()["rows"],
-                    ),
+                    ) if row.get("id") not in dismissed],
                 }).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/sessions":
@@ -456,7 +509,7 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
             # the caller controls one side of it.
             if not hmac.compare_digest(self.headers.get(TOKEN_HEADER, ""), TOKEN):
                 return self.send_error(403, "bad or missing token")
-            if path != "/api/run":
+            if path not in ("/api/run", "/api/ack"):
                 return self.send_error(404)
             # A length is required and `-1` is not one. Both were once read
             # as an empty body, which answers a real POST with "no action
@@ -474,10 +527,46 @@ def make_handler(cache: Cache, script: str) -> type[BaseHTTPRequestHandler]:
                 sent = json.loads(self.rfile.read(max(length, 0)) or b"{}")
             except (OSError, ValueError):
                 return self.send_error(400, "body is not JSON")
+            if path == "/api/ack":
+                # R11-D25 stands: this is not a parameterised action. The id is
+                # written to a store and compared against on render -- it never
+                # reaches `actions.run`, never reaches an argv, and there is no
+                # interpolation site here for it to reach. That is why an ack
+                # needs no parameter validator and no allow-list entry.
+                identifier = sent.get("id") if isinstance(sent, dict) else None
+                if not isinstance(identifier, str) or not identifier:
+                    return self.send_error(400, "ack needs an id")
+                # The one record whose failure the caller must hear about. A
+                # mutation row is telemetry and may be dropped; an ack is a
+                # command, and answering 200 to a write that never landed makes
+                # the row vanish from the page and return on the next poll with
+                # no explanation. Found in review.
+                if not record("ack", id=identifier):
+                    return self.send_error(503, "the ack was not stored")
+                return self.send_body(b'{"ok":true}', "application/json")
             body, status = actions.run(
                 sent.get("action") if isinstance(sent, dict) else None,
                 plugins.catalog()[0],
             )
+            # After the guards and after the action, and only when the action
+            # was *served*: an unknown verb or a failed run comes back 4xx/5xx
+            # and mutated nothing, so counting it would inflate the one number
+            # R11-D10 turns into a deletion decision. Found in review, where
+            # this recorded every outcome and the step's own gate claimed
+            # otherwise without testing it.
+            #
+            # The `Host` is carried as a boolean rather than as itself:
+            # R11-D10 counts requests *from a tailnet Host*, and the name adds
+            # nothing the criterion asks for while making the ledger a log of
+            # where the operator was. It is classified by `host_name`, not by
+            # `split(":")` -- `[::1]:8767` splits at the wrong colon and turns
+            # the supported IPv6 loopback into recorded tailnet demand.
+            # Never before `send_body` and never able to affect it (D-6).
+            if 200 <= status < 300:
+                record("mutation",
+                       action=sent.get("action") if isinstance(sent, dict) else None,
+                       tailnet_host=host_name(self.headers.get("Host"))
+                       not in LOOPBACK_NAMES)
             self.send_body(json.dumps(body).encode(), "application/json", status)
 
     return Handler
@@ -529,7 +618,8 @@ def script_source() -> str:
     return (Path(__file__).resolve().parent / "app.js").read_text(encoding="utf-8")
 
 
-def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> None:
+def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST,
+          record=_drop, acked=frozenset) -> None:
     """One server per address, never `0.0.0.0`.
 
     Binding the wildcard would publish this on every network the machine ever
@@ -542,9 +632,16 @@ def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> Non
     # would do it inside the first request, putting a ten-second timeout in
     # front of a page load. Found in review.
     allowed_hosts()
-    handler = make_handler(Cache(root), script_source())
+    handler = make_handler(Cache(root), script_source(), record, acked)
     bound = []
-    for addr in [host] + bound_addrs():
+    # Kept apart from `requested` because they fail differently and requirement
+    # 6 cares about both. A probe that finds nothing makes `requested` exactly
+    # `[host]`, so `requested == bound` and the counts alone report a clean
+    # start -- which is the silent loopback-only bind this item exists to end,
+    # reported as a success. Found in review.
+    tailnet = bound_addrs()
+    requested = [host] + tailnet
+    for addr in requested:
         server = ServerV6 if ":" in addr else ThreadingHTTPServer
         try:
             httpd = server((addr, port), handler)
@@ -553,8 +650,29 @@ def serve(root: Path, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST) -> Non
             continue
         bound.append(f"[{addr}]" if ":" in addr else addr)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    # D-5. Written on every start, achieved or not, because it is what makes
+    # R11-D10's count readable: a ledger with `bind` rows and no `mutation`
+    # rows is genuine zero demand, while a ledger with neither is a server
+    # that never ran and is "no evidence" rather than a zero. It is also the
+    # only durable trace that a start went loopback-only.
+    #
+    # Before the `SystemExit`, not after. Review found the worst start of all
+    # -- nothing bound at all -- leaving no row, so the total failure and the
+    # server that never ran were the same evidence. `tailnet` is recorded
+    # beside the counts because a probe that returned nothing cannot be seen
+    # in them.
+    record("bind", requested=len(requested), bound=len(bound), tailnet=len(tailnet))
     if not bound:
         raise SystemExit(f"nothing bound on port {port}")
+    if not tailnet:
+        print("WARNING: no tailnet address found after "
+              f"{PROBES} probes; serving on {host} only. A phone on the "
+              "tailnet cannot reach this.", flush=True)
+    if len(bound) < len(requested):
+        # Requirement 6: a start that publishes fewer addresses than were asked
+        # for is not a successful start, and saying nothing is not available.
+        print(f"WARNING: asked for {len(requested)} address(es), bound "
+              f"{len(bound)} -- reachable only at {' '.join(bound)}", flush=True)
     print("dashboard on " + " ".join(f"http://{a}:{port}/" for a in bound), flush=True)
     while True:
         time.sleep(3600)

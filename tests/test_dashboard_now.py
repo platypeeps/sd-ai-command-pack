@@ -107,6 +107,20 @@ class PullRequestRows(unittest.TestCase):
         two = now.pr_rows(self.payload(self.pr(3, "2026-08-01")), "2026-09-30")
         self.assertEqual(one[0]["id"], two[0]["id"])
 
+    def test_the_id_carries_the_band_so_going_quiet_is_a_new_alert(self) -> None:
+        """D-3, and the other half of the test above.
+
+        The age is kept out of the id because it changes every morning; the
+        *band* is put in because it changes once, and that once is the state
+        the view exists to raise. A PR acked while it was being worked on
+        should not stay acked after a fortnight of silence.
+        """
+        fresh = now.pr_rows(self.payload(self.pr(5, "2026-08-30")), "2026-08-31")
+        stale = now.pr_rows(self.payload(self.pr(5, "2026-08-01")), "2026-08-31")
+        self.assertEqual(fresh[0]["rank"], now.FRESH)
+        self.assertEqual(stale[0]["rank"], now.STALE)
+        self.assertNotEqual(fresh[0]["id"], stale[0]["id"])
+
     def test_an_unusable_stamp_still_renders_and_is_not_called_quiet(self) -> None:
         """The index stores what the tracker returned, and Now has to work
         when nothing else does. A row it cannot rank is still a row."""
@@ -134,7 +148,7 @@ class PullRequestRows(unittest.TestCase):
                    "needsYou": [self.pr(1, "2026-08-31")],
                    "other": [self.pr(2, "2026-08-31")]}
         rows = now.pr_rows(payload, "2026-08-31")
-        self.assertEqual([row["id"] for row in rows], ["pr:o/r#1"])
+        self.assertEqual([row["id"] for row in rows], ["pr:o/r#1:4"])
 
 
 def gone(count: int, live: int = 0) -> list[dict]:

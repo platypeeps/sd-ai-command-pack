@@ -23,6 +23,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# And this script's own directory, for the sibling modules under bin/. Running
+# the file as a program puts it on sys.path already; loading it *as a file* --
+# runpy.run_path, spec_from_file_location, which is how two of its test modules
+# reach it -- does not, so the sibling import fails there and only there.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import sd_ledger  # noqa: E402 - after the path insert
 
 from dashboard import collect, server, store  # noqa: E402 - after the path insert
 
@@ -30,7 +37,11 @@ from dashboard import collect, server, store  # noqa: E402 - after the path inse
 def cmd_serve(args: argparse.Namespace, out) -> int:
     root = collect.repo_root()
     print(f"serving {root} on http://{server.DEFAULT_HOST}:{args.port}", file=out)
-    server.serve(root, port=args.port)
+    # The ledger is handed *down*. `dashboard/` is a library that knows
+    # nothing about where its records go, which is what lets this mechanism
+    # charge `bin/` instead of a `dashboard/` budget that had no room for it.
+    server.serve(root, port=args.port,
+                 record=sd_ledger.append, acked=sd_ledger.acked)
     return 0
 
 
