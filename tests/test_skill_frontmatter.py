@@ -433,28 +433,86 @@ class RunsAsColumn(unittest.TestCase):
             "than letting the checks below pass on nothing",
         )
 
-    # The inventory itself. There is no rule in the tree that derives it:
-    # `skills/` holds seventy-odd surfaces, only eleven carry
-    # `disable-model-invocation: true`, and the table lists twelve -- `sd-help`
-    # is in the table without the marker. So this list is data, not a
-    # derivation, and it is the one place that is honest about it. Adding a
-    # command means editing this line on purpose, which is the point: without
-    # it, swapping `sd-map` for any other real skill passes every other check
-    # here, because each one asks whether a row is *plausible* rather than
-    # whether the set is *right*.
-    EXPECTED = frozenset({
-        "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
-        "sd-deps", "sd-help", "sd-suggest", "sd-skill-adopt", "sd-map",
-        "sd-handoff",
-    })
+    # README: "each of the eleven commands sets `disable-model-invocation`, so
+    # invoking it is a deliberate act; every other surface, `sd-help` included,
+    # does not." So the table is `COMMANDS` plus `SKILL_KIND` -- `sd-help`
+    # earns its row by being a command you run while deliberately not carrying
+    # the marker: it reads the installed tree and has no side-effect authority
+    # to gate. That is `EXPECTED`, and the table is checked against it.
+    #
+    # An earlier cut of this derived the set from the marker instead, so that a
+    # twelfth command would join the table by existing rather than by somebody
+    # remembering a line. That is the wrong trade here and the module docstring
+    # says so: the roster is pinned *because* standing rule 2 makes the verb
+    # inventory a CI-tested invariant, and a twelfth command is supposed to
+    # fail until the design record grows to justify it. Deriving silently
+    # granted that growth to any skill that set the key.
+    #
+    # So the marker is used as a cross-check on the roster rather than as a
+    # substitute for it, below. Drift between the two still fails; it fails
+    # naming the design record, which is where the decision belongs.
+    EXCEPTIONS = SKILL_KIND
+
+    @staticmethod
+    def marks_itself(skill: str) -> bool:
+        """Whether `skill` sets the marker -- in its frontmatter, not its prose.
+
+        The distinction is not hypothetical. `sd-help` and `sd-skill-adopt`
+        both write `disable-model-invocation` into their bodies, because a pack
+        whose subject is its own conventions documents them. A substring search
+        over the whole file cannot tell a skill that *sets* the key from one
+        that *explains* it, so it would enrol any skill that grew a sentence
+        about the marker into README's command table and then fail it for
+        missing a prose-runner declaration it was never supposed to make.
+        `frontmatter()` is the parser the rest of this file already trusts.
+        """
+        fields = frontmatter((SKILLS / skill / "SKILL.md").read_text(encoding="utf-8"))
+        return bool(fields) and fields.get(MARKER) == "true"
+
+    def expected(self) -> set[str]:
+        return set(EXPECTED)
+
+    def test_the_marker_agrees_with_the_pinned_roster(self) -> None:
+        """The filesystem and the design record name the same eleven commands.
+
+        `COMMANDS` is a roster, and a roster drifts. This is the check that it
+        has not: every skill setting the marker is a pinned command, and every
+        pinned command sets it. A skill that gates itself without joining the
+        design record fails here rather than quietly becoming a command, and a
+        command that loses its marker fails here rather than quietly becoming
+        model-invocable.
+        """
+        marked = {
+            d.name for d in SKILLS.iterdir()
+            if (d / "SKILL.md").is_file() and self.marks_itself(d.name)
+        }
+        self.assertEqual(
+            marked, set(COMMANDS),
+            f"sets {MARKER} but is not a pinned command: "
+            f"{sorted(marked - set(COMMANDS))}; pinned command not setting it: "
+            f"{sorted(set(COMMANDS) - marked)} -- reconcile the skill with the "
+            f"design record, not this list with the tree",
+        )
+
+    def test_the_exception_is_still_an_exception(self) -> None:
+        """Retires itself. `sd-help` gaining the marker makes EXCEPTIONS dead
+        weight that would then be silently masking a real derivation."""
+        for name in self.EXCEPTIONS:
+            with self.subTest(skill=name):
+                self.assertFalse(
+                    self.marks_itself(name),
+                    f"`{name}` now sets {MARKER}, so it is no longer an "
+                    f"exception -- drop it from EXCEPTIONS and let the "
+                    f"derivation carry it",
+                )
 
     def test_the_table_lists_exactly_the_commands(self) -> None:
         """Identity of the set, not the shape of it."""
         names = {name for name, _ in self.rows()}
         self.assertEqual(
-            names, set(self.EXPECTED),
-            f"missing from README's table: {sorted(self.EXPECTED - names)}; "
-            f"unexpected: {sorted(names - self.EXPECTED)}",
+            names, self.expected(),
+            f"missing from README's table: {sorted(self.expected() - names)}; "
+            f"unexpected: {sorted(names - self.expected())}",
         )
 
     def test_each_command_appears_once_and_is_a_real_skill(self) -> None:
