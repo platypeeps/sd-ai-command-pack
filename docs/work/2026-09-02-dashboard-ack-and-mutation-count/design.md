@@ -476,8 +476,8 @@ at C-10.
   `skip` tier and a scope's provider list; a test asserting that
   `scope=planning` yields a non-empty chain at tier `skip` would have refuted
   this in the round it was written. That test now exists:
-  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:589-686`), six
-  assertions, killed against four mutations of `plan_providers` — the planning
+  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:589-705`), seven
+  tests, killed against four mutations of `plan_providers` — the planning
   branch deleted, its provider list emptied, the scope appended instead of
   prepended, and the scope replacing the chain rather than adding to it.
 
@@ -486,7 +486,12 @@ at C-10.
   `planning_providers` is also codex — so prepend and append produce the same
   chain, and the mutation that swapped them survived. A test that cannot fail is
   the same defect as a concern that was never run, one layer up. The assertion
-  now uses a policy whose names are deliberately disjoint from the tier's.
+  now substitutes a provider taken from the tier's own chain. Not one absent
+  from it -- an earlier draft of this sentence, and of the test's docstring,
+  claimed disjoint names and was wrong on its own fixture, where the
+  substituted name sits second in the `deep` chain. What the name has to be
+  is not *first*, since first is the one position where prepending and
+  appending agree.
 - **C-19 — cross-artifact sweep. `addressed`.** Two artifacts now, so the sweep
   is real rather than internal. Every figure appearing in both was enumerated by
   `grep` rather than by reading in sequence: 94 and 110 (agree, re-derived from

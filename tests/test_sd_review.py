@@ -655,27 +655,46 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
             self.assertIn(name, chain, f"the scope dropped {name}, which the tier asked for")
 
     def test_the_scopes_provider_goes_in_front(self) -> None:
-        """Ordering, pinned against a policy chosen so that it can fail.
+        """Ordering, pinned against a fixture chosen so that it can fail.
 
         The live policy cannot show this. Its `deep` tier starts with codex and
         its `planning_providers` is codex, so prepending and appending produce
         the same chain and an ordering assertion over it passes either way --
         which is what the first version of this test did, and a mutation that
-        swapped `extra + chain` for `chain + extra` survived it. The names here
-        are deliberately disjoint from the tier's so the two orders differ.
+        swapped `extra + chain` for `chain + extra` survived it.
+
+        What the substituted name has to be is not *absent* from the tier's
+        chain -- it may well be in it, and here it is -- but not *first* in it,
+        because first is the one position where the two orders agree. So it is
+        taken from the tier's own chain rather than written down, and the
+        expected order is derived from that chain too: this pins how
+        `plan_providers` composes, not which providers the policy currently
+        names.
         """
 
-        policy = dict(self.policy, planning_providers=["prism"])
         deep = sd_review.sd_route.route(
-            ["bin/sd_install.py"], lines=1, draft=False, policy=policy)
-        self.assertEqual(tuple(deep.providers)[0], "codex", "fixture assumption")
+            ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
+        tier = tuple(str(name) for name in deep.providers)
+        self.assertTrue(tier, "the deep tier asks for nobody, so order is unobservable")
+        later = [name for name in tier if name != tier[0]]
+        self.assertTrue(
+            later,
+            "every provider in the deep chain is the first one, so prepending and"
+            " appending agree and this assertion could not fail")
+        scope_provider = later[0]
+
+        policy = dict(self.policy, planning_providers=[scope_provider])
         chain = sd_review.plan_providers(deep, policy, challenge=False, scope="planning")
         self.assertEqual(
-            chain[0], "prism",
+            chain[0], scope_provider,
             "the scope's provider must lead the chain: it is the stance the run"
             " was asked for, and a chain read in order spends its budget on"
             " whatever comes first.")
-        self.assertEqual(chain, ("prism", "codex", "gito"))
+        self.assertEqual(
+            chain,
+            (scope_provider,) + tuple(name for name in tier if name != scope_provider),
+            "the scope's provider moves to the front of the tier's chain; the rest"
+            " keep the tier's order and nothing is dropped or duplicated")
 
     def test_the_policy_still_names_a_planning_provider(self) -> None:
         """The claim above is about this repository's live policy, so it is
