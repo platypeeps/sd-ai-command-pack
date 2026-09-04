@@ -1,7 +1,7 @@
 ---
 title: the Host guard repairs what it should refuse, and the fix opens with a cap re-derivation
 status: in_progress
-branch: cap/r11-d30-dashboard-ceiling
+branch: fix/host-parsing-refuses-what-it-cannot-parse
 created: 2026-09-04
 ---
 

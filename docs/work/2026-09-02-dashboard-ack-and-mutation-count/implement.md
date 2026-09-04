@@ -29,7 +29,7 @@ other; steps 5 and 6 are the ack pair and 6 depends on 5.
       passed *down* as a callable and `dashboard/` gains a parameter rather than
       an import.
 - [x] **2 — the `mutation` record.** One `ledger.append` in `do_POST`
-      (`dashboard/server.py:498`), after `actions.run` returns **and only when
+      (`dashboard/server.py:516`), after `actions.run` returns **and only when
       it returned a 2xx**, carrying `at`, `action`, and `tailnet_host` (the
       `Host` matched a tailnet address rather than loopback). Green when: a
       request through each of the four paths — host refused, token refused,
@@ -38,7 +38,7 @@ other; steps 5 and 6 are the ack pair and 6 depends on 5.
       first version recorded every outcome, and this gate asserted otherwise
       without testing it.*
 - [x] **3 — the `bind` record.** One `ledger.append` in `serve`
-      (`dashboard/server.py:621`) after the bind loop and **before** the
+      (`dashboard/server.py:639`) after the bind loop and **before** the
       `SystemExit` that a total failure raises, carrying `requested`, `bound`
       and `tailnet` as counts. Green when: a fixture with a stubbed `tailscale`
       that exits non-zero records `requested: 1, bound: 1, tailnet: 0` and warns

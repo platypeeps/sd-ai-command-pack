@@ -187,6 +187,89 @@ class Hosts(unittest.TestCase):
         for header in ["evil.example", "evil.example:8767", "", None]:
             self.assertFalse(server.host_ok(header), repr(header))
 
+    #: `Host` header -> whether this server answers to it. The bracketed rows
+    #: are the point: `host_name` used to end its bracketed branch with
+    #: `+ "]"`, and `partition` returns the whole string when the separator is
+    #: absent, so it invented a closing bracket for `[::1` and discarded
+    #: everything after one for `[::1]evil.com`. That admitted not eight
+    #: headers but every `[::1]<anything>` -- an unbounded family, measured at
+    #: 2000 of 2000 generated tails. These rows are representatives chosen to
+    #: separate the candidate fixes, not an enumeration of the defect.
+    BRACKETED = [
+        ("[::1]:8767", True),      # the canonical case, and why the branch exists
+        ("[::1]", True),           # canonical, no port
+        ("[::1", False),           # the invented bracket
+        ("[::1]evil.com", False),  # the discarded tail
+        ("[::1]]", False),
+        ("[::1]/", False),         # a path smuggled into the authority
+        ("[::1]8767", False),      # no colon at all
+        ("[::1]:8767:9", False),   # two ports: what a colon-only check admits
+        ("[::1]:0x1f", False),     # a port that is not a number, likewise
+        ("[::1]:", False),         # empty port: legal per RFC 3986, refused here
+        ("[evil.com", False),      # refused before this change too, by accident
+        ("[]", False),
+        ("[", False),
+    ]
+
+    def test_a_malformed_bracketed_host_is_refused_not_repaired(self) -> None:
+        """The security property, asserted row by row.
+
+        A boundary that repairs its input is not a boundary: two of these
+        reached `allowed_hosts` as the IPv6 loopback because the parser fixed
+        them up on the way in.
+        """
+
+        for header, served in self.BRACKETED:
+            with self.subTest(header=header):
+                self.assertEqual(server.host_ok(header), served, header)
+
+    def test_both_callers_agree_about_a_malformed_host(self) -> None:
+        """`host_ok` and the mutation record read the same parser.
+
+        Asserting only `host_ok` would leave `tailnet_host` free to disagree,
+        which is the exact bug `host_name` was extracted to prevent. So the
+        refusal is checked at the classifier too: a header this cannot parse
+        must come back unparsed, and in particular must not come back `""` --
+        `""` is in `LOOPBACK_NAMES`, so an empty return would file a malformed
+        header as local while every `host_ok` assertion above still passed.
+        """
+
+        for header, served in self.BRACKETED:
+            if served or header in ("[]", "["):
+                continue
+            with self.subTest(header=header):
+                name = server.host_name(header)
+                self.assertNotEqual(name, "", f"{header!r} classified as loopback")
+                self.assertNotIn(name, server.LOOPBACK_NAMES, header)
+                self.assertNotIn(name, server.allowed_hosts(), header)
+
+    def test_a_port_is_still_a_port(self) -> None:
+        """The narrowing must not cost the case the branch exists for.
+
+        Every numeric port on the loopback still resolves to it; if this fails
+        the fix has over-tightened and the dashboard 403s its own operator.
+        """
+
+        for port in (1, 80, 8767, 65535):
+            with self.subTest(port=port):
+                self.assertTrue(server.host_ok(f"[::1]:{port}"))
+                self.assertEqual(server.host_name(f"[::1]:{port}"), "[::1]")
+
+    def test_the_unbracketed_path_still_drops_a_port_and_invents_nothing(self) -> None:
+        """Examined rather than assumed, per the PRD's fourth criterion.
+
+        Either the header has exactly one colon, in which case what precedes it
+        is the host, or it does not, in which case nothing is stripped. There
+        is no shape where this branch invents a name, so it is left alone --
+        `localhost:evil` is a malformed port over a host that really is
+        `localhost`, and answering it is correct.
+        """
+
+        self.assertEqual(server.host_name("localhost:evil"), "localhost")
+        self.assertTrue(server.host_ok("localhost:evil"))
+        self.assertEqual(server.host_name("localhost:80:80"), "localhost:80:80")
+        self.assertFalse(server.host_ok("localhost:80:80"))
+
 
 class TailnetBind(unittest.TestCase):
     """The second address, and the reason it is opt-in.
