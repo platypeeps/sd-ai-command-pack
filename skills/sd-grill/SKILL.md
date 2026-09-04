@@ -89,8 +89,8 @@ itself the signal to take the heavier.
    by whether an answer was expected — authorship is observable at the moment
    the question is written and expectation is not:
 
-   - **open** — the user's answer supplies its own content. Ask this first,
-     always.
+   - **open** — the user's answer supplies its own content. This is the default
+     opening move, and the two exceptions below are the whole of the list.
    - **closed** — the user selects from candidates. Where the candidates came
      from decides what the answer is worth. Read off something that exists
      independently of this conversation — the files in a directory, the states a

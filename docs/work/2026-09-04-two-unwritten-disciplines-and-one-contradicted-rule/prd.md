@@ -481,17 +481,29 @@ the consumer audit. The audit's result is unchanged — all four literal `bounds
 uses match the reserved definition — but it is now a step that was run rather
 than a fact asserted.
 
+**C-26 — the C-17 fix left the sentence it contradicted standing.** The `open`
+bullet still read "Ask this first, always" while the paragraph directly below it
+named two cases where a closed question may come first, so the remediation
+reproduced the exact defect it was fixing one line higher up. Found by the
+automated reviewer's second pass, on the fix rather than on the original.
+Addressed: the bullet now calls open the default opening move and points at the
+two exceptions as the whole of the list. Recorded because C-1 was this same
+failure — a new rule contradicting the sentence it was layered onto — and it
+recurring inside C-1's own remediation is the argument for re-reviewing a fix
+rather than only the thing it fixed.
+
 ### Conclusion
 
-Twenty-four concerns addressed, one rebutted with evidence, none parked, none
+Twenty-five concerns addressed, one rebutted with evidence, none parked, none
 unresolved. No blocking concern remains open.
 
-Ten of those twenty-four came from the second Codex round and the pull request's
-automated reviewer, after the first conclusion in this section declared the item
-unblocked. That conclusion was wrong when written: it was recorded before the
-round it claimed to have cleared had returned. Two of the ten — the
-options-first contradiction and the bound-triggered closing state — were found
-by both lanes independently.
+Eleven of those twenty-five came from the second Codex round and the pull
+request's automated reviewer, after the first conclusion in this section
+declared the item unblocked. That conclusion was wrong when written: it was
+recorded before the round it claimed to have cleared had returned. Two of the
+eleven — the options-first contradiction and the bound-triggered closing state —
+were found by both lanes independently, and one more, C-26, was found on the
+remediation itself rather than on the original.
 
 The item ships with one gap declared rather than closed, and it is the same gap
 as before: nothing here tests conduct. That is C-11 on the `sd-grill` item, and
