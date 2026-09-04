@@ -586,5 +586,105 @@ class EnabledBackendTests(unittest.TestCase):
             if not row.enabled:
                 self.assertTrue(row.disabled_reason.strip(), f"{row.name} is silently off")
 
+class ScopeProvidersOverASkipTier(unittest.TestCase):
+    """A `skip` tier silences the tier, not the scope.
+
+    This exists because its absence let a false concern stand. C-18 in
+    `docs/work/2026-09-02-dashboard-ack-and-mutation-count/design.md` claimed
+    `sd-review --scope planning` never asks a provider, reasoning correctly that
+    `docs_skip` routes every work item to tier `skip` and then stopping one
+    function short of `plan_providers`, which prepends what a *scope* names
+    ahead of whatever the tier asked for. Nothing in the repository disagreed,
+    because nothing pinned the interaction. The concern survived a review round
+    and an explanation to its owner before anyone ran it.
+
+    So this is not coverage of a line. It is the assertion that would have
+    refuted the claim in the round it was made.
+    """
+
+    def setUp(self) -> None:
+        self.policy = json.loads((REPO_ROOT / ".github" / "sd-review.json").read_text())
+        self.skip = sd_review.sd_route.route(
+            ["docs/work/2026-01-01-any-item/prd.md"],
+            lines=1, draft=False, policy=self.policy)
+
+    def test_a_work_item_really_does_route_to_skip(self) -> None:
+        """The half of C-18 that was right, kept so the rest has a subject."""
+
+        self.assertEqual(self.skip.tier, "skip")
+        self.assertEqual(tuple(self.skip.providers), ())
+
+    def test_planning_scope_asks_a_provider_even_at_tier_skip(self) -> None:
+        chain = sd_review.plan_providers(
+            self.skip, self.policy, challenge=False, scope="planning")
+        self.assertTrue(
+            chain,
+            "scope=planning produced an empty provider chain at tier skip. Either"
+            " `plan_providers` stopped honouring `planning_providers`, or the"
+            " policy stopped naming one -- and `sd-plan` gates `planning ->"
+            " ready` on a lane that now asks nobody.")
+        self.assertEqual(chain, tuple(self.policy["planning_providers"]))
+
+    def test_challenge_asks_a_provider_even_at_tier_skip(self) -> None:
+        """The same seam, reached by the other role that uses it."""
+
+        chain = sd_review.plan_providers(
+            self.skip, self.policy, challenge=True, scope="worktree")
+        self.assertEqual(chain, tuple(self.policy["challenge_providers"]))
+
+    def test_an_ordinary_scope_at_tier_skip_asks_nobody(self) -> None:
+        """The control. Without it the three above pass on a chain that is
+        never empty, which would prove nothing about the scope."""
+
+        self.assertEqual(
+            sd_review.plan_providers(
+                self.skip, self.policy, challenge=False, scope="worktree"),
+            ())
+
+    def test_the_scope_adds_to_the_tier_rather_than_replacing_it(self) -> None:
+        """`plan_providers` says "an extra stance, not a substitute". At tier
+        `skip` those two readings agree, so the difference is only visible
+        against a tier that asks for something."""
+
+        deep = sd_review.sd_route.route(
+            ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
+        self.assertEqual(deep.tier, "deep")
+        chain = sd_review.plan_providers(
+            deep, self.policy, challenge=False, scope="planning")
+        for name in deep.providers:
+            self.assertIn(name, chain, f"the scope dropped {name}, which the tier asked for")
+
+    def test_the_scopes_provider_goes_in_front(self) -> None:
+        """Ordering, pinned against a policy chosen so that it can fail.
+
+        The live policy cannot show this. Its `deep` tier starts with codex and
+        its `planning_providers` is codex, so prepending and appending produce
+        the same chain and an ordering assertion over it passes either way --
+        which is what the first version of this test did, and a mutation that
+        swapped `extra + chain` for `chain + extra` survived it. The names here
+        are deliberately disjoint from the tier's so the two orders differ.
+        """
+
+        policy = dict(self.policy, planning_providers=["prism"])
+        deep = sd_review.sd_route.route(
+            ["bin/sd_install.py"], lines=1, draft=False, policy=policy)
+        self.assertEqual(tuple(deep.providers)[0], "codex", "fixture assumption")
+        chain = sd_review.plan_providers(deep, policy, challenge=False, scope="planning")
+        self.assertEqual(
+            chain[0], "prism",
+            "the scope's provider must lead the chain: it is the stance the run"
+            " was asked for, and a chain read in order spends its budget on"
+            " whatever comes first.")
+        self.assertEqual(chain, ("prism", "codex", "gito"))
+
+    def test_the_policy_still_names_a_planning_provider(self) -> None:
+        """The claim above is about this repository's live policy, so it is
+        asserted rather than assumed. A policy that dropped the key would make
+        C-18 true again, and should fail here rather than quietly downstream."""
+
+        self.assertTrue(self.policy.get("planning_providers"),
+                        ".github/sd-review.json no longer names a planning provider")
+
+
 if __name__ == "__main__":
     unittest.main()

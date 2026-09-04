@@ -475,8 +475,18 @@ at C-10.
   repository disagreed with it, because nothing pins the interaction between a
   `skip` tier and a scope's provider list; a test asserting that
   `scope=planning` yields a non-empty chain at tier `skip` would have refuted
-  this in the round it was written. That test does not exist and is worth having
-  — it is the only part of C-18 that survives.
+  this in the round it was written. That test now exists:
+  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:589-686`), six
+  assertions, killed against four mutations of `plan_providers` — the planning
+  branch deleted, its provider list emptied, the scope appended instead of
+  prepended, and the scope replacing the chain rather than adding to it.
+
+  Writing it found one more thing worth recording. The ordering assertion first
+  went through the live policy, where the `deep` tier begins with codex and
+  `planning_providers` is also codex — so prepend and append produce the same
+  chain, and the mutation that swapped them survived. A test that cannot fail is
+  the same defect as a concern that was never run, one layer up. The assertion
+  now uses a policy whose names are deliberately disjoint from the tier's.
 - **C-19 — cross-artifact sweep. `addressed`.** Two artifacts now, so the sweep
   is real rather than internal. Every figure appearing in both was enumerated by
   `grep` rather than by reading in sequence: 94 and 110 (agree, re-derived from
