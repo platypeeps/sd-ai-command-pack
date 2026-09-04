@@ -106,6 +106,7 @@ rather than spending them."*
    the port plays no part in the origin comparison.
 2. Does anything else in the repo parse a `Host`, or is `host_name` the only one?
    The blast-radius rule says enumerate before fixing.
-3. Is the 23-citation `PAIR` gap (the sibling item opened alongside this one) worth
+3. Is the citation-gate gap (the sibling item opened alongside this one) worth
    folding in here, or does it stay separate? They share nothing but a discovery
-   date.
+   date, and the sibling turned out to be the larger of the two once its premise
+   was measured rather than assumed.

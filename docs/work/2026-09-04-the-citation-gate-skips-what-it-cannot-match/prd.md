@@ -1,5 +1,5 @@
 ---
-title: the citation gate skips a citation shape it cannot match, and says nothing
+title: the citation gate has three silencers and none of them say anything
 status: planning
 created: 2026-09-04
 ---
@@ -9,115 +9,121 @@ created: 2026-09-04
 ## Problem
 
 `tests/test_doc_citations.py` validates that a `path:line` citation in the docs
-still points at the symbol it names. It finds citations with one regex:
+still points at the symbol it names. When it declines to validate one, it says
+nothing — the citation is indistinguishable from prose that contains no citation
+at all. There are **four independent ways** to be declined, and this item exists
+because they were found one at a time, by being bitten, rather than by reading
+the file.
 
-```python
-PAIR = re.compile(r"`([^`\n]+)`\s*\(?`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`")
-```
+Measured against the merged tree, over every `*.md` in the checkout:
 
-`\s*` matches whitespace. It does not match a comma. So a citation written
-
-```markdown
-(`test_the_dashboard_stays_under_its_ceiling`, `tests/test_loc_caps.py:215-226`)
-```
-
-is not matched, is not validated, and **produces no complaint** — it is
-indistinguishable to the gate from prose that contains no citation at all.
-Confirmed directly:
-
-```
-as written      -> NO MATCH (skipped by CI)
-adjacent form   -> MATCH  anchor=test_the_dashboard_stays_under_its_ceiling
-```
-
-This is not hypothetical damage. During #732 a single citation in that comma
-shape went stale **four times** across four review rounds while `make check`
-passed green each time. Every other citation in the same file was caught by the
-gate on the first run. The gate was working; that one line was invisible to it.
-
-The file already knows this is the failure mode it must avoid — `PAIR` has a
-dedicated self-test at `tests/test_doc_citations.py:153-154` asserting the regex
-does *not* tolerate arbitrary text between the two backticked halves. It runs
-`PAIR.search` over two strings built from the same symbol and the same file
-reference: the adjacent form, asserted to match, and the two halves separated by
-the words "is reported by", asserted to return `None`. (They are described rather
-than quoted, for the reason immediately below.) That test defends against a regex
-too *loose*. Nothing defends against a citation too loose for the regex.
-
-**A third property, found while writing this PRD.** The paragraph above originally
-reproduced those two assertions verbatim, as a `python` code block. `make check`
-then failed on *this file*:
-
-```
-docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/prd.md:
-  `status_filter` is not at bin/sd:1378
-```
-
-The gate cannot distinguish a citation from a quotation of a citation. Quoting the
-regex's own example inside a document makes it a live claim about this repository,
-and it is false here because the example was written for a different one. That is
-its own question — see below — and it is recorded rather than merely worked around,
-because it is the second thing this gate does that nobody had written down.
-
-## Why this is not a one-line regex change
-
-Adding `,?` to `PAIR` is the obvious fix and it is a trap. A repo-wide sweep for
-the comma shape finds **24** citations:
-
-| Where | Count | State of the cited file |
+| Why a citation is not validated | Comma-shaped ones | Announced? |
 |---|---|---|
-| `docs/work/2026-09-02-dashboard-ack-and-mutation-count/prd.md` | 1 | live — already fixed in #732 |
-| `CHANGELOG.md` | 1 | `internal/review/rules.go` — never existed in this repo |
-| `docs/work/archive/**` | 22 | mostly the retired stack: `install.py`, `installer/registry.py`, `review-local.py`, `templates/scripts/*` |
+| lives outside `docs/` — the corpus glob is `docs/**/*.md` | 1 (`CHANGELOG.md`) | no |
+| lives under `docs/**/archive/**` — skipped by path part | 21 | no |
+| names a file that does not exist — `is_inside_repo` requires `is_file()` | 1 | no |
+| punctuation the regex cannot match — `PAIR`'s `\s*` is not a comma | — | no |
 
-Widening the regex turns 23 silent skips into 23 red failures pointing at files
-that were deleted when the thin-only install landed. The gate would be correct and
-the build would be permanently broken, which is a worse gate than the one that
-skips.
+**The fourth cost four rounds.** During #732 one citation written
+`` (`sym`, `path:line`) `` went stale **four times** across four review rounds
+while `make check` passed green each time. Every other citation in that same file
+was caught on the first run. The gate was working; that one line was invisible to
+it, and nothing distinguished "checked and correct" from "never looked at".
 
-So the question this item exists to answer is not "how do we match the comma" but
-**"what should a citation into a file that no longer exists do?"** — and that
-question has to be answered before the regex moves.
+`PAIR` is anchored deliberately — `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`
+(`tests/test_doc_citations.py:145-154`) asserts that a symbol and a citation
+separated by prose do *not* match, so the anchoring is a design decision with a
+test defending it, not an oversight. What has no test is the case where a real
+citation is written in a shape the anchor rejects.
 
-## What the gate currently does about missing files
+## What the first draft of this PRD got wrong
 
-Unknown, and it must be established before anything else. `test_doc_citations.py`
-has a guard (`tests/test_doc_citations.py:119-124`) asserting the corpus was
-reached and at least one citation compared — a defence against `PAIR` matching
-nothing at all. Whether a matched citation into a nonexistent path fails, skips or
-throws is the first thing to find out, because it determines whether archived
-items can be validated at all.
+Recorded rather than deleted, because it is the same error the parent item's
+review found four times over.
+
+This PRD originally claimed that widening `PAIR` to accept the comma would
+"turn 23 silent skips into 23 permanent red failures" against retired-stack files.
+That is false, and review said so. It was written from the 24-citation grep
+without checking what the gate does with each one. Measured:
+
+- 21 of the 24 are under `docs/**/archive/**`, which
+  `anchored_citations` (`tests/test_doc_citations.py:79-101`) skips by path part
+  regardless of regex.
+- 1 is in `CHANGELOG.md`, which the corpus glob never reaches.
+- 1 names a file deleted with the retired stack, which `is_inside_repo` skips.
+- **1** is in a live document naming a file that exists.
+
+So widening `PAIR` would newly check **one** citation, and that one currently
+passes. The change is cheap and nearly free of blast radius — the opposite of
+what this PRD asserted before anyone ran it.
+
+The claim was written the way the parent item's C-22, C-25, C-30 and C-33 were
+written: confidently, about behaviour nobody had executed. It is left standing
+here because an item about a gate that hides things should not open by hiding
+that its own premise was wrong.
+
+## The finding that survives, and is larger
+
+The interesting silencer is the third, not the fourth.
+
+`is_inside_repo` exists for a real reason, stated in its own comment: `REPO_ROOT / path`
+follows `..` out of the tree, so an edit to any document under `docs/` could make
+CI read a file of its choosing, and `test_a_citation_cannot_send_this_test_outside_the_checkout`
+(`tests/test_doc_citations.py:132-143`) defends that. It must stay.
+
+But it answers two questions with one `continue`. *"This path escapes the
+checkout"* is a security refusal and should be silent. *"This path is inside the
+checkout and does not exist"* is a **stale citation** — precisely what the gate
+was built to catch — and it is discarded through the same branch.
+
+There is a live instance today, in the adjacent form, fully matched by `PAIR`,
+skipped anyway:
+
+```
+docs/spec/backend/manifest-and-filesystem.md
+  `_candidate_refresh_required` -> prepare-release.py    (file does not exist)
+```
+
+The same document says elsewhere that the script was *"removed with the release
+train in 0.72.0"*. The gate holds both the citation and the evidence it is dead,
+and reports neither.
 
 ## Acceptance criteria
 
-1. The behaviour of a citation into a deleted file is established by experiment
-   and written down, before any regex changes.
-2. Every one of the 24 comma-shaped citations is enumerated from the filesystem —
-   not from the list in this PRD, which is a snapshot and will drift.
-3. A decision is recorded on archived items: validated, exempted by path, or
-   exempted by a frontmatter marker. Whichever it is, the reason is in the record.
-4. After the change, a citation written in the comma shape either validates or
-   fails. It must not skip. A test asserts this directly, in the same place
-   `PAIR`'s existing self-test lives.
-5. `make check` is green with no citation newly exempted by accident — the count
-   of *validated* citations goes up, and the number is asserted or reported.
+1. A citation naming a path **inside** the checkout that does not exist fails, or
+   is reported. A citation naming a path **outside** the checkout stays silent.
+   The two are distinguished; today one `continue` serves both.
+2. `docs/spec/backend/manifest-and-filesystem.md`'s `prepare-release.py` citation
+   is resolved — corrected, marked historical, or removed — and whichever it is,
+   the mechanism generalises to the next one.
+3. Every count in this PRD is re-measured from the filesystem at implementation
+   time rather than read from the table above, which is a snapshot and will drift.
+4. A citation written in the comma shape either validates or fails. It must not
+   skip. Asserted directly, beside `PAIR`'s existing self-tests.
+5. The archive and corpus-glob exclusions are decided deliberately: kept with a
+   stated reason, or narrowed. They are currently silent by accident of ordering,
+   not by an argument anyone wrote down.
+6. `make check` green, and the number of citations actually *validated* is
+   reported rather than assumed — the control test
+   `test_the_scan_reaches_the_documents` (`tests/test_doc_citations.py:116-130`)
+   already exists for this reason and asserts only that the count is non-zero.
 
 ## Open questions
 
-1. Should the comma shape be **accepted** (widen `PAIR`) or **rejected** (a
-   separate test that fails on comma-shaped citations, forcing the adjacent form)?
-   Rejecting is stricter and keeps one canonical spelling; accepting is kinder to
-   prose that reads better with the comma.
-2. Are there other shapes the gate skips? The comma was found by a reviewer
-   reading the regex, not by a test. The same reading should be finished rather
-   than stopped at the first hit — an em dash, a semicolon, `and`, a line break
+1. Should a stale citation in an **archived** item fail? Archived items are
+   historical records; a citation into a file that has since moved is arguably
+   correct-as-of-writing. But 21 comma-shaped citations sit there unexamined, and
+   "we never look" is not the same answer as "we decided not to".
+2. Should the corpus include `CHANGELOG.md`? It carries a citation into
+   `internal/review/rules.go`, which has never existed in this repository.
+3. **Can a document quote a citation without making it a claim?** Found by being
+   caught: this PRD's first draft reproduced `PAIR`'s own self-test verbatim, and
+   `make check` failed on *this file* — the example was written for a different
+   repository, so quoting it asserted something false about this one. The gate
+   cannot tell a citation from a quotation of one, which means a document
+   explaining the gate cannot show an example. Some way to write a deliberately
+   inert citation is wanted.
+4. Are there shapes beyond the comma? The comma was found by a reviewer reading
+   the regex, not by a test. That reading should be finished rather than stopped
+   at its first hit: an em dash, a semicolon, a bare "and", a line break landing
    between the halves.
-3. Does `CHANGELOG.md` belong in the corpus at all? It cites a `.go` file from
-   another project.
-4. Should a citation inside a fenced code block be validated? Today it is, which
-   is why this PRD could not quote the gate's own test. The argument for keeping
-   it: a code block is where a citation is most likely to be copied from and go
-   stale. The argument against: a document explaining the gate cannot show an
-   example, and a document quoting another repository's code is making a claim
-   about this one. Whichever way it goes, it wants a way to write a citation that
-   is deliberately inert.
