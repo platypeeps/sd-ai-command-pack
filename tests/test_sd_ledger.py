@@ -109,7 +109,7 @@ class LedgerAcked(unittest.TestCase):
         self.assertEqual(ledger.acked(target), frozenset({"a", "b"}))
 
 
-class TheCriterionsThreeStates(unittest.TestCase):
+class TheCriterionHasThreeStates(unittest.TestCase):
     """D-6's table, which is the whole reason `bind` rows are written.
 
     A zero that means "nobody used it" and a zero that means "nothing ever

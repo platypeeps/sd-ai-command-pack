@@ -654,7 +654,42 @@ which is the useful part.
   is loopback or tailnet and nothing else. The dependency is real and worth
   naming: if `allowed_hosts` ever widens, this classification widens with it.
 
-**On the count.** Twenty-eight findings against work that had passed three
+### Round 6 — the pull request's own review (C-35, C-36)
+
+- **C-35 — `host_name` repairs a malformed `Host` instead of refusing it.
+  Real, pre-existing, deferred with a named reason. `parked`.**
+
+  `name.partition("]")[0] + "]"` invents a closing bracket when the header has
+  none, so `Host: [::1` is normalised to `[::1]` and admitted, and
+  `Host: [::1]evil.com` has its tail discarded and is likewise admitted.
+  Confirmed by running it: `host_ok('[::1')` and `host_ok('[::1]evil.com')`
+  both return `True`. A boundary that repairs its input is not a boundary.
+
+  Two things bound the severity and one bounds the fix. It is **not introduced
+  here**: `git show origin/main:dashboard/server.py` carries the identical
+  expression inside `host_ok`, and this item only moved it into a helper so two
+  callers could share one parser. It is **not reachable from the documented
+  threat model** either: `host_ok`'s docstring names DNS rebinding, and a page
+  on the open internet cannot set a `Host` header — reaching this needs a client
+  that sets it directly, which is a different and much smaller adversary.
+
+  The fix does not fit. The narrowest correct form is `+1` line of code, but a
+  security boundary that now deliberately refuses input it used to repair needs
+  the sentence saying so, and `dashboard/` stands at 4,348 against 4,350. Paying
+  for it by deleting rationale elsewhere is the exact failure R11-D24 split the
+  cap to prevent. So it goes where the doctrine sends it: its own item, opening
+  with its own re-derivation, which is what the R11-D29 record says the next
+  change under `dashboard/` must do. This is that change, arriving on schedule.
+
+- **C-36 — a test class name read as a bad plural. Non-blocking. `addressed`.**
+
+  `TheCriterionsThreeStates` was a possessive without the apostrophe a class
+  name cannot carry. Review proposed `Criteria`, which is wrong in the other
+  direction — D-6 has one criterion with three states, not three criteria — so
+  it is `TheCriterionHasThreeStates` instead. Recorded because the observation
+  was right even though the correction was not.
+
+**On the count.** Thirty findings against work that had passed three
 planning rounds and one code round is not a defence of the process — it is the
 measurement of it. The pattern across C-22, C-25, C-30 and C-33 is one thing:
 every claim this item made that nobody executed turned out to be false, and
