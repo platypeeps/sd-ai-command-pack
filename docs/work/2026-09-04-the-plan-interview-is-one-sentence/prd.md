@@ -65,10 +65,12 @@ is not caught downstream — every later gate reads the PRD as authored.
 - [ ] `grep -c disable-model-invocation skills/sd-grill/SKILL.md` prints `0`
 - [ ] `grep -c '^# sd-grill$' skills/sd-grill/SKILL.md` prints `1`, satisfying
       the title contract in `tests/test_skill_frontmatter.py`
-- [ ] `grep -c 'sd-grill. is that interrogation written down' skills/sd-plan/SKILL.md`
+- [ ] ``grep -cF -- '`sd-grill` is that interrogation written down' skills/sd-plan/SKILL.md``
       prints `1` — a bare name count would pass on a sentence saying never to
       use it, so the criterion pins the sentence that establishes the
-      relationship, not the occurrence of the word
+      relationship, not the occurrence of the word. Fixed-string, not `grep -c`:
+      an unescaped `.` is a wildcard and would match variants the criterion does
+      not mean
 - [ ] on the pushed branch, `git diff --stat origin/main...HEAD -- bin/ dashboard/`
       prints nothing, so no line-count ceiling in `tests/test_loc_caps.py` moves
       — evaluated after the commits exist, since before them it passes whatever
@@ -143,7 +145,7 @@ ledger below is merged and deduplicated across both.
 | C-8 | host | 1 | low | no | addressed |
 | C-9 | codex | 2 | medium | yes | addressed |
 | C-10 | codex | 2 | medium | yes | addressed |
-| C-11 | codex | 2 | high | yes | **unresolved — referred to the user** |
+| C-11 | codex | 2 | low | no | parked — user ruling, 2026-09-04 |
 | C-12 | codex | 3 | medium | yes | addressed |
 | C-13 | codex | 3 | medium | yes | addressed |
 
@@ -232,8 +234,9 @@ that termination fit neither `completed` nor `stopped`. Addressed: the closure i
 now three named states, `handed off` is defined in step 9 and forbidden from
 presenting its partial ledger as intent, and PRD requirement 1 names all three.
 
-**C-11 — the two lanes disagree on whether requirements 1 and 4 may ship
-verified by reading alone. Unresolved, and referred to the user.** The Codex
+**C-11 — the two lanes disagreed on whether requirements 1 and 4 may ship
+verified by reading alone. Ruled non-blocking by the user on 2026-09-04, and
+parked.** The Codex
 lane holds that `sd-plan`'s contract requires every requirement to name a check
 and its result, so reader-verification does not satisfy it and the item is
 blocked. The host lane holds that no skill in this pack has conduct-level CI —
@@ -245,6 +248,27 @@ can settle. Per section 4 of the planning contract, three automatic rounds have
 run and two lanes remain in material conflict, so this stops here for the user's
 judgment instead of being self-approved.
 
+**The ruling.** Non-blocking, parked. Trigger: the conduct-harness work item,
+which runs a skill against a subagent under a pressure scenario and asserts what
+it did. Owner: the user. Requirements 1 and 4 are that harness's first test
+case. The reasoning recorded, so a later reader can disagree with it on the
+merits: the Codex lane's standard is one that no artifact in this pack meets —
+seventy-six skills have shipped and none has conduct-level CI — so enforcing it
+against the seventy-seventh alone is arbitrary rather than rigorous. What makes
+the gap acceptable here is narrow and must stay narrow: this document names
+*which* two requirements are unchecked, *why* no check exists, and *who*
+verified them instead. A blanket disclaimer would not qualify, and the harness
+item exists so that "declared gap" does not become the escape hatch every later
+skill reaches for.
+
+**Disclosure attached to that ruling.** The host lane is not a neutral judge of
+C-11. The same session wrote the skill, wrote the requirements, and wrote the
+rebuttal that C-11 disputes, so the lane arguing to ship is the lane with an
+interest in shipping. By this item's own contamination rule that argument is
+recorded beside the finding rather than in place of it, and the Codex lane is
+the only independent read on the record. The user ruled with that disclosure in
+front of them.
+
 **Lane status.** Host: completed, three rounds. Codex: completed, three rounds.
 C-12 and C-13 were found by the Codex lane in round 3 and remediated by the host
 lane afterwards; the contract forbids a fourth automatic round, so those two
@@ -255,13 +279,10 @@ The Codex lane declined to run full `make check` because its runner writes
 it ran a focused 26-test subset instead, and the host lane ran the full gate at
 every round.
 
-**Promotion is blocked on C-11.** The implementation exists — it is in the same
-change set as this item, written before the item was opened — so what C-11
-blocks is not writing the skill but approving it: the item may not move to
-`ready` or `in_progress`, and the change may not be merged as reviewed-clean,
-until the disagreement is settled. Every other concern is addressed, rebutted,
-or parked, and no parked concern blocks. C-11 needs a decision from the user,
-not another round.
+**Promotion is unblocked.** C-11 was the only blocking concern still open, and
+the user ruled it non-blocking and parked on 2026-09-04 with the reasoning and
+the disclosure recorded above. Every other concern is addressed, rebutted, or
+parked, and no parked concern blocks.
 
 ## Log
 
