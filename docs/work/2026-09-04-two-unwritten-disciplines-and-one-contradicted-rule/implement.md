@@ -82,11 +82,15 @@ means something was edited that should not have been.
 **What cannot be verified here.** Whether an agent holding these skills behaves
 differently. There is no conduct harness in this repository and the item that
 would have built one was abandoned; `claude plugin eval` implements it and is
-gated behind early access on this account. Requirements 5 through 8 and
-requirement 10 are therefore reader-verified — 10 is a rule about how a question
-is *asked*, which no grep over the file reaches — and that is stated in the PRD
-rather than papered over. This item leaves the pack with three skills in that
-condition instead of one.
+gated behind early access on this account. So the behavioural halves of
+requirements 5 through 8 ship unverified, and so does the postcondition in
+requirement 10 — "no experimental edit left standing that has not been run
+against the reproduction", which is a claim about what the tree looks like when
+the session ends and which no grep over the skill file reaches. Requirement 10's
+outward-action bans *are* pinned by the acceptance criteria; it is only the
+postcondition that is not. The PRD's `### What these criteria do not cover`
+states this per requirement rather than papering over it. This item leaves the
+pack with three skills in that condition instead of one.
 
 ## Closing steps
 
