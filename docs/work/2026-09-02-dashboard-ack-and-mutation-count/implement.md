@@ -29,16 +29,23 @@ other; steps 5 and 6 are the ack pair and 6 depends on 5.
       passed *down* as a callable and `dashboard/` gains a parameter rather than
       an import.
 - [x] **2 — the `mutation` record.** One `ledger.append` in `do_POST`
-      (`dashboard/server.py:492`), after `actions.run` returns, carrying `at`,
-      `action`, and `tailnet_host` (the `Host` matched a tailnet address rather
-      than loopback). Green when: a request through each of the four paths —
-      host refused, token refused, unknown action, success — leaves exactly one
-      record for the success and none for the other three.
+      (`dashboard/server.py:498`), after `actions.run` returns **and only when
+      it returned a 2xx**, carrying `at`, `action`, and `tailnet_host` (the
+      `Host` matched a tailnet address rather than loopback). Green when: a
+      request through each of the four paths — host refused, token refused,
+      unknown action, success — leaves exactly one record for the success and
+      none for the other three. *The status guard is a review finding: the
+      first version recorded every outcome, and this gate asserted otherwise
+      without testing it.*
 - [x] **3 — the `bind` record.** One `ledger.append` in `serve`
-      (`dashboard/server.py:609`) after the bind loop, carrying `requested` and
-      `bound` as counts. Green when: a fixture with a stubbed `tailscale` that
-      exits non-zero records `requested: 1, bound: 1` (loopback only) and one
-      with two addresses records `3` and `3`.
+      (`dashboard/server.py:621`) after the bind loop and **before** the
+      `SystemExit` that a total failure raises, carrying `requested`, `bound`
+      and `tailnet` as counts. Green when: a fixture with a stubbed `tailscale`
+      that exits non-zero records `requested: 1, bound: 1, tailnet: 0` and warns
+      that no tailnet address was found, and one with two addresses records `3`,
+      `3` and `2`. *Both the third count and the ordering are review findings:
+      `requested` and `bound` agreeing hid an empty probe, and the `SystemExit`
+      came first, so the worst start of all left no row at all.*
 - [x] **4 — the bounded re-probe.** `bound_addrs` (`dashboard/server.py:129`)
       probes up to 3 times, 2 seconds apart, latching after the last attempt
       rather than the first (D-4). The sleep is injectable so the test does not
@@ -76,8 +83,9 @@ estimate:
 | before | 4,190 / 4,300 | 2,206 / 2,300 | 12,217 / 14,000 |
 | ledger in `dashboard/` (abandoned) | **4,353 — over by 53** | 2,285 | — |
 | shipped, before review remediation | 4,294 / 4,300 | 2,257 / 2,300 | 12,354 / 14,000 |
-| **shipped, after the branch review** | **4,336 / 4,350** | **2,267 / 2,300** | **12,393 / 14,000** |
-| headroom left | 14 | 33 | 1,607 |
+| shipped, after the branch review's first round | 4,336 / 4,350 | 2,267 / 2,300 | 12,393 / 14,000 |
+| **shipped, after its second round** | **4,348 / 4,350** | **2,269 / 2,300** | **12,416 / 14,000** |
+| headroom left | **2** | 31 | 1,584 |
 
 Two errors the estimate made, recorded because the next item will make them
 again otherwise:
@@ -103,14 +111,21 @@ the only defence is to re-run the tokeniser after the last commit rather than
 after the last one you remember. The row above is measured at this branch's tip.
 
 **The cap.** Raising `DASHBOARD_CODE_CAP` was never available
-(`tests/test_loc_caps.py:20`, downward-only), and it is not needed: 2,267 of
+(`tests/test_loc_caps.py:20`, downward-only), and it is not needed: 2,269 of
 2,300. `DASHBOARD_CAP` **is** raisable, was the binding constraint at six lines
 before remediation and would have been red after it, and is not raised here.
 `test_loc_caps.py`'s docstring says a cap "is never raised in the PR that busts
 it" and that each re-derivation landed "in its own decision record by a change
 that fit under the ceiling it replaced". So it moved in R11-D29, in a change
 touching nothing under `dashboard/`, merged immediately before this one. This
-branch is rebased on it and measures 4,336 against 4,350.
+branch is rebased on it and measures 4,348 against 4,350.
+
+Two lines. The table above has four "shipped" rows because each round of review
+moved the number, which is the honest shape of this item's budget and the reason
+the cap record was re-derived from the branch each time rather than once. Two
+lines is not slack; it means the next change under `dashboard/` opens by writing
+its own re-derivation, which is what `test_loc_caps.py` asks for and what this
+item spent a separate pull request learning.
 
 ## What the branch review changed
 

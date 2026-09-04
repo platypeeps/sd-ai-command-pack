@@ -267,13 +267,14 @@ measured table; the two corrections that belong to *this* file are:
    loudly*, not what a deletion would *cost*.
 
 What was done instead is D-1's amendment: the module moved to `bin/`, spending
-176 of `bin/`'s 1,783 lines and leaving `dashboard/` at **4,336** total and
-**2,267 / 2,300** code once the branch review's remediation is counted. Against
+199 of `bin/`'s 1,783 lines and leaving `dashboard/` at **4,348** total and
+**2,269 / 2,300** code once both rounds of the branch review's remediation are
+counted. Against
 4,300 that is red, which is why `DASHBOARD_CAP` was re-derived at 4,350 in
 R11-D29 — a separate change, touching nothing under `dashboard/`, because
 `tests/test_loc_caps.py`'s own rule is that a cap moves in its own record by a
 change that fits under the ceiling it replaces. This branch is rebased on it and
-measures 4,336 / 4,350.
+measures 4,348 / 4,350, with two lines to spare.
 
 ## Evaluating R11-D10
 
@@ -282,19 +283,60 @@ precedent:
 
 ```bash
 L=~/.local/state/sd-ai-command-pack/dashboard/ledger.jsonl
+SINCE=$(date -u -v-60d +%Y-%m-%d)   # the window R11-D10 actually asks about
+
+# A damaged line must not take the run with it. `jq -c . "$L" 2>/dev/null`
+# looks like it does this and does not: jq aborts at the parse error, so every
+# record *after* a damaged line silently disappears and the count comes back
+# low. Reading raw lines and dropping the ones that will not parse is the form
+# that actually skips. Checked against a ledger with a torn line in the middle:
+# the first form returned 1 of 3 records, this one returns 3.
+records() { jq -Rc 'fromjson? // empty' "$L"; }
 
 # D-6's three states, in the order that matters: "no evidence" is checked
 # first, because every reading below returns 0 on an absent file and 0 is the
 # answer that deletes the write path.
 [ -r "$L" ] || { echo "no evidence: no ledger"; exit 2; }
-starts=$(jq -r 'select(.kind=="bind")' "$L" | wc -l)
-[ "$starts" -gt 0 ] || { echo "no evidence: no start ever recorded"; exit 2; }
+[ -n "$(records | head -1)" ] || { echo "no evidence: nothing parses"; exit 2; }
 
-# mutating requests from a tailnet Host
-jq -r 'select(.kind=="mutation" and .tailnet_host==true) | .at' "$L" | wc -l
-# the denominator: how often the bind that was asked for was achieved
-jq -r 'select(.kind=="bind") | "\(.requested) \(.bound)"' "$L" | sort | uniq -c
+# The denominator has to cover the window, not merely exist. One `bind` row
+# from ninety days ago proves the writer worked once, which is not the claim
+# being made -- the claim is that a zero over sixty days means nobody used it.
+starts=$(records | jq -r --arg s "$SINCE" \
+  'select(.kind=="bind" and .at >= $s) | .at' | wc -l)   # `.at`, not the object:
+                                       # `jq -r` pretty-prints a bare object
+                                       # over several lines and `wc -l` then
+                                       # counts those, not records
+[ "$starts" -gt 0 ] || { echo "no evidence: no start inside the window"; exit 2; }
+
+# mutating requests from a tailnet Host, inside the window
+records | jq -r --arg s "$SINCE" \
+  'select(.kind=="mutation" and .tailnet_host==true and .at >= $s) | .at' | wc -l
+# how often the bind that was asked for was achieved, and whether the probe
+# ever found a tailnet address at all
+records | jq -r --arg s "$SINCE" \
+  'select(.kind=="bind" and .at >= $s) | "\(.requested) \(.bound) \(.tailnet)"' \
+  | sort | uniq -c
 ```
+
+Four things about that command are review findings or its own test, rather
+than first drafts.
+It compares `.at` as a string, which works because every stamp is ISO-8601 with
+a fixed-width date and the comparison only ever needs the day. It counts starts
+**inside the window** rather than ever, because a criterion that reads "nobody
+used it in sixty days" is not supported by a writer that last proved itself
+three months ago. It routes every read through `records`, because `jq`
+aborting on one malformed line would have printed a low count and let the caller
+read it as no demand. And it counts a field rather than a record, which is the
+one the command's own dry run caught: the first version counted seven starts in
+a ledger holding one, because `jq -r` pretty-printed the selected object and
+`wc -l` counted its lines.
+
+Run against a fixture before being written down, in all three of D-6's states:
+a ledger with only an out-of-window start exits 2, a ledger that parses to
+nothing exits 2, and a ledger with an in-window start and a torn line reports
+one tailnet mutation against `3 1 0` — asked for three addresses, bound one,
+found no tailnet.
 
 The two guards are the command, not preamble around it. A version of this that
 opens with the `jq` count is the same defect as the criterion it replaces:
@@ -415,7 +457,7 @@ at C-10.
   the tokeniser today), 59 (agree, re-measured), 2026-10-31 (agrees), 719
   (agrees), and 2,853 (disagreed — C-12). Every citation this file makes *out* of
   itself was opened: `store.py:1-22`, `now.py:15-19,59,71,129,161`,
-  `server.py:89,125`, `sd-dashboard:69`, `sd-handoff:162`,
+  `server.py:89,122`, `sd-dashboard:69`, `sd-handoff:162`,
   `test_loc_caps.py:20,66`, `plugins.py:678-713`.
 
 Implementation is **unblocked**: no blocking concern is unresolved, the five
@@ -488,14 +530,16 @@ round §4 permits. C-11 through C-21 stand.
   corrected figure leaving a citation behind. It found two live drifts the
   amendment above had not touched, both now fixed: the PRD asserted `bin/`'s
   **1,783** free lines in the present tense in two places outside its dated
-  measured-state row (`prd.md:99,189`, now date-qualified and carrying the 1,607
+  measured-state row (`prd.md:99,189`, now date-qualified and carrying the 1,584
   the item leaves), and this file's Risks said the ack store makes `dashboard/`
   the owner of a durable fact, which the move to `bin/` falsified in its
   particulars while leaving the risk itself intact. `grep -rn 'ledger\.py'`
   returns three hits, all of them naming `dashboard/ledger.py` as the location
   that was abandoned rather than the one in use; the three
   anchored code citations in this file and `implement.md`
-  (`dashboard/server.py:129,479,588`) are the post-edit lines, enforced by
+  (`bound_addrs`, `do_POST` and `serve`, at `dashboard/server.py:129,498,621`)
+  are the post-edit lines, and are anchored to their symbols so they are
+  enforced by
   `tests/test_doc_citations.py`; and D-7's `grep -rn 'ledger\.jsonl'` still
   names the path D-1 chose, which the move did not change.
 
@@ -503,7 +547,7 @@ round §4 permits. C-11 through C-21 stand.
   Found by the C-24 sweep's own re-run rather than by reading: the figures C-22
   had just installed as "measured" (4,266 total, 2,235 code) were taken after
   step 5, and step 6 had since added the dismiss control. The true final state
-  was **4,294 / 4,300** — six lines, not thirty-four, and 4,336 / 4,350 once the
+  was **4,294 / 4,300** — six lines, not thirty-four, and 4,348 / 4,350 once the
   branch review's remediation landed. This is C-22 committed a
   second time inside the fix for C-22, which is the failure the contract's
   third round exists to catch: a correction is a new claim and inherits none of
@@ -560,3 +604,59 @@ something the implementation has disproved.
 
 Implementation **unblocked**. C-26 (the cap) is in flight as its own change, per
 `tests/test_loc_caps.py`'s rule that a cap moves in its own record.
+
+## Planning adversarial review, fifth round — 2026-09-03
+
+The branch review, run again after the fourth round's fixes, returned
+twenty-eight findings. The contract's rounds are exhausted; this is the record
+of what a *code* lane found in artifacts that three planning rounds had passed,
+which is the useful part.
+
+- **C-30 — `append` could raise, and D-6 says it cannot. Blocking. `addressed`.**
+  Four statements sat above the `try`, `json.dumps` among them. A field JSON
+  cannot encode raised `TypeError` into `do_POST` between `actions.run` and
+  `send_body`, turning a mutation that had already happened into a 500 — the
+  exact failure requirement 2 forbids, produced by the code written to satisfy
+  it. Confirmed by calling `append(..., x=object())` before the fix. The whole
+  body is inside the guard now, and `tests/test_sd_ledger.py` pins it.
+- **C-31 — the ack answered 200 to a write that never landed. Blocking.
+  `addressed`.** `record` returned nothing, so `/api/ack` could not tell a
+  stored ack from a dropped one, and the page removes the row on the strength
+  of that answer. A mutation row is telemetry and may be dropped; an ack is a
+  command. `append` now returns whether the record landed, the ack path 503s
+  when it did not, and the default sink returns True so a server with no ledger
+  does not 503 its own button.
+- **C-32 — the day boundary was UTC's, not the operator's. Blocking.
+  `addressed`.** D-2's replacement expired an ack at the end of "today"
+  measured in UTC. On this machine, in America/Denver, that is 18:00 local: an
+  alert dismissed after dinner reappears before bed. Confirmed against the
+  clock — at 23:36 local the UTC date was already tomorrow. `at` is stamped in
+  local time with its offset, which stays an unambiguous instant while making
+  `at[:10]` the operator's day.
+- **C-33 — the criterion command did not evaluate the criterion. Blocking.
+  `addressed`.** Three defects in one block, all in Evaluating R11-D10. It
+  counted every mutation ever rather than the sixty days R11-D10 asks about; it
+  accepted any `bind` row as proof the writer worked, including one from ninety
+  days ago; and its damage guard did not guard. This is C-20 and C-15 for the
+  third time — the command that implements a decision drifting from the
+  decision — and the reason it keeps happening is that the command was written
+  and never run. It has now been run against fixtures in all three of D-6's
+  states, which is how the last two defects were found rather than reasoned
+  about: `jq -c .` aborts at a torn line instead of skipping it, returning 1 of
+  3 records, and `jq -r 'select(...)'` pretty-prints an object so `wc -l`
+  counted seven starts in a ledger holding one.
+- **C-34 — two findings refuted, recorded so they are not re-litigated.**
+  *"Tests require banded IDs without a production change"* — false;
+  `dashboard/now.py:135` carries the band, and the test passes against it.
+  *"Non-loopback hosts are incorrectly counted as tailnet demand"* — false;
+  `host_ok` has already narrowed `Host` to `allowed_hosts()`, which is
+  `LOOPBACK | tailnet_names() | bound addresses`, so a host reaching the record
+  is loopback or tailnet and nothing else. The dependency is real and worth
+  naming: if `allowed_hosts` ever widens, this classification widens with it.
+
+**On the count.** Twenty-eight findings against work that had passed three
+planning rounds and one code round is not a defence of the process — it is the
+measurement of it. The pattern across C-22, C-25, C-30 and C-33 is one thing:
+every claim this item made that nobody executed turned out to be false, and
+every claim that was executed held. The planning rounds read; the code round
+ran.

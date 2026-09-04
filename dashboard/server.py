@@ -383,13 +383,19 @@ class Cache:
             return dict(self._state or {}, cachedFor=round(self.seconds))
 
 
-def _drop(kind: str, **fields: object) -> None:
+def _drop(kind: str, **fields: object) -> bool:
     """The default record sink: a server nobody handed a ledger to.
 
     Not `None` and a branch at each call site. Every write here is a byproduct
     (D-6), so the shape that cannot fail is the one where the sink is always
     callable and the *caller* decides whether records go anywhere.
+
+    Returns True: a server with no ledger stored the ack as well as it was ever
+    going to, and 503-ing the dismiss button because nobody wired one up would
+    break the page for the plain `serve()` case.
     """
+
+    return True
 
 
 def make_handler(cache: Cache, script: str, record=_drop,
@@ -530,7 +536,13 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 identifier = sent.get("id") if isinstance(sent, dict) else None
                 if not isinstance(identifier, str) or not identifier:
                     return self.send_error(400, "ack needs an id")
-                record("ack", id=identifier)
+                # The one record whose failure the caller must hear about. A
+                # mutation row is telemetry and may be dropped; an ack is a
+                # command, and answering 200 to a write that never landed makes
+                # the row vanish from the page and return on the next poll with
+                # no explanation. Found in review.
+                if not record("ack", id=identifier):
+                    return self.send_error(503, "the ack was not stored")
                 return self.send_body(b'{"ok":true}', "application/json")
             body, status = actions.run(
                 sent.get("action") if isinstance(sent, dict) else None,

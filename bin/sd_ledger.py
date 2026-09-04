@@ -30,7 +30,7 @@ import fcntl
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 # A two-second budget, taken in fiftieths. The first draft of this bound was
@@ -56,18 +56,36 @@ def path(environ: dict[str, str] | None = None) -> Path:
     return home / "sd-ai-command-pack" / "dashboard" / "ledger.jsonl"
 
 
-def append(kind: str, target: Path | None = None, **fields: object) -> None:
+def append(kind: str, target: Path | None = None, **fields: object) -> bool:
     """Append one record. Never raises, never blocks a response.
 
-    `at` is stamped here rather than by the caller: three call sites write to
-    this file and a criterion that compares their timestamps needs them taken
-    the same way.
+    Returns whether the record reached the file, so a caller that is serving a
+    *command* rather than emitting telemetry can tell the operator the truth.
+    The mutation and bind sites ignore it; `/api/ack` does not.
+
+    `at` is stamped in **local** time, with its offset, rather than in UTC.
+    Both are unambiguous instants; only one makes `at[:10]` the operator's day.
+    `acked` expires an ack at the end of the day it was taken, and a UTC stamp
+    put that boundary at 18:00 for a machine in America/Denver -- an alert
+    dismissed after dinner reappearing before bed. Found in review.
+
+    Three call sites write to this file, and a criterion that compares their
+    timestamps needs them all taken the same way, which is why the stamp is
+    here and not at the callers.
     """
-    record = dict(fields)
-    record["kind"] = kind
-    record["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    payload = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
-    destination = path() if target is None else target
+    try:
+        record = dict(fields)
+        record["kind"] = kind
+        record["at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        payload = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
+        destination = path() if target is None else target
+    except Exception:
+        # Inside the guard, not above it. These four lines sat outside the
+        # `try` and `json.dumps` raises `TypeError` on a field nothing checked
+        # -- which propagated into `do_POST` between `actions.run` and
+        # `send_body`, turning a mutation that had already happened into a 500.
+        # A function documented as unable to raise has to actually not raise.
+        return False
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         # 0o600 to match the packets under the same root: this records when
@@ -76,7 +94,8 @@ def append(kind: str, target: Path | None = None, **fields: object) -> None:
             str(destination), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
         )
     except OSError:
-        return
+        return False
+    written = 0
     try:
         # Bounded, not blocking. `LOCK_EX` alone parks the calling thread for
         # as long as whoever holds the lock wants it, and this runs inside an
@@ -90,10 +109,10 @@ def append(kind: str, target: Path | None = None, **fields: object) -> None:
                 break
             except OSError:
                 if attempt == LOCK_TRIES - 1:
-                    return
+                    return False  # the `finally` closes it; closing here too
+                    # could land on an fd another thread has since opened
                 time.sleep(LOCK_WAIT)
         start = os.lseek(descriptor, 0, os.SEEK_END)
-        written = 0
         try:
             while written < len(payload):
                 progress = os.write(descriptor, payload[written:])
@@ -118,6 +137,7 @@ def append(kind: str, target: Path | None = None, **fields: object) -> None:
             os.close(descriptor)  # releases the lock
         except OSError:
             pass
+    return written == len(payload)
 
 
 def acked(target: Path | None = None) -> frozenset[str]:
@@ -142,7 +162,10 @@ def acked(target: Path | None = None) -> frozenset[str]:
         text = source.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return frozenset()
-    today = datetime.now(timezone.utc).date().isoformat()
+    # Local, to match the stamp `append` writes. An ack taken at 19:00 in
+    # America/Denver is stamped with that day and expires at the end of it,
+    # rather than at 18:00 the next afternoon when UTC rolls over.
+    today = datetime.now().astimezone().date().isoformat()
     for line in text.splitlines():
         try:
             record = json.loads(line)

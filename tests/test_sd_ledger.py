@@ -162,8 +162,8 @@ class BoundedReprobe(unittest.TestCase):
     def setUp(self) -> None:
         from dashboard import server
         self.server = server
+        self.addCleanup(setattr, server, "_ADDRS", server._ADDRS)
         server._ADDRS = None
-        self.addCleanup(setattr, server, "_ADDRS", None)
         # The probe is replaced on the module, so it has to be put back. Left
         # out, every later test in the process that reaches `bound_addrs` sees
         # this class's stub and the leak is invisible until the ordering
@@ -309,9 +309,22 @@ class AcksExpireWithTheDay(unittest.TestCase):
     def test_yesterdays_ack_does_not(self) -> None:
         import datetime as dt
         target = self.target()
-        stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
+        # Derived from the same clock `acked` reads, so the case cannot drift
+        # across a midnight between the two calls. Review found the first
+        # version racing it.
+        stamp = dt.datetime.now().astimezone() - dt.timedelta(days=1)
         self.write(target, stamp.isoformat(timespec="seconds"), "dirty:repo:1")
         self.assertEqual(ledger.acked(target), frozenset())
+
+    def test_the_stamp_is_the_operators_day_not_utcs(self) -> None:
+        """Review's case: 19:00 in America/Denver is tomorrow in UTC, so a
+        UTC-stamped ack expired at 18:00 the following afternoon."""
+        import datetime as dt
+        target = self.target()
+        ledger.append("ack", target=target, id="x")
+        stamp = json.loads(target.read_text().splitlines()[0])["at"]
+        self.assertEqual(stamp[:10], dt.datetime.now().astimezone().date().isoformat())
+        self.assertRegex(stamp, r"[+-]\d\d:\d\d$", "the offset keeps it an instant")
 
     def test_a_stampless_ack_is_not_honoured(self) -> None:
         """Rather than honoured forever, which is the failure being removed."""
@@ -333,6 +346,65 @@ class DamagedLedgerStillRenders(unittest.TestCase):
         with target.open("ab") as handle:
             handle.write(b"\xff\xfe not utf-8\n")
         self.assertEqual(ledger.acked(target), frozenset({"a"}))
+
+
+class AppendReportsWhatHappened(unittest.TestCase):
+    """`append` returns whether the record landed, and never raises doing it.
+
+    Both halves are review findings. Four statements sat above the `try` --
+    `json.dumps` among them -- so an unserializable field raised `TypeError`
+    into `do_POST` between `actions.run` and `send_body`, turning a mutation
+    that had already happened into a 500. And the ack endpoint answered 200 to
+    a write that never landed, so the row vanished and came back on the next
+    poll with nothing said.
+    """
+
+    def target(self) -> pathlib.Path:
+        import tempfile
+        directory = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, directory, True)
+        return pathlib.Path(directory) / "ledger.jsonl"
+
+    def test_a_field_json_cannot_encode_returns_false_and_does_not_raise(self) -> None:
+        self.assertIs(ledger.append("mutation", target=self.target(), x=object()), False)
+
+    def test_an_unwritable_destination_returns_false(self) -> None:
+        self.assertIs(
+            ledger.append("ack", target=pathlib.Path("/proc/nope/l.jsonl"), id="a"),
+            False)
+
+    def test_a_landed_record_returns_true(self) -> None:
+        self.assertIs(ledger.append("ack", target=self.target(), id="a"), True)
+
+
+class TheAckEndpointTellsTheTruth(unittest.TestCase):
+    """The rule `do_POST` applies, read out of the file rather than restated.
+
+    A mutation row may be dropped -- it is telemetry. An ack may not: it is a
+    command, and the page removes the row optimistically on the strength of the
+    answer.
+    """
+
+    def source(self) -> str:
+        from dashboard import server
+        return pathlib.Path(server.__file__).read_text(encoding="utf-8")
+
+    def test_a_failed_ack_write_is_not_a_200(self) -> None:
+        self.assertIn('if not record("ack", id=identifier):', self.source())
+        self.assertIn('return self.send_error(503, "the ack was not stored")',
+                      self.source())
+
+    def test_the_default_sink_still_succeeds(self) -> None:
+        """A server nobody handed a ledger to must not 503 its own button."""
+        from dashboard import server
+        self.assertIs(server._drop("ack", id="a"), True)
+
+    def test_the_mutation_row_is_not_gated_on_its_own_success(self) -> None:
+        """Telemetry that can fail the request it measures is worse than none."""
+        source = self.source()
+        head = source.index('record("mutation"')
+        tail = source.index("self.send_body(json.dumps(body)", head)
+        self.assertNotIn("if not record", source[head:tail])
 
 
 if __name__ == "__main__":
