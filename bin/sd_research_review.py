@@ -20,8 +20,10 @@ but a repository following both standards used to get "Mechanical checks pass"
 from this tool while the other one was failing, so the lint is run when the
 directory exists.
 
-Usage:  research-kit review [repo_dir ...]
-Exit 1 if any check fails.
+Usage:  sd-research-kit review        # from inside the research repo
+
+`review` takes no argument: it checks the repository you are standing in
+(R10-D6, the same move `render` made). Exit 1 if any check fails.
 """
 import datetime
 import os

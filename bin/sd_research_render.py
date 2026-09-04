@@ -3,8 +3,11 @@
 
 Usage
 -----
-    pip install markdown
-    research-kit render [repo_dir]        # or: python3 ~/repos/system/local-research-kit/render.py [repo_dir]
+    sd-research-kit render        # from inside the research repo
+
+`render` takes no argument: every verb acts on the current working directory
+(`bin/sd-research-kit:133` rejects one). The entrypoint bootstraps `markdown`
+itself, so there is nothing to install first.
 
 Reads `<repo>/research.conf.py`, which must define:
 
