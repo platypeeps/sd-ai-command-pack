@@ -1,5 +1,5 @@
 ---
-title: the citation gate has three silencers and none of them say anything
+title: the citation gate has four silencers and none of them say anything
 status: planning
 created: 2026-09-04
 ---
@@ -22,7 +22,15 @@ Measured against the merged tree, over every `*.md` in the checkout:
 | lives outside `docs/` — the corpus glob is `docs/**/*.md` | 1 (`CHANGELOG.md`) | no |
 | lives under `docs/**/archive/**` — skipped by path part | 21 | no |
 | names a file that does not exist — `is_inside_repo` requires `is_file()` | 1 | no |
-| punctuation the regex cannot match — `PAIR`'s `\s*` is not a comma | — | no |
+| **punctuation alone** — `PAIR`'s `\s*` is not a comma, and nothing else would have skipped it | **0** | no |
+| | **23** | |
+
+The last row is zero *today* and that is not reassuring, because it was 1 an hour
+ago. The 24th comma-shaped citation in this repository was in the first draft of
+**this PRD**, and vanished when the draft was rewritten. The document was inside
+its own corpus and its own count. Anything reading the table above as a standing
+measurement rather than a snapshot will be wrong by the time it reads it, which
+is why criterion 3 exists.
 
 **The fourth cost four rounds.** During #732 one citation written
 `` (`sym`, `path:line`) `` went stale **four times** across four review rounds
@@ -46,16 +54,20 @@ This PRD originally claimed that widening `PAIR` to accept the comma would
 That is false, and review said so. It was written from the 24-citation grep
 without checking what the gate does with each one. Measured:
 
-- 21 of the 24 are under `docs/**/archive/**`, which
+- 21 are under `docs/**/archive/**`, which
   `anchored_citations` (`tests/test_doc_citations.py:79-101`) skips by path part
   regardless of regex.
 - 1 is in `CHANGELOG.md`, which the corpus glob never reaches.
 - 1 names a file deleted with the retired stack, which `is_inside_repo` skips.
-- **1** is in a live document naming a file that exists.
+- **1** was in a live document naming a file that exists — this PRD's own first
+  draft, which quoted the parent item's citation while explaining it.
 
-So widening `PAIR` would newly check **one** citation, and that one currently
-passes. The change is cheap and nearly free of blast radius — the opposite of
-what this PRD asserted before anyone ran it.
+So widening `PAIR` would have newly checked **one** citation, and that one
+passed. The change is cheap and nearly free of blast radius — the opposite of
+what this PRD asserted before anyone ran it. Rewriting the draft removed that
+citation, so the same measurement now returns 23 and zero, which is the strongest
+possible argument for criterion 3: a count taken once is a count that was true
+once.
 
 The claim was written the way the parent item's C-22, C-25, C-30 and C-33 were
 written: confidently, about behaviour nobody had executed. It is left standing
