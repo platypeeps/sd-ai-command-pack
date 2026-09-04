@@ -1,6 +1,7 @@
 ---
 title: the Host guard repairs what it should refuse, and the fix opens with a cap re-derivation
-status: planning
+status: in_progress
+branch: cap/r11-d30-dashboard-ceiling
 created: 2026-09-04
 ---
 
@@ -31,6 +32,17 @@ running it against the merged tree:
 | `[evil.com` | `[evil.com]` | `False` — refused, but by accident |
 
 Two headers that are not the IPv6 loopback are accepted as the IPv6 loopback.
+
+**Corrected during design, left standing here.** The sentence above is wrong and
+is kept because `design.md` quotes it. Running `host_name` over a corpus rather
+than reading it shows the admitted set is not two headers and is not a number at
+all: `partition("]")` discards everything after the first `]`, so every header
+of the form `[::1]<anything>` is admitted as the IPv6 loopback. 2000 of 2000
+randomly generated tails were accepted. The table above lists the two the review
+happened to name, which is how a fix written against the examples in a report
+comes to be narrower than the defect -- and `design.md` records that its own
+first draft made the same mistake one size up, by counting the rows of a corpus
+and calling that the answer.
 
 **What this is not.** It is not a DNS-rebinding bypass. A page on the open internet
 cannot set a `Host` header; the browser sets it from the URL authority, and
