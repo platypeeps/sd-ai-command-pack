@@ -4,11 +4,14 @@ The design fixes a ceiling for each part of the replacement world -- `bin/` at
 14,000 lines (R11-D15, re-derived from built code after 8,000 was busted with
 six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`, `sd-spec`,
 `sd-deps`, `sd-suggest`, `sd-map`), the temporary `migrate-*` tools at 1,500
-outside it, `dashboard/` at 4,300 with 2,300 of it carrying code (R11-D24) -- and says in as many words that "caps are
+outside it, `dashboard/` at 4,350 with 2,300 of it carrying code (R11-D24, with the total
+re-derived at R11-D29) -- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
 every re-derivation: 14,000, 4,000 and 4,300 were each set in their own
 decision record by a change that fit under the ceiling it replaced, not in a
-pull request that did not fit.
+pull request that did not fit. 4,350 was set the same way at R11-D29, by a
+change touching this file and one design record and nothing under `dashboard/`,
+while the directory stood at 4,190 against the 4,300 it replaced.
 
 **Downward-only now attaches to the code cap, not to the dashboard total.**
 R11-D17 said 4,000 could only fall; R11-D24 raised it anyway, and said so in
@@ -57,7 +60,29 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # record rather than at a bare number.
 BIN_CAP = 14_000           # R11-D15: derived from built code, not from unwritten scope
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
-DASHBOARD_CAP = 4_300      # R11-D24: re-derived at 6b-7 from files that exist
+# R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
+# for: 4,190 measured on `main`, 158 measured on the branch that carries the
+# dashboard ack-and-mutation-count item, 2 unclaimed. Both figures came off
+# `line_count(tracked("dashboard"))` below rather than out of an estimate.
+#
+# It is a plain number, and one round of review was spent finding out why it
+# has to be. The clause forbids raising a cap in the pull request that needs
+# it, which leaves a window where capacity exists that no landed change has
+# claimed; the attempt to close that window made this constant conditional on
+# a work item's `implement.md` being present, so that an abandoned item took
+# its reservation with it. That is worse. `sd-plan` sweeps merged items to
+# `docs/work/archive/YYYY-MM/`, so the routine archive commit would have moved
+# the file, dropped the ceiling back to 4,300 under a directory holding 4,348
+# lines in total, and turned a bookkeeping commit into a red build. A ceiling that
+# depends on where a document currently lives is not a ceiling.
+#
+# So the window stays open and is named instead: 2 lines, on `main`, until the
+# reserved branch lands -- 14 when this was first written, narrowed by the
+# branch's own remediation. That is the price of the clause, and it is smaller
+# than the cost of the mechanism that tried to remove it.
+DASHBOARD_CAP = 4_350
+
+
 # The half that cannot be paid for with prose. R11-D24 split the dashboard
 # ceiling in two because a single total let a docstring and a branch compete
 # for the same line, and 6b-7 was spent deleting rationale to fit a write path

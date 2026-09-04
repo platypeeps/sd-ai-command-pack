@@ -79,8 +79,8 @@ from an absent one, and an unbound address from an unwanted one.
 
 | Fact | Number | Source |
 |---|---|---|
-| `dashboard/` total lines | **4,190 against a 4,300 cap — 110 headroom** | `wc -l dashboard/*.py dashboard/*.js` |
-| `dashboard/` code lines | **2,206 against a 2,300 cap — 94 headroom** | the tokeniser in `tests/test_loc_caps.py:115-134` |
+| `dashboard/` total lines | **4,190 against the 4,300 cap in force when this was measured; R11-D29 re-derived it at 4,350** | the tokeniser `line_count` (`tests/test_loc_caps.py:163-171`), over `tracked("dashboard")` |
+| `dashboard/` code lines | **2,206 against a 2,300 cap — 94 headroom** | the tokeniser `code_line_count` (`tests/test_loc_caps.py:117-160`) |
 | `RUN_ALLOWLIST` entries | 1 (`index`) | `dashboard/actions.py:52-58` |
 | Mutating requests recorded | 0 — no write site exists | `dashboard/server.py:445-481` |
 | `bin/sd-dashboard` verbs | 3 of the design's 5 (`serve`, `install`, `index`) | `bin/sd-dashboard:207-216` |
@@ -91,12 +91,13 @@ from an absent one, and an unbound address from an unwanted one.
 | Tailnet address across those starts | changed, `100.82.165.108` → `100.73.1.43` | the same log, lines 6 and 10 |
 | `bin/` lines | 11,147 against a 14,000 cap — **2,853 headroom** | the same tokeniser, over `tracked("bin")` |
 
-`DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:66`) moves **downward only**, so 94 lines is a
+`DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:91`) moves **downward only**, so 94 lines is a
 budget this item cannot raise by writing prose or by re-deriving the cap. It is the binding
 constraint on gaps 1 and 2, which have to live under `dashboard/`, and any solution for them that
 does not fit inside it is not a solution. Gap 3 has an exit the other two do not: `bin/sd-dashboard`
-is the CLI in front of the server and charges the `bin/` cap instead
-(`tests/test_loc_caps.py:190-201`), where 2,853 lines are free — so where its fix lands is a budget
+is the CLI in front of the server and charges the `bin/` cap instead —
+`test_the_dashboard_stays_under_its_ceiling` (`tests/test_loc_caps.py:215-226`) —
+where 2,853 lines are free, so where its fix lands is a budget
 decision, not only a design one.
 
 The log rows are machine-local evidence from this Mac, not something CI can reproduce. They are
