@@ -408,9 +408,16 @@ class RunsAsColumn(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         m = self.SENTENCE.search(readme)
         self.assertIsNotNone(m, "README no longer states an X-of-Y prose count")
-        prose = self.WORDS[m.group(1)]
-        total = self.WORDS[m.group(2).capitalize()]
-        return prose, total
+        # Assert before indexing. `WORDS[...]` on an unlisted spelling raises a
+        # KeyError, which CI reports as an error with a traceback into this
+        # helper -- true, and useless to whoever changed the README sentence.
+        for word in (m.group(1), m.group(2).capitalize()):
+            self.assertIn(
+                word, self.WORDS,
+                f"README's prose-count sentence spells a number this test "
+                f"cannot read: {word!r}. Add it to WORDS.",
+            )
+        return self.WORDS[m.group(1)], self.WORDS[m.group(2).capitalize()]
 
     def test_the_table_is_found_at_all(self) -> None:
         """Guards the derivation, not the data.

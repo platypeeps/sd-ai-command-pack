@@ -87,7 +87,10 @@ before anything was pushed.
     answering 404 — GitHub returns a byte-identical 404 when the repository is
     unreachable or the credentials are wrong, so that check reads "cleaned up"
     and "cannot see the repository at all" the same way. The list call proves
-    access by succeeding and answers deletion by omission, in one request.
+    access by succeeding and answers deletion by omission, in one call —
+    `--paginate` may spend several HTTP requests on a repository with many
+    branches, but it is still one question asked once, not two checks whose
+    answers can disagree.
 
     Locally: `git fetch -p`, and stop there. Fetching prunes the tracking ref
     for the branch just deleted, which is what makes the report below accurate;
