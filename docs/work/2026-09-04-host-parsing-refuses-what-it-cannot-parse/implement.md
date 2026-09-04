@@ -37,7 +37,12 @@ than asserted about.
 **Verification.**
 
 - `make check` green, with `dashboard/` measuring 4,348 — unchanged by this PR.
-- `git diff --stat` names exactly one file.
+- `git diff --name-only main` lists nothing under `dashboard/`. Not "exactly one
+  file", which is what this bullet said until review pointed out that the PR
+  deliberately carries the planning artifacts too. The single-file phrasing was
+  left over from the scope sentence above it, corrected in the same change —
+  which is the third time in this item that fixing a claim in one place left the
+  same claim standing in another, and the reason the ledger's C-8 exists.
 
 ## PR 2 — the boundary
 
