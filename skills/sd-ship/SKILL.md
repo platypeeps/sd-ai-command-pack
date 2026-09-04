@@ -81,6 +81,13 @@ before anything was pushed.
     setting, it may be off, and a step that depends on it reports success
     having done nothing.
 
+    Where it is *on*, the branch is already gone by the time this step runs and
+    `git push origin --delete` exits non-zero with `remote ref does not exist`.
+    That is this step succeeding, not failing: the goal is an absent branch, not
+    a delete that did the absenting. Treat an already-absent ref as done — the
+    branch listing below is what decides, and it cannot tell which command
+    removed the branch, only that it is gone.
+
     Verify it against the branch *list*:
     `gh api repos/<owner>/<repo>/branches --paginate --jq '.[].name'` must
     succeed and must not contain the branch. Not `gh api .../branches/<branch>`
