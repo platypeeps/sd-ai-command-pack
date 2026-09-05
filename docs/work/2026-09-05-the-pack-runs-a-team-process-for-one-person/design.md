@@ -96,7 +96,7 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 |---|---|---|---|
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
-| Development | prd and design | Scope, missing requirements, wrong assumptions | 1 |
+| Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
 | Development | Code, before merge | Defects a second reader finds | 1 |
 
 The reviewer is a different vendor from the author, always. Skills name the

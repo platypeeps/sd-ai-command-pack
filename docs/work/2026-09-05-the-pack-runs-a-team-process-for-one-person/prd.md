@@ -195,7 +195,7 @@ cap, and nowhere else unless the operator asks by name:
 |---|---|---|---|
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
-| Development | prd and design | Scope, missing requirements, wrong assumptions | 1 |
+| Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
 | Development | Code, before merge | Defects a second reader finds | 1 |
 
 The cap bounds automatic passes, not the disposition of what they find. When a
@@ -814,3 +814,10 @@ are filed as rows on this item once B's library exists, and in the log before.
   installer and one place that knows the path. This item's three review
   rounds are spent, so these edits are unreviewed by the lane; the operator
   reads them.
+- **2026-09-05** — The operator raised the planning review contract from
+  three automatic rounds to five, after item B's third round still found
+  three blocking defects. The contract file changes in this commit. The
+  review table's prd-and-design cap moves from 1 to 5 to match, in both
+  copies, so the page does not contradict the contract the day it lands; the
+  operator can set it lower once the first items under the new spine show
+  what a round finds.
