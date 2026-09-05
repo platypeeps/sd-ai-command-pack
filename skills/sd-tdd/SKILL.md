@@ -145,8 +145,9 @@ What the gate never accepts is a test that has only ever been seen to pass.
    **If the fix has not landed yet, there is nothing to revert.** `sd-debug`
    hands over a reproduction, so write the test against the unfixed tree, watch
    it fail with the original symptom, then fix. That is steps 2 through 6 of
-   this workflow with the bug as the behaviour, it produces the same evidence,
-   and it closes `disciplined`. Prefer it.
+   this workflow with the bug as the behaviour, and it closes `disciplined`.
+   Prefer it: it is the stronger evidence as well as the shorter path, since
+   nothing about the fix shaped which cases the test covers.
 
    **If the fix landed first**, recover the evidence in four steps, in this
    order:
