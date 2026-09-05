@@ -1331,8 +1331,11 @@ confirmed by the next `sd-ship` run alone.
     closure write passed the guard without `--rebind`, and that a checkout
     of the merged default branch is not reported as behind. Tests cover all
     five, the merge and the closure. The pack's installer installs B's
-    `sd_db` into the pack's virtualenv, asserted by a test that runs the
-    installer against a fixture system checkout and imports it. Before B
+    `sd_db` into the pack's virtualenv as a built copy at the system
+    checkout's tag and never editable, from B's round forty-five,
+    asserted by a test that runs the
+    installer against a fixture system checkout, imports it, and checks
+    the imported file is not under that checkout. Before B
     exists, this criterion is recorded as waiting, not as met.
 14. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
     exists, and skips them cleanly when it does not.
@@ -2140,3 +2143,6 @@ from a number the operator types.
     the branch. Criterion 13 ships two slices three ways, continued on
     the branch, prepared in a second worktree before the first merges,
     and cut fresh, all without `--rebind`; the design page follows.
+- **2026-09-05** — Cross-item change from B's round forty-five, C-77:
+  the installer installs `sd_db` as a built copy at the system checkout's
+  tag, never editable. Criterion 13 follows.
