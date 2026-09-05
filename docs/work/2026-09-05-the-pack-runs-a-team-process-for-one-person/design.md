@@ -87,7 +87,8 @@ These run only when asked by name.
   `design.md` and `implement.md` exist only when you ask for them. Status lives
   on the item's row and nowhere in the file; a checkout or CI runner with no
   database asks git whether the item is delivered, by the merge trailers, and
-  nothing else. `ready_to_send` marks a finished artifact waiting on you.
+  nothing else once the line has retired. `ready_to_send` marks a finished
+  artifact waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.

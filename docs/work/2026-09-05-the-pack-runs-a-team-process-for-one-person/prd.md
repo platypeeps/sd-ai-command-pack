@@ -532,16 +532,29 @@ from A's round thirty-six: its import lands the rows beside the lines in
 B's first slice and removes nothing, and the rows it lands are a
 rehearsal copy and not the record; this item's second slice lands the
 reader, which asks the repository's row in the database which source is
-the record, `status_source`, `file` until the sitting sets it `row`,
+the record, `status_source`, `file` until the sitting, `retiring`
+while it runs, and `row` after it,
 from A's rounds thirty-seven and thirty-eight: under `file` it reads
 the line, because until the retire the line is what every writer still
 writes, the status commands and `sd-plan` and `sd-ship` among them, and
 a row imported earlier says what the item was and not what it is; under
 `row` it reads the row and ignores a line wherever one is found, a
 branch or a linked worktree kept across the retire, reporting the line
-by name as stale with the integration update as its repair, and the old
-status writers refuse under `row` naming the sitting; with no database
-it reads no line at all and asks git for delivery alone, as above. The
+by name as stale with the integration update as its repair, and every
+status writer refuses under `retiring`, the sitting's own value, and
+the old ones under `row`, naming the sitting, from B's round
+forty-nine; with no database it asks git for delivery, as above, and
+reads the line as well until the repository itself says the retire
+happened: the retire step's one commit adds a tracked marker,
+`docs/work/.status-source`, one line, `row`, beside removing the lines,
+from A's round forty-one, so that a clone or a CI runner with no
+database and without that commit, taken between this item's reader and
+the retire, reads the historical `done` items as `done` from their
+lines and picks none of them, their `Closes:` arriving only with the
+retire step's pull request, and one holding the marker reads no line
+at all; a checkout with a database asks the row and never the marker,
+since a retained worktree lacks the marker until the integration
+update merges it in and the row is right at once. The
 presence of a line is never the marker of the migration's state, since
 every checkout that predates the retire keeps its lines until the
 default branch's deletion merges into it, which requirement 3's
@@ -549,12 +562,16 @@ integration update does before any merge and CI's lint refuses to skip.
 The same slice lands the trailer-writing ship path and the `PR_BODY`
 setting.
 The migration's retire step runs after that in a pull request of its
-own, and it is B's one sitting: freeze the writers, import once more so
+own, and it is B's one sitting: set the repository's row `retiring`,
+which is the freeze, every status writer refusing under it, import
+once more so
 that every row says what its line says now, verify by content, snapshot,
 and remove every line in one commit, refusing to run while the
 installed `sd_lib` has no `delivered`, naming the version, and lifting
-the freeze with nothing removed when the verify names a difference; the
-lint's rule that no line remains switches on with that commit, which
+the freeze, `file` again, with nothing removed when the verify names a
+difference;
+the lint's rule that no line remains switches on where that commit's
+marker is present, and the commit
 also sets the repository's `status_source` to `row`, and from
 it the row is the record, and a status change writes the row. After it
 nothing writes a status into a file again. A `done`
@@ -584,22 +601,29 @@ else; every other state lives on the row, and the surfaces that act on it
 have the database. One function, `sd_lib.delivered`, answers `yes` when a
 commit reachable from the remote's default branch as just fetched, or
 from the checkout's branch as just fetched from its upstream, or from
-`HEAD` where the branch has no upstream,
+`HEAD`,
 carries `Delivers: <item>` or `Closes: <item>`, never on `Item:` alone, `no`
 when none does, the history is whole, and the history is current, and
 `unknown` otherwise: when the checkout is shallow, `git rev-parse
 --is-shallow-repository`, because the trailer may sit past the boundary,
 from A's round twenty-two; and when the checkout has a remote and this
-run's fetch from it, of the default branch and of the checkout's
-branch where it has an upstream, `git fetch <remote> <default>
-<branch>`, did not succeed, because a whole history is not a current
+run's fetch of the default branch from it, `git fetch <remote>
+<default>`, did not succeed, because a whole history is not a current
 one, and a clone retained while another machine delivered or cancelled
 the item holds neither trailer and would answer `no` for finished work,
-from A's rounds thirty-nine and forty; the second ref is fetched
-because the mark for a branch-only cancel and for a guest delivery
-lives on the item's branch and on no other, so a clone retained on
-that branch is current only once it has that branch's tip and not the
-default branch's alone. The function fetches before it answers, a
+from A's round thirty-nine. The function fetches the default branch
+first and answers `yes` from it alone when it carries the trailer, from
+A's round forty-one, and only otherwise fetches the checkout's branch
+from its upstream, `git fetch <remote> <branch>`, because the mark for
+a branch-only cancel and for a guest delivery lives on the item's
+branch and on no other, from A's round forty, so a clone retained on
+that branch is current only once it has that branch's tip; a branch
+the remote no longer has, deleted by requirement 2's
+`delete_branch_on_merge` at its merge, git's refusal naming the ref, is
+nothing to be behind, and the function answers from the default branch
+as fetched and `HEAD`, `no` when that merge was a slice's, while a
+fetch of the branch that fails for any other reason, the remote
+unreachable, is `unknown`, since the tip it lacks may carry the mark. A
 checkout with no remote has nothing to be behind and answers from what
 it has, and an `unknown` names the boundary or the remote and the fetch
 as the repair. Every reader
@@ -1312,8 +1336,11 @@ confirmed by the next `sd-ship` run alone.
     that a verify difference seeded after the freeze lifts the freeze
     with every line in place, that after the retire both `done` items'
     rows are `done` and unmarked, the pull request `sd-ship` opens for
-    the retire step carries `Closes:` for both, after the merge a
-    database-free clone of the default branch picks neither, and a linked
+    the retire step carries `Closes:` for both, a database-free clone
+    of the default branch at each installed slice, after B's import,
+    after this item's reader and before the retire, and after it, picks
+    neither, reading the line while the marker is absent and git alone
+    once it is present, from A's round forty-one, and a linked
     worktree kept across the retire on a branch still carrying its lines
     reads the row after a status change made in the database, has
     `sd-status` name its line as stale, has the old status command refuse
@@ -1356,7 +1383,10 @@ confirmed by the next `sd-ship` run alone.
     answers `yes` after its fetch of the branch with the default branch
     unchanged, `unknown` while the remote is unreachable, and `no`
     never, and a guest clone retained on the fork's integration branch
-    across a guest delivery the same. A test
+    across a guest delivery the same; a retained worktree on a branch
+    the fixture remote deleted at its merge answers `yes` after a
+    delivering merge and `no` after a slice's, `unknown` for neither,
+    from A's round forty-one. A test
     rejects the merge, and another kills `sd-ship` after the push, and
     both assert that the item is still picked, the directory is
     untouched, and the row is not `done`; a third kills `sd-ship` after
@@ -2388,3 +2418,26 @@ from a number the operator types.
     its upstream, and reads from both as fetched. Criterion 13 retains a
     clone on the item's branch across a cancel from a second clone, and
     a guest clone across a guest delivery.
+- **2026-09-05** — Planning review, round forty-one, one confirmation
+  round granted by the operator past the cap: two blocking findings,
+  addressed, and one cross-item change from B's round forty-nine.
+  - C-74, requirement 5: round forty made `delivered` need both fetches
+    to succeed, and requirement 2's `delete_branch_on_merge` removes the
+    item's branch at its merge, so a retained worktree on that branch
+    answered `unknown` for ever with the trailer on the default branch.
+    Addressed: the default branch is fetched first and answers `yes`
+    alone; the branch is fetched only otherwise; a ref the remote no
+    longer has is nothing to be behind; an unreachable remote stays
+    `unknown`. Criterion 13 retains a worktree across the deletion.
+  - C-75, requirement 5: between this item's reader and the retire, a
+    database-free clone read no line and asked git alone, and the
+    historical `done` items' `Closes:` arrive only with the retire
+    step's pull request, so it picked delivered work. Addressed: the
+    retire commit adds a tracked marker, `docs/work/.status-source`;
+    without it a database-free reader reads the line as well, with it
+    git alone; a checkout with a database asks the row and never the
+    marker. Criterion 13 tests a database-free clone at each slice;
+    the design page's sentence dates itself to the retire.
+  - B's C-81: `status_source` gains `retiring`, the sitting's own value
+    and its freeze; every status writer reads it in the transaction that
+    writes and refuses under it. Requirement 5, criterion 13.
