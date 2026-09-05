@@ -324,15 +324,20 @@ and nothing else writes: a fresh checkout and a CI runner have no database, and
 `make check` runs the documentation lint there. The row carries the item's
 branch, and that branch is the mirror's revision identity. Git checks a branch
 out in one worktree at a time, so exactly one checkout on this machine holds
-the mirror the row describes. The library writes the mirror only in that
-checkout; `sd_lib.py` and `sd-docs-lint` compare row and mirror only there,
-and fail by name when they disagree. In any other checkout, on `main` after the
-merge or in a linked worktree on another branch, and in CI, they read the
-mirror alone. A `done` row compares with nothing, and `done` is never written
-into a mirror: the transition to `done` deletes the directory, below, so a
-mirror carries only the states its branch passed through. `sd-ship` refreshes
-the mirror before it commits. Until B's library exists the frontmatter is the
-only copy, and the switch is one migration.
+the mirror the row describes. A status change writes the row and nothing
+else; the mirror is written by the two commands that commit item files,
+`sd-plan` and `sd-ship`, in the checkout they run in, so there is no dual
+write and no checkout that has to exist. Between commits the mirror is stale
+by design. In the checkout on the item's branch, `sd_lib.py` and
+`sd-docs-lint` compare row and mirror and report a disagreement by name with
+its repair, `sd mirror refresh <item>`, as a warning; what `sd-ship` commits
+always agrees, because it refreshes first. In any other checkout, on `main`
+after the merge or in a linked worktree on another branch, and in CI, they
+read the mirror alone. A `done` row compares with nothing, and `done` is
+never written into a mirror: the transition to `done` deletes the directory,
+below, so a mirror carries only the states its branch passed through. Until
+B's library exists the frontmatter is the only copy, and the switch is one
+migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
 waiting on the operator's external action, and keeps `blocked`. Nothing else
@@ -585,13 +590,15 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
 13. Once B's library exists: on a machine with the database, in a checkout on
     the item's branch, `sd_lib.py` and `sd-docs-lint` derive an item's status
     from its row, and a `prd.md` whose `status:` mirror disagrees with the row
-    fails the lint by name. In a checkout on any other branch, and without the
-    database as in CI, both read the mirror and pass. Tests cover all three:
-    the item's branch with a disagreeing mirror fails; a linked worktree on
-    another branch with the same mirror passes; no database passes. `sd-ship`
-    refreshes the mirror before committing, asserted by a test that changes a
-    row and ships. Before B exists, this criterion is recorded as waiting, not
-    as met.
+    is reported by name with `sd mirror refresh <item>`, exit zero. In a
+    checkout on any other branch, and without the database as in CI, both
+    read the mirror and say nothing. A status change leaves the file's hash
+    unchanged. `sd-ship` refreshes the mirror before committing, so the
+    committed file agrees with the row, asserted by a test that changes a row
+    and ships. Tests cover all four. The pack's installer installs B's
+    `sd_db` into the pack's virtualenv, asserted by a test that runs the
+    installer against a fixture system checkout and imports it. Before B
+    exists, this criterion is recorded as waiting, not as met.
 14. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
     exists, and skips them cleanly when it does not.
 15. The coverage floor applies to `bin/sd_install.py` and to no other file. The
@@ -798,3 +805,12 @@ are filed as rows on this item once B's library exists, and in the log before.
   Mac only. The operator works mostly from an iPad, so B serves it over
   Tailscale, bound to the tailnet address, identified by `tailscale whois`.
   Nothing in this item changes; recorded so the two ledgers agree.
+- **2026-09-05** — Carried from item B's planning review, finding C-2 there:
+  writing the mirror on every status change was a dual write with no
+  recovery path. A status change now writes the row only; `sd-plan` and
+  `sd-ship` write the mirror; the lint reports a stale mirror with its repair
+  and does not fail. Requirement 5 and criterion 13. Also on criterion 13, by
+  the operator's choice: the pack's installer provisions `sd_db`, one
+  installer and one place that knows the path. This item's three review
+  rounds are spent, so these edits are unreviewed by the lane; the operator
+  reads them.
