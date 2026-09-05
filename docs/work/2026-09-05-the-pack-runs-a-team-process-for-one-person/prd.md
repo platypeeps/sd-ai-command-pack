@@ -369,7 +369,16 @@ and `sd mirror refresh <item>`, first checks that the checkout's `HEAD`
 contains `rev`; if it does not, the write refuses and names both commits,
 and `sd mirror refresh --rebind <item>` accepts the checkout's `HEAD` as the
 new identity and records a note saying so. After a write, `rev` is the new
-commit. In a checkout on the item's branch whose `HEAD` contains `rev`,
+commit. The merge is the one transition the guard has to be told about,
+because `sd-ship` squash-merges and a squash commit does not contain the
+branch's `rev`: on the confirmed merge, `sd-ship` reads the merge commit
+from the pull request, GitHub's `merge_commit_sha`, and in the same step
+that sets the row `done` it sets the row's branch to the default branch and
+`rev` to that commit, with a note naming the old pair. The closure commit
+is then an ordinary mirror write, on a `HEAD` that contains `rev`, whether
+it lands by direct push or on a closure branch cut from that commit, and
+no `--rebind` is ever needed on the happy path. In a checkout on the
+item's branch whose `HEAD` contains `rev`,
 `sd_lib.py` and `sd-docs-lint` compare row and mirror and report a
 disagreement by name with its repair, `sd mirror refresh <item>`, as a
 warning; in a checkout on the branch that is behind `rev`, they report that
@@ -824,8 +833,11 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     the directory is not deleted, and the row is not `done`; a third
     confirms the merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
-    lands it. Tests cover all five, the merge and the closure. The pack's
-    installer installs B's
+    lands it. Every merge test above merges with an actual squash merge and
+    asserts that the row's `rev` is the squash commit afterwards, that the
+    closure write passed the guard without `--rebind`, and that a checkout
+    of the merged default branch is not reported as behind. Tests cover all
+    five, the merge and the closure. The pack's installer installs B's
     `sd_db` into the pack's virtualenv, asserted by a test that runs the
     installer against a fixture system checkout and imports it. Before B
     exists, this criterion is recorded as waiting, not as met.
@@ -1193,3 +1205,14 @@ Waiting on the operator, not open: model pins and prices for the `kimi`,
     otherwise; the row records the closure commit and the next `sd-ship`
     run finishes a closure that was interrupted. Criterion 13 tests the
     rejected merge, the killed ship and the interrupted closure.
+
+- **2026-09-05** — Planning review, round eight of fifteen: one blocking
+  finding, addressed.
+  - C-18, requirement 5: every mirror write requires `HEAD` to contain the
+    row's `rev`, and `sd-ship` squash-merges, so the closure commit on the
+    default branch would have refused every time and left the row `done`
+    while database-free readers still picked the item. Addressed: on the
+    confirmed merge the row's branch and `rev` move to the default branch
+    and the pull request's `merge_commit_sha`, in the step that sets `done`,
+    so the closure is an ordinary mirror write; criterion 13 merges with a
+    real squash merge and asserts the guard passed without `--rebind`.

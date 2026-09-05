@@ -141,9 +141,10 @@ Eight commands, one local review, no artifacts.
 Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
 path, with the two development review points. After the merge the item's row is
-`done`, and `sd-ship` lands one closure commit on the default branch, a
-direct push where the branch accepts one and a second pull request
-otherwise, that writes `done` into the mirror so that `main` and CI read it
+`done`, its `rev` moves to the squash commit the pull request reports, and
+`sd-ship` lands one closure commit on the default branch, a direct push
+where the branch accepts one and a second pull request otherwise, that
+writes `done` into the mirror so that `main` and CI read it
 without the database, and deletes the directory when every file in it is
 tracked and committed and nothing untracked or ignored sits beside them;
 otherwise it stays and the commit names the files. The branch itself never
