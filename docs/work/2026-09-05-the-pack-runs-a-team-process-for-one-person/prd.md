@@ -177,7 +177,16 @@ request, wait for CI once, merge, close the item on the default branch,
   detection sets it. Everywhere else the path stops at pull-request-ready. Mode
   decides where artifacts go; the merge policy decides whether the loop merges,
   and the two are separate because remote ownership can suggest the first and
-  cannot authorize the second.
+  cannot authorize the second. Consent goes stale, though, and a row set
+  once does not know that a collaborator arrived since: so at the moment of
+  the merge `merge: auto` is necessary and not sufficient, and the path asks
+  the remote the three questions again, is the owner you, is it not a fork,
+  are you the only collaborator, whatever the `mode:` line says. Any no, or
+  no answer, and the merge does not happen: the item ends `ready_to_send`
+  with a note naming the answer that changed, the row keeps `merge: auto`
+  and the dashboard shows it suspended with the same reason, and the
+  operator decides. Nothing merges into a repository someone else can also
+  merge into, whatever a row from before they arrived says.
 - Nothing on the path asks a question mid-run. Where a skill would ask today, it
   decides, records the choice on the item as a proposal, and continues. The
   operator vetoes after, not before. A test failure, a blocking review finding
@@ -256,26 +265,32 @@ One list of providers on the machine. `bin/sd-review` carries its own table,
 again under `challenge_providers` and `planning_providers`. Both go. The
 registry entry holds what the table held: the start line, and the reader for
 the provider's output. `sd-review.json` keeps what is repository policy and
-nothing about chains: categories, paths, `sensitive`, the severity floor,
-and one thing about vendors, a `vendors` list, the vendors that may read
-this repository's contents. Fallthrough is dispatch, not authorization: a
-review pass sends the diff to whoever reviews it, so the repository says
-who may see it, the chain is intersected with that list, and with no entry
-left the review refuses naming the file and the list rather than sending
-the diff to the next vendor with budget. Absent, the list is the vendors on
-the `author` line, who already read the repository as authors, and no one
-else; a prepaid or company vendor is allowed once, by name, in the file. A
-guest repository has no such file and the default holds there. The tiers go
-with the `tiers` key, by the operator's decision
+nothing about vendors or chains: categories, paths, `sensitive`, the
+severity floor. Who may read a repository's contents is consent, not
+policy, and it lives where the operator's other per-repository, per-machine
+decisions live, the `CLAUDE.local.md` block, as a fifth key: `vendors`, the
+vendors that may receive this repository's diff. Fallthrough is dispatch,
+not authorization: the chain is intersected with `vendors`, and with no
+entry left, or with no `vendors` line at all, the review refuses naming the
+key and the file rather than sending the diff to the next vendor with
+budget. Nothing is derived: not from the `author` line, which says who is
+available and not who was consented to; not from the mode; not from who
+authored the branch. One line per repository, written by the operator, and
+a vendor added to the registry reaches no repository that did not name it.
+A guest repository gets the line the same way, in its untracked block. The
+tiers go with the `tiers` key, by the operator's decision
 on 2026-09-05: the registry's reviewer order is the one chain, and `deep` had
 already collapsed into `standard` the day gito was disabled.
 
 **Fallback is the reviewer list, read in order, and the order follows the
 bill.** Every entry names a `bill:`, and the registry's `bills:` section says
-whose money it is: `subscription` for Codex and Claude, `prepaid` for the
-Moonshot and MiniMax balances the operator has already paid, `company` for
-Baseten, `local` for exo. The `reviewer` line runs subscription first, prepaid
-next, company last: `[codex, claude, kimi, minimax, prism, gito, exo]`, with `prism`
+whose money it is: `subscription` for Codex and Claude, `plan` for MiniMax,
+an annual plan the operator has paid that grants tokens per month, `prepaid`
+for the Moonshot balance the operator has already paid, `company` for
+Baseten, `local` for exo. The `reviewer` line runs subscription first, the
+plan next, because its monthly tokens lapse unused where a prepaid balance
+keeps, prepaid after that, company last: `[codex, claude, minimax, kimi,
+prism, gito, exo]`, with `prism`
 and `gito` re-pointed from OpenRouter to Baseten. The first entry that is
 enabled, carries the role, is not the author's vendor, has budget left on its
 bill, and passes its preflight reviews. Claude sits second so a change Codex
@@ -286,7 +301,7 @@ failed authentication, a non-zero exit and a timeout each fall through to the
 next, and the run records which provider reviewed and why the earlier ones
 did not, on the assignment row and in the JSON it emits. Fallthrough happens
 on its own, onto prepaid and company bills included, and only among the
-vendors the repository's `vendors` list allows; every pass writes a cost
+vendors the repository's `vendors` line allows; every pass writes a cost
 row and Today shows it.
 
 One bill has a cap from day one. `baseten` is company money, and its bill
@@ -385,9 +400,9 @@ branch's `rev`: on the confirmed merge, `sd-ship` reads the merge commit
 from the pull request, GitHub's `merge_commit_sha`, and in the same step
 that sets the row `done` it sets the row's branch to the default branch and
 `rev` to that commit, with a note naming the old pair. The closure commit
-is then an ordinary mirror write, on a `HEAD` that contains `rev`, whether
-it lands by direct push or on a closure branch cut from that commit, and
-no `--rebind` is ever needed on the happy path. In a checkout on the
+is then an ordinary mirror write, on a `HEAD` that contains `rev`, made on
+a closure branch cut from that commit, and no `--rebind` is ever needed on
+the happy path. In a checkout on the
 item's branch whose `HEAD` contains `rev`,
 `sd_lib.py` and `sd-docs-lint` compare row and mirror and report a
 disagreement by name with its repair, `sd mirror refresh <item>`, as a
@@ -401,9 +416,14 @@ rejected merge, a failed CI run or a ship killed after the push leaves the
 item exactly as open and as selectable as it was. Once `sd-ship` has
 confirmed the merge it lands one closure commit on the default branch that
 writes `status: done` into the mirror and deletes the directory when it is
-clean, below; a direct push where the default branch accepts one, otherwise
-a second pull request through the same merge path. The closure commit
-carries a `Closes: <item>` trailer, the mark a run that restarts after the
+clean, below, as a second pull request through the same merge path and
+never a direct push: the default branch is protected in every repository
+the pack merges into, by the operator's decision on 2026-09-05, pull
+requests only and CI required, with no required approvals because there is
+no second person to give one. `sd-status` reports those three settings, an
+unattended merge into a default branch that does not require pull requests
+and CI refuses naming the setting, and a ship the operator runs by hand is
+warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the mark a run that restarts after the
 merge looks for on the default branch so that it never lands a second one. The row turns `done` on
 the confirmed merge and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
@@ -792,13 +812,15 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    resolution skips every openai entry; a branch with one `claude` and one
    `codex` trailer resolves to the first entry of neither vendor; a branch
    with no trailer and no `--author` is refused naming the flag; `--author
-   human` resolves to the first enabled entry. Authorization: a policy
-   whose `vendors` lists `anthropic` alone, with author `claude`, refuses
-   naming the file and the list; `[anthropic, openai]` with author `claude`
-   resolves to `codex`; no `vendors` key with author `codex` resolves to
-   `claude`, and with both subscription entries rate-limited refuses rather
-   than reaching `kimi`, asserted with a recording fixture that sees no
-   request leave for any other vendor. `bin/sd-review` contains no provider table, `sd-review.json`
+   human` resolves to the first enabled entry. Authorization: a block
+   whose `vendors` line names `anthropic` alone, with author `claude`,
+   refuses naming the key; `anthropic, openai` with author `claude`
+   resolves to `codex`, and with `codex` rate-limited refuses rather than
+   reaching `minimax`; no `vendors` line refuses naming the key whatever
+   the `author` line holds; a registry with a new vendor added resolves
+   nothing to it in a repository whose line does not name it; each asserted
+   with a recording fixture that sees no request leave for any other
+   vendor. `bin/sd-review` contains no provider table, `sd-review.json`
    contains no key ending in `_providers` and no `tiers` key, and the only
    provider names anywhere in the pack are in the registry. The
    reviewer list falls through: a test disables the first entry, then makes
@@ -835,7 +857,15 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     left to whichever branch an exception reaches. An explicit `mode:` line
     still wins over detection. Unattended merge is never derived from mode: a
     test asserts the loop stops at pull-request-ready in a `full` repository
-    whose row lacks `merge: auto`. All three modes appear in `README.md`.
+    whose row lacks `merge: auto`, and another enables `merge: auto`, ships
+    once to merge, adds a second collaborator to the fixture remote, ships
+    again and asserts the second stops at `ready_to_send` with the
+    collaborator named, the row still `merge: auto`, and the remote asked at
+    merge time rather than at dispatch. An unattended merge against a
+    fixture remote whose default branch does not require pull requests
+    refuses naming the setting, and every closure in the tests above lands
+    by a pull request, asserted by the fixture remote seeing no push to the
+    default branch. All three modes appear in `README.md`.
 12. `README.md`'s writes-nothing claim names the installer as its subject and
     lists the skills that write tracked files.
 13. Once B's library exists: on a machine with the database, in a checkout on
@@ -956,9 +986,9 @@ review raised are settled and recorded in the log under their dates. None
 are open. New questions raised during implementation are filed as rows on
 this item once B's library exists, and in the log before.
 
-Nothing waits on the operator. The model pins were written on 2026-09-05;
-the MiniMax price is marked `unverified` in the registry until the vendor
-publishes one, and Today shows the mark beside the number.
+Waiting on the operator, not open: the MiniMax plan's monthly token grant,
+`tokens_month` on the `minimax` bill, read off the plan page. The model pins
+were written on 2026-09-05.
 
 ## Log
 
@@ -1264,3 +1294,29 @@ publishes one, and Today shows the mark beside the number.
     repository is the one rule set and B's Dependencies list is the
     surface. Requirement 13, criterion 31. The open-questions note about
     model pins is closed, the pins having been written.
+- **2026-09-05** — Planning review, round ten of twenty: two blocking
+  findings, both addressed, and one correction from the operator.
+  - C-21, requirement 3: the default for a missing `vendors` list was the
+    `author` line, a global list of who is available, not a repository's
+    consent, so a shared repository used only with Codex would have sent
+    its diff to Claude, and a vendor added globally would have reached every
+    such repository. Addressed: `vendors` moves to the `CLAUDE.local.md`
+    block as a fifth key, consent written by the operator per repository
+    and per machine, derived from nothing; without it no reviewer resolves.
+    Criterion 6; design's preface, Providers and Overrides.
+  - C-22, requirement 2: `merge: auto` on a row outlived the facts that
+    justified it, so a repository that gained a collaborator kept merging
+    unattended. Addressed: at every merge the path re-asks the remote the
+    three questions, and a no suspends the merge, item `ready_to_send` with
+    the answer named, row unchanged and shown suspended. Criterion 11.
+  - Operator correction: MiniMax is an annual plan with a monthly token
+    grant, not a prepaid balance. Bill basis `plan`, price zero, the grant
+    on the bill as `tokens_month`, reservation in tokens; `minimax` moves
+    ahead of `kimi` in the reviewer order because plan tokens lapse and a
+    prepaid balance keeps. The grant number waits on the operator.
+- **2026-09-05** — Operator decision: the default branch is protected in
+  every repository the pack merges into, pull requests only and CI required,
+  no required approvals. The closure commit is always a second pull request;
+  the direct-push path goes; `sd-status` reports the settings and an
+  unattended merge into an unprotected branch refuses. Requirement 5,
+  criterion 11, design's Defaults.

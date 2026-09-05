@@ -8,11 +8,13 @@ depends on is item B in the system repository. A policy page that states rules
 the payload contradicts is the stale-document failure this item exists to
 remove, so the page moves to the root in the commit that makes it true.
 
-The Overrides section carries the keys `sd_lib.py` already reads and no others:
-`mode:` plus `CHECK_NAMES` at `bin/sd_lib.py:36`, consumed together at
-`_local_block_entrypoints` (`:391-412`). Three further keys were drafted and cut
-on 2026-09-05; an opt-in lane is asked for by name, which needs no key to go
-stale.
+The Overrides section carries the keys `sd_lib.py` already reads, `mode:`
+plus `CHECK_NAMES` at `bin/sd_lib.py:36`, consumed together at
+`_local_block_entrypoints` (`:391-412`), and one more, `vendors:`, added on
+2026-09-05 because consent to disclose a repository's diff is per repository
+and per machine and belongs in the file the operator writes by hand. Three
+further keys were drafted and cut the same day; an opt-in lane is asked for
+by name, which needs no key to go stale.
 
 The provider registry section documents a file that B's library reads. Its
 format is fixed here so that skills can name roles today and resolve them the
@@ -40,7 +42,9 @@ the end: external publish or filing is the one gate, and it is yours.
 **Development.** Pick the item. The loop writes the prd and design when the
 change earns them, implements, tests, reviews, pushes, and merges where you
 have allowed it. A repository merges unattended only when you set `merge: auto`
-on its row, once, from the dashboard; there you review the result on the item
+on its row, once, from the dashboard, and only while the remote still answers
+that the repository is yours alone, asked again at every merge; there you
+review the result on the item
 screen after it lands, and revert is one action. Everywhere else the loop stops
 at pull-request-ready and the pull request waits in the send box.
 
@@ -63,6 +67,9 @@ These run without being asked.
   lands the item's closure commit on the default branch, and runs
   `git fetch -p`. The repository setting `delete_branch_on_merge` removes
   the remote branch.
+- The default branch is protected: pull requests only, CI required, no
+  required approvals. `sd-status` reports it; an unattended merge into a
+  branch that is not refuses naming the setting.
 - `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
@@ -142,8 +149,8 @@ Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
 path, with the two development review points. After the merge the item's row is
 `done`, its `rev` moves to the squash commit the pull request reports, and
-`sd-ship` lands one closure commit on the default branch, a direct push
-where the branch accepts one and a second pull request otherwise, that
+`sd-ship` lands one closure commit on the default branch by a second pull
+request, never a direct push, because the default branch is protected, that
 writes `done` into the mirror so that `main` and CI read it
 without the database, and deletes the directory when every file in it is
 tracked and committed and nothing untracked or ignored sits beside them;
@@ -168,7 +175,8 @@ remote: is the owner you, is it not a fork, are you the only collaborator. Three
 yes: `full`. Anything else, including no answer: `guest`. A root with no remote
 is `full`; there is no one to expose anything to. Mode never decides merging.
 `merge: auto` is a per-repository policy you set once on the dashboard, off by
-default, and nothing derives it.
+default, and nothing derives it. It is necessary, not sufficient: every merge
+asks the three questions again, and a no suspends it with the reason shown.
 
 ## Providers
 
@@ -179,7 +187,7 @@ never vendors.
       anthropic: { cost: subscription }
       openai:    { cost: subscription }
       moonshot:  { cost: prepaid }
-      minimax:   { cost: prepaid }
+      minimax:   { cost: plan, tokens_month: "<from the plan page>" }
       baseten:   { cost: company, cap_usd_month: 50 }
       local:     { cost: local }
     providers:
@@ -188,7 +196,7 @@ never vendors.
       kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot, bill: moonshot,
                  roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
       minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 0.30, out: 1.20, unverified: true } }
+                 roles: [reviewer], max_tokens: 16384, price: { in: 0, out: 0 } }
       prism:   { start: "prism", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek, bill: baseten,
                  roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 }, reader: prism-json }
       gito:    { start: "gito",  model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek, bill: baseten,
@@ -198,13 +206,16 @@ never vendors.
                  roles: [author, reviewer], enabled: false, reason: "model not pinned" }
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude, kimi, minimax, prism, gito, exo]
+      reviewer: [codex, claude, minimax, kimi, prism, gito, exo]
 
 Pins as of 2026-09-05, each read from the vendor's model list on that day:
 `kimi-k3` is Moonshot's current flagship with a one-million-token window;
-`MiniMax-M3` is MiniMax's newest, and its price is a proxy from an index
-because the vendor publishes none, hence `unverified`, which Today shows
-beside the number until a real price replaces it; the two Baseten tools pin
+`MiniMax-M3` is MiniMax's newest, and it runs on an annual plan the
+operator has already paid, so the entry's price is zero and the bill carries
+the plan's monthly token grant instead, `tokens_month`, which the operator
+reads off the plan page; Today shows the month's tokens against that grant,
+and the reservation of requirement 6 counts tokens, not dollars, on a
+`plan` bill; the two Baseten tools pin
 DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
 reviewers. `max_tokens` is the same on all four because a review reply that
 needs more than sixteen thousand tokens is a review that should have been
@@ -235,10 +246,11 @@ name. Copilot and Greptile are not entries: they post on the pull request, and
 this lane never posts.
 
 This file is the only list of providers. `sd-review` reads it through the
-library; `.github/sd-review.json` carries repository policy, paths, the
-severity floor and `vendors`, the vendors allowed to read this repository,
-and names no provider and no chain. The `reviewer` line above is the chain,
-intersected with `vendors`; absent, the author vendors and no one else.
+library; `.github/sd-review.json` carries repository policy, paths and the
+severity floor, and names no provider and no chain. The `reviewer` line above
+is the chain, intersected with the repository's `vendors` line in
+`CLAUDE.local.md`, the vendors you have allowed to read that repository;
+without the line, no reviewer resolves.
 
 ## Overrides
 
@@ -248,9 +260,12 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     check: <the command that verifies this repo>
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
+    vendors: <the vendors that may read this repository's diff, e.g. anthropic, openai>
 
 `check`, `test` and `lint` run in that order and are each optional; a repository
-that spells everything as one command sets `check` alone.
+that spells everything as one command sets `check` alone. `vendors` is
+consent: you write it, nothing derives it, and without it no reviewer
+resolves for the repository.
 
 Everything under **Opt-in** above is asked for by name, in the moment, rather
 than switched on in a file. Naming it is already the whole cost, and a key that
