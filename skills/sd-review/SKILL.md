@@ -43,7 +43,7 @@ the CI lane's business, installed separately by `sd-review setup-github`.
 `--challenge` (adversarial design-challenge stance) · `--explain` (print the
 routing decision and why, run nothing) · `--dry-run` (print the exact
 invocations, run nothing) · `--json` · `--draft` (routing reduces the tier) ·
-`--timeout SECONDS` (per provider, default 900).
+`--timeout SECONDS` (per provider, default 1800).
 
 There is **no `--repo` and there will not be one** (R10-D6): a session that can
 be pointed at another checkout is a session that reviews the wrong diff.
