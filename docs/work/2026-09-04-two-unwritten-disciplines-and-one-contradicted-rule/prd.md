@@ -1,8 +1,7 @@
 ---
 title: two disciplines the pack never wrote down, and one rule its newest skill contradicts
-status: planning
+status: done
 created: 2026-09-04
-branch: feat/debug-receive-and-question-form
 ---
 
 # PRD — two unwritten disciplines and one contradicted rule
