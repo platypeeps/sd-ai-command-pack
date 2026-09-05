@@ -113,11 +113,15 @@ What the gate never accepts is a test that has only ever been seen to pass.
    a completed cycle, a cycle stopped partway, found already present, or never
    reached.
 
-   A change with no observed red is untested production code sitting in the
-   tree. So is a change seen to fail and then left before it was seen to pass,
-   and that one is the more dangerous of the two, because the code is there and
-   nothing has run against it since. Say so in those terms rather than in a
-   grade.
+   What is missing is judged against what the change claimed. A change that
+   claims new behaviour and was never seen to fail is untested production code
+   sitting in the tree, and so is one seen to fail and then left before it was
+   seen to pass — the second is the more dangerous of the two, because the code
+   is there and nothing has run against it since. A refactor claims no new
+   behaviour, so it has no red of its own to be missing; what it owes is the
+   green suite it was made on and the green suite after it, and a refactor left
+   without that second run is its untested case. Say which in those terms
+   rather than in a grade.
 
    **There is deliberately no summary word, and none is to be invented.** Do
    not grade the session `disciplined`, `clean`, `partial` or anything else;
@@ -141,9 +145,11 @@ recorded here rather than guessed at a third time.
   the gate above is absolute. **When you hit this, stop and ask.** Say what the
   test needs in order to run, what creating it would mean under the gate, and
   let the user decide — the same move the first safety rule makes for a
-  proposed rewrite. Whatever is agreed goes in the report under
-  **Scaffolding**, with the fact that the gate was consulted rather than
-  quietly read past.
+  proposed rewrite. The request and the answer go in the report under
+  **Consent**, with the fact that the gate was consulted rather than quietly
+  read past. Anything actually created goes under **Production changes**,
+  annotated as scaffolding and carrying whichever halves of its cycle were
+  observed — which, for a scaffold made before any red, is neither.
 - **Recovering the evidence for a test written late.** Reverting the change and
   watching the test fail is the obvious move and this skill does not endorse
   it: reverting proves the test is sensitive to the behaviour but not that it
@@ -203,9 +209,12 @@ recorded here rather than guessed at a third time.
 
 ## Final report
 
-Two lists, then two things read off them. Every behaviour appears exactly
-once in the first list and every production change exactly once in the
-second, so nothing is reported twice and nothing falls between them.
+Two lists, then two read-outs taken from them. Every behaviour appears exactly
+once in the first list and every production change exactly once in the second,
+so no item is filed twice and none falls between them. The two read-outs name
+some of those items again on purpose — that is what a read-out is — and
+`Consent` also carries decisions that produced no change at all, such as a
+rewrite or a scaffold the user declined.
 
 - **Behaviours** — every behaviour this session took up, one line each, and
   what became of it: a completed cycle, a cycle stopped partway with the step
@@ -220,9 +229,11 @@ second, so nothing is reported twice and nothing falls between them.
   late are all entries here, annotated as such — they are not categories of
   their own, because a change that belongs to two buckets gets reported in the
   flattering one.
-- **Untested code left in the tree** — read off the production-change list:
-  every change missing its red, missing its passing rerun, or both. Say none
-  if there is none; do not omit the heading.
+- **Untested code left in the tree** — read off the production-change list, by
+  what each change owed: one claiming new behaviour that was never seen to
+  fail, or that was seen to fail and then left before it was seen to pass; and
+  a refactor left without the green suite that should have followed it. Say
+  none if there is none; do not omit the heading.
 - **Consent** — any rewrite proposed under the first safety rule, and any
   scaffolding put to the user under the open question above, each with the
   answer that came back.
