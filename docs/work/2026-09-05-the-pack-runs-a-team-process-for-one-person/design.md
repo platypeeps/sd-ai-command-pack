@@ -187,7 +187,7 @@ never vendors.
       anthropic: { cost: subscription }
       openai:    { cost: subscription }
       moonshot:  { cost: prepaid }
-      minimax:   { cost: plan, tokens_month: "<from the plan page>" }
+      minimax:   { cost: plan, meter: "https://www.minimax.io/v1/token_plan/remains" }
       baseten:   { cost: company, cap_usd_month: 50 }
       local:     { cost: local }
     providers:
@@ -210,12 +210,16 @@ never vendors.
 
 Pins as of 2026-09-05, each read from the vendor's model list on that day:
 `kimi-k3` is Moonshot's current flagship with a one-million-token window;
-`MiniMax-M3` is MiniMax's newest, and it runs on an annual plan the
-operator has already paid, so the entry's price is zero and the bill carries
-the plan's monthly token grant instead, `tokens_month`, which the operator
-reads off the plan page; Today shows the month's tokens against that grant,
-and the reservation of requirement 6 counts tokens, not dollars, on a
-`plan` bill; the two Baseten tools pin
+`MiniMax-M3` is MiniMax's newest, and it runs on the Token Plan the
+operator has already paid, so the entry's price is zero and the bill
+carries a meter instead: the plan grants use in a five-hour window and a
+weekly window, and `GET /v1/token_plan/remains` on `www.minimax.io`, with
+the same key, answers with `current_interval_remaining_percent` and
+`current_weekly_remaining_percent` for `model_name: general`, probed
+2026-09-05. The meter writes those two percents as `meter` rows, Today
+shows them beside the bill, a `plan` bill reserves no dollars, and
+fallthrough skips it while either window reads zero; the two Baseten tools
+pin
 DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
 reviewers. `max_tokens` is the same on all four because a review reply that
 needs more than sixteen thousand tokens is a review that should have been

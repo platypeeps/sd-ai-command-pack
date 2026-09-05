@@ -285,8 +285,10 @@ already collapsed into `standard` the day gito was disabled.
 **Fallback is the reviewer list, read in order, and the order follows the
 bill.** Every entry names a `bill:`, and the registry's `bills:` section says
 whose money it is: `subscription` for Codex and Claude, `plan` for MiniMax,
-an annual plan the operator has paid that grants tokens per month, `prepaid`
-for the Moonshot balance the operator has already paid, `company` for
+the Token Plan the operator has paid for the year, which grants use in a
+five-hour window and a weekly window that the vendor's `token_plan/remains`
+endpoint reports as a remaining percent each, `prepaid` for the Moonshot
+balance the operator has already paid, `company` for
 Baseten, `local` for exo. The `reviewer` line runs subscription first, the
 plan next, because its monthly tokens lapse unused where a prepaid balance
 keeps, prepaid after that, company last: `[codex, claude, minimax, kimi,
@@ -820,7 +822,11 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    the `author` line holds; a registry with a new vendor added resolves
    nothing to it in a repository whose line does not name it; each asserted
    with a recording fixture that sees no request leave for any other
-   vendor. `bin/sd-review` contains no provider table, `sd-review.json`
+   vendor. The plan: the `minimax` meter reads the two remaining percents
+   from a recorded `token_plan/remains` answer and writes them as `meter`
+   rows, and a bill whose five-hour or weekly window reads zero is skipped
+   in fallthrough and refused by name on a direct pick, asserted with both
+   windows in turn. `bin/sd-review` contains no provider table, `sd-review.json`
    contains no key ending in `_providers` and no `tiers` key, and the only
    provider names anywhere in the pack are in the registry. The
    reviewer list falls through: a test disables the first entry, then makes
@@ -986,9 +992,9 @@ review raised are settled and recorded in the log under their dates. None
 are open. New questions raised during implementation are filed as rows on
 this item once B's library exists, and in the log before.
 
-Waiting on the operator, not open: the MiniMax plan's monthly token grant,
-`tokens_month` on the `minimax` bill, read off the plan page. The model pins
-were written on 2026-09-05.
+Nothing waits on the operator. The model pins were written on 2026-09-05,
+and the MiniMax plan's windows are read from the vendor's endpoint, not
+from a number the operator types.
 
 ## Log
 
@@ -1320,3 +1326,11 @@ were written on 2026-09-05.
   the direct-push path goes; `sd-status` reports the settings and an
   unattended merge into an unprotected branch refuses. Requirement 5,
   criterion 11, design's Defaults.
+- **2026-09-05** — The MiniMax Token Plan has no monthly token number: it
+  grants use in a five-hour window and a weekly window, and
+  `GET https://www.minimax.io/v1/token_plan/remains` with the operator's
+  key answered on 2026-09-05 with a remaining percent for each. The
+  `tokens_month` placeholder from round ten goes; the bill carries the
+  meter, fallthrough skips the bill while either window reads zero, and
+  nothing waits on the operator. Requirement 3, criterion 6, design's
+  Providers.
