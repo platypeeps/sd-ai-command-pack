@@ -515,14 +515,14 @@ def resolve_subject(root: pathlib.Path, scope: str, item: str | None = None) -> 
     if item is not None:
         named = [i for i in items if pathlib.Path(i.path).name == item]
         if not named:
-            active = ", ".join(sorted(pathlib.Path(i.path).name for i in items))
-            raise UsageError(f"--item {item!r} names no active work item; active: {active}")
+            names = ", ".join(sorted(pathlib.Path(i.path).name for i in items))
+            raise UsageError(f"--item {item!r} names no active work item; active: {names}")
         items = named
     planning_paths: list[str] = []
     lines = 0
-    for item in items:
+    for active in items:
         for name in PLANNING_FILES:
-            candidate = pathlib.Path(item.path) / name
+            candidate = pathlib.Path(active.path) / name
             if candidate.is_file():
                 planning_paths.append(str(candidate.relative_to(root)))
                 lines += _count_lines(candidate)
