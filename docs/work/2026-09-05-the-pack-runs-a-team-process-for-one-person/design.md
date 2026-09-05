@@ -63,8 +63,9 @@ These run without being asked.
   Blocking findings are fixed or recorded before the branch leaves.
 - CI runs on the pull request. The merge waits for CI and nothing else.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
-  for CI once in the background, merges with an explicit title and body,
-  lands the item's closure commit on the default branch, and runs
+  for CI once in the background, merges with an explicit title and body
+  whose trailer names the item, lands the item's closure commit on the
+  default branch when the merge delivered the item, `--deliver`, and runs
   `git fetch -p`. The repository setting `delete_branch_on_merge` removes
   the remote branch.
 - The default branch is protected: pull requests only, CI required, branches
@@ -154,17 +155,27 @@ Eight commands, one local review, no artifacts.
 
 Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
-path, with the two development review points. After the merge, whether `sd-ship` made it or you did, and a merge you make
-is confirmed by the runner's watch on the pull request or by the next
-`sd-ship` run here, the item's row is
-`done`, its `rev` moves to the squash commit the pull request reports, and
-`sd-ship` lands one closure commit on the default branch by a second pull
-request, never a direct push, because the default branch is protected, and that
-second pull request merges on its own under both policies once CI passes,
-since it carries only the item's own mirror; it
-writes `done` into the mirror so that `main` and CI read it
-without the database, and touches nothing else: the directory stays. The
-branch itself never
+path, with the two development review points. An item is not one pull
+request; it lands in as many as its slices need. Every merge `sd-ship`
+makes carries `Item: <item>` in its message, which ties the commit to
+the item and closes nothing: after it, whether `sd-ship` made it or you
+did, and a merge you make is confirmed by the runner's watch on the pull
+request or by the next `sd-ship` run here, the row's `rev` moves to the
+squash commit the pull request reports and the item stays open. The one
+merge that delivers carries `Delivers: <item>` as well: `sd-ship
+--deliver`, the runner on a row you marked final, or your own hand in
+the merge message; for a hand merge without it, the item screen's
+`deliver` does the same after the fact. On that merge, and on no other,
+the row is `done` and `sd-ship` lands one closure commit on the default
+branch by a second pull request, never a direct push, because the
+default branch is protected, and that second pull request merges on its
+own under both policies once CI passes, since it carries only the item's
+own mirror; it writes `done` into the mirror so that `main` and CI read
+it without the database, and touches nothing else: the directory stays.
+A reader with no database asks git first: a `Delivers:` or `Closes:`
+commit on the default branch means delivered, an `Item:` commit alone
+means nothing, and a shallow clone that cannot tell says so and picks
+nothing. The branch itself never
 says `done`, so a merge that fails leaves the item open. Delete a `done`
 directory yourself, with `git rm -r`, when you want the listing short;
 nothing in the pack does. When the default branch moved while the pull

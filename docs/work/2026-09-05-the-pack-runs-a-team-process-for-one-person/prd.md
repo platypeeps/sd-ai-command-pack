@@ -604,11 +604,11 @@ file, for a reader that has the file and not the history, the
 dashboard's artifact render, a shallow clone, CI on one path, and the
 guest fork; that lands within one closure merge, unbounded while its CI
 is red, shown as `closure pending` on the row from D's round one, and
-nothing selects on it. The residue is a merge the operator makes by
-hand, whose message carries no trailer: that item stays selectable in a
-database-free checkout until the closure lands, which is the one case
-the closure bounds, and the row is `done` from the moment the merge is
-confirmed. Until B's library exists the
+nothing selects on it. The residue is an item delivered with no
+`Delivers:` in git, the item screen's `deliver` after a hand merge: the
+row is `done` from that moment, and a database-free checkout still
+picks the item until the closure's `Closes:` lands, which is the one
+case the closure bounds. Until B's library exists the
 frontmatter is the only copy, and the switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
@@ -1136,8 +1136,8 @@ confirmed by the next `sd-ship` run alone.
     and ships. A test resets the branch to a commit older than the row's
     `rev` and asserts that `sd mirror refresh` refuses naming both commits,
     that the lint reports the checkout as behind and does not compare, and
-    that `--rebind` proceeds and writes a note. A test ships an item to
-    merge, then reads the default branch with no database and asserts the
+    that `--rebind` proceeds and writes a note. A test ships an item with
+    `--deliver`, then reads the default branch with no database and asserts the
     closure commit is there, the mirror says `done`, `sd-status` reports it
     done, and `sd-review --scope planning` in that checkout does not pick
     it and, with no other item open, refuses naming none; the same test
@@ -1146,7 +1146,10 @@ confirmed by the next `sd-ship` run alone.
     and `sd-plan` in a fresh clone of the default branch do not pick the
     item though its mirror still says `in_progress`, and the row shows
     `closure pending`; a hand merge through the fixture remote with no
-    trailer is picked until the closure lands; two slices shipped in
+    trailer moves `rev`, leaves the row `in_progress`, lands no closure
+    and is still picked, and after `deliver` on the item screen the row
+    is `done`, the closure lands, and the item is picked in a
+    database-free checkout only until it does; two slices shipped in
     turn, the first without `--deliver`, leave the row `in_progress`
     after the first with `rev` moved, no closure, `delivered` answering
     `no` on an `Item:` merge, and the item still picked, and after the
@@ -1159,12 +1162,12 @@ confirmed by the next `sd-ship` run alone.
     the merge, and another kills `sd-ship` after the push, and both assert
     that the branch's mirror never says `done`, the item is still picked,
     the directory is untouched, and the row is not `done`; a third
-    confirms the merge and kills `sd-ship` before the closure, and asserts
+    confirms a `--deliver` merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
     lands it; a fifth kills `sd-ship` after the closure pull request is
     opened and before it is merged, and asserts the next run merges that
     pull request, opens no second one, and one closure commit exists. A
-    test ships an item to merge and asserts the closure commit touched one
+    test ships an item with `--deliver` and asserts the closure commit touched one
     file, the item's `prd.md`, and one line of it; the fixture remote is
     asserted to require pull requests, CI and branches up to date, and
     `sd-status` to report four settings. A test moves the fixture's
@@ -1891,3 +1894,14 @@ from a number the operator types.
     Addressed: the absence assertions grep a governed tree named once in
     criterion 4, code and governing files, with `docs/work/` and
     `CHANGELOG.md` excluded by name as history.
+- **2026-09-05** — Planning review, round twenty-four of forty: one
+  blocking finding, addressed.
+  - C-49, design and criterion 13: the page that ships as `WORKFLOW.md`
+    still closed the item on any confirmed merge, and criterion 13 still
+    asserted completion on a hand merge with no delivery trailer, both
+    behind round twenty-three's `Delivers:` rule. Addressed: the page
+    states the one delivery transition, `Item:` associates and
+    `Delivers:` closes, with the item screen's `deliver` for a hand merge;
+    every completion assertion in criterion 13 names `--deliver` or
+    `deliver`, and the residue passage says the row is `done` from
+    `deliver` and git knows at the closure.
