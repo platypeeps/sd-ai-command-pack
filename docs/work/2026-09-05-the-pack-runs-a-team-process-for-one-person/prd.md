@@ -237,8 +237,18 @@ mid-item: a Claude outage sends the next assignment to Codex, not the one in
 flight. Whichever provider authored, a single-name `reviewer` line would
 resolve to the vendor that wrote the code. So resolution takes the author into
 account: the reviewer is the first entry on the `reviewer` list whose vendor
-is not the author's, and the library refuses by name when none differs. The
-assignment row names the author, so the runner and `sd-review` both know.
+is not the author's, and the library refuses by name when none differs. Under
+the runner the assignment row names the author. Outside it the author is an
+input: `sd-ship` and `sd-review` take `--author <provider>` or
+`--author human`, defaulting to `SD_AUTHOR`, which the runner and B's
+terminal wrapper set for every session they start. `sd-ship` stamps each
+commit it makes with an `Authored-with: <name>` trailer, and reviewer
+resolution reads every such trailer on the branch's commits since its base
+and skips every vendor named, so a branch two providers wrote is reviewed by
+a third or refused. A `human` author is reviewed by the first entry. A branch
+whose commits carry no trailer and whose caller names no author is refused
+by name, with the flag to pass, because a default that guesses can pick the
+vendor that wrote the change.
 
 One list of providers on the machine. `bin/sd-review` carries its own table,
 `BACKENDS` at `bin/sd-review:195`, and `.github/sd-review.json` names providers
@@ -725,7 +735,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    provider, and fails by name when no other provider carries the role; a test
    asserts both, and asserts that a change authored by `codex` resolves to
    `claude` and one authored by `claude` resolves to `codex`, for every entry
-   on the `author` line. `bin/sd-review` contains no provider table, `sd-review.json`
+   on the `author` line. Outside the runner: a test ships two commits under
+   `SD_AUTHOR=codex` and asserts both carry `Authored-with: codex` and that
+   resolution skips every openai entry; a branch with one `claude` and one
+   `codex` trailer resolves to the first entry of neither vendor; a branch
+   with no trailer and no `--author` is refused naming the flag; `--author
+   human` resolves to the first enabled entry. `bin/sd-review` contains no provider table, `sd-review.json`
    contains no key ending in `_providers` and no `tiers` key, and the only
    provider names anywhere in the pack are in the registry. The
    reviewer list falls through: a test disables the first entry, then makes
@@ -1097,3 +1112,16 @@ Waiting on the operator, not open: model pins and prices for the `kimi`,
   requirement 13, and the design's Providers section. `sd-publish`: one
   change list, the author approves, the omission ledger only for a target
   published under the company's name; requirement 13.
+- **2026-09-05** — Planning review, round five. Two blocking findings, both
+  addressed.
+  - C-13, the sweep item: its criteria 2 and 4 still excluded on liveness
+    while its criterion 5 annotated. Addressed on that item: all six
+    criteria annotate, nothing excludes.
+  - C-14, requirement 3: the assignment row was the only author identity,
+    and the small-change path has no row, so a hand-started session could
+    be reviewed by its own vendor or refused outright. Addressed: `--author`
+    and `SD_AUTHOR` name the author outside the runner, `sd-ship` stamps
+    `Authored-with:` on each commit, resolution skips every vendor the
+    branch's trailers name, `human` is reviewed by the first entry, and an
+    unnamed author is refused with the flag named. Criterion 6; the
+    design's Providers section.

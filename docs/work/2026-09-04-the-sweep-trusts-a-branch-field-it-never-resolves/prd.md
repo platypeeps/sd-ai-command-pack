@@ -58,16 +58,17 @@ naming.
 ## Acceptance criteria
 
 1. An item whose `branch:` names a branch that does not exist in *its own*
-   repository is no longer excluded from the sweep — it appears as due if it is
-   otherwise due.
-2. An item whose `branch:` names a live branch is still excluded, unchanged.
+   repository is annotated gone and appears as due if it is otherwise due.
+2. An item whose `branch:` names a live branch is annotated live and appears
+   as due if it is otherwise due; the annotation changes, the listing does
+   not.
 3. Resolution is per-root. A branch name that exists in one swept repository and
    not another gives different answers for items in each, and a test asserts
    that rather than assuming it.
 4. "git cannot answer" is a distinct outcome from "the branch is absent". A root
-   that is not a git checkout, or a git invocation that fails, must not convert
-   every item inside it into a sweep candidate. The conservative answer there is
-   to keep excluding, and to say so.
+   that is not a git checkout, or a git invocation that fails, annotates every
+   item inside it unknown and says so once per root; it neither adds nor
+   removes an item from the report.
 5. Branch liveness is advisory, never an exclusion. The sweep asks the remote
    once per root, `git ls-remote --heads <remote> <branch>`, and reads local
    refs beside it; a branch found in either is annotated live, a branch found
@@ -75,9 +76,9 @@ naming.
    Every item past the age threshold is in the report with its annotation;
    none is hidden by it. A test covers each of the three annotations and
    asserts the report's item count is the same across all three.
-6. Mutation-tested, per the standing bar. At minimum: the exclusion inverted,
+6. Mutation-tested, per the standing bar. At minimum: live and gone swapped,
    the per-root argument replaced by a fixed root, and the "git cannot answer"
-   path made to fall through.
+   path made to report gone.
 
 ## Open questions
 
@@ -113,3 +114,8 @@ naming.
   finding C-12 there: liveness is advisory, one fresh remote query per root,
   failure is unknown, and no annotation hides an item. The supersession
   recorded above still stands.
+- **2026-09-05** — Criteria 1, 2, 4 and 6 brought in line with criterion 5,
+  from the planning review of
+  `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round five,
+  finding C-13 there: liveness annotates, nothing excludes, and the mutation
+  set tests the annotation.
