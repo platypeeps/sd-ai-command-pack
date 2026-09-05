@@ -267,6 +267,35 @@ class SubjectTests(ReviewFixture):
         with self.assertRaises(sd_review.UsageError):
             sd_review.resolve_subject(root, "planning")
 
+    def test_item_narrows_planning_scope_to_one_of_two_active_items(self) -> None:
+        root = self.make_repo()
+        for name in ("2026-01-01-first", "2026-01-02-second"):
+            item = root / "docs" / "work" / name
+            item.mkdir(parents=True)
+            (item / "prd.md").write_text(
+                "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
+            )
+        both = sd_review.resolve_subject(root, "planning")
+        self.assertEqual(len(both.paths), 2)
+        one = sd_review.resolve_subject(root, "planning", "2026-01-02-second")
+        self.assertEqual(one.paths, ("docs/work/2026-01-02-second/prd.md",))
+
+    def test_item_that_names_no_active_item_is_a_usage_error_naming_the_active_ones(self) -> None:
+        root = self.make_repo()
+        item = root / "docs" / "work" / "2026-01-01-thing"
+        item.mkdir(parents=True)
+        (item / "prd.md").write_text(
+            "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
+        )
+        with self.assertRaises(sd_review.UsageError) as caught:
+            sd_review.resolve_subject(root, "planning", "2026-01-01-other")
+        self.assertIn("2026-01-01-thing", str(caught.exception))
+
+    def test_item_outside_planning_scope_is_a_usage_error(self) -> None:
+        root = self.make_repo()
+        with self.assertRaises(sd_review.UsageError):
+            sd_review.resolve_subject(root, "worktree", "2026-01-01-thing")
+
 
 class DispositionTests(unittest.TestCase):
     def test_the_floor_decides_blocking_from_advisory(self) -> None:

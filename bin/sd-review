@@ -62,11 +62,9 @@ if _BIN not in sys.path:
 import sd_lib  # noqa: E402
 import sd_route  # noqa: E402
 
-# The hook `bin/sd_setup_github.py` reaches through, and the whole of it: a way
-# to serialise the resolved policy and the backend table into a workflow file,
-# and a way to ask which backends carry lane "github". Both read from
-# `BACKENDS` and `load_policy` unchanged. Nothing else in this file is
-# involved, and nothing in this file writes a workflow.
+# All that `bin/sd_setup_github.py` reaches through: the resolved policy and
+# the backend table, read unchanged, to write a workflow file. Nothing in
+# this file writes one.
 SETUP_GITHUB_SEAM = "load_policy + BACKENDS; consumed by bin/sd_setup_github.py"
 
 POLICY_RELATIVE_PATH = pathlib.Path(".github") / "sd-review.json"
@@ -256,11 +254,9 @@ BACKENDS_BY_NAME: dict[str, Backend] = {row.name: row for row in BACKENDS}
 # Policy
 # --------------------------------------------------------------------------
 
-# The policy used when `.github/sd-review.json` is absent. It is deliberately
-# conservative: documentation-only changes are free, everything else pays for
-# codex, and anything sensitive or large escalates. A repository that wants a
-# different answer writes the file; a repository that writes nothing still gets
-# a defensible route rather than a crash.
+# The policy when `.github/sd-review.json` is absent, deliberately conservative:
+# documentation-only changes are free, everything else pays for codex, anything
+# sensitive or large escalates. A repository that wants otherwise writes the file.
 DEFAULT_POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
     "tiers": {
@@ -480,7 +476,7 @@ def _count_lines(path: pathlib.Path) -> int:
         return 0
 
 
-def resolve_subject(root: pathlib.Path, scope: str) -> Subject:
+def resolve_subject(root: pathlib.Path, scope: str, item: str | None = None) -> Subject:
     """Turn a scope name into the exact diff the providers will be given.
 
     Each scope names a different pair of endpoints, and the provider argv is
@@ -489,6 +485,8 @@ def resolve_subject(root: pathlib.Path, scope: str) -> Subject:
     place the endpoints exist.
     """
 
+    if item is not None and scope != "planning":
+        raise UsageError("--item applies to --scope planning only")
     if scope == "worktree":
         paths, lines = _numstat(root, ["HEAD"])
         extra = _untracked(root)
@@ -514,6 +512,12 @@ def resolve_subject(root: pathlib.Path, scope: str) -> Subject:
     items = [i for i in sd_lib.work_items(root) if i.status in ("planning", "in_progress")]
     if not items:
         raise UsageError(f"no planning or in_progress work item under {sd_lib.WORK_DIR}")
+    if item is not None:
+        named = [i for i in items if pathlib.Path(i.path).name == item]
+        if not named:
+            active = ", ".join(sorted(pathlib.Path(i.path).name for i in items))
+            raise UsageError(f"--item {item!r} names no active work item; active: {active}")
+        items = named
     planning_paths: list[str] = []
     lines = 0
     for item in items:
@@ -1078,13 +1082,15 @@ def review(
     """The pipeline. Returns one result object; prints nothing."""
 
     policy, source = load_policy(root)
-    subject = resolve_subject(root, args.scope)
+    item = getattr(args, "item", None)
+    subject = resolve_subject(root, args.scope, item)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
     providers = plan_providers(plan, policy, args.challenge, args.scope)
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
         "scope": args.scope,
+        "item": item,
         "challenge": bool(args.challenge),
         "draft": bool(args.draft),
         "policy_source": source,
@@ -1295,7 +1301,6 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"\nsd-review: {result['status']}\n")
 
 
-
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -1311,6 +1316,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--challenge", action="store_true", help="add the adversarial design-challenge stance")
+    parser.add_argument("--item", default=None, metavar="NAME", help="planning scope only: review the one active work item whose directory is NAME")
     parser.add_argument("--explain", action="store_true", help="print the routing decision and why, then exit without running anything")
     parser.add_argument("--dry-run", action="store_true", help="print the exact invocations, run nothing")
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
@@ -1328,17 +1334,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
-    # One subcommand, dispatched before the main parser sees the arguments.
-    # `add_subparsers` would have made every existing invocation positional-first
-    # and broken `sd-review --scope pr`; this keeps the default surface exactly
-    # as it was and gives the subcommand its own parser.
+    # One subcommand, dispatched before the main parser: `add_subparsers` would
+    # have made every invocation positional-first and broken `--scope pr`.
     if raw and raw[0] == "setup-github":
         import sd_setup_github
 
         # The seam named at SETUP_GITHUB_SEAM, handed over rather than reached
-        # into: the installer gets `load_policy` and `BACKENDS` and nothing
-        # else of this file. It lives in its own module because it *writes* a
-        # file, and `tests/test_sd_review_boundary.py` proves this one does not.
+        # into; it is its own module because it writes a file and this one does not.
         return sd_setup_github.main(raw[1:], load_policy=load_policy, backends=BACKENDS)
     args = build_parser().parse_args(raw)
     try:

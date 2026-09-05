@@ -40,7 +40,9 @@ the CI lane's business, installed separately by `sd-review setup-github`.
 
 ## Flags
 
-`--challenge` (adversarial design-challenge stance) · `--explain` (print the
+`--challenge` (adversarial design-challenge stance) · `--item NAME` (planning
+scope only: the one active item whose directory is NAME, when two are
+active) · `--explain` (print the
 routing decision and why, run nothing) · `--dry-run` (print the exact
 invocations, run nothing) · `--json` · `--draft` (routing reduces the tier) ·
 `--timeout SECONDS` (per provider, default 1800).
