@@ -201,7 +201,12 @@ Ownership decides where artifacts go, whichever organisation holds the
 repository. Without a `mode:` line, the pack asks three questions of the
 remote: is the owner you, is it not a fork, are you the only collaborator. Three
 yes: `full`. Anything else, including no answer: `guest`. A root with no remote
-is `full`; there is no one to expose anything to. Mode never decides merging.
+is `full`; there is no one to expose anything to. The questions are asked
+again before every artifact write and every push, and a `no` makes the
+run `guest` whatever the line says: a `mode: full` you wrote is a floor,
+never a ceiling, so a repository that gains a collaborator stops
+receiving your planning artifacts before the next push, not after the
+next merge. Mode never decides merging.
 `merge: auto` is a per-repository policy you set once on the dashboard, off by
 default, and nothing derives it. It is necessary, not sufficient: every merge
 asks the three questions again, and a no suspends it with the reason shown.

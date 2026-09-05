@@ -674,7 +674,20 @@ pushed and Notion mirrors for its audience. That is intended and stays.
   collaborator. Any other answer, and any failure to answer, returns `guest`
   for the artifact question while leaving the merge question to the policy
   above, which is off unless set. A personal fork of a shared upstream and a
-  personally owned repository with collaborators both resolve to `guest`. The
+  personally owned repository with collaborators both resolve to `guest`.
+  The answer is live, not stored, from A's round twenty-five: a stored
+  `mode: full` is a floor the operator set and never a ceiling, so the
+  three questions are asked again before every write that places a
+  planning artifact in the tree, `sd-plan`'s commit of the triad, and
+  before every push `sd-ship` makes, not only at merge time, and a `no`
+  makes the effective mode `guest` for that run whatever the line says:
+  the write goes to the fork's integration branch or is refused naming
+  the answer, the collaborator, the fork or the owner, the push of a
+  branch that carries the triad is refused the same way before anything
+  leaves the machine, and a note on the item records the demotion. What
+  is already in the shared tree from before the answer changed is the
+  operator's to move, and `sd-status` names it. An explicit `mode:
+  guest` is never raised by a `yes`. The
   three modes are named in `README.md`, which mentions none of them today.
 - `README.md`'s claim that the pack writes "nothing, ever" in a repository is
   rescoped to the installer, which is where it is true. The skills that write
@@ -1112,7 +1125,16 @@ confirmed by the next `sd-ship` run alone.
     to `full` for artifacts, since a local scratch repository has no one to
     expose anything to, and is named and asserted as its own case rather than
     left to whichever branch an exception reaches. An explicit `mode:` line
-    still wins over detection. Unattended merge is never derived from mode: a
+    wins over detection downward and never upward: a test installs a
+    repository with `mode: full`, ships one item, adds a second
+    collaborator to the fixture remote, and asserts that the next
+    `sd-plan` write places the triad on the integration branch naming
+    the collaborator, that `sd-ship` refuses to push a branch carrying
+    the triad with the fixture remote seeing no push, that the item
+    carries a demotion note, and that `sd-status` names the artifacts
+    already in the shared tree; and that with the collaborator removed
+    the next run is `full` again with no edit to the line. Unattended
+    merge is never derived from mode: a
     test asserts the loop stops at pull-request-ready in a `full` repository
     whose row lacks `merge: auto`, and another enables `merge: auto`, ships
     once to merge, adds a second collaborator to the fixture remote, ships
@@ -1905,3 +1927,14 @@ from a number the operator types.
     every completion assertion in criterion 13 names `--deliver` or
     `deliver`, and the residue passage says the row is `done` from
     `deliver` and git knows at the closure.
+- **2026-09-05** — Planning review, round twenty-five of forty: one
+  blocking finding, addressed.
+  - C-50, requirement 6: a stored `mode: full` kept placing and pushing
+    planning artifacts after the repository gained a collaborator, since
+    the three questions were asked again only at merge time, after the
+    push had disclosed them. Addressed: the questions are asked before
+    every artifact write and every push, a stored `full` is a floor and
+    never a ceiling, a `no` makes the run `guest` and refuses the push
+    naming the answer, and `sd-status` names what is already in the tree.
+    Criterion 11 installs `full`, adds a collaborator, and asserts the
+    demotion; the design's Modes section says the same.
