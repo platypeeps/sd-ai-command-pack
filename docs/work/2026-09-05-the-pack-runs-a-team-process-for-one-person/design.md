@@ -144,7 +144,7 @@ A shared repository is one where someone else also merges. In it:
   repository asked for them.
 - No merge. The loop stops at pull-request-ready.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
-  files one when you run it, to a destination you configured.
+  files one when you run it, to the destination you name with `--to`.
 
 ## The path for a change
 

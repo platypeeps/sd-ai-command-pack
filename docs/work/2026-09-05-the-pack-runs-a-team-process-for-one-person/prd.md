@@ -688,8 +688,9 @@ captures a fixed small set: repository, what happened, what it cost, what was
 expected, and the session it came from. It writes a row, in every
 repository and every mode, and files nothing anywhere on its own: a
 suggestion that belongs in another person's tracker leaves the database
-only by `sd suggest publish <row>`, run by the operator, to the
-destination the row's repository names in its `CLAUDE.local.md`, and
+only by `sd suggest publish <row> --to <owner/repo>`, run by the operator,
+to the destination the run names, or the one on the repository's row in
+B's database once it exists, never a sixth key in `CLAUDE.local.md`, and
 refused without one, so that an unattended session cannot turn a
 framework incident into someone else's issue, from A's round eighteen and
 in line with requirement 6 and the skill's own rule. Issues other people
@@ -1130,7 +1131,7 @@ confirmed by the next `sd-ship` run alone.
     dashboard directly. A test asserts the branch content.
 28. `sd-suggest` writes a row in every mode and files nothing, asserted by a
     test per mode against a recording GitHub fixture that saw no call; `sd
-    suggest publish` files one issue at the configured destination,
+    suggest publish` files one issue at the destination `--to` names,
     refuses without one, and is no palette entry, asserted by enumerating
     `commands.yaml`. The two
     open internal issues are closed on GitHub with a pointer to their rows. The
@@ -1674,3 +1675,7 @@ from a number the operator types.
     run and one per merge-lane turn, a second on a hand-moved base and
     `blocked` past it. Requirements 3 and 5, criterion 13, the design's
     Defaults and path.
+  - Self-found, the same hour: the first wording of C-36 put the publish
+    destination in `CLAUDE.local.md`, a sixth key that criterion 1 refuses.
+    The destination is `--to` on the run, or the repository's row once B
+    exists.
