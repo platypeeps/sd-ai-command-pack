@@ -459,9 +459,12 @@ Usage counts cannot decide what stays, because none exist. Cohesion can.
   run, which says so. A path skill with no use in ninety days is proposed for
   demotion. No demotion on counts happens before ninety days of data exist.
 - The dashboard's skills section (B) is a catalog: what each skill does, when to
-  use it, use per surface, trials and their expiry, and two buttons, promote and
-  demote, that call the library to open the pull request. The operator merges.
-  The dashboard never writes to git.
+  use it, use per surface, trials and their expiry, and three buttons. Promote
+  and demote call the library to open the pull request. Review runs one
+  reviewer pass on the skill, installed, on trial or in `contrib/`, for
+  internal consistency and for fit with the installed set, and files each
+  recommendation as a proposal; accepted proposals ship as one pull request.
+  The operator merges. The dashboard never writes to git.
 
 ### Requirement 11 — filing an improvement is one skill and one row
 
@@ -821,3 +824,7 @@ are filed as rows on this item once B's library exists, and in the log before.
   copies, so the page does not contradict the contract the day it lands; the
   operator can set it lower once the first items under the new spine show
   what a round finds.
+- **2026-09-05** — Operator request, not reviewed by the lane: the skills
+  section gains a review button beside promote and demote. Requirement 10;
+  the pass, the lens, the `skill-review` item and the apply path live on
+  item B's requirement 5 and criterion 19.
