@@ -299,12 +299,21 @@ the runner the assignment row names the author. Outside it the author is
 an input at commit time and never at review time: `sd-ship` takes
 `--author <provider>` or `--author human`, defaulting to `SD_AUTHOR`, which
 the runner and B's terminal wrapper set for every session they start, and
-stamps each commit it makes with an `Authored-with: <name>` trailer.
+stamps each commit it makes with an `Authored-with: <name>/<vendor>`
+trailer, the entry and the vendor the registry gives it at commit time,
+refusing an entry the registry does not have, and `human` bare, from A's
+round thirty-five: the independence rule reads the vendor from the
+trailer and never from the registry at review time, so an entry
+repointed to another vendor's model or removed after the commit changes
+no history, misidentifies no author, and blocks no review of an older
+branch.
 Reviewer resolution walks every commit in the reviewed range, the branch
 since its base, and builds the set of authors from what the range
-carries: each commit's own trailer, or an `Attributes: <sha> <name>`
-trailer on a later commit in the range, which `sd attribute <sha> <name>`
-writes as one empty commit on the branch, one trailer per attributed
+carries: each commit's own trailer, or an `Attributes: <sha>
+<name>/<vendor>` trailer on a later commit in the range, the vendor
+resolved the same way when the attribution is written, which `sd
+attribute <sha> <name>` writes as one empty commit on the branch, one
+trailer per attributed
 commit, run by the operator per commit or per range, `sd attribute
 <from>..<to> <name>`, and stamped `Authored-with: human` itself, because
 the operator made it, so that the repair never needs repairing, from
@@ -329,7 +338,8 @@ a session's identity says who is working now, not who wrote an older
 commit, and a handoff from one agent to another is ordinary, so a review
 that took `--author` for the whole range would let the first agent review
 its own untagged work under the second's name. The
-reviewer is the first entry whose vendor is in no member of the set, so a
+reviewer is the first entry whose vendor is in no member of the set, the
+vendors the trailers carry, so a
 branch two providers wrote is reviewed by a third or refused; a set that is
 `human` alone is reviewed by the first entry, and `human` beside a provider
 adds nothing to skip.
@@ -369,7 +379,8 @@ and the tool's own configuration is named here as the operator's to
 keep and the one place consent does not reach; a remote the operator
 wants to choose is a `url` entry, where the library owns the transport
 and the host is the recipient. `vendor` stays what it is, the maker, for the
-independence rule alone. Fallthrough is dispatch, not authorization: the
+independence rule alone, read from the trailer for the author and from
+the registry for the candidate reviewer. Fallthrough is dispatch, not authorization: the
 chain is intersected with `reviewers`, and with no entry left, or with no
 `reviewers` line at all, the review refuses naming the key and the file
 rather than sending the diff to the next entry with budget. Nothing is
@@ -1090,8 +1101,12 @@ confirmed by the next `sd-ship` run alone.
    concurrently against room for exactly one and asserts one goes and one is
    refused, with the settled rows summing under the cap afterwards. Outside
    the runner: a test ships two commits under
-   `SD_AUTHOR=codex` and asserts both carry `Authored-with: codex` and that
-   resolution skips every openai entry; a branch with one `claude` and one
+   `SD_AUTHOR=codex` and asserts both carry `Authored-with: codex/openai`
+   and that resolution skips every openai entry, and still does after the
+   `codex` entry is repointed to an anthropic model and after it is
+   removed, with the review of the older branch proceeding in both cases
+   and refusing the same vendor; `SD_AUTHOR=nosuch` is refused at commit
+   naming the registry; a branch with one `claude` and one
    `codex` trailer resolves to the first entry of neither vendor; a branch
    with no trailer and no `--author` is refused naming the flag; a branch
    with one untagged commit followed by one `Authored-with: codex` commit
@@ -1101,9 +1116,10 @@ confirmed by the next `sd-ship` run alone.
    being accepted by the scan without a second `sd attribute`; a rebase
    of the branch that rewrites the attributed commit makes the review
    refuse again naming the rewritten commit, and one `sd attribute
-   <from>..<to> claude` over the rewritten commits resolves it,
-   vendor, with the attributing commit asserted on the fixture remote
-   after the push and its `Attributes:` trailer naming the sha; two
+   <from>..<to> claude` over the rewritten commits resolves it, with
+   the attributing commit asserted on the fixture remote after the push
+   and its `Attributes:` trailer naming the sha and `claude/anthropic`;
+   two
    clones attributing two different commits of one branch in turn both
    push without force and the review reads both; `sd attribute <sha>
    human` on an untagged branch resolves to the
@@ -2196,3 +2212,15 @@ from a number the operator types.
     decides by the same word as elsewhere, `--deliver`, `final`, or
     `deliver` after the fact; an upstream merge without it is a slice.
     Criterion 13's guest fixture ships two slices.
+- **2026-09-05** — Planning review, round thirty-five of forty: one
+  blocking finding, addressed.
+  - C-66, requirement 3: `Authored-with:` named a registry entry, and the
+    independence rule resolved its vendor through the registry at review
+    time, so an entry repointed to another vendor's model or removed
+    after the commit misidentified an older branch's author, permitting
+    a self-review or blocking the review until re-attribution.
+    Addressed: the trailer carries `<name>/<vendor>`, the vendor the
+    registry gave at commit time, `Attributes:` the same, an unknown
+    entry is refused at commit, and the rule reads the author's vendor
+    from the trailer and the candidate's from the registry. Criterion 7
+    repoints and removes the entry after the commits.
