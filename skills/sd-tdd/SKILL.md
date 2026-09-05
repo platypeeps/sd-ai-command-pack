@@ -263,17 +263,20 @@ What the gate never accepts is a test that has only ever been seen to pass.
   Where neither happened, say the proof was not run and why;
 - **Behaviours already present** — behaviours whose first test passed because
   the behaviour existed, and what was found on investigating;
-- **Untested changes** — every production change with no failing-test evidence,
-  and why;
+- **Untested changes** — every production change with no failing-test
+  evidence, and why. These are step 10's `none`;
 - **Recovered late** — changes whose test was written after the code and
-  recovered by reverting, with the recoverable-copy mechanism named;
+  recovered by reverting, with the recoverable-copy mechanism named. These are
+  step 10's `recovered`;
 - **Refactors** — what changed on green, and the suite result that held;
 - **Deferred** — behaviours a bound left unimplemented, reported untested
   rather than implemented untested;
 - **Consent** — any rewrite proposed under the first safety rule, and the
   answer; and
 - **Closing state** — `disciplined`, `partial`, or `abandoned`, and what ended
-  it.
+  it. It is not chosen freely: it follows from the two bullets above, since
+  every production change not listed in either of them is a `first`. Report the
+  three counts, then the state they yield.
 
 ## Lineage
 

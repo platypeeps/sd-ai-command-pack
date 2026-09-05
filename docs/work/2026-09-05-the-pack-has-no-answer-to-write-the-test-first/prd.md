@@ -115,6 +115,12 @@ cover` rather than papered over.
    single change was never seen to fail, and "the evidence is mixed" excludes a
    session whose single change was recovered late even though `partial` is
    where it belongs.
+
+   The construction must also settle the **empty session**, which is the one
+   input where two definitions fire at once no matter how carefully they are
+   worded: with no production changes, "every change qualifies" and "no change
+   qualifies" are both vacuously true. The skill names the winner explicitly
+   rather than leaving it to whoever reads the definitions in order.
 7. `sd-tdd` names the sibling surfaces a reader would otherwise confuse it with,
    and each of `sd-debug`, `sd-check`, `sd-review` and `sd-typed-holes` is named.
 8. `sd-debug` gains the seam from its side: fixing a bug hands the regression
