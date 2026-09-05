@@ -96,7 +96,7 @@ the block; the file is untracked by construction.
 |---|---|---|
 | `full` | `docs/work/` in the repository | everything above |
 | `minimal` | nowhere; no work items | the small-change path only |
-| `guest` | untracked local path | the small-change path; no posts, no labels |
+| `guest` | the fork's integration branch | the small-change path; no posts, no labels |
 
 A repository you do not own defaults to `guest`.
 
