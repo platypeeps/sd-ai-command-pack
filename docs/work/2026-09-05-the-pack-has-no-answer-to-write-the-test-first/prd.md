@@ -81,7 +81,14 @@ cover` rather than papered over.
    fix — and per requirement 6 that closes `partial` for the fix, since it is
    the recovered-late route.
 4. `sd-tdd` settles the `sd-typed-holes` seam explicitly, in both files, so a
-   Rust author reading either one learns which governs and why.
+   Rust author reading either one learns which governs and why. The seam
+   divides the *contents* of the work rather than its commits: the type surface
+   and the `todo!()` bodies are exempt; the real bodies a skeleton also lands —
+   implemented accessors, conversion impls, derives whose runtime semantics the
+   design relies on — are behaviour and are inside test-first. Stating this in
+   prose is not sufficient: `sd-typed-holes`' own workflow must route those
+   bodies through `sd-tdd` before it proposes the skeleton commit, or a getter
+   returning the wrong same-typed field still ships on a green toolchain.
 5. `sd-tdd` never instructs an agent to delete a user's work on its own
    authority. Where the upstream source says code written before its test must
    be deleted and rewritten, this skill proposes that and requires consent,
@@ -100,6 +107,14 @@ cover` rather than papered over.
    it, so it is a report line that counts neither way, and the workflow must
    give the agent that truthful way to say so rather than telling it to stop
    with nowhere to record the result.
+
+   The three states must be **mutually exclusive by construction**, decided by
+   sorting production changes rather than by judgement, so that exactly one
+   always fits. Prose definitions do not achieve this: "some changes lack
+   evidence" and "the discipline was not followed" both match a session whose
+   single change was never seen to fail, and "the evidence is mixed" excludes a
+   session whose single change was recovered late even though `partial` is
+   where it belongs.
 7. `sd-tdd` names the sibling surfaces a reader would otherwise confuse it with,
    and each of `sd-debug`, `sd-check`, `sd-review` and `sd-typed-holes` is named.
 8. `sd-debug` gains the seam from its side: fixing a bug hands the regression
@@ -111,13 +126,26 @@ cover` rather than papered over.
     an import error, which requirement 2 rejects as invalid red, while
     creating that module is production code requirement 1 forbids — a deadlock
     for every new module, type or symbol in every language. The skill names the
-    carve-out: the smallest surface that turns an import error into an
-    assertion failure is not the behaviour, and it is the same carve-out
+    carve-out: the smallest surface the test must reach in order to fail about
+    the behaviour is not the behaviour, and it is the same carve-out
     requirement 4 grants a Rust type surface, stated generally rather than for
     one language.
+
+    The carve-out is only reachable if requirement 2 admits the failure it
+    produces. A stub that raises — `NotImplementedError`, or `todo!()` in
+    Rust — reports an *error*, not an assertion failure, and a rule rejecting
+    all errors sends the agent back to write a placeholder return value, which
+    is executable behaviour and defeats the point. So the skill must draw
+    requirement 2's line at **whose absence the message reports** rather than
+    at the error/failure distinction: a defect in the test or its scaffolding
+    is invalid red; a declared hole announcing itself is the behaviour being
+    absent, and is valid red.
 11. `sd-tdd` bounds the destructive authority the revert path hands it. It
     cannot commit or branch, so it holds no recovery mechanism; the skill must
-    require the change be committed or explicitly saved before any revert,
+    require the change be committed or explicitly saved before any revert —
+    and the save must actually be lossless, since `git diff` alone omits staged
+    changes and mangles binaries, producing an empty or unusable backup
+    immediately before a destructive step —
     refuse to revert where unrelated dirty edits prevent isolating it, and
     treat restoration as a verified step. It must also bound what running a
     suite may reach — no production credentials, live endpoints or shared
@@ -158,7 +186,7 @@ the first review round found this item in.
       similar delete/add pair as `R`, which neither `A` nor `D` matches
 - [ ] `sd-tdd` carries the pack's section skeleton, anchored to whole lines so
       that prose *mentioning* a heading cannot satisfy it; run exactly this and
-      all six lines print `1`:
+      all seven lines print `1`:
       ```
       for h in 'When to use' 'Arguments' 'The gate' 'Workflow' \
                'Red flags' 'Safety rules' 'Final report'; do
@@ -249,8 +277,9 @@ behavioural half that no grep reaches:
   claim about what a past run did and what the tree looked like when it did it;
 - requirement 2's "the failure is the expected one" is a judgement about a
   message;
-- requirement 3's red-green proof is a four-step procedure whose steps must
-  happen in order;
+- requirement 3's red-green proof is two routes, one of which is a four-step
+  procedure whose steps must happen in order, and neither of which a grep can
+  tell apart from prose describing them;
 - requirement 5's consent rule is a thing that must happen before an action,
   not a sentence in a file;
 - requirement 6's "a production change whose test was never seen to fail cannot
@@ -392,8 +421,86 @@ Verified: absent from `test-driven-development/SKILL.md`, present at
 admonitory rows survives; the attribution is corrected in place.
 
 **C-10 — the design misstated its own footprint. `addressed`.**
-"Four surfaces" enumerated three files, and "one-line" reciprocal edits were
-seven added lines each. Corrected to three files and "a passage".
+"Four surfaces" enumerated three files, and the "one-line" reciprocal edits
+were seven added lines in `sd-debug` and fifty-four in `sd-typed-holes`, the
+latter carrying a `## Lineage` section as well as the seam. Corrected to three
+files with those counts named. This entry first said "seven added lines each",
+repeating in the ledger the arithmetic error it was recording.
+
+### Round 2
+
+Run against the clean pushed snapshot `41cda029`, so these findings are about
+the tree as shipped, not a tree moving underneath the lane. Five blocking, one
+non-blocking. The important result is not the count: **three round-1
+dispositions were disproved and one was incomplete.** Every one of them failed
+the same way — the round-1 fix corrected the sentence describing a rule and
+left the procedure that executes it untouched. C-4, C-5 and C-6 were recorded
+`addressed` above; those three words were wrong when written, and are left
+standing with this section as their correction rather than edited out.
+
+**C-11 — the C-3 two-route change did not reach every consumer. `addressed`.**
+Step 9 and requirement 3 were updated to offer both routes; four other places
+still assumed the four-step one. The Final report demanded "the four steps of
+step 9" for every bug fix, so a valid pre-fix cycle had no truthful line. The
+`### What these criteria do not cover` bullet still called requirement 3 a
+four-step procedure. `sd-debug`'s handoff fired *after* the fix and mandated
+revert/restore, contradicting the PRD's claim that the handoff supplies the
+pre-fix route. And a red-flag row said an unproven regression test "guards
+nothing" — an overclaim the workflow itself avoids, since not-known-to-guard is
+the weaker true statement. All four corrected; `sd-debug` now hands over before
+applying the fix, with the after-the-fix handoff still owed but priced at a
+revert and a `partial`.
+
+**C-12 — the three closing states were not mutually exclusive. `addressed`.**
+New defect, introduced by the C-3 remediation. A session whose single
+production change was never seen to fail matched `partial` ("changes with no
+failing-test evidence") *and* `abandoned` ("the discipline was not followed"),
+which breaks D6's "exactly one chosen". A single recovered-late change matched
+`partial` only by ignoring its own opening words, "the evidence is mixed". The
+states are now decided by sorting changes into `first`/`recovered`/`none` and
+counting, which is exhaustive and disjoint by construction rather than by
+careful reading.
+
+**C-13 — C-5 was fixed in prose and not in procedure. Round-1 `addressed` was
+wrong; now `addressed`.** The seam text correctly placed derives, conversion
+impls and implemented accessors under test-first. `sd-typed-holes` step 4 then
+gated the skeleton on check, clippy and format — none of which read behaviour —
+and proposed the commit. The getter returning the wrong same-typed field, the
+exact case the seam was written for, still shipped without `sd-tdd` ever being
+invoked. Step 4 now requires every real body in the skeleton to be listed and
+routed through `sd-tdd` before the commit is proposed, and the final report
+carries that evidence or states its absence.
+
+**C-14 — C-6's recovery mechanism was itself lossy. Round-1 `addressed` was
+wrong; now `addressed`.** The safety rule offered `git diff > <patch>` as the
+save before a destructive revert. Plain `git diff` omits staged changes and
+mangles binaries, so a staged or binary fix would have produced an empty or
+unusable backup at precisely the moment one was needed. Now
+`git stash --include-untracked` or `git diff HEAD --binary`, with the reason
+stated so the command is not quietly simplified back.
+
+**C-15 — C-4's carve-out was unreachable in its own terms. Round-1 `addressed`
+was wrong; now `addressed`.** The bootstrap carve-out permitted "the signature
+that raises" and then required that surface to turn an import error into an
+*assertion failure*. A Python stub raising `NotImplementedError` reports an
+error, which step 4 rejected, sending the agent to write a placeholder return
+value — executable behaviour, the very thing the gate forbids. The lane
+demonstrated it: `FAILED (errors=1)`. Step 4 now draws the line at whose
+absence the message reports rather than at error-versus-failure. A defect in
+the test or its scaffolding is invalid red; a declared hole announcing itself —
+`NotImplementedError`, or `todo!()` in Rust — is the behaviour being absent and
+is valid red. This also aligns the rule with the `sd-typed-holes` lineage,
+where a diverging panic is exactly how a hole speaks.
+
+**C-16 — two stale numbers. `addressed`.** The heading criterion said "all six
+lines" above a seven-item loop. And the C-10 ledger entry said the seam edits
+were "seven added lines each" when they are seven and fifty-four — recording
+the arithmetic error inside the entry correcting it.
+
+**Round-1 entries the lane verified as holding:** C-1, C-2, C-7, C-8, C-9. It
+also confirmed the C-2 rebuttal: real headings plus fenced duplicates produce
+seven `2`s, and headings existing only inside a fence produce seven `1`s,
+which is what the revised ledger says.
 
 ### What the lane could not run
 
@@ -413,3 +520,10 @@ command ran there verbatim.
   recovered late test now closes `partial`. `sd-typed-holes` gained a
   `## Lineage`, recovering provenance that changed D4 rather than annotating
   it.
+- 2026-09-05 codex round 2 against `41cda029`: five blocking, one non-blocking,
+  recorded as C-11..C-16. Three round-1 dispositions were disproved and one
+  incomplete, all failing the same way — the sentence describing a rule was
+  corrected and the procedure executing it was not. The round added a counting
+  rule for the closing states, a valid-red definition that makes the bootstrap
+  carve-out reachable, a lossless save command, and a step in
+  `sd-typed-holes` that routes the skeleton's real bodies through `sd-tdd`.
