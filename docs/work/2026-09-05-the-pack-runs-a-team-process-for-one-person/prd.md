@@ -254,11 +254,16 @@ an input at commit time and never at review time: `sd-ship` takes
 the runner and B's terminal wrapper set for every session they start, and
 stamps each commit it makes with an `Authored-with: <name>` trailer.
 Reviewer resolution walks every commit in the reviewed range, the branch
-since its base, and builds the set of authors from what each commit
-carries: its trailer, or a note under `refs/notes/sd-author` that `sd
-attribute <sha> <name>` writes for a commit made without one, which the
-operator runs per commit and which travels with the branch, pushed with
-it and read by CI and by the merge row. A commit with neither is refused
+since its base, and builds the set of authors from what the range
+carries: each commit's own trailer, or an `Attributes: <sha> <name>`
+trailer on a later commit in the range, which `sd attribute <sha> <name>`
+writes as one empty commit on the branch, one trailer per attributed
+commit, run by the operator per commit. It is a commit and not a note
+because a notes ref is one mutable ref the whole repository shares, and
+two clones attributing different commits from the same tip diverge, the
+second push fails, and a force would drop the first; a commit on the
+branch is branch-local, travels with the push, is read by CI and by the
+merge row, and is squashed away with the rest at the merge. A commit with neither is refused
 naming the commit and the command, not reviewed on the strength of the
 tagged ones, and no flag or variable at review time attributes history:
 a session's identity says who is working now, not who wrote an older
@@ -883,8 +888,11 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    with one untagged commit followed by one `Authored-with: codex` commit
    is refused naming the untagged commit and `sd attribute`, and after
    `sd attribute <sha> claude` resolves to the first entry of neither
-   vendor, with the note asserted present on the fixture remote after the
-   push; `sd attribute <sha> human` on an untagged branch resolves to the
+   vendor, with the attributing commit asserted on the fixture remote
+   after the push and its `Attributes:` trailer naming the sha; two
+   clones attributing two different commits of one branch in turn both
+   push without force and the review reads both; `sd attribute <sha>
+   human` on an untagged branch resolves to the
    first enabled entry; `sd-review --author claude` is refused as not a
    review flag, and `SD_AUTHOR=codex` in the review's environment changes
    nothing about an untagged commit. Consent at install: the installer writing the block for
@@ -1023,13 +1031,20 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
 20. Exactly one file states the planning adversarial review rule.
 21. `docs/work/archive/` does not exist. All 487 items in it are deleted, the
     386 `done` and the 100 `planning` alike, and the deletion commit names
-    `46ec7fb85` as the commit that recovers them. `sd-plan` deletes a `done`
-    item's directory rather than moving it, and only when the directory is
-    clean and fully tracked; no sweep or park code path remains. Tests cover
-    the deletion path, an untracked file that blocks it, an ignored file that
-    blocks it, and an uncommitted edit that blocks it, and assert the report
-    names the file; the deletion test asserts `git rm` removed only tracked
-    paths.
+    `46ec7fb85` as the commit that recovers them. A `done` item's
+    directory is deleted by the closure in requirement 5 and by nothing
+    else: `sd-plan` moves, parks and sweeps nothing and deletes nothing,
+    and no sweep or park code path remains. The eligibility check is one
+    function in `sd_lib.py`, clean, fully tracked, and no reader outside
+    the directory, and the closure is its only caller, so that a directory
+    the closure kept for a reader is not taken by a second path that never
+    asked. Tests cover the deletion path, an untracked file that blocks it,
+    an ignored file that blocks it, an uncommitted edit that blocks it, and
+    a reader that blocks it, and assert the report names the file; the
+    deletion test asserts `git rm` removed only tracked paths; a test runs
+    `sd-plan` on a repository holding a `done` directory kept for a reader
+    and asserts the directory is untouched; a grep of `bin/` for the
+    eligibility function names one caller.
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -1513,3 +1528,18 @@ from a number the operator types.
     Addressed: authorship is recorded at commit time only, by trailer or
     by a note `sd attribute <sha> <name>` writes; review takes no author;
     a commit with neither is refused naming the command. Criterion 6.
+- **2026-09-05** — Planning review, round fifteen of thirty: three
+  blocking findings, all addressed.
+  - C-29, design: the workflow page still attributed untagged commits by
+    the session's declaration after C-28 removed that from the
+    requirement. Addressed: the page reads as the requirement does.
+  - C-30, requirement 3: attribution as a note under a shared notes ref
+    diverged between two clones, and a force dropped the first. Addressed:
+    `sd attribute` writes one empty commit on the branch with
+    `Attributes: <sha> <name>` trailers, branch-local, squashed away at
+    the merge. Criterion 6 pushes from two clones.
+  - C-31, criterion 21: `sd-plan` deleted a clean `done` directory on its
+    own, without the reader guard, so a directory the closure kept was
+    taken on the next planning run. Addressed: the closure is the one
+    deleter, through one eligibility function with one caller; `sd-plan`
+    deletes nothing. Criterion 21 runs `sd-plan` over a kept directory.

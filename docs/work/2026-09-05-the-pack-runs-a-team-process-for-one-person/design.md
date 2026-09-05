@@ -236,10 +236,12 @@ scoped. A pin is changed by editing this file, never by a page.
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item; outside the runner, `SD_AUTHOR` or `--author` names it, `sd-ship`
-stamps it on each commit as `Authored-with:`, every commit in the reviewed
-range is attributed by its trailer or by that declaration, and a commit with
-neither refuses the review by name rather than being guessed. `reviewer` is the first entry that is enabled, is not the author's
+mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
+`sd-ship`, which stamps it on each commit it makes as `Authored-with:`. The
+review reads no declaration: every commit in the reviewed range is attributed
+by its own trailer, or by an `Attributes: <sha> <name>` trailer on a later
+commit in the range that `sd attribute` makes, and a commit with neither
+refuses the review by name rather than being guessed. `reviewer` is the first entry that is enabled, is not the author's
 vendor, has budget left on its bill, and answers its preflight. A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
