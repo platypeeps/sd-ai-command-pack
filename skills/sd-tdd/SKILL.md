@@ -99,8 +99,10 @@ What the gate never accepts is a test that has only ever been seen to pass.
    clean — a passing suite that prints warnings is hiding its next failure.
 7. **Refactor only on green**, and only what is already covered. Removing
    duplication, improving names, extracting a helper: none of these add
-   behaviour, so none of them need a new test, and each of them needs the suite
-   to stay green.
+   behaviour, so none of them need a new test. Each needs the surrounding suite
+   seen green *before* it — that is what "on green" means, and an unobserved
+   baseline is not one — and seen green again *after* it. Both runs are what a
+   refactor owes in step 9's table, in place of the red it never had.
 8. **Repeat for the next behaviour.** Under `depth=deep`, the edge cases and
    error paths the happy path implies each get their own cycle rather than
    being folded into the first test as extra assertions.
@@ -113,20 +115,32 @@ What the gate never accepts is a test that has only ever been seen to pass.
    a completed cycle, a cycle stopped partway, found already present, or never
    reached.
 
-   What is missing is judged against what the change claimed. A change that
-   claims new behaviour and was never seen to fail is untested production code
-   sitting in the tree, and so is one seen to fail and then left before it was
-   seen to pass — the second is the more dangerous of the two, because the code
-   is there and nothing has run against it since. A refactor claims no new
-   behaviour, so it has no red of its own to be missing; what it owes is the
-   green suite it was made on and the green suite after it, and a refactor left
-   without that second run is its untested case. Say which in those terms
-   rather than in a grade.
+   **What a change owes depends on what it claims, and it claims that before it
+   is made.** Say which of the three it is at the point of making it, not
+   afterwards when the flattering answer is visible:
+
+   | Kind | What it claims | What it owes, all of it observed |
+   |---|---|---|
+   | **behaviour** | new observable behaviour | valid red for it against a tree that did not yet contain it, with the message quoted, *and* the change then seen to pass with the surrounding suite green |
+   | **refactor** | no new behaviour | the surrounding suite seen green *before* it, *and* seen green *after* it |
+   | **scaffold** | nothing; it exists so a test can run at all | consent recorded before it was made, per the open question below — no red and no pass of its own, and the behaviour it unblocks still owes a full behaviour cycle |
+
+   The three are exhaustive over production changes and one change is one kind.
+   A change that would be two — a rename made while implementing a behaviour,
+   an extraction that also fixes a bug — is split into two entries, each owing
+   its own row. Where it genuinely cannot be split, it is a **behaviour**
+   change and owes that row in full; never the refactor row, which is the
+   cheaper one.
+
+   A change missing any part of what its row owes is untested production code
+   sitting in the tree. Of the behaviour row's two halves, the second missing
+   is the more dangerous, because the code is there and nothing has run against
+   it since. Say which part is missing, in those terms rather than in a grade.
 
    **There is deliberately no summary word, and none is to be invented.** Do
    not grade the session `disciplined`, `clean`, `partial` or anything else;
-   the Lineage says why. A refactor records the green suite it kept and no red
-   of its own, because it claimed no new behaviour. A bound records the half it
+   the Lineage says why. A refactor records both green suites its row owes and no
+   red of its own, because it claimed no new behaviour. A bound records what was
    reached. A session that changed nothing records that it changed nothing.
 
 ## What this skill does not settle
@@ -147,9 +161,9 @@ recorded here rather than guessed at a third time.
   let the user decide — the same move the first safety rule makes for a
   proposed rewrite. The request and the answer go in the report under
   **Consent**, with the fact that the gate was consulted rather than quietly
-  read past. Anything actually created goes under **Production changes**,
-  annotated as scaffolding and carrying whichever halves of its cycle were
-  observed — which, for a scaffold made before any red, is neither.
+  read past. Anything actually created goes under **Production changes** as a
+  **scaffold**, owing that row of step 9's table and no more; the behaviour it
+  unblocks is a separate entry owing the behaviour row in full.
 - **Recovering the evidence for a test written late.** Reverting the change and
   watching the test fail is the obvious move and this skill does not endorse
   it: reverting proves the test is sensitive to the behaviour but not that it
@@ -221,19 +235,21 @@ rewrite or a scaffold the user declined.
   it stopped at, found already present with what was found on investigating, or
   never reached because a bound fired.
 - **Production changes** — every change this session made to production code,
-  one entry each, carrying the test that covers it, the red observed against a
-  tree lacking it with the message quoted, the run that showed it passing, and
-  the surrounding suite result. Where one of those was never observed, say so
-  in its place rather than leaving the line out. A refactor made on green, a
-  scaffold created under the open question above, and a change whose test came
-  late are all entries here, annotated as such — they are not categories of
-  their own, because a change that belongs to two buckets gets reported in the
-  flattering one.
-- **Untested code left in the tree** — read off the production-change list, by
-  what each change owed: one claiming new behaviour that was never seen to
-  fail, or that was seen to fail and then left before it was seen to pass; and
-  a refactor left without the green suite that should have followed it. Say
-  none if there is none; do not omit the heading.
+  one entry each, naming which of step 9's three kinds it is and carrying every
+  observation that kind owes: for a behaviour change the test, the red observed
+  against a tree lacking it with the message quoted, the run that showed it
+  passing and the surrounding suite result; for a refactor the green suite
+  before and the green suite after; for a scaffold the consent that authorised
+  it. Where something owed was never observed, say so in its place rather than
+  leaving the line out. Refactors and scaffolds are entries here rather than
+  categories of their own, because a change that belongs to two buckets gets
+  reported in the flattering one.
+- **Untested code left in the tree** — read off the production-change list:
+  every change missing any part of what its row in step 9's table owes. A
+  behaviour change never seen to fail, or seen to fail and then left before it
+  was seen to pass; a refactor missing the green suite before it or the green
+  suite after it; a scaffold whose behaviour never got its own cycle. Say none
+  if there is none; do not omit the heading.
 - **Consent** — any rewrite proposed under the first safety rule, and any
   scaffolding put to the user under the open question above, each with the
   answer that came back.
