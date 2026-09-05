@@ -252,13 +252,18 @@ the runner the assignment row names the author. Outside it the author is an
 input: `sd-ship` and `sd-review` take `--author <provider>` or
 `--author human`, defaulting to `SD_AUTHOR`, which the runner and B's
 terminal wrapper set for every session they start. `sd-ship` stamps each
-commit it makes with an `Authored-with: <name>` trailer, and reviewer
-resolution reads every such trailer on the branch's commits since its base
-and skips every vendor named, so a branch two providers wrote is reviewed by
-a third or refused. A `human` author is reviewed by the first entry. A branch
-whose commits carry no trailer and whose caller names no author is refused
-by name, with the flag to pass, because a default that guesses can pick the
-vendor that wrote the change.
+commit it makes with an `Authored-with: <name>` trailer. Reviewer resolution
+walks every commit in the reviewed range, the branch since its base, and
+builds the set of authors: each commit's trailer where it has one, and the
+declared author, `--author` or `SD_AUTHOR`, for every commit that has none.
+A trailer on some commits says nothing about the others, since only
+`sd-ship` stamps them and an interactive session commits without one, so a
+range with an untagged commit and no declaration is refused naming that
+commit and the flag, not reviewed on the strength of the tagged ones. The
+reviewer is the first entry whose vendor is in no member of the set, so a
+branch two providers wrote is reviewed by a third or refused; a set that is
+`human` alone is reviewed by the first entry, and `human` beside a provider
+adds nothing to skip.
 
 One list of providers on the machine. `bin/sd-review` carries its own table,
 `BACKENDS` at `bin/sd-review:195`, and `.github/sd-review.json` names providers
@@ -268,17 +273,23 @@ the provider's output. `sd-review.json` keeps what is repository policy and
 nothing about vendors or chains: categories, paths, `sensitive`, the
 severity floor. Who may read a repository's contents is consent, not
 policy, and it lives where the operator's other per-repository, per-machine
-decisions live, the `CLAUDE.local.md` block, as a fifth key: `vendors`, the
-vendors that may receive this repository's diff. Fallthrough is dispatch,
-not authorization: the chain is intersected with `vendors`, and with no
-entry left, or with no `vendors` line at all, the review refuses naming the
-key and the file rather than sending the diff to the next vendor with
-budget. Nothing is derived: not from the `author` line, which says who is
-available and not who was consented to; not from the mode; not from who
-authored the branch. One line per repository, written by the operator, and
-a vendor added to the registry reaches no repository that did not name it.
-A guest repository gets the line the same way, in its untracked block. The
-tiers go with the `tiers` key, by the operator's decision
+decisions live, the `CLAUDE.local.md` block, as a fifth key: `reviewers`,
+the registry entries that may receive this repository's diff. The entry is
+the recipient, not the model's maker: `prism` sends the diff to Baseten,
+whoever trained the model it runs, so consent names `prism`, and a second
+host for the same model is a second entry that no repository has consented
+to until its line names it. `vendor` stays what it is, the maker, for the
+independence rule alone. Fallthrough is dispatch, not authorization: the
+chain is intersected with `reviewers`, and with no entry left, or with no
+`reviewers` line at all, the review refuses naming the key and the file
+rather than sending the diff to the next entry with budget. Nothing is
+derived: not from the `author` line, which says who is available and not
+who was consented to; not from the mode; not from who authored the branch;
+not from a vendor already allowed under another entry. One line per
+repository, written by the operator, and an entry added to the registry
+reaches no repository that did not name it. A guest repository gets the
+line the same way, in its untracked block. The tiers go with the `tiers`
+key, by the operator's decision
 on 2026-09-05: the registry's reviewer order is the one chain, and `deep` had
 already collapsed into `standard` the day gito was disabled.
 
@@ -303,7 +314,7 @@ failed authentication, a non-zero exit and a timeout each fall through to the
 next, and the run records which provider reviewed and why the earlier ones
 did not, on the assignment row and in the JSON it emits. Fallthrough happens
 on its own, onto prepaid and company bills included, and only among the
-vendors the repository's `vendors` line allows; every pass writes a cost
+entries the repository's `reviewers` line allows; every pass writes a cost
 row and Today shows it.
 
 One bill has a cap from day one. `baseten` is company money, and its bill
@@ -813,16 +824,22 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    `SD_AUTHOR=codex` and asserts both carry `Authored-with: codex` and that
    resolution skips every openai entry; a branch with one `claude` and one
    `codex` trailer resolves to the first entry of neither vendor; a branch
-   with no trailer and no `--author` is refused naming the flag; `--author
-   human` resolves to the first enabled entry. Authorization: a block
-   whose `vendors` line names `anthropic` alone, with author `claude`,
-   refuses naming the key; `anthropic, openai` with author `claude`
-   resolves to `codex`, and with `codex` rate-limited refuses rather than
-   reaching `minimax`; no `vendors` line refuses naming the key whatever
-   the `author` line holds; a registry with a new vendor added resolves
-   nothing to it in a repository whose line does not name it; each asserted
-   with a recording fixture that sees no request leave for any other
-   vendor. The plan: the `minimax` meter reads the two remaining percents
+   with no trailer and no `--author` is refused naming the flag; a branch
+   with one untagged commit followed by one `Authored-with: codex` commit
+   is refused naming the untagged commit when nothing declares its author,
+   and with `--author claude` resolves to the first entry of neither
+   vendor; `--author human` on an untagged branch resolves to the first
+   enabled entry. Authorization: a block
+   whose `reviewers` line names `claude` alone, with author `claude`,
+   refuses naming the key; `claude, codex` with author `claude` resolves to
+   `codex`, and with `codex` rate-limited refuses rather than reaching
+   `minimax`; no `reviewers` line refuses naming the key whatever the
+   `author` line holds; a registry with a new entry added resolves nothing
+   to it in a repository whose line does not name it, and a second entry
+   for a vendor the line already allows under another entry, `prism`
+   allowed and a new `prism-openrouter` with the same `vendor`, is not
+   resolved until the line names it; each asserted with a recording fixture
+   that sees no request leave for any other entry. The plan: the `minimax` meter reads the two remaining percents
    from a recorded `token_plan/remains` answer and writes them as `meter`
    rows, and a bill whose five-hour or weekly window reads zero is skipped
    in fallthrough and refused by name on a direct pick, asserted with both
@@ -1334,3 +1351,18 @@ from a number the operator types.
   meter, fallthrough skips the bill while either window reads zero, and
   nothing waits on the operator. Requirement 3, criterion 6, design's
   Providers.
+- **2026-09-05** — Planning review, round eleven of twenty: two blocking
+  findings, both addressed.
+  - C-23, requirement 3: consent was keyed to the vendor, the model's
+    maker, while the recipient of the diff is the host, so allowing
+    DeepSeek allowed Baseten, and a second host for the same model would
+    have inherited the consent. Addressed: the key is `reviewers` and names
+    registry entries, the recipients; a second host is a second entry with
+    no consent until named; `vendor` stays for independence only. Criterion
+    6 adds the same-vendor second-entry test.
+  - C-24, requirement 3: trailers on some commits were read as provenance
+    for the whole range, while only `sd-ship` stamps them, so an untagged
+    Claude commit beside a tagged Codex commit let Claude review its own
+    work. Addressed: every commit in the range is attributed, by trailer
+    or by the declared author, and an untagged commit with no declaration
+    refuses naming it. Criterion 6 adds the mixed fixture.

@@ -10,7 +10,7 @@ remove, so the page moves to the root in the commit that makes it true.
 
 The Overrides section carries the keys `sd_lib.py` already reads, `mode:`
 plus `CHECK_NAMES` at `bin/sd_lib.py:36`, consumed together at
-`_local_block_entrypoints` (`:391-412`), and one more, `vendors:`, added on
+`_local_block_entrypoints` (`:391-412`), and one more, `reviewers:`, added on
 2026-09-05 because consent to disclose a repository's diff is per repository
 and per machine and belongs in the file the operator writes by hand. Three
 further keys were drafted and cut the same day; an opt-in lane is asked for
@@ -228,8 +228,9 @@ scoped. A pin is changed by editing this file, never by a page.
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
 mid-item; outside the runner, `SD_AUTHOR` or `--author` names it, `sd-ship`
-stamps it on each commit as `Authored-with:`, and a branch with no author
-named is refused, not guessed. `reviewer` is the first entry that is enabled, is not the author's
+stamps it on each commit as `Authored-with:`, every commit in the reviewed
+range is attributed by its trailer or by that declaration, and a commit with
+neither refuses the review by name rather than being guessed. `reviewer` is the first entry that is enabled, is not the author's
 vendor, has budget left on its bill, and answers its preflight. A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
@@ -252,9 +253,10 @@ this lane never posts.
 This file is the only list of providers. `sd-review` reads it through the
 library; `.github/sd-review.json` carries repository policy, paths and the
 severity floor, and names no provider and no chain. The `reviewer` line above
-is the chain, intersected with the repository's `vendors` line in
-`CLAUDE.local.md`, the vendors you have allowed to read that repository;
-without the line, no reviewer resolves.
+is the chain, intersected with the repository's `reviewers` line in
+`CLAUDE.local.md`, the entries you have allowed to receive that repository's
+diff; the entry is the recipient, so a second host for the same model is a
+second name to allow; without the line, no reviewer resolves.
 
 ## Overrides
 
@@ -264,12 +266,13 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     check: <the command that verifies this repo>
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
-    vendors: <the vendors that may read this repository's diff, e.g. anthropic, openai>
+    reviewers: <the registry entries that may receive this repository's diff, e.g. claude, codex>
 
 `check`, `test` and `lint` run in that order and are each optional; a repository
-that spells everything as one command sets `check` alone. `vendors` is
-consent: you write it, nothing derives it, and without it no reviewer
-resolves for the repository.
+that spells everything as one command sets `check` alone. `reviewers` is
+consent: you write it, nothing derives it, it names entries because the entry
+is who receives the diff, and without it no reviewer resolves for the
+repository.
 
 Everything under **Opt-in** above is asked for by name, in the moment, rather
 than switched on in a file. Naming it is already the whole cost, and a key that
