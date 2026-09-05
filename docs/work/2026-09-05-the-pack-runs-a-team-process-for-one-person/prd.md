@@ -342,8 +342,9 @@ severity floor. Who may read a repository's contents is consent, not
 policy, and it lives where the operator's other per-repository, per-machine
 decisions live, the `CLAUDE.local.md` block, as a fifth key: `reviewers`,
 the registry entries that may receive this repository's diff. The entry is
-the recipient, not the model's maker: `prism` sends the diff to Baseten,
-whoever trained the model it runs, so consent names `prism`, and a second
+the recipient, not the model's maker: the `baseten` entry sends the diff
+to Baseten, whoever trained the model it serves, so consent names
+`baseten`, and a second
 host for the same model is a second entry that no repository has consented
 to until its line names it. `vendor` stays what it is, the maker, for the
 independence rule alone. Fallthrough is dispatch, not authorization: the
@@ -377,8 +378,9 @@ balance the operator has already paid, `company` for
 Baseten, `local` for exo. The `reviewer` line runs subscription first, the
 plan next, because its monthly tokens lapse unused where a prepaid balance
 keeps, prepaid after that, company last: `[codex, claude, minimax, kimi,
-prism, gito, exo]`, with `prism`
-and `gito` re-pointed from OpenRouter to Baseten. The first entry that is
+baseten, exo]`, with one `url` entry,
+`baseten`, in place of the `prism` and `gito` CLIs that pointed there,
+from A's round twenty-two. The first entry that is
 enabled, carries the role, is not the author's vendor, has budget left on its
 bill, and passes its preflight reviews. Claude sits second so a change Codex
 authored is reviewed on a subscription before any prepaid balance is
@@ -406,8 +408,13 @@ thirty-four, which overturns the session bound of round thirty-three
 because a declared bound is a guess a retry passes. The operator points
 such an entry at the vendor's endpoint as a `url` entry, so the library
 makes the calls, or takes the cap off the bill, which makes the number
-an alert. Today both entries on `baseten`, `prism` and `gito`, are
-`url` entries, so the rule changes nothing. The reservation settles to the real
+an alert. Round twenty-one said the two Baseten entries were `url`
+entries already; they were not, the design's registry had `prism` and
+`gito` as `start` lines, the CLIs, which the reader would refuse. So the
+CLIs leave the registry and one `url` entry, `baseten`, takes their
+place, through the library's client that already carries Kimi and
+MiniMax, from A's round twenty-two; the CLIs added only their own limits.
+The reservation settles to the real
 cost after. At the cap, fallthrough skips every provider on that bill,
 direct choice refuses by name with the month's total, reserved included,
 and Today shows spend against cap. The dashboard raises the cap in one action, and it enables, disables and
@@ -419,9 +426,9 @@ tokens in and out, so a cost row is tokens times price without a billing API;
 a subscription entry logs tokens alone.
 
 An entry carries `vendor:`, the maker of the model behind it, and the
-different-vendor rule compares vendors, not names or bills. `prism` and `gito`
-are tools, not vendors: their vendor is whatever model Baseten serves them,
-pinned on the entry. `kimi` is Moonshot, `minimax` is MiniMax, `exo` is
+different-vendor rule compares vendors, not names or bills. `baseten` is
+a bill and an endpoint, not a vendor: the entry's vendor is the model it
+serves, pinned on the entry. `kimi` is Moonshot, `minimax` is MiniMax, `exo` is
 whatever model it serves. Entries carrying a `url:` run through one
 OpenAI-compatible client in the library, with `model:` and `max_tokens:` from
 the entry and one reader for all of them that takes the answer from
@@ -563,11 +570,17 @@ The merge message `sd-ship` hands the API carries an `Item: <item>`
 trailer, so the commit that delivers the item marks it on the default
 branch in the same act, and a reader with no database derives `done`
 from git before any closure exists: one function, `sd_lib.delivered`,
-answers yes when a commit reachable from the default branch carries
-`Item: <item>` or `Closes: <item>`, and every reader that picks an item,
-`sd-review --scope planning` and `sd-plan` among them, excludes a
-delivered item as it excludes a `done` mirror, so a closed item is never
-the "single open item" of a checkout that has no database, and a red CI
+answers `yes` when a commit reachable from the default branch carries
+`Item: <item>` or `Closes: <item>`, `no` when none does and the history
+is whole, and `unknown` when none does and the checkout is shallow,
+`git rev-parse --is-shallow-repository`, because the trailer may sit
+past the boundary, from A's round twenty-two. Every reader that picks an
+item, `sd-review --scope planning` and `sd-plan` among them, excludes a
+`yes` as it excludes a `done` mirror and treats an `unknown` as not
+selectable, refusing by name with the boundary and `git fetch
+--unshallow` as the repair, since a reader that cannot establish
+delivery must not restart delivered work; so a closed item is never the
+"single open item" of a checkout that has no database, and a red CI
 run on the closure branch delays nothing that selects. The two trailers
 stay distinct because the restart rule above looks for `Closes:` to know
 a closure landed. What the closure still does is put the word in the
@@ -1028,8 +1041,8 @@ confirmed by the next `sd-ship` run alone.
    `minimax`; no `reviewers` line refuses naming the key whatever the
    `author` line holds; a registry with a new entry added resolves nothing
    to it in a repository whose line does not name it, and a second entry
-   for a vendor the line already allows under another entry, `prism`
-   allowed and a new `prism-openrouter` with the same `vendor`, is not
+   for a vendor the line already allows under another entry, `baseten`
+   allowed and a new `baseten-openrouter` with the same `vendor`, is not
    resolved until the line names it; each asserted with a recording fixture
    that sees no request leave for any other entry. The plan: the `minimax` meter reads the two remaining percents
    from a recorded `token_plan/remains` answer and writes them as `meter`
@@ -1108,8 +1121,12 @@ confirmed by the next `sd-ship` run alone.
     `Item:`, `sd_lib.delivered` answers yes, `sd-review --scope planning`
     and `sd-plan` in a fresh clone of the default branch do not pick the
     item though its mirror still says `in_progress`, and the row shows
-    `closure pending`; and a hand merge through the fixture remote with
-    no trailer is picked until the closure lands. A test rejects
+    `closure pending`; a hand merge through the fixture remote with no
+    trailer is picked until the closure lands; and a clone of the
+    default branch at depth one, taken after one more commit lands past
+    the merge, has `sd_lib.delivered` answer `unknown`, `sd-review
+    --scope planning` refuse naming the boundary, and after `git fetch
+    --unshallow` answer `yes` and not pick the item. A test rejects
     the merge, and another kills `sd-ship` after the push, and both assert
     that the branch's mirror never says `done`, the item is still picked,
     the directory is untouched, and the row is not `done`; a third
@@ -1813,3 +1830,18 @@ from a number the operator types.
     `done` from the default branch's history, every picker excludes a
     delivered item, and the closure is left with putting the word in the
     file; the hand-merge residue is stated. Criterion 13.
+- **2026-09-05** — Planning review, round twenty-two of forty: two
+  blocking findings, addressed.
+  - C-45, requirement 5: `delivered` read the default branch's history as
+    if it were whole, and a shallow clone taken after a later commit can
+    hold neither the trailer nor a `done` mirror while closure CI is red.
+    Addressed: `delivered` answers `yes`, `no` or `unknown`, `unknown` on a
+    shallow checkout with no trailer in reach, and a picker refuses an
+    `unknown` naming the boundary and the fetch that resolves it.
+    Criterion 13 clones at depth one.
+  - C-46, design: the registry still had `prism` and `gito` as `start`
+    entries on the capped Baseten bill, which requirement 3 refuses, and
+    round twenty-one had said they were `url` entries; they were not.
+    Addressed: the two CLIs leave the registry and one `url` entry,
+    `baseten`, takes their place through the library's client; the
+    reviewer list, the consent line and the vendor passage follow.

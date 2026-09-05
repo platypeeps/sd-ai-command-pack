@@ -214,16 +214,19 @@ never vendors.
                  roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
       minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
                  roles: [reviewer], max_tokens: 16384, price: { in: 0, out: 0 } }
-      prism:   { start: "prism", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek, bill: baseten,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 }, reader: prism-json }
-      gito:    { start: "gito",  model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek, bill: baseten,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 },
-                 enabled: false, reason: "start line and report reader unverified" }
+      baseten: { url: "https://inference.baseten.co/v1", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
+                 bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
       exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
                  roles: [author, reviewer], enabled: false, reason: "model not pinned" }
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude, minimax, kimi, prism, gito, exo]
+      reviewer: [codex, claude, minimax, kimi, baseten, exo]
+
+A capped bill takes `url` entries only, because the library makes those
+calls and can refuse one before it is sent; a `start` entry on a capped
+bill is refused when the file is read. That is why `baseten` is one `url`
+entry and the `prism` and `gito` CLIs are gone: they pointed at the same
+endpoint and added limits of their own.
 
 Each entry also carries `env`, the list of variables the entry's process
 receives beside `PATH`, `HOME`, `LANG`, `TERM` and `TMPDIR`, `env:
