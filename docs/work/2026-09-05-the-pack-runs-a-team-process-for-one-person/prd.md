@@ -514,9 +514,18 @@ in an unattended run it asks none and records its assumptions.
 and `implement.md` stay in the repository as the decision trail. The item row in
 `sd.db` holds status, dates, links and notes, and points at the files by path.
 The `status:` line leaves `prd.md`, by the operator's decision on 2026-09-05
-after A's round thirty-three: the migration that fills the database reads each
-open item's line into its row and removes it from the file, in one commit, and
-nothing writes a status into a file again. Rounds eleven to thirty-two kept the
+after A's round thirty-three: the migration that fills the database reads
+every item's line outside `docs/work/archive/` into its row, `done` ones
+included, and removes it from the file, in one commit, and
+nothing writes a status into a file again. A `done` item the default branch
+does not mark, which is every historical one, four in this repository
+today, is an unmarked `done` row from the import, and the pull request that
+lands the migration carries `Closes:` for each, as every pull request
+`sd-ship` opens does below, from A's round thirty-four; so the terminal
+state moves from the file into the merge commit in one landing, the file
+says `done` on the default branch until that merge and the trailer says it
+after, and the migration's own branch before its merge is the one checkout
+that reads those items as open. Rounds eleven to thirty-two kept the
 line as a derived mirror the library wrote, and the mirror needed an identity,
 `rev`, a guard on every write, `--rebind` for the guard's misses, a refresh
 command, a lint comparison, a rule for each way a squash merge moved the
@@ -557,7 +566,8 @@ up-to-date requirement was dropped with the deletion below on 2026-09-05 and
 restored the same day, because two parallel pull requests that each pass
 alone can merge without a conflict and break the default branch, so the
 combination is tested before the merge and not after, requirement 3.
-`sd-status` reports those four settings, an unattended merge into a default
+`sd-status` reports those four settings and the merge-message setting
+below, an unattended merge into a default
 branch that does not require pull requests and CI refuses naming the
 setting, and a ship the operator runs by hand is warned, not stopped. A run
 that restarts after the delivering merge finds the row `done` and the
@@ -583,15 +593,22 @@ Two trailers, and a mark for the cases the delivering merge does not cover.
 where a row is `done` and no commit on the branch a database-free checkout
 would read carries `Delivers:` for it, so that such a checkout stops picking
 the item, by one of two means, from A's round thirty-three. Where the item's
-triad reached the default branch, a slice merged, the next merge `sd-ship`
-makes in that repository, of whatever item, carries `Closes: <item>` in its
-merge message for every such row in that repository; the merge message is
-written at merge time through the API, changes no tree and no reviewed
-head, and rides whatever pull request merges next, so it costs nothing and
-touches nothing. Until that merge, a database-free checkout of the default
-branch still picks the item, which is the one residue, bounded by the next
-ship in that repository, and `sd-status` names such rows as unmarked while
-they wait; nothing that has the database picks them. Where the triad never
+triad reached the default branch, a slice merged, the next pull request
+`sd-ship` opens in that repository, of whatever item, carries `Closes:
+<item>` for every such row in that repository, in its body's trailer block
+beside `Item:` and, with `--deliver`, `Delivers:`, and the merge message is
+that block: `sd-ship` writes it through the API when it merges, and a hand
+squash merge takes it from the body because the repository's
+`squash_merge_commit_message` is `PR_BODY`, a fifth setting the installer
+sets beside the four protections and `sd-status` reports, from A's round
+thirty-four, so that under the default policy the operator types no
+trailer and the merge dialog's prefilled message carries them all. The
+trailers change no tree and no reviewed head, and ride whatever pull
+request merges next, so they cost nothing and touch nothing. Until that
+merge, a database-free checkout of the default branch still picks the
+item, which is the one residue, bounded by the next pull request in that
+repository, and `sd-status` names such rows as unmarked while they wait;
+nothing that has the database picks them. Where the triad never
 left the item's branch, or lives on a guest fork's integration branch,
 requirement 6, the mark is one empty commit on that branch, `git commit
 --allow-empty`, carrying `Closes: <item>` and the reason in its body, made
@@ -609,14 +626,20 @@ the default policy, is confirmed the same way by whichever next asks GitHub
 about the item's pull request, D's runner, which watches every
 `ready_to_send` item's pull request, or the next `sd-ship` run in that
 repository before D exists, and the same step follows when the merge message
-carries `Delivers:`, which a hand merge carries when the operator wrote it:
-the row `done`; without it, the squash commit goes on a note, the item stays
-open, and the item screen offers `deliver` for a merge that was the last
-one, which writes `done` and leaves the mark to the next merge message.
-Under `mode: guest` the upstream merge is the maintainer's and carries no
-trailer of the pack's, so on the confirmed upstream merge the row is `done`
-with the squash commit recorded as the merge, and the mark commit goes on
-the integration branch, pushed to the fork, with no pull request and nothing
+carries `Delivers:`, which a hand squash merge carries when the pull request
+was opened with `--deliver` or the operator added the line to the body or
+the dialog: the row `done`; without it, the squash commit goes on a note,
+the item stays open, and the item screen offers `deliver` for a merge that
+was the last one, which writes `done` and leaves the mark to the next pull
+request. Under `mode: guest` the upstream merge is the maintainer's and
+carries no trailer of the pack's, so the row decides, from A's round
+thirty-four, by the same word as anywhere else: the ship that offered the
+pull request ran with `--deliver`, the row was `final` from the run dialog,
+or the operator says `deliver` on the item screen after the fact; a
+confirmed upstream merge without that is a slice, the squash commit goes on
+a note, and the item stays open. On the delivery the row is `done` with the
+squash commit recorded as the merge, and the mark commit goes on the
+integration branch, pushed to the fork, with no pull request and nothing
 upstream. Until B's library exists the frontmatter is the only copy, and the
 switch is one migration.
 
@@ -1193,9 +1216,14 @@ confirmed by the next `sd-ship` run alone.
     derive an item's status from its row on a machine with the database,
     and a `prd.md` under `docs/work/` outside the archive carries no
     `status:` line, asserted by the lint failing on one seeded, from A's
-    round thirty-three; the migration that fills the database reads each
-    open item's line into its row and removes it, in one commit, asserted
-    by a test that runs it against a fixture repository and diffs. A
+    round thirty-three; the migration that fills the database reads
+    every item's line outside the archive into its row and removes it,
+    in one commit, asserted by a test that runs it against a fixture
+    repository holding a `done` item and two open ones, diffs, and
+    asserts the `done` item's row is `done` and unmarked, the pull
+    request `sd-ship` opens for the migration carries `Closes:` for it,
+    and after the merge a database-free clone of the default branch does
+    not pick it, from A's round thirty-four. A
     status change touches no file, asserted by a test that changes status
     three times and hashes the item's files. In a checkout with no
     database, as in CI, every reader that picks an item asks
@@ -1209,8 +1237,8 @@ confirmed by the next `sd-ship` run alone.
     remote with no trailer leaves the row `in_progress`, notes the squash
     commit, and is still picked, and after `deliver` on the item screen
     the row is `done`, `sd-status` names it as unmarked, and the item is
-    picked in a database-free checkout until the next merge `sd-ship`
-    makes in that repository, whose message carries `Closes:` for it, and
+    picked in a database-free checkout until the next pull request in
+    that repository merges, its message carrying `Closes:` for it, and
     not after; two slices shipped in turn, the first without `--deliver`,
     leave the row `in_progress` after the first with the squash commit on
     a note, `delivered` answering `no` on an `Item:` merge, and the item
@@ -1243,7 +1271,10 @@ confirmed by the next `sd-ship` run alone.
     delivers, delivers the first, and asserts `sd-plan` and `sd-ship` on
     the second's branch touch no file of the first and read no commit of
     the first. The fixture remote is asserted to require pull requests,
-    CI and branches up to date, and `sd-status` to report four settings.
+    CI and branches up to date, to take the squash message from the pull
+    request body, and `sd-status` to report five settings; a hand squash
+    merge on the fixture with the dialog's prefilled message is asserted
+    to carry every trailer the body carried.
     A test moves the fixture's default branch after the review and
     asserts one integration update, one branch review over the combined
     head that spent no pass, CI, and a merge naming that head; moved
@@ -1251,10 +1282,13 @@ confirmed by the next `sd-ship` run alone.
     with no second update, and the next run makes one; a seeded conflict
     in the update ends the item `blocked` naming the file with no merge
     call. A test ships a guest-mode item whose triad sits on the fork's
-    integration branch, merges the upstream pull request by hand on the
-    fixture, and asserts the row is `done`, one empty commit carrying
-    `Closes:` is on the integration branch, no pull request was opened,
-    and nothing was pushed upstream. A test ships under the default
+    integration branch in two slices, merges the first upstream pull
+    request by hand on the fixture, and asserts the row is `in_progress`
+    with the squash commit on a note and no mark commit, then ships the
+    second with `--deliver`, merges it the same way, and asserts the row
+    is `done`, one empty commit carrying `Closes:` is on the integration
+    branch, no pull request was opened by the pack, and nothing was
+    pushed upstream. A test ships under the default
     policy to `ready_to_send`, merges the pull request by hand on the
     fixture remote with `Delivers: <item>` written in the merge message,
     runs `sd-ship` again in that repository, and asserts the row turned
@@ -2140,3 +2174,25 @@ from a number the operator types.
     one empty commit on the item's own branch, for a branch-only cancel
     and for the guest fork. Requirement 5 and criterion 13 rewritten,
     criteria 11 and 12 and the design page follow; items B and D follow.
+- **2026-09-05** — Planning review, round thirty-four of forty: two
+  blocking findings, addressed.
+  - C-64, requirement 5: the migration read only open items, and a
+    historical `done` item outside the archive, four in this repository,
+    either failed the new lint or lost its terminal state with its line.
+    Addressed: the migration reads every item outside the archive, a
+    `done` one lands as an unmarked `done` row, and the pull request that
+    lands the migration carries `Closes:` for each. With it, the mark
+    moves from the merge message alone into the pull request body's
+    trailer block, which `sd-ship` writes into the merge message and a
+    hand squash merge takes from the body through the repository setting
+    `squash_merge_commit_message: PR_BODY`, a fifth setting the installer
+    sets and `sd-status` reports; under the default policy the operator
+    types no trailer, and the residue is bounded by the next pull request
+    rather than the next unattended merge. Criterion 13's migration
+    fixture holds a `done` item; the fixture remote takes the squash
+    message from the body.
+  - C-65, requirement 5: guest mode wrote `done` on any confirmed
+    upstream merge, so a first slice closed the item. Addressed: the row
+    decides by the same word as elsewhere, `--deliver`, `final`, or
+    `deliver` after the fact; an upstream merge without it is a slice.
+    Criterion 13's guest fixture ships two slices.
