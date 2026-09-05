@@ -287,8 +287,15 @@ derived: not from the `author` line, which says who is available and not
 who was consented to; not from the mode; not from who authored the branch;
 not from a vendor already allowed under another entry. One line per
 repository, written by the operator, and an entry added to the registry
-reaches no repository that did not name it. A guest repository gets the
-line the same way, in its untracked block. The tiers go with the `tiers`
+reaches no repository that did not name it. The installer asks for the
+line once per repository, when it writes the block, offering the enabled
+registry entries and taking none as an answer; it fills in no default,
+writes no line for none, keeps the answer on every rerun, and a
+repository the operator skipped refuses its first review naming the key,
+by the operator's decision on 2026-09-05: install is the one moment the
+operator is present per repository, and a default would be a derived
+grant. A guest repository gets the line the same way, in its untracked
+block. The tiers go with the `tiers`
 key, by the operator's decision
 on 2026-09-05: the registry's reviewer order is the one chain, and `deep` had
 already collapsed into `standard` the day gito was disabled.
@@ -440,6 +447,16 @@ warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the 
 merge looks for on the default branch so that it never lands a second one. The row turns `done` on
 the confirmed merge and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
+A merge the operator makes by hand, the default policy, is confirmed the
+same way by whichever next asks GitHub about the item's pull request, B's
+runner, which watches every `ready_to_send` item's pull request, or the
+next `sd-ship` run in that repository before B exists, and the same step
+follows: the row `done`, `rev` moved, the closure by a second pull request.
+That closure pull request merges on its own under both policies once CI
+passes and the three answers hold, because it carries the item's own mirror
+and directory and nothing a provider wrote; under the default policy it is
+the one merge the operator does not make by hand, by the operator's
+decision on 2026-09-05.
 So `main`, every database-free checkout and CI read `done` within one commit
 of the merge, and before that they read the last true state, never a false
 one. Every reader that picks an item, `sd-review --scope planning` among
@@ -788,8 +805,9 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    installer writes. A test asserts the installer's block names it. A test
    asserts the set of keys `WORKFLOW.md` documents equals the set `sd_lib.py`
    reads, enumerated from `MODES` and `CHECK_NAMES` in the source rather than
-   from a list written down beside it. The set today is `mode`, `check`, `test`,
-   `lint`; the test must fail if a fifth key is added to either side alone.
+   from a list written down beside it, with the consent key beside them. The
+   set today is `mode`, `check`, `test`, `lint`, `reviewers`; the test must
+   fail if a sixth key is added to either side alone.
 2. `sd-ship` invoked on a change with no work item performs no `sd-spec` run, no
    `Work:` line, and no remote-branch deletion command, and its settle step
    issues no shell polling loop. Asserted against the skill text, not inferred.
@@ -829,7 +847,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    is refused naming the untagged commit when nothing declares its author,
    and with `--author claude` resolves to the first entry of neither
    vendor; `--author human` on an untagged branch resolves to the first
-   enabled entry. Authorization: a block
+   enabled entry. Consent at install: the installer writing the block for
+   a fixture repository with a two-entry registry asks once and writes the
+   answered entries as the `reviewers` line, writes no line for an empty
+   answer, and on a rerun keeps the line it finds and asks nothing; a
+   non-interactive run takes `--reviewers` and otherwise writes no line.
+   Authorization: a block
    whose `reviewers` line names `claude` alone, with author `claude`,
    refuses naming the key; `claude, codex` with author `claude` resolves to
    `codex`, and with `codex` rate-limited refuses rather than reaching
@@ -912,7 +935,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     the directory is not deleted, and the row is not `done`; a third
     confirms the merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
-    lands it. Every merge test above merges with an actual squash merge and
+    lands it. A fourth ships under the default policy to `ready_to_send`,
+    merges the pull request by hand on the fixture remote, runs `sd-ship`
+    again in that repository, and asserts the row turned `done` with `rev`
+    the squash commit and the closure landed by a second pull request the
+    path merged after CI with no hand; the same on a fixture remote that
+    gained a collaborator leaves the closure pull request open and named.
+    Every merge test above merges with an actual squash merge and
     asserts that the row's `rev` is the squash commit afterwards, that the
     closure write passed the guard without `--rebind`, and that a checkout
     of the merged default branch is not reported as behind. Tests cover all
@@ -1375,3 +1404,15 @@ from a number the operator types.
 - **2026-09-05** — Operator decision: protecting the default branch is one
   dashboard action on an owned repository, B's requirement 5; the design's
   Defaults name it beside the report and the refusal.
+- **2026-09-05** — Two decisions of the operator's, shared with B.
+  - Requirement 2: a merge made by hand is confirmed by whichever next
+    asks GitHub, B's runner watching `ready_to_send` pull requests or the
+    next `sd-ship` run, and the same confirmed-merge step follows. The
+    closure pull request merges on its own under both policies, since it
+    carries only the item's own mirror. Criterion 13 gains the hand-merge
+    case.
+  - Requirement 5: the installer asks once per repository for the
+    `reviewers` line, no default, none accepted, answer kept on rerun.
+    Criterion 6 asserts it. Criterion 1 still named four keys and a
+    fifth-key failure after C-21 added the fifth; it names five and fails
+    on a sixth.

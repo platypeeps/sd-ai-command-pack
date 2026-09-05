@@ -150,10 +150,14 @@ Eight commands, one local review, no artifacts.
 
 Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
-path, with the two development review points. After the merge the item's row is
+path, with the two development review points. After the merge, whether `sd-ship` made it or you did, and a merge you make
+is confirmed by the runner's watch on the pull request or by the next
+`sd-ship` run here, the item's row is
 `done`, its `rev` moves to the squash commit the pull request reports, and
 `sd-ship` lands one closure commit on the default branch by a second pull
-request, never a direct push, because the default branch is protected, that
+request, never a direct push, because the default branch is protected, and that
+second pull request merges on its own under both policies once CI passes,
+since it carries only the item's own mirror; it
 writes `done` into the mirror so that `main` and CI read it
 without the database, and deletes the directory when every file in it is
 tracked and committed and nothing untracked or ignored sits beside them;
@@ -275,7 +279,10 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
 that spells everything as one command sets `check` alone. `reviewers` is
 consent: you write it, nothing derives it, it names entries because the entry
 is who receives the diff, and without it no reviewer resolves for the
-repository.
+repository. The installer asks for it once per repository when it writes the
+block, offering the enabled entries and taking none as an answer; it fills in
+no default, keeps your answer on every rerun, and a repository you skipped
+refuses its first review naming the key.
 
 Everything under **Opt-in** above is asked for by name, in the moment, rather
 than switched on in a file. Naming it is already the whole cost, and a key that
