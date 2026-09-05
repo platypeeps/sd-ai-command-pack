@@ -531,19 +531,31 @@ its row, `done` ones included, and is additive first and retires last,
 from A's round thirty-six: its import lands the rows beside the lines in
 B's first slice and removes nothing, and the rows it lands are a
 rehearsal copy and not the record; this item's second slice lands the
-reader, which reads the line where there is one, the row where there is
-none, and answers `unknown` for neither, from A's round thirty-seven,
-because until the retire the line is what every writer still writes,
-the status commands and `sd-plan` and `sd-ship` among them, and a row
-imported earlier says what the item was and not what it is; the same
-slice lands the trailer-writing ship path and the `PR_BODY` setting.
+reader, which asks the repository's row in the database which source is
+the record, `status_source`, `file` until the sitting sets it `row`,
+from A's rounds thirty-seven and thirty-eight: under `file` it reads
+the line, because until the retire the line is what every writer still
+writes, the status commands and `sd-plan` and `sd-ship` among them, and
+a row imported earlier says what the item was and not what it is; under
+`row` it reads the row and ignores a line wherever one is found, a
+branch or a linked worktree kept across the retire, reporting the line
+by name as stale with the integration update as its repair, and the old
+status writers refuse under `row` naming the sitting; with no database
+it reads no line at all and asks git for delivery alone, as above. The
+presence of a line is never the marker of the migration's state, since
+every checkout that predates the retire keeps its lines until the
+default branch's deletion merges into it, which requirement 3's
+integration update does before any merge and CI's lint refuses to skip.
+The same slice lands the trailer-writing ship path and the `PR_BODY`
+setting.
 The migration's retire step runs after that in a pull request of its
 own, and it is B's one sitting: freeze the writers, import once more so
 that every row says what its line says now, verify by content, snapshot,
 and remove every line in one commit, refusing to run while the
 installed `sd_lib` has no `delivered`, naming the version, and lifting
 the freeze with nothing removed when the verify names a difference; the
-lint's rule that no line remains switches on with that commit, and from
+lint's rule that no line remains switches on with that commit, which
+also sets the repository's `status_source` to `row`, and from
 it the row is the record, and a status change writes the row. After it
 nothing writes a status into a file again. A `done`
 item the default branch does not mark, which is every historical one,
@@ -1063,8 +1075,8 @@ slices, each its own pull request, in the order B's `prd.md` records under
 the same heading, by the operator's decision on 2026-09-05: B's fixture
 harness, library and migrations as rehearsals that retire nothing; then
 this item's registry reader, tiered ship path and protection, with the
-reader that reads the line where there is one and the row where there is
-none; then the `docs/work` migration's retire step, B's one sitting that
+reader that reads the line or the row as the repository's
+`status_source` says; then the `docs/work` migration's retire step, B's one sitting that
 freezes, imports once more, verifies and removes the lines, in a pull
 request after the one that lands the reader, from A's rounds thirty-six
 and thirty-seven, so that the pack installed at every point between
@@ -1268,16 +1280,21 @@ confirmed by the next `sd-ship` run alone.
     the pack installed at B's first slice reads them as before, that
     with one open item's line changed to `done` by the old command after
     the import the pack installed at this item's slice reads the line,
-    `done`, and not the stale row, reads the row for an item with no
-    line, and answers `unknown` for none, that the retire step refuses
+    `done`, and not the stale row, under `status_source: file`, and
+    answers `unknown` for none, that the retire step refuses
     under a pack whose `sd_lib` has no `delivered`, naming the version,
     that its final import moves that row to `done` and its verify passes,
     that a verify difference seeded after the freeze lifts the freeze
     with every line in place, that after the retire both `done` items'
     rows are `done` and unmarked, the pull request `sd-ship` opens for
-    the retire step carries `Closes:` for both, and after the merge a
-    database-free clone of the default branch picks neither, from A's
-    rounds thirty-four, thirty-six and thirty-seven. A
+    the retire step carries `Closes:` for both, after the merge a
+    database-free clone of the default branch picks neither, and a linked
+    worktree kept across the retire on a branch still carrying its lines
+    reads the row after a status change made in the database, has
+    `sd-status` name its line as stale, has the old status command refuse
+    naming the sitting, and loses the line in the integration update
+    before its merge, CI's lint refusing a pull request that still
+    carries one, from A's rounds thirty-four to thirty-eight. A
     status change touches no file, asserted by a test that changes status
     three times and hashes the item's files. In a checkout with no
     database, as in CI, every reader that picks an item asks
@@ -2292,3 +2309,14 @@ from a number the operator types.
     round thirty-five moved the trailers to `<name>/<vendor>`.
     Addressed on the page; criterion 7 asserts the page's trailer forms
     equal the library's, enumerated from the source.
+- **2026-09-05** — Planning review, round thirty-eight of forty: one
+  blocking finding, addressed.
+  - C-70, requirement 5: a line's presence was the marker of the
+    migration's state, and a branch or linked worktree kept across the
+    retire keeps its lines, so the reader there read a stale
+    `in_progress` over the row and picked finished work. Addressed: the
+    repository's row carries `status_source`, `file` until the sitting
+    sets `row`; under `row` the reader ignores a line anywhere, reports
+    it as stale with the integration update as the repair, and the old
+    writers refuse; with no database no line is read at all. Criterion
+    13 keeps a worktree across the retire and changes a status after.
