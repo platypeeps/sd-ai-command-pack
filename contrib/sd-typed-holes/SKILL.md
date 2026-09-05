@@ -22,25 +22,6 @@ Do not use for one-line fixes or edits inside an existing surface, and do
 not use it to model the types themselves — `sd-rust-design` owns the
 modeling rules the skeleton must satisfy.
 
-The seam with `sd-tdd`, because the two look opposed and are not. What sits
-outside test-first is the **type surface** — signatures, types, module
-boundaries, and the `todo!()` bodies standing in for behavior not yet
-written. That much carries no behavior and the compiler is its reviewer, so
-laying it needs no failing test.
-
-The exemption stops there, and it is narrower than "the skeleton commit". The
-same commit also lands derives, `From`/`Into` impls, and trivial accessors
-implemented rather than held open. Each of those has a real body and real
-runtime semantics — that is behavior, and a getter returning the wrong
-same-typed field compiles and passes clippy. The safety rules below already
-concede the point: a green skeleton shows the design composes, not that
-behavior is correct. So those bodies are inside test-first exactly as filled
-holes are.
-
-Every `todo!()` that becomes a body is behavior too, and the fill pass is
-inside it — each hole gets a test seen to fail against the unfilled hole
-before it is filled. Different parts of the work, not competing rules.
-
 ## Arguments
 
 None.
@@ -79,21 +60,7 @@ Unknown argument names are an error — stop and report them before starting.
 4. Gate the skeleton alone: workspace check and clippy with warnings
    denied, plus a format check, all green with every behavioral body
    still `todo!()` — the trivial accessors step 2 asks you to implement
-   stay implemented.
-
-   Check, clippy and format are not the whole gate, because they do not
-   read behavior. Step 2 lands real bodies alongside the holes — the
-   implemented accessors, the conversion impls, and any derive whose
-   runtime semantics the design relies on. Those are behavior, they are
-   inside `sd-tdd`, and the seam above says so: a getter returning the
-   wrong same-typed field compiles, passes clippy, and is formatted. So
-   before proposing the commit, list every real body in the skeleton and
-   route it through `sd-tdd` — each gets a test seen to fail against a
-   tree lacking it. A skeleton whose only evidence is a green toolchain
-   has proved the design composes and nothing about the bodies it
-   already contains.
-
-   Then propose the skeleton as its own commit, so the
+   stay implemented. Then propose the skeleton as its own commit, so the
    reviewed design is a retrievable git object rather than a
    conversation, and let the user make it. Committing is theirs to
    authorize; this workflow reaching step 4 is not that authorization.
@@ -148,9 +115,7 @@ Unknown argument names are an error — stop and report them before starting.
 - **Surface summary** — the public types with their business rules and
   forbidden states, per the design record;
 - **Skeleton commit** — the commit that carries the surface and its
-  green check, lint, and format evidence, plus the real bodies it
-  contains and the `sd-tdd` evidence for each, or a statement that a
-  body shipped without it;
+  green check, lint, and format evidence;
 - **Hole inventory** — holes opened, holes filled, holes remaining, and
   the tracking mechanism (lint level or grep baseline);
 - **Marker status** — expect-markers and dead-code allowances still
@@ -181,10 +146,19 @@ siblings.
 practice. Layer 1 is the type-checked skeleton this skill kept. Layer 2 —
 whole-frame golden tests written from the spec so that they fail on arrival —
 was not carried over. Layer 2 is test-first under another name, so dropping it
-is the whole reason this file and `sd-tdd` read as a contradiction: what looks
-like a skill opposing test-first is a skill missing the half that supplied it.
-`sd-tdd` restores that half pack-wide rather than Rust-only, which is why the
-seam above is a division of scope and not a truce.
+is worth knowing: what reads as a skill opposing test-first is a skill missing
+the half that supplied it, not a practice that rejected it.
+
+**How this skill relates to `sd-tdd` is not settled here.** The obvious answer —
+that the type surface and the `todo!()` bodies are exempt from test-first while
+the bodies that get filled are not — does not survive contact with step 2,
+which also lands derives, `From`/`Into` impls, and trivial accessors
+implemented rather than held open. Each of those has a real body and real
+runtime semantics, and a getter returning the wrong same-typed field compiles
+and passes clippy. The safety rules below already say a green skeleton shows
+the design composes and not that behavior is correct. Writing the boundary
+precisely enough to be followed was tried and failed review three times, so it
+is named as an open question rather than stated wrongly a fourth.
 
 Four rules below look arbitrary and are each a corrected error, from the
 review rounds that followed the original: `419f9131`, `10b32167`, `78f3dc2b`
