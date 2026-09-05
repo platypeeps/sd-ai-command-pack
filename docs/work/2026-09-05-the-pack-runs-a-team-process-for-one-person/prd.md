@@ -245,9 +245,10 @@ One list of providers on the machine. `bin/sd-review` carries its own table,
 again under `challenge_providers` and `planning_providers`. Both go. The
 registry entry holds what the table held: the start line, and the reader for
 the provider's output. `sd-review.json` keeps what is repository policy and
-nothing about vendors: tiers, categories, paths, `sensitive`, the severity
-floor. Tier lists keep naming providers by registry name; the names are
-validated against the registry where one exists, and pass as strings in CI.
+nothing about vendors or chains: categories, paths, `sensitive`, the
+severity floor. The tiers go with the `tiers` key, by the operator's decision
+on 2026-09-05: the registry's reviewer order is the one chain, and `deep` had
+already collapsed into `standard` the day gito was disabled.
 
 **Fallback is the reviewer list, read in order, and the order follows the
 bill.** Every entry names a `bill:`, and the registry's `bills:` section says
@@ -541,7 +542,10 @@ log, not here.
   in `templates/work-README.md:11`. The flags table for a `bin/sd-plan` that
   does not exist (:57) and `--from-suggestion`/`--from-proposal` (:122) go. One
   work-item threshold, the page's, more than one session or about 300 lines
-  (:17); `skills/sd-ship/SKILL.md:54` cites it instead of naming 800.
+  (:17); `skills/sd-ship/SKILL.md:54` cites it instead of naming 800. Step 1's
+  delegation to `sd-grill` (:23) goes: attended, `sd-plan` asks its three to
+  five questions itself; unattended, none. `sd-grill` moves to `contrib/` and
+  a trial decides whether it stays, by the operator's decision on 2026-09-05.
 - `skills/sd-ship/SKILL.md`: rule 5 runs when the pull request exists, at
   step 7 with `--pr-body`, not at step 3 (:41). Step 8 reads Copilot findings
   and never gates; the round budget and the Never at :185 go. The flags table
@@ -622,6 +626,11 @@ log, not here.
   item row; "saved preferences" goes.
 - `skills/sd-paper/SKILL.md:72,81-86,93-97`: `bounds=` on the interview, the
   author approves the brief, the workspace is the item's rows.
+- `skills/sd-publish/SKILL.md:57-62,86-92,98-102,152-153`: the source,
+  adaptation and omission ledgers and the approval states become one change
+  list, and the author approves; the omission ledger stays only for a target
+  published under the company's name, by the operator's decision on
+  2026-09-05. The 182-line profile contract becomes `tone=`.
   `skills/sd-distill/SKILL.md:60-63,89-90` names `wc -w` or drops the ratio.
 - Recorded here, lands with item C: `sd-writing-pack/scripts/pack.py:735-757`
   refuses `ready` on a NO verdict or a CERTAIN finding without a resolution
@@ -661,8 +670,8 @@ log, not here.
   `bin/sd-status:1269`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
   envelopes carry one version key; one ACTIVE status set in `sd_lib` serves
   `bin/sd-status:1107-1108`, `dashboard/work.py:50` and `bin/sd-review:514`;
-  the `deep` tier is not `standard` plus a disabled provider
-  (`.github/sd-review.json:8`), see the open question on tiers.
+  the tiers in `.github/sd-review.json:8` go with their key, since the
+  registry order is the chain; settled 2026-09-05.
 
 ## What leaves this item
 
@@ -717,8 +726,8 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    asserts both, and asserts that a change authored by `codex` resolves to
    `claude` and one authored by `claude` resolves to `codex`, for every entry
    on the `author` line. `bin/sd-review` contains no provider table, `sd-review.json`
-   contains no key ending in `_providers`, and every provider name in its
-   tiers resolves against the registry on a machine that has one. The
+   contains no key ending in `_providers` and no `tiers` key, and the only
+   provider names anywhere in the pack are in the registry. The
    reviewer list falls through: a test disables the first entry, then makes
    it fail preflight, and asserts the second reviews and the output names the
    fallthrough. `sd-review --provider <name>` refuses a name not in the
@@ -855,29 +864,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
 
 ## Open questions
 
-The five questions the first draft carried are settled and recorded in the log
-under their dates. Three are open, raised by the 2026-09-05 review of both
-flows. New questions raised during implementation are filed as rows on this
-item once B's library exists, and in the log before.
-
-1. **`sd-grill`.** `sd-plan` step 1 delegates its interview to `sd-grill`, 289
-   lines, one question per turn, unbounded, while the page promises three to
-   five questions attended and none unattended. The delegation goes either
-   way. Does `sd-grill` stay as a standalone skill in `contrib/`, or go?
-   Recommendation: `contrib/`, and a trial decides.
-2. **Tiers.** `.github/sd-review.json` names `cheap`, `standard` and `deep`
-   chains. The registry's ordered reviewer list with fallthrough does the
-   same job, and `deep` equals `standard` today because gito is off.
-   Recommendation: drop the tiers; the policy file keeps paths and the
-   severity floor, and the registry order is the chain.
-3. **`sd-publish`'s ledgers.** Source, adaptation and omission ledgers plus
-   approval states assume an approver other than the author. Recommendation:
-   one change list, the author approves. Does any target, company-facing
-   posts in particular, still need the omission ledger?
+The five questions the first draft carried and the three the 2026-09-05
+review raised are settled and recorded in the log under their dates. None
+are open. New questions raised during implementation are filed as rows on
+this item once B's library exists, and in the log before.
 
 Waiting on the operator, not open: model pins and prices for the `kimi`,
-`minimax` and `baseten` entries; whether to run a further review round on
-item B by hand.
+`minimax` and `baseten` entries.
 
 ## Log
 
@@ -1096,3 +1089,11 @@ item B by hand.
     two. Addressed on that item: branch liveness is advisory, one fresh
     `ls-remote` per root, failure reported as unknown, and unknown never
     excludes an item. Requirement 13 still deletes the sweep.
+- **2026-09-05** — The three questions from the flow review, settled by the
+  operator. `sd-grill`: the `sd-plan` delegation goes and the skill moves to
+  `contrib/`, a trial decides; requirement 13. Tiers: dropped, the registry's
+  reviewer order is the one chain and `.github/sd-review.json` keeps paths,
+  categories, `sensitive` and the severity floor; requirement 3, criterion 6,
+  requirement 13, and the design's Providers section. `sd-publish`: one
+  change list, the author approves, the omission ledger only for a target
+  published under the company's name; requirement 13.
