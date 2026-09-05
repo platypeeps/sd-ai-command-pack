@@ -566,13 +566,18 @@ own, and it is B's one sitting: set the repository's row `retiring`,
 which is the freeze, every status writer refusing under it, import
 once more so
 that every row says what its line says now, verify by content, snapshot,
-and remove every line in one commit, refusing to run while the
+set the repository's `status_source` to `row`, and only then remove
+every line in one commit, refusing to run while the
 installed `sd_lib` has no `delivered`, naming the version, and lifting
 the freeze, `file` again, with nothing removed when the verify names a
-difference;
+difference; `row` before the removal and never after, from C's round
+five, because the sitting spans the database, the files and a commit,
+and a run that dies between two steps is rerun, each step idempotent:
+before `row` every line is in place and the rerun imports and
+continues, after it the lines left are ones every reader ignores and
+the lint names, and the rerun removes them;
 the lint's rule that no line remains switches on where that commit's
-marker is present, and the commit
-also sets the repository's `status_source` to `row`, and from
+marker is present, and from
 it the row is the record, and a status change writes the row. After it
 nothing writes a status into a file again. A `done`
 item the default branch does not mark, which is every historical one,
@@ -1338,7 +1343,10 @@ confirmed by the next `sd-ship` run alone.
     under a pack whose `sd_lib` has no `delivered`, naming the version,
     that its final import moves that row to `done` and its verify passes,
     that a verify difference seeded after the freeze lifts the freeze
-    with every line in place, that after the retire both `done` items'
+    with every line in place, that the sitting killed after the import
+    and before `row` reruns to the same rows with every line in place
+    until `row`, and killed after `row` and before the commit reruns to
+    the commit, from C's round five, that after the retire both `done` items'
     rows are `done` and unmarked, the pull request `sd-ship` opens for
     the retire step carries `Closes:` for both, a database-free clone
     of the default branch at each installed slice, after B's import,
@@ -2448,3 +2456,8 @@ from a number the operator types.
 - **2026-09-05** — Item C created, cross-item: the two places that said
   "item C" name it, `2026-09-05-the-writing-pipeline-runs-on-the-row` in
   `sd-writing-pack`. Requirement 13 and What leaves this item.
+- **2026-09-05** — C's round five, cross-item: the retire sitting removed
+  the lines and then set `row`, so a run that died between the two left
+  the repository frozen with nothing to import. `row` is set before the
+  removal, every step idempotent, the same command reruns. Requirement
+  5, criterion 13.
