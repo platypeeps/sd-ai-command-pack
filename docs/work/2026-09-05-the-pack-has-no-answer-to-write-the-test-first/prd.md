@@ -69,11 +69,17 @@ cover` rather than papered over.
    expected one, distinguishing a test that fails because the behaviour is
    missing from one that fails because of a typo, an import error, or a
    collapsed fixture.
-3. `sd-tdd` carries the red-green proof for a regression test, as a procedure
-   with a stated result: write the test, run it against the fix and see it
-   pass, revert the fix, run it again and see it **fail**, restore the fix.
-   A regression test that was never seen to fail with the fix removed does not
-   prove it guards the bug.
+3. `sd-tdd` carries the red-green proof for a regression test. A regression
+   test never seen to fail with the fix removed does not prove it guards the
+   bug, and the skill states both routes to that proof rather than one. Where
+   the fix has not landed yet — the `sd-debug` handoff, which supplies a
+   reproduction — the ordinary cycle applies: write the test against the
+   unfixed tree, watch it fail with the original symptom, then fix; there is
+   nothing to revert and it closes `disciplined`. Where the fix landed first,
+   the four-step recovery applies: write the test, run it against the fix and
+   see it pass, revert the fix, run it again and see it **fail**, restore the
+   fix — and per requirement 6 that closes `partial` for the fix, since it is
+   the recovered-late route.
 4. `sd-tdd` settles the `sd-typed-holes` seam explicitly, in both files, so a
    Rust author reading either one learns which governs and why.
 5. `sd-tdd` never instructs an agent to delete a user's work on its own
