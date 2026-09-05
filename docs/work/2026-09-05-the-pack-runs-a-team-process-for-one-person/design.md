@@ -317,14 +317,17 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     check: <the command that verifies this repo>
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
-    reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude, baseten@inference.baseten.co>
+    reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude+3f9a1c2e, baseten@inference.baseten.co>
 
 `check`, `test` and `lint` run in that order and are each optional; a repository
 that spells everything as one command sets `check` alone. `reviewers` is
 consent: you write it, nothing derives it, it names entries because the entry
 is who receives the diff, and each entry carries its recipient, the host of a
-`url` entry or the executable of a `start` entry, so an entry edited to point
-elsewhere is refused until you rewrite the line; without the line no
+`url` entry, or the executable of a `start` entry with a fingerprint of its
+line and `env` names, so an entry edited to point elsewhere is refused until
+you rewrite the line; a `start` session is refused any variable whose value
+is a URL, and the tool's own configuration file is yours to keep; without
+the line no
 reviewer resolves for the
 repository. The installer asks for it once per repository when it writes the
 block, offering the enabled entries and taking none as an answer; it fills in

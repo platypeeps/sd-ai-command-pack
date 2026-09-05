@@ -352,14 +352,25 @@ to Baseten, whoever trained the model it serves, so consent names
 host for the same model is a second entry that no repository has consented
 to until its line names it. The line names the recipient beside the
 entry, `baseten@inference.baseten.co`, the host of a `url` entry's
-address and the executable of a `start` entry's line, from A's round
-twenty-seven, because an entry is a name in a file the operator edits
-and a name is not a recipient: the library derives each named entry's
-recipient from the registry at every review and compares it with the
-line, and an entry whose recipient moved under its name is refused
-naming the host or executable consented to and the one found, with no
-request sent, until the operator rewrites the line; a bare name in the
-line is refused the same way, naming the form. `vendor` stays what it is, the maker, for the
+address, and for a `start` entry the executable with a fingerprint of
+the whole start line and the entry's `env` names,
+`codex@codex+3f9a1c2e`, from A's rounds twenty-seven and twenty-eight,
+because an entry is a name in a file the operator edits and a name is
+not a recipient, and an executable alone is not one either, since an
+argument or a variable can send the same tool elsewhere: the library
+derives each named entry's recipient from the registry at every review
+and compares it with the line, and an entry whose recipient moved
+under its name is refused naming what was consented to and what was
+found, with no request sent, until the operator rewrites the line; a
+bare name in the line is refused the same way, naming the form. What
+the fingerprint cannot see is where a tool is told to talk by the
+value of a variable it is handed or by its own configuration file, so
+the library refuses to start a `start` session when any variable it
+passes has a URL for a value, naming the variable and never the value,
+and the tool's own configuration is named here as the operator's to
+keep and the one place consent does not reach; a remote the operator
+wants to choose is a `url` entry, where the library owns the transport
+and the host is the recipient. `vendor` stays what it is, the maker, for the
 independence rule alone. Fallthrough is dispatch, not authorization: the
 chain is intersected with `reviewers`, and with no entry left, or with no
 `reviewers` line at all, the review refuses naming the key and the file
@@ -572,12 +583,21 @@ closure; `sd-ship` says so in its last line, naming `--deliver` for
 next time. The row turns `done` on the confirmed merge that carries
 `Delivers:` and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
-A `cancel`, item B's requirement 1, is the other way a work item ends:
-it writes `done` with a `cancelled` note and lands the same closure,
-the word and the note into the mirror through `closure/<item>` with
-`Closes:`, and no delivering merge behind it because nothing is
-delivered, from B's round forty-one; a cancelled row without its
-closure is finished by the next `sd-ship` run the same way, so no
+A `cancel`, item B's requirement 1, is the other way a work item ends,
+and it has a path of its own, from B's round forty-one and A's round
+twenty-eight: it writes `done` with a `cancelled` note in the row, and
+where the default branch holds the item's mirror it lands a
+cancellation closure cut from the default branch's head and never
+from the item's branch, `closure/<item>` with `Closes:`, whose diff is
+the mirror's status line and the note and nothing else, so that
+nothing of the abandoned branch rides in on a pull request that
+merges on its own; the `rev` guard does not apply to it, because it
+writes the default branch's mirror and not the branch's, and `rev`
+moves to it when it lands. Where the default branch holds no mirror,
+the triad lives on the item's branch alone, nothing anywhere reads
+the item as open, no closure is landed, and the note names the branch
+that still holds the triad. A cancelled row whose closure has not
+landed is finished by the next `sd-ship` run the same way, so no
 other checkout and no CI reads a cancelled item as open.
 A merge the operator makes by hand, the default policy, is confirmed the
 same way by whichever next asks GitHub about the item's pull request, D's
@@ -1118,8 +1138,12 @@ confirmed by the next `sd-ship` run alone.
    edited to another host in a repository whose line names
    `baseten@inference.baseten.co` is refused naming both hosts with the
    fixture seeing no request, a `start` entry's executable edited the
-   same way is refused naming both, and a line carrying a bare name is
-   refused naming the form; each asserted with a recording fixture
+   same way is refused naming both, an argument added to its start line
+   with the executable unchanged is refused naming the fingerprint, a
+   variable in its `env` list whose value in the fixture environment is
+   a URL refuses the session naming the variable with no value printed
+   and no process started, and a line carrying a bare name is refused
+   naming the form; each asserted with a recording fixture
    that sees no request leave for any other entry. The plan: the `minimax` meter reads the two remaining percents
    from a recorded `token_plan/remains` answer and writes them as `meter`
    rows, and a bill whose five-hour or weekly window reads zero is skipped
@@ -1236,9 +1260,15 @@ confirmed by the next `sd-ship` run alone.
     the directory is untouched, and the row is not `done`; a third
     confirms a `--deliver` merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
-    lands it; a fourth cancels an item with no merge from item B's
-    screen and asserts a closure lands whose mirror says `done` with the
-    `cancelled` note and no `Delivers:` anywhere in the history; a fifth kills `sd-ship` after the closure pull request is
+    lands it; a fourth cancels, from item B's screen, an item whose first
+    slice merged and whose second lives on its branch with three
+    implementation commits, and asserts the closure is cut from the
+    default branch, its diff is one file and the status line with the
+    note, none of the three commits is in the default branch's history
+    after it lands, and no `Delivers:` is anywhere in it; a cancel of an
+    item whose triad exists on its branch alone lands no closure, leaves
+    the row `done` with the note naming the branch, and leaves the
+    default branch unchanged; a fifth kills `sd-ship` after the closure pull request is
     opened and before it is merged, and asserts the next run merges that
     pull request, opens no second one, and one closure commit exists. A
     test ships an item with `--deliver` and asserts the closure commit touched one
@@ -2029,3 +2059,22 @@ from a number the operator types.
   - B's C-72: `cancel` lands the same closure as delivery, with the
     `cancelled` note and no delivering merge, so a cancelled item is
     closed in every checkout. Requirement 5, criterion 13.
+- **2026-09-05** — Planning review, round twenty-eight of forty: two
+  blocking findings, addressed.
+  - C-55, requirement 5: round twenty-seven had `cancel` reuse the
+    delivery closure, whose `rev` guard fails for an item whose commits
+    live on its branch alone and whose closure would carry the abandoned
+    branch into a pull request that merges on its own. Addressed: a
+    cancellation closure of its own, cut from the default branch, touching
+    the mirror's status line and note alone, outside the `rev` guard, and
+    landed only where the default branch holds the mirror; otherwise no
+    closure and a note naming the branch. Criterion 13 cancels a
+    half-merged item and asserts none of its branch lands.
+  - C-56, requirement 3: an executable's name did not identify the
+    recipient of a `start` review, since an argument, a configuration
+    file or a variable can send the same tool elsewhere. Addressed: the
+    recipient of a `start` entry is the executable with a fingerprint of
+    its line and `env` names, a session is refused any variable whose
+    value is a URL, and the tool's own configuration is named as the one
+    place consent does not reach. Criterion 8 changes an argument and a
+    variable with the executable unchanged; the design's Overrides follow.
