@@ -32,47 +32,69 @@ behavioural improvements; roughly a third were the same value stated in three
 artifacts and drifting between them; roughly a quarter were defects introduced
 by the previous round's own fix.
 
-Three separate signals say the process serves nobody:
+Four signals say the process serves nobody:
 
-- **Nobody reads the artifacts.** 494 archived work items, sampled fifteen
-  deep, have exactly one commit after creation: the archive move itself. Zero
-  subsequent edits. The archive is a write-only log.
-- **Nobody runs most of the payload.** Of 82 skills, twelve show any invocation
-  evidence in the machine's history. Two of them carry nearly all real use.
-- **The rules that fail are the ones written as prose.** The global "never `cd`,
-  always absolute paths" rule is contradicted by 9,455 of 16,033 Bash calls in
-  the sample window — by the same agents that read it every session.
+- **The framework gets the work, not the work.** In the same eight days the
+  operator's own commits split 327 to 62: pack 244, system 48, writing pack 35,
+  against 55 in `mezmo-world-simulator` and about seven in `mcp-research`. Those
+  two repositories are the stated priority. Five commits on the tool for every
+  one on the thing the tool is for.
+- **Nobody reads the artifacts.** `docs/work/archive/` holds 487 items. A full
+  enumeration of the git history, replacing an earlier sample of fifteen, shows
+  386 arrived already `done` in one import commit (`46ec7fb85`) and were never
+  active here; the other 100 were bulk-parked in one commit (`5278b0d28`). Five
+  items in the whole history were ever touched by more than two commits, and
+  four of those are open today. The archive is an import, not a record.
+- **Skill usage cannot be measured, in either direction.** Three counts over
+  identical eight-day data give six skills, thirteen, and eighty-one. No surface
+  records "this skill's instructions governed this turn". Every "unused" claim
+  in the audit that opened this item was unfalsifiable, and the twelve-of-82
+  figure it carried is withdrawn. What the count did show is a second surface:
+  270 Codex sessions against 2,487 Claude Code transcripts, with `sd-red-team`
+  and the six `sd-rust-*` skills living almost entirely on Codex.
+- **Finished work does not leave.** Four blog pieces at `ready` since
+  mid-August, zero published. Six `mcp-research` handoff drafts written on
+  2026-09-03, none filed. The operator's own account of the stall: not perfect
+  yet, another pass first. A framework that can always run one more pass has no
+  end state.
 
-Meanwhile the writing pack, running its own eleven-stage pipeline, has published
-zero pieces. Four have been sitting at `ready` since mid-August. Its own skill
-file says so: "Nothing has been pushed through this path yet."
+The rules that fail are the ones written as prose. The global "never `cd`,
+always absolute paths" rule is contradicted by 9,455 of 16,033 Bash calls in the
+sample window, by the same agents that read it every session.
 
 ## Why the obvious fix is wrong
 
-**Not "delete the skills".** The unused-skill count looks like the headline and
-is not. Skills cost nothing at rest — they render once at install and sit in a
-catalog until named. What costs is the *mandatory path*: the gates that run
-whether or not the change needs them. Cutting sixty skills would remove
-capability the owner might want next month and would not save a single one of
-the 770 polling minutes. The skills stay.
+**Not "delete the skills".** Skills cost nothing at rest; they render once at
+install and sit in a catalog until named. What costs is the *mandatory path*:
+the gates that run whether or not the change needs them. Cutting sixty skills
+would remove capability the owner might want next month and would not save a
+single one of the 770 polling minutes. And the usage evidence for any cut does
+not exist. The skills stay; what changes is which of them install, and how that
+is decided.
 
-**Not "remove the gates".** The local adversarial review lane before the first
-push is the single measured win in the pack's history: it took one branch from
-fifteen remote review rounds down to three. Deleting gates indiscriminately
-would delete that one too. What is wrong is not that gates exist; it is that
-every gate applies at every size, to a one-line fix and a new subsystem alike.
+**Not "remove the gates".** The adversarial review lane is the single measured
+win in the pack's history: it took one branch from fifteen remote review rounds
+down to three, and seven passes on `mezmo-world-simulator` found real defects
+each time. What is wrong is not that reviews exist; it is that they have no
+cap, so a finished artifact can always be reviewed once more instead of sent.
 
 **Not a new abstraction.** The pack already carries three review lanes, three
 repository modes, a routing policy, a plugin registry and a fleet dashboard.
 Another layer to decide when the other layers apply is the disease, not the
-cure. What is missing is one page saying which defaults hold, and a set of
-existing knobs wired to it.
+cure. What is missing is one page saying which defaults hold, one place that
+holds state, and the existing knobs wired to both.
 
-**Not "make everything opt-in".** A default nobody sets is a gate nobody runs. The
-distinction that matters is *who sees the output*: a gate that runs on the
-owner's machine and prints to the owner's terminal is cheap and stays on by
+**Not "make everything opt-in".** A default nobody sets is a gate nobody runs.
+The distinction that matters is *who sees the output*: a gate that runs on the
+owner's machine and prints to the owner's screen is cheap and stays on by
 default; a gate that writes to a shared repository, posts to a pull request, or
 blocks a merge is expensive and turns off unless the work earns it.
+
+**Not a bigger command line.** The operator is visual and forgets commands and
+their options. Every prior fix added a command. The 82 skill names are a memory
+load, which is one reason they go unused. The front door has to be a screen that
+shows what is possible; the command line is the agent's surface, not the
+operator's.
 
 ## What this changes
 
@@ -81,15 +103,42 @@ person in it, and the pack's surfaces are brought into line with it. The policy
 in one sentence: **anything the pack does should help the person running it,
 without exposing or imposing that person's process on anyone else.**
 
-Twenty decisions were taken in a structured interview on 2026-09-05. They are
-recorded here as the requirements below, grouped by what they touch.
+The page describes two flows on one spine. The **research flow** runs sources,
+understanding, brief, decisions, handoff or publish; the operator sits at the
+end, and external publish is the only gate. The **development flow** runs prd,
+design, implement, test, review, push, merge; in a repository the operator owns
+it runs without a gate and the operator reviews the result after it lands. The
+spine both flows share is the **item**: one row in a local database, one screen
+on a dashboard, and the artifacts in git that the row points at.
+
+That spine is not built here. This item was opened as one piece of work and,
+after a second interview on 2026-09-05, became three:
+
+- **A — this item, the pack.** Policy, the tiered ship path, review points and
+  caps, the vendor rule and the provider registry, which skills install and how
+  they are promoted, the filing skill, the handoff skill. Everything that
+  describes behaviour or ships in the payload.
+- **B — the system repository.** The database at `~/.local/share/sd/sd.db`,
+  the one library that owns its schema and every write, the runner that turns
+  an assignment into a session, the dashboard as the operator's front door with
+  five sections, the migrations that fill it, the vault crons stopped, and the
+  terminal-multiplexer wrapper. Everything that runs on the machine.
+- **C — the writing repository.** A stub: ideas and pieces move into the
+  database after B's library exists. Nothing else until one piece publishes.
+
+B's library lands first, because requirements 5, 10, 11 and 12 below write to
+it. Requirements 1 through 4 and 6 through 9 need nothing from B and land in any
+order.
+
+Decisions taken in the two interviews are the requirements below.
 
 ### Requirement 1 — the policy page exists and is discoverable
 
-`WORKFLOW.md` at the repository root states, for a consuming repository: what
-runs by default, what is opt-in, what is advisory, what never touches a shared
-repository, the path for a change at each size, and the three modes. `sd-help`
-names it. The `CLAUDE.local.md` block the installer writes links to it.
+`WORKFLOW.md` at the repository root states, for a consuming repository: the two
+flows and the spine they share; what runs by default, what is opt-in, what is
+advisory, what never touches a shared repository; the review table with its
+caps; the path for a change at each size; and the modes and how they resolve.
+`sd-help` names it. The `CLAUDE.local.md` block the installer writes links to it.
 
 The block carries the keys the pack already reads and no others: `mode:`, plus
 the entrypoint names `check:`, `test:` and `lint:` from `CHECK_NAMES`
@@ -98,7 +147,7 @@ name in the moment. A key that turns a lane on permanently is a default in
 disguise: it converts a decision about one change into a decision about the
 repository, taken once and unrecorded.
 
-### Requirement 2 — the ship path is tiered, not uniform
+### Requirement 2 — the ship path is tiered, and it can run unattended
 
 Today `sd-ship` applies eleven steps to a one-line fix. After this item the
 default path is: commit enumerated paths, local review, push, open the pull
@@ -113,44 +162,106 @@ request, wait for CI once, merge, `git fetch -p`.
   timeout and were reissued, are the thing being removed.
 - The 70 lines of pull-request history in the skill file (the `#718` and `#720`
   narratives) collapse to one paragraph stating the resulting rule.
+- In a repository the operator owns, the path merges on its own when tests,
+  review and CI pass, and reports. In a repository someone else merges, it stops
+  at pull-request-ready. That is the only difference between the two, and
+  `mode:` already carries it.
+- Nothing on the path asks a question mid-run. Where a skill would ask today, it
+  decides, records the choice on the item as a proposal, and continues. The
+  operator vetoes after, not before. A test failure, a blocking review finding
+  past the retry cap, or a write outside the repository stops the run and marks
+  the item `blocked` with the reason.
+- Every commit to the pack, the system repository or the writing repository
+  names what needed it: a `Needed-by:` trailer carrying an item id or one of the
+  three lanes `cost`, `efficiency`, `visibility`. `sd-ship` warns when it is
+  missing and ships anyway. The weekly count of missing trailers is a number the
+  dashboard shows. This is the guard against the 327-to-62 split, chosen soft
+  because the operator asked for framework work to continue in those lanes.
 
-### Requirement 3 — one second-model lane, one round
+### Requirement 3 — review points, caps, and the vendor rule
 
 Three lanes review the same planning artifacts today: a host lane in the
 contract, `sd-review --scope planning`, and a hand-launched background task
 named in `AGENTS.md`. Two of them are the same external model reading the same
-files.
+files. None of them has a cap.
 
-After this item there is one lane, `sd-review --scope planning`, and it is
-opt-in per work item. One round by default. The concern ledger, the pre-edit
+After this item, adversarial review happens at four named points, each with a
+cap, and nowhere else unless the operator asks by name:
+
+| Flow | Point | What it checks | Cap |
+|---|---|---|---|
+| Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
+| Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
+| Development | prd and design | Scope, missing requirements, wrong assumptions | 1 |
+| Development | Code, before merge | See the experiment below | 1 |
+
+When a point's passes are spent the artifact moves on: to the send box, to
+implementation, to merge. A further pass needs the operator to ask for it by
+name, and the item records that it was asked for. This is the fix for "not
+perfect yet, another pass first".
+
+**The reviewer is a different vendor from the author, by policy.** Today Claude
+writes and Codex reviews. If the primary moves to OpenCode or a local model, the
+pair changes and the rule holds. The pack's skills name *roles*, `author` and
+`reviewer`, never vendors. A **provider registry**, one config file read by B's
+library, maps each role to a provider: name, how to start it, which roles it
+may fill, cost basis. Adding exo, another commercial API, or a second local
+model is an entry, not code. The registry's format and the role vocabulary are
+defined in this item; the file lives with the database.
+
+**Code review is an experiment, not yet a rule.** The seven passes already run
+on `mezmo-world-simulator` are scored first: findings accepted against findings
+rejected, per pass. Then the other vendor reviews the next ten code pull
+requests, and cost is logged per pass. Below thirty percent accepted, the code
+point leaves the table.
+
+The one lane is `sd-review --scope planning`. The concern ledger, the pre-edit
 hash baselines and the per-round cross-artifact sweep apply only to paths listed
-under `sensitive` in `.github/sd-review.json`. Rounds are counted per work item
-and a scope cut does not reset the count; three rounds is the cap. The codex
-appendix under `docs/` and the `AGENTS.md` bullet that mandates the second lane
-are deleted.
+under `sensitive` in `.github/sd-review.json`. The codex appendix under `docs/`
+and the `AGENTS.md` bullet that mandates the second lane are deleted.
 
-### Requirement 4 — Copilot advises, CI decides
+### Requirement 4 — Copilot advises, on the repositories where the organisation pays
 
 Merge blockers are the local review lane and CI. Copilot review is advisory:
-GitHub requests it automatically when a pull request opens, its findings are
-read and dispositioned, and it never blocks a merge. The pack never requests a
-second round. The user-global `PostToolUse` hook that asks for a Copilot review
-after every push is deleted; it is not installed by the pack, and it duplicates
-what GitHub already does.
+GitHub requests it automatically when a pull request opens in an organisation or
+shared repository, its findings are read and dispositioned, and it never blocks
+a merge. The pack never requests a second round. On repositories the operator
+pays for personally it is off. GitHub spend is the one cost line the operator
+named as a worry, and this is the part of it the pack controls. The user-global
+`PostToolUse` hook that asks for a Copilot review after every push is deleted;
+it is not installed by the pack, and it duplicates what GitHub already does.
 
-### Requirement 5 — a work item exists only when it earns one
+### Requirement 5 — a work item exists only when it earns one, and its state lives in the database
 
 A work item is created when the work spans more than one session or roughly 300
 changed lines. `design.md` and `implement.md` are written when asked for, not by
-default. `sd-plan` asks three to five questions before it writes anything.
+default. `sd-plan` asks three to five questions before it writes anything, and
+in an unattended run it asks none and records its assumptions.
 
-A merged item is marked `done` and its directory is deleted at the next sweep;
-git history holds it. The 45-day park stays for unmerged items. `docs/work/archive/`
-and its 494 files are removed in one commit.
+**Git owns the artifacts; the database owns the state.** `prd.md`, `design.md`
+and `implement.md` stay in the repository as the decision trail. Their `status:`
+frontmatter stops being truth: the item row in `sd.db` holds status, dates,
+links and notes, and points at the files by path. `sd-docs-lint` rule 2 and
+`sd_lib.py`'s status derivation read the row, not the file. Until B's library
+exists the frontmatter stays as it is, and the switch is one migration.
 
-### Requirement 6 — nothing personal reaches a shared repository
+The status vocabulary gains one state, `ready_to_send`, for a finished artifact
+waiting on the operator's external action, and keeps `blocked`. Nothing else
+changes.
 
-A shared repository is one where somebody else also merges.
+No sweep, no park, no archive. A merged item is `done` in the row and its
+directory is deleted at the next `sd-plan` run; git history holds it.
+`docs/work/archive/` and its 941 files are removed in one commit that names
+`46ec7fb85` as the commit that recovers any of them. The 100 parked items go
+with the 386 imported ones: a backlog nobody opened in four months is not a
+backlog, and B names one surface for later work.
+
+### Requirement 6 — nothing personal reaches a shared repository, and ownership decides
+
+A shared repository is one where somebody else also merges. Ownership decides
+the mode; the organisation name does not. `mezmo-world-simulator` sits in the
+`answerbook` organisation, has one author, and runs `full` with its triad
+pushed and Notion mirrors for its audience. That is intended and stays.
 
 - The `Work:` line appears in a pull request body only when the pull request
   resolves a work item that lives in that repository. The `Work: none - <reason>`
@@ -161,15 +272,13 @@ A shared repository is one where somebody else also merges.
   integration branch (`sd-plan/SKILL.md:105`), `sd-spec` never touches the
   upstream tree (`:41`), `sd-review` refuses outright (`:106`), `sd-ship` posts
   no reviews or labels (`:206`), `sd-deps` does not merge (`:49`), and
-  `sd-suggest` files nothing upstream (`:44`). No new mechanism is built. An
-  untracked local path was drafted for this and cut: it would duplicate a rule
-  the payload already states in six places, and add a second thing to keep true.
+  `sd-suggest` files nothing upstream (`:44`). No new mechanism is built.
 - A repository the operator does not own resolves to `mode: guest` without an
   explicit line. Today `sd_lib.mode()` reads the local block and falls back to
   `full`, so an unconfigured shared repository gets the most invasive mode by
   default. This is the one piece of requirement 6 that is new code: the fallback
-  consults the remote's owner before returning `full`. The three modes are named
-  in `README.md`, which mentions none of them today.
+  asks who merges, using the remote owner as the proxy, before returning `full`.
+  The three modes are named in `README.md`, which mentions none of them today.
 - `README.md`'s claim that the pack writes "nothing, ever" in a repository is
   rescoped to the installer, which is where it is true. The skills that write
   tracked files by design are named.
@@ -209,7 +318,7 @@ A shared repository is one where somebody else also merges.
   history and the system repository's guide about 36% incident write-ups. Each
   keeps its present-tense rules, plus one sentence where a rule needs its reason.
 - The four files stating the planning review rule collapse to one under
-  `.claude/rules/`.
+  `.claude/rules/`, and that one states the review table from requirement 3.
 - The pull-request template points contributors at `docs/SD_AI_COMMAND_PACK.md`,
   which does not exist. Fixed or removed.
 
@@ -220,184 +329,200 @@ enforces a second, overlapping style through a session hook, and the writing
 repository carries an override forbidding it. The plugin is uninstalled and the
 override deleted, leaving the output style as the single mechanism.
 
-### Requirement 10 — the writing pipeline proves itself before it grows
+### Requirement 10 — a skill installs because a path names it, or because it was used
 
-Zero pieces published, four at `ready` for three weeks, and process commits
-running level with content commits (75 to 76). Before any further pipeline work:
-publish one piece end to end, then delete every step that run did not need.
+Usage counts cannot decide what stays, because none exist. Cohesion can.
 
-The Google Docs review loop (`sdw-review-push`, `sdw-review-pull`) is cut;
-reviewers do not comment on the copies. `sdw-help` duplicates `sd-help` and is
-cut. `sdw-blog-research` folds into `sdw-research` as a from-an-idea path. Dated
-narrative leaves `pipeline.md` and `permissions.md`.
+- `skills/paths.json` names three paths and the skills on each: research
+  (sources to brief to handoff), development (plan to build to ship), and act
+  (brief to draft to send). The installer renders only what a path names. A
+  directory under `skills/` that no path names fails `make check`. The list is
+  enumerated at install, never recited.
+- `contrib/` holds every skill no path names. In git, not installed. Every
+  adoption from outside lands in `contrib/` first; adopting is cheap, promotion
+  costs a trial.
+- `sd skill try <name>` installs a `contrib/` skill on this machine for thirty
+  days and writes a trial row. Direct use during the trial lands in the
+  `skill_use` table B's library owns: a `PreToolUse` hook on the `Skill` tool
+  and on reads of `skills/*/SKILL.md`, a `UserPromptSubmit` hook for typed
+  `/sd-*` commands (marked `direct`), a nightly parse of `~/.codex/sessions`
+  for the same, and an OpenCode plugin when that surface is in use.
+- Promotion is a pull request that moves `contrib/<name>` to `skills/<name>` and
+  adds it to a path; direct use counts as a path of length one. Demotion is the
+  reverse. A trial that expires with zero rows is removed at the next install
+  run, which says so. A path skill with no use in ninety days is proposed for
+  demotion. No demotion on counts happens before ninety days of data exist.
+- The dashboard's skills section (B) is a catalog: what each skill does, when to
+  use it, use per surface, trials and their expiry, and two buttons, promote and
+  demote, that call the library to open the pull request. The operator merges.
+  The dashboard never writes to git.
 
-### Requirement 11 — one surface per question
+### Requirement 11 — filing an improvement is one skill and one row
 
-Seven systems track work today. They are not seven of a kind: three are
-tracking, one is a cache, two are session state, and one is reference material
-that was never tracking at all. Naming which is which is most of the
-consolidation.
+Internal GitHub issues stop. Two are open across repositories the operator owns
+(`sd-ai-command-pack` 1, `mezmo_benchmark` 1); they import to the database and
+close on GitHub with a pointer.
 
-| Question | Surface | What it is today |
-|---|---|---|
-| What am I working on? | `docs/work/` in git | 8 active, 495 total, 101 parked |
-| What might I do later? | one vault backlog | three databases with three ladders |
-| What do others expect? | GitHub | plus a SQLite read cache |
-| What is due by a date? | Obsidian TaskNotes | 207 notes, nightly digest, out of scope |
+`sd-suggest` is the one way to file, for the operator and for the agent. It
+captures a fixed small set: repository, what happened, what it cost, what was
+expected, and the session it came from. In a repository the operator owns it
+writes a row. In a repository someone else merges it files a GitHub issue there,
+as it does today. Issues other people file on GitHub arrive as read-only shadow
+rows through B's sync, with the operator's notes beside them.
 
-The issue index is a cache of GitHub and stays one: read-only here, written only
-by the dashboard, rebuildable by deleting it. Handoff packets and session memory
-are not tracking and are not consolidated; they are ephemeral state that answers
-"where was I", not "what is outstanding". The five reference databases —
-Market Watch, Companies, Learning, Tool Stack, Prompts — hold material, not
-work, and are left alone.
+The vault `skill-proposal` database, its kind in the writing manifest, and
+`sd-propose-skills`'s vault write all go; they were the previous answer to this
+requirement, and the routine they depended on, `skill-proposal-accept`, never
+existed.
 
-Three changes follow.
+### Requirement 12 — handoff loses nothing, because nothing lives only in context
 
-**The idea and the piece stop both holding status.** Every one of the ten pieces
-carries an `obsidian_source` line, and nine of the ten disagree with the note it
-names. Two pieces are in `drafting` and `review` against vault notes marked
-`declined`; one is `ready` against a note still at `inbox`. The vault ladder's
-job ends at the decision: `inbox` to `accepted` or `declined`, and acceptance
-creates the piece. From that moment the piece's frontmatter is the only status,
-and the note carries a forward link and nothing else.
+`sd-handoff` exists and has been used once. It is manual by design: a hook
+cannot write `summary`, `next` and `dont`, only the model can, and a model that
+has to be asked is not asked.
 
-The `drafting` state in the blog-idea ladder is what makes this drift possible —
-it is a handoff flag wearing a status's clothes, and the `blog-idea-accept`
-routine exists to set it. Acceptance should create the piece directly; the flag
-and the routine both go.
+After this item the packet is the last resort, not the mechanism. Followups,
+decisions, proposals and open questions are written to the item's rows as the
+session produces them, through the library; nothing that matters lives only in
+the conversation. A `PreCompact` hook and a `SessionEnd` hook prompt the model
+to write the packet for whatever is left. The `SessionStart` hook loads the
+item's open rows, the packet if one exists, and the `claude-mem` context it
+loads today. The test of this requirement is a session killed mid-task and
+restarted: every followup it had named is on the item, and the new session
+begins from them without being told.
 
-**Blog ideas and topics merge into one backlog.** One database, `kind:` as a
-field. The plugin manifest already declares transitions per kind, so the two
-ladders survive the merge unchanged — this is a change of where rows live, not
-of what they mean. Seventy-five ideas sit in `inbox` and ninety-five are
-`declined`; the declined rows are the graveyard the merge should not carry
-forward wholesale.
+## What leaves this item
 
-**Skill proposals leave the vault for GitHub.** `sd-suggest` files the issue in
-the moment the limitation costs a turn, which its own skill argues is the only
-moment it reliably gets filed. The vault database, its `skill-proposal` kind in
-the manifest, and `sd-propose-skills`'s vault write all go.
+Two requirements of the first draft are gone, recorded here so the trail holds.
 
-That path is already broken and the counts show it: the note template tells the
-reader to pick `accepted` so that a routine named `skill-proposal-accept` will
-file it. No such routine exists in the vault's scheduled tasks. Ten notes: eight
-`declined`, two `filed`, zero `accepted` — the one transition the template
-advertises is the one that goes nowhere.
+- **The writing pipeline** (was requirement 10) moves to C. Blog writing is
+  third in priority behind `mezmo-world-simulator` and `mcp-research`, and its
+  ideas and pieces belong in the database, which does not exist yet. The four
+  cuts it named (`sdw-review-push`, `sdw-review-pull`, `sdw-help`,
+  `sdw-blog-research` folding into `sdw-research`) go with it.
+- **One surface per question** (was requirement 11) is superseded. It merged
+  three vault databases into one vault backlog. Obsidian is now a knowledge
+  base, not a process surface: no ladders, no tasks, no crons, no state the pack
+  reads. The backlog is a table in `sd.db`. The two defects that requirement
+  found stand as evidence: nine of ten pieces disagree with the vault note they
+  name, and the `skill-proposal-accept` routine does not exist.
 
 ## Acceptance criteria
 
-1. `WORKFLOW.md` exists at the repository root, states the default, opt-in,
-   advisory and never-in-a-shared-repository sets, and is reachable from both
-   `sd-help` and the `CLAUDE.local.md` block the installer writes. A test
-   asserts the installer's block names it. A test asserts the set of keys
-   `WORKFLOW.md` documents equals the set `sd_lib.py` reads, enumerated from
-   `MODES` and `CHECK_NAMES` in the source rather than from a list written down
-   beside it. The set today is `mode`, `check`, `test`, `lint`; the test must
-   fail if a fifth key is added to either side alone.
+1. `WORKFLOW.md` exists at the repository root, states the two flows and the
+   spine, the default, opt-in, advisory and never-in-a-shared-repository sets,
+   the review table with its caps, and the modes with their resolution rule. It
+   is reachable from both `sd-help` and the `CLAUDE.local.md` block the
+   installer writes. A test asserts the installer's block names it. A test
+   asserts the set of keys `WORKFLOW.md` documents equals the set `sd_lib.py`
+   reads, enumerated from `MODES` and `CHECK_NAMES` in the source rather than
+   from a list written down beside it. The set today is `mode`, `check`, `test`,
+   `lint`; the test must fail if a fifth key is added to either side alone.
 2. `sd-ship` invoked on a change with no work item performs no `sd-spec` run, no
    `Work:` line, and no remote-branch deletion command, and its settle step
    issues no shell polling loop. Asserted against the skill text, not inferred.
-3. Exactly one second-model planning lane is named anywhere in the payload, the
+3. `sd-ship` warns on a commit to the pack, system or writing repository whose
+   message lacks a `Needed-by:` trailer, and ships. A test covers the warning
+   path and the pass path. The count of missing trailers per week is readable
+   from the database once B exists, and from the git log before that.
+4. Exactly one second-model lane is named anywhere in the payload, the
    contract, or `AGENTS.md`. A repository-wide grep for the deleted lane returns
    nothing outside `CHANGELOG.md`.
-4. The concern-ledger and cross-artifact-sweep obligations are stated as
+5. The review table appears in exactly two places, `WORKFLOW.md` and the one
+   rule file under `.claude/rules/`, and a test asserts the two copies are
+   identical. Every skill that runs a review names its point in the table and
+   reads the cap from it. A grep of the payload for a vendor name (`codex`,
+   `claude`, `openai`, `anthropic`) inside a skill's instructions returns only
+   the provider-registry documentation.
+6. The provider registry format is documented in `WORKFLOW.md` with the role
+   vocabulary `author` and `reviewer`, and a test asserts the registry the
+   library ships resolves both roles to different providers. Adding a provider
+   entry named `exo` with an OpenAI-compatible URL needs no code change,
+   asserted by a test that adds one and resolves it.
+7. The seven `mezmo-world-simulator` passes are scored, accepted against
+   rejected per pass, and the scores are recorded on this item before the code
+   review point runs on any new pull request.
+8. The concern-ledger and cross-artifact-sweep obligations are stated as
    conditional on a `sensitive` path in every place they appear.
-5. No pack surface requests a Copilot review. The global settings contain no
+9. No pack surface requests a Copilot review. The global settings contain no
    Copilot-requesting hook. Both asserted by grep over the rendered payload and
-   the settings file.
-6. A pull request body carries a `Work:` line only when the item exists; the
-   `none - <reason>` form appears in no skill, tool, or lint rule. The lint's
-   rule 5 passes on a body with no `Work:` line when no work item is present,
-   and still fails a body naming an item that does not resolve.
-7. `mode: guest` is the resolved mode for a repository whose remote owner is not
-   the operator, absent an explicit `mode:` line, and `full` when it is. A test
-   covers three cases: owned remote, unowned remote, and a root with no remote
-   or no git at all. The last must not resolve to `guest` on an error — a
-   detection failure that silently downgrades every local scratch repository is
-   the same class of defect as one that silently upgrades a shared one, so the
-   failure path is named and asserted rather than left to whichever branch the
-   exception happens to reach. An explicit `mode:` line still wins over
-   detection. All three modes appear in `README.md`.
-8. `README.md`'s writes-nothing claim names the installer as its subject and
-   lists the skills that write tracked files.
-9. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
-   exists, and skips them cleanly when it does not.
-10. The coverage floor applies to `bin/sd_install.py` and to no other file. The
+   the settings file. `WORKFLOW.md` states that Copilot review is off on
+   repositories the operator pays for personally.
+10. A pull request body carries a `Work:` line only when the item exists; the
+    `none - <reason>` form appears in no skill, tool, or lint rule. The lint's
+    rule 5 passes on a body with no `Work:` line when no work item is present,
+    and still fails a body naming an item that does not resolve.
+11. `mode: guest` is the resolved mode for a repository whose remote owner is
+    not the operator, absent an explicit `mode:` line, and `full` when it is. A
+    test covers three cases: owned remote, unowned remote, and a root with no
+    remote or no git at all. The last must not resolve to `guest` on an error; a
+    detection failure that silently downgrades every local scratch repository
+    is the same class of defect as one that silently upgrades a shared one, so
+    the failure path is named and asserted. An explicit `mode:` line still wins
+    over detection. All three modes appear in `README.md`.
+12. `README.md`'s writes-nothing claim names the installer as its subject and
+    lists the skills that write tracked files.
+13. Once B's library exists: `sd_lib.py` derives an item's status from its row
+    and not from frontmatter, `sd-docs-lint` rule 2 reads the row, and a test
+    asserts that a `prd.md` with a stale `status:` line does not change what
+    `sd-status` reports. Before B exists, this criterion is recorded as waiting,
+    not as met.
+14. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
+    exists, and skips them cleanly when it does not.
+15. The coverage floor applies to `bin/sd_install.py` and to no other file. The
     four line-count ceilings emit a warning and exit zero when exceeded. A test
     asserts the warning path, not only the passing one.
-11. `make check` accepts a changed-files fast path, and the full suite remains
+16. `make check` accepts a changed-files fast path, and the full suite remains
     the default when no such argument is given.
-12. The `bash32` job, `tests/test_selector_contract_drift.py`,
+17. The `bash32` job, `tests/test_selector_contract_drift.py`,
     `generated/registry-snapshot.json` and the `plugins/sd` stub are absent, and
     the `security` job's steps run inside `lint`.
-13. A repository-wide grep for `Trellis`, `.trellis` and `task.py` returns
-    nothing outside `CHANGELOG.md` and archived items.
-14. The global settings contain no `Read()` deny rule and no `.trellis` allow
+18. A repository-wide grep for `Trellis`, `.trellis` and `task.py` returns
+    nothing outside `CHANGELOG.md`.
+19. The global settings contain no `Read()` deny rule and no `.trellis` allow
     rule, and do contain the four MCP pull-request tools. The global guide
     contains no `cd` prohibition.
-15. Exactly one file states the planning adversarial review rule.
-16. `docs/work/archive/` does not exist, and the sweep deletes a `done` item
-    rather than moving it. A test asserts the deletion path and asserts that an
-    unmerged item still parks at 45 days.
-17. The pull-request template links only to files that exist. A test walks its
+20. Exactly one file states the planning adversarial review rule.
+21. `docs/work/archive/` does not exist. All 487 items in it are deleted, the
+    386 `done` and the 100 `planning` alike, and the deletion commit names
+    `46ec7fb85` as the commit that recovers them. `sd-plan` deletes a `done`
+    item's directory rather than moving it, and no sweep or park code path
+    remains; a test asserts the deletion path.
+22. The pull-request template links only to files that exist. A test walks its
     links.
-18. The caveman plugin is absent from the global settings, and the writing
+23. The caveman plugin is absent from the global settings, and the writing
     repository's style override is deleted.
-19. In the writing repository: one piece reaches `published` with a live URL
-    recorded, before any further pipeline change lands. `sdw-review-push`,
-    `sdw-review-pull` and `sdw-help` are absent, and `sdw-blog-research` is
-    reachable as a path within `sdw-research`.
-20. No piece carries a status that its `obsidian_source` note contradicts. The
-    check enumerates pieces from `content/` and resolves each note, rather than
-    sampling: today it reports nine failures out of ten, and that number is the
-    baseline it must drive to zero. A piece whose note is missing is a failure
-    too, not a skip.
-21. The blog-idea ladder ends at `accepted` or `declined`. No `drafting` state
-    exists in the manifest for that kind, and `blog-idea-accept` is absent from
-    the vault's scheduled tasks. Acceptance creates the piece in the same step.
-22. One vault database holds both the blog-idea and topic kinds, distinguished
-    by a `kind:` field, and `sd store list` returns the same rows for each kind
-    as it does today. Per-kind transitions are unchanged, asserted by comparing
-    the manifest before and after.
-23. The `skill-proposal` kind is absent from the manifest, the vault database is
-    gone, and `sd-propose-skills` writes no vault note. A grep for
-    `skill-proposal-accept` returns nothing outside this item and the changelog.
-24. `sd-status` reports the same issue counts after the consolidation as before
-    it. The cache is untouched by this requirement, and a test asserts the
-    index is still rebuildable from empty.
-25. `make check` passes, and the acceptance-criteria count it reports does not
-    fall below its current 40 without each removal being named in this item's
-    log.
+24. `skills/paths.json` exists, names three paths, and every directory under
+    `skills/` appears on at least one. The installer renders exactly the union
+    of the paths plus active trials, asserted by a test that adds an unlisted
+    skill directory and sees `make check` fail. `contrib/` exists and the
+    installer never renders from it without a trial row.
+25. `sd skill try <name>` installs from `contrib/`, writes a trial row with an
+    expiry, and prints the date. The next install run after expiry with no
+    `skill_use` rows removes the skill and says so. Both asserted by tests
+    against a temporary database.
+26. The `PreToolUse` and `UserPromptSubmit` hooks write `skill_use` rows with
+    `surface`, `mode` and `cwd`, and the Codex nightly parse writes the same
+    shape. A test feeds one recorded session of each kind and asserts the rows.
+27. Promotion and demotion each produce one pull request that moves the
+    directory and edits `paths.json`, opened by the library and never by the
+    dashboard directly. A test asserts the branch content.
+28. `sd-suggest` writes a row in an owned repository and files a GitHub issue in
+    a repository someone else merges, asserted by a test for each mode. The two
+    open internal issues are closed on GitHub with a pointer to their rows. The
+    `skill-proposal` kind is absent from the writing manifest and
+    `sd-propose-skills` writes no vault note.
+29. A session killed mid-task and restarted in the same directory begins from
+    the followups it had named, with none lost. The test writes three followups
+    through the library, ends the session without calling `sd-handoff`, starts a
+    new one, and asserts all three are in the injected context.
+30. `make check` passes.
 
 ## Open questions
 
-1. **Settled 2026-09-05: no new keys.** The drafted `spec:`, `codex:` and
-   `copilot:` keys are cut. `sd_lib.py` continues to read `mode:` and `check:`
-   and nothing else, and every opt-in lane is asked for by name. Recorded here
-   rather than deleted because the alternative is the one this item would
-   otherwise have drifted into: three keys added to make a document true.
-2. **Settled 2026-09-05: guest mode covers it, no new path.** The drafted
-   untracked local path is cut. Guest mode already refuses the upstream tree in
-   six skills and routes the triad to the fork's integration branch, so the
-   mechanism would have duplicated a rule the payload states six times over.
-   What survives from this question is narrower and is now requirement 6's only
-   new code: mode detection falls back to `full`, which is the wrong default for
-   a repository the operator does not own.
-3. Deleting `docs/work/archive/` is irreversible in the working tree and
-   reversible only through git history. 494 items, none ever re-read in the
-   sample. The sample was fifteen. Whether to sample deeper before deleting, or
-   accept git history as the archive, is the owner's call.
-4. Requirement 10 orders the writing-pack work behind a publish that has not
-   happened. If the publish surfaces pipeline defects, those become work of
-   their own and this item's writing-pack scope is superseded. That is the
-   intended outcome, but it means requirement 10 may close by being replaced
-   rather than by being met.
-5. The measurement window was eight days and covered Claude Code transcripts
-   only. Codex sessions and OpenCode invocations are not in the data, so the
-   skill-usage figures undercount by an unknown amount. Nothing in this item cuts
-   a skill, so the exposure is limited to the framing — but the twelve-of-82
-   figure should not be quoted as settled.
+All five questions the first draft carried are settled and recorded in the log
+under their dates. None are open. New questions raised during implementation
+are filed as rows on this item once B's library exists, and in the log before.
 
 ## Log
 
@@ -407,37 +532,52 @@ advertises is the one that goes nowhere.
   supplied the evidence: the mandatory process path, teammate-visible surfaces,
   skill usage against machine history, cross-layer rule consistency, tooling
   weight, and writing-pipeline throughput. Twenty decisions recorded as
-  requirements 1 through 10 above. The policy page draft exists and lands with
-  the first implementation commit.
+  requirements 1 through 10. The policy page draft exists and lands with the
+  first implementation commit.
 - **2026-09-05** — Open question 1 settled: the drafted `spec:`, `codex:` and
   `copilot:` keys are cut, and opt-in lanes are asked for by name. Requirement 1
   and acceptance criterion 1 now bound the key set to what `sd_lib.py` already
-  reads, checked by enumeration rather than by a list. Four open questions
-  remain.
+  reads, checked by enumeration rather than by a list.
 
   Writing that criterion found a defect in the same edit that introduced it: the
-  first draft said the block carries `mode:` and `check:`. It carries four keys —
-  `mode:` plus the three `CHECK_NAMES` entrypoints — so the page was wrong by two
+  first draft said the block carries `mode:` and `check:`. It carries four keys,
+  `mode:` plus the three `CHECK_NAMES` entrypoints, so the page was wrong by two
   before it was ever written down as policy. Enumerating from `sd_lib.py` caught
-  it; reading the draft would not have. That is the argument for the criterion,
-  made by the criterion, an hour before anything implements it.
+  it; reading the draft would not have.
 - **2026-09-05** — Open question 2 settled: guest mode covers the shared-repository
   case and the drafted untracked local path is cut. Requirement 6 keeps one piece
-  of new code, the mode fallback, and acceptance criterion 7 now names its three
-  cases including the detection-failure path. Three open questions remain.
-- **2026-09-05** — Tracking surfaces consolidated. Four decisions: the piece owns
-  its status once accepted, so the vault note stops at the decision; blog ideas,
-  topics and skill proposals collapse from three databases toward one backlog
-  with `kind:` as a field; skill proposals leave the vault entirely for GitHub
-  through `sd-suggest`; Obsidian TaskNotes is a calendar, not a backlog, and is
-  out of scope. Recorded as requirement 11 and acceptance criteria 20 to 24.
-
-  Verifying those decisions found two live defects. The `skill-proposal-accept`
-  routine that `sd-propose-skills/SKILL.md:126` tells the reader to rely on does
-  not exist in the vault's scheduled tasks, which is why the `accepted` state
-  holds zero notes while eight sit `declined`. And nine of the ten pieces
+  of new code, the mode fallback, and its criterion names three cases including
+  the detection-failure path.
+- **2026-09-05** — Tracking surfaces consolidated into a requirement 11 that no
+  longer exists; see "What leaves this item". Verifying it found two live
+  defects that stand as evidence: `skill-proposal-accept`, which
+  `sd-propose-skills/SKILL.md:126` relies on, is not in the vault's scheduled
+  tasks, which is why `accepted` holds zero notes; and nine of ten pieces
   disagree with the vault note their `obsidian_source` line names, two of them
-  actively in `drafting` and `review` against notes marked `declined`. Both
-  defects are consequences of the same shape — two places holding one status —
-  so requirement 11 removes the shape rather than repairing the rows. Criterion
-  20 carries the nine-of-ten figure as the baseline it must drive to zero.
+  active against notes marked `declined`.
+- **2026-09-05** — Open questions 3, 4 and 5 settled. Three: delete both
+  archive groups, git is the archive; the full enumeration replaced the sample
+  and is now in the problem statement. Four: the writing publish closes its
+  requirement and defects open their own item; moot an hour later when the
+  requirement left this item. Five: the skill-usage undercount is real, uneven,
+  and unfixable by counting; the twelve-of-82 figure is withdrawn and no figure
+  replaces it, and requirement 10 now installs by path rather than by count.
+- **2026-09-05** — Second interview, on the operator's goals rather than the
+  pack's defects. Priorities: `mezmo-world-simulator` and `mcp-research` first,
+  blog writing third. The operator is visual, forgets commands, tinkers, and
+  wants tools perfect before use; the framework has been the rabbit hole, at
+  327 commits to 62. Twenty-three decisions taken, and the item split into
+  three. What moved into this item: the two-flow policy page, the unattended
+  ship path with a soft `Needed-by:` guard, the review table with caps and the
+  different-vendor rule, the provider registry, Copilot scoped to where the
+  organisation pays, ownership deciding mode, state leaving frontmatter for the
+  database, path-based skill installation with `contrib/` and trials, one
+  filing skill, and handoff on rows. What moved out: the writing pipeline to C;
+  the vault consolidation, superseded by Obsidian's exit from process. What
+  moved to B: the database, the library, the runner, the five-section
+  dashboard, migrations, the vault crons stopping, and the multiplexer wrapper.
+
+  This week's deliverables, outside this item: the six `mcp-research` drafts
+  filed, and `mezmo-world-simulator` Phase 1 to `done`. The vault's automated
+  Codex jobs stop today. The seven `mezmo-world-simulator` passes are scored
+  before any new code review runs.
