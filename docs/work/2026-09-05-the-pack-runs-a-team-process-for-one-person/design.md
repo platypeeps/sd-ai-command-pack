@@ -174,7 +174,14 @@ never vendors.
       reviewer: codex
 
 Adding a provider is an entry. Changing who writes or who reviews is a role
-line. The two roles never resolve to the same provider.
+line. The two roles never resolve to the same provider: when the change was
+authored by the provider on the `reviewer` line, the next provider carrying
+the `reviewer` role reviews it, and with none to take, the review refuses by
+name rather than reading its own work.
+
+This file is the only list of providers. `sd-review` reads it through the
+library; `.github/sd-review.json` carries repository policy, tiers, paths and
+the severity floor, and names providers only by the names above.
 
 ## Overrides
 

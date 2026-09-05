@@ -216,6 +216,23 @@ may fill, cost basis. Adding exo, another commercial API, or a second local
 model is an entry, not code. The registry's format and the role vocabulary are
 defined in this item; the file lives with the database.
 
+The registry is static and the author is not. When the runner assigns the
+change to a provider other than the registry's `author`, the `reviewer` line
+would resolve to the vendor that wrote the code. So resolution takes the
+author into account: the reviewer is the registry's `reviewer` provider unless
+that provider authored the change, in which case the library takes the next
+provider carrying the `reviewer` role, and refuses by name when none differs.
+The assignment row names the author, so the runner and `sd-review` both know.
+
+One list of providers on the machine. `bin/sd-review` carries its own table,
+`BACKENDS` at `bin/sd-review:195`, and `.github/sd-review.json` names providers
+again under `challenge_providers` and `planning_providers`. Both go. The
+registry entry holds what the table held: the start line, and the reader for
+the provider's output. `sd-review.json` keeps what is repository policy and
+nothing about vendors: tiers, categories, paths, `sensitive`, the severity
+floor. Tier lists keep naming providers by registry name; the names are
+validated against the registry where one exists, and pass as strings in CI.
+
 **Code review is an experiment, not yet a rule.** The seven passes already run
 on `mezmo-world-simulator` are scored first: findings accepted against findings
 rejected, per pass. Then the other vendor reviews the next ten code pull
@@ -468,7 +485,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    vocabulary `author` and `reviewer`, and a test asserts the registry the
    library ships resolves both roles to different providers. Adding a provider
    entry named `exo` with an OpenAI-compatible URL needs no code change,
-   asserted by a test that adds one and resolves it.
+   asserted by a test that adds one and resolves it. Resolving `reviewer` for
+   a change authored by the registry's reviewer provider returns a different
+   provider, and fails by name when no other provider carries the role; a test
+   asserts both. `bin/sd-review` contains no provider table, `sd-review.json`
+   contains no key ending in `_providers`, and every provider name in its
+   tiers resolves against the registry on a machine that has one.
 7. The seven `mezmo-world-simulator` passes are scored, accepted against
    rejected per pass, and the scores are recorded on this item before the code
    review point runs on any new pull request.
@@ -675,3 +697,10 @@ are filed as rows on this item once B's library exists, and in the log before.
     21 removes the sweep, so that item is superseded when this one lands. The
     finding is recorded on that item's Log so it survives if the sweep outlives
     this item. Not addressed here.
+- **2026-09-05** — Two gaps recorded from the operator's question on code
+  review. First: the registry is static, so a Codex-authored change would
+  have resolved `reviewer` to Codex. Resolution now takes the author into
+  account and falls through to the next provider carrying the role.
+  Second: `bin/sd-review` and `.github/sd-review.json` each carried their own
+  provider list beside the registry. The registry owns providers; the other
+  two keep policy only. Requirement 3 and criterion 6.
