@@ -248,18 +248,23 @@ flight. Whichever provider authored, a single-name `reviewer` line would
 resolve to the vendor that wrote the code. So resolution takes the author into
 account: the reviewer is the first entry on the `reviewer` list whose vendor
 is not the author's, and the library refuses by name when none differs. Under
-the runner the assignment row names the author. Outside it the author is an
-input: `sd-ship` and `sd-review` take `--author <provider>` or
-`--author human`, defaulting to `SD_AUTHOR`, which the runner and B's
-terminal wrapper set for every session they start. `sd-ship` stamps each
-commit it makes with an `Authored-with: <name>` trailer. Reviewer resolution
-walks every commit in the reviewed range, the branch since its base, and
-builds the set of authors: each commit's trailer where it has one, and the
-declared author, `--author` or `SD_AUTHOR`, for every commit that has none.
-A trailer on some commits says nothing about the others, since only
-`sd-ship` stamps them and an interactive session commits without one, so a
-range with an untagged commit and no declaration is refused naming that
-commit and the flag, not reviewed on the strength of the tagged ones. The
+the runner the assignment row names the author. Outside it the author is
+an input at commit time and never at review time: `sd-ship` takes
+`--author <provider>` or `--author human`, defaulting to `SD_AUTHOR`, which
+the runner and B's terminal wrapper set for every session they start, and
+stamps each commit it makes with an `Authored-with: <name>` trailer.
+Reviewer resolution walks every commit in the reviewed range, the branch
+since its base, and builds the set of authors from what each commit
+carries: its trailer, or a note under `refs/notes/sd-author` that `sd
+attribute <sha> <name>` writes for a commit made without one, which the
+operator runs per commit and which travels with the branch, pushed with
+it and read by CI and by the merge row. A commit with neither is refused
+naming the commit and the command, not reviewed on the strength of the
+tagged ones, and no flag or variable at review time attributes history:
+a session's identity says who is working now, not who wrote an older
+commit, and a handoff from one agent to another is ordinary, so a review
+that took `--author` for the whole range would let the first agent review
+its own untagged work under the second's name. The
 reviewer is the first entry whose vendor is in no member of the set, so a
 branch two providers wrote is reviewed by a third or refused; a set that is
 `human` alone is reviewed by the first entry, and `human` beside a provider
@@ -439,8 +444,9 @@ writes `status: done` into the mirror and deletes the directory when it is
 clean, below, as a second pull request through the same merge path and
 never a direct push: the default branch is protected in every repository
 the pack merges into, by the operator's decision on 2026-09-05, pull
-requests only and CI required, with no required approvals because there is
-no second person to give one. `sd-status` reports those three settings, an
+requests only, CI required, branches up to date with the default branch
+before they merge, and no required approvals because there is no second
+person to give one. `sd-status` reports those four settings, an
 unattended merge into a default branch that does not require pull requests
 and CI refuses naming the setting, and a ship the operator runs by hand is
 warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the mark a run that restarts after the
@@ -497,7 +503,17 @@ stays. When all of that holds, the deletion is `git rm -r` of those
 tracked paths and nothing else. When it does not, the directory stays with
 its mirror at `done`, and the closure commit's message and `sd-ship` name
 the untracked, ignored or modified files, or the files that link in. Git
-history holds what is deleted.
+history holds what is deleted. The scan on the closure branch sees the
+tree as it was when the branch was cut, and a pull request merged after
+that can add a reader the scan never saw, so the scan also runs where the
+tree is current: `sd-docs-lint` gains a rule, every link and literal path
+into `docs/work/` from a tracked file resolves to a path that exists, and
+required CI runs it on the pull request's merge ref, the prospective
+merged tree. The protection's up-to-date requirement refuses a closure
+pull request cut before the default branch moved until it carries the
+move, the update reruns the rule on the merged tree, and a failure sends
+the closure back rather than through: `sd-ship` re-cuts it from the
+current default branch with the directory kept and the new reader named.
 `docs/work/archive/` and its 941 files are removed in one commit that names
 `46ec7fb85` as the commit that recovers any of them. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
@@ -865,10 +881,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    `codex` trailer resolves to the first entry of neither vendor; a branch
    with no trailer and no `--author` is refused naming the flag; a branch
    with one untagged commit followed by one `Authored-with: codex` commit
-   is refused naming the untagged commit when nothing declares its author,
-   and with `--author claude` resolves to the first entry of neither
-   vendor; `--author human` on an untagged branch resolves to the first
-   enabled entry. Consent at install: the installer writing the block for
+   is refused naming the untagged commit and `sd attribute`, and after
+   `sd attribute <sha> claude` resolves to the first entry of neither
+   vendor, with the note asserted present on the fixture remote after the
+   push; `sd attribute <sha> human` on an untagged branch resolves to the
+   first enabled entry; `sd-review --author claude` is refused as not a
+   review flag, and `SD_AUTHOR=codex` in the review's environment changes
+   nothing about an untagged commit. Consent at install: the installer writing the block for
    a fixture repository with a two-entry registry asks once and writes the
    answered entries as the `reviewers` line, writes no line for an empty
    answer, and on a rerun keeps the line it finds and asks nothing; a
@@ -966,7 +985,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     relative link `work/<item>/design.md` in a fixture `docs/guide.md`,
     and `../<item>/prd.md` in a sibling item's `prd.md`, each keep the
     directory and are named, and a link to a different item's directory
-    that merely shares a prefix does not. A
+    that merely shares a prefix does not. A test cuts the closure, then
+    merges a second pull request that adds a link into the item's
+    directory, and asserts the closure pull request fails the lint rule on
+    the merged tree, is re-cut from the current default branch, keeps the
+    directory, and names the new reader; the fixture remote is asserted to
+    require branches up to date, and `sd-status` to report four settings. A
     fourth ships under the default policy to `ready_to_send`,
     merges the pull request by hand on the fixture remote, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
@@ -1474,3 +1498,18 @@ from a number the operator types.
     markdown links are resolved against their source file's directory and
     any that land under the item's directory keep it, beside the literal
     grep. Criterion 13 tests both relative forms and a prefix near-miss.
+- **2026-09-05** — Planning review, round fourteen of thirty: two blocking
+  findings, both addressed.
+  - C-27, requirement 5: the reader scan ran on the closure branch's
+    checkout, cut from the merge commit, so a link added to the default
+    branch after that was never seen and the deletion merged cleanly
+    around it. Addressed: `sd-docs-lint` gains a rule that every link
+    into `docs/work/` resolves, required CI runs it on the merge ref, the
+    protection requires branches up to date, and a failing closure is
+    re-cut with the directory kept. Four protection settings now.
+  - C-28, requirement 5: `--author` and `SD_AUTHOR` attributed every
+    untagged commit in the range at review time, so a handoff let the
+    first agent review its own untagged work under the second's name.
+    Addressed: authorship is recorded at commit time only, by trailer or
+    by a note `sd attribute <sha> <name>` writes; review takes no author;
+    a commit with neither is refused naming the command. Criterion 6.

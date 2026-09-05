@@ -67,8 +67,9 @@ These run without being asked.
   lands the item's closure commit on the default branch, and runs
   `git fetch -p`. The repository setting `delete_branch_on_merge` removes
   the remote branch.
-- The default branch is protected: pull requests only, CI required, no
-  required approvals. `sd-status` reports it, the dashboard sets it in one
+- The default branch is protected: pull requests only, CI required, branches
+  up to date before they merge, no required approvals. `sd-status` reports
+  it, the dashboard sets it in one
   action on a repository you own, and an unattended merge into a branch
   that is not refuses naming the setting.
 - `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
