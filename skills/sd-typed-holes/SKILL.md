@@ -155,12 +155,12 @@ the bodies that get filled are not — does not survive contact with step 2,
 which also lands derives, `From`/`Into` impls, and trivial accessors
 implemented rather than held open. Each of those has a real body and real
 runtime semantics, and a getter returning the wrong same-typed field compiles
-and passes clippy. The safety rules below already say a green skeleton shows
+and passes clippy. This skill's safety rules already say a green skeleton shows
 the design composes and not that behavior is correct. Writing the boundary
 precisely enough to be followed was tried and failed review three times, so it
 is named as an open question rather than stated wrongly a fourth.
 
-Four rules below look arbitrary and are each a corrected error, from the
+Four of the rules above look arbitrary and are each a corrected error, from the
 review rounds that followed the original: `419f9131`, `10b32167`, `78f3dc2b`
 and `037d6137`. They fixed a skeleton gate that demanded every body still be a
 hole while also demanding trivial accessors be implemented; two cases where

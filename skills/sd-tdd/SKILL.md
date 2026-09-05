@@ -131,9 +131,16 @@ recorded here rather than guessed at a third time.
   module you have not written fails with an import error, which step 4 rejects
   as a broken test rather than an absent behaviour — but creating the module is
   production code the gate forbids. Every rule tried for telling those two
-  apart admitted something it should have rejected. Until one holds, use
-  judgement, write the least scaffolding that lets the test speak, and say in
-  the report what you created before the red step and why.
+  apart admitted something it should have rejected.
+
+  So this section states the tension and does not resolve it, because a rule
+  written here would have to authorise production code before valid red, and
+  the gate above is absolute. **When you hit this, stop and ask.** Say what the
+  test needs in order to run, what creating it would mean under the gate, and
+  let the user decide — the same move the first safety rule makes for a
+  proposed rewrite. Whatever is agreed goes in the report under
+  **Scaffolding**, with the fact that the gate was consulted rather than
+  quietly read past.
 - **Recovering the evidence for a test written late.** Reverting the change and
   watching the test fail is the obvious move and this skill does not endorse
   it: reverting proves the test is sensitive to the behaviour but not that it
@@ -181,8 +188,14 @@ recorded here rather than guessed at a third time.
 - Never characterise whoever wrote the untested code. The absent test is the
   subject.
 - Honor stop and scope limits immediately. A bound closes the session at
-  whatever was actually established — `partial` with the unproven changes
-  named, never `disciplined`.
+  whatever was actually established, and the closing state is still the one
+  step 9 counts out — a bound does not change any change's classification. The
+  behaviours the bound left unreached are **Deferred**, not `unproven`: nothing
+  was written for them, so there is no production change to be unproven. A
+  session whose completed cycles were all proven closes `disciplined` with a
+  Deferred list, which is the honest report; what a bound must never do is
+  license reporting an unproven change as proven, or leaving an unproven one
+  out of the count to reach a better word.
 
 ## Final report
 
