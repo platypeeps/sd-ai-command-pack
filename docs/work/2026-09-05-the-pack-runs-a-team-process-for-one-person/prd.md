@@ -398,11 +398,16 @@ plus the entry's `max_tokens` at the entry's price, and reserves it against
 the bill in one transaction with the month's settled and still-reserved
 rows, as B's requirement 6 specifies; a bound that would carry the month
 past the cap is refused before anything is sent, so two calls racing for
-the last dollar cannot both go. A `start` entry on a capped bill makes
-its own calls, so it carries `session_bound_usd`, the most one session
-may cost, which the library reserves at session start and settles from
-the usage read, from B's round thirty-three; the reader refuses a
-`start` entry on a capped bill without it. The reservation settles to the real
+the last dollar cannot both go. A `start` entry makes its own calls, and
+no number the library holds stands in front of them, so a capped bill
+takes `url` entries only: the registry reader refuses a `start` entry
+whose bill carries a cap, naming the entry and the bill, from B's round
+thirty-four, which overturns the session bound of round thirty-three
+because a declared bound is a guess a retry passes. The operator points
+such an entry at the vendor's endpoint as a `url` entry, so the library
+makes the calls, or takes the cap off the bill, which makes the number
+an alert. Today both entries on `baseten`, `prism` and `gito`, are
+`url` entries, so the rule changes nothing. The reservation settles to the real
 cost after. At the cap, fallthrough skips every provider on that bill,
 direct choice refuses by name with the month's total, reserved included,
 and Today shows spend against cap. The dashboard raises the cap in one action, and it enables, disables and
@@ -553,11 +558,28 @@ identity stays that branch, `rev` moves to the closure commit, and the
 upstream squash commit is recorded on the row as the merge and never as
 `rev`, from A's round eighteen, so that the guard is never asked to find
 a mirror in a tree that was built to hold none.
-So `main`, every database-free checkout and CI read `done` within one commit
-of the merge, and before that they read the last true state, never a false
-one. Every reader that picks an item, `sd-review --scope planning` among
-them, excludes a `done` mirror, so a closed item is never the "single open
-item" of a checkout that has no database. Until B's library exists the
+The closure is not what a reader waits on, from A's round twenty-one.
+The merge message `sd-ship` hands the API carries an `Item: <item>`
+trailer, so the commit that delivers the item marks it on the default
+branch in the same act, and a reader with no database derives `done`
+from git before any closure exists: one function, `sd_lib.delivered`,
+answers yes when a commit reachable from the default branch carries
+`Item: <item>` or `Closes: <item>`, and every reader that picks an item,
+`sd-review --scope planning` and `sd-plan` among them, excludes a
+delivered item as it excludes a `done` mirror, so a closed item is never
+the "single open item" of a checkout that has no database, and a red CI
+run on the closure branch delays nothing that selects. The two trailers
+stay distinct because the restart rule above looks for `Closes:` to know
+a closure landed. What the closure still does is put the word in the
+file, for a reader that has the file and not the history, the
+dashboard's artifact render, a shallow clone, CI on one path, and the
+guest fork; that lands within one closure merge, unbounded while its CI
+is red, shown as `closure pending` on the row from D's round one, and
+nothing selects on it. The residue is a merge the operator makes by
+hand, whose message carries no trailer: that item stays selectable in a
+database-free checkout until the closure lands, which is the one case
+the closure bounds, and the row is `done` from the moment the merge is
+confirmed. Until B's library exists the
 frontmatter is the only copy, and the switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
@@ -1081,7 +1103,13 @@ confirmed by the next `sd-ship` run alone.
     merge, then reads the default branch with no database and asserts the
     closure commit is there, the mirror says `done`, `sd-status` reports it
     done, and `sd-review --scope planning` in that checkout does not pick
-    it and, with no other item open, refuses naming none. A test rejects
+    it and, with no other item open, refuses naming none; the same test
+    with CI red on the closure branch asserts the merge commit carries
+    `Item:`, `sd_lib.delivered` answers yes, `sd-review --scope planning`
+    and `sd-plan` in a fresh clone of the default branch do not pick the
+    item though its mirror still says `in_progress`, and the row shows
+    `closure pending`; and a hand merge through the fixture remote with
+    no trailer is picked until the closure lands. A test rejects
     the merge, and another kills `sd-ship` after the push, and both assert
     that the branch's mirror never says `done`, the item is still picked,
     the directory is untouched, and the row is not `done`; a third
@@ -1769,3 +1797,19 @@ from a number the operator types.
 - **2026-09-05** — B's C-59, cross-item: a `start` entry on a capped bill
   carries `session_bound_usd`, reserved at session start; the reader
   refuses one without it. Requirement 3's cap passage.
+- **2026-09-05** — Planning review, round twenty-one of forty, the first
+  on this item alone: two blocking findings, addressed.
+  - C-43, requirement 3: the session bound of B's round thirty-three was a
+    reservation and not a limit; a subprocess that retries or takes one
+    more turn passes it with the money spent, and settling the usage read
+    finds the cap broken after the fact. Addressed as B's C-60, the same
+    finding: a capped bill takes `url` entries only, the reader refuses a
+    `start` entry on one naming both, and `session_bound_usd` is gone.
+    Today both `baseten` entries are `url` entries.
+  - C-44, requirement 5: the closure pull request was the only path by
+    which a database-free reader learned an item was delivered, and its
+    convergence had no bound while closure CI was red. Addressed: the
+    merge message carries an `Item:` trailer, `sd_lib.delivered` derives
+    `done` from the default branch's history, every picker excludes a
+    delivered item, and the closure is left with putting the word in the
+    file; the hand-merge residue is stated. Criterion 13.
