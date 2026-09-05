@@ -64,8 +64,7 @@ These run without being asked.
 - CI runs on the pull request. The merge waits for CI and nothing else.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
   for CI once in the background, merges with an explicit title and body
-  whose trailer names the item, and runs `git fetch -p`; the next ship in
-  that repository puts `done` into a delivered item's file. The repository
+  whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
 - The default branch is protected: pull requests only, CI required, branches
@@ -86,9 +85,9 @@ These run only when asked by name.
 - A work item under `docs/work/<date>-<slug>/prd.md`. Create one when the
   work spans more than one session or more than about 300 changed lines.
   `design.md` and `implement.md` exist only when you ask for them. Status lives
-  on the item's row; the file's `status:` line is a mirror the library writes
-  in the checkout on the item's branch, for checkouts and CI runners that have
-  no database. `ready_to_send` marks a finished artifact waiting on you.
+  on the item's row and nowhere in the file; a checkout or CI runner with no
+  database asks git whether the item is delivered, by the merge trailers, and
+  nothing else. `ready_to_send` marks a finished artifact waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.
@@ -161,15 +160,16 @@ makes carries `Item: <item>` in its message, which ties the commit to
 the item and closes nothing: after it, whether `sd-ship` made it or you
 did, and a merge you make is confirmed by the runner's watch on the pull
 request or by the next `sd-ship` run here, the squash commit goes on a
-note, `rev` stays with the branch, and the item stays open. The one
+note, and the item stays open. The one
 merge that delivers carries `Delivers: <item>` as well: `sd-ship
 --deliver`, the runner on a row you marked final, or your own hand in
 the merge message; for a hand merge without it, the item screen's
 `deliver` does the same after the fact. On that merge, and on no other,
-the row is `done`. No pull request follows for the status line: the next
-commit `sd-plan` or `sd-ship` makes in that repository refreshes the file
-to `done` and carries `Closes:` for it, so `main` and CI read it without
-the database; the directory stays.
+the row is `done`, nothing is written into a file, and the directory
+stays. A delivered item that got no `Delivers:` of its own, a hand merge
+you delivered after the fact or a cancel, is marked by the next merge
+message `sd-ship` writes here, or by one empty commit on its own branch
+when the triad never left it.
 A reader with no database asks git first: a `Delivers:` or `Closes:`
 commit on the default branch means delivered, an `Item:` commit alone
 means nothing, and a shallow clone that cannot tell says so and picks
@@ -181,7 +181,7 @@ request waited, `sd-ship` merges it in once, reviews the combined head
 once, spends no pass on it, waits for CI and merges; moved again, the run
 stops at `ready_to_send` and says so, and the next run makes the next
 update. A conflict ends the item `blocked` naming the files. In `guest`
-mode the closure is one commit on the fork's integration branch, where
+mode the mark is one empty commit on the fork's integration branch, where
 the triad lives, and nothing goes upstream.
 
 ## Modes
