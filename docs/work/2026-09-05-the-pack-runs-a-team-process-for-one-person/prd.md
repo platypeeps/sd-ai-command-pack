@@ -240,8 +240,8 @@ it marks the item `blocked`. `sd-ship` pushes a head that is the reviewed head
 or a verified fix of it, and nothing else; a further commit waits for the
 operator to ask for a pass by name. That rule governs the author's
 changes. The base's changes are governed by another, because the default
-branch moves while a pull request waits, another item's merge or its
-closure, and the protection then refuses the pull request until it
+branch moves while a pull request waits, another item's merge, and the
+protection then refuses the pull request until it
 carries the move: an integration update, the default branch merged into
 the branch with nothing else in the commit, is not a fix and spends no
 pass, and it is bounded, from A's rounds seventeen and eighteen and B's
@@ -526,17 +526,23 @@ commands that commit item files, `sd-plan` and `sd-ship`, in the checkout
 they run in, so there is no dual write and no checkout that has to exist.
 Between commits the mirror is stale by design. Every mirror write, those two
 and `sd mirror refresh <item>`, first checks that the checkout's `HEAD`
-contains `rev`; if it does not, the write refuses and names both commits,
+contains `rev`, or, from A's round thirty-one, contains the newest
+squash commit the row noted from a slice merge, in which case the write
+moves `rev` to `HEAD` itself and notes the transition, because a slice
+cut fresh from the updated default branch contains the squash and not
+the branch, and the squash came from the item's own confirmed merge, so
+that commit verifies the checkout as the item's; if neither, the write
+refuses and names the commits,
 and `sd mirror refresh --rebind <item>` accepts the checkout's `HEAD` as the
 new identity and records a note saying so. After a write, `rev` is the new
-commit. The merge is the one transition the guard has to be told about,
+commit. The delivering merge is the one transition the guard has to be told about,
 because `sd-ship` squash-merges and a squash commit does not contain the
-branch's `rev`: on the confirmed merge, `sd-ship` reads the merge commit
+branch's `rev`: on the confirmed delivering merge, `sd-ship` reads the merge commit
 from the pull request, GitHub's `merge_commit_sha`, and in the same step
 that sets the row `done` it sets the row's branch to the default branch and
-`rev` to that commit, with a note naming the old pair. The closure commit
-is then an ordinary mirror write, on a `HEAD` that contains `rev`, made on
-a closure branch cut from that commit, and no `--rebind` is ever needed on
+`rev` to that commit, with a note naming the old pair, so that the next
+mirror write in that repository, on a `HEAD` that contains it, passes
+the guard, and no `--rebind` is ever needed on
 the happy path. In a checkout on the
 item's branch whose `HEAD` contains `rev`,
 `sd_lib.py` and `sd-docs-lint` compare row and mirror and report a
@@ -549,10 +555,21 @@ read the mirror alone. `done` reaches the mirror after the merge is
 confirmed and never before: the branch's own mirror never says `done`, so a
 rejected merge, a failed CI run or a ship killed after the push leaves the
 item exactly as open and as selectable as it was. Once `sd-ship` has
-confirmed the merge it lands one closure commit on the default branch that
-writes `status: done` into the mirror and changes nothing else, as a
-second pull request through the same merge path and
-never a direct push: the default branch is protected in every repository
+confirmed the delivering merge the row is `done`, and the word reaches
+the file with the next commit `sd-plan` or `sd-ship` makes in that
+repository, which refreshes every mirror whose row is `done` and whose
+file is not, one status line each, and carries `Closes: <item>` for
+each in its message, from A's round thirty-one; that commit is the
+closure, and there is no closure pull request. Rounds nineteen to
+thirty had one, a status-only pull request through the merge path after
+every delivery, and it cost a CI-and-merge cycle per item, moved the
+protected default branch under every other open pull request, which
+the up-to-date rule then sent through an integration update each, and
+left a retry obligation while its CI was red, all to put in a file a
+word that `sd_lib.delivered` already reads from the delivering commit;
+the operator's decision of 2026-09-05 that the closure is the one merge
+the operator does not make by hand is moot with it. Nothing here pushes
+to the default branch: the default branch is protected in every repository
 the pack merges into, by the operator's decision on 2026-09-05, pull
 requests only, CI required, branches up to date with the default branch
 before they merge, and no required approvals because there is no second
@@ -564,13 +581,9 @@ merge and not after, requirement 3. `sd-status` reports those four
 settings, an
 unattended merge into a default branch that does not require pull requests
 and CI refuses naming the setting, and a ship the operator runs by hand is
-warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the mark a run that restarts after the
-merge looks for on the default branch so that it never lands a second one;
-and the closure branch is `closure/<item>` and nothing else, so that a run
-that restarts after the closure pull request was opened and before it was
-merged finds it by its head and finishes it, waits for CI and merges, rather
-than opening a second one or failing on the branch it already pushed, from
-B's round nineteen. An item is not one pull request: the landing order
+warned, not stopped. A run that restarts after the delivering merge
+finds the row `done` and the trailer on the default branch, and has
+nothing further to land. An item is not one pull request: the landing order
 below splits this one into slices, and a merge is a delivery only when
 it says so, from A's round twenty-three. Every merge `sd-ship` makes
 carries `Item: <item>`, which associates the commit with the item and
@@ -590,19 +603,18 @@ the next merge, which is where it is needed. Only the delivering merge
 moves `rev` and the branch. `sd-ship` says so in its last line, naming
 `--deliver` for
 next time. The row turns `done` on the confirmed merge that carries
-`Delivers:` and records the closure commit when it lands; a `done`
-row without one is what the next `sd-ship` run in that repository finishes.
+`Delivers:` and records the closure when a later commit refreshes its
+mirror; a `done` row without one is what the next `sd-ship` run in
+that repository finishes, in its own commit.
 A `cancel`, item B's requirement 1, is the other way a work item ends,
 and it has a path of its own, from B's round forty-one and A's round
 twenty-eight: it writes `done` with a `cancelled` note in the row, and
-where the default branch holds the item's mirror it lands a
-cancellation closure cut from the default branch's head and never
-from the item's branch, `closure/<item>` with `Closes:`, whose diff is
-the mirror's status line and the note and nothing else, so that
-nothing of the abandoned branch rides in on a pull request that
-merges on its own; the `rev` guard does not apply to it, because it
-writes the default branch's mirror and not the branch's, and `rev`
-moves to it when it lands. Where the default branch holds no mirror,
+where the default branch holds the item's mirror it sets the row's
+branch to the default branch and `rev` to its head, with a note naming
+the old pair, so that the next mirror-refreshing commit in that
+repository carries the word and the note into the file with `Closes:`
+as a delivered item's does, and nothing of the abandoned branch reaches
+the default branch. Where the default branch holds no mirror,
 the triad lives on the item's branch alone, and that branch is a
 checkout somebody can open with no database, whose mirror says the
 item is open and whose default-branch history carries no trailer, so
@@ -623,16 +635,12 @@ runner, which watches every `ready_to_send` item's pull request, or the
 next `sd-ship` run in that repository before D exists, and the same step
 follows when the merge message carries `Delivers:`, which a hand merge
 carries when the operator wrote it: the row `done`, `rev` moved, the
-closure by a second pull request; without it, `rev` stays, the squash
+word for the file with the next mirror write; without it, `rev` stays, the squash
 commit goes on a note, the item
 stays open, and the item screen offers `deliver` for a merge that was
-the last one, which writes `done` and lands the closure as a
+the last one, which writes `done` as a
 `Delivers:` merge would have.
-That closure pull request merges on its own under both policies once CI
-passes and the three answers hold, because it carries the item's own mirror
-and nothing a provider wrote; under the default policy it is
-the one merge the operator does not make by hand, by the operator's
-decision on 2026-09-05. Under `mode: guest` the mirror never was in the
+Under `mode: guest` the mirror never was in the
 merged tree: the triad lives on the fork's integration branch,
 requirement 6, so the closure is one commit on that branch, pushed to the
 fork, with no pull request and nothing upstream; the row's branch
@@ -656,19 +664,20 @@ item, `sd-review --scope planning` and `sd-plan` among them, excludes a
 selectable, refusing by name with the boundary and `git fetch
 --unshallow` as the repair, since a reader that cannot establish
 delivery must not restart delivered work; so a closed item is never the
-"single open item" of a checkout that has no database, and a red CI
-run on the closure branch delays nothing that selects. The two trailers
-stay distinct because the restart rule above looks for `Closes:` to know
-a closure landed. What the closure still does is put the word in the
-file, for a reader that has the file and not the history, the
-dashboard's artifact render, a shallow clone, CI on one path, and the
-guest fork; that lands within one closure merge, unbounded while its CI
-is red, shown as `closure pending` on the row from D's round one, and
-nothing selects on it. The residue is an item delivered with no
-`Delivers:` in git, the item screen's `deliver` after a hand merge: the
-row is `done` from that moment, and a database-free checkout still
-picks the item until the closure's `Closes:` lands, which is the one
-case the closure bounds. Until B's library exists the
+"single open item" of a checkout that has no database. The two trailers
+stay distinct: `Delivers:` is written by the merge that delivered, and
+`Closes:` by the commit that put the word in the file, after a delivery,
+a cancellation, or a `deliver` after the fact. The word in the file is
+for a reader that has the file and not the history, the dashboard's
+artifact render, a shallow clone, CI on one path, and the guest fork;
+it lands with the next mirror-refreshing commit in that repository,
+shown as `closure pending` on the row until then, from D's round one,
+and nothing selects on it. The residue is an item delivered with no
+`Delivers:` in git, the item screen's `deliver` after a hand merge, and
+an item cancelled with its mirror on the default branch: the row is
+`done` from that moment, and a database-free checkout still picks the
+item until a commit carrying `Closes:` lands, bounded by the next ship
+in that repository, which `sd-status` names while it waits. Until B's library exists the
 frontmatter is the only copy, and the switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
@@ -1235,9 +1244,9 @@ confirmed by the next `sd-ship` run alone.
     collaborator named, the row still `merge: auto`, and the remote asked at
     merge time rather than at dispatch. An unattended merge against a
     fixture remote whose default branch does not require pull requests
-    refuses naming the setting, and every closure in the tests above lands
-    by a pull request, asserted by the fixture remote seeing no push to the
-    default branch. All three modes appear in `README.md`.
+    refuses naming the setting, and no test above pushes to the default
+    branch, asserted by the fixture remote seeing none. All three modes
+    appear in `README.md`.
 12. `README.md`'s writes-nothing claim names the installer as its subject and
     lists the skills that write tracked files.
 13. Once B's library exists: on a machine with the database, in a checkout on
@@ -1252,11 +1261,12 @@ confirmed by the next `sd-ship` run alone.
     `rev` and asserts that `sd mirror refresh` refuses naming both commits,
     that the lint reports the checkout as behind and does not compare, and
     that `--rebind` proceeds and writes a note. A test ships an item with
-    `--deliver`, then reads the default branch with no database and asserts the
-    closure commit is there, the mirror says `done`, `sd-status` reports it
+    `--deliver`, ships a second item, then reads the default branch with
+    no database and asserts the second ship's commit carries `Closes:`
+    for the first, the first's mirror says `done`, `sd-status` reports it
     done, and `sd-review --scope planning` in that checkout does not pick
     it and, with no other item open, refuses naming none; the same test
-    with CI red on the closure branch asserts the merge commit carries
+    before the second ship asserts the merge commit carries
     `Item:`, `sd_lib.delivered` answers yes, `sd-review --scope planning`
     and `sd-plan` in a fresh clone of the default branch do not pick the
     item though its mirror still says `in_progress`, and the row shows
@@ -1264,19 +1274,22 @@ confirmed by the next `sd-ship` run alone.
     trailer leaves `rev` and the row `in_progress`, notes the squash
     commit, lands no closure
     and is still picked, and after `deliver` on the item screen the row
-    is `done`, the closure lands, and the item is picked in a
-    database-free checkout only until it does; two slices shipped in
+    is `done`, the next ship of another item in that repository carries
+    the closure with `Closes:` for it, and the item is picked in a
+    database-free checkout only until that lands; two slices shipped in
     turn, the first without `--deliver`, leave the row `in_progress`
     after the first with `rev` unmoved and the squash commit on a note,
     no closure, `delivered` answering
     `no` on an `Item:` merge, and the item still picked, the second
     slice continued on the same branch with no rebase and its mirror
     refresh passing the guard without `--rebind`, and after the
-    second with `--deliver` the row is `done` and the closure lands; the
+    second with `--deliver` the row is `done` and the fixture remote saw
+    one pull request per slice and no third; the
     same with the second slice prepared in a second worktree of the
     branch before the first merges, and the same with the second slice
     cut fresh from the updated default branch, all three passing the
-    guard without `--rebind`; and
+    guard without `--rebind`, the fresh one by the noted squash commit
+    with `rev` moved to its head and a note saying so; and
     a clone of the
     default branch at depth one, taken after one more commit lands past
     the merge, has `sd_lib.delivered` answer `unknown`, `sd-review
@@ -1285,24 +1298,30 @@ confirmed by the next `sd-ship` run alone.
     the merge, and another kills `sd-ship` after the push, and both assert
     that the branch's mirror never says `done`, the item is still picked,
     the directory is untouched, and the row is not `done`; a third
-    confirms a `--deliver` merge and kills `sd-ship` before the closure, and asserts
-    the row is `done` without a closure commit and the next `sd-ship` run
-    lands it; a fourth cancels, from item B's screen, an item whose first
+    confirms a `--deliver` merge and kills `sd-ship` at once, and asserts
+    the row is `done`, the default branch's mirror still says
+    `in_progress`, `delivered` answers `yes`, and the next `sd-ship`
+    commit in that repository refreshes the line with `Closes:` in its
+    merge message; a fourth cancels, from item B's screen, an item whose first
     slice merged and whose second lives on its branch with three
-    implementation commits, and asserts the closure is cut from the
-    default branch, its diff is one file and the status line with the
-    note, none of the three commits is in the default branch's history
-    after it lands, and no `Delivers:` is anywhere in it; a cancel of an
+    implementation commits, and asserts no pull request is opened, the
+    row's branch is the default branch, the next ship of another item
+    carries the status line and the note with `Closes:` for it, none of
+    the three commits is in the default branch's history, and no
+    `Delivers:` is anywhere in it; a cancel of an
     item whose triad exists on its branch alone lands no closure on the
     default branch, which is unchanged, and writes one commit on the
     branch whose diff is the status line and the note with `Closes:`
     in its message, `rev` that commit; and in both cases a database-free
     checkout of the retained branch runs `sd-review --scope planning`
-    and `sd-plan` and neither picks the item; a fifth kills `sd-ship` after the closure pull request is
-    opened and before it is merged, and asserts the next run merges that
-    pull request, opens no second one, and one closure commit exists. A
-    test ships an item with `--deliver` and asserts the closure commit touched one
-    file, the item's `prd.md`, and one line of it; the fixture remote is
+    and `sd-plan` and neither picks the item; a fifth kills `sd-ship`
+    mid-commit while it refreshes another item's mirror, and asserts the
+    next run carries the same refresh once and the fixture remote saw
+    no second pull request for it. A
+    test ships an item with `--deliver`, ships a second item, and asserts
+    the second ship's commit touched one line of the first item's
+    `prd.md` beyond its own paths and its merge message carries `Closes:`
+    for the first; the fixture remote is
     asserted to require pull requests, CI and branches up to date, and
     `sd-status` to report four settings. A test moves the fixture's
     default branch after the review and asserts one integration update,
@@ -1319,16 +1338,16 @@ confirmed by the next `sd-ship` run alone.
     merges the pull request by hand on the fixture remote with
     `Delivers: <item>` written in the merge message, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
-    the squash commit and the closure landed by a second pull request the
-    path merged after CI with no hand; the same hand merge without the
+    the squash commit and no second pull request was opened; the same hand merge without the
     trailer leaves the row `in_progress` with `rev` unmoved and no
     closure, and the item screen's `deliver` then writes `done` and
     lands it; the delivering case on a fixture remote that
-    gained a collaborator leaves the closure pull request open and named.
+    gained a collaborator leaves the row `done`, the merge confirmed, and
+    nothing further to merge.
     Every merge test above merges with an actual squash merge and
     asserts that after a delivering merge the row's `rev` is the squash
     commit and after a slice merge it is unmoved, that the
-    closure write passed the guard without `--rebind`, and that a checkout
+    later mirror refresh passed the guard without `--rebind`, and that a checkout
     of the merged default branch is not reported as behind. Tests cover all
     five, the merge and the closure. The pack's installer installs B's
     `sd_db` into the pack's virtualenv as a built copy at the system
@@ -2146,3 +2165,28 @@ from a number the operator types.
 - **2026-09-05** — Cross-item change from B's round forty-five, C-77:
   the installer installs `sd_db` as a built copy at the system checkout's
   tag, never editable. Criterion 13 follows.
+- **2026-09-05** — Planning review, round thirty-one of forty: two
+  blocking findings, addressed. The first run of this round timed out in
+  the provider and was rerun with a longer timeout.
+  - C-60, requirement 5: with `rev` left on the branch after a slice
+    merge, a second slice cut fresh from the updated default branch
+    contained the squash and not `rev`, so the guard refused what
+    criterion 13 said passes. Addressed: the guard also accepts a `HEAD`
+    that contains the newest squash commit the row noted, the item's own
+    confirmed merge, and moves `rev` to it with a note. Criterion 13's
+    fresh-slice case says so.
+  - C-61, requirement 5: the closure was a status-only pull request after
+    every delivery, a second CI-and-merge cycle per item that moved the
+    protected default branch under every other open pull request and
+    left a retry obligation while red, to put in a file a word the
+    delivering commit's trailer already carries. Addressed: no closure
+    pull request; the next commit `sd-plan` or `sd-ship` makes in the
+    repository refreshes every `done` mirror and carries `Closes:` for
+    each, cancellation on the default branch rides the same way, the
+    guest fork's one commit and the branch-only cancel commit stay, and
+    the residue is bounded by the next ship and named by `sd-status`.
+    Criterion 13 asserts one pull request per slice and no third, the
+    refresh in a later ship, and the killed-ship cases; criterion 11's
+    closure assertion becomes no push to the default branch. Items B and
+    D follow; the operator's decision that the closure is the one merge
+    not made by hand is moot and recorded so.

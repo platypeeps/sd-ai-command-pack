@@ -64,9 +64,9 @@ These run without being asked.
 - CI runs on the pull request. The merge waits for CI and nothing else.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
   for CI once in the background, merges with an explicit title and body
-  whose trailer names the item, lands the item's closure commit on the
-  default branch when the merge delivered the item, `--deliver`, and runs
-  `git fetch -p`. The repository setting `delete_branch_on_merge` removes
+  whose trailer names the item, and runs `git fetch -p`; the next ship in
+  that repository puts `done` into a delivered item's file. The repository
+  setting `delete_branch_on_merge` removes
   the remote branch.
 - The default branch is protected: pull requests only, CI required, branches
   up to date before they merge, no required approvals. `sd-status` reports
@@ -166,12 +166,10 @@ merge that delivers carries `Delivers: <item>` as well: `sd-ship
 --deliver`, the runner on a row you marked final, or your own hand in
 the merge message; for a hand merge without it, the item screen's
 `deliver` does the same after the fact. On that merge, and on no other,
-the row is `done` and `sd-ship` lands one closure commit on the default
-branch by a second pull request, never a direct push, because the
-default branch is protected, and that second pull request merges on its
-own under both policies once CI passes, since it carries only the item's
-own mirror; it writes `done` into the mirror so that `main` and CI read
-it without the database, and touches nothing else: the directory stays.
+the row is `done`. No pull request follows for the status line: the next
+commit `sd-plan` or `sd-ship` makes in that repository refreshes the file
+to `done` and carries `Closes:` for it, so `main` and CI read it without
+the database; the directory stays.
 A reader with no database asks git first: a `Delivers:` or `Closes:`
 commit on the default branch means delivered, an `Item:` commit alone
 means nothing, and a shallow clone that cannot tell says so and picks
