@@ -85,9 +85,11 @@ What the gate never accepts is a test that has only ever been seen to pass.
    rather than the test being broken. If it is the test that is broken, fix it
    and run again. If it **passes**, the behaviour already exists or the test
    does not reach it — stop and find out which before writing code. A
-   behaviour that turns out to already exist is recorded under **Behaviours
-   already present**; no production code is written for it, so it counts
-   neither way at the close.
+   behaviour that turns out to already exist is recorded under
+   **Behaviours** as already present, together with what was found. No
+   production code is written for it. If the behaviour turns out to have been
+   written earlier *in this session*, it is not already present — it is a
+   production change whose test came late, and it is recorded as one.
 5. **Write the smallest code that makes it pass.** Not the general version, not
    the configurable version, not the version that anticipates the next three
    requirements. Options nobody asked for are untested branches with a
@@ -102,31 +104,26 @@ What the gate never accepts is a test that has only ever been seen to pass.
 8. **Repeat for the next behaviour.** Under `depth=deep`, the edge cases and
    error paths the happy path implies each get their own cycle rather than
    being folded into the first test as extra assertions.
-9. Close in one of exactly three ways, and name which one. The state is
-   counted, not judged. Sort every production change made this session into
-   **proven** or **unproven**. A change is `proven` when **both** halves of its
-   cycle were observed: valid red for it against a tree that did not yet
-   contain it, *and* the change then seen to pass with the surrounding suite
-   green. `unproven` is everything else, which includes a change never seen to
-   fail and a change whose cycle was cut short before step 6 — a bound that
-   fires after the code is written but before the rerun leaves real, untested
-   production code in the tree, and the red step alone does not make it proven.
-   Then:
-   - **disciplined** — every change is proven, and the report quotes each
-     failure.
-   - **partial** — at least one change is proven and at least one is not. Name
-     the unproven ones and why, one line each. This state exists so an honest
-     partial result has a word; without it, partial work gets reported as
-     `disciplined`.
-   - **abandoned** — no change is proven. Not one observed failure. Say so
-     plainly rather than reporting a green suite and letting the reader infer
-     the rest.
+9. **Close by reporting what was observed, not by grading it.** List every
+   production change made this session, and against each one say which halves
+   of its cycle were observed: the valid red for it, against a tree that did
+   not yet contain it, and the change then seen to pass with the surrounding
+   suite green. Both, one, or neither — say which, and quote the failure where
+   there was one. Then list every behaviour taken up, and what became of each:
+   a completed cycle, a cycle stopped partway, found already present, or never
+   reached.
 
-   The three are exhaustive and mutually exclusive over any non-empty set of
-   changes. **A session that made no production changes closes `disciplined`,**
-   and the report says it made none — that tie-break is stated because with an
-   empty set "every change is proven" and "no change is proven" are both
-   vacuously true, and something has to name the winner.
+   A change with no observed red is untested production code sitting in the
+   tree. So is a change seen to fail and then left before it was seen to pass,
+   and that one is the more dangerous of the two, because the code is there and
+   nothing has run against it since. Say so in those terms rather than in a
+   grade.
+
+   **There is deliberately no summary word, and none is to be invented.** Do
+   not grade the session `disciplined`, `clean`, `partial` or anything else;
+   the Lineage says why. A refactor records the green suite it kept and no red
+   of its own, because it claimed no new behaviour. A bound records the half it
+   reached. A session that changed nothing records that it changed nothing.
 
 ## What this skill does not settle
 
@@ -151,9 +148,10 @@ recorded here rather than guessed at a third time.
   watching the test fail is the obvious move and this skill does not endorse
   it: reverting proves the test is sensitive to the behaviour but not that it
   covers the right cases, and a skill that cannot commit or branch has no safe
-  way to put the reverted work back. A late test is `unproven` here. That is a
-  real cost, honestly priced, rather than a cheap route to the word
-  `disciplined`.
+  way to put the reverted work back. So a late test is reported as exactly
+  what it is: a production change with no observed red behind it, named in the
+  report as untested code in the tree. That is a real cost, honestly priced,
+  rather than a route to a word that reads like compliance.
 
 ## Red flags
 
@@ -194,37 +192,40 @@ recorded here rather than guessed at a third time.
 - Never characterise whoever wrote the untested code. The absent test is the
   subject.
 - Honor stop and scope limits immediately. A bound closes the session at
-  whatever was actually established, and the closing state is still the one
-  step 9 counts out — a bound does not change any change's classification. The
-  behaviours the bound left unreached are **Deferred**, not `unproven`: nothing
-  was written for them, so there is no production change to be unproven. A
-  session whose completed cycles were all proven closes `disciplined` with a
-  Deferred list, which is the honest report; what a bound must never do is
-  license reporting an unproven change as proven, or leaving an unproven one
-  out of the count to reach a better word.
+  whatever was actually established, and what a bound must never do is change
+  what gets reported about a change. A behaviour the bound never reached is
+  reported as never reached; a behaviour reached but stopped partway is
+  reported with the step it stopped at and the evidence that exists, which is
+  the case that matters, because a bound firing after step 5 and before step 6
+  leaves production code nothing has run against. Never round either of those
+  up to a completed cycle, and never drop a change from the list to make the
+  report read better.
 
 ## Final report
 
-- **Behaviours** — each one named in the sentence it was stated as;
-- **Cycles** — per behaviour: the test, the failure that was observed with the
-  message quoted, the change that made it pass, and the suite result after;
-- **Behaviours already present** — behaviours whose first test passed because
-  the behaviour existed, and what was found on investigating;
-- **Unproven changes** — every production change without a complete observed
-  cycle behind it, and which half is missing: never seen to fail, or seen to
-  fail and then left before it was seen to pass. The second is the more
-  dangerous report, because the code is in the tree and nothing has run against
-  it since;
-- **Scaffolding** — anything created before a red step so the test could run,
-  per the open question above;
-- **Refactors** — what changed on green, and the suite result that held;
-- **Deferred** — behaviours a bound left unimplemented, reported untested
-  rather than implemented untested;
-- **Consent** — any rewrite proposed under the first safety rule, and the
-  answer; and
-- **Closing state** — `disciplined`, `partial`, or `abandoned`. It follows from
-  the counts rather than being chosen: report how many changes were proven and
-  how many were not, then the state they yield.
+Two lists, then two things read off them. Every behaviour appears exactly
+once in the first list and every production change exactly once in the
+second, so nothing is reported twice and nothing falls between them.
+
+- **Behaviours** — every behaviour this session took up, one line each, and
+  what became of it: a completed cycle, a cycle stopped partway with the step
+  it stopped at, found already present with what was found on investigating, or
+  never reached because a bound fired.
+- **Production changes** — every change this session made to production code,
+  one entry each, carrying the test that covers it, the red observed against a
+  tree lacking it with the message quoted, the run that showed it passing, and
+  the surrounding suite result. Where one of those was never observed, say so
+  in its place rather than leaving the line out. A refactor made on green, a
+  scaffold created under the open question above, and a change whose test came
+  late are all entries here, annotated as such — they are not categories of
+  their own, because a change that belongs to two buckets gets reported in the
+  flattering one.
+- **Untested code left in the tree** — read off the production-change list:
+  every change missing its red, missing its passing rerun, or both. Say none
+  if there is none; do not omit the heading.
+- **Consent** — any rewrite proposed under the first safety rule, and any
+  scaffolding put to the user under the open question above, each with the
+  answer that came back.
 
 ## Lineage
 
@@ -232,7 +233,7 @@ The iron law, the red-green-refactor cycle, the mandatory verified-red step and
 the form of the rationalization table are adapted from the
 `test-driven-development` skill in
 `github.com/obra/superpowers`, MIT, revision `b36e082`.
-The argument vocabulary, the closing states, the section skeleton and the bound
+The argument vocabulary, the closing report, the section skeleton and the bound
 on outward action are this pack's, shared with `sd-debug` and
 `sd-receive-review`.
 
@@ -241,6 +242,19 @@ authorship order**, because which file was typed first is not recoverable from
 the tree an hour later and a watched failure is — the same reasoning that made
 `sd-grill` split its question forms on who authored the candidates rather than
 on what answer was expected.
+
+**The close is a record, not a grade.** An earlier draft closed on one of three
+counted states — `disciplined`, `partial`, `abandoned` — sorted by whether each
+production change had been seen to fail and then to pass. It was cut after six
+review rounds, because the questions it generated were about the grade and
+never about the code: what state a refactor yields when it adds no behaviour
+and so has no red of its own, what a consented scaffold yields, what a bound
+yields when it fires between the red and the rerun, what an empty session
+yields when both predicates are vacuously true. Each answer needed a rule, and
+each rule collided with another. The per-change record answers all of them by
+not asking. A reader who wants one word can read the list; a reader given one
+word cannot recover the list, and the one word is the part an agent under
+pressure will round up.
 
 **This skill never deletes.** Upstream says code written before its test must
 be deleted and rewritten, with "delete means delete" and no consent step. Read
