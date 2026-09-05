@@ -56,9 +56,12 @@ this item delivers; answering it is not.
 does not add a conduct harness, and cannot: the same gap C-11 named on the
 `sd-grill` item applies here and is widened again, which is stated in
 `### What these criteria do not cover` rather than papered over. It also does
-not settle the two questions requirement 8 names — the `sd-typed-holes`
-boundary above, and how a test bootstraps against code that does not exist yet.
-Both were answered twice and wrongly; the skill records them as open. The scope
+not settle three adjacent questions. Requirement 8 covers two of them in
+`sd-tdd` — how a test bootstraps against code that does not exist yet, and
+whether evidence for a late test can be recovered by reverting. The third, the
+`sd-typed-holes` boundary described above, belongs to requirement 9 and is
+recorded in that skill's own `## Lineage`. All three were answered wrongly at
+least twice; each is now recorded as open where a reader will meet it. The scope
 this PRD describes is the second one, cut after three review rounds produced
 twenty-three findings of which fourteen belonged to three additions that are
 no longer here.
@@ -92,8 +95,11 @@ no longer here.
    proven is `disciplined`, some but not all is `partial`, none is
    `abandoned`. The classifier is when valid red was *observed* relative to the
    change, not when the test was authored, since authorship admits a test
-   written and never run. The empty session must be tie-broken by name, because
-   with no changes both outer predicates are vacuously true.
+   written and never run. **A session with no production changes closes
+   `disciplined`**, and the skill says so in those words: with no changes both
+   outer predicates are vacuously true, so a requirement that merely demanded a
+   tie-break without naming its result would leave the same ambiguity it exists
+   to remove.
 5. `sd-tdd` bounds what running a suite may reach — no production credentials,
    live endpoints, shared state, or fixtures that send mail or move money —
    since preferring real code over mocks is a statement about the code under
@@ -493,8 +499,11 @@ Dispositions for the round-3 findings under the cut scope, one each:
 - **C-18** (the classifier keyed on authorship, and the empty session) —
   `addressed`. Changes are now sorted by when valid red was *observed* relative
   to the change, which is what requirement 4 says and what D4 explains. The
-  empty session is tie-broken by name in the skill, in D4 and in requirement 4,
-  where before only two of the three named a winner.
+  empty session is now tie-broken by name in all three artifacts. Round 4
+  caught that this sentence was false when first written: the skill and D4 both
+  said `disciplined`, but requirement 4 only demanded that a winner be named
+  without naming one, so two of three artifacts settled it and the ledger
+  claimed three.
 - **C-19, C-20** (the typed-holes fill pass and skeleton gate) — `parked`. Both
   concern a seam that no longer exists.
 - **C-21** (the stash could not execute) — `parked`. The procedure it describes
@@ -508,6 +517,61 @@ Dispositions for the round-3 findings under the cut scope, one each:
   `addressed` by deletion. The counts are gone from both documents. A number
   that changes on every commit and had been wrong in all three of its states
   does not belong in prose; the diff is the source of truth for it.
+
+### Round 4, the confirmation pass
+
+Run against `46533b37`, scoped to reject findings against the three removed
+features. It raised none, which is the result the cut was for. Four blocking
+and two non-blocking, all local; the lane also confirmed the step 9 classifier
+is exhaustive and mutually exclusive over every non-empty set, that `sd-debug`
+is byte-identical to `origin/main`, and that the `sd-typed-holes` diff is
+exactly one appended `## Lineage`.
+
+**C-24 — the bound rule contradicted the closing-state classifier.
+`addressed`.** The safety rule said a bound closes `partial`, "never
+`disciplined`", while step 9 says all-proven closes `disciplined`. One
+completed cycle followed by an expired bound counts 1 proven / 0 unproven:
+step 9 said `disciplined`, the safety rule said `partial` with no unproven
+change to name. The rule now defers to step 9's count and puts the unreached
+behaviours under **Deferred** rather than `unproven` — nothing was written for
+them, so there is no production change to be unproven. What a bound must never
+do is licence reporting an unproven change as proven, which is what the rule
+was reaching for.
+
+**C-25 — the open question issued an instruction the gate forbids.
+`addressed`.** `## What this skill does not settle` said to "write the least
+scaffolding that lets the test speak", which is a positive instruction to
+create production code before valid red — exactly what the gate prohibits, in
+the section admitting the question is unresolved. The section now states the
+tension and stops: when it comes up, stop and ask the user, the same move the
+first safety rule makes for a proposed rewrite. An open question cannot issue
+an instruction that contradicts a rule the skill still enforces.
+
+**C-26 — requirement 4 demanded a tie-break without naming its result.
+`addressed`.** The skill and D4 both said the empty session closes
+`disciplined`; requirement 4 said only that it "must be tie-broken by name".
+It now names `disciplined`. This also falsifies a sentence in the C-18
+disposition above, which claimed all three artifacts named a winner when two
+did — corrected in place, with the error left visible rather than removed.
+
+**C-27 — the branch violates the two-file diff boundary. `rebutted`.** The
+criterion is `git diff --name-only origin/main...HEAD -- skills/`, with the
+pathspec, and it prints exactly the two skill files. The lane ran the command
+without `-- skills/`, got the item's own `prd.md` and `design.md` as well, and
+reported the criterion as violated. Its own acceptance table records the
+correct invocation passing under "changed skills", so the finding contradicts
+the run directly above it. A work item that did not modify its own PRD would be
+the defect.
+
+**C-28 — the scope note named the wrong requirements. `addressed`.** It
+attributed the `sd-typed-holes` boundary and bootstrapping to requirement 8.
+Requirement 8 covers bootstrapping and late recovery; the boundary is
+requirement 9. Rewritten to name all three open questions and where each is
+recorded.
+
+**C-29 — two `## Lineage` cross-references pointed the wrong way.
+`addressed`.** Lineage was appended after the operational sections, so "the
+safety rules below" and "Four rules below" referred to rules above them.
 
 ### What the lane could not run
 
@@ -541,3 +605,9 @@ command ran there verbatim.
   reverted to `origin/main`; `sd-typed-holes` keeps only its recovered
   `## Lineage`. Requirements fall from twelve to nine and the skill gains a
   section naming what it does not settle.
+- 2026-09-05 codex round 4 against `46533b37`, the confirmation pass on the cut
+  scope: four blocking and two non-blocking, none against a removed feature,
+  all local. Five addressed and one rebutted (the two-file criterion was run
+  without its pathspec). The lane confirmed the closing-state classifier is
+  exhaustive and mutually exclusive, `sd-debug` byte-identical to `origin/main`,
+  and the `sd-typed-holes` diff exactly one appended `## Lineage`.
