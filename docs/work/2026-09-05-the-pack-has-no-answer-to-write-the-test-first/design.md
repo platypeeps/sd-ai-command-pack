@@ -142,8 +142,16 @@ which are disposable. A skill that deletes source code is further over that
 line than any of them.
 
 So `sd-tdd` **proposes** the rewrite, names what would be lost, and requires
-consent. D1 also removes most of the occasions for it: the revert-and-watch-it-
-fail path reaches the same evidence without deleting anything.
+consent. D1 also removes most of the occasions for it: the
+revert-and-watch-it-fail path reaches a watched failure without a rewrite, and
+closes `partial` rather than `disciplined` — which is the honest price of
+having written the code first, and a far smaller one than deleting it.
+
+Two claims that stood in this paragraph are gone, both wrong for reasons the
+review found elsewhere. It said the revert path reaches "the same evidence",
+which C-3 refuted: reverting proves sensitivity, not case coverage. And it said
+"without deleting anything", which C-6 refuted: a revert *does* remove working
+code from the tree, which is why D3 now requires a recoverable copy first.
 
 **D6 — closing states mirror `sd-debug`'s three, with different words.**
 
