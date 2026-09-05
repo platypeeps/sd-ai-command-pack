@@ -351,7 +351,17 @@ here, since a squash is no ancestor of the head it squashed and a base
 alone cannot exclude it; the merge commits themselves are on the
 branch and carry the trailer `sd-ship` gave them, or are refused like
 any other. A fresh branch cut from the default after the merge has
-the same set by the same rule with no `slice_base`. The
+the same set by the same rule with no `slice_base`. The vendors the
+trailers carry are joined by the row's `authors`, from A's round
+forty-four: every session the runner or B's wrapper starts on the
+item's branch adds its vendor to the row's set for the slice in the
+transaction that starts it, whether it commits or not, and the
+transaction that records the slice's squash clears the set with
+`slice_base`, because a session that edits and leaves without
+committing has authored what the next session commits under its own
+name, and a trailer names who committed and not everyone who wrote;
+the operator's terminal outside the wrapper is the operator, `human`,
+which adds nothing to skip. The
 reviewer is the first entry whose vendor is in no member of the set, the
 vendors the trailers carry, so a
 branch two providers wrote is reviewed by a third or refused; a set that is
@@ -579,7 +589,9 @@ The migration's retire step runs after that in a pull request of its
 own, and it is B's one sitting: set the repository's row `retiring`,
 which is the freeze, every status writer refusing under it, import
 once more so
-that every row says what its line says now, verify by content, snapshot,
+that every row says what its committed line says now, the import and
+the verify reading `HEAD`'s tree and refusing on a dirty `docs/work`,
+from C's round eight, verify by content, snapshot,
 set the repository's `status_source` to `row`, and only then remove
 every line in one commit, refusing to run while the
 installed `sd_lib` has no `delivered`, naming the version, and lifting
@@ -1236,7 +1248,12 @@ confirmed by the next `sd-ship` run alone.
    excluding the first slice's commits by `slice_base` and the squash
    by the default, and a fresh branch cut from the default with the
    same second slice resolves the same, from A's rounds forty-two and
-   forty-three;
+   forty-three; a Claude session started by the wrapper that edits and
+   exits without committing, followed by a Codex session that commits
+   the edits with `--author codex`, resolves neither Claude nor Codex,
+   a third vendor or a refusal, the row's `authors` naming both, and
+   the set is empty after the squash is recorded, from A's round
+   forty-four;
    two
    clones attributing two different commits of one branch in turn both
    push without force and the review reads both; `sd attribute <sha>
@@ -1364,7 +1381,8 @@ confirmed by the next `sd-ship` run alone.
     under a pack whose `sd_lib` has no `delivered`, naming the version,
     that its final import moves that row to `done` and its verify passes,
     that a verify difference seeded after the freeze lifts the freeze
-    with every line in place, that the sitting killed after the import
+    with every line in place, that an uncommitted `prd.md` makes the
+    sitting refuse naming it, from C's round eight, that the sitting killed after the import
     and before `row` reruns to the same rows with every line in place
     until `row`, and killed after `row` and before the commit reruns to
     the commit, from C's round five, that after the retire both `done` items'
@@ -2503,3 +2521,17 @@ from a number the operator types.
     rev-list HEAD --not <default> <slice_base>`. Criterion 13 merges the
     default back before the second slice and runs the fresh-branch
     case.
+- **2026-09-05** — Planning review, round forty-four of forty-six: one
+  blocking finding, addressed, and one cross-item change from C's
+  round eight.
+  - C-78, requirement 3: a session that edits and exits without
+    committing leaves its work to the next session's commit, whose
+    trailer names the committer alone, so Claude's edits shipped by
+    Codex let Claude review them. Addressed: every session the runner
+    or the wrapper starts on the branch adds its vendor to the row's
+    `authors` for the slice, cleared with `slice_base`, and the
+    reviewer's set joins the trailers with it. Criterion 13 runs the
+    uncommitted handoff.
+  - C's C-16: the retire sitting reads `HEAD`'s tree and refuses on a
+    dirty `docs/work`, so the marker commit's parent is what the verify
+    saw. Requirement 5, criterion 13.
