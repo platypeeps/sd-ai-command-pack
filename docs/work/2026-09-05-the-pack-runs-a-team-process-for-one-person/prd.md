@@ -398,7 +398,11 @@ plus the entry's `max_tokens` at the entry's price, and reserves it against
 the bill in one transaction with the month's settled and still-reserved
 rows, as B's requirement 6 specifies; a bound that would carry the month
 past the cap is refused before anything is sent, so two calls racing for
-the last dollar cannot both go, and the reservation settles to the real
+the last dollar cannot both go. A `start` entry on a capped bill makes
+its own calls, so it carries `session_bound_usd`, the most one session
+may cost, which the library reserves at session start and settles from
+the usage read, from B's round thirty-three; the reader refuses a
+`start` entry on a capped bill without it. The reservation settles to the real
 cost after. At the cap, fallthrough skips every provider on that bill,
 direct choice refuses by name with the month's total, reserved included,
 and Today shows spend against cap. The dashboard raises the cap in one action, and it enables, disables and
@@ -1757,3 +1761,11 @@ from a number the operator types.
     has two, so that B is reviewed alone while D waits for its spike.
     Requirement 13's `--scope planning` line; landed in the pack the same
     day with its test.
+- **2026-09-05** — Operator's decision one, the last of the seven: the four
+  protection settings stay, pull requests only, CI required, branches up to
+  date, no approvals, with the bounded integration update of round
+  eighteen. Three settings and a red-main gate was the alternative. No text
+  changes; requirement 3 and criterion 13 already say this.
+- **2026-09-05** — B's C-59, cross-item: a `start` entry on a capped bill
+  carries `session_bound_usd`, reserved at session start; the reader
+  refuses one without it. Requirement 3's cap passage.
