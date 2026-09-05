@@ -69,9 +69,9 @@ A shared repository is one where someone else also merges. In it:
 
 - No `Work:` line in a pull request body unless the pull request resolves a
   work item that lives in that repository.
-- No `docs/work/`, `docs/spec/`, or `docs/decisions/` commits. Planning
-  artifacts for a shared repository live in an untracked local path that the
-  global git excludes cover, the same way `CLAUDE.local.md` does.
+- No `docs/work/`, `docs/spec/`, or `docs/decisions/` commits. `mode: guest`
+  already carries this: planning artifacts go to the fork's integration branch,
+  and every writing skill refuses the upstream tree.
 - No labels, review comments, reviewer requests, or bot posts from any pack
   surface. `sd-review` and `sd-receive-review` never post.
 - No workflow files or repository settings unless the owner of that

@@ -156,11 +156,20 @@ A shared repository is one where somebody else also merges.
   resolves a work item that lives in that repository. The `Work: none - <reason>`
   form is deleted, and rule 5 of the documentation lint becomes conditional on a
   work item existing.
-- Planning artifacts for a shared repository live in an untracked local path
-  covered by the global git excludes, the same mechanism `CLAUDE.local.md` uses.
-  Nothing lands in the team's history.
-- A repository the operator does not own defaults to `mode: guest`. The three
-  modes are named in `README.md`, which does not mention two of them today.
+- Planning artifacts stay out of the shared tree through `mode: guest`, which
+  already carries this rule across six skills: the triad goes to the fork's
+  integration branch (`sd-plan/SKILL.md:105`), `sd-spec` never touches the
+  upstream tree (`:41`), `sd-review` refuses outright (`:106`), `sd-ship` posts
+  no reviews or labels (`:206`), `sd-deps` does not merge (`:49`), and
+  `sd-suggest` files nothing upstream (`:44`). No new mechanism is built. An
+  untracked local path was drafted for this and cut: it would duplicate a rule
+  the payload already states in six places, and add a second thing to keep true.
+- A repository the operator does not own resolves to `mode: guest` without an
+  explicit line. Today `sd_lib.mode()` reads the local block and falls back to
+  `full`, so an unconfigured shared repository gets the most invasive mode by
+  default. This is the one piece of requirement 6 that is new code: the fallback
+  consults the remote's owner before returning `full`. The three modes are named
+  in `README.md`, which mentions none of them today.
 - `README.md`'s claim that the pack writes "nothing, ever" in a repository is
   rescoped to the installer, which is where it is true. The skills that write
   tracked files by design are named.
@@ -248,8 +257,14 @@ narrative leaves `pipeline.md` and `permissions.md`.
    rule 5 passes on a body with no `Work:` line when no work item is present,
    and still fails a body naming an item that does not resolve.
 7. `mode: guest` is the resolved mode for a repository whose remote owner is not
-   the operator, absent an explicit `mode:` line. All three modes appear in
-   `README.md`.
+   the operator, absent an explicit `mode:` line, and `full` when it is. A test
+   covers three cases: owned remote, unowned remote, and a root with no remote
+   or no git at all. The last must not resolve to `guest` on an error — a
+   detection failure that silently downgrades every local scratch repository is
+   the same class of defect as one that silently upgrades a shared one, so the
+   failure path is named and asserted rather than left to whichever branch the
+   exception happens to reach. An explicit `mode:` line still wins over
+   detection. All three modes appear in `README.md`.
 8. `README.md`'s writes-nothing claim names the installer as its subject and
    lists the skills that write tracked files.
 9. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
@@ -290,12 +305,13 @@ narrative leaves `pipeline.md` and `permissions.md`.
    and nothing else, and every opt-in lane is asked for by name. Recorded here
    rather than deleted because the alternative is the one this item would
    otherwise have drifted into: three keys added to make a document true.
-2. Requirement 6's untracked-local-path mechanism for shared repositories is
-   stated but not designed. `CLAUDE.local.md` works because the installer puts
-   one line in the global excludes. A `docs/work.local/` would need the same,
-   and the sweep and the lint would both need to find it. Guest mode already
-   routes artifacts to a fork branch; whether that is sufficient, and this
-   mechanism unnecessary, should be settled before either is built.
+2. **Settled 2026-09-05: guest mode covers it, no new path.** The drafted
+   untracked local path is cut. Guest mode already refuses the upstream tree in
+   six skills and routes the triad to the fork's integration branch, so the
+   mechanism would have duplicated a rule the payload states six times over.
+   What survives from this question is narrower and is now requirement 6's only
+   new code: mode detection falls back to `full`, which is the wrong default for
+   a repository the operator does not own.
 3. Deleting `docs/work/archive/` is irreversible in the working tree and
    reversible only through git history. 494 items, none ever re-read in the
    sample. The sample was fifteen. Whether to sample deeper before deleting, or
@@ -333,3 +349,7 @@ narrative leaves `pipeline.md` and `permissions.md`.
   before it was ever written down as policy. Enumerating from `sd_lib.py` caught
   it; reading the draft would not have. That is the argument for the criterion,
   made by the criterion, an hour before anything implements it.
+- **2026-09-05** — Open question 2 settled: guest mode covers the shared-repository
+  case and the drafted untracked local path is cut. Requirement 6 keeps one piece
+  of new code, the mode fallback, and acceptance criterion 7 now names its three
+  cases including the detection-failure path. Three open questions remain.
