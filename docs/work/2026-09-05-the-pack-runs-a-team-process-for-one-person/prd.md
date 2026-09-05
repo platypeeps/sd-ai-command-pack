@@ -127,8 +127,16 @@ after a second interview on 2026-09-05, became three:
   database after B's library exists. Nothing else until one piece publishes.
 
 B's library lands first, because requirements 5, 10, 11 and 12 below write to
-it. Requirements 1 through 4 and 6 through 9 need nothing from B and land in any
-order.
+it, because requirement 2 reads `merge: auto` from a repository row and writes
+proposals as rows, and because requirement 3 resolves the registry through it.
+Until the library is installed: the loop never merges, since no row can say
+`auto`, and it records proposals in the item's log in the format
+`sd-receive-review` defines; `sd-review` resolves `providers.yaml` through a
+file-only reader in the pack, which the library's resolver replaces the day it
+lands, and a test asserts both return the same order from the same file. The
+provider table in `bin/sd-review` goes in the commit that adds that reader,
+not before. Requirements 1, 4 and 6 through 9 need nothing from B and land in
+any order.
 
 Decisions taken in the two interviews are the requirements below.
 
@@ -196,7 +204,7 @@ cap, and nowhere else unless the operator asks by name:
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
-| Development | Code, before merge | Defects a second reader finds | 1 |
+| Development | Code, before merge | Defects a second reader finds | 1, plus one verification of the fix |
 
 The cap bounds automatic passes, not the disposition of what they find. When a
 point's passes are spent, no further pass starts on its own; the artifact moves
@@ -206,6 +214,13 @@ the item `blocked`, and the operator decides. Non-blocking findings never hold
 an artifact. A further pass needs the operator to ask for it by name, and the
 item records that it was asked for. This is the fix for "not perfect yet,
 another pass first": the review ends; the findings do not vanish.
+
+The code point's pass reads a head. A fix that changes the head after the
+pass gets one verification pass over the diff since the reviewed head, and
+that is the last automatic pass on the pull request: a blocking finding from
+it marks the item `blocked`. `sd-ship` pushes a head that is the reviewed head
+or a verified fix of it, and nothing else; a further commit waits for the
+operator to ask for a pass by name.
 
 **The reviewer is a different vendor from the author, by policy.** Today Claude
 writes and Codex reviews. If the primary moves to OpenCode or a local model, the
@@ -239,10 +254,13 @@ bill.** Every entry names a `bill:`, and the registry's `bills:` section says
 whose money it is: `subscription` for Codex and Claude, `prepaid` for the
 Moonshot and MiniMax balances the operator has already paid, `company` for
 Baseten, `local` for exo. The `reviewer` line runs subscription first, prepaid
-next, company last: `[codex, kimi, minimax, prism, gito, exo]`, with `prism`
+next, company last: `[codex, claude, kimi, minimax, prism, gito, exo]`, with `prism`
 and `gito` re-pointed from OpenRouter to Baseten. The first entry that is
 enabled, carries the role, is not the author's vendor, has budget left on its
-bill, and passes its preflight reviews. A rate limit, a missing binary,
+bill, and passes its preflight reviews. Claude sits second so a change Codex
+authored is reviewed on a subscription before any prepaid balance is
+touched, and the vendor rule keeps either from reading its own work. A rate
+limit, a missing binary,
 failed authentication, a non-zero exit and a timeout each fall through to the
 next, and the run records which provider reviewed and why the earlier ones
 did not, on the assignment row and in the JSON it emits. Fallthrough happens
@@ -689,7 +707,9 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    asserted by a test that adds one and resolves it. Resolving `reviewer` for
    a change authored by the registry's reviewer provider returns a different
    provider, and fails by name when no other provider carries the role; a test
-   asserts both. `bin/sd-review` contains no provider table, `sd-review.json`
+   asserts both, and asserts that a change authored by `codex` resolves to
+   `claude` and one authored by `claude` resolves to `codex`, for every entry
+   on the `author` line. `bin/sd-review` contains no provider table, `sd-review.json`
    contains no key ending in `_providers`, and every provider name in its
    tiers resolves against the registry on a machine that has one. The
    reviewer list falls through: a test disables the first entry, then makes
@@ -795,6 +815,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     through the library, ends the session without calling `sd-handoff`, starts a
     new one, and asserts all three are in the injected context.
 30. `make check` passes.
+32. `sd-ship` pushes only a reviewed head or a verified fix of it: a test
+    reviews a branch, commits a fix, asserts one further pass runs over the
+    fix's diff alone, then commits again and asserts the push is refused
+    with the reviewed head named. Before B's library is installed, a test
+    asserts the file-only reader and, once it exists, the library resolver
+    return the same reviewer order from the same `providers.yaml`, and that
+    the loop stops at pull-request-ready in every repository.
 31. Requirement 13 is closed line by line. One test lists the symbols, flags
     and files the cuts remove and asserts a repository-wide grep for each
     returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
@@ -1025,3 +1052,22 @@ item B by hand.
   session's scratchpad, not in the repository. Three open questions
   reopened; see that section. Requirement 13 is unreviewed by the lane
   until the next round runs.
+- **2026-09-05** — Planning review, round three, the first after the cap
+  rose to fifteen. Three blocking findings, all addressed. The subject was
+  five files, since `--scope planning` still concatenates every planning
+  item; requirement 13 fixes that.
+  - C-8, requirement 3: with a cap of one on the code point, the fix for a
+    blocking finding merged unreviewed. Addressed: one verification pass over
+    the diff since the reviewed head, the last automatic pass on that pull
+    request; `sd-ship` pushes only the reviewed head or a verified fix. Table
+    cell in both copies, criterion 32.
+  - C-9, rollout: requirements 2 and 3 were said to need nothing from B while
+    reading `merge: auto` from a row and resolving the registry through the
+    library. Addressed: the library is a prerequisite for both; until it
+    lands the loop never merges, proposals go to the log, and a file-only
+    reader in the pack resolves the registry, replaced by the library's
+    resolver with a test that both agree. Criterion 32.
+  - C-10, design: the reviewer order omitted `claude`, so a Codex-authored
+    change went straight to a prepaid balance. Addressed: `claude` second on
+    the `reviewer` line, in both copies; criterion 6 asserts resolution for
+    every author.

@@ -97,7 +97,11 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
-| Development | Code, before merge | Defects a second reader finds | 1 |
+| Development | Code, before merge | Defects a second reader finds | 1, plus one verification of the fix |
+
+The code pass reads a head. A fix that changes it gets one verification pass
+over the diff since the reviewed head, the last automatic pass on that pull
+request; `sd-ship` pushes only the reviewed head or a verified fix of it.
 
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.
@@ -186,7 +190,7 @@ never vendors.
                  roles: [author, reviewer], enabled: false, reason: "model not pinned" }
     roles:
       author:   [claude, codex]
-      reviewer: [codex, kimi, minimax, prism, gito, exo]
+      reviewer: [codex, claude, kimi, minimax, prism, gito, exo]
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
