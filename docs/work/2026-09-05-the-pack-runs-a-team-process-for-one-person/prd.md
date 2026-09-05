@@ -794,3 +794,7 @@ are filed as rows on this item once B's library exists, and in the log before.
   OpenAI-compatible client, because `prism`'s fixed output cap is why both
   are recorded as disabled in `~/.prism/.env`. Requirement 3, criterion 6,
   and B's requirements 4, 5 and 6.
+- **2026-09-05** — Correction to the entry above: the dashboard is not this
+  Mac only. The operator works mostly from an iPad, so B serves it over
+  Tailscale, bound to the tailnet address, identified by `tailscale whois`.
+  Nothing in this item changes; recorded so the two ledgers agree.
