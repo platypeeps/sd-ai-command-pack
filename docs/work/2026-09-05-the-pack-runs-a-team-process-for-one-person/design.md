@@ -227,7 +227,9 @@ never vendors.
 Each entry also carries `env`, the list of variables the entry's process
 receives beside `PATH`, `HOME`, `LANG`, `TERM` and `TMPDIR`, `env:
 [OPENAI_API_KEY]` for `codex`; left out of the example above for width. A
-session sees the variables its own entry names and no other entry's.
+session inherits the variables its own entry names and no other entry's.
+That is inheritance, not isolation: the session runs as you, in your
+`HOME`, and can read the file the keys live in.
 
 Pins as of 2026-09-05, each read from the vendor's model list on that day:
 `kimi-k3` is Moonshot's current flagship with a one-million-token window;

@@ -269,11 +269,19 @@ library, maps each role to a provider: name, how to start it, which roles it
 may fill, cost basis. Adding exo, another commercial API, or a second local
 model is an entry, not code. Each entry names the environment variables its
 process needs, `env: [OPENAI_API_KEY]`, and a session or a review call
-started for that entry receives those, a fixed base, `PATH`, `HOME`,
-`LANG`, `TERM`, `TMPDIR`, and nothing else, so that a session for one
-vendor never holds another vendor's key, asked for on 2026-09-05: the
+started for that entry inherits those, a fixed base, `PATH`, `HOME`,
+`LANG`, `TERM`, `TMPDIR`, and nothing else, asked for on 2026-09-05: the
 runner and `sd-review` read the operator's environment file for themselves
-and pass on only what the entry names. The registry's format and the role vocabulary are
+and pass on only what the entry names. What that buys is stated exactly,
+from A's round nineteen: a session does not inherit another vendor's
+key, so a tool that reads its own environment, and a log or a crash dump
+that prints it, carry one vendor's key and not all of them. It is not a
+boundary. The session runs as the operator with the operator's `HOME`,
+can read `~/.config/shell/env.sh`, and a login shell it starts sources
+that file back; a session that wants another key can have it, and this
+design says so rather than claiming otherwise. The boundary a key needs,
+a per-vendor account and a per-session credential store, is not built
+here. The registry's format and the role vocabulary are
 defined in this item; the file lives with the database.
 
 The registry is static and the author is not. `author` is a list too,
@@ -293,7 +301,9 @@ since its base, and builds the set of authors from what the range
 carries: each commit's own trailer, or an `Attributes: <sha> <name>`
 trailer on a later commit in the range, which `sd attribute <sha> <name>`
 writes as one empty commit on the branch, one trailer per attributed
-commit, run by the operator per commit. It is a commit and not a note
+commit, run by the operator per commit, and stamped `Authored-with:
+human` itself, because the operator made it, so that the repair never
+needs repairing, from A's round nineteen. It is a commit and not a note
 because a notes ref is one mutable ref the whole repository shares, and
 two clones attributing different commits from the same tip diverge, the
 second push fails, and a force would drop the first; a commit on the
@@ -415,9 +425,16 @@ nothing; the local list is its fallback by construction.
 
 **Code review is an experiment, not yet a rule.** The seven passes already run
 on `mezmo-world-simulator` are scored first: findings accepted against findings
-rejected, per pass. Then the other vendor reviews the next ten code pull
-requests, and cost is logged per pass. Below thirty percent accepted, the code
-point leaves the table.
+rejected, per pass, and each accepted finding's severity beside it. Then the
+other vendor reviews the next ten code pull requests, and cost is logged per
+pass. The experiment ends in a report on this item, not in a rule that
+fires, from A's round nineteen: accepted against rejected, the highest
+severity accepted and what it would have cost to ship, and the cost per
+pass. A reviewer that finds one data-loss defect in ten passes and nine
+rejected findings is worth its cost at any ratio, and one that finds
+ten typos is not, so no percentage removes the code point; the operator
+reads the report and decides, and the decision is recorded here with
+the report.
 
 The one lane is `sd-review --scope planning`. The concern ledger, the pre-edit
 hash baselines and the per-round cross-artifact sweep apply only to paths listed
@@ -950,7 +967,9 @@ confirmed by the next `sd-ship` run alone.
    with no trailer and no `--author` is refused naming the flag; a branch
    with one untagged commit followed by one `Authored-with: codex` commit
    is refused naming the untagged commit and `sd attribute`, and after
-   `sd attribute <sha> claude` resolves to the first entry of neither
+   `sd attribute <sha> claude` resolves to the first entry of neither,
+   the attributing commit itself carrying `Authored-with: human` and
+   being accepted by the scan without a second `sd attribute`,
    vendor, with the attributing commit asserted on the fixture remote
    after the push and its `Attributes:` trailer naming the sha; two
    clones attributing two different commits of one branch in turn both
@@ -991,8 +1010,13 @@ confirmed by the next `sd-ship` run alone.
    entry whose response carries a `<think>` block and `reasoning_content`
    yields a clean finding list, asserted against a fixture response.
 7. The seven `mezmo-world-simulator` passes are scored, accepted against
-   rejected per pass, and the scores are recorded on this item before the code
-   review point runs on any new pull request.
+   rejected per pass with each accepted finding's severity, and the scores
+   are recorded on this item before the code review point runs on any new
+   pull request. After the ten, a report with the ratio, the highest
+   severity accepted, and the cost per pass is on this item, and the code
+   point stays or goes by a recorded decision, not by a threshold: a grep
+   of `bin/` and `skills/` for a percentage that disables a review point
+   returns nothing.
 8. The concern-ledger and cross-artifact-sweep obligations are stated as
    conditional on a `sensitive` path in every place they appear.
 9. No pack surface requests a Copilot review. The global settings contain no
@@ -1679,3 +1703,21 @@ from a number the operator types.
     destination in `CLAUDE.local.md`, a sixth key that criterion 1 refuses.
     The destination is `--to` on the run, or the repository's row once B
     exists.
+- **2026-09-05** — Planning review, round nineteen of forty: three
+  blocking findings, addressed.
+  - C-38, requirement 3: filtering the inherited environment was called
+    credential isolation, and a session that runs as the operator in the
+    operator's `HOME` can read the environment file and a login shell it
+    starts sources it back. Addressed by scoping the claim to what it is:
+    a session does not inherit another vendor's key, and nothing more.
+    D's criterion 5 asserts the gap with a child login shell. The design's
+    Providers section says the same.
+  - C-39, requirement 3: a thirty-percent acceptance ratio removed the code
+    review point on its own, and a reviewer that catches one data-loss
+    defect in ten passes fails that ratio. Addressed: the experiment ends
+    in a report with severity and cost beside the ratio, and the operator
+    decides, recorded here. Criterion 7.
+  - C-40, requirement 3: `sd attribute` wrote an empty commit with no
+    `Authored-with:` trailer of its own, so the repair created what it
+    repaired. Addressed: the attributing commit is stamped `Authored-with:
+    human`. Criterion 13's attribution test covers it.
