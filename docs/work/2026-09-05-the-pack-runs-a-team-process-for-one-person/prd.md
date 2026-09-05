@@ -235,21 +235,31 @@ that is the last automatic pass on the pull request: a blocking finding from
 it marks the item `blocked`. `sd-ship` pushes a head that is the reviewed head
 or a verified fix of it, and nothing else; a further commit waits for the
 operator to ask for a pass by name. That rule governs the author's
-changes. The base moves while a pull request waits, another item's merge
-or its closure, and nothing follows from that alone: the protection does
-not require the branch to carry the move, so a pull request GitHub can
-merge is merged as reviewed, CI having run on its merge ref, and CI on the
-default branch after the merge catches a combination that broke. The one
-case that needs the base carried in is a conflict, GitHub reporting the
-pull request not mergeable, and `sd-ship` resolves no conflict: the item
-ends `blocked` naming the conflicting files, the operator merges the
-default branch in by hand, and that integration commit, the default branch
-merged in and nothing else, is not a fix and spends no pass; the next
-`sd-ship` run reviews the new head once with the branch review, waits for
-CI and merges. There is no automatic integration update, so there is no
-loop for a busy base to feed, from A's round seventeen: the count of
-integration reviews is the count of conflicts the operator resolved by
-hand, and the closure pull requests that move the base cause none.
+changes. The base's changes are governed by another, because the default
+branch moves while a pull request waits, another item's merge or its
+closure, and the protection then refuses the pull request until it
+carries the move: an integration update, the default branch merged into
+the branch with nothing else in the commit, is not a fix and spends no
+pass, and it is bounded, from A's rounds seventeen and eighteen and B's
+round thirty. `sd-ship` makes at most one per run: it merges the default
+branch in, reviews the combined head once with the branch review, since
+two changes each reviewed alone were never reviewed together, waits for
+CI, and merges naming that head; when the base moved again in between,
+GitHub refuses the merge and the run ends with the item `ready_to_send`
+naming the reason rather than updating again, and the next run, the
+operator's or D's merge row's, makes the next one. Under D's runner the
+merge row holds the repository's serial merge lane from the update to
+the merge, so the pack's own merges cannot move the base under it and one
+update is the rule; a hand can, so a second update is the bound and the
+row ends `blocked` past it. A blocking finding from an integration review
+marks the item `blocked` like any other; a clean one merges the head it
+reviewed. A conflict in the update ends the item `blocked` naming the
+files, and `sd-ship` resolves none. Three settings without the update
+were tried on 2026-09-05 and withdrawn the same day: without the
+up-to-date requirement, two parallel authors that each pass alone can
+merge without a textual conflict and break the default branch, which CI
+finds after delivery, when a successor has already been dispatched onto
+it.
 
 **The reviewer is a different vendor from the author, by policy.** Today Claude
 writes and Codex reviews. If the primary moves to OpenCode or a local model, the
@@ -474,12 +484,14 @@ writes `status: done` into the mirror and changes nothing else, as a
 second pull request through the same merge path and
 never a direct push: the default branch is protected in every repository
 the pack merges into, by the operator's decision on 2026-09-05, pull
-requests only, CI required, and no required approvals because there is no
-second person to give one; the up-to-date requirement that stood beside
-them until 2026-09-05 went with the deletion below, and CI runs on the
-default branch after every merge as well as on the pull request, so a
-combination that merged clean and broke is on Today within minutes.
-`sd-status` reports those three settings, an
+requests only, CI required, branches up to date with the default branch
+before they merge, and no required approvals because there is no second
+person to give one. The up-to-date requirement was dropped with the
+deletion below on 2026-09-05 and restored the same day, because two
+parallel pull requests that each pass alone can merge without a conflict
+and break the default branch, so the combination is tested before the
+merge and not after, requirement 3. `sd-status` reports those four
+settings, an
 unattended merge into a default branch that does not require pull requests
 and CI refuses naming the setting, and a ship the operator runs by hand is
 warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the mark a run that restarts after the
@@ -500,7 +512,14 @@ That closure pull request merges on its own under both policies once CI
 passes and the three answers hold, because it carries the item's own mirror
 and nothing a provider wrote; under the default policy it is
 the one merge the operator does not make by hand, by the operator's
-decision on 2026-09-05.
+decision on 2026-09-05. Under `mode: guest` the mirror never was in the
+merged tree: the triad lives on the fork's integration branch,
+requirement 6, so the closure is one commit on that branch, pushed to the
+fork, with no pull request and nothing upstream; the row's branch
+identity stays that branch, `rev` moves to the closure commit, and the
+upstream squash commit is recorded on the row as the merge and never as
+`rev`, from A's round eighteen, so that the guard is never asked to find
+a mirror in a tree that was built to hold none.
 So `main`, every database-free checkout and CI read `done` within one commit
 of the merge, and before that they read the last true state, never a false
 one. Every reader that picks an item, `sd-review --scope planning` among
@@ -527,8 +546,9 @@ a deletion would have had to detect and a kept directory serves. No pack
 surface deletes an item directory. When the operator wants the listing
 short, once a quarter or never, they delete with `git rm -r` in a change
 of their own, and a link that breaks then is theirs to see. The lint
-rule, the two reader scans, the eligibility function, the up-to-date
-setting and the re-cut path are not built.
+rule, the two reader scans, the eligibility function and the re-cut path
+are not built; the up-to-date setting stays for the reason requirement 3
+gives, which is not this one.
 `docs/work/archive/` and its 941 files are removed in one commit whose
 message names its own parent, by full hash, as the commit that recovers
 any of them: the parent is the last tree that holds every file at the
@@ -665,9 +685,15 @@ close on GitHub with a pointer.
 
 `sd-suggest` is the one way to file, for the operator and for the agent. It
 captures a fixed small set: repository, what happened, what it cost, what was
-expected, and the session it came from. In a repository the operator owns it
-writes a row. In a repository someone else merges it files a GitHub issue there,
-as it does today. Issues other people file on GitHub arrive as read-only shadow
+expected, and the session it came from. It writes a row, in every
+repository and every mode, and files nothing anywhere on its own: a
+suggestion that belongs in another person's tracker leaves the database
+only by `sd suggest publish <row>`, run by the operator, to the
+destination the row's repository names in its `CLAUDE.local.md`, and
+refused without one, so that an unattended session cannot turn a
+framework incident into someone else's issue, from A's round eighteen and
+in line with requirement 6 and the skill's own rule. Issues other people
+file on GitHub arrive as read-only shadow
 rows through B's sync, with the operator's notes beside them.
 
 The vault `skill-proposal` database, its kind in the writing manifest, and
@@ -1024,12 +1050,18 @@ confirmed by the next `sd-ship` run alone.
     pull request, opens no second one, and one closure commit exists. A
     test ships an item to merge and asserts the closure commit touched one
     file, the item's `prd.md`, and one line of it; the fixture remote is
-    asserted to require pull requests and CI and nothing else, and
-    `sd-status` to report three settings. A test makes the fixture remote
-    report the pull request not mergeable and asserts the item ends
-    `blocked` naming the file, no merge call was made, and that after the
-    default branch is merged in by hand and pushed the next run reviews
-    the new head once, spends no pass, and merges it. A
+    asserted to require pull requests, CI and branches up to date, and
+    `sd-status` to report four settings. A test moves the fixture's
+    default branch after the review and asserts one integration update,
+    one branch review over the combined head that spent no pass, CI, and
+    a merge naming that head; moved again during the wait, the run ends
+    `ready_to_send` naming the reason with no second update, and the next
+    run makes one; a seeded conflict in the update ends the item
+    `blocked` naming the file with no merge call. A test ships a
+    guest-mode item whose triad sits on the fork's integration branch,
+    merges the upstream pull request by hand on the fixture, and asserts
+    the closure is one commit on the integration branch, no pull request
+    was opened, nothing was pushed upstream, and `rev` is that commit. A
     fourth ships under the default policy to `ready_to_send`,
     merges the pull request by hand on the fixture remote, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
@@ -1096,8 +1128,11 @@ confirmed by the next `sd-ship` run alone.
 27. Promotion and demotion each produce one pull request that moves the
     directory and edits `paths.json`, opened by the library and never by the
     dashboard directly. A test asserts the branch content.
-28. `sd-suggest` writes a row in an owned repository and files a GitHub issue in
-    a repository someone else merges, asserted by a test for each mode. The two
+28. `sd-suggest` writes a row in every mode and files nothing, asserted by a
+    test per mode against a recording GitHub fixture that saw no call; `sd
+    suggest publish` files one issue at the configured destination,
+    refuses without one, and is no palette entry, asserted by enumerating
+    `commands.yaml`. The two
     open internal issues are closed on GitHub with a pointer to their rows. The
     `skill-proposal` kind is absent from the writing manifest and
     `sd-propose-skills` writes no vault note.
@@ -1619,3 +1654,23 @@ from a number the operator types.
     Providers section; the runner is split out of B into item D, and the
     references here follow; the three items land in slices in the order
     under Landing order, recorded in full on B.
+- **2026-09-05** — Planning review, round eighteen of forty: two blocking
+  findings, addressed; and one cross-item correction from B's round thirty.
+  - C-36, requirement 11: `sd-suggest` filed a GitHub issue in a repository
+    someone else merges, against requirement 6 and the skill's own rule,
+    and an unattended session could file it. Addressed: a row everywhere,
+    nothing filed on its own; `sd suggest publish <row>` is the operator's
+    step, to a configured destination, and no palette entry. Criterion 28.
+  - C-37, requirement 5: the closure assumed the merged tree held the
+    mirror, and in `guest` mode the triad lives on the fork's integration
+    branch, so rebinding to the upstream squash commit left the closure a
+    tree with no mirror. Addressed: the guest closure is one commit on the
+    integration branch, `rev` moves there, nothing upstream. Criterion 13.
+  - Cross-item, from B's round thirty and D's round one: three protection
+    settings with no integration update, round seventeen's C-35 fix, let
+    two parallel pull requests that each pass alone merge clean and break
+    the default branch after delivery. Withdrawn: the up-to-date setting is
+    back, the integration update is back and bounded, one per `sd-ship`
+    run and one per merge-lane turn, a second on a hand-moved base and
+    `blocked` past it. Requirements 3 and 5, criterion 13, the design's
+    Defaults and path.

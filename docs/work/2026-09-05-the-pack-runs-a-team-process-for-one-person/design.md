@@ -67,9 +67,9 @@ These run without being asked.
   lands the item's closure commit on the default branch, and runs
   `git fetch -p`. The repository setting `delete_branch_on_merge` removes
   the remote branch.
-- The default branch is protected: pull requests only, CI required, no
-  required approvals. CI also runs on the default branch after each merge.
-  `sd-status` reports it, the dashboard sets it in one
+- The default branch is protected: pull requests only, CI required, branches
+  up to date before they merge, no required approvals. `sd-status` reports
+  it, the dashboard sets it in one
   action on a repository you own, and an unattended merge into a branch
   that is not refuses naming the setting.
 - `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
@@ -143,6 +143,8 @@ A shared repository is one where someone else also merges. In it:
 - No workflow files or repository settings unless the owner of that
   repository asked for them.
 - No merge. The loop stops at pull-request-ready.
+- No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
+  files one when you run it, to a destination you configured.
 
 ## The path for a change
 
@@ -164,10 +166,13 @@ without the database, and touches nothing else: the directory stays. The
 branch itself never
 says `done`, so a merge that fails leaves the item open. Delete a `done`
 directory yourself, with `git rm -r`, when you want the listing short;
-nothing in the pack does. A pull request GitHub cannot merge, a conflict,
-ends the item `blocked` naming the files; merge the default branch in by
-hand, push, and the next `sd-ship` run reviews the new head once, spends
-no pass on it, and merges.
+nothing in the pack does. When the default branch moved while the pull
+request waited, `sd-ship` merges it in once, reviews the combined head
+once, spends no pass on it, waits for CI and merges; moved again, the run
+stops at `ready_to_send` and says so, and the next run makes the next
+update. A conflict ends the item `blocked` naming the files. In `guest`
+mode the closure is one commit on the fork's integration branch, where
+the triad lives, and nothing goes upstream.
 
 ## Modes
 
