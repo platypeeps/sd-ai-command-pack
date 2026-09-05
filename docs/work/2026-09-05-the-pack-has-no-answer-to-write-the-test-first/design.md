@@ -119,7 +119,15 @@ runtime semantics still need inspection and tests."
 
 So the seam divides the *contents* of the work, not its commits: type surface
 and `todo!()` bodies are outside test-first; every real body — whether it lands
-in the skeleton commit or a later fill — is inside it. Neither skill wins. Stated in both files, because a Rust author
+in the skeleton commit or a later fill — is inside it. Neither skill wins.
+
+**Saying that in prose was not enough, and the first remediation stopped
+there.** `sd-typed-holes` step 4 gates the skeleton on check, clippy and
+format, none of which read behaviour, and then proposes the commit. The wrong
+getter passes all three. So step 4 now also requires listing every real body in
+the skeleton and routing it through `sd-tdd` before the commit is proposed, and
+the skill's final report carries that evidence or states its absence. A seam
+that only the prose enforces is a seam the workflow walks straight past. Stated in both files, because a Rust author
 may arrive at either one first, and a seam readable from only one side is the
 defect `sd-feedback` had before requirement 11 of the prior item fixed it.
 
@@ -155,12 +163,25 @@ code from the tree, which is why D3 now requires a recoverable copy first.
 
 **D6 — closing states mirror `sd-debug`'s three, with different words.**
 
-`disciplined` (every production change was preceded by its test, and each was
-seen to fail against a tree lacking the behaviour), `partial`, `abandoned` (the
-discipline was not followed; the report says so rather than implying
-otherwise). Three states, exactly one chosen, and the middle one exists so that
-an honest partial result has a word — without it, partial work gets reported as
+Three states, exactly one chosen, and the middle one exists so that an honest
+partial result has a word — without it, partial work gets reported as
 `disciplined`, which is the failure mode the state set is for.
+
+**Exactly one must fit, and prose definitions did not deliver that.** The first
+draft defined them by description: `partial` took "changes with no failing-test
+evidence" and `abandoned` took "the discipline was not followed". A session
+whose single production change was never seen to fail matches both, and a
+session whose single change was recovered late matches neither cleanly, because
+`partial` opened with "the evidence is mixed" and one change is not a mixture.
+
+So the states are decided by **counting**, not by judgement. Sort each
+production change into `first` (test written before it, seen to fail),
+`recovered` (test written after, seen to fail against the reverted tree), or
+`none`. Then `disciplined` is *every change is `first`*; `partial` is *at least
+one is `first` or `recovered`, and not all are `first`*; `abandoned` is *none
+is either*. The three are exhaustive and disjoint over any multiset of changes,
+which is what "exactly one" requires. The empty session closes `disciplined`
+vacuously and says it made no changes.
 
 `partial` carries **two** groups, named separately in the report: changes with
 no failing-test evidence at all, and changes whose test was recovered late by

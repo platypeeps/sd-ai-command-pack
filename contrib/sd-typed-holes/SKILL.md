@@ -79,7 +79,21 @@ Unknown argument names are an error — stop and report them before starting.
 4. Gate the skeleton alone: workspace check and clippy with warnings
    denied, plus a format check, all green with every behavioral body
    still `todo!()` — the trivial accessors step 2 asks you to implement
-   stay implemented. Then propose the skeleton as its own commit, so the
+   stay implemented.
+
+   Check, clippy and format are not the whole gate, because they do not
+   read behavior. Step 2 lands real bodies alongside the holes — the
+   implemented accessors, the conversion impls, and any derive whose
+   runtime semantics the design relies on. Those are behavior, they are
+   inside `sd-tdd`, and the seam above says so: a getter returning the
+   wrong same-typed field compiles, passes clippy, and is formatted. So
+   before proposing the commit, list every real body in the skeleton and
+   route it through `sd-tdd` — each gets a test seen to fail against a
+   tree lacking it. A skeleton whose only evidence is a green toolchain
+   has proved the design composes and nothing about the bodies it
+   already contains.
+
+   Then propose the skeleton as its own commit, so the
    reviewed design is a retrievable git object rather than a
    conversation, and let the user make it. Committing is theirs to
    authorize; this workflow reaching step 4 is not that authorization.
@@ -134,7 +148,9 @@ Unknown argument names are an error — stop and report them before starting.
 - **Surface summary** — the public types with their business rules and
   forbidden states, per the design record;
 - **Skeleton commit** — the commit that carries the surface and its
-  green check, lint, and format evidence;
+  green check, lint, and format evidence, plus the real bodies it
+  contains and the `sd-tdd` evidence for each, or a statement that a
+  body shipped without it;
 - **Hole inventory** — holes opened, holes filled, holes remaining, and
   the tracking mechanism (lint level or grep baseline);
 - **Marker status** — expect-markers and dead-code allowances still

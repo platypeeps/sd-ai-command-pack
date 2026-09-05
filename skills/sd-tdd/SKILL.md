@@ -113,11 +113,19 @@ What the gate never accepts is a test that has only ever been seen to pass.
 3. **Run it and watch it fail.** Not "expect it to fail" — run it, and read the
    output.
 4. **Check the failure is the expected one.** A test that fails is not a test
-   that failed correctly. An import error, a typo in a fixture, a collapsed
-   factory and a missing behaviour all produce red, and only the last proves
-   anything. The failure must be *the behaviour being absent*, and the report
-   quotes the message that says so. If the test errors, fix the error and run
-   again until it fails for the right reason. If it **passes**, the behaviour
+   that failed correctly. The failure must be *the behaviour being absent*, and
+   the report quotes the message that says so.
+
+   The line is not "assertion good, error bad" — it is **whose absence the
+   message reports**. A typo in a fixture, a collapsed factory, or an import of
+   a module that was supposed to already exist are defects in the test or its
+   scaffolding: invalid red, fix and rerun. A stub from the bootstrap carve-out
+   raising `NotImplementedError` — or panicking on `todo!()` in Rust — is the
+   declared hole announcing itself, which *is* the behaviour being absent:
+   valid red, and it needs no placeholder return value to become one. Writing a
+   placeholder body to convert the error into an assertion failure would mean
+   writing behaviour to satisfy a formality, which is the thing the gate
+   exists to prevent. If it **passes**, the behaviour
    already exists, or the test does not reach it — either way, stop and find
    out which before writing code. If the behaviour genuinely already exists,
    no production code is written for it: record it under **Behaviours already
@@ -162,19 +170,26 @@ What the gate never accepts is a test that has only ever been seen to pass.
    under **Recovered late** rather than counted as `disciplined`. `sd-debug`
    owns the reproduction and the cause; this step owns the proof that the fix
    stays fixed.
-10. Close in one of exactly three ways, and name which one:
-    - **disciplined** — every production change in this session was preceded by
-      its test, each test was seen to fail against a tree lacking the
-      behaviour, and the report quotes each failure.
-    - **partial** — the evidence is mixed. Two things land here, named
-      separately: changes with no failing-test evidence at all, and changes
-      whose test was recovered late by reverting. The second satisfies the
-      gate and still belongs here, because a test derived from the code it
-      tests was scoped by that code. Name which changes are in which group and
-      why, one line each. Without this state, both get reported as
-      `disciplined`.
-    - **abandoned** — the discipline was not followed. Say so plainly rather
-      than reporting a green suite and letting the reader infer the rest.
+10. Close in one of exactly three ways, and name which one. They are decided
+    by counting production changes, not by judgement, so that exactly one
+    always fits. Sort every production change this session into **first**
+    (its test was written before it and seen to fail), **recovered** (its test
+    was written after and seen to fail against the reverted tree), or **none**
+    (no observed failure at all). Then:
+    - **disciplined** — every change is `first`. Nothing else qualifies. The
+      report quotes each failure.
+    - **partial** — at least one change is `first` or `recovered`, and not
+      every change is `first`. Name which changes are `recovered` and which are
+      `none`, one line each. A single `recovered` change with nothing else in
+      the session lands here too: the state is about the *grade* of the
+      evidence, not about a mixture.
+    - **abandoned** — no change is `first` or `recovered`. Not one observed
+      failure in the session. Say so plainly rather than reporting a green
+      suite and letting the reader infer the rest.
+
+    A session with no production changes at all closes `disciplined`
+    vacuously, and the report says the session made none — that is a true
+    statement about an empty set, not a claim to have done the work.
 
 ## Red flags
 
@@ -186,7 +201,7 @@ What the gate never accepts is a test that has only ever been seen to pass.
 | "The test passed first try — good" | Then it is testing something that already worked. Find out what, before trusting it. |
 | "It fails, that's the red step" | Fails how? An import error is red and proves nothing. Read the message. |
 | "I'll write the general version now, tests later" | Every option nobody asked for is an untested branch. Write what the test demands. |
-| "The regression test passes, the bug is guarded" | It passes because the fix is present. Revert the fix and see it fail, or it guards nothing. |
+| "The regression test passes, the bug is guarded" | It passes because the fix is present. Until it has been seen to fail without the fix, it is not known to guard anything — which is not the same as knowing it guards nothing, and the report should say the weaker true thing. |
 | "Deleting an hour of work to redo it with tests is wasteful" | Nobody is asking you to delete it. Revert it, watch the test fail, restore it. That closes `partial`, not `disciplined`, and a watched failure beats no failure. |
 | "TDD is dogma, I'm being pragmatic" | The pragmatic question is whether the test can catch the bug. Watching it fail is the only way to answer it. |
 
@@ -202,8 +217,13 @@ What the gate never accepts is a test that has only ever been seen to pass.
 - **Never revert without a recoverable copy.** Reverting removes working code
   from the tree, and this skill cannot commit or branch, so it carries no
   recovery mechanism of its own. Before reverting: confirm the change is
-  already committed, or save it — `git stash`, or `git diff > <patch>` for
-  tracked files plus a copy for untracked ones — and say where it went. If the
+  already committed, or save it — `git stash --include-untracked`, or
+  `git diff HEAD --binary > <patch>` plus a copy of any untracked file — and
+  say where it went. Plain `git diff` is not sufficient and must not be used
+  here: it omits anything already staged and mangles binary files, so a staged
+  or binary fix would produce an empty or unusable backup immediately before a
+  destructive revert. `HEAD` covers staged and unstaged alike; `--binary` makes
+  the patch reapplicable. If the
   tree carries unrelated uncommitted edits that the revert cannot be isolated
   from, or the change is untracked and cannot be separated, **do not revert**:
   report the regression proof as not run and say why. Restoring is a step to
@@ -237,8 +257,10 @@ What the gate never accepts is a test that has only ever been seen to pass.
 - **Behaviours** — each one named in the sentence it was stated as;
 - **Cycles** — per behaviour: the test, the failure that was observed with the
   message quoted, the change that made it pass, and the suite result after;
-- **Regression proofs** — for each bug fix, the four steps of step 9 with the
-  reverted-fix failure quoted, or a statement that the proof was not run;
+- **Regression proofs** — for each bug fix, which of step 9's two routes was
+  used and its evidence: for a test written against the still-unfixed tree, the
+  failure quoted; for the four-step recovery, the reverted-fix failure quoted.
+  Where neither happened, say the proof was not run and why;
 - **Behaviours already present** — behaviours whose first test passed because
   the behaviour existed, and what was found on investigating;
 - **Untested changes** — every production change with no failing-test evidence,
