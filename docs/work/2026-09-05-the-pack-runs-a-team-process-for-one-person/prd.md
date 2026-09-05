@@ -545,14 +545,29 @@ and the closure branch is `closure/<item>` and nothing else, so that a run
 that restarts after the closure pull request was opened and before it was
 merged finds it by its head and finishes it, waits for CI and merges, rather
 than opening a second one or failing on the branch it already pushed, from
-B's round nineteen. The row turns `done` on
-the confirmed merge and records the closure commit when it lands; a `done`
+B's round nineteen. An item is not one pull request: the landing order
+below splits this one into slices, and a merge is a delivery only when
+it says so, from A's round twenty-three. Every merge `sd-ship` makes
+carries `Item: <item>`, which associates the commit with the item and
+closes nothing; the merge that delivers carries `Delivers: <item>` as
+well, written when the operator ships with `--deliver`, or when D's
+runner merges an assignment whose row was created as the item's last
+slice, `final` on the row from the run dialog. A merge without
+`Delivers:` leaves the row `in_progress`, moves `rev`, and lands no
+closure; `sd-ship` says so in its last line, naming `--deliver` for
+next time. The row turns `done` on the confirmed merge that carries
+`Delivers:` and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
 A merge the operator makes by hand, the default policy, is confirmed the
 same way by whichever next asks GitHub about the item's pull request, D's
 runner, which watches every `ready_to_send` item's pull request, or the
 next `sd-ship` run in that repository before D exists, and the same step
-follows: the row `done`, `rev` moved, the closure by a second pull request.
+follows when the merge message carries `Delivers:`, which a hand merge
+carries when the operator wrote it: the row `done`, `rev` moved, the
+closure by a second pull request; without it, `rev` moves and the item
+stays open, and the item screen offers `deliver` for a merge that was
+the last one, which writes `done` and lands the closure as a
+`Delivers:` merge would have.
 That closure pull request merges on its own under both policies once CI
 passes and the three answers hold, because it carries the item's own mirror
 and nothing a provider wrote; under the default policy it is
@@ -566,12 +581,13 @@ upstream squash commit is recorded on the row as the merge and never as
 `rev`, from A's round eighteen, so that the guard is never asked to find
 a mirror in a tree that was built to hold none.
 The closure is not what a reader waits on, from A's round twenty-one.
-The merge message `sd-ship` hands the API carries an `Item: <item>`
-trailer, so the commit that delivers the item marks it on the default
-branch in the same act, and a reader with no database derives `done`
-from git before any closure exists: one function, `sd_lib.delivered`,
-answers `yes` when a commit reachable from the default branch carries
-`Item: <item>` or `Closes: <item>`, `no` when none does and the history
+The merge message `sd-ship` hands the API carries the trailers above,
+so the commit that delivers the item marks it on the default branch in
+the same act, and a reader with no database derives `done` from git
+before any closure exists: one function, `sd_lib.delivered`, answers
+`yes` when a commit reachable from the default branch carries
+`Delivers: <item>` or `Closes: <item>`, never on `Item:` alone, `no`
+when none does and the history
 is whole, and `unknown` when none does and the checkout is shallow,
 `git rev-parse --is-shallow-repository`, because the trailer may sit
 past the boundary, from A's round twenty-two. Every reader that picks an
@@ -963,7 +979,9 @@ the same heading, by the operator's decision on 2026-09-05: B's fixture
 harness, library and migrations; then this item's registry reader, tiered
 ship path, protection, closure and mirror guard; then B's dashboard,
 read-only and then writing; then D's runner. A slice claims only the
-criteria its text names. Before the second slice, criteria 13 and 32 are
+criteria its text names, and only the last slice's merge delivers the
+item, `Delivers:` on its message; the others carry `Item:` and leave the
+row open, requirement 5. Before the second slice, criteria 13 and 32 are
 recorded as waiting, and until D lands a merge the operator makes is
 confirmed by the next `sd-ship` run alone.
 
@@ -987,8 +1005,14 @@ confirmed by the next `sd-ship` run alone.
    path and the pass path. The count of missing trailers per week is readable
    from the database once B exists, and from the git log before that.
 4. Exactly one second-model lane is named anywhere in the payload, the
-   contract, or `AGENTS.md`. A repository-wide grep for the deleted lane returns
-   nothing outside `CHANGELOG.md`.
+   contract, or `AGENTS.md`. A grep of the governed tree for the deleted
+   lane returns nothing outside `CHANGELOG.md`. The governed tree, for
+   this and every absence assertion below, from A's round twenty-three,
+   is what runs or governs: `bin/`, `skills/`, `templates/`, `dashboard/`,
+   `tests/`, `.claude/`, `.github/`, `CLAUDE.md`, `AGENTS.md`, `README.md`
+   and `docs/spec/`; `docs/work/`, this item and the archive alike, and
+   `CHANGELOG.md` are history and are excluded by name, since the archive
+   is kept unchanged and holds every name the cuts remove.
 5. The review table appears in exactly two places, `WORKFLOW.md` and the one
    rule file under `.claude/rules/`, and a test asserts the two copies are
    identical. Every skill that runs a review names its point in the table and
@@ -1122,7 +1146,12 @@ confirmed by the next `sd-ship` run alone.
     and `sd-plan` in a fresh clone of the default branch do not pick the
     item though its mirror still says `in_progress`, and the row shows
     `closure pending`; a hand merge through the fixture remote with no
-    trailer is picked until the closure lands; and a clone of the
+    trailer is picked until the closure lands; two slices shipped in
+    turn, the first without `--deliver`, leave the row `in_progress`
+    after the first with `rev` moved, no closure, `delivered` answering
+    `no` on an `Item:` merge, and the item still picked, and after the
+    second with `--deliver` the row is `done` and the closure lands; and
+    a clone of the
     default branch at depth one, taken after one more commit lands past
     the merge, has `sd_lib.delivered` answer `unknown`, `sd-review
     --scope planning` refuse naming the boundary, and after `git fetch
@@ -1173,8 +1202,8 @@ confirmed by the next `sd-ship` run alone.
 17. The `bash32` job, `tests/test_selector_contract_drift.py`,
     `generated/registry-snapshot.json` and the `plugins/sd` stub are absent, and
     the `security` job's steps run inside `lint`.
-18. A repository-wide grep for `Trellis`, `.trellis` and `task.py` returns
-    nothing outside `CHANGELOG.md`.
+18. A grep of the governed tree, criterion 4, for `Trellis`, `.trellis`
+    and `task.py` returns nothing.
 19. The global settings contain no `Read()` deny rule and no `.trellis` allow
     rule, and do contain the four MCP pull-request tools. The global guide
     contains no `cd` prohibition.
@@ -1233,8 +1262,8 @@ confirmed by the next `sd-ship` run alone.
     return the same reviewer order from the same `providers.yaml`, and that
     the loop stops at pull-request-ready in every repository.
 31. Requirement 13 is closed line by line. One test lists the symbols, flags
-    and files the cuts remove and asserts a repository-wide grep for each
-    returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
+    and files the cuts remove and asserts a grep of the governed tree,
+    criterion 4, for each returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
     `carrier_branches`, `_protection_gaps`, `load_acknowledgements`,
     `--stash-ref`, `--push`, `--park`, `authors`, `argument-vocabulary`,
     `Standing rule`, `R10-D`, `five gates`, `cron-jobs.sh`, `Active item:`,
@@ -1845,3 +1874,20 @@ from a number the operator types.
     Addressed: the two CLIs leave the registry and one `url` entry,
     `baseten`, takes their place through the library's client; the
     reviewer list, the consent line and the vendor passage follow.
+- **2026-09-05** — Planning review, round twenty-three of forty: two
+  blocking findings, addressed.
+  - C-47, requirement 5: one merge turned the row `done`, landed the
+    closure and made `delivered` exclude the item, while the landing order
+    splits this item over several pull requests. Addressed: `Item:`
+    associates and closes nothing; the delivering merge carries
+    `Delivers:`, written by `sd-ship --deliver`, by D's runner on a row
+    marked `final`, or by the operator's hand, and `delivered` answers on
+    `Delivers:` and `Closes:` only; the item screen offers `deliver` for a
+    hand merge that was the last. The landing order says so; criterion 13
+    ships two slices.
+  - C-48, criteria 4, 18 and 31: repository-wide absence greps hit the
+    archive, kept unchanged since round twenty and holding `R10-D6` among
+    every name the cuts remove, so `make check` would fail for good.
+    Addressed: the absence assertions grep a governed tree named once in
+    criterion 4, code and governing files, with `docs/work/` and
+    `CHANGELOG.md` excluded by name as history.
