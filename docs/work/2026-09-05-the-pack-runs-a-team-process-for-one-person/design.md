@@ -212,7 +212,8 @@ branch is your own remote, and the guest push there proceeds while the
 same branch offered upstream is refused. Mode never decides merging.
 `merge: auto` is a per-repository policy you set once on the dashboard, off by
 default, and nothing derives it. It is necessary, not sufficient: every merge
-asks the three questions again, and a no suspends it with the reason shown.
+asks the same three questions again, one function for both gates, and a no
+suspends it with the reason shown.
 
 ## Providers
 
@@ -303,8 +304,10 @@ library; `.github/sd-review.json` carries repository policy, paths and the
 severity floor, and names no provider and no chain. The `reviewer` line above
 is the chain, intersected with the repository's `reviewers` line in
 `CLAUDE.local.md`, the entries you have allowed to receive that repository's
-diff; the entry is the recipient, so a second host for the same model is a
-second name to allow; without the line, no reviewer resolves.
+diff; the entry is the recipient and the line names the recipient beside the
+entry, so a second host for the same model is a second name to allow and a
+host moved under the same name is refused until you rewrite the line;
+without the line, no reviewer resolves.
 
 ## Overrides
 
@@ -314,12 +317,15 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     check: <the command that verifies this repo>
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
-    reviewers: <the registry entries that may receive this repository's diff, e.g. claude, codex>
+    reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude, baseten@inference.baseten.co>
 
 `check`, `test` and `lint` run in that order and are each optional; a repository
 that spells everything as one command sets `check` alone. `reviewers` is
 consent: you write it, nothing derives it, it names entries because the entry
-is who receives the diff, and without it no reviewer resolves for the
+is who receives the diff, and each entry carries its recipient, the host of a
+`url` entry or the executable of a `start` entry, so an entry edited to point
+elsewhere is refused until you rewrite the line; without the line no
+reviewer resolves for the
 repository. The installer asks for it once per repository when it writes the
 block, offering the enabled entries and taking none as an answer; it fills in
 no default, keeps your answer on every rerun, and a repository you skipped

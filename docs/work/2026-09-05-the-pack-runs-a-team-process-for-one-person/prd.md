@@ -184,8 +184,12 @@ request, wait for CI once, merge, close the item on the default branch,
   cannot authorize the second. Consent goes stale, though, and a row set
   once does not know that a collaborator arrived since: so at the moment of
   the merge `merge: auto` is necessary and not sufficient, and the path asks
-  the remote the three questions again, is the owner you, is it not a fork,
-  are you the only collaborator, whatever the `mode:` line says. Any no, or
+  the remote requirement 6's three questions again, can the operator
+  administer it, is it not a fork, can anyone else push, one predicate in
+  the library that the artifact gate and this gate both call and neither
+  restates, from A's round twenty-seven, whatever the `mode:` line says,
+  so that an organisation repository the operator alone administers
+  merges unattended under `merge: auto` as requirement 6 keeps it `full`. Any no, or
   no answer, and the merge does not happen: the item ends `ready_to_send`
   with a note naming the answer that changed, the row keeps `merge: auto`
   and the dashboard shows it suspended with the same reason, and the
@@ -346,7 +350,16 @@ the recipient, not the model's maker: the `baseten` entry sends the diff
 to Baseten, whoever trained the model it serves, so consent names
 `baseten`, and a second
 host for the same model is a second entry that no repository has consented
-to until its line names it. `vendor` stays what it is, the maker, for the
+to until its line names it. The line names the recipient beside the
+entry, `baseten@inference.baseten.co`, the host of a `url` entry's
+address and the executable of a `start` entry's line, from A's round
+twenty-seven, because an entry is a name in a file the operator edits
+and a name is not a recipient: the library derives each named entry's
+recipient from the registry at every review and compares it with the
+line, and an entry whose recipient moved under its name is refused
+naming the host or executable consented to and the one found, with no
+request sent, until the operator rewrites the line; a bare name in the
+line is refused the same way, naming the form. `vendor` stays what it is, the maker, for the
 independence rule alone. Fallthrough is dispatch, not authorization: the
 chain is intersected with `reviewers`, and with no entry left, or with no
 `reviewers` line at all, the review refuses naming the key and the file
@@ -357,7 +370,8 @@ not from a vendor already allowed under another entry. One line per
 repository, written by the operator, and an entry added to the registry
 reaches no repository that did not name it. The installer asks for the
 line once per repository, when it writes the block, offering the enabled
-registry entries and taking none as an answer; it fills in no default,
+registry entries with their recipients, writing the pairs, and taking
+none as an answer; it fills in no default,
 writes no line for none, keeps the answer on every rerun, and a
 repository the operator skipped refuses its first review naming the key,
 by the operator's decision on 2026-09-05: install is the one moment the
@@ -558,6 +572,13 @@ closure; `sd-ship` says so in its last line, naming `--deliver` for
 next time. The row turns `done` on the confirmed merge that carries
 `Delivers:` and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
+A `cancel`, item B's requirement 1, is the other way a work item ends:
+it writes `done` with a `cancelled` note and lands the same closure,
+the word and the note into the mirror through `closure/<item>` with
+`Closes:`, and no delivering merge behind it because nothing is
+delivered, from B's round forty-one; a cancelled row without its
+closure is finished by the next `sd-ship` run the same way, so no
+other checkout and no CI reads a cancelled item as open.
 A merge the operator makes by hand, the default policy, is confirmed the
 same way by whichever next asks GitHub about the item's pull request, D's
 runner, which watches every `ready_to_send` item's pull request, or the
@@ -1079,19 +1100,26 @@ confirmed by the next `sd-ship` run alone.
    review flag, and `SD_AUTHOR=codex` in the review's environment changes
    nothing about an untagged commit. Consent at install: the installer writing the block for
    a fixture repository with a two-entry registry asks once and writes the
-   answered entries as the `reviewers` line, writes no line for an empty
+   answered entries with their recipients as the `reviewers` line, writes
+   no line for an empty
    answer, and on a rerun keeps the line it finds and asks nothing; a
    non-interactive run takes `--reviewers` and otherwise writes no line.
    Authorization: a block
-   whose `reviewers` line names `claude` alone, with author `claude`,
-   refuses naming the key; `claude, codex` with author `claude` resolves to
+   whose `reviewers` line names `claude@claude` alone, with author
+   `claude`, refuses naming the key; `claude@claude, codex@codex` with
+   author `claude` resolves to
    `codex`, and with `codex` rate-limited refuses rather than reaching
    `minimax`; no `reviewers` line refuses naming the key whatever the
    `author` line holds; a registry with a new entry added resolves nothing
    to it in a repository whose line does not name it, and a second entry
    for a vendor the line already allows under another entry, `baseten`
    allowed and a new `baseten-openrouter` with the same `vendor`, is not
-   resolved until the line names it; each asserted with a recording fixture
+   resolved until the line names it; the `baseten` entry's `url` host
+   edited to another host in a repository whose line names
+   `baseten@inference.baseten.co` is refused naming both hosts with the
+   fixture seeing no request, a `start` entry's executable edited the
+   same way is refused naming both, and a line carrying a bare name is
+   refused naming the form; each asserted with a recording fixture
    that sees no request leave for any other entry. The plan: the `minimax` meter reads the two remaining percents
    from a recorded `token_plan/remains` answer and writes them as `meter`
    rows, and a bill whose five-hour or weekly window reads zero is skipped
@@ -1154,7 +1182,11 @@ confirmed by the next `sd-ship` run alone.
     to the upstream is refused with the upstream seeing no push. Unattended
     merge is never derived from mode: a
     test asserts the loop stops at pull-request-ready in a `full` repository
-    whose row lacks `merge: auto`, and another enables `merge: auto`, ships
+    whose row lacks `merge: auto`; a second enables `merge: auto` on an
+    organisation remote only the operator can push to and asserts the
+    merge happens unattended, and a grep of `bin/` for the collaborator
+    query finds one function that both gates call; and another enables
+    `merge: auto`, ships
     once to merge, adds a second collaborator to the fixture remote, ships
     again and asserts the second stops at `ready_to_send` with the
     collaborator named, the row still `merge: auto`, and the remote asked at
@@ -1204,7 +1236,9 @@ confirmed by the next `sd-ship` run alone.
     the directory is untouched, and the row is not `done`; a third
     confirms a `--deliver` merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
-    lands it; a fifth kills `sd-ship` after the closure pull request is
+    lands it; a fourth cancels an item with no merge from item B's
+    screen and asserts a closure lands whose mirror says `done` with the
+    `cancelled` note and no `Delivers:` anywhere in the history; a fifth kills `sd-ship` after the closure pull request is
     opened and before it is merged, and asserts the next run merges that
     pull request, opens no second one, and one closure commit exists. A
     test ships an item with `--deliver` and asserts the closure commit touched one
@@ -1975,3 +2009,23 @@ from a number the operator types.
     remote and the push there proceeds, the same branch offered upstream
     is refused, and an owned repository with no fork keeps the triad on a
     local branch. Criterion 11 asserts both pushes on a guest fixture.
+- **2026-09-05** — Planning review, round twenty-seven of forty, with B's
+  round forty-one in the same batch: two blocking findings here,
+  addressed, and one cross-item change from B's C-72.
+  - C-53, requirement 2: the merge gate still asked whether the owner is
+    the operator after round twenty-six had made requirement 6 ask about
+    access, so an organisation repository the operator alone administers
+    was `full` for artifacts and refused for unattended merge. Addressed:
+    one predicate in the library, called by both gates and restated by
+    neither. Criterion 11 merges unattended on an organisation fixture
+    and greps for one function; the design's Modes section follows.
+  - C-54, requirement 3: consent was bound to an entry's name, and an
+    entry whose `url` was edited to another host kept every repository's
+    grant. Addressed: the line names the recipient beside the entry,
+    `baseten@inference.baseten.co`, the library derives the recipient
+    from the registry at every review, and a mismatch refuses naming both
+    with no request sent. Criterion 8 edits an allowed entry's host and
+    executable; the design's Providers and Overrides sections follow.
+  - B's C-72: `cancel` lands the same closure as delivery, with the
+    `cancelled` note and no delivering merge, so a cancelled item is
+    closed in every checkout. Requirement 5, criterion 13.
