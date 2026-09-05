@@ -529,14 +529,23 @@ after A's round thirty-three: the migration that fills the database, B's
 requirement 2, reads every item's line outside `docs/work/archive/` into
 its row, `done` ones included, and is additive first and retires last,
 from A's round thirty-six: its import lands the rows beside the lines in
-B's first slice and removes nothing; this item's second slice lands the
-reader, which reads the row where the database is and the line where it
-still is and answers `unknown` for neither, the trailer-writing ship path
-and the `PR_BODY` setting; and the migration's retire step, one commit
-that removes every line, runs after that in a pull request of its own,
-refusing to run while the installed `sd_lib` has no `delivered`, naming
-the version, and the lint's rule that no line remains switches on with
-that commit. After it nothing writes a status into a file again. A `done`
+B's first slice and removes nothing, and the rows it lands are a
+rehearsal copy and not the record; this item's second slice lands the
+reader, which reads the line where there is one, the row where there is
+none, and answers `unknown` for neither, from A's round thirty-seven,
+because until the retire the line is what every writer still writes,
+the status commands and `sd-plan` and `sd-ship` among them, and a row
+imported earlier says what the item was and not what it is; the same
+slice lands the trailer-writing ship path and the `PR_BODY` setting.
+The migration's retire step runs after that in a pull request of its
+own, and it is B's one sitting: freeze the writers, import once more so
+that every row says what its line says now, verify by content, snapshot,
+and remove every line in one commit, refusing to run while the
+installed `sd_lib` has no `delivered`, naming the version, and lifting
+the freeze with nothing removed when the verify names a difference; the
+lint's rule that no line remains switches on with that commit, and from
+it the row is the record, and a status change writes the row. After it
+nothing writes a status into a file again. A `done`
 item the default branch does not mark, which is every historical one,
 four in this repository today, is an unmarked `done` row from the import,
 and the pull request that lands the retire step carries `Closes:` for
@@ -1054,11 +1063,12 @@ slices, each its own pull request, in the order B's `prd.md` records under
 the same heading, by the operator's decision on 2026-09-05: B's fixture
 harness, library and migrations as rehearsals that retire nothing; then
 this item's registry reader, tiered ship path and protection, with the
-reader that reads the row where the database is and the line where it
-still is; then the `docs/work` migration's retire step, the commit that
-removes the lines, in a pull request after the one that lands them, from
-A's round thirty-six, so that the pack installed at every point between
-reads every item; then B's dashboard,
+reader that reads the line where there is one and the row where there is
+none; then the `docs/work` migration's retire step, B's one sitting that
+freezes, imports once more, verifies and removes the lines, in a pull
+request after the one that lands the reader, from A's rounds thirty-six
+and thirty-seven, so that the pack installed at every point between
+reads every item as it is; then B's dashboard,
 read-only and then writing; then D's runner. A slice claims only the
 criteria its text names, and only the last slice's merge delivers the
 item, `Delivers:` on its message; the others carry `Item:` and leave the
@@ -1120,7 +1130,10 @@ confirmed by the next `sd-ship` run alone.
    `codex` entry is repointed to an anthropic model and after it is
    removed, with the review of the older branch proceeding in both cases
    and refusing the same vendor; `SD_AUTHOR=nosuch` is refused at commit
-   naming the registry; a branch with one `claude` and one
+   naming the registry; the trailer forms the design page documents,
+   `Authored-with:` and `Attributes:`, are asserted equal to the forms
+   `sd_lib.py` writes and reads, enumerated from the source; a branch
+   with one `claude` and one
    `codex` trailer resolves to the first entry of neither vendor; a branch
    with no trailer and no `--author` is refused naming the flag; a branch
    with one untagged commit followed by one `Authored-with: codex` commit
@@ -1252,15 +1265,19 @@ confirmed by the next `sd-ship` run alone.
     asserted by a test that runs both against a fixture repository
     holding a `done` item and two open ones, diffs after each, and
     asserts that after the import alone every line is still there and
-    the pack installed at B's first slice reads them as before, that the
-    pack installed at this item's slice reads the row where the database
-    is and the line where it is not and answers `unknown` for none, that
-    the retire step refuses under a pack whose `sd_lib` has no
-    `delivered`, naming the version, that after the retire the `done`
-    item's row is `done` and unmarked, the pull request `sd-ship` opens
-    for the retire step carries `Closes:` for it, and after the merge a
-    database-free clone of the default branch does not pick it, from A's
-    rounds thirty-four and thirty-six. A
+    the pack installed at B's first slice reads them as before, that
+    with one open item's line changed to `done` by the old command after
+    the import the pack installed at this item's slice reads the line,
+    `done`, and not the stale row, reads the row for an item with no
+    line, and answers `unknown` for none, that the retire step refuses
+    under a pack whose `sd_lib` has no `delivered`, naming the version,
+    that its final import moves that row to `done` and its verify passes,
+    that a verify difference seeded after the freeze lifts the freeze
+    with every line in place, that after the retire both `done` items'
+    rows are `done` and unmarked, the pull request `sd-ship` opens for
+    the retire step carries `Closes:` for both, and after the merge a
+    database-free clone of the default branch picks neither, from A's
+    rounds thirty-four, thirty-six and thirty-seven. A
     status change touches no file, asserted by a test that changes status
     three times and hashes the item's files. In a checkout with no
     database, as in CI, every reader that picks an item asks
@@ -2258,3 +2275,20 @@ from a number the operator types.
     and the retire step runs after that in a pull request of its own,
     refusing under a pack whose `sd_lib` has no `delivered`. Criterion 13
     tests each installed version, not only the completed stack.
+- **2026-09-05** — Planning review, round thirty-seven of forty: two
+  blocking findings, addressed.
+  - C-68, requirement 5: between B's rehearsal import and the retire
+    sitting the old pack still wrote the line, and a reader that
+    preferred the row reopened an item completed in the interval and
+    let the retire delete its newer status with no `Closes:`. Addressed:
+    until the retire the line is the record, the rows are a rehearsal,
+    and the reader reads the line where there is one and the row where
+    there is none; the retire is B's one sitting, freeze, final import,
+    verify by content, snapshot, remove, and lifts the freeze with
+    nothing removed when the verify differs. Criterion 13 changes a
+    line between the slices and asserts each installed version and the
+    sitting's final import.
+  - C-69, design: the page still wrote `Attributes: <sha> <name>` after
+    round thirty-five moved the trailers to `<name>/<vendor>`.
+    Addressed on the page; criterion 7 asserts the page's trailer forms
+    equal the library's, enumerated from the source.
