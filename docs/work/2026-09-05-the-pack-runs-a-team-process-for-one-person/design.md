@@ -118,9 +118,10 @@ refused at GitHub.
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.
 
-The code point is an experiment until the numbers say otherwise: findings
-accepted against findings rejected over ten pull requests, cost logged per pass,
-thirty percent accepted to stay.
+The code point is an experiment: over ten pull requests, findings accepted
+against findings rejected with each accepted finding's severity, and cost
+logged per pass. The experiment ends in a report on the item, and you
+decide whether the point stays; no ratio decides for you.
 
 ## Advisory
 

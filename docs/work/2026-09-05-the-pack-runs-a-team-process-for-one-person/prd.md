@@ -301,9 +301,21 @@ since its base, and builds the set of authors from what the range
 carries: each commit's own trailer, or an `Attributes: <sha> <name>`
 trailer on a later commit in the range, which `sd attribute <sha> <name>`
 writes as one empty commit on the branch, one trailer per attributed
-commit, run by the operator per commit, and stamped `Authored-with:
-human` itself, because the operator made it, so that the repair never
-needs repairing, from A's round nineteen. It is a commit and not a note
+commit, run by the operator per commit or per range, `sd attribute
+<from>..<to> <name>`, and stamped `Authored-with: human` itself, because
+the operator made it, so that the repair never needs repairing, from
+A's round nineteen. The trailer names a commit as it is, and a rewrite
+of the branch that changes an attributed commit's hash, a rebase or an
+amend, loses it: the review then refuses again naming the commits that
+lost their attribution, and one range attribution restores it. That is
+deliberate and rare, from A's round twenty: the pack never rewrites a
+branch, D's dispatch and `sd-ship`'s integration both merge and never
+rebase, so the case arises only from the operator's own rewrite, and a
+trailer that followed content across rewrites would have to be matched
+by a patch id, which a conflict resolution changes. The mirror's `rev`
+is a separate identity with its own `--rebind`, and the two are repaired
+separately because they answer different questions. It is a commit and
+not a note
 because a notes ref is one mutable ref the whole repository shares, and
 two clones attributing different commits from the same tip diverge, the
 second push fails, and a force would drop the first; a commit on the
@@ -566,23 +578,19 @@ of their own, and a link that breaks then is theirs to see. The lint
 rule, the two reader scans, the eligibility function and the re-cut path
 are not built; the up-to-date setting stays for the reason requirement 3
 gives, which is not this one.
-`docs/work/archive/` and its 941 files are removed in one commit whose
-message names its own parent, by full hash, as the commit that recovers
-any of them: the parent is the last tree that holds every file at the
-path it is deleted from, where an older snapshot does not, `46ec7fb85`,
-the import, lacks 136 of the 941 at their current paths, from A's round
-seventeen. The same commit
-migrates every reader the archive has, eleven tracked files today,
-`CONTRIBUTING.md`, `CHANGELOG.md`, `docs/spec/guides/index.md`, the
-`artifacts-as-product` item's `design.md` and `implement.md`, and
-`.gito/config.toml` among them: a link into the archive becomes a
-permalink to the same path at that parent, a literal mention in prose
-gains that commit beside it, and the ignore pattern in `.gito/config.toml`
-goes; before the commit is made, every permalink's path is checked to
-exist in the parent's tree with `git cat-file -e`, and one that does not
-stops the commit naming it. The archive is the one deletion the pack
-makes, made once, by hand, and never by a closure. The 100 parked items go
-with the 386 imported ones: a backlog nobody opened in four months is not a
+`docs/work/archive/` stays as it is, by the operator's decision on
+2026-09-05 after A's round twenty, which overturns the first draft's
+answer to its third question. The pack stops reading it instead:
+`work_item_dirs` skips that one directory by name, and no other surface
+knows it exists, so the 386 imported and the 100 parked items are files
+in git and nothing else, the eleven tracked files that link into the
+archive keep links that resolve, and the ignore pattern in
+`.gito/config.toml` stays. The deletion took two rounds to make safe, a
+recovery commit named by full hash, every permalink checked against its
+tree, every reader migrated, and it bought a shorter listing of a
+directory nobody opens; git holds the archive either way, and a
+directory the pack does not read costs nothing. The pack makes no
+deletion at all. A backlog nobody opened in four months is still not a
 backlog, and B names one surface for later work.
 
 ### Requirement 6 — nothing personal reaches a shared repository, and ownership decides
@@ -778,7 +786,9 @@ log, not here.
   nowhere; each citation inlines its rule or goes.
 - `--scope planning` reviews one item: the one whose `branch:` is checked out,
   else the single non-done item, `ready` included; more than one candidate
-  refuses (`bin/sd-review:514`, `skills/sd-review/SKILL.md:39`).
+  refuses (`bin/sd-review:514`, `skills/sd-review/SKILL.md:39`), unless
+  `--item <directory name>` names one, added 2026-09-05 so that a
+  repository with two active items can review one at a time.
 - One review-record format, defined in `skills/sd-receive-review/SKILL.md:71`;
   `sd-plan`'s `## Review` (:41) and `sd-ship`'s "record the decision" (:46)
   cite it. Once B lands the record is rows on the item.
@@ -866,7 +876,7 @@ log, not here.
   walk and the `archived` and `parked` fields (`bin/sd_lib.py:355-368`,
   `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
   1122-1129,1234-1242,1254-1287`, `bin/sd-docs-lint:87-91`), so
-  `work_item_dirs` is one `iterdir`; `bin/sd_ledger.py` moves to B with the
+  `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
   database; `record_load` (`bin/sd-handoff-restore:157-288`); the six helpers
   copied from `bin/sd-handoff` (`bin/sd-handoff-restore:72-140,356-370`) are
   imported the way `bin/sd-status:96` does; the `authors` policy key
@@ -969,7 +979,10 @@ confirmed by the next `sd-ship` run alone.
    is refused naming the untagged commit and `sd attribute`, and after
    `sd attribute <sha> claude` resolves to the first entry of neither,
    the attributing commit itself carrying `Authored-with: human` and
-   being accepted by the scan without a second `sd attribute`,
+   being accepted by the scan without a second `sd attribute`; a rebase
+   of the branch that rewrites the attributed commit makes the review
+   refuse again naming the rewritten commit, and one `sd attribute
+   <from>..<to> claude` over the rewritten commits resolves it,
    vendor, with the attributing commit asserted on the fixture remote
    after the push and its `Attributes:` trailer naming the sha; two
    clones attributing two different commits of one branch in turn both
@@ -1117,23 +1130,17 @@ confirmed by the next `sd-ship` run alone.
     rule, and do contain the four MCP pull-request tools. The global guide
     contains no `cd` prohibition.
 20. Exactly one file states the planning adversarial review rule.
-21. `docs/work/archive/` does not exist. All 487 items in it are deleted, the
-    386 `done` and the 100 `planning` alike, and the deletion commit's
-    message names its parent, by full hash, as the commit that recovers
-    them; a test reads that hash from the message and asserts every path
-    the commit deletes exists in the parent's tree, and that every
-    permalink the commit wrote names the same hash and a path that exists
+21. `docs/work/archive/` is untouched: the branch's diff against its base
+    under that path is empty, and no pack surface reads it: a test puts a
+    `planning` item under `docs/work/archive/` and asserts that
+    `sd-status`, `sd-plan` and `sd-review --scope planning` see no item
     there. No item directory is deleted by any pack surface: the closure
     writes one line, `sd-plan` moves, parks and sweeps nothing and deletes
     nothing, no sweep or park code path remains, and a grep of `bin/` and
     `skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside the
     installer's own temporary paths. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
-    directory is untouched. After the archive commit, `git grep` finds no
-    link or literal path into `docs/work/archive/` from a tracked file,
-    and the two `docs/spec/guides/index.md` lines and the two
-    `artifacts-as-product/design.md` lines that linked in resolve as
-    permalinks at the parent.
+    directory is untouched.
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -1721,3 +1728,32 @@ from a number the operator types.
     `Authored-with:` trailer of its own, so the repair created what it
     repaired. Addressed: the attributing commit is stamped `Authored-with:
     human`. Criterion 13's attribution test covers it.
+- **2026-09-05** — Planning review, round twenty of forty: two blocking
+  findings, addressed.
+  - C-41, requirement 3: an `Attributes: <sha>` trailer names a hash, and a
+    rebase or an amend of the attributed commit changes it, so resolved
+    authorship became unknown again with no stated repair. Addressed by
+    stating it: the pack never rewrites a branch, both integrations merge,
+    so the case is the operator's own rewrite; the review refuses naming
+    the rewritten commits and one range attribution, `sd attribute
+    <from>..<to> <name>`, restores it. Criterion 13's attribution test
+    rebases and re-attributes.
+  - C-42, design: the page that ships as `WORKFLOW.md` still made thirty
+    percent accepted the condition for keeping the code point, which
+    requirement 3 and criterion 7 had withdrawn in round nineteen.
+    Addressed: the page requires the severity-and-cost report and the
+    operator's decision, with no threshold.
+- **2026-09-05** — Operator's decisions after round twenty, from the list
+  of seven presented with it.
+  - Two: `docs/work/archive/` stays, and the pack stops reading it. This
+    overturns the first draft's answer to open question 3, and the
+    machinery of C-33 and C-34, the recovery commit, the permalinks, the
+    migrated readers, is not built. Requirement 5, requirement 13's
+    `work_item_dirs` cut, criterion 21.
+  - Six: the environment gap of round nineteen, inheritance and not
+    isolation, is accepted for now. A per-vendor credential store is not on
+    this item and no criterion claims one.
+  - Three: `sd-review --item` names one active item in a repository that
+    has two, so that B is reviewed alone while D waits for its spike.
+    Requirement 13's `--scope planning` line; landed in the pack the same
+    day with its test.
