@@ -355,19 +355,22 @@ the same set by the same rule with no `slice_base`. The vendors the
 trailers carry are joined by the row's `authors`, from A's round
 forty-four: every session the runner or B's wrapper starts on the
 item's branch adds its vendor to the row's set for the slice in the
-transaction that starts it, whether it commits or not, and the
-transaction that records the slice's squash clears the entries of
-sessions that ended with a clean tree, because a session that edits
-and leaves without committing has authored what the next session
-commits under its own name, and a trailer names who committed and not
-everyone who wrote; the wrapper and the runner's supervisor record at
-the session's end whether `git status --porcelain` named anything, and
-an entry that ended dirty, or a session still running, stays through
-the squash, from A's round forty-five, since a second slice prepared
-before the first merges is exactly such a session and the squash
-would have erased it; a dirty entry clears at the squash that follows
-a later session's clean end, by which its edits are in a commit under
-someone's trailer and merged;
+transaction that starts it, whether it commits or not, and an
+entry lives from the session's start until its work is in a recorded
+slice, because a session that edits and leaves without committing has
+authored what the next session commits under its own name, and a
+trailer names who committed and not everyone who wrote: the wrapper
+and the runner's supervisor record at the session's end whether `git
+status --porcelain` named anything and the branch head at that moment,
+an entry that ended clean clears at once, its work being in commits
+that carry its trailer, and an entry that ended dirty, or a session
+still running, stays until the first commit on the branch after its
+recorded head is an ancestor of `slice_base`, the commit that carried
+its edits having been in a recorded slice, from A's rounds forty-five
+and forty-six; the transaction that records a squash clears the
+entries that rule clears then, and a review clears none, so a second
+slice's edits left by one session, committed by another and squashed
+later keep the first session in the set until that later squash;
 the operator's terminal outside the wrapper is the operator, `human`,
 which adds nothing to skip. The
 reviewer is the first entry whose vendor is in no member of the set, the
@@ -597,8 +600,10 @@ The migration's retire step runs after that in a pull request of its
 own, and it is B's one sitting: set the repository's row `retiring`,
 which is the freeze, every status writer refusing under it, import
 once more so
-that every row says what its committed line says now, the import and
-the verify reading `HEAD`'s tree and refusing on a dirty `docs/work`,
+that every row says what its committed line says now, on every branch
+of the remote and not the default alone, refusing naming an item whose
+branches disagree, from B's round fifty-four, the import and
+the verify reading committed trees and refusing on a dirty `docs/work`,
 from C's round eight, verify by content, snapshot,
 set the repository's `status_source` to `row`, and only then remove
 every line in one commit, refusing to run while the
@@ -1260,13 +1265,15 @@ confirmed by the next `sd-ship` run alone.
    exits without committing, followed by a Codex session that commits
    the edits with `--author codex`, resolves neither Claude nor Codex,
    a third vendor or a refusal, the row's `authors` naming both, and
-   the set is empty after the squash is recorded once both ended
+   the set is empty after the squash is recorded, both having ended
    clean, from A's round forty-four; a Claude session that exits dirty
    in a second worktree of the branch before the first slice's squash
-   is recorded, followed by the squash and a Codex session that commits
-   the edits, resolves neither, Claude's entry surviving the squash,
-   and the entry is gone after the next squash, from A's round
-   forty-five;
+   is recorded, a Codex session that commits those edits and exits
+   clean, and then the first slice's squash recorded, resolves neither
+   for the second slice, Claude's entry bound to Codex's commit and
+   that commit in no recorded slice, and the entry is gone once the
+   second slice's squash is recorded, from A's rounds forty-five and
+   forty-six;
    two
    clones attributing two different commits of one branch in turn both
    push without force and the review reads both; `sd attribute <sha>
@@ -2558,3 +2565,15 @@ from a number the operator types.
     the supervisor at exit; a dirty or running entry survives it and
     clears at the squash after a later clean end. Criterion 13 runs the
     combination.
+- **2026-09-05** — Planning review, round forty-six of forty-six: one
+  blocking finding, addressed, and one cross-item change from B's
+  round fifty-four.
+  - C-80, requirement 3: a clean exit did not prove the edits belonged
+    to the slice being merged; Codex committing Claude's second-slice
+    edits and exiting clean let the first slice's squash clear Claude.
+    Addressed: an entry that ended dirty stays until the first commit
+    after its recorded head is an ancestor of `slice_base`, the commit
+    carrying its edits in a recorded slice; a clean exit clears at once,
+    its trailers standing. Criterion 13 runs the sequence.
+  - B's C-86: the retire sitting reads every branch of the remote and
+    refuses naming an item whose branches disagree. Requirement 5.
