@@ -62,9 +62,10 @@ whether evidence for a late test can be recovered by reverting. The third, the
 `sd-typed-holes` boundary described above, belongs to requirement 9 and is
 recorded in that skill's own `## Lineage`. All three were answered wrongly at
 least twice; each is now recorded as open where a reader will meet it. The scope
-this PRD describes is the second one, cut after three review rounds produced
-twenty-three findings of which fourteen belonged to three additions that are
-no longer here.
+this PRD describes is the third. The second was cut after three review rounds
+produced twenty-three findings, fourteen of them belonging to three additions
+no longer here; the third followed round 6, which cut the counted closing
+state after nine of the item's findings had accumulated in it.
 
 ## Requirements
 
@@ -684,6 +685,54 @@ straight off that list" with two lists intervening. Both fixed in the same
 edit. They are recorded because the standing lesson of this item is that a
 consistency rewrite introduces its own defects, and this one was no exception.
 
+### Round 7, the pass on the cut
+
+Run against `b77754e5`. Two blocking, two non-blocking — and both blocking
+findings are defects the round-6 cut introduced, which is the pattern this item
+has never once escaped. The lane confirmed the seven behaviour and change cases
+it was asked to enumerate map coherently apart from the two below, and that no
+session grade survives outside the two places that record the cut as history.
+
+**C-38 — the untested read-out condemned every valid refactor. `addressed`.**
+Step 9 said flatly that "a change with no observed red is untested production
+code sitting in the tree", and the report bullet read "every change missing its
+red". A refactor has no red of its own *by design* — step 7 says it adds no
+behaviour and needs no test — so every correct refactor landed in **Untested
+code left in the tree**. This is the same shape as C-33, which the cut was
+supposed to remove: a rule about changes in general colliding with the one kind
+of change that legitimately has no red. What was missing was not the state
+machinery but the qualification, so both places now judge a change against
+**what it claimed**: a change claiming new behaviour owes a red and a pass; a
+refactor owes the green suite before and the green suite after, and a refactor
+left without the second run is its untested case.
+
+**C-39 — a deleted report bucket was still being written to. `addressed`.**
+The bootstrap open question still ended "whatever is agreed goes in the report
+under **Scaffolding**", a heading the cut removed. An agent following it would
+either invent a fifth heading or contradict the partition. The request and
+answer now go under **Consent** and anything created goes under **Production
+changes**, annotated as scaffolding and carrying neither half of a cycle.
+
+This one is a verification failure as much as a writing one. The post-cut check
+grepped for the *state words* and found them clean, but never enumerated the
+*bucket names* the cut deleted — a check scoped to what was edited rather than
+to the blast radius. Running that enumeration afterwards found exactly one live
+dangler, this one; `Deferred`, `Cycles`, `Unproven changes`, `Refactors` and
+`Closing state` were already clean, and the surviving `Scaffolding` mentions in
+D4 are its historical record.
+
+**C-40 — the scope count was stale. `addressed`.** Both artifacts said "the
+second scope" while the round-6 ledger records a second cut, making the current
+one the third. Corrected in prd.md and design.md, each now saying what the
+superseded scope was.
+
+**C-41 — the report's non-overlap claim was overstated. `addressed`.** The lead
+said "two lists, then two things read off them… nothing is reported twice",
+but a read-out names items again by definition, and `Consent` carries decisions
+that produce no change at all — a declined rewrite, a declined scaffold. The
+claim is now scoped to the two lists, where it is true and load-bearing, and
+the read-outs are described as what they are.
+
 ### What the lane could not run
 
 `make check` and the companion/citation unittests failed inside the read-only
@@ -735,3 +784,10 @@ command ran there verbatim.
   of which halves of each cycle were observed, in two lists with no overlapping
   categories, and the untested code is read off the production-change list. Nine
   of the item's thirty-seven findings were the machinery that was removed.
+- 2026-09-05 codex round 7 against `b77754e5`: two blocking, two non-blocking,
+  both blocking introduced by the round-6 cut. C-38 condemned every valid
+  refactor as untested, because the read-out asked for a red that a refactor
+  never owes; it now judges each change against what it claimed. C-39 was a
+  surviving write to the deleted `Scaffolding` bucket, missed because the
+  post-cut check grepped the state words and never enumerated the bucket names
+  the cut removed.

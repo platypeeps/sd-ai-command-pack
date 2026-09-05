@@ -12,13 +12,14 @@ The gate / Workflow / Red flags / Safety rules / Final report / Lineage — the
 same shape `sd-debug` and `sd-receive-review` shipped in, so a reader moving
 between the three finds the same furniture.
 
-**This is the second scope for this item.** The first attempted three further
+**This is the third scope for this item.** The first attempted three further
 things: a route by which a test written late could still satisfy the gate, a
 seam settling the apparent contradiction with `sd-typed-holes`, and a
 carve-out permitting the scaffolding a test needs before the code exists.
 Three review rounds produced twenty-three findings and fourteen of them
 belonged to those three additions. D7 records why they were cut rather than
-fixed a fourth time.
+fixed a fourth time. The second scope kept a counted three-state close, which
+round 6 cut in turn; D4 records that.
 
 ## Decisions
 
