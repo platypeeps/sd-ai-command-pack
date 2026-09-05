@@ -308,7 +308,7 @@ repointed to another vendor's model or removed after the commit changes
 no history, misidentifies no author, and blocks no review of an older
 branch.
 Reviewer resolution walks every commit in the reviewed range, the branch
-since its base, and builds the set of authors from what the range
+since its slice base, and builds the set of authors from what the range
 carries: each commit's own trailer, or an `Attributes: <sha>
 <name>/<vendor>` trailer on a later commit in the range, the vendor
 resolved the same way when the attribution is written, which `sd
@@ -337,7 +337,15 @@ tagged ones, and no flag or variable at review time attributes history:
 a session's identity says who is working now, not who wrote an older
 commit, and a handoff from one agent to another is ordinary, so a review
 that took `--author` for the whole range would let the first agent review
-its own untagged work under the second's name. The
+its own untagged work under the second's name. The range's base is the
+slice base, from A's round forty-two: the merge base with the default
+branch, or, on a branch continued after a squash merge, requirement 5,
+the branch head the row recorded when that slice's squash commit was
+recorded, `slice_base`, written in the transaction that records the
+squash, because the squash carries the earlier slice's diff and not
+its commits' identities, so those commits stay in the range from the
+merge base for the branch's life and their vendors would exclude
+reviewers of every later slice. The
 reviewer is the first entry whose vendor is in no member of the set, the
 vendors the trailers carry, so a
 branch two providers wrote is reviewed by a third or refused; a set that is
@@ -1216,6 +1224,10 @@ confirmed by the next `sd-ship` run alone.
    <from>..<to> claude` over the rewritten commits resolves it, with
    the attributing commit asserted on the fixture remote after the push
    and its `Attributes:` trailer naming the sha and `claude/anthropic`;
+   a Claude-authored slice squash-merged and the branch continued with
+   a Codex-authored second slice resolves a Claude reviewer, the row's
+   `slice_base` excluding the first slice's commits, from A's round
+   forty-two;
    two
    clones attributing two different commits of one branch in turn both
    push without force and the review reads both; `sd attribute <sha>
@@ -2461,3 +2473,13 @@ from a number the operator types.
   the repository frozen with nothing to import. `row` is set before the
   removal, every step idempotent, the same command reruns. Requirement
   5, criterion 13.
+- **2026-09-05** — Planning review, round forty-two of forty-six: one
+  blocking finding, addressed.
+  - C-76, requirement 3: the author set was built from the branch since
+    its merge base, and a branch continued after a squash merge keeps
+    the earlier slice's commits there for its life, so a Claude slice
+    followed by a Codex slice excluded both vendors from reviewing the
+    second. Addressed: the range's base is the slice base, the branch
+    head the row records as `slice_base` when it records a slice's
+    squash commit, the merge base where there is none. Criterion 13
+    runs the two-vendor, two-slice case.
