@@ -392,7 +392,9 @@ item exactly as open and as selectable as it was. Once `sd-ship` has
 confirmed the merge it lands one closure commit on the default branch that
 writes `status: done` into the mirror and deletes the directory when it is
 clean, below; a direct push where the default branch accepts one, otherwise
-a second pull request through the same merge path. The row turns `done` on
+a second pull request through the same merge path. The closure commit
+carries a `Closes: <item>` trailer, the mark a run that restarts after the
+merge looks for on the default branch so that it never lands a second one. The row turns `done` on
 the confirmed merge and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
 So `main`, every database-free checkout and CI read `done` within one commit
@@ -1216,3 +1218,6 @@ Waiting on the operator, not open: model pins and prices for the `kimi`,
     and the pull request's `merge_commit_sha`, in the step that sets `done`,
     so the closure is an ordinary mirror write; criterion 13 merges with a
     real squash merge and asserts the guard passed without `--rebind`.
+- **2026-09-05** — Cross-item, from B's round thirteen: the closure commit
+  carries a `Closes: <item>` trailer, the mark B's runner reconciles against
+  when a merge row restarts after the merge. Requirement 5.
