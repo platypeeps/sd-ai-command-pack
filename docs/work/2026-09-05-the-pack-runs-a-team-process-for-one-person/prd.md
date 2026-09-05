@@ -231,6 +231,60 @@ reviewers do not comment on the copies. `sdw-help` duplicates `sd-help` and is
 cut. `sdw-blog-research` folds into `sdw-research` as a from-an-idea path. Dated
 narrative leaves `pipeline.md` and `permissions.md`.
 
+### Requirement 11 — one surface per question
+
+Seven systems track work today. They are not seven of a kind: three are
+tracking, one is a cache, two are session state, and one is reference material
+that was never tracking at all. Naming which is which is most of the
+consolidation.
+
+| Question | Surface | What it is today |
+|---|---|---|
+| What am I working on? | `docs/work/` in git | 8 active, 495 total, 101 parked |
+| What might I do later? | one vault backlog | three databases with three ladders |
+| What do others expect? | GitHub | plus a SQLite read cache |
+| What is due by a date? | Obsidian TaskNotes | 207 notes, nightly digest, out of scope |
+
+The issue index is a cache of GitHub and stays one: read-only here, written only
+by the dashboard, rebuildable by deleting it. Handoff packets and session memory
+are not tracking and are not consolidated; they are ephemeral state that answers
+"where was I", not "what is outstanding". The five reference databases —
+Market Watch, Companies, Learning, Tool Stack, Prompts — hold material, not
+work, and are left alone.
+
+Three changes follow.
+
+**The idea and the piece stop both holding status.** Every one of the ten pieces
+carries an `obsidian_source` line, and nine of the ten disagree with the note it
+names. Two pieces are in `drafting` and `review` against vault notes marked
+`declined`; one is `ready` against a note still at `inbox`. The vault ladder's
+job ends at the decision: `inbox` to `accepted` or `declined`, and acceptance
+creates the piece. From that moment the piece's frontmatter is the only status,
+and the note carries a forward link and nothing else.
+
+The `drafting` state in the blog-idea ladder is what makes this drift possible —
+it is a handoff flag wearing a status's clothes, and the `blog-idea-accept`
+routine exists to set it. Acceptance should create the piece directly; the flag
+and the routine both go.
+
+**Blog ideas and topics merge into one backlog.** One database, `kind:` as a
+field. The plugin manifest already declares transitions per kind, so the two
+ladders survive the merge unchanged — this is a change of where rows live, not
+of what they mean. Seventy-five ideas sit in `inbox` and ninety-five are
+`declined`; the declined rows are the graveyard the merge should not carry
+forward wholesale.
+
+**Skill proposals leave the vault for GitHub.** `sd-suggest` files the issue in
+the moment the limitation costs a turn, which its own skill argues is the only
+moment it reliably gets filed. The vault database, its `skill-proposal` kind in
+the manifest, and `sd-propose-skills`'s vault write all go.
+
+That path is already broken and the counts show it: the note template tells the
+reader to pick `accepted` so that a routine named `skill-proposal-accept` will
+file it. No such routine exists in the vault's scheduled tasks. Ten notes: eight
+`declined`, two `filed`, zero `accepted` — the one transition the template
+advertises is the one that goes nowhere.
+
 ## Acceptance criteria
 
 1. `WORKFLOW.md` exists at the repository root, states the default, opt-in,
@@ -294,7 +348,25 @@ narrative leaves `pipeline.md` and `permissions.md`.
     recorded, before any further pipeline change lands. `sdw-review-push`,
     `sdw-review-pull` and `sdw-help` are absent, and `sdw-blog-research` is
     reachable as a path within `sdw-research`.
-20. `make check` passes, and the acceptance-criteria count it reports does not
+20. No piece carries a status that its `obsidian_source` note contradicts. The
+    check enumerates pieces from `content/` and resolves each note, rather than
+    sampling: today it reports nine failures out of ten, and that number is the
+    baseline it must drive to zero. A piece whose note is missing is a failure
+    too, not a skip.
+21. The blog-idea ladder ends at `accepted` or `declined`. No `drafting` state
+    exists in the manifest for that kind, and `blog-idea-accept` is absent from
+    the vault's scheduled tasks. Acceptance creates the piece in the same step.
+22. One vault database holds both the blog-idea and topic kinds, distinguished
+    by a `kind:` field, and `sd store list` returns the same rows for each kind
+    as it does today. Per-kind transitions are unchanged, asserted by comparing
+    the manifest before and after.
+23. The `skill-proposal` kind is absent from the manifest, the vault database is
+    gone, and `sd-propose-skills` writes no vault note. A grep for
+    `skill-proposal-accept` returns nothing outside this item and the changelog.
+24. `sd-status` reports the same issue counts after the consolidation as before
+    it. The cache is untouched by this requirement, and a test asserts the
+    index is still rebuildable from empty.
+25. `make check` passes, and the acceptance-criteria count it reports does not
     fall below its current 40 without each removal being named in this item's
     log.
 
@@ -353,3 +425,19 @@ narrative leaves `pipeline.md` and `permissions.md`.
   case and the drafted untracked local path is cut. Requirement 6 keeps one piece
   of new code, the mode fallback, and acceptance criterion 7 now names its three
   cases including the detection-failure path. Three open questions remain.
+- **2026-09-05** — Tracking surfaces consolidated. Four decisions: the piece owns
+  its status once accepted, so the vault note stops at the decision; blog ideas,
+  topics and skill proposals collapse from three databases toward one backlog
+  with `kind:` as a field; skill proposals leave the vault entirely for GitHub
+  through `sd-suggest`; Obsidian TaskNotes is a calendar, not a backlog, and is
+  out of scope. Recorded as requirement 11 and acceptance criteria 20 to 24.
+
+  Verifying those decisions found two live defects. The `skill-proposal-accept`
+  routine that `sd-propose-skills/SKILL.md:126` tells the reader to rely on does
+  not exist in the vault's scheduled tasks, which is why the `accepted` state
+  holds zero notes while eight sit `declined`. And nine of the ten pieces
+  disagree with the vault note their `obsidian_source` line names, two of them
+  actively in `drafting` and `review` against notes marked `declined`. Both
+  defects are consequences of the same shape — two places holding one status —
+  so requirement 11 removes the shape rather than repairing the rows. Criterion
+  20 carries the nine-of-ten figure as the baseline it must drive to zero.
