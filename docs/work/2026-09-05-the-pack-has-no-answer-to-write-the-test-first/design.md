@@ -73,40 +73,39 @@ line than any of them.
 So `sd-tdd` **proposes** the rewrite, names what would be lost, and requires
 consent.
 
-**D4 — closing states are decided by counting, not by judgement.**
+**D4 — the close is a per-change record, and a counted grade was cut.**
 
-Three states, exactly one chosen, and the middle one exists so that an honest
-partial result has a word — without it, partial work gets reported as
-`disciplined`, which is the failure mode the state set is for.
+Six drafts closed on one of three states — `disciplined`, `partial`,
+`abandoned` — chosen by sorting each production change into proven or unproven,
+counting rather than judging so that exactly one state always fit. The counting
+itself worked; a review lane enumerated the state space and found no session
+mapping to two states or to none.
 
-Prose definitions do not deliver "exactly one". An earlier draft defined
-`partial` as "changes with no failing-test evidence" and `abandoned` as "the
-discipline was not followed", and a session whose single change was never seen
-to fail matched both. So each production change is sorted into **proven**
-(both halves of its cycle were observed: valid red against a tree that did not
-yet contain it, and the change then passing with the suite green) or
-**unproven**, and the state follows: all proven is `disciplined`, some but not
-all is `partial`, none is `abandoned`. Exhaustive and disjoint over any
-non-empty set.
+It was cut anyway, because the classifier was exclusive over its inputs and the
+inputs were what kept breaking. Producing them meant ruling on what a refactor
+is, when step 7 says it needs no test of its own and so has no red; on what a
+consented scaffold is, being production code that exists before any red; on
+what a behaviour "already present" is, when the code was written earlier in the
+same session; and on what a bound yields when it fires after the code is
+written and before the rerun. Each needed its own rule, and the rules collided
+with one another and with the report's categories — `Scaffolding` and
+`Unproven changes` both claimed a consented scaffold, and between `Deferred`
+and `Cycles` there was no place at all for a behaviour reached but not
+implemented. Across six review rounds, nine of thirty-seven findings were this
+machinery, and not one of them was a question about whether the code was
+tested.
 
-The classifier is *what was observed, and when*, not what was authored.
-Authorship admits a test written but never run before the code; observation
-does not.
+What replaced it asks the question the discipline actually cares about, per
+change instead of per session: which halves of its cycle were observed. A
+refactor answers "the green suite it kept, and no red of its own". A scaffold
+answers "no red". A bound answers with the half it reached. The report is two
+lists — every behaviour once in one, every production change once in the other
+— and the untested code is read off the second rather than summarised away.
 
-**Both halves are load-bearing, and an earlier draft required only the first.**
-Keying on the red step alone let a bound that fires after the code is written
-but before the rerun close the session `disciplined`, with real untested
-production code sitting in the tree: the change could not be `Deferred`,
-because it had been reached and implemented, and the Cycles report demanded
-pass-and-suite evidence that did not exist. Requiring the green half as well
-sends that change to `unproven`, so the session closes `partial` and the report
-says which half is missing. `Deferred` stays what it was — behaviours nothing
-was written for — so it does not overlap.
-
-The empty session is called explicitly for `disciplined`. With no changes,
-"every change is proven" and "no change is proven" are both vacuously true, so
-no wording of the two predicates separates them and something has to name the
-winner.
+The cost is that no single token grades a session, and that is the point. The
+counted word was the part an agent under pressure would round up, and a reader
+given one word cannot recover the list, while a reader given the list can form
+whatever word they want.
 
 **D5 — the suite's blast radius is bounded.**
 

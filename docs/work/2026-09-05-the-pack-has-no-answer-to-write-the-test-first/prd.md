@@ -88,23 +88,17 @@ no longer here.
    lost, and **waits for consent**, because an agent that deletes uncommitted
    work because a skill told it to is a worse failure than a test written in
    the wrong order.
-4. `sd-tdd` closes in one of a named closed set of **exactly three** states,
-   decided by counting rather than by judgement so that exactly one always
-   fits. Each production change is sorted **proven** — valid red for it was
-   observed against a tree that did not yet contain it — or **unproven**; all
-   proven is `disciplined`, some but not all is `partial`, none is
-   `abandoned`. The classifier is when valid red was *observed* relative to the
-   change, not when the test was authored, since authorship admits a test
-   written and never run. `proven` requires **both** halves of the cycle to
-   have been observed — the red against a tree lacking the change, and the
-   change then passing with the suite green — because a bound that fires
-   between them leaves real untested production code in the tree, and a
-   classifier keyed on the red step alone would close that session
-   `disciplined`. **A session with no production changes closes
-   `disciplined`**, and the skill says so in those words: with no changes both
-   outer predicates are vacuously true, so a requirement that merely demanded a
-   tie-break without naming its result would leave the same ambiguity it exists
-   to remove.
+4. `sd-tdd` closes by **recording what was observed, per change, rather than
+   grading the session**. For every production change it says which halves of
+   that change's cycle were seen — the valid red against a tree that did not
+   yet contain it, and the change then passing with the surrounding suite green
+   — and for every behaviour taken up it says what became of it. It states in
+   those terms which code is sitting untested in the tree, and it names **no
+   summary word** for the session, because a word that grades a session is the
+   part an agent under pressure rounds up. The report is two lists, every
+   behaviour appearing exactly once in one and every production change exactly
+   once in the other, so no change can be filed under whichever category reads
+   best.
 5. `sd-tdd` bounds what running a suite may reach — no production credentials,
    live endpoints, shared state, or fixtures that send mail or move money —
    since preferring real code over mocks is a statement about the code under
@@ -183,8 +177,9 @@ the content checks.
       for s in 'seen to fail' 'passes on its first run' \
                'the failure is the expected one' \
                'never deletes' 'waits for consent' \
-               'exactly three' 'proven' 'unproven' \
-               'closes `disciplined`' \
+               'halves of its cycle were observed' \
+               'no summary word' \
+               'Untested code left in the tree' \
                'production credentials' \
                'does not settle'; do
         printf '%s' "$T" | grep -oiF -- "$s" | wc -l
@@ -245,8 +240,9 @@ behavioural half that no grep reaches:
   message — and one this item twice failed to reduce to a rule;
 - requirement 3's consent rule is a thing that must happen before an action,
   not a sentence in a file;
-- requirement 4's counting rule is a classification made during a session, and
-  a grep cannot tell a correct sort from an incorrect one;
+- requirement 4's per-change record is written during a session from what was
+  observed, and a grep cannot tell a truthful entry from an invented one, nor
+  notice a change left off the list entirely;
 - requirement 8's honesty is the hardest of all: a section admitting two open
   questions is worth nothing if the agent reads past it.
 
@@ -621,6 +617,73 @@ requirements 1-7 and 9 agree with D1-D7 and both skill files, `sd-typed-holes`
 differs only by one appended `## Lineage`, and the two-file criterion run with
 its pathspec prints exactly the two expected paths.
 
+### Round 6, and the second scope cut
+
+Run against `52161308`. Six blocking, none non-blocking — the worst result
+since round 3, and every one of the six sat in the counted closing state or in
+the report categories feeding it. The lane confirmed the classifier itself was
+still sound (`count_states=16 exactly_one_failures=0`); what kept breaking was
+producing its inputs.
+
+**The machinery was cut rather than fixed a sixth time.** Across six rounds,
+nine of thirty-seven findings — C-24, C-26, C-30, and C-32 through C-37 — were
+`disciplined`/`partial`/`abandoned` and the buckets around it. None of the nine
+was a question about whether code was tested; all were questions about what
+grade a case deserved. Requirement 4, D4, step 9 and the whole `## Final report`
+are rewritten around a per-change record: which halves of each change's cycle
+were observed, two lists with every item appearing exactly once, and the
+untested code read off the second list instead of summarised into a word. Every
+finding below is disposed of by that cut, and each is recorded with what it
+actually showed, because the cut is only justified by the specific collisions.
+
+**C-32 — requirement 4 contradicted itself. `addressed` by the cut.** It opened
+with the superseded red-only `proven` and restated the two-half version five
+lines later, so a change between the red and the rerun was simultaneously
+proven and unproven. Third consecutive round in which a definition changed in
+one artifact and not in all three; that recurrence is itself part of why the
+definition is gone.
+
+**C-33 — a refactor could not be proven, so a correct session graded
+`partial`. `addressed` by the cut.** Step 7 says a refactor adds no behaviour
+and needs no test of its own; step 9 sorted *every* production change and a
+refactor has no red for it. Found in this repository before the round returned,
+and reported by the lane independently. A refactor now records the green suite
+it kept and no red of its own, which is the true statement about it.
+
+**C-34 — D4 and the C-30 disposition both misnamed the state. `addressed` by
+the cut.** Both said an interrupted change "closes `partial`"; with no other
+proven change the count gives `abandoned`. A two-line error in text describing
+the classifier, written by the same hand that wrote the classifier — the
+clearest evidence that the state set cost more attention than it returned.
+
+**C-35 — `Scaffolding` and `Unproven changes` both claimed the same change.
+`addressed` by the cut.** A scaffold consented to under the open question is
+production code created before any red, so it satisfied both bullets. The
+report now has one production-change list; a scaffold is an entry there,
+annotated, because a change that belongs to two buckets gets reported in the
+flattering one.
+
+**C-36 — `Behaviours already present` collided with in-session code.
+`addressed` by the cut, and by a fix to step 4.** Code written earlier in the
+same session whose late test passes on its first run fitted both "already
+present" (counting neither way) and "a change whose test came late". Step 4 now
+says explicitly that a behaviour written earlier in this session is not already
+present; it is a production change whose test came late, recorded as one.
+
+**C-37 — a behaviour reached but not implemented had nowhere to go.
+`addressed` by the cut.** A bound firing after valid red but before step 5
+leaves a behaviour that is not `Deferred` (it was reached), not an unproven
+change (nothing was written), and unable to satisfy `Cycles`, which demanded a
+change and a suite result that do not exist. The Behaviours list now carries
+"a cycle stopped partway, with the step it stopped at" as a first-class outcome.
+
+**Two defects were caught in the cut itself before it was reviewed.** The
+rewritten `## Final report` opened "Two lists, and every item appears in
+exactly one place on each" above four bullets, and its third bullet said "read
+straight off that list" with two lists intervening. Both fixed in the same
+edit. They are recorded because the standing lesson of this item is that a
+consistency rewrite introduces its own defects, and this one was no exception.
+
 ### What the lane could not run
 
 `make check` and the companion/citation unittests failed inside the read-only
@@ -665,3 +728,10 @@ command ran there verbatim.
   `disciplined` over untested code. `proven` now requires both halves of the
   cycle. C-31 was unpropagated wording from the C-25 fix. The lane verified the
   classifier over 36 combinations with zero exclusivity failures.
+- 2026-09-05 codex round 6 against `52161308`: six blocking, none
+  non-blocking, all six in the counted closing state or its report buckets.
+  Second scope cut, on the user's decision: `disciplined`/`partial`/`abandoned`
+  and the proven/unproven sort are gone. The close is now a per-change record
+  of which halves of each cycle were observed, in two lists with no overlapping
+  categories, and the untested code is read off the production-change list. Nine
+  of the item's thirty-seven findings were the machinery that was removed.
