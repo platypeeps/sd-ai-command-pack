@@ -62,10 +62,10 @@ whether evidence for a late test can be recovered by reverting. The third, the
 `sd-typed-holes` boundary described above, belongs to requirement 9 and is
 recorded in that skill's own `## Lineage`. All three were answered wrongly at
 least twice; each is now recorded as open where a reader will meet it. The scope
-this PRD describes is the third. The second was cut after three review rounds
+this PRD describes is the third. The first was cut after three review rounds
 produced twenty-three findings, fourteen of them belonging to three additions
-no longer here; the third followed round 6, which cut the counted closing
-state after nine of the item's findings had accumulated in it.
+no longer here. The second kept a counted three-state close and was cut at
+round 6, after nine of the item's findings had accumulated in that machinery.
 
 ## Requirements
 
@@ -90,16 +90,22 @@ state after nine of the item's findings had accumulated in it.
    work because a skill told it to is a worse failure than a test written in
    the wrong order.
 4. `sd-tdd` closes by **recording what was observed, per change, rather than
-   grading the session**. For every production change it says which halves of
-   that change's cycle were seen — the valid red against a tree that did not
-   yet contain it, and the change then passing with the surrounding suite green
-   — and for every behaviour taken up it says what became of it. It states in
-   those terms which code is sitting untested in the tree, and it names **no
-   summary word** for the session, because a word that grades a session is the
-   part an agent under pressure rounds up. The report is two lists, every
-   behaviour appearing exactly once in one and every production change exactly
-   once in the other, so no change can be filed under whichever category reads
-   best.
+   grading the session**. Every production change is one of exactly three
+   kinds, declared before the change is made, and each kind owes a stated set
+   of observations: a **behaviour** change owes valid red against a tree
+   lacking it and the change then passing with the surrounding suite green; a
+   **refactor** owes the surrounding suite seen green before it and green after
+   it, in place of the red it never had; a **scaffold** owes recorded consent
+   and nothing more, the behaviour it unblocks still owing the behaviour set in
+   full. A change that would be two kinds is split, and one that cannot be
+   split owes the behaviour set. The skill states these as one table, and the
+   report names each change's kind and every observation that kind owes,
+   saying so in place of any that was never made. It states in those terms
+   which code is sitting untested in the tree, and names **no summary word**
+   for the session, because a word that grades a session is the part an agent
+   under pressure rounds up. The report is two lists, every behaviour appearing
+   exactly once in one and every production change exactly once in the other,
+   so no change can be filed under whichever category reads best.
 5. `sd-tdd` bounds what running a suite may reach — no production credentials,
    live endpoints, shared state, or fixtures that send mail or move money —
    since preferring real code over mocks is a statement about the code under
@@ -733,6 +739,56 @@ that produce no change at all — a declined rewrite, a declined scaffold. The
 claim is now scoped to the two lists, where it is true and load-bearing, and
 the read-outs are described as what they are.
 
+### Round 8
+
+Run against `afe65fbd`. Three blocking, one non-blocking, and all four descend
+from the round-7 fix for C-38. That fix introduced a second class of change
+with its own evidence rule and stated the rule as **prose in four places**;
+within one round the four had drifted apart. The remedy is structural: the
+obligation is now **one table**, stated once in step 9, which requirement 4 and
+D4 restate rather than paraphrase.
+
+**C-42 — the classes were not exhaustive, and the claim was never declared.
+`addressed`.** "What is missing is judged against what the change claimed"
+named two kinds, behaviour and refactor, but a consented scaffold is neither,
+so the rule never said what it owed or whether it belonged in the untested
+read-out. Worse, nothing required the claim to be fixed *before* the change,
+which is when it must be, because afterwards the flattering answer is visible
+and "that was a refactor" is always available. The table now carries three
+exhaustive kinds, declared at the point of making the change; a change that
+would be two is split; a change that cannot be split owes the behaviour row,
+never the cheaper refactor one.
+
+**C-43 — three artifacts, three evidence models. `addressed`.** Requirement 4
+still described a red/pass model that a clean refactor cannot satisfy; D4 said
+a scaffold "answers no red" while the skill said it carried "neither" half;
+step 9 demanded two green runs of a refactor that requirement 4 knew nothing
+about. Fifth consecutive round in which a definition changed in one artifact
+and not the others. All three now state the same table.
+
+**C-44 — the three refactor formulations demanded different runs.
+`addressed`.** Step 7 said "only on green" and that the suite must "stay
+green"; step 9 said green before *and* after; the report flagged only a missing
+run *after*. A refactor with no observed baseline that passed afterwards was
+therefore missing an owed observation by step 9 and clean by the report. All
+six sites now say both runs, and step 7 states explicitly that "on green" with
+an unobserved baseline is not on green. One residual singular — "the green
+suite it kept", in step 9's no-summary-word paragraph — was caught by the
+post-edit sweep rather than by the round.
+
+**C-45 — the scope history was reversed. `addressed`.** The prd.md sentence
+written in round 7 to fix C-40 said "The second was cut after three review
+rounds", when it was the *first* scope that carried the three additions and was
+cut at round 3; the second carried the counted close and was cut at round 6.
+design.md had it right, so this was drift introduced by the previous round's
+own consistency fix.
+
+**What the lane confirmed.** The scaffold routing holds — an accepted scaffold
+appears once under `Production changes` with its decision under `Consent`, the
+repetition is stated as intentional, and a declined scaffold is reachable
+through `Consent` with no production-change entry. `sd-typed-holes` introduced
+no new conflict.
+
 ### What the lane could not run
 
 `make check` and the companion/citation unittests failed inside the read-only
@@ -791,3 +847,9 @@ command ran there verbatim.
   surviving write to the deleted `Scaffolding` bucket, missed because the
   post-cut check grepped the state words and never enumerated the bucket names
   the cut removed.
+- 2026-09-05 codex round 8 against `afe65fbd`: three blocking, one
+  non-blocking, all four descending from the round-7 C-38 fix, which stated a
+  per-kind evidence rule as prose in four places that drifted apart within one
+  round. Replaced with one table in step 9 carrying three exhaustive kinds —
+  behaviour, refactor, scaffold — declared before the change is made, with
+  requirement 4 and D4 restating it rather than paraphrasing.

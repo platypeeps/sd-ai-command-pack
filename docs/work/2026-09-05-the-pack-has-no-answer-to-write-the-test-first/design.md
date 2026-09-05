@@ -97,11 +97,25 @@ machinery, and not one of them was a question about whether the code was
 tested.
 
 What replaced it asks the question the discipline actually cares about, per
-change instead of per session: which halves of its cycle were observed. A
-refactor answers "the green suite it kept, and no red of its own". A scaffold
-answers "no red". A bound answers with the half it reached. The report is two
-lists — every behaviour once in one, every production change once in the other
-— and the untested code is read off the second rather than summarised away.
+change instead of per session: what did this change owe, and what was actually
+observed? The obligation depends on what the change claims, so the skill states
+one table with three exhaustive kinds. A **behaviour** change owes valid red
+against a tree lacking it and a pass with the suite green. A **refactor** owes
+the suite seen green before it and green after it — both runs, since "on green"
+with an unobserved baseline is not on green — in place of the red it never had.
+A **scaffold** owes recorded consent and nothing else, and the behaviour it
+unblocks owes the behaviour row in full. One change is one kind; a change that
+would be two is split, and one that cannot be split owes the behaviour row,
+never the cheaper refactor one. The report is two lists — every behaviour once
+in one, every production change once in the other, each naming its kind — and
+the untested code is read off the second: any change missing any part of what
+its row owed.
+
+The table is stated once, in the skill, and this decision and requirement 4
+restate it rather than paraphrasing it. An earlier draft left the obligation as
+prose in four places and the four drifted apart within a single review round —
+a refactor owing one green run here and two there, a scaffold owing "no red" in
+one artifact and "neither half" in another.
 
 The cost is that no single token grades a session, and that is the point. The
 counted word was the part an agent under pressure would round up, and a reader
