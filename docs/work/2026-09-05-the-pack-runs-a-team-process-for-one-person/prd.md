@@ -472,11 +472,19 @@ No sweep, no park, no archive. A merged item is `done` in the row, and the
 closure commit above writes `done` into the mirror and deletes the directory
 in that same commit, only when every file in it is tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
 that ignored files count alongside untracked and modified ones, and every path
-under the directory listed by `git ls-files -- <dir>` and present at `HEAD`.
-When that holds, the deletion is `git rm -r` of those tracked paths and
-nothing else. When it does not, the directory stays with its mirror at
-`done`, and the closure commit's message and `sd-ship` name the untracked,
-ignored or modified files. Git history holds what is deleted.
+under the directory listed by `git ls-files -- <dir>` and present at `HEAD`;
+and only when nothing outside the directory reads it: `git grep -l -F
+"docs/work/<dir>" -- ':!docs/work/<dir>'` empty, because a link from a
+tracked file is a reader, and git history keeping the file does not make
+the path it was linked by resolve. The pack has that case today:
+`2026-08-29-artifacts-as-product` is `done` and fourteen lines in twelve
+tracked files link into it, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`,
+`CHANGELOG.md`, `docs/fleet/README.md` and seven `docs/spec/` pages, so it
+stays. When all of that holds, the deletion is `git rm -r` of those
+tracked paths and nothing else. When it does not, the directory stays with
+its mirror at `done`, and the closure commit's message and `sd-ship` name
+the untracked, ignored or modified files, or the files that link in. Git
+history holds what is deleted.
 `docs/work/archive/` and its 941 files are removed in one commit that names
 `46ec7fb85` as the commit that recovers any of them. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
@@ -935,7 +943,11 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     the directory is not deleted, and the row is not `done`; a third
     confirms the merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
-    lands it. A fourth ships under the default policy to `ready_to_send`,
+    lands it. A test adds a line to the fixture's `README.md` that names
+    the item's directory, ships to merge, and asserts the directory stays
+    with its mirror at `done` and the closure commit names `README.md`;
+    with the line removed before the ship, the directory is deleted. A
+    fourth ships under the default policy to `ready_to_send`,
     merges the pull request by hand on the fixture remote, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
     the squash commit and the closure landed by a second pull request the
@@ -1416,3 +1428,14 @@ from a number the operator types.
     Criterion 6 asserts it. Criterion 1 still named four keys and a
     fifth-key failure after C-21 added the fifth; it names five and fails
     on a sixth.
+- **2026-09-05** — Planning review, round twelve of twenty: one blocking
+  finding, addressed. The first run of the round produced nothing, codex
+  timed out, and was rerun.
+  - C-25, requirement 5: the closure deleted a clean, committed directory
+    with no regard for tracked files outside it that link in, and the pack
+    already has a `done` item, `2026-08-29-artifacts-as-product`, linked
+    from fourteen lines in twelve files, `AGENTS.md` and seven `docs/spec/`
+    pages among them. Addressed: deletion also requires `git grep` to find
+    no tracked file outside the directory naming it; otherwise the
+    directory stays and the closure names the files that link in.
+    Criterion 13 asserts both sides.

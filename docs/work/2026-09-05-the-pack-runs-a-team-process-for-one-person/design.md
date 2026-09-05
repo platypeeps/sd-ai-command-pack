@@ -160,8 +160,9 @@ second pull request merges on its own under both policies once CI passes,
 since it carries only the item's own mirror; it
 writes `done` into the mirror so that `main` and CI read it
 without the database, and deletes the directory when every file in it is
-tracked and committed and nothing untracked or ignored sits beside them;
-otherwise it stays and the commit names the files. The branch itself never
+tracked and committed, nothing untracked or ignored sits beside them, and no
+tracked file outside it links in; otherwise it stays and the commit names the
+files. The branch itself never
 says `done`, so a merge that fails leaves the item open. Git history keeps
 what is deleted.
 
