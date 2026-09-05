@@ -1372,3 +1372,6 @@ from a number the operator types.
 - **2026-09-05** — Cross-item, from B's round seventeen: `sd-ship` merges
   naming the reviewed head, so a head that moved after the review refuses
   at GitHub. Criterion 32; design's Reviews.
+- **2026-09-05** — Operator decision: protecting the default branch is one
+  dashboard action on an owned repository, B's requirement 5; the design's
+  Defaults name it beside the report and the refusal.
