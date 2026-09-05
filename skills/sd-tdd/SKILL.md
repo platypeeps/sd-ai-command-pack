@@ -104,8 +104,14 @@ What the gate never accepts is a test that has only ever been seen to pass.
    being folded into the first test as extra assertions.
 9. Close in one of exactly three ways, and name which one. The state is
    counted, not judged. Sort every production change made this session into
-   **proven** — valid red for it was observed against a tree that did not yet
-   contain it — or **unproven**, which is everything else. Then:
+   **proven** or **unproven**. A change is `proven` when **both** halves of its
+   cycle were observed: valid red for it against a tree that did not yet
+   contain it, *and* the change then seen to pass with the surrounding suite
+   green. `unproven` is everything else, which includes a change never seen to
+   fail and a change whose cycle was cut short before step 6 — a bound that
+   fires after the code is written but before the rerun leaves real, untested
+   production code in the tree, and the red step alone does not make it proven.
+   Then:
    - **disciplined** — every change is proven, and the report quotes each
      failure.
    - **partial** — at least one change is proven and at least one is not. Name
@@ -204,8 +210,11 @@ recorded here rather than guessed at a third time.
   message quoted, the change that made it pass, and the suite result after;
 - **Behaviours already present** — behaviours whose first test passed because
   the behaviour existed, and what was found on investigating;
-- **Unproven changes** — every production change with no observed failure
-  behind it, and why;
+- **Unproven changes** — every production change without a complete observed
+  cycle behind it, and which half is missing: never seen to fail, or seen to
+  fail and then left before it was seen to pass. The second is the more
+  dangerous report, because the code is in the tree and nothing has run against
+  it since;
 - **Scaffolding** — anything created before a red step so the test could run,
   per the open question above;
 - **Refactors** — what changed on green, and the suite result that held;

@@ -83,14 +83,25 @@ Prose definitions do not deliver "exactly one". An earlier draft defined
 `partial` as "changes with no failing-test evidence" and `abandoned` as "the
 discipline was not followed", and a session whose single change was never seen
 to fail matched both. So each production change is sorted into **proven**
-(valid red for it was observed against a tree that did not yet contain it) or
+(both halves of its cycle were observed: valid red against a tree that did not
+yet contain it, and the change then passing with the suite green) or
 **unproven**, and the state follows: all proven is `disciplined`, some but not
 all is `partial`, none is `abandoned`. Exhaustive and disjoint over any
 non-empty set.
 
-The classifier is *when valid red was observed relative to the change*, not
-when the test was authored. Authorship admits a test written but never run
-before the code; observation does not.
+The classifier is *what was observed, and when*, not what was authored.
+Authorship admits a test written but never run before the code; observation
+does not.
+
+**Both halves are load-bearing, and an earlier draft required only the first.**
+Keying on the red step alone let a bound that fires after the code is written
+but before the rerun close the session `disciplined`, with real untested
+production code sitting in the tree: the change could not be `Deferred`,
+because it had been reached and implemented, and the Cycles report demanded
+pass-and-suite evidence that did not exist. Requiring the green half as well
+sends that change to `unproven`, so the session closes `partial` and the report
+says which half is missing. `Deferred` stays what it was — behaviours nothing
+was written for — so it does not overlap.
 
 The empty session is called explicitly for `disciplined`. With no changes,
 "every change is proven" and "no change is proven" are both vacuously true, so
@@ -146,8 +157,15 @@ Cutting them is not pretending the questions do not exist. The skill carries a
 `## What this skill does not settle` section naming the first and third, with
 what was tried and why it failed, and `sd-typed-holes` names the second in its
 own Lineage. A reader who hits one of these in a real session gets told it is
-open and to use judgement, which is worth more than a rule that reads
-authoritative and misfires.
+open, which is worth more than a rule that reads authoritative and misfires.
+
+One constraint on how an open question may be written, learned the hard way:
+it may not issue a positive instruction that contradicts a rule the skill still
+enforces. The first draft told the reader to "write the least scaffolding that
+lets the test speak" — production code before valid red, which the gate
+prohibits absolutely — inside the section admitting the question was
+unresolved. So the bootstrap question routes to the user rather than to the
+reader's judgement, the same move D3 makes for a proposed rewrite.
 
 ## Risks
 
