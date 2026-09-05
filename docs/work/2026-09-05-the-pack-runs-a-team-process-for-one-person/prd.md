@@ -500,6 +500,145 @@ loads today. The test of this requirement is a session killed mid-task and
 restarted: every followup it had named is on the item, and the new session
 begins from them without being told.
 
+### Requirement 13 — the review's confirmed cuts and bugs land
+
+On 2026-09-05 three read-only reviewers read the research flow, the
+development flow and the shared scripts against the decisions above. What
+follows is every finding they confirmed by source reading, with the seven the
+operator's session re-checked by hand. Each line is a cut or a fix; nothing
+here adds a mechanism. Plausible findings that need a fixture first are in the
+log, not here.
+
+**Development flow.**
+
+- `skills/sd-plan/SKILL.md`: step 6, archive and park (:49-54), goes, with
+  `sd-status --parked` (`skills/sd-status/SKILL.md:79`) and the sweep sentence
+  in `templates/work-README.md:11`. The flags table for a `bin/sd-plan` that
+  does not exist (:57) and `--from-suggestion`/`--from-proposal` (:122) go. One
+  work-item threshold, the page's, more than one session or about 300 lines
+  (:17); `skills/sd-ship/SKILL.md:54` cites it instead of naming 800.
+- `skills/sd-ship/SKILL.md`: rule 5 runs when the pull request exists, at
+  step 7 with `--pr-body`, not at step 3 (:41). Step 8 reads Copilot findings
+  and never gates; the round budget and the Never at :185 go. The flags table
+  and autonomous lane for a `bin/sd-ship` that does not exist (:135-175), the
+  pull-request history (:16-34) and the hook narrative (:208-243) go, with the
+  standalone `sd-check` run that `sd-review` already performs. Step 11's branch
+  deletion (:72) becomes three lines: delete remote, `git fetch -p`, report the
+  local branch. `--agent claude|codex` (:141) and `codex exec` (:150) become
+  roles. The skill gains the mirror write for the statuses it sets, which
+  requirement 5 promised and the skill never had.
+- `skills/sd-status/SKILL.md:27` stops listing Lane B carrier branches;
+  the accepted-gap ledger (:54) goes with the machinery below. The docstring
+  and the table say eight sections while `collect` emits nine; both lists are
+  asserted against `collect` in a test.
+- `skills/sd-handoff/SKILL.md`: `--push`/`--park` (:104-117) go; the
+  `cron-jobs.sh` claim (:84) becomes "headless jobs export
+  `SD_HANDOFF_RESTORE=0`"; `Codex/OpenCode` (:73) becomes a role.
+- "The five gates" (`skills/sd-spec/SKILL.md:34`), "Standing rule 1"
+  (`skills/sd-suggest/SKILL.md:38`, `templates/decision.md:26`) and
+  R10-D1 to D7 (`sd-plan:51,97`, `sd-ship:148`, `sd-review:48`) are defined
+  nowhere; each citation inlines its rule or goes.
+- `--scope planning` reviews one item: the one whose `branch:` is checked out,
+  else the single non-done item, `ready` included; more than one candidate
+  refuses (`bin/sd-review:514`, `skills/sd-review/SKILL.md:39`).
+- One review-record format, defined in `skills/sd-receive-review/SKILL.md:71`;
+  `sd-plan`'s `## Review` (:41) and `sd-ship`'s "record the decision" (:46)
+  cite it. Once B lands the record is rows on the item.
+- The pre-edit hash baseline in `.claude/rules/sd-planning-adversarial-review.md:4`
+  goes; the trigger is that `sd-plan` wrote a planning file.
+- `skills/sd-typed-holes/SKILL.md`: the flow commits the skeleton (:64), not
+  the user; `agents/sd-rust-reviewer.md` and the step 8 mention go, since a
+  same-vendor advisory read is not the reviewer; the `--locked`/`--offline`/
+  `build.rs` paragraph in `agents/sd-rust-write.md:56` and
+  `agents/sd-rust-fill.md:53` moves to one shared reference; expect markers and
+  the grep baseline (:46) go, the clippy `todo` lint stays, warn then deny.
+- `skills/sd-red-team/SKILL.md` stays out of the flow; its dispatch section
+  (:108-162) moves into `_shared/references/subagent-dispatch.md`.
+- The dispatch boilerplate repeated in seven skills (`sd-research:71-116`,
+  `sd-fact-check:83-123` and five more) becomes one citation of
+  `_shared/references/subagent-dispatch.md`. The "Active item" hook-injection
+  clause (`sd-research:112-116`, `sd-fact-check:119-123`, `agents/*.md:17-23`)
+  goes; no hook injects it. `references/argument-vocabulary.md`, cited at line
+  30 of 56 skills, is an authoring convention: the line goes and the file stops
+  shipping.
+
+**Research flow.**
+
+- `adversarial-gate run` in the system repository's `local-adversarial-gate`
+  is the one reviewer entry point. It resolves the reviewer role from the
+  registry, takes the document by `--set DOC_PATH=` and drops the diff framing
+  (`conventions.md:192-198`, `bin/sd_research_review.py:238-241`), applies the
+  `--timeout` it parses (`adversarial-gate.sh:103`), refuses an empty or
+  missing `--out` (`:114`), parses the lens's YES/NO line and the CERTAIN count
+  and exits non-zero on NO, and writes `pass=N` into the stamp and refuses past
+  the table's cap.
+- `skills/sd-research/SKILL.md:64-65` and `skills/sd-decide/SKILL.md` gain the
+  reviewer step at the point the table names; `skills/sd-publish/SKILL.md`
+  gains it before the send box.
+- Vendor names go to roles in `skills/sd-research-repo/references/conventions.md:167,175,182-185,224`,
+  `skills/sd-research-repo/SKILL.md:84` (which names the plugin the
+  conventions forbid), `bin/sd_research_review.py:237-260` and
+  `skills/sd-research-repo/templates/CLAUDE.md:87-93`. The three inline
+  reviewer prompts (`conventions.md:203-210`, `templates/CLAUDE.md:87-93`,
+  `sd_research_review.py:245-250`) go; `render` prints the lens. The
+  cross-reference at `conventions.md:176` to a document the installer never
+  ships goes. `templates/CLAUDE.md:6-112` shrinks to the pointer at lines 1-4
+  and the per-repository Notion folder line.
+- `bin/sd_research_review.py`: no `research.conf.py` exits 2 (:173-175, :277);
+  an unrendered document fails or the freshness check goes (:197-199).
+- `agents/sd-claim-verifier.md:41` emits the five verdicts
+  `skills/sd-fact-check/SKILL.md:64-70` requires, verbatim.
+- One citation shape, in `_shared/references/source-standards.md`; the review
+  greps for it on load-bearing claims or stops implying it checks citations
+  (`conventions.md:69,113`, `sd_research_review.py:49-65`).
+- `bin/sd-research-kit:132-135` accepts `-C DIR`.
+- `skills/sd-brief/SKILL.md:34-39` reads topics from
+  `sd store list sdw.topic --status active` and the last-brief date from the
+  item row; "saved preferences" goes.
+- `skills/sd-paper/SKILL.md:72,81-86,93-97`: `bounds=` on the interview, the
+  author approves the brief, the workspace is the item's rows.
+  `skills/sd-distill/SKILL.md:60-63,89-90` names `wc -w` or drops the ratio.
+- Recorded here, lands with item C: `sd-writing-pack/scripts/pack.py:735-757`
+  refuses `ready` on a NO verdict or a CERTAIN finding without a resolution
+  entry, and `pass=N` in the reconcile stamp caps re-runs
+  (`sdw-draft/SKILL.md:44`, `pipeline.md:213`, `conventions.md:224`).
+
+**Shared scripts.**
+
+- Bugs: `bin/sd-status:851` passes `root` to `handoff.resolve_root`;
+  `bin/sd-docs-lint:242` compares the token before ` - ` with `none` instead
+  of `startswith`.
+- Cuts: protection gap analysis, acknowledgement loading, both schema files
+  and `.github/sd-status.json` (`bin/sd-status:226-836`) become one
+  `protected: yes/no` line; `bin/sd_sweep.py`, the `sweep` verb
+  (`bin/sd:2703-2737,2916-2925`) and `tests/test_sd_sweep.py`; the archive
+  walk and the `archived` and `parked` fields (`bin/sd_lib.py:355-368`,
+  `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
+  1122-1129,1234-1242,1254-1287`, `bin/sd-docs-lint:87-91`), so
+  `work_item_dirs` is one `iterdir`; `bin/sd_ledger.py` moves to B with the
+  database; `record_load` (`bin/sd-handoff-restore:157-288`); the six helpers
+  copied from `bin/sd-handoff` (`bin/sd-handoff-restore:72-140,356-370`) are
+  imported the way `bin/sd-status:96` does; the `authors` policy key
+  (`bin/sd-review:287`, `:1092`, `bin/sd_setup_github.py:230,267`, the schema,
+  `.github/sd-review.json`); the unreachable gito and kimi argv branches
+  (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
+  `posted` key and its grep test (`bin/sd-review:1110`,
+  `tests/test_sd_review_boundary.py:167`); the second BACKENDS table
+  (`bin/sd-status:917`), derived from the registry instead; the residue
+  detectors (`bin/sd-status:960-1018`) after one clean run across the fleet;
+  the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
+  `carrier_branches` (`bin/sd-status:885-908`); `_git` (`bin/sd-status:123-135`)
+  and the other four git wrappers (`bin/sd_lib.py:107`, `bin/sd-pr-state`,
+  `bin/sd-handoff:80`, `bin/sd-handoff-restore:72`) become one with a timeout
+  argument; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
+  directory walk and the in-progress rule from `sd_lib`.
+- Consistency: a configuration error exits 2 everywhere (`bin/sd:2930-2946`,
+  `bin/sd-status:1269`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
+  envelopes carry one version key; one ACTIVE status set in `sd_lib` serves
+  `bin/sd-status:1107-1108`, `dashboard/work.py:50` and `bin/sd-review:514`;
+  the `deep` tier is not `standard` plus a disabled provider
+  (`.github/sd-review.json:8`), see the open question on tiers.
+
 ## What leaves this item
 
 Two requirements of the first draft are gone, recorded here so the trail holds.
@@ -656,12 +795,52 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     through the library, ends the session without calling `sd-handoff`, starts a
     new one, and asserts all three are in the injected context.
 30. `make check` passes.
+31. Requirement 13 is closed line by line. One test lists the symbols, flags
+    and files the cuts remove and asserts a repository-wide grep for each
+    returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
+    `carrier_branches`, `_protection_gaps`, `load_acknowledgements`,
+    `--stash-ref`, `--push`, `--park`, `authors`, `argument-vocabulary`,
+    `Standing rule`, `R10-D`, `five gates`, `cron-jobs.sh`, `Active item:`,
+    `sd-rust-reviewer`. Each bug has a regression test: planning scope on a
+    fixture with two planning items and one `ready` item picks the item
+    whose branch is checked out and refuses when none is; `sd-status <path>`
+    run from another checkout reports the packet under `<path>`;
+    `Work: nonexistent-item` fails as an unresolved path, not as a missing
+    reason; `adversarial-gate run --timeout 1` against a sleeping command
+    exits non-zero within two seconds, and a run whose `--out` is empty
+    exits non-zero and names the file; `sd_research_review` on a directory
+    without `research.conf.py` exits 2; `sd-research-kit -C <dir> <verb>`
+    runs from another working directory; the verdict set in
+    `agents/sd-claim-verifier.md` equals the set in
+    `skills/sd-fact-check/SKILL.md`, read from both files. One provider
+    list, one git wrapper, one status vocabulary and one ACTIVE set exist,
+    asserted by a grep that finds no second definition of each.
 
 ## Open questions
 
-All five questions the first draft carried are settled and recorded in the log
-under their dates. None are open. New questions raised during implementation
-are filed as rows on this item once B's library exists, and in the log before.
+The five questions the first draft carried are settled and recorded in the log
+under their dates. Three are open, raised by the 2026-09-05 review of both
+flows. New questions raised during implementation are filed as rows on this
+item once B's library exists, and in the log before.
+
+1. **`sd-grill`.** `sd-plan` step 1 delegates its interview to `sd-grill`, 289
+   lines, one question per turn, unbounded, while the page promises three to
+   five questions attended and none unattended. The delegation goes either
+   way. Does `sd-grill` stay as a standalone skill in `contrib/`, or go?
+   Recommendation: `contrib/`, and a trial decides.
+2. **Tiers.** `.github/sd-review.json` names `cheap`, `standard` and `deep`
+   chains. The registry's ordered reviewer list with fallthrough does the
+   same job, and `deep` equals `standard` today because gito is off.
+   Recommendation: drop the tiers; the policy file keeps paths and the
+   severity floor, and the registry order is the chain.
+3. **`sd-publish`'s ledgers.** Source, adaptation and omission ledgers plus
+   approval states assume an approver other than the author. Recommendation:
+   one change list, the author approves. Does any target, company-facing
+   posts in particular, still need the omission ledger?
+
+Waiting on the operator, not open: model pins and prices for the `kimi`,
+`minimax` and `baseten` entries; whether to run a further review round on
+item B by hand.
 
 ## Log
 
@@ -828,3 +1007,21 @@ are filed as rows on this item once B's library exists, and in the log before.
   section gains a review button beside promote and demote. Requirement 10;
   the pass, the lens, the `skill-review` item and the apply path live on
   item B's requirement 5 and criterion 19.
+- **2026-09-05** — The operator raised the planning review contract to
+  fifteen automatic rounds for this planning exercise. The contract file
+  changes in this commit; the review table's cap stays at five, since the
+  table is the policy that lands and the contract is the lane running now.
+  Item B's round five had found two more blocking defects.
+- **2026-09-05** — Requirement 13 and criterion 31, from the review of both
+  flows: three read-only reviewers, one per flow and one for the shared
+  scripts, 80 findings, 26 of the plumbing set and every flow finding
+  confirmed by source reading, seven re-checked by hand in the operator's
+  session. Verdicts: neither flow tight; about 1,780 cuttable lines in the
+  scripts. Four plausible findings are not recorded as requirements until a
+  fixture confirms them: `bin/sd-docs-lint:113,135` bare `read_text`,
+  `bin/sd-docs-lint:47` `\bBLOCKING\b` matching prose, `bin/sd_lib.py:92-99`
+  closing frontmatter on any `---` prefix, `bin/sd-review:341-342`
+  `validate_policy` mutating its argument. The full reports are in the
+  session's scratchpad, not in the repository. Three open questions
+  reopened; see that section. Requirement 13 is unreviewed by the lane
+  until the next round runs.
