@@ -337,15 +337,21 @@ tagged ones, and no flag or variable at review time attributes history:
 a session's identity says who is working now, not who wrote an older
 commit, and a handoff from one agent to another is ordinary, so a review
 that took `--author` for the whole range would let the first agent review
-its own untagged work under the second's name. The range's base is the
-slice base, from A's round forty-two: the merge base with the default
-branch, or, on a branch continued after a squash merge, requirement 5,
-the branch head the row recorded when that slice's squash commit was
-recorded, `slice_base`, written in the transaction that records the
-squash, because the squash carries the earlier slice's diff and not
-its commits' identities, so those commits stay in the range from the
-merge base for the branch's life and their vendors would exclude
-reviewers of every later slice. The
+its own untagged work under the second's name. The set is the commits
+of `HEAD` reachable from neither the default branch nor the row's
+`slice_base`, `git rev-list HEAD --not <default> <slice_base>`, from
+A's rounds forty-two and forty-three: `slice_base` is the branch head
+the row recorded when it recorded a slice's squash commit, requirement
+5, written in that transaction, and excludes that slice's own commits,
+which the squash carries as a diff and not by identity, so they would
+stay in a range from the merge base for the branch's life; the default
+branch excludes the squash commit itself and what came in with the
+merges of the default into the branch, which are nobody's authorship
+here, since a squash is no ancestor of the head it squashed and a base
+alone cannot exclude it; the merge commits themselves are on the
+branch and carry the trailer `sd-ship` gave them, or are refused like
+any other. A fresh branch cut from the default after the merge has
+the same set by the same rule with no `slice_base`. The
 reviewer is the first entry whose vendor is in no member of the set, the
 vendors the trailers carry, so a
 branch two providers wrote is reviewed by a third or refused; a set that is
@@ -1224,10 +1230,13 @@ confirmed by the next `sd-ship` run alone.
    <from>..<to> claude` over the rewritten commits resolves it, with
    the attributing commit asserted on the fixture remote after the push
    and its `Attributes:` trailer naming the sha and `claude/anthropic`;
-   a Claude-authored slice squash-merged and the branch continued with
-   a Codex-authored second slice resolves a Claude reviewer, the row's
-   `slice_base` excluding the first slice's commits, from A's round
-   forty-two;
+   a Claude-authored slice squash-merged, the default merged back into
+   the branch by `sd-ship`, and the branch continued with a
+   Codex-authored second slice resolves a Claude reviewer, the set
+   excluding the first slice's commits by `slice_base` and the squash
+   by the default, and a fresh branch cut from the default with the
+   same second slice resolves the same, from A's rounds forty-two and
+   forty-three;
    two
    clones attributing two different commits of one branch in turn both
    push without force and the review reads both; `sd attribute <sha>
@@ -2483,3 +2492,14 @@ from a number the operator types.
     head the row records as `slice_base` when it records a slice's
     squash commit, the merge base where there is none. Criterion 13
     runs the two-vendor, two-slice case.
+- **2026-09-05** — Planning review, round forty-three of forty-six: one
+  blocking finding, addressed.
+  - C-77, requirement 3: `slice_base..HEAD` still held the first
+    slice's squash commit once the default was merged back, since the
+    squash is no ancestor of the head it squashed, so the scan refused
+    it as untagged or counted the first vendor again; a fresh branch
+    from the default had the same. Addressed: the set is what `HEAD`
+    reaches and neither the default nor `slice_base` does, `git
+    rev-list HEAD --not <default> <slice_base>`. Criterion 13 merges the
+    default back before the second slice and runs the fresh-branch
+    case.
