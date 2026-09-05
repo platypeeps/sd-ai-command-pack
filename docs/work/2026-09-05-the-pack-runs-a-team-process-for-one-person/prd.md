@@ -582,17 +582,24 @@ A reader with no database, CI, a fresh clone, a linked worktree on another
 branch, asks git one question, whether the item is delivered, and nothing
 else; every other state lives on the row, and the surfaces that act on it
 have the database. One function, `sd_lib.delivered`, answers `yes` when a
-commit reachable from the default branch or from the checkout's `HEAD`
+commit reachable from the remote's default branch as just fetched, or
+from the checkout's branch as just fetched from its upstream, or from
+`HEAD` where the branch has no upstream,
 carries `Delivers: <item>` or `Closes: <item>`, never on `Item:` alone, `no`
 when none does, the history is whole, and the history is current, and
 `unknown` otherwise: when the checkout is shallow, `git rev-parse
 --is-shallow-repository`, because the trailer may sit past the boundary,
 from A's round twenty-two; and when the checkout has a remote and this
-run's fetch of the default branch from it, `git fetch <remote>
-<default>`, did not succeed, because a whole history is not a current
+run's fetch from it, of the default branch and of the checkout's
+branch where it has an upstream, `git fetch <remote> <default>
+<branch>`, did not succeed, because a whole history is not a current
 one, and a clone retained while another machine delivered or cancelled
 the item holds neither trailer and would answer `no` for finished work,
-from A's round thirty-nine; the function fetches before it answers, a
+from A's rounds thirty-nine and forty; the second ref is fetched
+because the mark for a branch-only cancel and for a guest delivery
+lives on the item's branch and on no other, so a clone retained on
+that branch is current only once it has that branch's tip and not the
+default branch's alone. The function fetches before it answers, a
 checkout with no remote has nothing to be behind and answers from what
 it has, and an `unknown` names the boundary or the remote and the fetch
 as the repair. Every reader
@@ -1344,7 +1351,12 @@ confirmed by the next `sd-ship` run alone.
     answers `yes` once its fetch succeeds, `unknown` naming the remote
     and the fetch while the fixture remote is unreachable, and `no`
     never, and a checkout with no remote answers `no` from its own
-    history. A test
+    history; a whole clone retained on the item's branch while the item
+    is cancelled from a second clone, the mark pushed to that branch,
+    answers `yes` after its fetch of the branch with the default branch
+    unchanged, `unknown` while the remote is unreachable, and `no`
+    never, and a guest clone retained on the fork's integration branch
+    across a guest delivery the same. A test
     rejects the merge, and another kills `sd-ship` after the push, and
     both assert that the item is still picked, the directory is
     untouched, and the row is not `done`; a third kills `sd-ship` after
@@ -2366,3 +2378,13 @@ from a number the operator types.
     row does not yet carry, idempotently. Criterion 13 kills between
     the API double's acceptance and the row's write, on a delivering
     merge and on a slice.
+- **2026-09-05** — Planning review, round forty of forty, the last
+  automatic round: one blocking finding, addressed.
+  - C-73, requirement 5: `delivered` fetched the default branch alone,
+    and the mark for a branch-only cancel or a guest delivery lives on
+    the item's branch, so a clone retained on that branch fetched,
+    found nothing, and answered `no` for cancelled work. Addressed: the
+    function fetches the default branch and the checkout's branch from
+    its upstream, and reads from both as fetched. Criterion 13 retains a
+    clone on the item's branch across a cancel from a second clone, and
+    a guest clone across a guest delivery.
