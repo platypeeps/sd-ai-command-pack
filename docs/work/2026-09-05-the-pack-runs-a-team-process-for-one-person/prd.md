@@ -557,10 +557,20 @@ rejected merge, a failed CI run or a ship killed after the push leaves the
 item exactly as open and as selectable as it was. Once `sd-ship` has
 confirmed the delivering merge the row is `done`, and the word reaches
 the file with the next commit `sd-plan` or `sd-ship` makes in that
-repository, which refreshes every mirror whose row is `done` and whose
-file is not, one status line each, and carries `Closes: <item>` for
-each in its message, from A's round thirty-one; that commit is the
-closure, and there is no closure pull request. Rounds nineteen to
+repository, which refreshes every mirror whose row is `done`, whose
+file is not, and whose `rev` the checkout's `HEAD` contains, one status
+line each, and carries `Closes: <item>` for each in its message, from
+A's round thirty-one; a `done` mirror the checkout does not contain,
+an item delivered after this branch was cut, is left alone and not
+refused, from A's round thirty-two, because the guard is the delivered
+item's and this commit is another item's; `sd-ship` refreshes after its
+integration update and before its push, so a branch that reaches the
+merge carries every closure the default branch held, and `sd-plan`'s
+commit carries those its branch already contains. The refresh moves no
+`done` row's `rev`, and the row records its closure when `sd-ship`
+confirms a merge whose message carries `Closes:` for it, which `sd-ship`
+writes from the branch's own trailers beside `Item:` and `Delivers:`;
+that commit is the closure, and there is no closure pull request. Rounds nineteen to
 thirty had one, a status-only pull request through the merge path after
 every delivery, and it cost a CI-and-merge cycle per item, moved the
 protected default branch under every other open pull request, which
@@ -1317,7 +1327,13 @@ confirmed by the next `sd-ship` run alone.
     and `sd-plan` and neither picks the item; a fifth kills `sd-ship`
     mid-commit while it refreshes another item's mirror, and asserts the
     next run carries the same refresh once and the fixture remote saw
-    no second pull request for it. A
+    no second pull request for it; a sixth cuts a second item's branch
+    before the first delivers, delivers the first, runs `sd-plan` on the
+    second's branch, and asserts that commit passed, touched no file of
+    the first, and carries no `Closes:`, then ships the second and
+    asserts the refresh came after the integration update, the merge
+    message carries `Closes:` for the first, and the default branch's
+    mirror of the first says `done`. A
     test ships an item with `--deliver`, ships a second item, and asserts
     the second ship's commit touched one line of the first item's
     `prd.md` beyond its own paths and its merge message carries `Closes:`
@@ -2190,3 +2206,16 @@ from a number the operator types.
     closure assertion becomes no push to the default branch. Items B and
     D follow; the operator's decision that the closure is the one merge
     not made by hand is moot and recorded so.
+- **2026-09-05** — Planning review, round thirty-two of forty: one
+  blocking finding, addressed.
+  - C-62, requirement 5: round thirty-one's refresh of every `done`
+    mirror ran the delivered item's guard against another item's
+    checkout, and a branch cut before that delivery does not contain the
+    squash, so the other item's next commit refused. Addressed: the
+    refresh takes only the mirrors whose `rev` the checkout contains and
+    leaves the rest pending; `sd-ship` refreshes after its integration
+    update, so a branch that reaches the merge carries every closure the
+    default branch held; the refresh moves no `done` row's `rev`, and the
+    row records its closure on the confirmed merge whose message carries
+    `Closes:` for it. Criterion 13 cuts a second item's branch before the
+    first delivers and asserts both commits.
