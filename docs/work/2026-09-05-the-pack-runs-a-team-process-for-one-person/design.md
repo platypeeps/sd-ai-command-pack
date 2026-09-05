@@ -59,8 +59,9 @@ These run without being asked.
   Blocking findings are fixed or recorded before the branch leaves.
 - CI runs on the pull request. The merge waits for CI and nothing else.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
-  for CI once in the background, merges with an explicit title and body, and
-  runs `git fetch -p`. The repository setting `delete_branch_on_merge` removes
+  for CI once in the background, merges with an explicit title and body,
+  lands the item's closure commit on the default branch, and runs
+  `git fetch -p`. The repository setting `delete_branch_on_merge` removes
   the remote branch.
 - `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
 - A commit to the pack, the system repository or the writing repository names
@@ -140,11 +141,14 @@ Eight commands, one local review, no artifacts.
 Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
 path, with the two development review points. After the merge the item's row is
-`done`, `sd-ship` has written `done` into the mirror as the branch's last
-commit so that `main` and CI read it without the database, and the directory
-is deleted at the next `sd-plan` run, when every file in it is tracked and
-committed and nothing untracked or ignored sits beside them; otherwise it
-stays and the run names the files. Git history keeps what is deleted.
+`done`, and `sd-ship` lands one closure commit on the default branch, a
+direct push where the branch accepts one and a second pull request
+otherwise, that writes `done` into the mirror so that `main` and CI read it
+without the database, and deletes the directory when every file in it is
+tracked and committed and nothing untracked or ignored sits beside them;
+otherwise it stays and the commit names the files. The branch itself never
+says `done`, so a merge that fails leaves the item open. Git history keeps
+what is deleted.
 
 ## Modes
 

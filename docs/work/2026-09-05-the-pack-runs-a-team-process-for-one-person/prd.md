@@ -159,7 +159,8 @@ repository, taken once and unrecorded.
 
 Today `sd-ship` applies eleven steps to a one-line fix. After this item the
 default path is: commit enumerated paths, local review, push, open the pull
-request, wait for CI once, merge, `git fetch -p`.
+request, wait for CI once, merge, close the item on the default branch,
+`git fetch -p`.
 
 - `sd-spec` leaves the default path. It runs when a change alters behaviour that
   `docs/spec/` documents, and the operator asks for it.
@@ -375,31 +376,36 @@ warning; in a checkout on the branch that is behind `rev`, they report that
 instead and compare nothing; what `sd-ship` commits always agrees, because
 it refreshes first. In any other checkout, on `main`
 after the merge or in a linked worktree on another branch, and in CI, they
-read the mirror alone. `done` reaches the mirror the same way every other
-state does, and in the merge itself: `sd-ship` writes `status: done` into the
-mirror as the last commit of the branch before it merges, so `main`, every
-database-free checkout and CI read `done` the moment the merge lands, and no
-reader waits on a later run to learn it. If the merge then fails, the branch
-carries `done` ahead of a row that does not, and the lint reports that
-disagreement like any other; the row turns `done` only when the merge is
-confirmed. Every reader that picks an item, `sd-review --scope planning`
-among them, excludes a `done` mirror, so a merged item is never the "single
-open item" of a checkout that has no database. Until B's library exists the
+read the mirror alone. `done` reaches the mirror after the merge is
+confirmed and never before: the branch's own mirror never says `done`, so a
+rejected merge, a failed CI run or a ship killed after the push leaves the
+item exactly as open and as selectable as it was. Once `sd-ship` has
+confirmed the merge it lands one closure commit on the default branch that
+writes `status: done` into the mirror and deletes the directory when it is
+clean, below; a direct push where the default branch accepts one, otherwise
+a second pull request through the same merge path. The row turns `done` on
+the confirmed merge and records the closure commit when it lands; a `done`
+row without one is what the next `sd-ship` run in that repository finishes.
+So `main`, every database-free checkout and CI read `done` within one commit
+of the merge, and before that they read the last true state, never a false
+one. Every reader that picks an item, `sd-review --scope planning` among
+them, excludes a `done` mirror, so a closed item is never the "single open
+item" of a checkout that has no database. Until B's library exists the
 frontmatter is the only copy, and the switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
 waiting on the operator's external action, and keeps `blocked`. Nothing else
 changes.
 
-No sweep, no park, no archive. A merged item is `done` in the row and in
-the mirror, above, and its directory is deleted at the next `sd-plan` run,
-only when every file in it is tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
+No sweep, no park, no archive. A merged item is `done` in the row, and the
+closure commit above writes `done` into the mirror and deletes the directory
+in that same commit, only when every file in it is tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
 that ignored files count alongside untracked and modified ones, and every path
 under the directory listed by `git ls-files -- <dir>` and present at `HEAD`.
 When that holds, the deletion is `git rm -r` of those tracked paths and
-nothing else. When it does not, the directory stays and `sd-plan` reports the
-untracked, ignored or modified files by name. Git history holds what is
-deleted.
+nothing else. When it does not, the directory stays with its mirror at
+`done`, and the closure commit's message and `sd-ship` name the untracked,
+ignored or modified files. Git history holds what is deleted.
 `docs/work/archive/` and its 941 files are removed in one commit that names
 `46ec7fb85` as the commit that recovers any of them. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
@@ -809,11 +815,17 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     `rev` and asserts that `sd mirror refresh` refuses naming both commits,
     that the lint reports the checkout as behind and does not compare, and
     that `--rebind` proceeds and writes a note. A test ships an item to
-    merge, then reads the merged tree with no database and asserts the
-    mirror says `done`, that `sd-status` reports it done, and that
-    `sd-review --scope planning` in that checkout does not pick it and,
-    with no other item open, refuses naming none. Tests cover all five,
-    and the merge. The pack's installer installs B's
+    merge, then reads the default branch with no database and asserts the
+    closure commit is there, the mirror says `done`, `sd-status` reports it
+    done, and `sd-review --scope planning` in that checkout does not pick
+    it and, with no other item open, refuses naming none. A test rejects
+    the merge, and another kills `sd-ship` after the push, and both assert
+    that the branch's mirror never says `done`, the item is still picked,
+    the directory is not deleted, and the row is not `done`; a third
+    confirms the merge and kills `sd-ship` before the closure, and asserts
+    the row is `done` without a closure commit and the next `sd-ship` run
+    lands it. Tests cover all five, the merge and the closure. The pack's
+    installer installs B's
     `sd_db` into the pack's virtualenv, asserted by a test that runs the
     installer against a fixture system checkout and imports it. Before B
     exists, this criterion is recorded as waiting, not as met.
@@ -1168,3 +1180,16 @@ Waiting on the operator, not open: model pins and prices for the `kimi`,
   - Model pins written into the design's registry block on the operator's
     yes: `kimi-k3`, `MiniMax-M3` with its price marked `unverified`,
     DeepSeek V4 Pro 0813 for both Baseten tools, `max_tokens` 16384 on all.
+
+- **2026-09-05** — Planning review, round seven of fifteen: one blocking
+  finding, addressed.
+  - C-17, requirement 5: round six's fix wrote `done` into the mirror before
+    the merge, so a rejected merge, a failed CI run or a ship killed after
+    the push left unmerged work marked `done`, excluded by every picker, and
+    eligible for deletion. Addressed: the branch's mirror never says `done`;
+    after the confirmed merge `sd-ship` lands one closure commit on the
+    default branch that writes `done` and deletes the clean directory, a
+    direct push where the branch accepts one and a second pull request
+    otherwise; the row records the closure commit and the next `sd-ship`
+    run finishes a closure that was interrupted. Criterion 13 tests the
+    rejected merge, the killed ship and the interrupted closure.
