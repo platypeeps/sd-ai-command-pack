@@ -160,8 +160,8 @@ request; it lands in as many as its slices need. Every merge `sd-ship`
 makes carries `Item: <item>` in its message, which ties the commit to
 the item and closes nothing: after it, whether `sd-ship` made it or you
 did, and a merge you make is confirmed by the runner's watch on the pull
-request or by the next `sd-ship` run here, the row's `rev` moves to the
-squash commit the pull request reports and the item stays open. The one
+request or by the next `sd-ship` run here, the squash commit goes on a
+note, `rev` stays with the branch, and the item stays open. The one
 merge that delivers carries `Delivers: <item>` as well: `sd-ship
 --deliver`, the runner on a row you marked final, or your own hand in
 the merge message; for a hand merge without it, the item screen's

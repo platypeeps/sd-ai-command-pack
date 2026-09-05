@@ -578,8 +578,17 @@ closes nothing; the merge that delivers carries `Delivers: <item>` as
 well, written when the operator ships with `--deliver`, or when D's
 runner merges an assignment whose row was created as the item's last
 slice, `final` on the row from the run dialog. A merge without
-`Delivers:` leaves the row `in_progress`, moves `rev`, and lands no
-closure; `sd-ship` says so in its last line, naming `--deliver` for
+`Delivers:` leaves the row `in_progress`, leaves `rev` where the
+branch's last mirror write put it, records the squash commit in a note
+naming the slice, and lands no closure, from A's round thirty: the
+branch continues, the next slice's checkout contains the branch's
+commits and not the squash, and a `rev` moved to the squash would make
+the next mirror refresh refuse and put `--rebind` on the ordinary path
+of every item that lands in more than one pull request; the squash
+reaches the branch through requirement 3's integration update before
+the next merge, which is where it is needed. Only the delivering merge
+moves `rev` and the branch. `sd-ship` says so in its last line, naming
+`--deliver` for
 next time. The row turns `done` on the confirmed merge that carries
 `Delivers:` and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
@@ -614,7 +623,8 @@ runner, which watches every `ready_to_send` item's pull request, or the
 next `sd-ship` run in that repository before D exists, and the same step
 follows when the merge message carries `Delivers:`, which a hand merge
 carries when the operator wrote it: the row `done`, `rev` moved, the
-closure by a second pull request; without it, `rev` moves and the item
+closure by a second pull request; without it, `rev` stays, the squash
+commit goes on a note, the item
 stays open, and the item screen offers `deliver` for a merge that was
 the last one, which writes `done` and lands the closure as a
 `Delivers:` merge would have.
@@ -1251,14 +1261,22 @@ confirmed by the next `sd-ship` run alone.
     and `sd-plan` in a fresh clone of the default branch do not pick the
     item though its mirror still says `in_progress`, and the row shows
     `closure pending`; a hand merge through the fixture remote with no
-    trailer moves `rev`, leaves the row `in_progress`, lands no closure
+    trailer leaves `rev` and the row `in_progress`, notes the squash
+    commit, lands no closure
     and is still picked, and after `deliver` on the item screen the row
     is `done`, the closure lands, and the item is picked in a
     database-free checkout only until it does; two slices shipped in
     turn, the first without `--deliver`, leave the row `in_progress`
-    after the first with `rev` moved, no closure, `delivered` answering
-    `no` on an `Item:` merge, and the item still picked, and after the
-    second with `--deliver` the row is `done` and the closure lands; and
+    after the first with `rev` unmoved and the squash commit on a note,
+    no closure, `delivered` answering
+    `no` on an `Item:` merge, and the item still picked, the second
+    slice continued on the same branch with no rebase and its mirror
+    refresh passing the guard without `--rebind`, and after the
+    second with `--deliver` the row is `done` and the closure lands; the
+    same with the second slice prepared in a second worktree of the
+    branch before the first merges, and the same with the second slice
+    cut fresh from the updated default branch, all three passing the
+    guard without `--rebind`; and
     a clone of the
     default branch at depth one, taken after one more commit lands past
     the merge, has `sd_lib.delivered` answer `unknown`, `sd-review
@@ -1303,12 +1321,13 @@ confirmed by the next `sd-ship` run alone.
     again in that repository, and asserts the row turned `done` with `rev`
     the squash commit and the closure landed by a second pull request the
     path merged after CI with no hand; the same hand merge without the
-    trailer leaves the row `in_progress` with `rev` moved and no
+    trailer leaves the row `in_progress` with `rev` unmoved and no
     closure, and the item screen's `deliver` then writes `done` and
     lands it; the delivering case on a fixture remote that
     gained a collaborator leaves the closure pull request open and named.
     Every merge test above merges with an actual squash merge and
-    asserts that the row's `rev` is the squash commit afterwards, that the
+    asserts that after a delivering merge the row's `rev` is the squash
+    commit and after a slice merge it is unmoved, that the
     closure write passed the guard without `--rebind`, and that a checkout
     of the merged default branch is not reported as behind. Tests cover all
     five, the merge and the closure. The pack's installer installs B's
@@ -2109,3 +2128,15 @@ from a number the operator types.
     requirement 5 says leaves it open. Addressed: the fixture's hand
     merge writes the trailer, and the same merge without it is asserted
     to leave the row `in_progress` until the item screen's `deliver`.
+- **2026-09-05** — Planning review, round thirty of forty: one blocking
+  finding, addressed. The first run of this round timed out in the
+  provider and was rerun.
+  - C-59, requirement 5: every merge moved `rev` to its squash commit,
+    and a second slice continued on the item's branch does not contain
+    that commit, so the next mirror refresh refused and `--rebind` sat on
+    the ordinary path of every item that lands in more than one pull
+    request. Addressed: a slice merge leaves `rev` with the branch and
+    notes the squash commit; only the delivering merge moves `rev` and
+    the branch. Criterion 13 ships two slices three ways, continued on
+    the branch, prepared in a second worktree before the first merges,
+    and cut fresh, all without `--rebind`; the design page follows.
