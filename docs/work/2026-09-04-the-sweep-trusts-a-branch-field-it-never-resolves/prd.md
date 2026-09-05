@@ -70,12 +70,16 @@ naming.
    item inside it unknown and says so once per root; it neither adds nor
    removes an item from the report.
 5. Branch liveness is advisory, never an exclusion. The sweep asks the remote
-   once per root, `git ls-remote --heads <remote> <branch>`, and reads local
-   refs beside it; a branch found in either is annotated live, a branch found
-   in neither is annotated gone, and a query that fails is annotated unknown.
-   Every item past the age threshold is in the report with its annotation;
-   none is hidden by it. A test covers each of the three annotations and
-   asserts the report's item count is the same across all three.
+   once per root, `git ls-remote --heads <remote>` with no branch argument,
+   holds every head the answer lists, and matches each item's `branch:`
+   against that set and against local refs by exact ref name; a branch found
+   in either is annotated live, a branch found in neither is annotated gone,
+   and a query that fails annotates every item in the root unknown. Every
+   item past the age threshold is in the report with its annotation; none is
+   hidden by it. A test covers each of the three annotations and asserts the
+   report's item count is the same across all three; a fixture root with two
+   items whose branches exist only on the remote asserts both are annotated
+   live and that the recording remote answered exactly one query.
 6. Mutation-tested, per the standing bar. At minimum: live and gone swapped,
    the per-root argument replaced by a fixed root, and the "git cannot answer"
    path made to report gone.
@@ -119,3 +123,8 @@ naming.
   `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round five,
   finding C-13 there: liveness annotates, nothing excludes, and the mutation
   set tests the annotation.
+- **2026-09-05** — From the solo-first item's ninth planning review, C-20:
+  one remote query per root filtered by one item's branch could only
+  classify that item, and a second remote-only branch in the same root was
+  annotated gone. Criterion 5 now fetches every remote head once per root
+  and matches locally; the fixture has two remote-only branches.

@@ -235,9 +235,10 @@ name. Copilot and Greptile are not entries: they post on the pull request, and
 this lane never posts.
 
 This file is the only list of providers. `sd-review` reads it through the
-library; `.github/sd-review.json` carries repository policy, paths and the
-severity floor, and names no provider and no chain. The `reviewer` line above
-is the chain.
+library; `.github/sd-review.json` carries repository policy, paths, the
+severity floor and `vendors`, the vendors allowed to read this repository,
+and names no provider and no chain. The `reviewer` line above is the chain,
+intersected with `vendors`; absent, the author vendors and no one else.
 
 ## Overrides
 
