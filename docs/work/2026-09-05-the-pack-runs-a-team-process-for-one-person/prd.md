@@ -444,7 +444,12 @@ no second person to give one. `sd-status` reports those three settings, an
 unattended merge into a default branch that does not require pull requests
 and CI refuses naming the setting, and a ship the operator runs by hand is
 warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the mark a run that restarts after the
-merge looks for on the default branch so that it never lands a second one. The row turns `done` on
+merge looks for on the default branch so that it never lands a second one;
+and the closure branch is `closure/<item>` and nothing else, so that a run
+that restarts after the closure pull request was opened and before it was
+merged finds it by its head and finishes it, waits for CI and merges, rather
+than opening a second one or failing on the branch it already pushed, from
+B's round nineteen. The row turns `done` on
 the confirmed merge and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
 A merge the operator makes by hand, the default policy, is confirmed the
@@ -943,7 +948,10 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     the directory is not deleted, and the row is not `done`; a third
     confirms the merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
-    lands it. A test adds a line to the fixture's `README.md` that names
+    lands it; a fifth kills `sd-ship` after the closure pull request is
+    opened and before it is merged, and asserts the next run merges that
+    pull request, opens no second one, and one closure commit exists. A
+    test adds a line to the fixture's `README.md` that names
     the item's directory, ships to merge, and asserts the directory stays
     with its mirror at `done` and the closure commit names `README.md`;
     with the line removed before the ship, the directory is deleted. A
@@ -1439,3 +1447,8 @@ from a number the operator types.
     no tracked file outside the directory naming it; otherwise the
     directory stays and the closure names the files that link in.
     Criterion 13 asserts both sides.
+- **2026-09-05** — Cross-item, from B's round nineteen: a restart between
+  the closure pull request's opening and its merge found no closure commit
+  and opened a second pull request. The closure branch is `closure/<item>`
+  and a restart finds the open pull request by that head and finishes it.
+  Criterion 13 kills `sd-ship` at that point.
