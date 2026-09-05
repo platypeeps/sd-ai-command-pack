@@ -594,11 +594,20 @@ nothing of the abandoned branch rides in on a pull request that
 merges on its own; the `rev` guard does not apply to it, because it
 writes the default branch's mirror and not the branch's, and `rev`
 moves to it when it lands. Where the default branch holds no mirror,
-the triad lives on the item's branch alone, nothing anywhere reads
-the item as open, no closure is landed, and the note names the branch
-that still holds the triad. A cancelled row whose closure has not
-landed is finished by the next `sd-ship` run the same way, so no
-other checkout and no CI reads a cancelled item as open.
+the triad lives on the item's branch alone, and that branch is a
+checkout somebody can open with no database, whose mirror says the
+item is open and whose default-branch history carries no trailer, so
+the mark goes where the mirror is, from A's round twenty-nine: `cancel`
+writes one commit on the item's branch, the status line `done` and the
+`cancelled` note and nothing else, with `Closes: <item>`, in the item's
+kept worktree where one exists and otherwise in a temporary one the
+library cuts from the branch and removes, pushed to the branch where
+the branch has a remote, and `rev` moves to it; the branch is retained
+and never merged, no closure lands on the default branch, and a
+checkout of the branch reads `done` from its own mirror. A cancelled
+row whose mark has not landed, on either path, is finished by the
+next `sd-ship` run the same way, so no other checkout and no CI reads
+a cancelled item as open.
 A merge the operator makes by hand, the default policy, is confirmed the
 same way by whichever next asks GitHub about the item's pull request, D's
 runner, which watches every `ready_to_send` item's pull request, or the
@@ -1266,9 +1275,12 @@ confirmed by the next `sd-ship` run alone.
     default branch, its diff is one file and the status line with the
     note, none of the three commits is in the default branch's history
     after it lands, and no `Delivers:` is anywhere in it; a cancel of an
-    item whose triad exists on its branch alone lands no closure, leaves
-    the row `done` with the note naming the branch, and leaves the
-    default branch unchanged; a fifth kills `sd-ship` after the closure pull request is
+    item whose triad exists on its branch alone lands no closure on the
+    default branch, which is unchanged, and writes one commit on the
+    branch whose diff is the status line and the note with `Closes:`
+    in its message, `rev` that commit; and in both cases a database-free
+    checkout of the retained branch runs `sd-review --scope planning`
+    and `sd-plan` and neither picks the item; a fifth kills `sd-ship` after the closure pull request is
     opened and before it is merged, and asserts the next run merges that
     pull request, opens no second one, and one closure commit exists. A
     test ships an item with `--deliver` and asserts the closure commit touched one
@@ -1286,10 +1298,14 @@ confirmed by the next `sd-ship` run alone.
     the closure is one commit on the integration branch, no pull request
     was opened, nothing was pushed upstream, and `rev` is that commit. A
     fourth ships under the default policy to `ready_to_send`,
-    merges the pull request by hand on the fixture remote, runs `sd-ship`
+    merges the pull request by hand on the fixture remote with
+    `Delivers: <item>` written in the merge message, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
     the squash commit and the closure landed by a second pull request the
-    path merged after CI with no hand; the same on a fixture remote that
+    path merged after CI with no hand; the same hand merge without the
+    trailer leaves the row `in_progress` with `rev` moved and no
+    closure, and the item screen's `deliver` then writes `done` and
+    lands it; the delivering case on a fixture remote that
     gained a collaborator leaves the closure pull request open and named.
     Every merge test above merges with an actual squash merge and
     asserts that the row's `rev` is the squash commit afterwards, that the
@@ -2078,3 +2094,18 @@ from a number the operator types.
     value is a URL, and the tool's own configuration is named as the one
     place consent does not reach. Criterion 8 changes an argument and a
     variable with the executable unchanged; the design's Overrides follow.
+- **2026-09-05** — Planning review, round twenty-nine of forty: two
+  blocking findings, addressed.
+  - C-57, requirement 5: a cancelled item whose triad lived on its branch
+    alone got no closure, and a database-free checkout of that retained
+    branch read an open mirror with no trailer in default-branch history,
+    so its pickers selected the cancelled item again. Addressed: `cancel`
+    writes one terminal commit on the item's branch, the status line and
+    the note with `Closes:`, and the branch's own mirror says `done`.
+    Criterion 13 picks from a database-free checkout of the branch in
+    both cancellation cases.
+  - C-58, criterion 13: the default-policy hand-merge test had `sd-ship`
+    close the item on a merge that carried no `Delivers:`, which
+    requirement 5 says leaves it open. Addressed: the fixture's hand
+    merge writes the trailer, and the same merge without it is asserted
+    to leave the row `in_progress` until the item screen's `deliver`.
