@@ -2,9 +2,11 @@
 
 ## Approach
 
-One new folded skill, `skills/sd-tdd/SKILL.md`, plus two one-line reciprocal
-pointers in skills that already exist. No Python, no `bin/` tool, no test
-changes beyond what the frontmatter suite already enumerates from disk.
+One new folded skill, `skills/sd-tdd/SKILL.md`, plus reciprocal passages in
+two skills that already exist — seven added lines in `sd-debug` and
+fifty-four in `sd-typed-holes`, the latter carrying a `## Lineage` section as
+well as the seam. No Python, no `bin/` tool, no test changes beyond what the
+frontmatter suite already enumerates from disk.
 
 The skill follows the pack's section skeleton — When to use / Arguments /
 The gate / Workflow / Red flags / Safety rules / Final report / Lineage — the
@@ -67,7 +69,7 @@ test proves nothing about the behaviour. Upstream states this well
 that gets dropped when the discipline is summarised, so it is requirement 2 on
 its own rather than a clause inside requirement 1.
 
-**D3 — the regression proof is a four-step procedure, and it is the seam with
+**D3 — the regression proof has two routes, and it is the seam with
 `sd-debug`.**
 
 Write the test, see it pass with the fix in place, **revert the fix**, see it
@@ -92,7 +94,7 @@ instead. Restoration is a verified step, not an intention.
 `sd-debug` today requires rerunning the reproduction after a fix, which proves
 the symptom is gone and proves nothing about the test that is supposed to keep
 it gone. Rather than duplicate the procedure into `sd-debug`, `sd-debug` gains
-one sentence handing the regression test to `sd-tdd`, and `sd-tdd` owns the
+a short passage handing the regression test to `sd-tdd`, and `sd-tdd` owns the
 proof. One procedure, one owner, two skills that agree — the same choice made
 when `sd-receive-review` reused the planning contract's four dispositions
 instead of coining new ones.

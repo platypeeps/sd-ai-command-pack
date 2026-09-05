@@ -139,7 +139,17 @@ What the gate never accepts is a test that has only ever been seen to pass.
    being folded into the first test as extra assertions.
 9. **For a bug fix, prove the regression test guards the bug.** A test written
    alongside a fix passes because the fix is there, which is also what a test
-   that guards nothing does. Four steps, in this order:
+   that guards nothing does. A regression test never seen to fail with the fix
+   removed is not known to guard anything.
+
+   **If the fix has not landed yet, there is nothing to revert.** `sd-debug`
+   hands over a reproduction, so write the test against the unfixed tree, watch
+   it fail with the original symptom, then fix. That is steps 2 through 6 of
+   this workflow with the bug as the behaviour, it produces the same evidence,
+   and it closes `disciplined`. Prefer it.
+
+   **If the fix landed first**, recover the evidence in four steps, in this
+   order:
    1. write the test and run it with the fix in place — it passes;
    2. **revert the fix** — the production change only, not the test, and only
       under the recoverable-copy rule in the safety rules below;
@@ -147,9 +157,10 @@ What the gate never accepts is a test that has only ever been seen to pass.
       original symptom;
    4. restore the fix and run once more — it passes.
 
-   A regression test that has not been seen to fail with the fix removed is not
-   known to guard anything. `sd-debug` owns the reproduction and the cause;
-   this procedure owns the proof that the fix stays fixed.
+   This is the recovered-late route, so it closes `partial` for that fix, named
+   under **Recovered late** rather than counted as `disciplined`. `sd-debug`
+   owns the reproduction and the cause; this step owns the proof that the fix
+   stays fixed.
 10. Close in one of exactly three ways, and name which one:
     - **disciplined** — every production change in this session was preceded by
       its test, each test was seen to fail against a tree lacking the
