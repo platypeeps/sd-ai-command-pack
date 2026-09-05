@@ -478,10 +478,18 @@ closure commit above writes `done` into the mirror and deletes the directory
 in that same commit, only when every file in it is tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
 that ignored files count alongside untracked and modified ones, and every path
 under the directory listed by `git ls-files -- <dir>` and present at `HEAD`;
-and only when nothing outside the directory reads it: `git grep -l -F
-"docs/work/<dir>" -- ':!docs/work/<dir>'` empty, because a link from a
-tracked file is a reader, and git history keeping the file does not make
-the path it was linked by resolve. The pack has that case today:
+and only when nothing outside the directory reads it, because a link from
+a tracked file is a reader, and git history keeping the file does not make
+the path it was linked by resolve. A reader is found two ways, and either
+keeps the directory: every tracked file outside it that spells the
+repository-relative path, `git grep -l -F "docs/work/<dir>" --
+':!docs/work/<dir>'`; and every markdown link or reference-style
+definition in a tracked markdown file outside it whose target, resolved
+against that file's own directory, lands under the item's directory, so
+that `work/<item>/design.md` from `docs/guide.md` and `../<item>/prd.md`
+from a sibling item count, which no spelling of the literal path would
+find. A target with a fragment or a query is resolved without it. The
+pack has that case today:
 `2026-08-29-artifacts-as-product` is `done` and fourteen lines in twelve
 tracked files link into it, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`,
 `CHANGELOG.md`, `docs/fleet/README.md` and seven `docs/spec/` pages, so it
@@ -954,7 +962,11 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     test adds a line to the fixture's `README.md` that names
     the item's directory, ships to merge, and asserts the directory stays
     with its mirror at `done` and the closure commit names `README.md`;
-    with the line removed before the ship, the directory is deleted. A
+    with the line removed before the ship, the directory is deleted; a
+    relative link `work/<item>/design.md` in a fixture `docs/guide.md`,
+    and `../<item>/prd.md` in a sibling item's `prd.md`, each keep the
+    directory and are named, and a link to a different item's directory
+    that merely shares a prefix does not. A
     fourth ships under the default policy to `ready_to_send`,
     merges the pull request by hand on the fixture remote, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
@@ -1452,3 +1464,13 @@ from a number the operator types.
   and opened a second pull request. The closure branch is `closure/<item>`
   and a restart finds the open pull request by that head and finishes it.
   Criterion 13 kills `sd-ship` at that point.
+- **2026-09-05** — Planning review, round thirteen of thirty: one blocking
+  finding, addressed. The round's first run timed out at fifteen minutes
+  and was rerun with thirty.
+  - C-26, requirement 5: the reader guard matched the literal
+    repository-relative path, so a relative link, `work/<item>/design.md`
+    from `docs/guide.md` or `../<item>/prd.md` from a sibling item, was
+    not a reader and the closure deleted a linked directory. Addressed:
+    markdown links are resolved against their source file's directory and
+    any that land under the item's directory keep it, beside the literal
+    grep. Criterion 13 tests both relative forms and a prefix near-miss.
