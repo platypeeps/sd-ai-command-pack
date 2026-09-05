@@ -32,11 +32,10 @@ investigation is open and hands over when it closes in any of its three states,
 over), to run this repository's own checks (`sd-check`), to
 review a diff for defects that have not manifested (`sd-review`), to attack an
 artifact's assumptions adversarially (`sd-red-team`), or to plan the work the
-fix turns into (`sd-plan`). Rust
-async and concurrency faults have their own body of knowledge in
-`sd-rust-async`; this skill is the language-agnostic discipline and applies
-alongside it rather than instead of it. Those are handoffs; report an
-unavailable sibling rather than implying it ran.
+fix turns into (`sd-plan`). Rust async and concurrency faults have their own
+body of knowledge in `sd-rust-async`; this skill is the language-agnostic
+discipline and applies alongside it rather than instead of it. Those are
+handoffs; report an unavailable sibling rather than implying it ran.
 
 ## Arguments
 
