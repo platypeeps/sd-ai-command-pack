@@ -162,15 +162,18 @@ request, wait for CI once, merge, `git fetch -p`.
   timeout and were reissued, are the thing being removed.
 - The 70 lines of pull-request history in the skill file (the `#718` and `#720`
   narratives) collapse to one paragraph stating the resulting rule.
-- In a repository the operator owns, the path merges on its own when tests,
-  review and CI pass, and reports. In a repository someone else merges, it stops
-  at pull-request-ready. That is the only difference between the two, and
-  `mode:` already carries it.
+- The path merges on its own when tests, review and CI pass, and reports, only
+  in a repository whose row in the database carries `merge: auto`. The operator
+  sets that once per repository from the dashboard; the default is off, and no
+  detection sets it. Everywhere else the path stops at pull-request-ready. Mode
+  decides where artifacts go; the merge policy decides whether the loop merges,
+  and the two are separate because remote ownership can suggest the first and
+  cannot authorize the second.
 - Nothing on the path asks a question mid-run. Where a skill would ask today, it
   decides, records the choice on the item as a proposal, and continues. The
   operator vetoes after, not before. A test failure, a blocking review finding
-  past the retry cap, or a write outside the repository stops the run and marks
-  the item `blocked` with the reason.
+  left open once the review cap is spent, or a write outside the repository
+  stops the run and marks the item `blocked` with the reason.
 - Every commit to the pack, the system repository or the writing repository
   names what needed it: a `Needed-by:` trailer carrying an item id or one of the
   three lanes `cost`, `efficiency`, `visibility`. `sd-ship` warns when it is
@@ -195,10 +198,14 @@ cap, and nowhere else unless the operator asks by name:
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 1 |
 | Development | Code, before merge | Defects a second reader finds | 1 |
 
-When a point's passes are spent the artifact moves on: to the send box, to
-implementation, to merge. A further pass needs the operator to ask for it by
-name, and the item records that it was asked for. This is the fix for "not
-perfect yet, another pass first".
+The cap bounds automatic passes, not the disposition of what they find. When a
+point's passes are spent, no further pass starts on its own; the artifact moves
+on only once every blocking finding is dispositioned, addressed or rebutted with
+evidence recorded on the item. A blocking finding still open past the cap marks
+the item `blocked`, and the operator decides. Non-blocking findings never hold
+an artifact. A further pass needs the operator to ask for it by name, and the
+item records that it was asked for. This is the fix for "not perfect yet,
+another pass first": the review ends; the findings do not vanish.
 
 **The reviewer is a different vendor from the author, by policy.** Today Claude
 writes and Codex reviews. If the primary moves to OpenCode or a local model, the
@@ -239,18 +246,25 @@ default. `sd-plan` asks three to five questions before it writes anything, and
 in an unattended run it asks none and records its assumptions.
 
 **Git owns the artifacts; the database owns the state.** `prd.md`, `design.md`
-and `implement.md` stay in the repository as the decision trail. Their `status:`
-frontmatter stops being truth: the item row in `sd.db` holds status, dates,
-links and notes, and points at the files by path. `sd-docs-lint` rule 2 and
-`sd_lib.py`'s status derivation read the row, not the file. Until B's library
-exists the frontmatter stays as it is, and the switch is one migration.
+and `implement.md` stay in the repository as the decision trail. The item row in
+`sd.db` holds status, dates, links and notes, and points at the files by path.
+The `status:` line in `prd.md` stays, as a derived mirror the library writes on
+every change and nothing else writes: a fresh checkout and a CI runner have no
+database, and `make check` runs the documentation lint there. On the machine,
+`sd_lib.py` and `sd-docs-lint` read the row and fail when the mirror disagrees
+with it; in CI they read the mirror. `sd-ship` refreshes the mirror before it
+commits. Until B's library exists the frontmatter is the only copy, and the
+switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
 waiting on the operator's external action, and keeps `blocked`. Nothing else
 changes.
 
 No sweep, no park, no archive. A merged item is `done` in the row and its
-directory is deleted at the next `sd-plan` run; git history holds it.
+directory is deleted at the next `sd-plan` run, only when every file in it is
+tracked and committed: `git status --porcelain -- <dir>` empty and the paths
+present at `HEAD`. Otherwise the directory stays and `sd-plan` reports the
+untracked or modified files by name. Git history holds what is deleted.
 `docs/work/archive/` and its 941 files are removed in one commit that names
 `46ec7fb85` as the commit that recovers any of them. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
@@ -277,8 +291,13 @@ pushed and Notion mirrors for its audience. That is intended and stays.
   explicit line. Today `sd_lib.mode()` reads the local block and falls back to
   `full`, so an unconfigured shared repository gets the most invasive mode by
   default. This is the one piece of requirement 6 that is new code: the fallback
-  asks who merges, using the remote owner as the proxy, before returning `full`.
-  The three modes are named in `README.md`, which mentions none of them today.
+  asks three questions of the remote before returning `full`: the owner is the
+  operator, the repository is not a fork, and the operator is its only
+  collaborator. Any other answer, and any failure to answer, returns `guest`
+  for the artifact question while leaving the merge question to the policy
+  above, which is off unless set. A personal fork of a shared upstream and a
+  personally owned repository with collaborators both resolve to `guest`. The
+  three modes are named in `README.md`, which mentions none of them today.
 - `README.md`'s claim that the pack writes "nothing, ever" in a repository is
   rescoped to the installer, which is where it is true. The skills that write
   tracked files by design are named.
@@ -452,21 +471,26 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     `none - <reason>` form appears in no skill, tool, or lint rule. The lint's
     rule 5 passes on a body with no `Work:` line when no work item is present,
     and still fails a body naming an item that does not resolve.
-11. `mode: guest` is the resolved mode for a repository whose remote owner is
-    not the operator, absent an explicit `mode:` line, and `full` when it is. A
-    test covers three cases: owned remote, unowned remote, and a root with no
-    remote or no git at all. The last must not resolve to `guest` on an error; a
-    detection failure that silently downgrades every local scratch repository
-    is the same class of defect as one that silently upgrades a shared one, so
-    the failure path is named and asserted. An explicit `mode:` line still wins
-    over detection. All three modes appear in `README.md`.
+11. Without an explicit `mode:` line, `full` is the resolved mode only when the
+    remote owner is the operator, the repository is not a fork, and the operator
+    is its sole collaborator; every other answer resolves to `guest`. A test
+    covers five cases: owned sole-collaborator remote, unowned remote, a
+    personal fork of a shared upstream, an owned remote with a second
+    collaborator, and a root with no remote or no git at all. The last resolves
+    to `full` for artifacts, since a local scratch repository has no one to
+    expose anything to, and is named and asserted as its own case rather than
+    left to whichever branch an exception reaches. An explicit `mode:` line
+    still wins over detection. Unattended merge is never derived from mode: a
+    test asserts the loop stops at pull-request-ready in a `full` repository
+    whose row lacks `merge: auto`. All three modes appear in `README.md`.
 12. `README.md`'s writes-nothing claim names the installer as its subject and
     lists the skills that write tracked files.
-13. Once B's library exists: `sd_lib.py` derives an item's status from its row
-    and not from frontmatter, `sd-docs-lint` rule 2 reads the row, and a test
-    asserts that a `prd.md` with a stale `status:` line does not change what
-    `sd-status` reports. Before B exists, this criterion is recorded as waiting,
-    not as met.
+13. Once B's library exists: on a machine with the database, `sd_lib.py` and
+    `sd-docs-lint` derive an item's status from its row, and a `prd.md` whose
+    `status:` mirror disagrees with the row fails the lint by name. Without the
+    database, as in CI, both read the mirror and pass. `sd-ship` refreshes the
+    mirror before committing, asserted by a test that changes a row and ships.
+    Before B exists, this criterion is recorded as waiting, not as met.
 14. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
     exists, and skips them cleanly when it does not.
 15. The coverage floor applies to `bin/sd_install.py` and to no other file. The
@@ -486,8 +510,10 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
 21. `docs/work/archive/` does not exist. All 487 items in it are deleted, the
     386 `done` and the 100 `planning` alike, and the deletion commit names
     `46ec7fb85` as the commit that recovers them. `sd-plan` deletes a `done`
-    item's directory rather than moving it, and no sweep or park code path
-    remains; a test asserts the deletion path.
+    item's directory rather than moving it, and only when the directory is
+    clean and fully tracked; no sweep or park code path remains. Tests cover
+    the deletion path, an untracked file that blocks it, and an uncommitted
+    edit that blocks it, and assert the report names the file.
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -578,6 +604,34 @@ are filed as rows on this item once B's library exists, and in the log before.
   dashboard, migrations, the vault crons stopping, and the multiplexer wrapper.
 
   This week's deliverables, outside this item: the six `mcp-research` drafts
-  filed, and `mezmo-world-simulator` Phase 1 to `done`. The vault's automated
-  Codex jobs stop today. The seven `mezmo-world-simulator` passes are scored
-  before any new code review runs.
+  filed, and `mezmo-world-simulator` Phase 1 to `done`. The seven
+  `mezmo-world-simulator` passes are scored before any new code review runs.
+
+  One decision from the interview is corrected here. The 104 Codex sessions
+  that run from the Obsidian vault are not scheduled jobs: no launchd job or
+  cron script spawns Codex. They are the writing pipeline's hostile-read
+  fan-out, `pack.py review adversarial` through `adversarial-gate.sh`, one
+  `codex exec` per piece, in bursts of up to eighteen when the pipeline runs.
+  There is nothing to unload. The cap in requirement 3 is what governs them.
+- **2026-09-05** — Planning review, round one, `sd-review --scope planning
+  --challenge` through Codex. Four blocking findings, all addressed.
+  - C-1, `design.md` modes: remote ownership cannot establish that nobody else
+    merges; a personal fork or an owned repository with collaborators would
+    resolve `full` and merge unattended. Addressed: mode detection asks owner,
+    not-a-fork, and sole-collaborator, and any other answer is `guest`;
+    unattended merge is a separate per-repository policy, `merge: auto`, set
+    once by the operator and never derived. Requirement 2, requirement 6,
+    criterion 11.
+  - C-2, requirement 5: status only in a machine-local database leaves CI's
+    documentation lint with nothing to read. Addressed: the `status:` line
+    stays as a derived mirror the library writes; the machine reads the row and
+    fails on disagreement, CI reads the mirror, `sd-ship` refreshes it before
+    committing. Criterion 13.
+  - C-3, requirement 5: deleting a `done` directory on the row alone destroys
+    untracked or uncommitted files. Addressed: deletion requires a clean, fully
+    tracked directory, else the run keeps it and names the files. Criterion 21.
+  - C-4, requirement 3: "moves on when the cap is spent" contradicted "blocked
+    on an open blocking finding past the cap". Addressed: the cap bounds
+    automatic passes; advancement needs every blocking finding dispositioned;
+    an open one past the cap marks the item `blocked`. Requirement 2 and 3, and
+    the page.

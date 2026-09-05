@@ -38,15 +38,17 @@ research kit lays out the repository; the item tracks what is open. You sit at
 the end: external publish or filing is the one gate, and it is yours.
 
 **Development.** Pick the item. The loop writes the prd and design when the
-change earns them, implements, tests, reviews, pushes, and merges. In a
-repository you own there is no gate; you review the result on the item screen
-after it lands, and revert is one action. In a repository someone else merges,
-the loop stops at pull-request-ready and the pull request waits in the send box.
+change earns them, implements, tests, reviews, pushes, and merges where you
+have allowed it. A repository merges unattended only when you set `merge: auto`
+on its row, once, from the dashboard; there you review the result on the item
+screen after it lands, and revert is one action. Everywhere else the loop stops
+at pull-request-ready and the pull request waits in the send box.
 
 The loop asks no questions while it runs. Where it would have asked, it decides,
 records the choice on the item as a proposal, and continues. You veto after. It
 stops, and marks the item `blocked` with the reason, on a failing test, a
-blocking review finding past the retry cap, or a write outside the repository.
+blocking review finding still open once the review cap is spent, or a write
+outside the repository.
 
 ## Defaults
 
@@ -83,8 +85,11 @@ These run only when asked by name.
 
 ## Reviews
 
-Adversarial review runs at four points, each with a cap. When the cap is spent
-the artifact moves on: to the send box, to implementation, to merge.
+Adversarial review runs at four points, each with a cap on automatic passes.
+When the cap is spent no further pass starts on its own. The artifact moves on,
+to the send box, to implementation, to merge, once every blocking finding is
+addressed or rebutted with evidence on the item. A blocking finding still open
+past the cap marks the item `blocked`; non-blocking findings hold nothing.
 
 | Flow | Point | What it checks | Cap |
 |---|---|---|---|
@@ -130,8 +135,9 @@ Eight commands, one local review, no artifacts.
 Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
 path, with the two development review points. After the merge the item's row is
-`done` and its directory is deleted at the next `sd-plan` run. Git history keeps
-it.
+`done` and its directory is deleted at the next `sd-plan` run, when every file
+in it is tracked and committed; otherwise it stays and the run names the files.
+Git history keeps what is deleted.
 
 ## Modes
 
@@ -140,14 +146,17 @@ the block; the file is untracked by construction.
 
 | Mode | Where planning artifacts go | What ships |
 |---|---|---|
-| `full` | `docs/work/` in the repository | everything above, merge included |
+| `full` | `docs/work/` in the repository | everything above; merge only with `merge: auto` on the row |
 | `minimal` | nowhere; no work items | the small-change path only |
 | `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
 
-Ownership decides. A repository you own runs `full`, whichever organisation
-holds it. A repository someone else merges runs `guest`. Without a `mode:`
-line, the pack asks who merges, using the remote's owner as the proxy, and
-never falls to `guest` on a detection error.
+Ownership decides where artifacts go, whichever organisation holds the
+repository. Without a `mode:` line, the pack asks three questions of the
+remote: is the owner you, is it not a fork, are you the only collaborator. Three
+yes: `full`. Anything else, including no answer: `guest`. A root with no remote
+is `full`; there is no one to expose anything to. Mode never decides merging.
+`merge: auto` is a per-repository policy you set once on the dashboard, off by
+default, and nothing derives it.
 
 ## Providers
 
