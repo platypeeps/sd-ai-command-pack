@@ -73,7 +73,8 @@ These run only when asked by name.
 - A work item under `docs/work/<date>-<slug>/prd.md`. Create one when the
   work spans more than one session or more than about 300 changed lines.
   `design.md` and `implement.md` exist only when you ask for them. Status is on
-  the item's row, never in the file.
+  the item's row, never in the file; `ready_to_send` marks a finished artifact
+  waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.

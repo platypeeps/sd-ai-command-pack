@@ -193,7 +193,7 @@ cap, and nowhere else unless the operator asks by name:
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 1 |
-| Development | Code, before merge | See the experiment below | 1 |
+| Development | Code, before merge | Defects a second reader finds | 1 |
 
 When a point's passes are spent the artifact moves on: to the send box, to
 implementation, to merge. A further pass needs the operator to ask for it by
