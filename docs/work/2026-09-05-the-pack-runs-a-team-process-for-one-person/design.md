@@ -67,9 +67,9 @@ These run without being asked.
   lands the item's closure commit on the default branch, and runs
   `git fetch -p`. The repository setting `delete_branch_on_merge` removes
   the remote branch.
-- The default branch is protected: pull requests only, CI required, branches
-  up to date before they merge, no required approvals. `sd-status` reports
-  it, the dashboard sets it in one
+- The default branch is protected: pull requests only, CI required, no
+  required approvals. CI also runs on the default branch after each merge.
+  `sd-status` reports it, the dashboard sets it in one
   action on a repository you own, and an unattended merge into a branch
   that is not refuses naming the setting.
 - `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
@@ -160,12 +160,14 @@ request, never a direct push, because the default branch is protected, and that
 second pull request merges on its own under both policies once CI passes,
 since it carries only the item's own mirror; it
 writes `done` into the mirror so that `main` and CI read it
-without the database, and deletes the directory when every file in it is
-tracked and committed, nothing untracked or ignored sits beside them, and no
-tracked file outside it links in; otherwise it stays and the commit names the
-files. The branch itself never
-says `done`, so a merge that fails leaves the item open. Git history keeps
-what is deleted.
+without the database, and touches nothing else: the directory stays. The
+branch itself never
+says `done`, so a merge that fails leaves the item open. Delete a `done`
+directory yourself, with `git rm -r`, when you want the listing short;
+nothing in the pack does. A pull request GitHub cannot merge, a conflict,
+ends the item `blocked` naming the files; merge the default branch in by
+hand, push, and the next `sd-ship` run reviews the new head once, spends
+no pass on it, and merges.
 
 ## Modes
 
@@ -216,6 +218,11 @@ never vendors.
     roles:
       author:   [claude, codex]
       reviewer: [codex, claude, minimax, kimi, prism, gito, exo]
+
+Each entry also carries `env`, the list of variables the entry's process
+receives beside `PATH`, `HOME`, `LANG`, `TERM` and `TMPDIR`, `env:
+[OPENAI_API_KEY]` for `codex`; left out of the example above for width. A
+session sees the variables its own entry names and no other entry's.
 
 Pins as of 2026-09-05, each read from the vendor's model list on that day:
 `kimi-k3` is Moonshot's current flagship with a one-million-token window;

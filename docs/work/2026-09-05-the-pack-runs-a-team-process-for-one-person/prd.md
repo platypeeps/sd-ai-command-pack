@@ -119,12 +119,16 @@ after a second interview on 2026-09-05, became three:
   they are promoted, the filing skill, the handoff skill. Everything that
   describes behaviour or ships in the payload.
 - **B — the system repository.** The database at `~/.local/share/sd/sd.db`,
-  the one library that owns its schema and every write, the runner that turns
-  an assignment into a session, the dashboard as the operator's front door with
-  five sections, the migrations that fill it, the vault crons stopped, and the
-  terminal-multiplexer wrapper. Everything that runs on the machine.
+  the one library that owns its schema and every write, the dashboard as the
+  operator's front door with five sections, the migrations that fill it, the
+  vault crons stopped, the fixture harness, and the terminal-multiplexer
+  wrapper. Everything that runs on the machine and is not the runner.
 - **C — the writing repository.** A stub: ideas and pieces move into the
   database after B's library exists. Nothing else until one piece publishes.
+- **D — the runner.** Split from B on 2026-09-05 by the operator's decision:
+  `local-sd-runner/`, the process that turns an assignment row into a
+  session, runs batches, watches pull requests and merges. It lands last, in
+  the order recorded under Landing order below.
 
 B's library lands first, because requirements 5, 10, 11 and 12 below write to
 it, because requirement 2 reads `merge: auto` from a repository row and writes
@@ -231,19 +235,21 @@ that is the last automatic pass on the pull request: a blocking finding from
 it marks the item `blocked`. `sd-ship` pushes a head that is the reviewed head
 or a verified fix of it, and nothing else; a further commit waits for the
 operator to ask for a pass by name. That rule governs the author's
-changes. The base's changes are governed by another, because the default
-branch moves while a pull request waits, another item's merge or its
-closure, and the protection then refuses the pull request until it
-carries the move: an integration update, the default branch merged into
-the branch with nothing else in the commit, is not a fix and spends no
-pass. `sd-ship` makes it when the remote reports the branch behind, runs
-the branch review once over the combined head, since two changes each
-reviewed alone were never reviewed together, waits for CI, and merges,
-unattended and as often as the default branch moves while the pull
-request waits its turn in the serial lane. A blocking finding from an
-integration review marks the item `blocked` like any other; a clean one
-merges the head it reviewed. The operator is asked for nothing that a
-moving base caused.
+changes. The base moves while a pull request waits, another item's merge
+or its closure, and nothing follows from that alone: the protection does
+not require the branch to carry the move, so a pull request GitHub can
+merge is merged as reviewed, CI having run on its merge ref, and CI on the
+default branch after the merge catches a combination that broke. The one
+case that needs the base carried in is a conflict, GitHub reporting the
+pull request not mergeable, and `sd-ship` resolves no conflict: the item
+ends `blocked` naming the conflicting files, the operator merges the
+default branch in by hand, and that integration commit, the default branch
+merged in and nothing else, is not a fix and spends no pass; the next
+`sd-ship` run reviews the new head once with the branch review, waits for
+CI and merges. There is no automatic integration update, so there is no
+loop for a busy base to feed, from A's round seventeen: the count of
+integration reviews is the count of conflicts the operator resolved by
+hand, and the closure pull requests that move the base cause none.
 
 **The reviewer is a different vendor from the author, by policy.** Today Claude
 writes and Codex reviews. If the primary moves to OpenCode or a local model, the
@@ -251,7 +257,13 @@ pair changes and the rule holds. The pack's skills name *roles*, `author` and
 `reviewer`, never vendors. A **provider registry**, one config file read by B's
 library, maps each role to a provider: name, how to start it, which roles it
 may fill, cost basis. Adding exo, another commercial API, or a second local
-model is an entry, not code. The registry's format and the role vocabulary are
+model is an entry, not code. Each entry names the environment variables its
+process needs, `env: [OPENAI_API_KEY]`, and a session or a review call
+started for that entry receives those, a fixed base, `PATH`, `HOME`,
+`LANG`, `TERM`, `TMPDIR`, and nothing else, so that a session for one
+vendor never holds another vendor's key, asked for on 2026-09-05: the
+runner and `sd-review` read the operator's environment file for themselves
+and pass on only what the entry names. The registry's format and the role vocabulary are
 defined in this item; the file lives with the database.
 
 The registry is static and the author is not. `author` is a list too,
@@ -458,13 +470,16 @@ confirmed and never before: the branch's own mirror never says `done`, so a
 rejected merge, a failed CI run or a ship killed after the push leaves the
 item exactly as open and as selectable as it was. Once `sd-ship` has
 confirmed the merge it lands one closure commit on the default branch that
-writes `status: done` into the mirror and deletes the directory when it is
-clean, below, as a second pull request through the same merge path and
+writes `status: done` into the mirror and changes nothing else, as a
+second pull request through the same merge path and
 never a direct push: the default branch is protected in every repository
 the pack merges into, by the operator's decision on 2026-09-05, pull
-requests only, CI required, branches up to date with the default branch
-before they merge, and no required approvals because there is no second
-person to give one. `sd-status` reports those four settings, an
+requests only, CI required, and no required approvals because there is no
+second person to give one; the up-to-date requirement that stood beside
+them until 2026-09-05 went with the deletion below, and CI runs on the
+default branch after every merge as well as on the pull request, so a
+combination that merged clean and broke is on Today within minutes.
+`sd-status` reports those three settings, an
 unattended merge into a default branch that does not require pull requests
 and CI refuses naming the setting, and a ship the operator runs by hand is
 warned, not stopped. The closure commit carries a `Closes: <item>` trailer, the mark a run that restarts after the
@@ -477,13 +492,13 @@ B's round nineteen. The row turns `done` on
 the confirmed merge and records the closure commit when it lands; a `done`
 row without one is what the next `sd-ship` run in that repository finishes.
 A merge the operator makes by hand, the default policy, is confirmed the
-same way by whichever next asks GitHub about the item's pull request, B's
+same way by whichever next asks GitHub about the item's pull request, D's
 runner, which watches every `ready_to_send` item's pull request, or the
-next `sd-ship` run in that repository before B exists, and the same step
+next `sd-ship` run in that repository before D exists, and the same step
 follows: the row `done`, `rev` moved, the closure by a second pull request.
 That closure pull request merges on its own under both policies once CI
 passes and the three answers hold, because it carries the item's own mirror
-and directory and nothing a provider wrote; under the default policy it is
+and nothing a provider wrote; under the default policy it is
 the one merge the operator does not make by hand, by the operator's
 decision on 2026-09-05.
 So `main`, every database-free checkout and CI read `done` within one commit
@@ -497,51 +512,39 @@ The status vocabulary gains one state, `ready_to_send`, for a finished artifact
 waiting on the operator's external action, and keeps `blocked`. Nothing else
 changes.
 
-No sweep, no park, no archive. A merged item is `done` in the row, and the
-closure commit above writes `done` into the mirror and deletes the directory
-in that same commit, only when every file in it is tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
-that ignored files count alongside untracked and modified ones, and every path
-under the directory listed by `git ls-files -- <dir>` and present at `HEAD`;
-and only when nothing outside the directory reads it, because a link from
-a tracked file is a reader, and git history keeping the file does not make
-the path it was linked by resolve. A reader is found two ways, and either
-keeps the directory: every tracked file outside it that spells the
-repository-relative path, `git grep -l -F "docs/work/<dir>" --
-':!docs/work/<dir>'`; and every markdown link or reference-style
-definition in a tracked markdown file outside it whose target, resolved
-against that file's own directory, lands under the item's directory, so
-that `work/<item>/design.md` from `docs/guide.md` and `../<item>/prd.md`
-from a sibling item count, which no spelling of the literal path would
-find. A target with a fragment or a query is resolved without it. The
-pack has that case today:
-`2026-08-29-artifacts-as-product` is `done` and fourteen lines in twelve
-tracked files link into it, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`,
-`CHANGELOG.md`, `docs/fleet/README.md` and seven `docs/spec/` pages, so it
-stays. When all of that holds, the deletion is `git rm -r` of those
-tracked paths and nothing else. When it does not, the directory stays with
-its mirror at `done`, and the closure commit's message and `sd-ship` name
-the untracked, ignored or modified files, or the files that link in. Git
-history holds what is deleted. The scan on the closure branch sees the
-tree as it was when the branch was cut, and a pull request merged after
-that can add a reader the scan never saw, so the scan also runs where the
-tree is current: `sd-docs-lint` gains a rule, every link and literal path
-into `docs/work/` from a tracked file resolves to a path that exists, and
-required CI runs it on the pull request's merge ref, the prospective
-merged tree. The protection's up-to-date requirement refuses a closure
-pull request cut before the default branch moved until it carries the
-move, the update reruns the rule on the merged tree, and a failure sends
-the closure back rather than through: `sd-ship` re-cuts it from the
-current default branch with the directory kept and the new reader named.
-`docs/work/archive/` and its 941 files are removed in one commit that names
-`46ec7fb85` as the commit that recovers any of them, and the same commit
+No sweep, no park, no archive, and no deletion at closure. A merged item
+is `done` in the row, the closure commit writes `done` into the mirror,
+and the directory stays, by the operator's decision on 2026-09-05. The
+rule that deleted it took seven fixes in sixteen rounds, a reader scan by
+literal path, a second by resolved link, a lint rule on the merged tree,
+an up-to-date protection setting, a re-cut path and a single-caller
+guard, and the reviewer said three times that keeping the directory with
+`status: done` was the simpler design. It is. A `done` directory costs a
+line in a listing, every reader that picks an item already excludes a
+`done` mirror, and the pack has the case today: `2026-08-29-artifacts-as-product`
+is `done` and fourteen lines in twelve tracked files link into it, which
+a deletion would have had to detect and a kept directory serves. No pack
+surface deletes an item directory. When the operator wants the listing
+short, once a quarter or never, they delete with `git rm -r` in a change
+of their own, and a link that breaks then is theirs to see. The lint
+rule, the two reader scans, the eligibility function, the up-to-date
+setting and the re-cut path are not built.
+`docs/work/archive/` and its 941 files are removed in one commit whose
+message names its own parent, by full hash, as the commit that recovers
+any of them: the parent is the last tree that holds every file at the
+path it is deleted from, where an older snapshot does not, `46ec7fb85`,
+the import, lacks 136 of the 941 at their current paths, from A's round
+seventeen. The same commit
 migrates every reader the archive has, eleven tracked files today,
 `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/spec/guides/index.md`, the
 `artifacts-as-product` item's `design.md` and `implement.md`, and
 `.gito/config.toml` among them: a link into the archive becomes a
-permalink to the same path at `46ec7fb85`, a literal mention in prose
+permalink to the same path at that parent, a literal mention in prose
 gains that commit beside it, and the ignore pattern in `.gito/config.toml`
-goes. The reader guard above is not bypassed for being a bulk deletion;
-it is satisfied in the commit that deletes. The 100 parked items go
+goes; before the commit is made, every permalink's path is checked to
+exist in the parent's tree with `git cat-file -e`, and one that does not
+stops the commit naming it. The archive is the one deletion the pack
+makes, made once, by hand, and never by a closure. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
 backlog, and B names one surface for later work.
 
@@ -859,6 +862,18 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
   found stand as evidence: nine of ten pieces disagree with the vault note they
   name, and the `skill-proposal-accept` routine does not exist.
 
+## Landing order
+
+Items A, B and D depend on each other in both directions, so they land in
+slices, each its own pull request, in the order B's `prd.md` records under
+the same heading, by the operator's decision on 2026-09-05: B's fixture
+harness, library and migrations; then this item's registry reader, tiered
+ship path, protection, closure and mirror guard; then B's dashboard,
+read-only and then writing; then D's runner. A slice claims only the
+criteria its text names. Before the second slice, criteria 13 and 32 are
+recorded as waiting, and until D lands a merge the operator makes is
+confirmed by the next `sd-ship` run alone.
+
 ## Acceptance criteria
 
 1. `WORKFLOW.md` exists at the repository root, states the two flows and the
@@ -1001,25 +1016,20 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     it and, with no other item open, refuses naming none. A test rejects
     the merge, and another kills `sd-ship` after the push, and both assert
     that the branch's mirror never says `done`, the item is still picked,
-    the directory is not deleted, and the row is not `done`; a third
+    the directory is untouched, and the row is not `done`; a third
     confirms the merge and kills `sd-ship` before the closure, and asserts
     the row is `done` without a closure commit and the next `sd-ship` run
     lands it; a fifth kills `sd-ship` after the closure pull request is
     opened and before it is merged, and asserts the next run merges that
     pull request, opens no second one, and one closure commit exists. A
-    test adds a line to the fixture's `README.md` that names
-    the item's directory, ships to merge, and asserts the directory stays
-    with its mirror at `done` and the closure commit names `README.md`;
-    with the line removed before the ship, the directory is deleted; a
-    relative link `work/<item>/design.md` in a fixture `docs/guide.md`,
-    and `../<item>/prd.md` in a sibling item's `prd.md`, each keep the
-    directory and are named, and a link to a different item's directory
-    that merely shares a prefix does not. A test cuts the closure, then
-    merges a second pull request that adds a link into the item's
-    directory, and asserts the closure pull request fails the lint rule on
-    the merged tree, is re-cut from the current default branch, keeps the
-    directory, and names the new reader; the fixture remote is asserted to
-    require branches up to date, and `sd-status` to report four settings. A
+    test ships an item to merge and asserts the closure commit touched one
+    file, the item's `prd.md`, and one line of it; the fixture remote is
+    asserted to require pull requests and CI and nothing else, and
+    `sd-status` to report three settings. A test makes the fixture remote
+    report the pull request not mergeable and asserts the item ends
+    `blocked` naming the file, no merge call was made, and that after the
+    default branch is merged in by hand and pushed the next run reviews
+    the new head once, spends no pass, and merges it. A
     fourth ships under the default policy to `ready_to_send`,
     merges the pull request by hand on the fixture remote, runs `sd-ship`
     again in that repository, and asserts the row turned `done` with `rev`
@@ -1051,26 +1061,22 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     contains no `cd` prohibition.
 20. Exactly one file states the planning adversarial review rule.
 21. `docs/work/archive/` does not exist. All 487 items in it are deleted, the
-    386 `done` and the 100 `planning` alike, and the deletion commit names
-    `46ec7fb85` as the commit that recovers them. A `done` item's
-    directory is deleted by the closure in requirement 5 and by nothing
-    else: `sd-plan` moves, parks and sweeps nothing and deletes nothing,
-    and no sweep or park code path remains. The eligibility check is one
-    function in `sd_lib.py`, clean, fully tracked, and no reader outside
-    the directory, and the closure is its only caller, so that a directory
-    the closure kept for a reader is not taken by a second path that never
-    asked. Tests cover the deletion path, an untracked file that blocks it,
-    an ignored file that blocks it, an uncommitted edit that blocks it, and
-    a reader that blocks it, and assert the report names the file; the
-    deletion test asserts `git rm` removed only tracked paths; a test runs
-    `sd-plan` on a repository holding a `done` directory kept for a reader
-    and asserts the directory is untouched; a grep of `bin/` for the
-    eligibility function names one caller. After the archive commit, the
-    lint rule from requirement 5 passes on the tree, `git grep` finds no
-    relative link into `docs/work/archive/` from a tracked file, and the
-    two `docs/spec/guides/index.md` lines and the two
+    386 `done` and the 100 `planning` alike, and the deletion commit's
+    message names its parent, by full hash, as the commit that recovers
+    them; a test reads that hash from the message and asserts every path
+    the commit deletes exists in the parent's tree, and that every
+    permalink the commit wrote names the same hash and a path that exists
+    there. No item directory is deleted by any pack surface: the closure
+    writes one line, `sd-plan` moves, parks and sweeps nothing and deletes
+    nothing, no sweep or park code path remains, and a grep of `bin/` and
+    `skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside the
+    installer's own temporary paths. A test ships a `done` item and runs
+    `sd-plan` and `sd-ship` again in that repository, and asserts the
+    directory is untouched. After the archive commit, `git grep` finds no
+    link or literal path into `docs/work/archive/` from a tracked file,
+    and the two `docs/spec/guides/index.md` lines and the two
     `artifacts-as-product/design.md` lines that linked in resolve as
-    permalinks at `46ec7fb85`.
+    permalinks at the parent.
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -1586,3 +1592,30 @@ from a number the operator types.
     commit migrates every reader, links to permalinks at `46ec7fb85`,
     prose gains the commit, the ignore pattern goes. Criterion 21 lints
     the resulting tree.
+- **2026-09-05** — Planning review, round seventeen of forty: two blocking
+  findings, addressed. The cap was raised from thirty to forty automatic
+  rounds by the operator on 2026-09-05, in the contract.
+  - C-34, requirement 5: the archive deletion named `46ec7fb85`, the
+    import, as the commit that recovers any deleted file, and that tree
+    lacks 136 of the 941 files at their current paths, verified by
+    `git ls-tree` against `git ls-files`. Addressed: the deletion commit
+    names its own parent, the permalinks point there, and every permalink
+    path is checked against that tree before the commit is made.
+    Criterion 21 reads the hash from the message and checks both.
+  - C-35, requirement 3: an integration update exempt from every cap, made
+    as often as the base moved, was an unbounded review loop on a busy
+    base, and the closure pull requests fed it. Addressed by removing the
+    thing that caused it: the up-to-date protection setting is gone, so a
+    mergeable pull request merges as reviewed and no automatic integration
+    update exists; a conflict ends the item `blocked` for the operator's
+    hand, whose integration commit spends no pass and is reviewed once.
+    Criterion 13 covers the conflict path and the three settings.
+  - Operator's decisions, the same day, from the improvement list: a
+    `done` item's directory is kept, never deleted by the pack, which
+    removes the reader scans, the lint rule, the eligibility function, the
+    re-cut path and the up-to-date setting from requirement 5 and criteria
+    13 and 21; each registry entry names its `env` variables and a session
+    receives those and a fixed base only, requirement 3 and the design's
+    Providers section; the runner is split out of B into item D, and the
+    references here follow; the three items land in slices in the order
+    under Landing order, recorded in full on B.
