@@ -1060,7 +1060,9 @@ log, not here.
   published under the company's name, by the operator's decision on
   2026-09-05. The 182-line profile contract becomes `tone=`.
   `skills/sd-distill/SKILL.md:60-63,89-90` names `wc -w` or drops the ratio.
-- Recorded here, lands with item C: `sd-writing-pack/scripts/pack.py:735-757`
+- Recorded here, lands with item C,
+  `2026-09-05-the-writing-pipeline-runs-on-the-row` in `sd-writing-pack`,
+  created 2026-09-05: `sd-writing-pack/scripts/pack.py:735-757`
   refuses `ready` on a NO verdict or a CERTAIN finding without a resolution
   entry, and `pass=N` in the reconcile stamp caps re-runs
   (`sdw-draft/SKILL.md:44`, `pipeline.md:213`, `conventions.md:224`).
@@ -1105,7 +1107,9 @@ log, not here.
 
 Two requirements of the first draft are gone, recorded here so the trail holds.
 
-- **The writing pipeline** (was requirement 10) moves to C. Blog writing is
+- **The writing pipeline** (was requirement 10) moves to C,
+  `2026-09-05-the-writing-pipeline-runs-on-the-row`, created 2026-09-05
+  in `sd-writing-pack`. Blog writing is
   third in priority behind `mezmo-world-simulator` and `mcp-research`, and its
   ideas and pieces belong in the database, which does not exist yet. The four
   cuts it named (`sdw-review-push`, `sdw-review-pull`, `sdw-help`,
@@ -2441,3 +2445,6 @@ from a number the operator types.
   - B's C-81: `status_source` gains `retiring`, the sitting's own value
     and its freeze; every status writer reads it in the transaction that
     writes and refuses under it. Requirement 5, criterion 13.
+- **2026-09-05** — Item C created, cross-item: the two places that said
+  "item C" name it, `2026-09-05-the-writing-pipeline-runs-on-the-row` in
+  `sd-writing-pack`. Requirement 13 and What leaves this item.
