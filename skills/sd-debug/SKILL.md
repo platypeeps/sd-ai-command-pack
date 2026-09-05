@@ -126,21 +126,6 @@ fix.
     surrounding suite to catch what the fix broke. An intermittent failure needs
     enough runs to distinguish a fix from luck; say how many were run and why
     that number.
-
-    This proves the symptom is gone. It proves nothing about the test that is
-    supposed to keep it gone: a regression test written alongside a fix passes
-    because the fix is there, which is also what a test guarding nothing does.
-    `sd-tdd` owns that proof. This skill owns the reproduction and the cause;
-    it does not own the guard.
-
-    **Hand over before applying the fix, not after.** By step 10 the cause is
-    known and the tree is still unfixed, which is exactly the tree a regression
-    test needs to fail against — so the cheaper route is to write the test now,
-    watch it fail with the original symptom, and then fix. That closes
-    `disciplined` in `sd-tdd` and needs no revert. Handing over after the fix
-    has landed is still valid and still owed, but it costs a revert-and-restore
-    cycle and closes `partial`. Either way the handoff is owed; only its price
-    changes.
 12. Close in one of exactly three ways, and name which one:
     - **fixed** — the reproduction was rerun and no longer reproduces, *and*
       the mechanism is stated in both of its links. Both, or this is not the
