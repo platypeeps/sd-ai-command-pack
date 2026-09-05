@@ -109,7 +109,9 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 
 The code pass reads a head. A fix that changes it gets one verification pass
 over the diff since the reviewed head, the last automatic pass on that pull
-request; `sd-ship` pushes only the reviewed head or a verified fix of it.
+request; `sd-ship` pushes only the reviewed head or a verified fix of it,
+and merges naming that head, so a head that moved after the review is
+refused at GitHub.
 
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.

@@ -974,10 +974,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     through the library, ends the session without calling `sd-handoff`, starts a
     new one, and asserts all three are in the injected context.
 30. `make check` passes.
-32. `sd-ship` pushes only a reviewed head or a verified fix of it: a test
-    reviews a branch, commits a fix, asserts one further pass runs over the
-    fix's diff alone, then commits again and asserts the push is refused
-    with the reviewed head named. Before B's library is installed, a test
+32. `sd-ship` pushes only a reviewed head or a verified fix of it, and
+    merges naming that head, so a head that moved after the review refuses
+    at GitHub rather than merging unreviewed: a test reviews a branch,
+    commits a fix, asserts one further pass runs over the fix's diff alone,
+    then commits again and asserts the push is refused with the reviewed
+    head named, and a test moves the remote head after the review and
+    asserts the merge call named the reviewed head and was refused. Before B's library is installed, a test
     asserts the file-only reader and, once it exists, the library resolver
     return the same reviewer order from the same `providers.yaml`, and that
     the loop stops at pull-request-ready in every repository.
@@ -1366,3 +1369,6 @@ from a number the operator types.
     work. Addressed: every commit in the range is attributed, by trailer
     or by the declared author, and an untagged commit with no declaration
     refuses naming it. Criterion 6 adds the mixed fixture.
+- **2026-09-05** — Cross-item, from B's round seventeen: `sd-ship` merges
+  naming the reviewed head, so a head that moved after the review refuses
+  at GitHub. Criterion 32; design's Reviews.
