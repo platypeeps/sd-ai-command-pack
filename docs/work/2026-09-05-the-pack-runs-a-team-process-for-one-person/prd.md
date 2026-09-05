@@ -216,13 +216,14 @@ may fill, cost basis. Adding exo, another commercial API, or a second local
 model is an entry, not code. The registry's format and the role vocabulary are
 defined in this item; the file lives with the database.
 
-The registry is static and the author is not. When the runner assigns the
-change to a provider other than the registry's `author`, the `reviewer` line
-would resolve to the vendor that wrote the code. So resolution takes the
-author into account: the reviewer is the registry's `reviewer` provider unless
-that provider authored the change, in which case the library takes the next
-provider carrying the `reviewer` role, and refuses by name when none differs.
-The assignment row names the author, so the runner and `sd-review` both know.
+The registry is static and the author is not. `author` is a list too,
+`[claude, codex]`, read in order when an assignment starts and never switched
+mid-item: a Claude outage sends the next assignment to Codex, not the one in
+flight. Whichever provider authored, a single-name `reviewer` line would
+resolve to the vendor that wrote the code. So resolution takes the author into
+account: the reviewer is the first entry on the `reviewer` list whose vendor
+is not the author's, and the library refuses by name when none differs. The
+assignment row names the author, so the runner and `sd-review` both know.
 
 One list of providers on the machine. `bin/sd-review` carries its own table,
 `BACKENDS` at `bin/sd-review:195`, and `.github/sd-review.json` names providers
@@ -233,23 +234,44 @@ nothing about vendors: tiers, categories, paths, `sensitive`, the severity
 floor. Tier lists keep naming providers by registry name; the names are
 validated against the registry where one exists, and pass as strings in CI.
 
-**Fallback is the reviewer list, read in order.** The `reviewer` line names
-providers in order of preference. The first that is enabled, carries the role,
-is not the author's vendor, and passes its preflight reviews. A rate limit, a
-missing binary, failed authentication, a non-zero exit and a timeout each fall
-through to the next, and the run records which provider reviewed and why the
-earlier ones did not, on the assignment row and in the JSON it emits. An entry
-carries `vendor:`, the maker of the model behind it, and the different-vendor
-rule compares vendors, not names. `prism` and `gito` both run
-`openai/gpt-5.6-sol` through OpenRouter today, so they are the same vendor as
-`codex` on a different bill: the fallback for a rate-limited Codex, and never
-the reviewer of Codex-authored code. `kimi` is Moonshot; `exo` is whatever
-model it serves. An entry also carries `enabled:`, with `reason:` when false,
-and `reader:`, the parser for the provider's output. Today `codex` and `prism`
-have a working start line and reader; `gito` and `kimi` have neither, and they
-ship in the registry disabled with the reason the `BACKENDS` table already
-records. Enabling one is a verified start line and a reader, and the entry
-flips.
+**Fallback is the reviewer list, read in order, and the order follows the
+bill.** Every entry names a `bill:`, and the registry's `bills:` section says
+whose money it is: `subscription` for Codex and Claude, `prepaid` for the
+Moonshot and MiniMax balances the operator has already paid, `company` for
+Baseten, `local` for exo. The `reviewer` line runs subscription first, prepaid
+next, company last: `[codex, kimi, minimax, prism, gito, exo]`, with `prism`
+and `gito` re-pointed from OpenRouter to Baseten. The first entry that is
+enabled, carries the role, is not the author's vendor, has budget left on its
+bill, and passes its preflight reviews. A rate limit, a missing binary,
+failed authentication, a non-zero exit and a timeout each fall through to the
+next, and the run records which provider reviewed and why the earlier ones
+did not, on the assignment row and in the JSON it emits. Fallthrough happens
+on its own, onto prepaid and company bills included; every pass writes a cost
+row and Today shows it.
+
+One bill has a cap from day one. `baseten` is company money, and its bill
+carries `cap_usd_month: 50`. The library sums cost rows per bill per calendar
+month; at the cap, fallthrough skips every provider on that bill, direct
+choice refuses by name with the month's total, and Today shows spend against
+cap. No other bill has a cap. An API entry carries `price:` per million tokens
+in and out, so a cost row is tokens times price without a billing API; a
+subscription entry logs tokens alone.
+
+An entry carries `vendor:`, the maker of the model behind it, and the
+different-vendor rule compares vendors, not names or bills. `prism` and `gito`
+are tools, not vendors: their vendor is whatever model Baseten serves them,
+pinned on the entry. `kimi` is Moonshot, `minimax` is MiniMax, `exo` is
+whatever model it serves. Entries carrying a `url:` run through one
+OpenAI-compatible client in the library, with `model:` and `max_tokens:` from
+the entry and one reader for all of them that takes the answer from
+`content`, strips a `<think>` block, and ignores `reasoning_content`. That
+client is what makes the prepaid balances usable: `prism` hardcodes 8,192
+output tokens and a 120-second deadline, which is why `~/.prism/.env` records
+Kimi and MiniMax as disabled there. The `kimi` CLI and `gito` ship disabled
+until each has a verified start line and a reader; the Moonshot balance is
+reached through the `url:` entry meanwhile. An entry also carries `enabled:`,
+with `reason:` when false. Enabling one is a verified start line and a reader,
+and the entry flips.
 
 Choosing directly is one flag and one picker. `sd-review --provider <name>`
 runs one named provider for one run, validated against the registry, and the
@@ -523,8 +545,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    it fail preflight, and asserts the second reviews and the output names the
    fallthrough. `sd-review --provider <name>` refuses a name not in the
    registry, and refuses a disabled one by its reason. Every entry carries
-   `vendor:`, and a test asserts `prism` is refused as reviewer of a
-   `codex`-authored change.
+   `vendor:`, and a test asserts an entry whose vendor matches the author's
+   is skipped. Fallthrough skips every provider on a bill at its cap: a test
+   writes cost rows to `cap_usd_month` and asserts resolution passes over the
+   bill, and that `--provider` on it refuses with the month's total. A `url:`
+   entry whose response carries a `<think>` block and `reasoning_content`
+   yields a clean finding list, asserted against a fixture response.
 7. The seven `mezmo-world-simulator` passes are scored, accepted against
    rejected per pass, and the scores are recorded on this item before the code
    review point runs on any new pull request.
@@ -751,3 +777,16 @@ are filed as rows on this item once B's library exists, and in the log before.
   each has a verified start line and a reader. Copilot has no local fallback
   to add: the local lane runs before every push, and Copilot only advises.
   Requirement 3 and criterion 6.
+- **2026-09-05** — Four answers from the operator, and two corrections.
+  Fallthrough runs on its own with the cost logged; `author` is a list picked
+  at assignment start; the dashboard is this Mac only; the palette's
+  execution model stays open on B. The corrections: the operator
+  holds prepaid balances on Moonshot and MiniMax and prefers them over
+  OpenRouter, so the reviewer order is subscription, then prepaid, then
+  company; and `prism` and `gito` move from OpenRouter to Baseten, which is
+  company money and gets the first cap, fifty dollars a month, on its bill.
+  The registry gains `bills:`, and entries gain `bill:`, `price:`, `model:`
+  and `max_tokens:`. The prepaid balances need the library's own
+  OpenAI-compatible client, because `prism`'s fixed output cap is why both
+  are recorded as disabled in `~/.prism/.env`. Requirement 3, criterion 6,
+  and B's requirements 4, 5 and 6.

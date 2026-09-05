@@ -165,28 +165,40 @@ default, and nothing derives it.
 One file, read by the library, maps roles to providers. Skills name roles and
 never vendors.
 
+    bills:
+      anthropic: { cost: subscription }
+      openai:    { cost: subscription }
+      moonshot:  { cost: prepaid }
+      minimax:   { cost: prepaid }
+      baseten:   { cost: company, cap_usd_month: 50 }
+      local:     { cost: local }
     providers:
-      claude: { start: "claude -p",  vendor: anthropic, roles: [author, reviewer], cost: subscription, reader: claude-json }
-      codex:  { start: "codex exec", vendor: openai,    roles: [author, reviewer], cost: subscription, reader: codex-json }
-      prism:  { start: "prism",      vendor: openai,    roles: [reviewer], cost: metered, reader: prism-json }
-      gito:   { start: "gito",       vendor: openai,    roles: [reviewer], cost: metered,
-                enabled: false, reason: "start line and report reader unverified" }
-      kimi:   { start: "kimi -p",    vendor: moonshot,  roles: [reviewer], cost: metered,
-                enabled: false, reason: "stream-json needs a reader" }
-      exo:    { url: "http://localhost:52415/v1", vendor: local, roles: [author, reviewer], cost: local,
-                enabled: false, reason: "model not pinned" }
+      claude:  { start: "claude -p",  vendor: anthropic, bill: anthropic, roles: [author, reviewer], reader: claude-json }
+      codex:   { start: "codex exec", vendor: openai,    bill: openai,    roles: [author, reviewer], reader: codex-json }
+      kimi:    { url: "<moonshot endpoint>", model: "<pinned>", vendor: moonshot, bill: moonshot,
+                 roles: [reviewer], max_tokens: 32768, price: { in: <usd per M>, out: <usd per M> } }
+      minimax: { url: "<minimax endpoint>", model: "<pinned>", vendor: minimax, bill: minimax,
+                 roles: [reviewer], max_tokens: 32768, price: { in: <usd per M>, out: <usd per M> } }
+      prism:   { start: "prism", vendor: "<maker of the pinned model>", bill: baseten, roles: [reviewer], reader: prism-json }
+      gito:    { start: "gito",  vendor: "<maker of the pinned model>", bill: baseten, roles: [reviewer],
+                 enabled: false, reason: "start line and report reader unverified" }
+      exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
+                 roles: [author, reviewer], enabled: false, reason: "model not pinned" }
     roles:
-      author:   claude
-      reviewer: [codex, prism, kimi, gito, exo]
+      author:   [claude, codex]
+      reviewer: [codex, kimi, minimax, prism, gito, exo]
 
-Adding a provider is an entry. Changing who writes is the `author` line.
-`reviewer` is an ordered list: the first entry that is enabled, is not the
-author's vendor, and answers its preflight reviews the change. A rate limit,
+Adding a provider is an entry; adding money is a bill. Both role lines are
+read in order. `author` is picked when an assignment starts and never switched
+mid-item. `reviewer` is the first entry that is enabled, is not the author's
+vendor, has budget left on its bill, and answers its preflight. A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work. `vendor` is the
-maker of the model, not the tool: `prism` and `gito` on `gpt-5.6-sol` are
-OpenAI, whatever bill they run on.
+maker of the model, not the tool; `bill` is whose money. A bill with
+`cap_usd_month` is skipped for the rest of the month once its cost rows reach
+the cap, and a direct pick of it refuses with the month's total. Entries with
+`url` share one OpenAI-compatible client and one reader.
 
 `sd-review --provider <name>` picks one entry for one run. The dashboard's
 item screen offers the same list, with vendor, cost and reason beside each
