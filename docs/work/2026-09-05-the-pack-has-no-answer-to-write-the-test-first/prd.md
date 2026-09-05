@@ -1,0 +1,409 @@
+---
+title: the pack has no answer to "write the test first", and one skill contradicts it
+status: in_progress
+branch: feat/sd-tdd-test-first
+created: 2026-09-05
+---
+
+# PRD — the pack has no answer to write the test first
+
+## Problem
+
+The pack has 81 skills. None of them says how to write a test.
+
+This is not a judgement about coverage; it is a grep. Measured on `main` at
+`53da3689`, before this item: across every file under `skills/` — not only
+`SKILL.md`, and including `_shared/references/` —
+`grep -rlni 'test-driven\|test.first\|red.green\|failing test first'` returns
+nothing. Stated as a measurement with its commit rather than in the present
+tense, because after this item lands the same grep matches `sd-tdd` and the
+`sd-typed-holes` seam, and a present-tense claim would then read as false.
+
+The pack has a debugging discipline (`sd-debug`), a review-receiving
+discipline (`sd-receive-review`), an interrogation discipline (`sd-grill`), a
+shipping discipline (`sd-ship`), and a runner that executes whatever test
+entrypoint a repository already has (`sd-check`). Between "this feature does not
+exist" and "the suite is green" there is nothing written down.
+
+The observable failure is the one every acceptance criterion in this repository
+is designed to catch and none of them can: **a test written after the code
+passes on its first run, which proves only that it agrees with what was
+written.** It may test the implementation rather than the behaviour, it may miss
+the case the author forgot, and nobody can tell, because it was never seen to
+fail. `sd-debug` requires rerunning the reproduction after a fix, which proves
+the symptom is gone; it does not require proving the new test would have caught
+the bug.
+
+**A second gap sits underneath the first.** `sd-typed-holes` tells a Rust
+author to land a compiling skeleton whose bodies are `todo!()` **as its own
+commit**, before any behaviour exists. Test-first says no production code
+without a failing test. Read together, a Rust author has two skills giving
+opposite instructions about what the first commit contains, and the pack says
+nothing about which governs. This is the same defect class as the `sd-grill`
+question-form ambiguity: two rules that never met, and a reader left to decide.
+It is cheaper to settle here than to discover it in a session.
+
+**Scope note.** This item adds the discipline. It does not add a conduct
+harness, and cannot: the same gap C-11 named on the `sd-grill` item applies
+here and is widened again, which is stated in `### What these criteria do not
+cover` rather than papered over.
+
+## Requirements
+
+1. A new `sd-tdd` skill states the test-first discipline as a gate: no
+   production code without a test that was **seen to fail against a tree
+   lacking the behaviour**, and a test that has only ever been seen to pass is
+   not evidence. The gate is stated on the observed failure rather than on
+   authorship order, because which file was typed first is not recoverable from
+   the tree an hour later and a watched failure is — the same reasoning that
+   made `sd-grill` split its question forms on who authored the candidates
+   rather than on what answer was expected. Writing the test first stays the
+   preferred route to that evidence; reverting the change and watching the test
+   fail is the other one, and the skill must say so, because a rule satisfiable
+   only by discarding work gets skipped rather than followed. The two routes
+   must not be presented as equivalent: reverting proves the test is
+   *sensitive* to the behaviour and does not undo the implementation's choice
+   of which cases were considered, so the recovered route closes `partial`
+   (requirement 6), not `disciplined`.
+2. `sd-tdd` names what "seen to fail" requires — that the failure is the
+   expected one, distinguishing a test that fails because the behaviour is
+   missing from one that fails because of a typo, an import error, or a
+   collapsed fixture.
+3. `sd-tdd` carries the red-green proof for a regression test, as a procedure
+   with a stated result: write the test, run it against the fix and see it
+   pass, revert the fix, run it again and see it **fail**, restore the fix.
+   A regression test that was never seen to fail with the fix removed does not
+   prove it guards the bug.
+4. `sd-tdd` settles the `sd-typed-holes` seam explicitly, in both files, so a
+   Rust author reading either one learns which governs and why.
+5. `sd-tdd` never instructs an agent to delete a user's work on its own
+   authority. Where the upstream source says code written before its test must
+   be deleted and rewritten, this skill proposes that and requires consent,
+   because an agent that deletes uncommitted work because a skill told it to is
+   a worse failure than a test written in the wrong order. The skill states
+   that it proposes the rewrite, names what would be lost, and **waits for
+   consent**.
+6. `sd-tdd` closes in one of a named closed set of **exactly three** states,
+   and a session with a production change whose test was never seen to fail
+   cannot report the discipline as followed — there is a distinct state for the
+   honest partial result, so partial work has a word other than the one meaning
+   complete. `partial` carries two groups named separately: changes with no
+   failing-test evidence, and changes whose test was recovered late by
+   reverting. A behaviour whose first test *passes* because the behaviour
+   already existed is not a fourth state — no production code is written for
+   it, so it is a report line that counts neither way, and the workflow must
+   give the agent that truthful way to say so rather than telling it to stop
+   with nowhere to record the result.
+7. `sd-tdd` names the sibling surfaces a reader would otherwise confuse it with,
+   and each of `sd-debug`, `sd-check`, `sd-review` and `sd-typed-holes` is named.
+8. `sd-debug` gains the seam from its side: fixing a bug hands the regression
+   test to `sd-tdd`, so the two skills agree about which one owns the proof.
+9. `sd-tdd` records its lineage — the upstream source, its licence, and the
+   revision — and says what it took and what it deliberately did not.
+10. `sd-tdd` says what may be written before valid red so the gate is
+    reachable at all. A test importing a module that does not exist fails with
+    an import error, which requirement 2 rejects as invalid red, while
+    creating that module is production code requirement 1 forbids — a deadlock
+    for every new module, type or symbol in every language. The skill names the
+    carve-out: the smallest surface that turns an import error into an
+    assertion failure is not the behaviour, and it is the same carve-out
+    requirement 4 grants a Rust type surface, stated generally rather than for
+    one language.
+11. `sd-tdd` bounds the destructive authority the revert path hands it. It
+    cannot commit or branch, so it holds no recovery mechanism; the skill must
+    require the change be committed or explicitly saved before any revert,
+    refuse to revert where unrelated dirty edits prevent isolating it, and
+    treat restoration as a verified step. It must also bound what running a
+    suite may reach — no production credentials, live endpoints or shared
+    state — since preferring real code over mocks is a statement about the code
+    under test, not a licence to reach production.
+12. `sd-typed-holes` carries a `## Lineage` section of its own, so that both
+    sides of the requirement 4 seam are documented rather than one.
+
+## Acceptance criteria
+
+**Preconditions, because otherwise these commands read two different trees.**
+The path and budget checks below inspect `origin/main...HEAD` while every
+`grep`, `ls` and unittest inspects the worktree. Run the whole set only on the
+pushed branch with `git status --porcelain` printing **nothing**; otherwise a
+deficient commit can pass the branch checks while an uncommitted repair passes
+the content checks. That split is not hypothetical — it is exactly the state
+the first review round found this item in.
+
+- [ ] the worktree is clean and pushed: `git status --porcelain` prints nothing
+      and `git rev-parse HEAD origin/<branch>` prints the same sha twice
+- [ ] `sd-tdd` exists and the frontmatter contract holds:
+      `python3 -m unittest tests.test_skill_frontmatter` prints `OK`
+- [ ] `ls skills/*/SKILL.md | wc -l` prints `82`. Counted as skill *files*,
+      because `ls -d skills/*/` also counts `skills/_shared/`, which is
+      companion references and not a skill
+- [ ] the new skill is an *addition*, proven by path identity rather than by a
+      count — deleting one folded skill and adding two also yields 82. Run
+      exactly this; the first prints the one name and nothing else, the second
+      prints nothing:
+      ```
+      git diff --no-renames --name-status origin/main...HEAD -- skills/ \
+        | awk '$1=="A"{print $2}'
+      git diff --no-renames --name-status origin/main...HEAD -- skills/ tests/ \
+        | awk '$1=="D"'
+      ```
+      Expected addition, exactly: `skills/sd-tdd/SKILL.md`.
+      `--no-renames` is load-bearing: without it git reports a sufficiently
+      similar delete/add pair as `R`, which neither `A` nor `D` matches
+- [ ] `sd-tdd` carries the pack's section skeleton, anchored to whole lines so
+      that prose *mentioning* a heading cannot satisfy it; run exactly this and
+      all six lines print `1`:
+      ```
+      for h in 'When to use' 'Arguments' 'The gate' 'Workflow' \
+               'Red flags' 'Safety rules' 'Final report'; do
+        grep -cE -- "^## ${h}$" skills/sd-tdd/SKILL.md
+      done
+      ```
+      Seven lines now, and `## The gate` is among them because the design
+      names it part of the skeleton. Each must print exactly `1`: a second
+      match — a real heading plus one inside a fenced example — prints `2` and
+      fails
+- [ ] requirements 1, 2, 3, 5 and 6 are each pinned to the file that must carry
+      them. Flattened because these phrases wrap across lines and `grep` is
+      line-based; fixed-string and case-insensitive because a case mismatch is
+      not a content defect. Run exactly this; every line prints at least `1`:
+      ```
+      flat() { tr '\n' ' ' | tr -s ' '; }
+      T=$(flat < skills/sd-tdd/SKILL.md)
+      for s in 'seen to fail' 'passes on its first run' \
+               'the failure is the expected one' \
+               'revert the fix' 'never deletes' 'waits for consent' \
+               'never revert without a recoverable copy' \
+               'exactly three' \
+               '**disciplined**' '**partial**' '**abandoned**'; do
+        printf '%s' "$T" | grep -oiF -- "$s" | wc -l
+      done
+      ```
+      The needles for requirements 2, 5 and 11 were absent from the first
+      draft of this criterion, so three requirements had no pinned phrase at
+      all; `exactly three` pins the closed set of requirement 6 against a
+      fourth state being added silently
+- [ ] the `sd-typed-holes` seam of requirement 4 is readable from **both**
+      sides, which one grep cannot show:
+      `grep -cF -- 'sd-typed-holes' skills/sd-tdd/SKILL.md` prints at least `1`
+      **and** `grep -cF -- 'sd-tdd' skills/sd-typed-holes/SKILL.md` prints at
+      least `1`
+- [ ] the seams of requirement 7 are named in the skill itself; run exactly
+      this and all four lines print at least `1`:
+      ```
+      for s in sd-debug sd-check sd-review sd-typed-holes; do
+        grep -cF -- "$s" skills/sd-tdd/SKILL.md
+      done
+      ```
+- [ ] the reciprocal pointer of requirement 8 exists:
+      `grep -cF -- 'sd-tdd' skills/sd-debug/SKILL.md` prints at least `1`
+- [ ] requirement 9's lineage is present and actually cites licence and
+      revision. The first draft of this criterion asked for one grep "on a
+      line that also names the licence and the revision", which no single
+      line-based grep can check and which the file did not satisfy — the
+      revision had wrapped to the next line. Flattened instead; run exactly
+      this, and the heading prints `1` while all three needles print at least
+      `1`:
+      ```
+      grep -cE -- '^## Lineage$' skills/sd-tdd/SKILL.md
+      flat() { tr '\n' ' ' | tr -s ' '; }
+      L=$(flat < skills/sd-tdd/SKILL.md)
+      for s in 'obra/superpowers' 'MIT' 'b36e082'; do
+        printf '%s' "$L" | grep -oF -- "$s" | wc -l
+      done
+      ```
+- [ ] requirement 12's reciprocal lineage exists:
+      `grep -cE -- '^## Lineage$' skills/sd-typed-holes/SKILL.md` prints `1`,
+      and it names its own upstream and revision — run exactly this, both
+      print at least `1`:
+      ```
+      flat() { tr '\n' ' ' | tr -s ' '; }
+      H=$(flat < skills/sd-typed-holes/SKILL.md)
+      for s in 'Shearerbeard/claude-skills' 'c79fe3a'; do
+        printf '%s' "$H" | grep -oF -- "$s" | wc -l
+      done
+      ```
+- [ ] `python3 -m unittest tests.test_skill_companions tests.test_doc_citations`
+      prints `OK`, so each cited shared reference ships with the skill citing it
+      and no citation in this item's prose trips the adjacency rule
+- [ ] `make check` ends with `0` `FAILED` and `40` `OK`
+- [ ] `git diff --stat origin/main...HEAD -- bin/ dashboard/ tests/test_loc_caps.py`
+      prints nothing on the pushed branch. The ceilings live in
+      `tests/test_loc_caps.py`, *outside* the `bin/` and `dashboard/` pathspec,
+      so a pathspec covering only those two would pass while a ceiling was
+      quietly raised
+
+### What these criteria do not cover
+
+Every criterion above is a claim about what a file *says*. None is a claim
+about what an agent holding the skill *does*, and several requirements have a
+behavioural half that no grep reaches:
+
+- requirement 1's "seen to fail against a tree lacking the behaviour" is a
+  claim about what a past run did and what the tree looked like when it did it;
+- requirement 2's "the failure is the expected one" is a judgement about a
+  message;
+- requirement 3's red-green proof is a four-step procedure whose steps must
+  happen in order;
+- requirement 5's consent rule is a thing that must happen before an action,
+  not a sentence in a file;
+- requirement 6's "a production change whose test was never seen to fail cannot
+  report the discipline as followed" is a dependency between two states.
+
+Each is present in the file and reader-verified. A substring check can be
+satisfied by text that negates a rule as easily as by text that states it —
+a file saying "an import error is valid red" and "deletion needs no consent"
+passes every phrase count above. So does a file whose seven headings all sit
+inside a fenced example and none of which is real. The reciprocal greps of
+requirements 4 and 8 are weaker still: they establish that each file *names*
+the other, never that the two agree, so "`sd-tdd` never governs Rust" would
+satisfy them.
+
+These are not oversights to be patched with more needles. Every one of them is
+the same limit — grep sees tokens, not claims — and adding needles moves the
+boundary without removing it. They are listed so that a reader knows the
+criteria are a floor, and the review lanes, not the greps, are what checked
+the content.
+
+This repository has no conduct harness. The successor item that would have
+built one was abandoned on 2026-09-04, after `claude plugin eval` turned out to
+implement it and to be gated behind early access on this account. So the
+behavioural halves above ship unverified in the same way `sd-grill`'s and
+`sd-debug`'s did, and **C-11 on the `sd-grill` item stays parked with a fourth
+skill standing behind it**.
+
+## References
+
+- `github.com/obra/superpowers`, MIT, revision
+  `b36e0829c6d0140e93cfef2ca599b1b07d4a7797` — its `test-driven-development`
+  skill is the source of requirements 1 through 3 and of the rationalization
+  table's form. Requirement 5 is where this pack **departs** from it: upstream
+  says code written before its test must be deleted, with "delete means delete"
+  and no consent step, which is an instruction an agent can execute against
+  uncommitted work.
+- `skills/sd-typed-holes/SKILL.md` — the skill whose skeleton-first commit
+  appears to contradict test-first for Rust, and the reason requirement 4
+  exists. It reached this pack in `56ba92eb` (2026-08-31, #640) from
+  `se-ai-command-pack`, where it was written as `se-typed-holes` in `9de85c3`
+  (2026-08-27).
+- `github.com/Shearerbeard/claude-skills`, `plugins/rust/skills/typed-holes`,
+  revision `c79fe3a` — what `sd-typed-holes` was re-authored from, recovered
+  for requirement 12. **No licence file**: `LICENSE`, `LICENSE.md`,
+  `LICENSE.txt` and `COPYING` are all absent, so its terms are unstated rather
+  than permissive. Upstream is a *two-layer* practice whose layer 2 —
+  golden tests written from the spec "so they fail on arrival" — this pack did
+  not carry over, which is where the requirement 4 contradiction came from.
+- `docs/work/2026-09-04-two-unwritten-disciplines-and-one-contradicted-rule/prd.md`
+  — the immediately prior adoption from the same upstream, and the source of
+  the acceptance-criteria shapes reused above: flattened fixed-string greps,
+  `--no-renames` path identity, and the budget pathspec that includes the file
+  defining the ceiling.
+
+## Review
+
+Host lane, then the native Codex lane (`--cd <root> --sandbox read-only
+--ephemeral`). Round 1 returned eight blocking concerns and two non-blocking.
+All ten are dispositioned below; each carries exactly one disposition.
+
+**C-1 — acceptance mixed committed and worktree state. `addressed`.**
+The path and budget checks read `origin/main...HEAD` while every content check
+read the worktree, so a deficient commit could pass the first while an
+uncommitted repair passed the second. The lane demonstrated it live: content
+greps passed against uncommitted `sd-tdd` while the addition command printed
+nothing. Two preconditions now head the criteria — clean `git status
+--porcelain` and `HEAD` equal to the pushed branch.
+
+**C-2 — predicates could pass while the requirement was false. `addressed`.**
+Three requirements (2, 5, and the later 11) had no pinned phrase at all;
+needles added, plus `exactly three` to pin requirement 6's closed set against a
+silent fourth state. `## The gate` added to the heading loop. The lineage
+criterion asked for a single grep "on a line that also names the licence and
+the revision", which no line-based grep can do and which the file did not
+satisfy — the revision had wrapped; it is flattened now and checks
+`obra/superpowers`, `MIT` and `b36e082` separately.
+
+One sub-example was wrong: the lane said six headings inside a fenced block
+"still produce six `1`s". A fenced duplicate alongside a real heading prints
+`2`, and the criterion demands `1`, so that case fails rather than passes. The
+reachable version — all seven headings *only* inside a fence — is real, and is
+now conceded in `### What these criteria do not cover` along with the negation
+and reciprocal-agreement gaps, which more needles cannot close.
+
+**C-3 — D1 replaced test-first with verified sensitivity, then called the
+evidence identical. `addressed`.** The strongest finding of the round, and the
+claim was simply false. Reverting proves the test is *sensitive* to the
+behaviour; it does not undo the implementation having chosen which cases were
+considered. Upstream names the mechanism — "you verify the cases you
+remembered, not the ones you'd have discovered". Both routes stay open, per
+D1's original reason, and they now close differently: test-before-code closes
+`disciplined`, a recovered late test closes `partial` with the recovered
+behaviours named. The gate, D1, D6, requirements 1 and 6, the closing states
+and one red-flag row all moved together.
+
+**C-4 — new modules and symbols deadlocked before valid red. `addressed`.**
+A test importing a module that does not exist fails with an import error, which
+requirement 2 rejects; creating the module is production code requirement 1
+forbids. Only Rust had an exception. New requirement 10 and a "bootstrap
+carve-out" paragraph in the gate: the smallest surface that turns an import
+error into an assertion failure is not the behaviour, stated for every
+language rather than one.
+
+**C-5 — the typed-holes seam exempted actual behaviour. `addressed`.**
+The seam was drawn at the *commit*, and that commit lands derives, `From`/`Into`
+impls, and trivial accessors implemented rather than held open. A getter
+returning the wrong same-typed field compiles, passes clippy, and was exempt.
+`sd-typed-holes`' own safety rules already conceded that derives and runtime
+semantics need tests. The seam now divides contents, not commits, in D4 and in
+both skill files.
+
+**C-6 — revert/restore had uncontained destructive authority. `addressed`.**
+The skill ordered reverts while forbidding commits and branches, so it held no
+recovery mechanism, and then claimed this happened "without deleting anything".
+New requirement 11 and a safety rule: committed or explicitly saved before any
+revert, refuse where unrelated dirty edits prevent isolation, restoration
+verified rather than intended. D3's "only construction" claim was also false —
+an ordinary red-green cycle on the bug produces the same evidence with no
+revert — and is corrected.
+
+**C-7 — the initial-pass branch had no truthful closing state. `addressed`.**
+The workflow told an agent to stop when the first test passes and left it
+nowhere to record the result: `partial` needs mixed compliance, `abandoned`
+says the discipline was not followed, `disciplined` needs a failure that cannot
+exist. Resolved without a fourth state, since no production code is written for
+such a behaviour: a **Behaviours already present** report line that needs no
+quoted failure and counts neither way.
+
+**C-8 — running "real code" and the suite had no outward-effect boundary.
+`addressed`.** The safety rules bounded git and said nothing about production
+credentials, live endpoints, shared databases, or fixtures that send mail or
+move money. A rule now bounds what a suite may reach, and marks "prefer real
+code over mocks" as a statement about the code under test rather than a licence
+to reach production.
+
+**C-9 — wrong upstream provenance for the "tired" row. `addressed`.**
+Verified: absent from `test-driven-development/SKILL.md`, present at
+`verification-before-completion/SKILL.md:70`. The design's point about
+admonitory rows survives; the attribution is corrected in place.
+
+**C-10 — the design misstated its own footprint. `addressed`.**
+"Four surfaces" enumerated three files, and "one-line" reciprocal edits were
+seven added lines each. Corrected to three files and "a passage".
+
+### What the lane could not run
+
+`make check` and the companion/citation unittests failed inside the read-only
+sandbox — `Operation not permitted` creating coverage, log and temp files —
+so those results are the host's, not the lane's. Every other acceptance
+command ran there verbatim.
+
+## Log
+
+- 2026-09-05 created. Scope set by the user after a review of all 14 upstream
+  skills against all 81 pack skills found test-driven development to be the one
+  genuine hole.
+- 2026-09-05 codex round 1 returned eight blocking concerns and two
+  non-blocking; all ten dispositioned in `## Review`. The round added
+  requirements 10, 11 and 12 and changed the closing-state contract, so a
+  recovered late test now closes `partial`. `sd-typed-holes` gained a
+  `## Lineage`, recovering provenance that changed D4 rather than annotating
+  it.

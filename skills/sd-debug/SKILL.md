@@ -126,6 +126,13 @@ fix.
     surrounding suite to catch what the fix broke. An intermittent failure needs
     enough runs to distinguish a fix from luck; say how many were run and why
     that number.
+
+    This proves the symptom is gone. It proves nothing about the test that is
+    supposed to keep it gone: a regression test written alongside a fix passes
+    because the fix is there, which is also what a test guarding nothing does.
+    Hand that test to `sd-tdd`, which owns the proof — write it, revert the
+    fix, watch it fail, restore. This skill owns the reproduction and the
+    cause; it does not own the guard.
 12. Close in one of exactly three ways, and name which one:
     - **fixed** — the reproduction was rerun and no longer reproduces, *and*
       the mechanism is stated in both of its links. Both, or this is not the
