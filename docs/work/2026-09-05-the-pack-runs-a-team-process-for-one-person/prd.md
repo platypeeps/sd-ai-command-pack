@@ -525,18 +525,27 @@ in an unattended run it asks none and records its assumptions.
 and `implement.md` stay in the repository as the decision trail. The item row in
 `sd.db` holds status, dates, links and notes, and points at the files by path.
 The `status:` line leaves `prd.md`, by the operator's decision on 2026-09-05
-after A's round thirty-three: the migration that fills the database reads
-every item's line outside `docs/work/archive/` into its row, `done` ones
-included, and removes it from the file, in one commit, and
-nothing writes a status into a file again. A `done` item the default branch
-does not mark, which is every historical one, four in this repository
-today, is an unmarked `done` row from the import, and the pull request that
-lands the migration carries `Closes:` for each, as every pull request
-`sd-ship` opens does below, from A's round thirty-four; so the terminal
-state moves from the file into the merge commit in one landing, the file
-says `done` on the default branch until that merge and the trailer says it
-after, and the migration's own branch before its merge is the one checkout
-that reads those items as open. Rounds eleven to thirty-two kept the
+after A's round thirty-three: the migration that fills the database, B's
+requirement 2, reads every item's line outside `docs/work/archive/` into
+its row, `done` ones included, and is additive first and retires last,
+from A's round thirty-six: its import lands the rows beside the lines in
+B's first slice and removes nothing; this item's second slice lands the
+reader, which reads the row where the database is and the line where it
+still is and answers `unknown` for neither, the trailer-writing ship path
+and the `PR_BODY` setting; and the migration's retire step, one commit
+that removes every line, runs after that in a pull request of its own,
+refusing to run while the installed `sd_lib` has no `delivered`, naming
+the version, and the lint's rule that no line remains switches on with
+that commit. After it nothing writes a status into a file again. A `done`
+item the default branch does not mark, which is every historical one,
+four in this repository today, is an unmarked `done` row from the import,
+and the pull request that lands the retire step carries `Closes:` for
+each, as every pull request `sd-ship` opens does below, from A's round
+thirty-four; so the terminal state moves from the file into the merge
+commit in one landing, the file says `done` on the default branch until
+that merge and the trailer says it after, and the retire step's own branch
+before its merge is the one checkout that reads those items as open.
+Rounds eleven to thirty-two kept the
 line as a derived mirror the library wrote, and the mirror needed an identity,
 `rev`, a guard on every write, `--rebind` for the guard's misses, a refresh
 command, a lint comparison, a rule for each way a squash merge moved the
@@ -1043,8 +1052,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
 Items A, B and D depend on each other in both directions, so they land in
 slices, each its own pull request, in the order B's `prd.md` records under
 the same heading, by the operator's decision on 2026-09-05: B's fixture
-harness, library and migrations; then this item's registry reader, tiered
-ship path and protection; then B's dashboard,
+harness, library and migrations as rehearsals that retire nothing; then
+this item's registry reader, tiered ship path and protection, with the
+reader that reads the row where the database is and the line where it
+still is; then the `docs/work` migration's retire step, the commit that
+removes the lines, in a pull request after the one that lands them, from
+A's round thirty-six, so that the pack installed at every point between
+reads every item; then B's dashboard,
 read-only and then writing; then D's runner. A slice claims only the
 criteria its text names, and only the last slice's merge delivers the
 item, `Delivers:` on its message; the others carry `Item:` and leave the
@@ -1230,16 +1244,23 @@ confirmed by the next `sd-ship` run alone.
     lists the skills that write tracked files.
 13. Once B's library exists: `sd_lib.py`, `sd-status` and `sd-docs-lint`
     derive an item's status from its row on a machine with the database,
-    and a `prd.md` under `docs/work/` outside the archive carries no
-    `status:` line, asserted by the lint failing on one seeded, from A's
-    round thirty-three; the migration that fills the database reads
-    every item's line outside the archive into its row and removes it,
-    in one commit, asserted by a test that runs it against a fixture
-    repository holding a `done` item and two open ones, diffs, and
-    asserts the `done` item's row is `done` and unmarked, the pull
-    request `sd-ship` opens for the migration carries `Closes:` for it,
-    and after the merge a database-free clone of the default branch does
-    not pick it, from A's round thirty-four. A
+    and once the retire step has run a `prd.md` under `docs/work/`
+    outside the archive carries no `status:` line, asserted by the lint
+    failing on one seeded, from A's round thirty-three; the migration
+    that fills the database reads every item's line outside the archive
+    into its row in its import and removes it in its retire step,
+    asserted by a test that runs both against a fixture repository
+    holding a `done` item and two open ones, diffs after each, and
+    asserts that after the import alone every line is still there and
+    the pack installed at B's first slice reads them as before, that the
+    pack installed at this item's slice reads the row where the database
+    is and the line where it is not and answers `unknown` for none, that
+    the retire step refuses under a pack whose `sd_lib` has no
+    `delivered`, naming the version, that after the retire the `done`
+    item's row is `done` and unmarked, the pull request `sd-ship` opens
+    for the retire step carries `Closes:` for it, and after the merge a
+    database-free clone of the default branch does not pick it, from A's
+    rounds thirty-four and thirty-six. A
     status change touches no file, asserted by a test that changes status
     three times and hashes the item's files. In a checkout with no
     database, as in CI, every reader that picks an item asks
@@ -2224,3 +2245,16 @@ from a number the operator types.
     entry is refused at commit, and the rule reads the author's vendor
     from the trailer and the candidate's from the registry. Criterion 7
     repoints and removes the entry after the commits.
+- **2026-09-05** — Planning review, round thirty-six of forty: one
+  blocking finding, addressed.
+  - C-67, landing order: requirement 5 read as if the migration imported
+    and removed the lines in one step in B's first slice, before this
+    item's reader, trailer-writing ship path and `PR_BODY` setting
+    landed, so a pack installed between slices read a migrated item as
+    `unknown` and the migration lacked its completion handoff. Addressed
+    by saying what B's requirement 2 already ordered: the import is
+    additive and retires nothing, this item's slice lands a reader that
+    reads the row where the database is and the line where it still is,
+    and the retire step runs after that in a pull request of its own,
+    refusing under a pack whose `sd_lib` has no `delivered`. Criterion 13
+    tests each installed version, not only the completed stack.
