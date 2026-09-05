@@ -584,9 +584,18 @@ else; every other state lives on the row, and the surfaces that act on it
 have the database. One function, `sd_lib.delivered`, answers `yes` when a
 commit reachable from the default branch or from the checkout's `HEAD`
 carries `Delivers: <item>` or `Closes: <item>`, never on `Item:` alone, `no`
-when none does and the history is whole, and `unknown` when none does and
-the checkout is shallow, `git rev-parse --is-shallow-repository`, because the
-trailer may sit past the boundary, from A's round twenty-two. Every reader
+when none does, the history is whole, and the history is current, and
+`unknown` otherwise: when the checkout is shallow, `git rev-parse
+--is-shallow-repository`, because the trailer may sit past the boundary,
+from A's round twenty-two; and when the checkout has a remote and this
+run's fetch of the default branch from it, `git fetch <remote>
+<default>`, did not succeed, because a whole history is not a current
+one, and a clone retained while another machine delivered or cancelled
+the item holds neither trailer and would answer `no` for finished work,
+from A's round thirty-nine; the function fetches before it answers, a
+checkout with no remote has nothing to be behind and answers from what
+it has, and an `unknown` names the boundary or the remote and the fetch
+as the repair. Every reader
 that picks an item, `sd-review --scope planning` and `sd-plan` among them,
 excludes a `yes` and treats an `unknown` as not selectable, refusing by name
 with the boundary and `git fetch --unshallow` as the repair, since a reader
@@ -611,8 +620,17 @@ combination is tested before the merge and not after, requirement 3.
 below, an unattended merge into a default
 branch that does not require pull requests and CI refuses naming the
 setting, and a ship the operator runs by hand is warned, not stopped. A run
-that restarts after the delivering merge finds the row `done` and the
-trailer on the default branch, and has nothing further to do. An item is not
+that restarts reconciles before it acts, from A's round thirty-nine: the
+row names the pull request from the moment it is opened, and the run
+asks GitHub for that pull request's state and `merge_commit_sha` and
+applies what GitHub confirms and the row does not yet carry, `done` when
+the merge commit's message carries `Delivers:` and the squash commit on
+a note otherwise, in one idempotent step that a second run repeats to no
+effect; GitHub's acceptance and the row's write are two systems, a
+process can die between them, and a run that trusted the row alone
+would treat delivered work as open. After that step a run that finds
+the row `done` and the trailer on the default branch has nothing
+further to do. An item is not
 one pull request: the landing order below splits this one into slices, and
 a merge is a delivery only when it says so, from A's round twenty-three.
 Every merge `sd-ship` makes carries `Item: <item>`, which associates the
@@ -1321,12 +1339,21 @@ confirmed by the next `sd-ship` run alone.
     a clone of the default branch at depth one, taken after one more
     commit lands past the merge, has `sd_lib.delivered` answer `unknown`,
     `sd-review --scope planning` refuse naming the boundary, and after
-    `git fetch --unshallow` answer `yes` and not pick the item. A test
+    `git fetch --unshallow` answer `yes` and not pick the item; a whole
+    clone retained before the item is delivered from a second clone
+    answers `yes` once its fetch succeeds, `unknown` naming the remote
+    and the fetch while the fixture remote is unreachable, and `no`
+    never, and a checkout with no remote answers `no` from its own
+    history. A test
     rejects the merge, and another kills `sd-ship` after the push, and
     both assert that the item is still picked, the directory is
-    untouched, and the row is not `done`; a third confirms a `--deliver`
-    merge and kills `sd-ship` at once, and asserts the row is `done` and
-    the next `sd-ship` run has nothing to do; a fourth cancels, from item
+    untouched, and the row is not `done`; a third kills `sd-ship` after
+    the API double has accepted the `--deliver` merge and before the
+    row's write, and asserts the row is still `in_progress` until the
+    next `sd-ship` run, which reconciles it to `done` from the pull
+    request the row names with no merge call, and that a run after that
+    changes nothing; the same kill on a slice merge reconciles the
+    squash commit onto a note and leaves the row open; a fourth cancels, from item
     B's screen, an item whose first slice merged and whose second lives
     on its branch with three implementation commits, and asserts no pull
     request is opened, nothing is pushed, `sd-status` names the row as
@@ -2320,3 +2347,22 @@ from a number the operator types.
     it as stale with the integration update as the repair, and the old
     writers refuse; with no database no line is read at all. Criterion
     13 keeps a worktree across the retire and changes a status after.
+- **2026-09-05** — Planning review, round thirty-nine of forty: two
+  blocking findings, addressed.
+  - C-71, requirement 5: `delivered` answered `no` from a whole history
+    that was not a current one, so a clone retained while another
+    machine delivered or cancelled the item let planning pick finished
+    work. Addressed: the function fetches the default branch from the
+    remote before it answers, answers `unknown` naming the remote and
+    the fetch when the fetch fails, and answers from its own history
+    only where there is no remote. Criterion 13 retains a whole clone
+    across a delivery from a second clone.
+  - C-72, requirement 5: the recovery contract assumed GitHub's
+    acceptance and the row's write were one step, so a kill between
+    them left delivered work open to database-backed pickers.
+    Addressed: the row names its pull request from the moment it is
+    opened, and every restart reconciles first, asking GitHub for the
+    pull request's state and `merge_commit_sha` and applying what the
+    row does not yet carry, idempotently. Criterion 13 kills between
+    the API double's acceptance and the row's write, on a delivering
+    merge and on a slice.
