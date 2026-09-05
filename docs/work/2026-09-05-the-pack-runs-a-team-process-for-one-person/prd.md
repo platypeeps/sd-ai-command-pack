@@ -340,16 +340,23 @@ and `implement.md` stay in the repository as the decision trail. The item row in
 The `status:` line in `prd.md` stays, as a derived mirror the library writes
 and nothing else writes: a fresh checkout and a CI runner have no database, and
 `make check` runs the documentation lint there. The row carries the item's
-branch, and that branch is the mirror's revision identity. Git checks a branch
-out in one worktree at a time, so exactly one checkout on this machine holds
-the mirror the row describes. A status change writes the row and nothing
-else; the mirror is written by the two commands that commit item files,
-`sd-plan` and `sd-ship`, in the checkout they run in, so there is no dual
-write and no checkout that has to exist. Between commits the mirror is stale
-by design. In the checkout on the item's branch, `sd_lib.py` and
-`sd-docs-lint` compare row and mirror and report a disagreement by name with
-its repair, `sd mirror refresh <item>`, as a warning; what `sd-ship` commits
-always agrees, because it refreshes first. In any other checkout, on `main`
+branch and `rev`, the commit that last wrote the mirror; the pair is the
+mirror's identity, because a branch name is not one: the same branch can be
+reset, rebased, or checked out at an older commit in another clone. A status
+change writes the row and nothing else; the mirror is written by the two
+commands that commit item files, `sd-plan` and `sd-ship`, in the checkout
+they run in, so there is no dual write and no checkout that has to exist.
+Between commits the mirror is stale by design. Every mirror write, those two
+and `sd mirror refresh <item>`, first checks that the checkout's `HEAD`
+contains `rev`; if it does not, the write refuses and names both commits,
+and `sd mirror refresh --rebind <item>` accepts the checkout's `HEAD` as the
+new identity and records a note saying so. After a write, `rev` is the new
+commit. In a checkout on the item's branch whose `HEAD` contains `rev`,
+`sd_lib.py` and `sd-docs-lint` compare row and mirror and report a
+disagreement by name with its repair, `sd mirror refresh <item>`, as a
+warning; in a checkout on the branch that is behind `rev`, they report that
+instead and compare nothing; what `sd-ship` commits always agrees, because
+it refreshes first. In any other checkout, on `main`
 after the merge or in a linked worktree on another branch, and in CI, they
 read the mirror alone. A `done` row compares with nothing, and `done` is
 never written into a mirror: the transition to `done` deletes the directory,
@@ -757,7 +764,10 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     read the mirror and say nothing. A status change leaves the file's hash
     unchanged. `sd-ship` refreshes the mirror before committing, so the
     committed file agrees with the row, asserted by a test that changes a row
-    and ships. Tests cover all four. The pack's installer installs B's
+    and ships. A test resets the branch to a commit older than the row's
+    `rev` and asserts that `sd mirror refresh` refuses naming both commits,
+    that the lint reports the checkout as behind and does not compare, and
+    that `--rebind` proceeds and writes a note. Tests cover all five. The pack's installer installs B's
     `sd_db` into the pack's virtualenv, asserted by a test that runs the
     installer against a fixture system checkout and imports it. Before B
     exists, this criterion is recorded as waiting, not as met.
@@ -1071,3 +1081,18 @@ item B by hand.
     change went straight to a prepaid balance. Addressed: `claude` second on
     the `reviewer` line, in both copies; criterion 6 asserts resolution for
     every author.
+- **2026-09-05** — Planning review, round four. Two blocking findings, both
+  addressed.
+  - C-11, requirement 5: the branch name was the mirror's identity, so a
+    checkout at an older commit on the same branch, after a reset, a rebase
+    or in another clone, inherited the row's status and `sd-ship` wrote it
+    into the mirror. Addressed: the row carries `rev`, the commit that last
+    wrote the mirror; every mirror write refuses unless `HEAD` contains it,
+    `--rebind` is the explicit override with a note, and the lint reports a
+    checkout behind `rev` instead of comparing. Criterion 13; B's `item` row
+    gains the column.
+  - C-12, the sweep item's criterion 5: remote-tracking refs do not
+    establish liveness, as its own log had recorded from this item's round
+    two. Addressed on that item: branch liveness is advisory, one fresh
+    `ls-remote` per root, failure reported as unknown, and unknown never
+    excludes an item. Requirement 13 still deletes the sweep.

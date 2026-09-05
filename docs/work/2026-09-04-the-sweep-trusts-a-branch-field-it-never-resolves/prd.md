@@ -68,9 +68,13 @@ naming.
    that is not a git checkout, or a git invocation that fails, must not convert
    every item inside it into a sweep candidate. The conservative answer there is
    to keep excluding, and to say so.
-5. Both remote and local refs count. A branch pushed but not checked out locally
-   is live work; a sweep that only consulted `refs/heads` would report it as
-   abandoned on any machine that has not fetched it.
+5. Branch liveness is advisory, never an exclusion. The sweep asks the remote
+   once per root, `git ls-remote --heads <remote> <branch>`, and reads local
+   refs beside it; a branch found in either is annotated live, a branch found
+   in neither is annotated gone, and a query that fails is annotated unknown.
+   Every item past the age threshold is in the report with its annotation;
+   none is hidden by it. A test covers each of the three annotations and
+   asserts the report's item count is the same across all three.
 6. Mutation-tested, per the standing bar. At minimum: the exclusion inverted,
    the per-root argument replaced by a fixed root, and the "git cannot answer"
    path made to fall through.
@@ -104,3 +108,8 @@ naming.
   one per-root query with failure reported as unknown, or keep branch
   resolution advisory. That item's criterion 21 removes the sweep; when it
   lands, this item closes as superseded and the question is moot.
+- **2026-09-05** — Criterion 5 rewritten from the planning review of
+  `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round four,
+  finding C-12 there: liveness is advisory, one fresh remote query per root,
+  failure is unknown, and no annotation hides an item. The supersession
+  recorded above still stands.
