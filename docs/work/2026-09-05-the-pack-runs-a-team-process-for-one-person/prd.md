@@ -253,9 +253,13 @@ One bill has a cap from day one. `baseten` is company money, and its bill
 carries `cap_usd_month: 50`. The library sums cost rows per bill per calendar
 month; at the cap, fallthrough skips every provider on that bill, direct
 choice refuses by name with the month's total, and Today shows spend against
-cap. No other bill has a cap. An API entry carries `price:` per million tokens
-in and out, so a cost row is tokens times price without a billing API; a
-subscription entry logs tokens alone.
+cap. The dashboard raises the cap in one action, and it enables, disables and
+reorders providers the same way: the registry file holds identity and seeds
+B's `provider` and `bill` tables, the rows hold what the page changes, and
+the library merges the two on every read, so the file is never edited from a
+page. No other bill has a cap. An API entry carries `price:` per million
+tokens in and out, so a cost row is tokens times price without a billing API;
+a subscription entry logs tokens alone.
 
 An entry carries `vendor:`, the maker of the model behind it, and the
 different-vendor rule compares vendors, not names or bills. `prism` and `gito`

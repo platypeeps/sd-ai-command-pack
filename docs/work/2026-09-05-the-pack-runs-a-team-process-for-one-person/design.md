@@ -198,7 +198,9 @@ the review refuses by name rather than reading its own work. `vendor` is the
 maker of the model, not the tool; `bill` is whose money. A bill with
 `cap_usd_month` is skipped for the rest of the month once its cost rows reach
 the cap, and a direct pick of it refuses with the month's total. Entries with
-`url` share one OpenAI-compatible client and one reader.
+`url` share one OpenAI-compatible client and one reader. This file is
+identity and seed; enabled, order and caps are rows the dashboard edits, and
+the library merges file and rows on every read.
 
 `sd-review --provider <name>` picks one entry for one run. The dashboard's
 item screen offers the same list, with vendor, cost and reason beside each
